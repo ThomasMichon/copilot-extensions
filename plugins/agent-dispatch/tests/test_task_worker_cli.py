@@ -403,7 +403,8 @@ def test_task_worker_cli_over_real_http_process(tmp_path, file_projection):
                             expected_generation=started.json()["generation"], expected_epoch=0,
                         )
                     replacement = tmp_path / "replacement-token"
-                    replacement.write_text(renewed["task_token"], encoding="utf-8")
+                    grant = renewed["task_token"]
+                    replacement.write_text(grant, encoding="utf-8")
                     replacement.replace(secret_file)
                 child = subprocess.run(  # noqa: S603 -- fixed candidate CLI and test-owned arguments
                     [sys.executable, "-m", "agent_dispatch", *command],

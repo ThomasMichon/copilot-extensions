@@ -347,6 +347,11 @@ recorded against each open fork._
   a blocking named pipe and rejects non-ASCII/control bytes before HTTP
   header construction. Its native selection passed 14 tests with the POSIX
   FIFO case skipped on Windows; both real CLI credential modes passed again.
+- Fresh Linux issuance/worker/scope selection passed 138 tests, including
+  the real FIFO rejection and both native CLI credential modes. This is
+  source-contract integration, not the unresolved admitted-container proof.
+  Review identified that the file-mode disclosure assertion retained the
+  original token; it now checks the renewed credential actually consumed.
 - This closes only the issuance/consumption contract, not provider delivery.
   Container placement, per-incarnation file isolation, trusted supervisor
   renewal, real restricted-container proof, central/local projections and
