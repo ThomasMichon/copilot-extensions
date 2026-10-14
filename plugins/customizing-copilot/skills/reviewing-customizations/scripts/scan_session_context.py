@@ -305,6 +305,45 @@ def _resolve_session_start_script(
     return script
 
 
+def _python_prints_only_to_stderr(text: str) -> bool:
+    """Whether every ``print`` call in ``text`` writes to ``sys.stderr``.
+
+    stderr never reaches model context; any other print may write stdout.
+    Each call is judged on its own, so a stdout print chained on the same line
+    or nested inside a stderr print still counts. A ``**kwargs`` destination,
+    any other reference to ``print`` (an alias, ``map(print, ...)``), an
+    attribute ``.print`` call and unparseable source all fail closed.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return False
+    stderr_calls: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "print":
+            return False
+        if not (isinstance(node.func, ast.Name) and node.func.id == "print"):
+            continue
+        streams = [keyword.value for keyword in node.keywords if keyword.arg == "file"]
+        if len(streams) != 1 or any(keyword.arg is None for keyword in node.keywords):
+            return False
+        if not (
+            isinstance(streams[0], ast.Attribute)
+            and isinstance(streams[0].value, ast.Name)
+            and streams[0].value.id == "sys"
+            and streams[0].attr == "stderr"
+        ):
+            return False
+        stderr_calls.add(id(node.func))
+    return all(
+        id(node) in stderr_calls
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and node.id == "print"
+    )
+
+
 def _script_has_output_free_contract(script: Path) -> bool:
     try:
         text = script.read_text(encoding="utf-8", errors="replace")
@@ -348,24 +387,8 @@ def _script_has_output_free_contract(script: Path) -> bool:
             return nested.is_file() and _script_has_output_free_contract(nested)
         return False
     if suffix == ".py":
-        try:
-            tree = ast.parse(text)
-        except SyntaxError:
+        if not _python_prints_only_to_stderr(text):
             return False
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if isinstance(node.func, ast.Name) and node.func.id == "print":
-                streams = [keyword.value for keyword in node.keywords if keyword.arg == "file"]
-                if len(streams) != 1 or not (
-                    isinstance(streams[0], ast.Attribute)
-                    and isinstance(streams[0].value, ast.Name)
-                    and streams[0].value.id == "sys"
-                    and streams[0].attr == "stderr"
-                ):
-                    return False
-            elif isinstance(node.func, ast.Attribute) and node.func.attr == "print":
-                return False
         code_lines = [
             line for line in text.splitlines() if line.lstrip() and not line.lstrip().startswith("#")
         ]

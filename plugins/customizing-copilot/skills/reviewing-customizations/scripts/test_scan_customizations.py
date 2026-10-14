@@ -2588,6 +2588,20 @@ def test_named_bootstrap_check_with_json_only_stdout_is_output_free(
     assert report.blocking == 0
 
 
+@pytest.mark.parametrize(("line", "output_free"), [
+    ('print(f"diagnostic: {error}", file=sys.stderr)', True),
+    ('print("diagnostic", file = sys.stderr)', True),
+    ('print("context for the model")', False),
+    ('print("x", file=sys.stdout)', False),
+    ('print("x", file=sys.stderr, end=""); print("leak")', False),
+], ids=["stderr", "stderr-spaced", "stdout", "explicit-stdout", "stderr-then-stdout"])
+def test_python_hook_stderr_diagnostics_stay_output_free(tmp_path: Path, line, output_free):
+    # stderr never reaches model context; a stdout print may.
+    script = tmp_path / "hook.py"
+    script.write_text(f"import sys\n{line}\n", encoding="utf-8")
+    assert scan._script_has_output_free_contract(script) is output_free
+
+
 def test_session_context_accepts_standard_writer_without_declaration(
     tmp_path: Path,
 ):
