@@ -133,8 +133,10 @@ def test_unavailable_explicit_address_never_spawns(monkeypatch):
 @pytest.mark.parametrize("project", ["project-a", "owner/repo"])
 @pytest.mark.parametrize("logical_siblings", [False, True])
 @pytest.mark.parametrize("caller_qualified", [True, False])
+@pytest.mark.parametrize("reply_timeout", [0.0, 0.25, 2.0, 600.0])
 def test_two_bridge_call_and_reverse_reply_preserve_addresses(
     tmp_path, monkeypatch, capsys, idempotency_key, project, logical_siblings, caller_qualified,
+    reply_timeout,
 ):
     machine_a, machine_b = "host-a", "host-b"
     if logical_siblings:
@@ -221,16 +223,17 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "a-old")
         args = argparse.Namespace(
             target=f"live:{machine_b}:{project}:wt-b", prompt="call", json=True,
-            no_wait=False, wait_reply=True, reply_timeout=2.0, idempotency_key=idempotency_key,
+            no_wait=False, wait_reply=True, reply_timeout=reply_timeout, idempotency_key=idempotency_key,
         )
         assert a_client.resolve_remote_live_session(machine_b, args.target)["session_id"] == "b-current"
         cli._cmd_send(args)
         output = capsys.readouterr().out
-        assert '"replied": true' in output and '"reply": "peer response"' in output
         fixture_path = (Path(__file__).parents[1] / "contract" / "fixtures" / "http"
                         / "current" / "remote-peer-generation-35.json")
         expected = json.loads(fixture_path.read_text(encoding="utf-8"))["response"]
         observed = json.loads(output)
+        if reply_timeout == 0:
+            expected = {**expected, "replied": False, "reply": None, "stop_reason": None}
         assert {key: observed[key] for key in expected} == expected
         assert observed["receipt"]["stage"] == "consumed"
         assert observed["reply_correlation"] == "post_consumption_turn"
@@ -252,7 +255,9 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         args.target, args.prompt = received[0]["reply_to"], "reverse reply"
         cli._cmd_send(args)
         output = capsys.readouterr().out
-        assert '"replied": true' in output and '"reply": "peer response"' in output
+        reverse = json.loads(output)
+        assert reverse["replied"] is (reply_timeout > 0)
+        assert reverse["reply"] == ("peer response" if reply_timeout > 0 else None)
         assert a_db.list_pending_live_messages("a-old") == []
         assert a_db.list_pending_live_messages("a-other-machine") == []
         assert a_db.list_pending_live_messages("a-new") == []
@@ -302,6 +307,74 @@ def test_qualified_peer_default_does_not_wait_for_a_reply():
     )
     assert result["message_id"] == 1
     assert calls[0]["wait"] is False
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("reply_timeout", [0.0, 0.05])
+def test_remote_cli_zero_and_fractional_waits_return_admission(
+    tmp_path, monkeypatch, capsys, reply_timeout,
+):
+    source, hosting = Database(tmp_path / "source.db"), Database(tmp_path / "hosting.db")
+    try:
+        _register(hosting, "recipient", "host-b", worktree="wt-b")
+        source_app, source_client = _bridge(source)
+        _hosting_app, hosting_client = _bridge(hosting)
+        packets = _route_through_versioned_carrier(source_app, hosting_client, 5)
+        monkeypatch.setattr(cli, "_get_client", lambda: source_client)
+        monkeypatch.setattr(cli, "_live_sender_label", lambda _: "peer")
+        monkeypatch.setattr(cli, "_live_reply_to", lambda _: "live:host-a:project-a:wt-a")
+        cli._cmd_send(argparse.Namespace(
+            target="live:host-b:project-a:wt-b", prompt="hello", json=True,
+            no_wait=False, wait_reply=True, reply_timeout=reply_timeout,
+        ))
+        result = json.loads(capsys.readouterr().out)
+        assert result["accepted"] is True and result["replied"] is False
+        assert result["receipt"]["stage"] == "admitted"
+        assert hosting.list_pending_live_messages("recipient")[0]["id"] == result["message_id"]
+        assert packets[0]["wait_timeout"] == reply_timeout
+        assert packets[0]["version"] == 5
+    finally:
+        source.close()
+        hosting.close()
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("timeout", [-0.1, -1.0, 601.0, float("nan"), float("inf")])
+def test_remote_client_invalid_reply_timeout_never_submits(monkeypatch, timeout):
+    client = BridgeClient("http://testserver", "fixture-token", connect_grace=0)
+    monkeypatch.setattr(client, "_request", lambda *_a, **_k: pytest.fail("invalid input reached HTTP"))
+    with pytest.raises(BridgeClientError) as refused:
+        client.send_remote_live_message(
+            "host-b", "live:host-b:project-a:wt-b", sender="peer", message="hello",
+            wait=True, wait_timeout=timeout, qualified_peer=True,
+        )
+    assert refused.value.status == 422
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("timeout", [0.0, 0.25, 600.0])
+def test_remote_wait_validator_matches_local_numeric_bounds(timeout):
+    from agent_bridge.live_peer_address import peer_wait_timeout
+    from agent_bridge.live_message_models import validate_live_reply_timeout
+
+    assert peer_wait_timeout(timeout) == validate_live_reply_timeout(timeout)
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("timeout", [-0.1, 601.0, float("nan"), float("inf"), None, True])
+def test_remote_carrier_invalid_reply_timeout_never_resolves(timeout):
+    client = SimpleNamespace(
+        daemon_supports=lambda _: True,
+        resolve_live_session=lambda *_a, **_k: pytest.fail("invalid wait reached recipient resolution"),
+    )
+    router = CarrierRequestRouter(lambda: client)
+    response = asyncio.run(router(Envelope(EnvelopeType.REQUEST, payload={
+        "version": 5, "operation": "live_session.send",
+        "target": "live:host-b:project-a:wt-b", "sender": "peer", "message": "hello",
+        "wait": True, "wait_timeout": timeout, "qualified_peer": True,
+    })))
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "invalid_request"
 
 
 @pytest.mark.parametrize(("wait", "version"), [(False, 4), (True, 5)])
@@ -664,7 +737,9 @@ def test_new_payload_old_daemon_keeps_legacy_automatic_reply(
     assert "local-only" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("wait_timeout,timeout", [(120.0, 135.0), (600.0, 615.0), (1.0, 20.0)])
+@pytest.mark.parametrize("wait_timeout,timeout", [
+    (120.0, 135.0), (600.0, 615.0), (1.0, 20.0), (0.0, 20.0), (0.25, 20.0),
+])
 def test_waited_client_defaults_cover_operation_and_read_deadlines(monkeypatch, wait_timeout, timeout):
     captured = {}
     client = BridgeClient("http://testserver", "fixture-token", connect_grace=0)
@@ -686,7 +761,9 @@ def test_waited_client_defaults_cover_operation_and_read_deadlines(monkeypatch, 
     assert captured["read_timeout"] == timeout + 15.0
 
 
-@pytest.mark.parametrize("wait_timeout,timeout", [(None, 135.0), (600.0, 615.0), (1.0, 20.0)])
+@pytest.mark.parametrize("wait_timeout,timeout", [
+    (None, 135.0), (600.0, 615.0), (1.0, 20.0), (0.0, 20.0), (0.25, 20.0),
+])
 def test_waited_http_defaults_cover_carrier_deadline(tmp_path, wait_timeout, timeout):
     db = Database(tmp_path / "http.db")
     try:
@@ -708,6 +785,8 @@ def test_waited_http_defaults_cover_carrier_deadline(tmp_path, wait_timeout, tim
         )
         assert response.status_code == 200, response.text
         assert captured["timeout"] == timeout
-        assert captured["payload"]["wait_timeout"] == (wait_timeout or 120.0)
+        assert captured["payload"]["wait_timeout"] == (
+            120.0 if wait_timeout is None else wait_timeout
+        )
     finally:
         db.close()

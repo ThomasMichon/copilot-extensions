@@ -102,7 +102,8 @@ unknown urgency is logged and left unacknowledged instead of silently queueing.
 For another machine, use its qualified address with the same command:
 `send live:host-b:project-a:peer-worktree "status?"`. The existing authenticated
 carrier reaches the hosting bridge; both reply metadata and the waited reply
-turn return through it. Remote waits are bounded to 1-600 seconds.
+turn return through it. Remote waits are bounded to 0-600 seconds; zero
+returns the admission receipt without waiting for a reply, just like a local send.
 Client, HTTP and carrier operation deadlines cover the requested reply wait
 plus transport margin, including when their defaults are used without the CLI.
 Qualified addressing requires HTTP protocol 35 and remote carrier operation

@@ -1421,6 +1421,13 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
         qualified_peer: bool = False,
     ) -> dict[str, Any]:
         """Deliver to a represented remote session through the carrier."""
+        if wait:
+            from .live_message_models import validate_live_reply_timeout
+
+            try:
+                wait_timeout = validate_live_reply_timeout(wait_timeout)
+            except ValueError as exc:
+                raise BridgeClientError(422, f"wait_timeout {exc}") from exc
         self._require_remote_commands()
         from .live_peer_address import peer_operation_timeout
         from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
