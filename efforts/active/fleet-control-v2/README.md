@@ -162,7 +162,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
   Durable receiver cursors landed in #6395 and local allocation claims in #6403.
   Cooperative SQLite effect-owner checks landed in #6411 and explicit local
   retirement/release/generation transfer in #6418. External effect-owner fencing
-  and authenticated runtime integration remain open.
+  and authenticated runtime integration remain open. Installed two-node journal
+  process recovery is a bounded prerequisite, not resident Gateway/node proof.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -704,3 +705,45 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   are not claimed. Next is proposal review and current-owner interface agreement
   before migration adapters; role lifecycle and Gateway/index work continue
   with their assigned owners.
+
+### 2026-10-13 - Migration proposal reviewed and merged
+- #6513 merged at `2026-10-13T11:03:11Z`, commit
+  `c8fe1b62ec504ab6ec5247b26907b717f8379024`, after actual current-head
+  Copilot APPROVED review with zero findings (Balanced effort). All checks
+  completed successfully or legitimately skipped, including the aggregate
+  required PR gate and workflow lockdown guard. No CI gate was bypassed.
+- Re-read every parent Plan/Validation item and pulled forward with managed
+  sync. The bounded source inventory and proposed migration sequence are now
+  reviewed, not implemented; no full Phase 1-4/Validation item is complete.
+- Relayed the shared staging contract to #6443. #6424 retains its implementation;
+  #5789's unpublished auth/connector reuse interface still requires agreement.
+  Migration adapters likewise require current-owner export/freeze/custody
+  agreement. No competing runtime, live import, deployment or retirement began.
+
+### 2026-10-14 - Separate-process two-node journal recovery
+- Added a bounded installed-package integration test under #6241: a real node
+  process holds its original operation at UNKNOWN while a second node commits
+  one cooperative SQLite effect. A separate Gateway receiver process exits
+  either during the second stream's audit transaction or after both commits.
+  Replacement receivers resume the independent durable cursors, retain the
+  original operations and reconcile explicit terminal evidence without duplicate
+  effects or audit. Imports are isolated and verified under the test interpreter.
+- Native contained full portfolio: 454 passed and one existing native FIFO skip,
+  42.08 seconds within the unchanged 120-second aggregate deadline. Both new
+  crash variants passed. An initial collection failure exposed a stale managed
+  test-package installation; the canonical runner's explicit preparation
+  refreshed that test environment before the passing runs. Shared installed
+  runtimes were not changed.
+- Unit and simple local-process integration tiers were exercised. This changes
+  tests/documentation only, not first-touch installation or live deployment;
+  clean-room provisioning and a live external venue were not exercised for this
+  slice. Synthetic resolution evidence and file-based test signaling are not
+  authentication or a real transport. Full objective/workspace/agent execution,
+  authenticated Gateway/two-node operation, lifecycle, migration and adoption
+  gates remain open; no Plan or Validation checkbox is closed.
+- Common authenticated staging remains owned by #6424/#6569. Its current
+  consumer contract returns component identities and bounded immutable
+  `read_artifact(component, current_policy)` byte snapshots, not reusable public
+  staging paths. Role consumers must retain their own admitted construction,
+  custody, health, sequence and activation checks. No competing installer,
+  publisher, Gateway, credential or authentication implementation was started.

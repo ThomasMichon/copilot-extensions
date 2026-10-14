@@ -1,0 +1,9 @@
+{
+  "comment": "Verify independent node journal replay across real receiver process crashes",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
