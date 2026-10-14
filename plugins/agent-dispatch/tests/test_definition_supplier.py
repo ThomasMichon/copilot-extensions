@@ -403,14 +403,97 @@ def test_supplier_qualification_preserves_foreign_absolute_cwd(monkeypatch, flav
     monkeypatch.setattr(document, "Path", path_type)
     monkeypatch.setattr(document, "os", SimpleNamespace(path=path_module))
 
-    for cwd in [*foreign, "tools", str(root / "tools"), None]:
-        context = {"cwd": cwd} if cwd is not None else {}
+    for cwd in foreign:
+        context = {"cwd": cwd}
         spec = context if kind == "emitter" else {
             "evaluator_spec": {"scripts": {"verify": ["python", "verify.py"]}, **context},
         }
         declaration = ProfileDeclaration(name="fixture", kind=kind, spec=spec)
         qualified = document.qualify_supplier_context(declaration, "state-notes", root)
         context = qualified.spec if kind == "emitter" else qualified.spec["evaluator_spec"]
-        expected = cwd if cwd in foreign else f"repo:state-notes:{'.' if cwd is None else 'tools'}"
-        assert context["cwd"] == expected
+        assert context["cwd"] == cwd
         assert declaration.spec == spec
+
+
+@pytest.mark.parametrize("kind", ["emitter", "evaluator"])
+def test_supplier_qualification_native_contexts(tmp_path, kind):
+    from agent_dispatch.registrar import ProfileDeclaration
+    from agent_dispatch.registrar_document import qualify_supplier_context
+
+    for cwd in ["tools", str(tmp_path / "tools"), None]:
+        context = {"cwd": cwd} if cwd is not None else {}
+        spec = context if kind == "emitter" else {
+            "evaluator_spec": {"scripts": {"verify": ["python", "verify.py"]}, **context},
+        }
+        declaration = ProfileDeclaration(name="fixture", kind=kind, spec=spec)
+        qualified = qualify_supplier_context(declaration, "state-notes", tmp_path)
+        context = qualified.spec if kind == "emitter" else qualified.spec["evaluator_spec"]
+        assert context["cwd"] == f"repo:state-notes:{'.' if cwd is None else 'tools'}"
+
+
+@pytest.mark.parametrize("kind", ["emitter", "evaluator"])
+@pytest.mark.parametrize("leaf", ["", "not-created"])
+def test_supplier_native_cwd_alias_is_fenced_at_actual_consumer(
+    supplier, monkeypatch, tmp_path, kind, leaf,
+):
+    from agent_dispatch.producers.emitter import run_tick
+    from agent_dispatch.producers.evaluator import EvaluatorRuntimeError, load_registration_evaluator
+    from tests.test_producers_emitter import FakeClient
+
+    roots, _, discover = supplier
+    root = roots["state-notes"]
+    alias = tmp_path / "supplier-alias"
+    try:
+        alias.symlink_to(root, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.fail(f"required native directory symlink could not be created: {exc}")
+    assert alias.is_symlink()
+    assert alias.resolve() == root
+    cwd = str(alias / leaf)
+    spec = {
+        "id": "alias-emitter", "interval_seconds": 60, "command": ["python", "unused.py"],
+        "cwd": cwd,
+    } if kind == "emitter" else {
+        "repo": "example/project", "evaluator_ref": "verify",
+        "evaluator_spec": {"scripts": {"verify": ["python", "unused.py"]}, "cwd": cwd},
+    }
+    declaration, = discover({"name": "alias", "kind": kind, "spec": spec})
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "dispatch"))
+
+    def forbidden(*a, **k):
+        pytest.fail("supplier symlink alias bypassed execution admission")
+
+    if kind == "emitter":
+        with pytest.raises(RegistrarError, match="knowledge-only"):
+            run_tick(FakeClient(), dict(declaration.spec), holder="fixture", runner=forbidden)
+        qualified = declaration.spec["cwd"]
+    else:
+        evaluator = load_registration_evaluator(dict(declaration.spec), runner=forbidden)
+        with pytest.raises(EvaluatorRuntimeError, match="knowledge-only"):
+            evaluator.evaluate({"type": "task.submitted"})
+        qualified = declaration.spec["evaluator_spec"]["cwd"]
+    assert qualified == f"repo:state-notes:{leaf or '.'}"
+
+
+def test_supplier_local_symlink_escape_keeps_source_authority(supplier, monkeypatch, tmp_path):
+    from agent_dispatch.producers.emitter import run_tick
+    from tests.test_producers_emitter import FakeClient
+
+    roots, _, discover = supplier
+    link = roots["state-notes"] / "outside-alias"
+    try:
+        link.symlink_to(roots["control-harness"], target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.fail(f"required native directory symlink could not be created: {exc}")
+    assert link.resolve() == roots["control-harness"]
+    declaration, = discover({"name": "escape", "kind": "emitter", "spec": {
+        "id": "escape", "interval_seconds": 60, "command": ["python", "unused.py"],
+        "cwd": str(link),
+    }})
+    assert declaration.spec["cwd"] == "repo:state-notes:outside-alias"
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "dispatch"))
+    with pytest.raises(RegistrarError, match="knowledge-only"):
+        run_tick(
+            FakeClient(), dict(declaration.spec), holder="fixture",
+            runner=lambda *a, **k: pytest.fail("source-local symlink escape reached subprocess"),
+        )

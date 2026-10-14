@@ -30,12 +30,19 @@ def qualify_supplier_context(
             if not implicit:
                 return value
             path = root / path
-        path = Path(os.path.normpath(path))
+        lexical = Path(os.path.normpath(path))
         try:
-            relative = path.relative_to(root)
-        except ValueError:
-            return value  # An explicit cwd outside the supplier is not its context.
-        return f"repo:{repository}:{relative.as_posix()}"
+            canonical = path.resolve(strict=False)
+        except (OSError, RuntimeError) as exc:
+            raise RegistrarError(f"could not resolve supplier execution cwd {value!r}: {exc}") from exc
+        # Keep source-local links named even when their targets escape the root.
+        for candidate in (canonical, lexical):
+            try:
+                relative = candidate.relative_to(root)
+            except ValueError:
+                continue
+            return f"repo:{repository}:{relative.as_posix()}"
+        return value  # An explicit cwd outside the supplier is not its context.
 
     spec = dict(declaration.spec)
     if declaration.kind == "emitter":
