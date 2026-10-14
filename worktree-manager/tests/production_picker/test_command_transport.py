@@ -67,6 +67,15 @@ def test_non_sdk_command_keeps_existing_transport(tmp_path, monkeypatch, windows
     ]
 
 
+def test_non_utf8_legacy_batch_keeps_existing_transport(tmp_path, monkeypatch):
+    command, _script = _launchers(tmp_path)
+    command.write_bytes(b"@echo off\nrem OEM/ANSI header \xff\xfe\n")
+    _windows(monkeypatch, command)
+    assert tasks._resolve_command(["fixture", '{"literal":1}']) == [
+        str(command), '{"literal":1}',
+    ]
+
+
 def test_missing_pwsh_preserves_legacy_simple_command_but_rejects_lossy_values(
     tmp_path, monkeypatch,
 ):

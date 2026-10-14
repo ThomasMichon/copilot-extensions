@@ -2475,7 +2475,8 @@ def test_open_venue_missing_identity_is_safe():
     asyncio.run(run())
 
 
-def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch):
+@pytest.mark.parametrize("resolve_error", [False, True])
+def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch, resolve_error):
     from worktree_manager.production_picker.picker_tui import engine_worktree_actions
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
@@ -2493,11 +2494,12 @@ def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch):
                     done(result)
 
             monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
-            monkeypatch.setattr(
-                tasks_mod,
-                "_resolve_argv",
-                lambda _template, _ctx: ["agent-dispatch", "embody", "t1", "--interactive"],
-            )
+            def _resolve(_template, _ctx):
+                if resolve_error:
+                    raise OSError("launcher metadata unreadable")
+                return ["agent-dispatch", "embody", "t1", "--interactive"]
+
+            monkeypatch.setattr(tasks_mod, "_resolve_argv", _resolve)
             monkeypatch.setattr(tasks_mod, "_child_process_env", lambda: {})
             class _Proc:
                 returncode = 1
@@ -2524,7 +2526,7 @@ def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch):
             assert ok is True
             assert "interactive CLI session" in msg
             assert app.result is None
-            assert "started" in scr.debug
+            assert ("launcher metadata unreadable" if resolve_error else "started") in scr.debug
 
     asyncio.run(run())
 
@@ -2547,6 +2549,10 @@ def test_embody_cli_internal_action_ssh_dispatches_for_remote_machine(monkeypatc
                     done(result)
 
             monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            def _unused_local_resolver(_template, _ctx):
+                raise OSError("local launcher must not be inspected for a remote action")
+
+            monkeypatch.setattr(tasks_mod, "_resolve_argv", _unused_local_resolver)
             monkeypatch.setattr(tasks_mod, "_child_process_env", lambda: {})
             monkeypatch.setattr(
                 data_ssh,

@@ -867,14 +867,10 @@ class PickerScreenWorktreeActionsMixin:
         env = env or str(local_env or "").strip()
         remote = not self.src.is_local(machine, env)
         base_argv = ["agent-dispatch", "embody", task_id, "--interactive", "--machine", machine]
-        local_argv = _tasks._resolve_argv(
-            base_argv, {"task_id": task_id, "machine": machine}
-        )
-
         def _work():
             from . import data_ssh as _data_ssh
 
-            argv = list(local_argv)
+            argv = list(base_argv)
             if remote:
                 source = _data_ssh._find_source(machine, env, source_id=source_id)
                 if (
@@ -900,12 +896,17 @@ class PickerScreenWorktreeActionsMixin:
                 return False, "empty action command"
             proc = None
             try:
+                if not remote:
+                    argv = _tasks._resolve_argv(
+                        base_argv, {"task_id": task_id, "machine": machine}
+                    )
                 proc = subprocess.Popen(
                     argv,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     env=_tasks._child_process_env(),
+                    creationflags=_tasks.no_window_flags(),
                 )
                 stdout, stderr = proc.communicate(timeout=max(_tasks.ACTION_TIMEOUT, 210.0))
             except FileNotFoundError:
