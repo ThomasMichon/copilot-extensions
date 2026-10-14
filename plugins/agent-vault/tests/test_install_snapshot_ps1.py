@@ -21,7 +21,7 @@ _HARNESS_TIMEOUT_SECONDS = 20
 _UV_INDEX_BLOCK_START = "function Test-UvConfiguredIndex {"
 _UV_INDEX_BLOCK_END = "\n# === install-contract:v3 source-kind -- keep byte-identical across plugins ==="
 _UV_LAUNCHER_BYTES: bytes | None = None
-_UV_SETTINGS = """PipInstallSettings {
+_UV_SETTINGS = """PipInstallSettings { settings: PipSettings {
     index_locations: IndexLocations {
         flat_index: [],
     },
@@ -29,14 +29,16 @@ _UV_SETTINGS = """PipInstallSettings {
         global: None,
         package: ExcludeNewerPackage({}),
     },
-}
+}, }
 """
 _UV_DRIVER = r'''
 import json
 import os
 import re
+import runpy
 import shutil
 import sys
+import tempfile
 import venv
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -67,7 +69,21 @@ elif args[:2] == ["pip", "install"]:
     sources = [Path(arg) for arg in args[2:] if (Path(arg) / "pyproject.toml").is_file()]
     assert len(sources) == 1, "Only one local snapshot artifact is supported"
     source = sources[0].resolve()
-    assert source.is_relative_to(Path(os.environ["FIXTURE_SNAPSHOT_ROOT"]).resolve())
+    config = Path(args[args.index("--config-file") + 1]).resolve()
+    private = config.parent
+    assert config.is_file() and not config.is_symlink() and private.name == "inputs"
+    assert private.parent.parent.samefile(Path(tempfile.gettempdir()))
+    assert source.is_relative_to(private)
+    if os.name != "nt":
+        assert private.stat().st_uid == os.getuid() and private.stat().st_mode & 0o077 == 0
+    snapshot = Path(os.environ["FIXTURE_SNAPSHOT_ROOT"]).resolve()
+    parse = runpy.run_path(str(snapshot / "scripts" / "installer_dependency_policy.py"))["_toml"]
+    project = parse(source / "pyproject.toml")["project"]
+    original = snapshot if project["name"] == "agent-vault" else snapshot / "libs" / source.name
+    assert source != original and original.is_relative_to(snapshot)
+    assert project == parse(original / "pyproject.toml")["project"]
+    for member in original.rglob("*.py"):
+        assert (source / member.relative_to(original)).read_bytes() == member.read_bytes()
     python = Path(args[args.index("--python") + 1])
     target = python.parent.parent
     cfg = (target / "pyvenv.cfg").read_text(encoding="utf-8")
@@ -84,9 +100,8 @@ elif args[:2] == ["pip", "install"]:
             shutil.copytree(child, destination, dirs_exist_ok=True)
         else:
             shutil.copyfile(child, destination)
-    project = (source / "pyproject.toml").read_text(encoding="utf-8")
-    name = re.search(r'(?m)^name\s*=\s*"([^"]+)"', project).group(1)
-    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', project).group(1).replace("-dev", ".dev")
+    name = project["name"]
+    version = project["version"].replace("-dev", ".dev")
     metadata = site / (name.replace("-", "_") + "-" + version + ".dist-info")
     metadata.mkdir(exist_ok=True)
     (metadata / "METADATA").write_text(
@@ -98,7 +113,7 @@ elif args[:2] == ["pip", "install"]:
             "[agent_vault.extensions]\ncore-delegation = agent_vault.core_ext:register\n",
             encoding="utf-8",
         )
-    record("install", source=str(source), name=name)
+    record("install", source=str(original), retained_source=str(source), name=name)
 else:
     raise SystemExit("Unsupported offline UV operation")
 '''
@@ -212,6 +227,22 @@ public class OfflineUv {
         return result.Append('"').ToString();
     }
     public static int Main(string[] args) {
+        if (args.Length == 1 && args[0] == "--version") {
+            Console.Out.WriteLine("uv 0.12.6 (offline fixture)");
+            return 0;
+        }
+        if (args.Length >= 2 && args[0] == "pip" && args[1] == "install"
+            && Array.IndexOf(args, "--show-settings") >= 0) {
+            File.AppendAllText(Environment.GetEnvironmentVariable("FIXTURE_UV_LOG"),
+                "{\"phase\": \"preflight\"}\n");
+            bool quiet = false;
+            foreach (var arg in args) {
+                if (arg == "--quiet" || System.Text.RegularExpressions.Regex.IsMatch(arg, "^-q+$"))
+                    quiet = true;
+            }
+            if (!quiet) Console.Out.Write(Environment.GetEnvironmentVariable("FIXTURE_UV_SETTINGS"));
+            return 0;
+        }
         var driver = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "driver.py");
         var arguments = new StringBuilder(Quote(driver));
         foreach (string argument in args) { arguments.Append(" ").Append(Quote(argument)); }
@@ -231,7 +262,7 @@ public class OfflineUv {
         }
     }
 }
-'''.replace("PYTHON", json.dumps(sys.executable)),
+'''.replace("PYTHON", json.dumps(sys._base_executable)),
             encoding="utf-8",
         )
         compiler = (
@@ -254,7 +285,7 @@ public class OfflineUv {
     else:
         provider = directory / "uv"
         provider.write_text(
-            f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(driver))} \"$@\"\n",
+            f"#!/bin/sh\nexec {shlex.quote(sys._base_executable)} {shlex.quote(str(driver))} \"$@\"\n",
             encoding="utf-8",
         )
         provider.chmod(0o755)
@@ -323,7 +354,7 @@ def test_offline_uv_policy_preflight_preserves_final_quiet(tmp_path: Path) -> No
          "print(json.dumps(p['prepare_uv_install']("
          "'uv',['--python',sys.executable,'unused-artifact','--quiet'])))",
          str(_PLUGIN_ROOT / "scripts" / "installer_dependency_policy.py")],
-        env=env, capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     admitted = json.loads(result.stdout)
@@ -405,6 +436,7 @@ def test_posix_stamp_wrapper_fails_when_provision_reports_success_without_runtim
             str(install_dir),
         ],
         env=env,
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=60,
@@ -540,7 +572,6 @@ def test_stamp_snapshot_retains_resources_without_creating_runtime(stamped_snaps
 def provisioned_snapshot(stamped_snapshot):
     state = stamped_snapshot
     home, snapshot, env, pwsh = state.home, state.snapshot, state.env, state.pwsh
-
     if os.name == "nt":
         provision = subprocess.run(
             [
@@ -556,6 +587,7 @@ def provisioned_snapshot(stamped_snapshot):
                 str(home / ".agent-vault"),
             ],
             env=env,
+            cwd=snapshot,
             capture_output=True,
             text=True,
             timeout=420,
@@ -573,6 +605,7 @@ def provisioned_snapshot(stamped_snapshot):
                 str(home / ".agent-vault"),
             ],
             env=env,
+            cwd=snapshot,
             capture_output=True,
             text=True,
             timeout=420,
@@ -582,6 +615,7 @@ def provisioned_snapshot(stamped_snapshot):
     return state
 
 
+@pytest.mark.timeout(60)
 def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(provisioned_snapshot) -> None:
     state = provisioned_snapshot
     before_launch = _uv_events(state.env)
@@ -589,7 +623,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(provisioned_s
     assert [event["name"] for event in installs] == [
         "agent-zdd", "agent-procutil", "agent-single-instance-lease", "agent-vault",
     ]
-    assert sum(event["phase"] == "preflight" for event in before_launch) == len(installs)
+    assert sum(event["phase"] == "preflight" for event in before_launch) == 2 * len(installs)
     slot = state.home / ".agent-vault" / "versions" / state.version
     assert (slot / "pyvenv.cfg").is_file()
     completion = json.loads((slot / ".install-complete.json").read_text(encoding="utf-8"))
@@ -597,6 +631,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(provisioned_s
     assert (state.home / ".agent-vault" / "current-version").read_text().strip() == state.version
 
 
+@pytest.mark.timeout(60)
 def test_snapshot_compatibility_launcher_does_not_self_provision(provisioned_snapshot) -> None:
     state = provisioned_snapshot
     before_launch = _uv_events(state.env)

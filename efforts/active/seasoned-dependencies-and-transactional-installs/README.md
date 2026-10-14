@@ -552,3 +552,22 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   environment. All 33 daemon contracts passed, including real stale-selector
   and missing-resolver cases. Fresh-head review and complete required CI remain
   blocking.
+- The next required CI run exposed stale Bridge, Index and Vault fixture
+  projections and working directories. Corrected fixtures preserve the native
+  resolver, full source graph and retained-byte checks. The native Index case
+  passed; native POSIX confirmation remains required.
+- The Windows diagnostic checkout expanded reconciliation from two to twelve
+  cases upstream; together with six binding cases, the full roster is eighteen.
+  Its wrapper collected almost ten thousand unrelated tests and exhausted the
+  two-minute step after all eighteen passed. A strict repeated test-file selector
+  now collects exactly their two source files without changing selection or
+  containment. Runner and workflow contracts passed 86 cases with two platform
+  skips; the local eight-case roster completed in 17.56 seconds.
+- With explicit operator approval, only the two indivisible Vault snapshot
+  provisioning cases allow sixty seconds per item. Actual source retention,
+  installation, health and publication still run in the timed fixture.
+  The shared Windows host remains CPU-saturated and its later native attempts
+  timed out, so local evidence is not a passing final gate. A focused fresh
+  Windows provider lane now carries that blocking proof, independently of the
+  existing POSIX suite; suite and CI deadlines remain unchanged. No further
+  deadline increase, failed-check bypass, merge or rollout occurred.

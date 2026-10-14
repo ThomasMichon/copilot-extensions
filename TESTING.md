@@ -136,6 +136,13 @@ must run from their own attributable payload or isolated working directory so
 UV does not discover unrelated checkout metadata. Retained-path assertions
 validate source identity, private ownership and content at the physical UV
 boundary before normalizing paths for ordering or retry comparisons.
+Vault's two snapshot-provisioning integration cases explicitly allow 60 seconds
+per item: fixture setup performs one complete four-package installation,
+health gate and publication transaction. The remaining items keep the default
+30-second limit; suite, child-process and CI budgets are unchanged.
+A focused, change-scoped Windows CI job executes both native cases under the
+same two-minute suite limit and participates in the required PR aggregate;
+the existing POSIX plugin suite remains required independently.
 `tools/test_installer_finalizers.py` exercises production cleanup and exclusive
 lock reacquisition in the same still-live Windows PowerShell host.
 
@@ -177,6 +184,13 @@ python tools/run-plugin-tests.py --all                  # every plugin with a su
 python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.mark.guard checks
 python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
 ```
+
+For a focused lane, repeat `--test-file tests/test_name.py` with exactly one
+named plugin to avoid importing unrelated test modules. The selector accepts
+only existing, unlinked Python test files inside that plugin's `tests` tree;
+it retains the usual containment and time budgets and fails if no selected
+tests run. Combine it with `-k` to preserve a diagnostic lane's exact test
+roster without collecting the full plugin suite.
 
 > **A cached venv is not editable.** A vendored path dependency (e.g.
 > `agent-ssh-manager` under `plugins/<p>/libs/<lib>/`) installs into

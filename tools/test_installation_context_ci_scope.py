@@ -150,10 +150,30 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert reconciliation["if"] == smoke["if"]
     assert reconciliation["timeout-minutes"] <= 2
     assert "run-plugin-tests.py agent-worktrees" in reconciliation["run"]
-    assert "--test-file test_reconcile.py --test-file test_installer_command_binding.py" in reconciliation["run"]
+    assert "--test-file tests/test_reconcile.py" in reconciliation["run"]
+    assert "--test-file tests/test_installer_command_binding.py" in reconciliation["run"]
     assert '-k "runtime_resolution_real_helper_read_only or command_binding"' in reconciliation["run"]
     assert "or command_binding" in reconciliation["run"]
     assert "--timeout 120" in reconciliation["run"]
+
+
+def test_native_vault_snapshot_lane_preserves_bounded_first_use_proof() -> None:
+    workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["vault-snapshot-windows"]
+    assert job["runs-on"] == "windows-latest"
+    assert job["timeout-minutes"] == 5
+    assert job["if"] == workflow["jobs"]["installation-context-windows"]["if"]
+    assert "vault-snapshot-windows" in workflow["jobs"]["pr-gate"]["needs"]
+    detection = next(step for step in job["steps"] if step.get("id") == "vault-snapshot")
+    assert "plugins/agent-vault/" in detection["run"]
+    assert "installer-engine|versioned-runtime|installation-context" in detection["run"]
+    step = job["steps"][-1]
+    assert step["if"] == "steps.vault-snapshot.outputs.run == 'true'"
+    assert step["timeout-minutes"] == 2
+    assert "run-plugin-tests.py agent-vault" in step["run"]
+    assert "--test-file tests/test_install_snapshot_ps1.py" in step["run"]
+    assert '-k "stamp_supports_first_use_provision or snapshot_compatibility_launcher"' in step["run"]
+    assert "--timeout 120" in step["run"]
 
 
 @pytest.mark.parametrize("job_name,step_name", [

@@ -136,7 +136,7 @@ def _run_harness(
         "for arg do\n"
         '    if [ "$arg" = "--show-settings" ]; then\n'
         "        cat <<'SETTINGS'\n"
-        "        PipInstallSettings { settings: PipSettings {\n"
+        "PipInstallSettings { settings: PipSettings {\n"
         "    index_locations: IndexLocations { indexes: [], flat_index: [], },\n"
         "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\n"
         "}, }\n"

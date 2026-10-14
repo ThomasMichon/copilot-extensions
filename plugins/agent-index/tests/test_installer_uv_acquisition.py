@@ -217,6 +217,7 @@ if (-not (Install-Engine)) {{ throw 'engine fixture failed' }}
     spec.loader.exec_module(policy)
     admitted = policy.prepare_uv_install(
         str(exe), ["--python", sys.executable, str(package)], env=environment(tmp_path),
+        cwd=package,
         trusted_source_roots=(source_repository.resolve(),),
     )
     assert "--exclude-newer" in admitted
