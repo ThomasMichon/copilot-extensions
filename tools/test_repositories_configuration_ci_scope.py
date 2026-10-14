@@ -25,7 +25,7 @@ def test_real_native_consumer_is_separate_bounded_and_required():
     owner = next(step for step in JOB["steps"] if step.get("id") == "repositories-owner")
     ui = next(step for step in JOB["steps"] if step.get("name") == "Test real Repositories Configuration UI")
     assert owner["if"] == ui["if"] == "steps.repositories-configuration.outputs.run == 'true'"
-    assert ' -k "repos_configuration or repos_registry_transaction"' in owner["run"]
+    assert ' -k "repos_configuration or repos_registry_transaction or registry_paths or picker_bootstrap"' in owner["run"]
     assert ".test-venvs/linux/agent-worktrees/bin/python" in owner["run"]
     assert ui["env"]["REPOSITORIES_CONFIG_TEST_PYTHON"] == "${{ steps.repositories-owner.outputs.python }}"
     assert ui["env"]["PYTEST_ADDOPTS"] == "-k repositories_configuration"
@@ -45,11 +45,18 @@ def test_real_native_consumer_is_separate_bounded_and_required():
     ("plugins/agent-worktrees/src/agent_worktrees/config_dropins.py", True),
     ("plugins/agent-worktrees/src/agent_worktrees/inrepo_config_source.py", True),
     ("plugins/agent-worktrees/src/agent_worktrees/state_root.py", True),
+    ("plugins/agent-worktrees/src/agent_worktrees/context_cli.py", True),
+    ("plugins/agent-worktrees/src/agent_worktrees/project_state.py", True),
+    ("plugins/agent-worktrees/src/agent_worktrees/tracking.py", True),
     ("plugins/agent-worktrees/tests/test_repos_configuration.py", True),
     ("plugins/agent-worktrees/tests/test_repos_registry_transaction.py", True),
+    ("plugins/agent-worktrees/tests/test_registry_paths.py", True),
+    ("plugins/agent-worktrees/tests/test_context_resolution.py", True),
     ("plugins/agent-worktrees/pivots/repositories-config.json", True),
     ("worktree-manager/src/worktree_manager/production_picker/picker_tui/configuration_preview.py", True),
     ("worktree-manager/src/worktree_manager/production_picker/picker_tui/tasks.py", True),
+    ("worktree-manager/src/worktree_manager/production_picker/picker_tui/pivot_registry_materialization.py", True),
+    ("worktree-manager/src/worktree_manager/production_picker/context.py", True),
     ("worktree-manager/tests/production_picker/test_repositories_configuration.py", True),
     ("plugins/agent-worktrees/README.md", False),
     ("plugins/other/src/repos.py", False),

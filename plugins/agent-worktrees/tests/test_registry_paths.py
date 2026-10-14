@@ -105,17 +105,11 @@ def _select(monkeypatch, context: Path, payload: Path) -> None:
 
 
 def _register_repo(name: str, remote: str) -> None:
-    repos.write_registry(
-        repos.ReposRegistry(
-            repos={
-                name: repos.RepoEntry(
-                    name=name,
-                    repo_class="worktree",
-                    remote=remote,
-                )
-            }
-        )
+    registry = repos.read_registry()
+    registry.repos[name] = repos.RepoEntry(
+        name=name, repo_class="worktree", remote=remote,
     )
+    repos.write_registry(registry)
 
 
 def test_legacy_paths_remain_exact_and_ignore_runtime_root(monkeypatch, tmp_path):
