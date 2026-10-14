@@ -8,23 +8,33 @@ produced vectors for them.
 
 from __future__ import annotations
 
-import contextlib
+import contextlib as contextlib
 import json
 import logging
-import os
+import os as os
 import random
 import re
-import subprocess
-import sys
+import subprocess as subprocess
+import sys as sys
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
-from agent_procutil import no_window_kwargs
+from agent_procutil import no_window_kwargs as no_window_kwargs
 
+from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_retryable
 from agent_index.store.repo_filter import _like_pattern, _sql_str, repo_filter_sql
+from agent_index.store.source_layout import (
+    SourceLayoutError,
+    domain_for,
+    source_fts_read,
+    source_read,
+    source_write,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,6 +42,14 @@ if TYPE_CHECKING:
     from agent_index.chunking.base import Chunk
 
 logger = logging.getLogger(__name__)
+
+
+class FtsBuildOutcome(Enum):
+    """Completion is independent of whether a prior index remains queryable."""
+
+    SUCCESS = "success"
+    EMPTY = "empty-noop"
+    FAILURE = "failure"
 
 # Cap on a reconstructed full-document preview (#882) -- enough for large docs
 # and issues, small enough to keep the response and browser render snappy.
@@ -89,7 +107,7 @@ def _decode_metadata(raw: object) -> dict:
         return {}
 
 
-class ContentStore:
+class ContentStore(_ContentFtsWorkerMixin):
     """LanceDB-backed store for chunk content and metadata.
 
     Owns the canonical ``chunks`` table and the BM25 full-text index.
@@ -104,6 +122,7 @@ class ContentStore:
     ) -> None:
         import lancedb
 
+        self._source_domain = domain_for(db_path)
         self._db = lancedb.connect(str(db_path))
         self._db_path = str(db_path)
         self._table_name = table_name
@@ -122,10 +141,14 @@ class ContentStore:
 
     def _get_or_create_table(self):
         if self._table is not None:
+            if self._source_domain is not None:
+                self._table.checkout_latest()
             return self._table
         try:
             table = self._db.open_table(self._table_name)
         except Exception:
+            if self._source_domain is not None and not self._source_domain.writing:
+                raise SourceLayoutError("source-aware content table is not prepared") from None
             self._table = self._db.create_table(
                 self._table_name, schema=_CONTENT_SCHEMA
             )
@@ -145,6 +168,8 @@ class ContentStore:
         """
         existing = set(table.schema.names)
         if "metadata" not in existing:
+            if self._source_domain is not None:
+                raise SourceLayoutError("source-aware schema is incompatible")
             table.add_columns({"metadata": "''"})
             logger.info(
                 "Migrated content table %s: added 'metadata' column",
@@ -153,12 +178,16 @@ class ContentStore:
 
     # -- write ---------------------------------------------------------------
 
+    @source_write
     def upsert(self, chunks: list[Chunk]) -> int:
         """Insert or update chunk content by chunk_id.
 
         Returns the number of rows written.
         """
         table = self._get_or_create_table()
+        if self._source_domain is not None:
+            from .source_projection import check_content_sources
+            check_content_sources(self, chunks)
         now = time.time()
 
         records = [
@@ -179,18 +208,34 @@ class ContentStore:
         ]
 
         chunk_ids = [c.chunk_id for c in chunks]
+        if self._source_domain is not None:
+            self._source_domain.effect(f"content-upsert:{self._table_name}")
         try:
             id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
             table.delete(f"chunk_id IN ({id_list})")
         except Exception:
+            if self._source_domain is not None:
+                raise
             pass
 
         table.add(records)
+        if self._source_domain is not None:
+            from .source_projection import sync_content_projection
+
+            sync_content_projection(self._db, chunks)
         logger.info("Upserted %d chunks to content store", len(records))
         return len(records)
 
+    @source_write
     def delete_by_source(self, source: str) -> None:
         """Remove all chunks from a specific source (prefix-matching)."""
+        if self._source_domain is not None:
+            from .source_projection import delete_canonical
+
+            return delete_canonical(self, (
+                f"(source = '{_sql_str(source)}' OR "
+                f"source LIKE '{_like_pattern(source)}:%' ESCAPE '\\')"
+            ))
         table = self._get_or_create_table()
         try:
             table.delete(f"source = '{source}' OR source LIKE '{source}:%'")
@@ -198,6 +243,7 @@ class ContentStore:
         except Exception:
             logger.debug("No content to delete for source: %s", source)
 
+    @source_write
     def delete_by_source_exact(self, source: str) -> None:
         """Remove chunks for an EXACT source value (no prefix matching).
 
@@ -206,6 +252,10 @@ class ContentStore:
         ``forge:code`` does not also wipe live ``forge:code:owner/repo``
         chunks. Used by source garbage collection (#879).
         """
+        if self._source_domain is not None:
+            from .source_projection import delete_canonical
+
+            return delete_canonical(self, f"source = '{_sql_str(source)}'")
         table = self._get_or_create_table()
         try:
             table.delete(f"source = '{_sql_str(source)}'")
@@ -213,6 +263,7 @@ class ContentStore:
         except Exception:
             logger.debug("No content to delete for exact source: %s", source)
 
+    @source_read
     def get_chunk_ids_by_source_exact(self, source: str) -> list[str]:
         """Return chunk_ids for an EXACT source value (no prefix matching)."""
         table = self._get_or_create_table()
@@ -229,6 +280,7 @@ class ContentStore:
         except Exception:
             return []
 
+    @source_read
     def source_counts(self) -> dict[str, int]:
         """Return ``{source: chunk_count}`` for every distinct source.
 
@@ -249,11 +301,20 @@ class ContentStore:
                 if src:
                     counts[src] = counts.get(src, 0) + 1
         except Exception:
+            if self._source_domain is not None:
+                raise
             logger.debug("source_counts scan failed", exc_info=True)
         return counts
 
+    @source_write
     def delete_by_file(self, source: str, file_path: str) -> list[str]:
         """Remove all chunks for a specific file. Returns deleted chunk_ids."""
+        if self._source_domain is not None:
+            from .source_projection import delete_canonical
+
+            return delete_canonical(self, (
+                f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}'"
+            ), return_ids=True)
         table = self._get_or_create_table()
         # Query chunk_ids before deleting so callers can clean up vector tables
         chunk_ids = self.get_chunk_ids_by_file(source, file_path)
@@ -267,6 +328,7 @@ class ContentStore:
                 )
         return chunk_ids
 
+    @source_read
     def get_chunk_ids_by_file(self, source: str, file_path: str) -> list[str]:
         """Return chunk_ids for a specific file within a source."""
         table = self._get_or_create_table()
@@ -282,8 +344,16 @@ class ContentStore:
         except Exception:
             return []
 
+    @source_write
     def delete_stale(self, source: str, *, before: float) -> int:
         """Remove chunks not refreshed after *before* timestamp."""
+        if self._source_domain is not None:
+            from .source_projection import delete_canonical
+
+            return delete_canonical(self, (
+                f"(source = '{_sql_str(source)}' OR "
+                f"source LIKE '{_like_pattern(source)}:%' ESCAPE '\\') AND indexed_at < {before}"
+            ))
         table = self._get_or_create_table()
         try:
             initial = table.count_rows()
@@ -301,6 +371,7 @@ class ContentStore:
         except Exception:
             return 0
 
+    @source_read
     def get_stale_chunk_ids_by_file(
         self,
         source: str,
@@ -325,6 +396,7 @@ class ContentStore:
         except Exception:
             return []
 
+    @source_write
     def delete_stale_by_file(
         self,
         source: str,
@@ -333,6 +405,13 @@ class ContentStore:
         before: float,
     ) -> int:
         """Remove stale chunks for a specific file (indexed before *before*)."""
+        if self._source_domain is not None:
+            from .source_projection import delete_canonical
+
+            return delete_canonical(self, (
+                f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}' "
+                f"AND indexed_at < {before}"
+            ))
         table = self._get_or_create_table()
         try:
             initial = table.count_rows()
@@ -353,6 +432,7 @@ class ContentStore:
 
     # -- maintenance ---------------------------------------------------------
 
+    @source_write
     def compact(self, *, older_than_days: int = 2) -> dict[str, int]:
         """Compact fragments and clean up old versions.
 
@@ -378,12 +458,16 @@ class ContentStore:
 
         try:
             cutoff = datetime.timedelta(days=older_than_days)
+            if self._source_domain is not None:
+                self._source_domain.effect(f"content-compact:{self._table_name}")
             table.optimize(cleanup_older_than=cutoff)
             logger.info(
                 "Optimized table %s (cleanup older than %d days)",
                 self._table_name, older_than_days,
             )
         except Exception:
+            if self._source_domain is not None:
+                raise
             logger.warning(
                 "optimize failed for %s", self._table_name, exc_info=True,
             )
@@ -398,6 +482,7 @@ class ContentStore:
 
     # -- read ----------------------------------------------------------------
 
+    @source_read
     def get_by_ids(self, chunk_ids: list[str]) -> dict[str, ChunkRecord]:
         """Fetch chunk records by ID for hydrating search results."""
         if not chunk_ids:
@@ -412,6 +497,8 @@ class ContentStore:
                 .to_list()
             )
         except Exception:
+            if self._source_domain is not None:
+                raise
             return {}
 
         return {
@@ -430,6 +517,7 @@ class ContentStore:
             for r in rows
         }
 
+    @source_read
     def get_document(self, source: str, file_path: str) -> ChunkRecord | None:
         """Reconstruct a file's full indexed text from all its chunks.
 
@@ -488,6 +576,7 @@ class ContentStore:
             metadata=_decode_metadata(first.get("metadata")),
         )
 
+    @source_read
     def get_chunks_for_file(
         self, source: str, file_path: str,
     ) -> list[ChunkRecord]:
@@ -531,6 +620,7 @@ class ContentStore:
             for r in rows
         ]
 
+    @source_write
     def ensure_fts_index(self, *, max_retries: int = 5) -> bool:
         """Create or rebuild the BM25 full-text index on content.
 
@@ -544,119 +634,23 @@ class ContentStore:
         """
         if not self._fts_lock.acquire(timeout=120):
             logger.warning("FTS lock acquisition timed out")
+            if self._source_domain is not None:
+                raise SourceLayoutError("source-aware FTS lock acquisition failed")
             return self._fts_available
 
         try:
-            return self._rebuild_fts_locked(max_retries=max_retries)
+            result = self._rebuild_fts_locked(max_retries=max_retries)
+            if self._source_domain is not None and result is FtsBuildOutcome.FAILURE:
+                raise SourceLayoutError("source-aware FTS preparation failed")
+            if self._source_domain is not None:
+                self._source_domain.cover_fts(self)
+            if result is FtsBuildOutcome.EMPTY:
+                return False
+            return self._fts_available
         finally:
             self._fts_lock.release()
 
-    @contextlib.contextmanager
-    def _fts_file_lock(self):
-        """Best-effort *cross-process* exclusive lock around ``create_fts_index``.
 
-        The in-process ``_fts_lock`` cannot coordinate with a *different* OS
-        process (e.g. a standalone ``agent-index reindex`` run, or a serve process that
-        died mid-build) issuing its own LanceDB ``CreateIndex``. Two concurrent
-        ``CreateIndex`` transactions livelock LanceDB's optimistic-concurrency
-        resolver and can leave the index stuck on a version forever (#1818).
-
-        Yields ``True`` if the lock was acquired, ``False`` if another process
-        holds it -- in which case the caller should skip this rebuild rather
-        than pile on with a competing ``CreateIndex``.
-        """
-        try:
-            import fcntl
-        except ImportError:  # non-POSIX: fall back to in-process serialization
-            yield True
-            return
-
-        lock_path = os.path.join(self._db_path, ".fts_index.lock")
-        fd = None
-        acquired = False
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                acquired = True
-            except OSError:
-                acquired = False
-            yield acquired
-        finally:
-            if fd is not None:
-                if acquired:
-                    with contextlib.suppress(OSError):
-                        fcntl.flock(fd, fcntl.LOCK_UN)
-                os.close(fd)
-
-    def _run_fts_build(self, *, full: bool, timeout: float = 300.0) -> None:
-        """Update the BM25 FTS index in a FRESH subprocess (optimize [+ create]).
-
-        LanceDB's sync ``create_fts_index`` bridges to a module-singleton
-        background asyncio loop; inside the agent-index server's full lifespan that
-        bridge DEADLOCKS (#3587) -- the worker blocks forever on the
-        background-loop result while the loop sits idle, so uvicorn never binds
-        and the service is DOWN. A fresh interpreter has a pristine background
-        loop, so the build completes normally out of process. Running it out of
-        process ALSO makes the build KILLABLE with a hard timeout (never-strand,
-        #1208) and lets us ``optimize()`` (compact) the table first -- a full
-        reindex leaves hundreds of tiny fragments/versions, the pathological
-        state that made the in-process build crawl before it deadlocked.
-
-        ``full`` controls whether a from-scratch ``create_fts_index(...,
-        replace=True)`` runs after ``optimize()``. Per LanceDB's own docs
-        (Reindexing / Incremental Reindexing), ``optimize()`` already performs
-        compaction, retention pruning, *and* an incremental update of any
-        existing vector/scalar/FTS index against newly-ingested rows -- it does
-        NOT require ``create_fts_index`` to pick up new data. Forcing
-        ``replace=True`` on every dirty-triggered rebuild discards the existing
-        BM25 index and rebuilds it from scratch over the *entire* content
-        table regardless of how small the actual delta is. Only the first-ever
-        build, a recovery from an index that was never successfully created
-        (``_fts_available`` False), or the caller's own escalation from a
-        non-retryable incremental failure (#2951, see
-        ``_rebuild_fts_locked``), needs the full ``replace=True`` path.
-
-        On the ``full`` path, an ``optimize()`` failure is swallowed (only
-        logged) because ``create_fts_index(replace=True)`` still runs
-        afterward and is the actual source of correctness there. On the
-        incremental (``full=False``) path there is no follow-up
-        ``create_fts_index`` call, so ``optimize()`` succeeding IS the only
-        thing that updates the index -- swallowing its failure there would let
-        the caller believe the rebuild succeeded while the on-disk index
-        silently went stale. So the incremental path lets ``optimize()``
-        raise, causing the subprocess to exit non-zero and the caller's
-        existing retry/backoff logic to treat it as a genuine failure.
-        """
-        if full:
-            body = (
-                "try:\n"
-                "    t.optimize()\n"
-                "except Exception as e:\n"
-                "    print(f'optimize skipped: {e}', file=sys.stderr)\n"
-                "t.create_fts_index('content', replace=True)\n"
-            )
-        else:
-            body = "t.optimize()\n"
-        code = (
-            "import sys, lancedb\n"
-            "t = lancedb.connect(sys.argv[1]).open_table(sys.argv[2])\n"
-            + body
-        )
-        proc = subprocess.run(
-            [sys.executable, "-B", "-c", code, self._db_path, self._table_name],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            **no_window_kwargs(),
-        )
-        if proc.returncode != 0:
-            # Surface the child's stderr so the caller's retry loop can still
-            # distinguish a (retryable) LanceDB commit conflict from a hard error.
-            raise RuntimeError(
-                f"FTS build subprocess failed (rc={proc.returncode}): "
-                f"{proc.stderr.strip()[-500:]}"
-            )
 
     @staticmethod
     def _index_columns(index: object) -> list[str]:
@@ -700,7 +694,7 @@ class ContentStore:
                 return True
         return False
 
-    def _rebuild_fts_locked(self, *, max_retries: int) -> bool:
+    def _rebuild_fts_locked(self, *, max_retries: int) -> FtsBuildOutcome:
         """Inner FTS rebuild - caller must hold the in-process ``_fts_lock``.
 
         Runs the actual build in a subprocess (``_run_fts_build``) to dodge the
@@ -734,10 +728,10 @@ class ContentStore:
             count = table.count_rows()
             if count == 0:
                 logger.info("Content table empty, skipping FTS index")
-                return False
+                return FtsBuildOutcome.EMPTY
         except Exception:
             logger.warning("Failed to count rows for FTS check", exc_info=True)
-            return self._fts_available
+            return FtsBuildOutcome.FAILURE
 
         with self._fts_file_lock() as have_lock:
             if not have_lock:
@@ -748,7 +742,7 @@ class ContentStore:
                     "FTS rebuild skipped: another process holds the index lock"
                 )
                 self._fts_next_retry_at = time.monotonic() + _FTS_LOCK_RECHECK_S
-                return self._fts_available
+                return FtsBuildOutcome.FAILURE
 
             # Track *why* a full rebuild is chosen -- three triggers (never
             # built, recovered-unavailable, escalated-non-retryable-failure)
@@ -793,11 +787,12 @@ class ContentStore:
                 try:
                     self._run_fts_build(full=full)
                     _mark_rebuilt(via_full=full, reason=full_reason)
-                    return True
+                    return FtsBuildOutcome.SUCCESS
                 except Exception as e:
+                    if self._source_domain is not None and isinstance(e, OSError):
+                        raise
                     last_err = e
-                    err_msg = str(e).lower()
-                    retryable = "retryable" in err_msg or "commit conflict" in err_msg
+                    retryable = fts_retryable(str(e))
                     last_retryable = retryable
                     if retryable and attempt < max_retries:
                         delay = (2.0 ** attempt) + random.uniform(0, 1)
@@ -822,8 +817,10 @@ class ContentStore:
                     self._run_fts_build(full=True)
                     reason = f"escalated-non-retryable-failure: {last_err}"
                     _mark_rebuilt(via_full=True, reason=reason)
-                    return True
+                    return FtsBuildOutcome.SUCCESS
                 except Exception as full_err:
+                    if self._source_domain is not None and isinstance(full_err, OSError):
+                        raise
                     last_err = full_err
 
         # Failed - arm a capped exponential backoff so the maintainer stops
@@ -850,7 +847,7 @@ class ContentStore:
             max_retries, last_err, self._fts_available,
             self._fts_consecutive_failures, backoff,
         )
-        return self._fts_available
+        return FtsBuildOutcome.FAILURE
 
     def mark_fts_dirty(self) -> None:
         """Signal that content has changed and FTS should be rebuilt.
@@ -889,6 +886,7 @@ class ContentStore:
     def fts_available(self) -> bool:
         return self._fts_available
 
+    @source_fts_read
     def fts_search(
         self,
         query: str,
@@ -939,6 +937,7 @@ class ContentStore:
 
     # -- stats ---------------------------------------------------------------
 
+    @source_read
     def distinct_sources(self) -> set[str]:
         """Return the set of distinct ``source`` values across all chunks.
 
@@ -957,6 +956,7 @@ class ContentStore:
             logger.debug("distinct_sources scan failed", exc_info=True)
             return set()
 
+    @source_read
     def distinct_items(self) -> list[tuple[str, str]]:
         """Return distinct ``(source, file_path)`` content items, sorted.
 
@@ -985,33 +985,33 @@ class ContentStore:
         }
         return sorted(items)
 
+    @source_read
     def stats(self) -> dict[str, Any]:
-        """Return content store statistics."""
+        """Count projected metadata in bounded batches, without loading content."""
         table = self._get_or_create_table()
-        try:
-            total = table.count_rows()
-        except Exception:
-            total = 0
-
+        total = table.count_rows()
         info: dict[str, Any] = {
             "total_chunks": total,
             "table_name": self._table_name,
         }
 
         if total > 0:
-            try:
-                df = table.to_pandas()
-                info["sources"] = df["source"].value_counts().to_dict()
-                info["languages"] = df["language"].value_counts().to_dict()
-            except Exception:
-                pass
-
+            sources: Counter[str] = Counter()
+            languages: Counter[str] = Counter()
+            with table.search().select(["source", "language"]).limit(None).to_batches(
+                batch_size=1024
+            ) as batches:
+                for batch in batches:
+                    sources.update(value for value in batch.column("source").to_pylist()
+                                   if value is not None)
+                    languages.update(value for value in batch.column("language").to_pylist()
+                                     if value is not None)
+            info["sources"] = dict(sources.most_common())
+            info["languages"] = dict(languages.most_common())
         return info
 
 
 # -- helpers -----------------------------------------------------------------
-
-
 
 
 def sanitize_fts_query(query: str) -> str:

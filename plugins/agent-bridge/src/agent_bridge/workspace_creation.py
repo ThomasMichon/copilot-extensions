@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import asyncio
 import json
+import logging
 import time
 import uuid
 from dataclasses import replace
@@ -106,7 +107,8 @@ def _sessionless(
     manager: SessionManager, row: dict[str, Any], head: str | None, worktree_id: str,
 ) -> bool:
     return not (
-        row.get("session_count") != 0 or row.get("last_session_id") or head
+        row.get("status") != "active"
+        or row.get("session_count") != 0 or row.get("last_session_id") or head
         or row.get("execution_leg") or row.get("execution_leg_live")
         or manager.db.list_fresh_live_sessions(worktree_id, now=time.time())
         or manager.db.get_worktree_ownership(worktree_id)
@@ -158,9 +160,9 @@ async def start(
         )[0])
         if operation["facts_digest"] != facts_digest:
             raise AcquisitionRefused("creation_conflict", "creation key is bound to different embodiment facts")
-        if operation["state"] == "terminal":
-            raise AcquisitionRefused("creation_terminal", "original embodiment is permanently terminal")
         saved = json.loads(operation["worktree_json"]) if operation["worktree_json"] else None
+        if operation["state"] == "terminal" and saved is None:
+            raise AcquisitionRefused("creation_terminal", "terminal embodiment has no retained allocation")
         if saved is None:
             if target.worktree_id:
                 saved, _ = await _workspace(target.project, target.worktree_id)
@@ -198,6 +200,30 @@ async def start(
                     raise
                 if any(row.get(field) != saved.get(field) for field in ("id", "repo", "path", "creation_nonce")):
                     raise AcquisitionRefused("creation_conflict", "original workspace identity changed")
+                if operation["state"] == "terminal":
+                    if (
+                        operation["native_session_id"] is not None
+                        or operation["turn_index"] is not None
+                        or db.get_session(operation["session_id"]) is not None
+                        or db.execute_read(
+                            "SELECT 1 FROM turns WHERE session_id=? LIMIT 1",
+                            (operation["session_id"],),
+                        )
+                        or db.execute_read(
+                            "SELECT 1 FROM acquisition_launch_gates WHERE worktree_id=? LIMIT 1",
+                            (worktree_id,),
+                        )
+                        or not _sessionless(manager, row, head, worktree_id)
+                    ):
+                        raise AcquisitionRefused(
+                            "creation_terminal", "terminal embodiment has native or launch history",
+                        )
+                    logging.getLogger(__name__).warning(
+                        "Reconciling pre-launch terminal embodiment for retained workspace %s",
+                        worktree_id,
+                    )
+                    _update(db, digest, state="allocated")
+                    operation["state"] = "allocated"
                 session = manager.get_session(operation["session_id"])
                 if session is not None and session.status == SessionStatus.ENDED:
                     _update(db, digest, state="terminal")
@@ -210,6 +236,11 @@ async def start(
                     )
                     try:
                         current, current_head = await _workspace(target.project, worktree_id)
+                        if any(
+                            current.get(field) != saved.get(field)
+                            for field in ("id", "repo", "path", "creation_nonce")
+                        ):
+                            raise AcquisitionRefused("creation_conflict", "workspace identity changed before native start")
                         if not _sessionless(manager, current, current_head, worktree_id):
                             raise AcquisitionRefused("live_holder", "workspace changed before native start")
                     except AcquisitionRefused:

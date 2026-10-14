@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
-import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from agent_procutil import no_window_kwargs
 
 from . import config as cfg, git_ops
 from . import installer as inst
@@ -177,7 +178,7 @@ def _sibling_binstub(slug: str) -> Path | None:
     """Locate the ``agent-<slug>`` binstub in ~/.local/bin (it runs in its own
     venv, so the router shells out to it rather than importing it)."""
     lb = inst.local_bin()
-    cand = lb / (f"agent-{slug}.ps1" if platform.system() == "Windows" else f"agent-{slug}")
+    cand = lb / (f"agent-{slug}.ps1" if sys.platform == "win32" else f"agent-{slug}")
     return cand if cand.exists() else None
 
 
@@ -237,7 +238,7 @@ def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) ->
     else:
         child_env.pop("AGENT_WORKTREES_PROJECT_ROUTED", None)
     forwarded += list(rest)
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         pwsh = shutil.which("pwsh") or shutil.which("powershell") or "pwsh"
         cmd = [pwsh, "-NoProfile", "-NoLogo", "-File", str(stub), *forwarded]
     else:
@@ -280,6 +281,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
             ["git", "-C", str(path), "rev-parse", *args],
             capture_output=True, text=True, timeout=5,
             env=git_ops.repository_identity_env(), stdin=subprocess.DEVNULL,
+            **no_window_kwargs(),
         )
 
     try:
@@ -652,4 +654,3 @@ _is_noninteractive_invocation = _mlc._is_noninteractive_invocation
 cmd_noninteractive_bare = _mlc.cmd_noninteractive_bare
 cmd_headless_bare = _mlc.cmd_headless_bare
 dispatch_bare_invocation = _mlc.dispatch_bare_invocation
-

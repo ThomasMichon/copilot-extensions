@@ -154,8 +154,10 @@ An abrupt process interruption may leave sidecar teardown partially complete;
 it does not remove YAML authority before that teardown finishes. Retry addresses
 only that exact record, never a newer worktree identity or foreign artifact.
 This is owned-artifact teardown, not a retention sweep or record-writer repair.
-The authoritative `launch_seed_remove` verb advertises and requires version 4
-for this teardown behavior. A known pre-v4 monitor is refused before dispatch
+The authoritative `launch_seed_remove` verb advertises and requires version 5
+for this teardown behavior, retaining the version-4 launch-admission guard.
+An admission-only version-4 monitor does not implement pair-receipt teardown;
+it and earlier monitors are refused before dispatch
 or direct fallback, preserving YAML/seed/receipt state during rolling upgrade.
 The caller does not substitute manual unlink or restart/take over that monitor.
 

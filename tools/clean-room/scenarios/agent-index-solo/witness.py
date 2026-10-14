@@ -277,10 +277,14 @@ def main(args: list[str]) -> None:
         assert live[0]["pid"] == data["pid"] and live[0]["instanceToken"] == data["instanceToken"], live
     elif action == "mcp":
         subprocess.run([values[0], "-I", "-c",
-                        "import asyncio; import agent_index.mcp_app as app; "
-                        "names={t.name for t in asyncio.run(app.mcp.list_tools())}; print(sorted(names)); "
-                        "assert names == {'agent_index_search','agent_index_find_similar','agent_index_clusters','agent_index_status','agent_index_reindex'}"],
+                        "import importlib.util; "
+                        "assert importlib.util.find_spec('mcp') is None; print('MCP SDK absent')"],
                        check=True, timeout=30)
+        result = subprocess.run([values[0], "-I", "-m", "agent_index", "mcp"],
+                                capture_output=True, text=True, timeout=30)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "[stdio-mcp] extra" in result.stderr, result.stderr
+        print("managed host refuses optional stdio MCP without installation")
     elif action == "engine-absent":
         assert_no_engine(Path(values[0]))
         subprocess.run([values[1], "-I", "-c",

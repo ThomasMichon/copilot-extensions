@@ -151,7 +151,7 @@ def test_atomic_failure_retains_previous_cue_and_removes_only_owned_temp(tmp_pat
 @pytest.mark.parametrize("contents", [
     "secret-invalid-json", '{"secret":1e999999999999999999999}',
     '{"schema":1,"schema":2}', "x" * 65537,
-])
+], ids=["invalid-json", "overflow", "duplicate-key", "oversized"])
 def test_invalid_config_is_explicit_redacted_unavailability(tmp_path, monkeypatch, contents):
     path = _config(tmp_path, monkeypatch)
     path.write_text(contents)
@@ -341,6 +341,22 @@ def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path, stall)
     assert result.returncode == 0
     assert result.stdout == "{}"
     assert "session cue could not be written" in result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX session wrapper")
+def test_posix_wrapper_missing_writer_emits_one_empty_envelope(tmp_path):
+    shell = shutil.which("bash")
+    if shell is None:
+        pytest.skip("Bash unavailable")
+    result = subprocess.run(
+        [shell, str(PLUGIN / "scripts/write-session-guidance.sh")],
+        input="{}", text=True, capture_output=True,
+        env={**os.environ, "COPILOT_PLUGIN_ROOT": str(tmp_path / "missing")},
+        timeout=8, **no_window_kwargs(),
+    )
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+    assert result.stderr.strip() == "budget-guidance: session cue writer or Python is unavailable"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows venv redirector resolution")

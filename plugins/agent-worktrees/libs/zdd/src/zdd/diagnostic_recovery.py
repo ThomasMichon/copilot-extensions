@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from . import breadcrumb, publication_history, routing
-from .cutover_lock import CutoverLock, CutoverLockedError, lock_path
+from .cutover_lock import CutoverBorrowError, CutoverLock, CutoverLockedError, lock_path
 
 if TYPE_CHECKING:
     from .diagnostics import DiagnosticContext
@@ -120,33 +121,36 @@ def guarded_apply(ctx: DiagnosticContext, *, now: datetime | None = None) -> dic
     if ctx.acquire_cutover_guard is not None and consumer is None:
         report = _audit_daemon_health(ctx, now=now, cutover_state="busy")
         return _blocked(ctx, report, "cutover_guard", error or "cutover in progress")
-    native = None
+    release_consumer = not isinstance(consumer, CutoverLock)
     try:
-        borrowed = (
-            isinstance(consumer, CutoverLock)
-            and consumer.path.resolve() == lock_path(ctx.config_dir).resolve()
-            and consumer._fh is not None
-        )
-        if not borrowed:
-            native = CutoverLock(ctx.config_dir)
-            try:
-                native.acquire(timeout=0)
-            except (CutoverLockedError, OSError) as exc:
-                reason = f"native cutover authority unavailable ({type(exc).__name__})"
-                log.error(reason)
-                report = _audit_daemon_health(ctx, now=now, cutover_state="busy")
-                return _blocked(ctx, report, "cutover_guard", reason)
-        report = conditional_recovery_report(ctx)
-        if report is not None:
-            log.error("Diagnostics refuses conditional state requiring owner-led recovery")
-            return _blocked(ctx, report, "conditional_recovery", report["owner_validation_reason"])
-        return _apply_daemon_health_locked(
-            replace(ctx, acquire_cutover_guard=None), now=now,
-        )
+        with ExitStack() as authority:
+            if isinstance(consumer, CutoverLock):
+                try:
+                    authority.enter_context(consumer.borrow())
+                except CutoverBorrowError as exc:
+                    reason = f"native cutover borrow refused ({type(exc).__name__})"
+                    log.error(reason)
+                    report = _audit_daemon_health(ctx, now=now, cutover_state="busy")
+                    return _blocked(ctx, report, "cutover_guard", reason)
+                release_consumer = True
+            if not (
+                isinstance(consumer, CutoverLock)
+                and consumer.path.resolve() == lock_path(ctx.config_dir).resolve()
+            ):
+                try:
+                    authority.enter_context(CutoverLock(ctx.config_dir))
+                except (CutoverLockedError, OSError) as exc:
+                    reason = f"native cutover authority unavailable ({type(exc).__name__})"
+                    log.error(reason)
+                    report = _audit_daemon_health(ctx, now=now, cutover_state="busy")
+                    return _blocked(ctx, report, "cutover_guard", reason)
+            report = conditional_recovery_report(ctx)
+            if report is not None:
+                log.error("Diagnostics refuses conditional state requiring owner-led recovery")
+                return _blocked(ctx, report, "conditional_recovery", report["owner_validation_reason"])
+            return _apply_daemon_health_locked(
+                replace(ctx, acquire_cutover_guard=None), now=now,
+            )
     finally:
-        try:
-            if native is not None:
-                native.release()
-        finally:
-            if consumer is not None and hasattr(consumer, "release"):
-                consumer.release()
+        if release_consumer and consumer is not None and hasattr(consumer, "release"):
+            consumer.release()

@@ -187,14 +187,17 @@ class Deliveries:
                 for event in self.registry.pending_events()
             ]
 
-    def close(self, deadline: float) -> list[str]:
+    def close(self, deadline: float, *, bounded: bool = False) -> list[str]:
         self.changed.set()
         scheduler = self.scheduler
         if scheduler is not None:
             scheduler.join(max(0.0, deadline - time.monotonic()))
         while True:
             with self.lock:
-                while self.legacy_queue and len(self.workers) < self.max_workers:
+                while (
+                    self.legacy_queue and len(self.workers) < self.max_workers
+                    and (not bounded or time.monotonic() < deadline)
+                ):
                     event = self.legacy_queue.popleft()
                     identity = event.subscriber.registration_id
                     thread = threading.Thread(
@@ -209,7 +212,8 @@ class Deliveries:
                         self.legacy_queue.appendleft(event)
                         self.start_error = "worker_start_failed"
                         raise
-                    deadline = max(deadline, time.monotonic() + 35.0)
+                    if not bounded:
+                        deadline = max(deadline, time.monotonic() + 35.0)
                 workers = list(self.workers.values())
                 queued = bool(self.legacy_queue)
             if not workers or time.monotonic() >= deadline:
@@ -224,4 +228,7 @@ class Deliveries:
         live = [worker.name for worker in workers if worker.is_alive()]
         if scheduler is not None and scheduler.is_alive():
             live.append(scheduler.name)
+        with self.lock:
+            if self.legacy_queue:
+                live.append(f"pr-notify:legacy-queued({len(self.legacy_queue)})")
         return live

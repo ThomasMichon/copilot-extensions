@@ -204,6 +204,14 @@ def test_resolve_resume_plan_project_matches_repo_name_not_ambient_global(
     monkeypatch.setattr(m.tracking, "mark_resumed", lambda *_a, **_k: None)
     from agent_worktrees import local_cache_refresh as _lcr
     monkeypatch.setattr(_lcr, "refresh_local_cache", lambda *_a, **_k: None)
+    from agent_worktrees import knowledge_plugins
+
+    def compose_selected_pair(*, cwd, config):
+        assert cwd == str(worktree_path)
+        assert config.repo_name == "demo-repo"
+        return {"action": "no-op"}
+
+    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", compose_selected_pair)
     monkeypatch.setattr(m.tracking, "save_record", lambda *_a, **_k: None)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(

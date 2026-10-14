@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import os
 import platform
 import sys
 import threading
@@ -235,6 +236,10 @@ def add_parsers(sub) -> None:
     parser = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--recovery", action="store_true")
+    parser.add_argument(
+        "--defer-projections", action="store_true", help=argparse.SUPPRESS,
+        default=os.environ.get("AGENT_WORKTREES_DEFER_PROJECTIONS") == "1",
+    )
     parser.add_argument(
         "--no-resume", action="store_true", help="Don't auto-resume the last Copilot session"
     )
@@ -629,9 +634,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         launch_preflight = _preflight_launch(config, state.args, work_dir)
         if launch_preflight.error:
             return output._json_error(launch_preflight.error, exit_code=3)
-        local_cache_refresh.prepare_for_launch(
-            work_dir, dry_run=getattr(state.args, "dry_run", False)
-        )
+        if not getattr(state.args, "defer_projections", False):
+            local_cache_refresh.prepare_for_launch(
+                work_dir, dry_run=getattr(state.args, "dry_run", False)
+            )
         launch_cmd = _build_launch_cmd(
             config,
             state.args,
@@ -664,6 +670,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 owner_ref=getattr(state.args, "owner_ref", None),
                 recovery=getattr(state.args, "recovery", False),
                 pending_seed=getattr(state.args, "seed", None),
+                defer_projections=getattr(state.args, "defer_projections", False),
             )
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)
@@ -691,17 +698,21 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         require_record_mutation(record, config)
     except ExecutionSpaceError as exc:
         return output._json_error(str(exc), exit_code=3)
+    with step("Verifying worktree liveness", worktree_id=worktree_id):
+        verdict = sessions.verify_worktree_active(record)
     try:
         with step("Preparing launch prompt", worktree_id=worktree_id):
-            staged_seed = seed_for_attempt(yaml_path, record, state.args)
+            staged_seed = seed_for_attempt(yaml_path, record, state.args, verdict=verdict)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         return output._json_error(f"Could not stage launch prompt: {exc}", exit_code=3)
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
         return output._json_error(launch_preflight.error, exit_code=3)
-    local_cache_refresh.prepare_for_launch(
-        record.worktree_path, dry_run=getattr(state.args, "dry_run", False)
-    )
+    if not getattr(state.args, "defer_projections", False):
+        local_cache_refresh.prepare_for_launch(
+            record.worktree_path, dry_run=getattr(state.args, "dry_run", False),
+            compose_pair=True, config=config,
+        )
     if getattr(state.args, "restore", False):
         session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
         restored = _perform_remux(
@@ -713,7 +724,6 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
         if not restored.get("ok"):
             return output._json_error(restored.get("reason", "could not restore the session"))
-    with step("Verifying worktree liveness", worktree_id=worktree_id):
         verdict = sessions.verify_worktree_active(record)
     if staged_seed is not None and plain_live_open(state.args, verdict):
         staged_seed = None
@@ -796,6 +806,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
     if seed_pending:
         launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
+    else:
+        launch_cmd = deferred_command(
+            launch_cmd, yaml_path, admission_only=True,
+            preserve_seed_id=staged_seed.seed_id if staged_seed else None,
+        )
 
     launch = {
         "action": "exec",

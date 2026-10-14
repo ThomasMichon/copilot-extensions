@@ -56,8 +56,14 @@ precede the ground allocation. Missing rows and advisory, stale or malformed
 projection observations explicitly refuse while retaining the same allocation
 and creation key for reconciliation. They never permanently terminalize it or
 authorize another create. A positively observed terminal workspace or retired
-native result still permanently refuses replay. Previously terminalized
-journals are not automatically reopened by this rule.
+native result still refuses replay. Ordinary same-key replay reconciles a
+previously terminalized pre-launch observation only when the ground owner now
+returns the same active, sessionless allocation and the original journal has
+no native, turn, persisted session or launch-gate history. It retains the
+original allocation and reserved session identity, logs the reconciliation,
+and runs the normal pre-launch checks again. A terminal workspace, changed
+allocation, existing conversation or uncertain holder still refuses; no
+separate operator recovery ceremony or replacement allocation is required.
 The qualified caller worktree, not its current session fragment, qualifies
 ownership facts, matching ground allocation across a caller restart.
 

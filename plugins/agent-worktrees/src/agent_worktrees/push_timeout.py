@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
+from typing import Literal, overload
 
 from agent_procutil import (
     contained_test_mode,
@@ -84,10 +85,24 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
+@overload
 def run_bounded(
     cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
-    inherit_process_group: bool = False,
-) -> subprocess.CompletedProcess[str]:
+    inherit_process_group: bool = False, binary: Literal[False] = False, input: None = None,
+) -> subprocess.CompletedProcess[str]: ...
+
+
+@overload
+def run_bounded(
+    cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
+    inherit_process_group: bool = False, binary: Literal[True], input: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]: ...
+
+
+def run_bounded(
+    cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
+    inherit_process_group: bool = False, binary: bool = False, input: bytes | None = None,
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     """Run *cmd*, capturing output; on a stall past *timeout*, kill its
     ENTIRE process tree (see module docstring) before re-raising
     :class:`subprocess.TimeoutExpired` with whatever output was captured.
@@ -96,18 +111,25 @@ def run_bounded(
     before they can execute. POSIX retains its existing process-group cleanup.
     ``inherit_process_group`` is for unbounded foreground work inside the
     Manager's owned group; the outer owner retains descendant cleanup.
+    ``binary`` retains opaque bytes, with optional bytes supplied on stdin.
     """
+    if input is not None and not binary:
+        raise ValueError("bytes input requires binary capture")
     windows = platform.system() == "Windows"
     proc, job = spawn_sync_in_kill_on_close_job(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", errors="replace", env=env,
+        text=not binary, env=env,
+        **({"stdin": subprocess.PIPE} if input is not None else {}),
+        **({} if binary else {"encoding": "utf-8", "errors": "replace"}),
         require_job=windows,
         allow_breakaway=False,
         **(no_window_kwargs() if windows else {} if inherit_process_group else detached_kwargs()),
     )
     try:
         try:
-            stdout, stderr = proc.communicate(timeout=timeout)
+            stdout, stderr = proc.communicate(
+                timeout=timeout, **({"input": input} if input is not None else {}),
+            )
         except subprocess.TimeoutExpired as exc:
             if job is not None:
                 job.close()

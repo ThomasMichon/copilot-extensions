@@ -670,3 +670,25 @@ requested contract.
   Publication, conflict resolution and the outstanding native validation remain
   blocked under coordinator custody; original timing/crash uncertainties, review,
   merge and deployment obligations remain open.
+
+- **Additive source integration and retained native uncertainty (PR #6542):**
+  A bounded observation inside the actual contained native fixture passed all
+  258 selected contracts, using only built-in child import timing and temporary
+  parent-side creation, HTTP and pipe telemetry. Five real children completed
+  in 3.234–10.734 seconds; import self time was 2.801–9.957 seconds, creation
+  31–250 milliseconds and native HTTP handling about 15–16 milliseconds. Both
+  captured pipes reached EOF and each child exited successfully. This is fresh
+  current evidence, not a retroactive pass, accepted flake or causal explanation
+  for the original 15-second timeout. Temporary instrumentation was restored;
+  the original UNKNOWN remains tracked.
+  Integrating reviewed `dev` additively preserves the published and local source
+  ancestors and composes the existing launch-admission guard with YAML-last
+  receipt teardown. A real admission-only v4 daemon regression failed first:
+  it could accept removal without implementing receipt teardown. Keep the v4
+  admission contract for all seed mutations and require v5 for the extended
+  removal contract, refusing earlier daemons before dispatch or direct fallback.
+  The first full launch-seed selection hit its unchanged 300-second aggregate
+  limit; bounded exhaustive families and remaining post-integration validation
+  are still owed, with no budget expansion or assertion weakened. Existing
+  plugin patch changefiles remain. Publication, fresh review/CI and authorized
+  release remain coordinator custody; no deployed state is changed.

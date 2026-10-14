@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve package-version ordering when recovering immutable dependency-profile runtime slots",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

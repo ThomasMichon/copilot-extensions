@@ -1,0 +1,9 @@
+{
+  "comment": "Make restricted SSH dependencies an explicit persistent installation profile with immutable slot selection and upgrade compatibility",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

@@ -11,6 +11,23 @@ it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
+Agent Containers qualifies immutable runtime slots by its durable dependency
+profile (`<package-version>+base` or `<package-version>+provider-exec`).
+Its installation-owned `runtime-profile.json` preserves explicit desired state
+across updates; an existing unprofiled runtime with Paramiko retains that
+capability, while a fresh installation defaults to base. Package version remains
+unchanged in the deploy manifest's `source.version`; `runtime_version` and
+`runtime_profile` identify the selected slot. Both installers use the same
+stdlib-only profile coordinator and canonical construction/retention leases,
+source admission, completion and activation primitives. Explicit optional-profile
+failure leaves the active selector intact, never a successful base-only downgrade.
+See the plugin README's **Optional restricted SSH runtime** for provisioning.
+
+The canonical Python and native shell recovery resolvers order qualified slots
+by the package-version portion before the profile qualifier. A completed final
+release therefore outranks its development versions even when selectors are
+missing and legacy unqualified slots coexist with profiled slots.
+
 ## Core agent service installation-cell contract
 
 The prescriptive ownership boundary for persistent core `agent-*` runtimes is a

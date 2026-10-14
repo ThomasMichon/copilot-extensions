@@ -10,6 +10,26 @@ from agent_index_service.composition import core_environment
 from agent_index_service.config import ConfigurationError, load_config, parse_config
 
 
+def test_source_layout_opt_in_is_explicit_and_scoped(config_data, tmp_path, monkeypatch):
+    assert "AGENT_INDEX_STORE_LAYOUT" not in parse_config(
+        config_data, tmp_path / "host.yaml",
+    ).core_environment()
+    config_data["store"] = {"layout": "source-aware-v1"}
+    selected = parse_config(config_data, tmp_path / "host.yaml")
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", "unrelated-ambient")
+    with core_environment(selected):
+        assert os.environ["AGENT_INDEX_STORE_LAYOUT"] == "source-aware-v1"
+    assert os.environ["AGENT_INDEX_STORE_LAYOUT"] == "unrelated-ambient"
+
+
+@pytest.mark.parametrize("store", [{}, {"layout": "legacy"}, {"layout": "unknown"},
+                                  {"layout": "source-aware-v1", "adopt_legacy": True}])
+def test_unknown_or_adoptive_layout_not_accepted(config_data, tmp_path, store):
+    config_data["store"] = store
+    with pytest.raises(ConfigurationError):
+        parse_config(config_data, tmp_path / "host.yaml")
+
+
 def test_defaults_and_environment(config_data, tmp_path):
     config = parse_config(config_data, tmp_path / "host.yaml")
     env = config.core_environment()

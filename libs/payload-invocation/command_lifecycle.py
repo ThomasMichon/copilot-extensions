@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import contextvars
+import importlib.util
 import json
+import math
 import os
 import subprocess
 import sys
@@ -187,13 +189,31 @@ def legacy_lifecycle(
             _CURRENT.reset(token)
 
 
+def _procutil(payload_root: Path) -> Any:
+    if __package__:
+        import agent_procutil
+        return agent_procutil
+    helper = payload_root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("_lifecycle_procutil", helper)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Lifecycle containment helper is unavailable: {helper}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def run_lifecycle(
     binding: Any, primitive: Any, command: list[str], *,
-    deferred_runtime: bool = False, teardown: bool = False, **arguments: Any,
+    deferred_runtime: bool = False, teardown: bool = False,
+    timeout: float | None = None, **arguments: Any,
 ) -> int:
     """Keep the native installer child contained under its admitting parent."""
     if not command or not Path(command[0]).is_absolute():
         raise ValueError("A lifecycle child requires an exact absolute interpreter.")
+    if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
+        raise ValueError("A lifecycle deadline must be finite and positive.")
+    if timeout is not None and os.name != "nt":
+        raise ValueError("A lifecycle deadline requires Windows Job containment.")
     if teardown:
         root = Path(arguments["legacy_root"]).resolve()
         if any(Path(path).resolve().is_relative_to(root) for path in (sys.executable, command[0])):
@@ -203,15 +223,42 @@ def run_lifecycle(
         teardown=teardown, **arguments,
     ) as lease:
         environment = {**os.environ, TICKET_ENV: json.dumps(lease.ticket)}
-        child = subprocess.Popen(
-            command, env=environment,
-            **no_window_kwargs(),
-        )
-        # Do not drop the ownership lock while an interrupted native child is
-        # still mutating the runtime. Caller containment remains responsible
-        # for cancellation; an unclean exit leaves a fail-closed stale lock.
+        job = None
+        if timeout is not None and os.name == "nt":
+            child, job = _procutil(Path(arguments["payload_root"])).spawn_sync_in_kill_on_close_job(
+                command, require_job=True, allow_breakaway=False,
+                env=environment, **no_window_kwargs(),
+            )
+        else:
+            child = subprocess.Popen(command, env=environment, **no_window_kwargs())
         while True:
             try:
-                return child.wait()
+                result = child.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                print(
+                    "Runtime lifecycle deadline exceeded; stopping the admitted installer tree.",
+                    file=sys.stderr,
+                )
+                try:
+                    job.terminate_and_wait(2)
+                except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                    print(f"Runtime lifecycle cancellation failed: {error}", file=sys.stderr)
+                    # Without an empty-Job witness, preserve the durable
+                    # reservation even if this parent can no longer wait.
+                    lease.lock.acquired = False
+                    job.close()
+                    child.wait()
+                    raise
+                child.wait()
+                return 124
             except KeyboardInterrupt:
                 continue
+            if job is not None:
+                try:
+                    job.terminate_and_wait(2)
+                except (OSError, RuntimeError) as error:
+                    print(f"Runtime lifecycle containment cleanup failed: {error}", file=sys.stderr)
+                    lease.lock.acquired = False
+                    job.close()
+                    raise
+            return result

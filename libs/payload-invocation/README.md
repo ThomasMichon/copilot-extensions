@@ -86,6 +86,18 @@ Deferred `stamp` holds the same admission lock but neither reserves an
 unfinished runtime build nor publishes new selectable ownership. First-use
 `provision` performs the runtime-building transaction.
 
+Windows callers with a bounded grace window may supply `--lifecycle-timeout <seconds>`
+with `--run-lifecycle`. The admitting parent owns this deadline: it stops the
+native installer tree and waits for the child before releasing its lease.
+Windows uses the payload's bundled `agent-procutil` strict, non-breakaway
+kill-on-close Job and verifies zero active processes before releasing ownership.
+Bounded mode is refused before admission on other platforms; a POSIX process
+group does not provide the same verified descendant-containment contract.
+A timeout returns exit code 124. Failed cancellation or an unverified empty Job
+is reported and leaves a fail-closed durable lock, not a ready-looking runtime;
+callers must not hard-kill the admitting parent as their normal deadline
+mechanism.
+
 Legacy `uninstall` uses the same ownership-validated transaction without a
 runtime-build reservation. The shared lock is a sibling of the canonical
 runtime root, so deleting that root cannot remove the lock or admit a concurrent

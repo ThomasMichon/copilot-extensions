@@ -82,7 +82,7 @@ def test_create_worktree_core_does_not_embed_pending_seed_in_its_own_launch_cmd(
     assert "--interactive" not in result["launch"]["cmd"]
 
 
-def test_create_worktree_core_with_no_seed_leaves_launch_cmd_unchanged(
+def test_create_worktree_core_with_no_seed_has_execution_admission_fence(
     tmp_path: Path, monkeypatch,
 ):
     config = _create_config(tmp_path)
@@ -92,6 +92,8 @@ def test_create_worktree_core_with_no_seed_leaves_launch_cmd_unchanged(
     result = m._create_worktree_core(config)
 
     assert "--interactive" not in result["launch"]["cmd"]
+    assert "--admission-only" in result["launch"]["cmd"]
+    assert result["launch"]["cmd"][-2:] == ["--", "copilot"]
 
 
 def test_create_worktree_core_stages_seed_in_worktree_state_folder(

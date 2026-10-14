@@ -1,6 +1,6 @@
 {
   "name": "agent-index-solo",
-  "description": "Tier-P F1 installer witness: install ONLY agent-index from a pinned release or explicitly materialized candidate. Preserve inactive/dormant and metadata-only session checks, explicit repository opt-in, installation-policy/activation governance, configured client/host role reads, owned incomplete-slot repair through first-use provisioning, strict completed-profile/no-role rejection, actual venv/CLI version, installation-owned HTTP health/status and direct MCP tool registration. Never build or start the embedding engine or a model. Stop at the first real obstacle; no synthetic completion receipts or hand-install workaround.",
+  "description": "Tier-P F1 installer witness: install ONLY agent-index from a pinned release or explicitly materialized candidate. Preserve inactive/dormant and metadata-only session checks, explicit repository opt-in, installation-policy/activation governance, configured client/host role reads, owned incomplete-slot repair through first-use provisioning, strict completed-profile/no-role rejection, actual venv/CLI version, installation-owned HTTP health/status and optional MCP SDK absence with honest stdio refusal. Never build or start the embedding engine or a model. Stop at the first real obstacle; no synthetic completion receipts or hand-install workaround.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -28,6 +28,6 @@
     { "n": 2, "title": "inactive startup is dormant; opted-in startup stamps only metadata" },
     { "n": 3, "title": "explicit installation-mode policy and activation" },
     { "n": 4, "title": "owned incomplete slot and explicit setup/provision" },
-    { "n": 5, "title": "stock PATH payload command, service health and MCP read surfaces" }
+    { "n": 5, "title": "stock PATH payload command, service health and optional MCP refusal" }
   ]
 }

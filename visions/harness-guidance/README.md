@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-13
+- **Last revised:** 2026-10-14
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -145,7 +145,11 @@ policy into an unattributed central voice.
 ### simple-local-static-delivery
 
 Static plugin guidance should be delivered as a simple local operation over the
-complete selected plugin set. All applicable workspace allocation and plugin
+complete selected plugin set. Every instruction file declared by those plugins
+should be projected, without runtime judgments about its content, quality,
+size or suitability. Harness-wide review and changes to plugin contributions,
+not on-the-fly admission decisions, should determine what plugins provide.
+All applicable workspace allocation and plugin
 composition should precede one final publication batch, so partial preparation
 does not cause repeated copies from incomplete source sets.
 Disabled or removed sources should not leave generated instructions applying
@@ -154,9 +158,8 @@ selection supersede a newer one.
 
 Delivering already-static files should not require a separately packaged
 projection engine, authoring/review framework, sibling runtime, service or
-network operation. Shared machinery should be reused only when its contracts
-and operating costs fit the task; conceptual similarity alone is not a reason
-to expand the startup dependency or failure surface.
+network operation. The implementation should stay simple rather than inherit
+unrelated machinery merely to reuse code from a similar subject.
 
 ### coordinator-first-task-routing
 

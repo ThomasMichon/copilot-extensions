@@ -531,3 +531,63 @@ hiding the problem or silently dropping text.
   native contention case hit its existing lock deadline, then passed alone and
   in the complete rerun; #6663 records that intermittent evidence without a
   timeout increase or CI waiver. Actual artifact publication remains required.
+- **2026-10-14** -- Registration fixture repair #6667 merged as
+  `8bc763c230319e3b3e1e134fa7b8cefeac379f3c` after the exact head received
+  an Approved review with zero findings, successful CI, workflow guard and
+  source attribution. The failed preceding full release still used an older
+  snapshot with the same six fixture signatures. Await a containing full run
+  and actual immutable asset publication; source promotion alone is not
+  installed or delivered Picker evidence.
+- **2026-10-14** -- The next containing full run passed the assignment
+  registration tests and exposed one separate exact-session scan fixture,
+  tracked in #6675. It now reuses the existing shared authority setup and
+  tracking directory rather than patching only the previous policy loader.
+  The first integration attempt also tried to create that already-owned
+  directory; reusing the supplied fixture resolves it. All 186 register,
+  deregister and independent execution-space cases pass, with the exact
+  deterministic-order test also selected in fast guards. Production
+  registration, authority and scan behavior remain unchanged.
+- **2026-10-14** -- Exact-session fixture repair #6682 merged as
+  `be910de4f60b4e24a0c77e4d8971c46baa0d9330` after its exact head received
+  an Approved review with zero findings and all CI, workflow and attribution
+  gates succeeded. Continue through the containing full release and actual
+  artifact publication; the original delivered Picker and resource-lifecycle
+  completion gates remain open.
+- **2026-10-14** -- Newer dev validation exposed a separate budget-guidance
+  declaration/output-free-hook integration failure. Exact logs match #6699;
+  its canonical repair #6701 is currently open under a verified active owner.
+  Retain release stewardship here while following that bounded repair rather
+  than opening a competing change. The prior exact-session failure was from
+  an older snapshot and is already repaired. No validation gate or publication
+  requirement is waived while the containing dev build is blocked.
+- **2026-10-14** -- Budget-guidance repair #6701 merged with green checks.
+  The next full engine gate passed the earlier registration groups and found
+  three receiving-authority fixture mismatches in terminal conclusion and
+  owning-directory lookup. Exact current ownership is confirmed in #6212 and
+  #6693, with actively updated canonical PR #6696 covering that family.
+  Follow its actual reviewed fix without duplicating or weakening the
+  terminal-managed and cross-project assertions. Artifact publication and
+  installed validation remain open.
+- **2026-10-14** -- After the author-owned feature remained in review and
+  its owner was not reachable through the local registries, the operator
+  explicitly authorized a separate fixture-only break-fix. The original
+  #6696 feature, branch, review and PR remain untouched. The bounded change
+  supplies existing terminal and owning-directory test data to the dedicated
+  registration authority reader and adds the three unchanged behavioral
+  contracts to fast guards. Keep every normal review and CI gate.
+  The complete affected terminal, tracking, registration-write and independent
+  execution-space modules pass all 414 cases in bounded groups; the three
+  targeted fast guards also pass. A stale negative-Resume seed mock was updated
+  to accept the production verdict keyword, preserving its refusal/write
+  assertions. An initial broad native run exceeded a GC-test deadline; that
+  unchanged case and the complete grouped portfolio subsequently passed with
+  the original deadlines. No production behavior or timeout was changed.
+- **2026-10-14** -- While #6730 was reviewed, the standalone data-setup fix
+  independently landed as #6726. Preserve its canonical setup and updated
+  comments rather than reimplementing them. Narrow #6730 to the distinct
+  remaining negative-Resume mock contract and fast-guard coverage, with its
+  own refreshed review and checks required after rebasing. The unrelated
+  #6696 feature and its open review remain intact.
+  The narrowed current-base selection passes all five fast guard cases,
+  including both real late-owner refusal branches; canonical fixture data
+  and comments from #6726 are retained unchanged.

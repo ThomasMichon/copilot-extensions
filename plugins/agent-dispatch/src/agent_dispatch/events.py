@@ -44,7 +44,9 @@ class EventBus:
             except asyncio.QueueFull:
                 pass  # slow subscriber: drop rather than block producers
 
-    async def subscribe(self, *, ready_frame: dict | None = None) -> AsyncIterator[dict]:
+    async def subscribe(
+        self, *, ready_frame: dict | None = None, keepalive: float | None = None
+    ) -> AsyncIterator[dict]:
         """Yield events published after subscription, until the caller stops.
 
         ``ready_frame``, when given, is yielded immediately once this queue is
@@ -62,7 +64,13 @@ class EventBus:
             if ready_frame is not None:
                 yield ready_frame
             while True:
-                yield await q.get()
+                if keepalive is None:
+                    yield await q.get()
+                else:
+                    try:
+                        yield await asyncio.wait_for(q.get(), timeout=keepalive)
+                    except (TimeoutError, asyncio.TimeoutError):
+                        yield {"type": "keepalive"}
         finally:
             self._subscribers.discard(q)
 

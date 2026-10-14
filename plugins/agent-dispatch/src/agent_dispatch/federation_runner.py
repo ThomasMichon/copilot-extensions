@@ -20,16 +20,20 @@ runner above the factory is unchanged.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from . import config
+from .coordinator_loops import DrainGate
 from .federation import CoordinatorRendezvous
 from .lease import CoordinatorLease
 from .satellites import ROLE_SATELLITE
 
 if TYPE_CHECKING:
+    from .assignment_intake import AssignmentIntake
     from .federation import Rendezvous
     from .satellite_work_intake import SatelliteWorkIntake
 
@@ -109,6 +113,8 @@ class FederationRunner:
         capabilities: list[str] | None = None,
         lease_ttl: float | None = None,
         clock=time.time,
+        is_active: Callable[[], bool] = lambda: True,
+        drain_gate: DrainGate | None = None,
     ) -> None:
         if not instance:
             raise ValueError("instance is required")
@@ -127,6 +133,12 @@ class FederationRunner:
         self._work_intake: SatelliteWorkIntake | None = None
         self._work_intake_url: str | None = None
         self._work_intake_client: Any | None = None
+        self._assignment_intake: AssignmentIntake | None = None
+        self._work_intake_token: str | None = None
+        self._running = False
+        self._is_active = is_active
+        self._route_owned = False
+        self._drain_gate = drain_gate if drain_gate is not None else DrainGate()
         if role in config.FEDERATION_LEASE_ROLES:
             lease_kwargs = {} if lease_ttl is None else {"lease_ttl": lease_ttl}
             self._lease = CoordinatorLease(
@@ -147,6 +159,27 @@ class FederationRunner:
 
     def tick(self) -> dict:
         """Advance federation one step; return a small status dict."""
+        with self._drain_gate.track_claim():
+            if not self._admitting():
+                self._close_work_intake_client()
+                return {"instance": self._instance, "role": self._role, "is_active": False}
+            return self._tick()
+
+    def _admitting(self) -> bool:
+        self._route_owned = (
+            not self._stop.is_set() and not self._drain_gate.draining
+            and self._is_active()
+        )
+        return self._cached_admitting()
+
+    def _cached_admitting(self) -> bool:
+        return (
+            not self._stop.is_set()
+            and not self._drain_gate.draining
+            and self._route_owned
+        )
+
+    def _tick(self) -> dict:
         if self._lease is not None:
             state = self._lease.tick()
             return {
@@ -179,8 +212,6 @@ class FederationRunner:
             # reopening the gate would resume the STALE cached instance
             # instead of picking up any config changed while closed.
             self._close_work_intake_client()
-            self._work_intake = None
-            self._work_intake_url = None
             return {
                 "instance": self._instance,
                 "role": self._role,
@@ -223,49 +254,32 @@ class FederationRunner:
         return {"worktrees": worktrees, "status": status}
 
     def _attempt_work_intake(self) -> None:
-        """Discover + trigger a bounded number of local spawns for this
-        machine's own queued work (Phase 3 -- see
-        :mod:`agent_dispatch.satellite_work_intake`). A no-op, not an error,
-        when no shared coordinator is configured (``AGENT_DISPATCH_SHARED_URL``
-        unset): work-intake needs the shared coordinator's task queue, which
-        is a separate concern from the awareness-plane directory this
-        runner's rendezvous already talks to (and which may itself be a
-        *different* backend, e.g. Dev Tunnels).
+        """Reconcile one-shot callers; run push-first intake off the presence loop.
 
-        The shared URL is re-read on **every** tick, not just once: an
-        operator unsetting/changing ``AGENT_DISPATCH_SHARED_URL`` at runtime
-        must disable (or repoint) work-intake on its very next tick, not
-        leave a cached client silently polling a stale/removed coordinator
-        indefinitely -- the cached :class:`SatelliteWorkIntake` is rebuilt
-        whenever the configured URL no longer matches the one it was built
-        from (including "now unset", which tears it down entirely).
-
-        Every teardown/rebuild also **closes** the previous
-        :class:`~agent_dispatch.client.DispatchClient` (its HTTP transport,
-        and any tunnel it owns): otherwise a URL that changes/clears
-        repeatedly would leak a connection per change instead of releasing
-        the old one.
-
-        Everything past the shared-URL check -- building the client, building
-        the work-intake object, and ticking it -- is one guarded block: a
-        transient coordinator/spawn error must never disrupt this tick's
-        presence half, nor kill the caller's loop (mirrors `run`'s own "a
-        transient error must not kill the loop" contract), and that guarantee
-        has to cover *construction* failures (e.g. a malformed shared
-        endpoint) exactly as much as a failure inside `tick()` itself."""
+        URL/credential changes retire the old subscription and in-flight intake
+        before constructing a replacement. A slow retire defers replacement,
+        never closing a client still in use or creating two claim loops.
+        """
         try:
             url = config.shared_url()
+            token = config.shared_token()
             if not url:
                 self._close_work_intake_client()
-                self._work_intake = None
-                self._work_intake_url = None
                 return
-            if self._work_intake is None or url != self._work_intake_url:
-                self._close_work_intake_client()
+            retiring = (
+                self._assignment_intake is not None
+                and self._assignment_intake.status()["state"] == "stopped"
+            )
+            if (
+                self._work_intake is None or url != self._work_intake_url
+                or token != self._work_intake_token or retiring
+            ):
+                if not self._close_work_intake_client():
+                    return
                 from .client import DispatchClient
                 from .satellite_work_intake import SatelliteWorkIntake
 
-                client = DispatchClient(url, token=config.shared_token())
+                client = DispatchClient(url, token=token)
                 try:
                     self._work_intake = SatelliteWorkIntake(
                         client,
@@ -283,23 +297,53 @@ class FederationRunner:
                     raise
                 self._work_intake_client = client
                 self._work_intake_url = url
-            self._work_intake.tick()
-        except Exception:
-            pass
+                self._work_intake_token = token
+            if self._running:
+                if self._assignment_intake is None:
+                    from .assignment_intake import AssignmentIntake
 
-    def _close_work_intake_client(self) -> None:
-        """Close and drop this runner's owned
-        :class:`~agent_dispatch.client.DispatchClient` (if any) -- its HTTP
-        transport (and any tunnel it owns) must not outlive the
-        :class:`SatelliteWorkIntake` it was built for. Idempotent and never
-        raises: a close failure is display-only cleanup, not a reason to
-        disrupt whatever teardown/rebuild triggered it."""
+                    self._assignment_intake = AssignmentIntake(
+                        self._work_intake_client, self._work_intake,
+                        machine=self._machine or self._instance,
+                        enabled=lambda: (
+                            self._cached_admitting()
+                            and config.satellite_gate_open()
+                            and config.shared_url() == url
+                            and self._work_intake_token == token
+                        ),
+                        reconcile=self._reconcile_work_intake,
+                    )
+                    self._assignment_intake.start()
+            else:
+                self._reconcile_work_intake()
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Satellite intake unavailable (%s)", type(exc).__name__
+            )
+
+    def _reconcile_work_intake(self) -> dict:
+        with self._drain_gate.track_claim():
+            if not self._admitting() or not config.satellite_gate_open():
+                return {}
+            intake = self._work_intake
+            return intake.tick() if intake is not None else {}
+
+    def _close_work_intake_client(self, timeout: float = 0.0) -> bool:
+        """Retire owned threads before transport; False defers in-use cleanup."""
+        if self._assignment_intake is not None:
+            if not self._assignment_intake.stop(timeout=timeout):
+                return False
+            self._assignment_intake = None
         if self._work_intake_client is not None:
             try:
                 self._work_intake_client.close()
             except Exception:
                 pass
             self._work_intake_client = None
+        self._work_intake = None
+        self._work_intake_url = None
+        self._work_intake_token = None
+        return True
 
     def _register(self) -> None:
         self._rv.register(
@@ -323,27 +367,40 @@ class FederationRunner:
     def status(self) -> dict:
         """A read-only snapshot for the CLI: this node's view of the fleet."""
         coord = self._rv.discover_coordinator()
-        return {
+        result = {
             "instance": self._instance,
             "role": self._role,
             "lease_eligible": self.lease_eligible,
             "coordinator": coord,
             "peers": self._rv.discover_peers(),
         }
+        assignment = self.assignment_status()
+        if assignment is not None:
+            result["assignment_intake"] = assignment
+        return result
+
+    def assignment_status(self) -> dict | None:
+        """Local subscription health without a directory/network read."""
+        intake = self._assignment_intake
+        return intake.status() if intake is not None else None
 
     # -- background loop -----------------------------------------------------
 
     def run(self, *, interval: float, stop_event: threading.Event | None = None) -> None:
         """Drive :meth:`tick` every ``interval`` seconds until stopped (blocking)."""
         stop = stop_event or self._stop
-        while not stop.is_set():
-            try:
-                self.tick()
-            except Exception:
-                # A transient directory error must not kill the loop; the next tick
-                # re-attempts (and re-registers / re-takes the lease as needed).
-                pass
-            stop.wait(interval)
+        self._running = True
+        try:
+            while not stop.is_set():
+                try:
+                    self.tick()
+                except Exception:
+                    # Transient directory failure must not kill presence.
+                    pass
+                stop.wait(interval)
+        finally:
+            self._running = False
+            self._close_work_intake_client(timeout=5.0)
 
     def start(self, *, interval: float) -> None:
         """Run the loop in a daemon thread."""
@@ -377,13 +434,13 @@ class FederationRunner:
         if resign:
             self.resign()
         if thread_exited:
-            self._close_work_intake_client()
-            self._work_intake = None
-            self._work_intake_url = None
+            self._close_work_intake_client(timeout=timeout)
 
     def resign(self) -> None:
         """Give up this node's standing: release the lease (eligible) or deregister
         the presence entry."""
+        if not self._is_active():
+            return
         if self._lease is not None:
             self._lease.resign()
         else:
@@ -404,7 +461,12 @@ def satellite_self_status(role: str | None, instance: str | None) -> dict:
     return info
 
 
-def runner_from_config(rendezvous: Rendezvous | None = None) -> FederationRunner | None:
+def runner_from_config(
+    rendezvous: Rendezvous | None = None,
+    *,
+    is_active: Callable[[], bool] = lambda: True,
+    drain_gate: DrainGate | None = None,
+) -> FederationRunner | None:
     """Build a :class:`FederationRunner` from the environment, or ``None`` when
     federation is not enabled (no valid ``AGENT_DISPATCH_FEDERATION_ROLE``).
 
@@ -428,5 +490,7 @@ def runner_from_config(rendezvous: Rendezvous | None = None) -> FederationRunner
             else f"backend {backend!r} could not be constructed"
         )
         raise RuntimeError(f"federation enabled but {reason}")
-    return FederationRunner(rv, instance, role=role, machine=instance)
-
+    return FederationRunner(
+        rv, instance, role=role, machine=instance,
+        is_active=is_active, drain_gate=drain_gate,
+    )

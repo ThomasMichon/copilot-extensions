@@ -73,27 +73,39 @@ try {
         }
         Exit-SessionStart
     }
-    $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
+    $manifestData = Get-Content $Manifest -Raw | ConvertFrom-Json
+    $deployed = "" + $manifestData.source.version
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyproj) {
         $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
     }
-    # "Provisioned" no longer implies a `.venv`: the marker runtime model (#581)
-    # publishes the active slot via a `current-version` marker with NO junction on
-    # Windows (RedirectionGuard), so a healthy current runtime has no `.venv` there.
-    # Treat a marker whose slot python exists as provisioned too -- otherwise a
-    # current runtime needlessly background-rebuilds every session.
-    $provisioned = Test-Path (Join-Path $InstallDir '.venv')
-    if (-not $provisioned) {
+    # Dependency profiles qualify slot identity without changing package version.
+    $expectedSlot = $current
+    $profilePath = Join-Path $InstallDir 'runtime-profile.json'
+    if (Test-Path -LiteralPath $profilePath) {
+        $desired = Get-Content -LiteralPath $profilePath -Raw | ConvertFrom-Json
+        $profile = [string]$desired.profile
+        if ($profile -cin @('base', 'provider-exec') -and
+            $desired.schema -ceq 'copilot-extensions.agent-containers.runtime-profile' -and
+            $desired.version -eq 1 -and
+            [string]$manifestData.runtime_profile -ceq $profile -and
+            [string]$manifestData.runtime_version -ceq "$current+$profile") {
+            $expectedSlot = "$current+$profile"
+        } else {
+            $expectedSlot = ''
+        }
+    }
+    $provisioned = $false
+    if ($expectedSlot) {
         $cvMarker = Join-Path $InstallDir 'current-version'
         if (Test-Path $cvMarker) {
             $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
             # ...and only when it names the CURRENT payload version: the marker is
             # authoritative for the ACTIVE slot, so a stale/corrupt marker naming an
             # older slot must NOT suppress reconcile and strand the wrong runtime.
-            if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+            if ($cv -and $cv -ceq $expectedSlot -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
         }
     }
     if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }

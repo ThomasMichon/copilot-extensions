@@ -1,6 +1,7 @@
 # Phase 5 - Configuration Workbench
 
-- **Status:** Proposed; implementation awaits reviewed plan and per-wave design.
+- **Status:** Active; wave plan reviewed, remaining implementations require
+  their own claims and per-wave design.
 - **Parent:** [Worktree Manager control plane](README.md)
 - **Coordination:** #357; adoption #356; prior enablement premise #543;
   completed confirmation prior art #6044/#6096; remaining dispatch toggles owned
@@ -37,9 +38,12 @@ No private originating identifiers or transcript are included here.
 | Delta maintenance | agent-dispatch task, recipe, worker, and evaluation contracts | No new queue; no automatic pool provisioning |
 | Presets | Installer Phase 7 harness-plugin onboard-presets scope | One shared adoption contract, not parallel defaults |
 
-The current Configuration section supports contributed command actions and
-confirmation. A status-only adapter is not evidence that rich panels or editable
-contracts already exist. Inspect actual production execution before extending it.
+The backstage merged through #6427 already supplies immediate navigation,
+full-content list/detail/forms, local worker instances and receipts. #6379
+retains that shared shell/lifecycle and its release/installed acceptance.
+The [Wave 0 source inventory and minimal consumer design](phase-5-effective-configuration-contract.md)
+separates those existing capabilities from the missing effective-state and
+post-input preview contract; do not rebuild the shell from this older checklist.
 
 ## Plan
 
@@ -50,17 +54,22 @@ permission to plan/claim a wave, not blanket deployment or destructive authority
 
 ### Wave 0 - Review contracts and reconcile owners
 
-- [ ] Inventory current production section/action/form contracts, effective
+- [x] Inventory current production section/action/form contracts, effective
   configuration resolvers, supported local writers, and helper lifecycles.
-- [ ] Specify typed source provenance, editable scope, override/reset semantics,
+  See the [source-cited inventory](phase-5-effective-configuration-contract.md#inventory-existing-behavior-not-missing-work).
+- [x] Specify typed source provenance, editable scope, override/reset semantics,
   validation/findings, and preview/apply outcomes; version existing contracts
   compatibly rather than add a parallel manifest registry.
-- [ ] Reconcile #543 with the read-only source boundary; treat #6044/#6096 as
+  See the [consumer contract](phase-5-effective-configuration-contract.md).
+- [x] Reconcile #543 with the read-only source boundary; treat #6044/#6096 as
   completed confirmation prior art and coordinate remaining dispatch toggles
   with `agent-dispatch-workers-config-section`. Do not close implementation
   issues on a planning amendment.
-- [ ] Resolve whether helper-backed widgets need a new capability or can use
+  #6379/#6283 retain the existing Workers/remote ownership; #543 remains open.
+- [x] Resolve whether helper-backed widgets need a new capability or can use
   current process/service boundaries; keep static reads daemon-independent.
+  Bounded provider commands suffice for the proposed first consumer; no helper
+  service is added.
 
 **Exit:** reviewed design identifies concrete owners and consumer contracts,
 old-provider degradation, supported local writes, and rejection behavior.
@@ -162,6 +171,13 @@ branch or standing delegates are assigned. Re-read recent sibling effort claims
 before taking a domain panel; preserve others' open PRs and runtime ownership.
 
 ## Journal
+
+- **2026-10-14** - Claimed #6711 as a bounded Wave 0 continuation; inventory
+  confirms #6427's existing backstage and preserves #6379/#6283 ownership.
+  Proposed a provider-row effective-state convention, one optional
+  Configuration form preview step, and native Repositories preference
+  set/reset as the first real consumer. Runtime, source-immutability and
+  installed UI proof remain follow-on gates; no implementation or rollout.
 
 - **2026-10-11** - Proposed wave plan following merged Configuration vision
   #6178. Planning only; no implementation, pool, or daemon activated.

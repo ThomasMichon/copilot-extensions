@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,6 +33,95 @@ def test_foreground_plan_waits_without_aggregate_deadline(monkeypatch, selection
     assert observed[0]["timeout"] is None
     assert observed[0]["stdout"] is subprocess.PIPE
     assert isinstance(observed[0]["stderr"], int)
+
+
+@pytest.mark.parametrize("route", ["shell", "shell-resume", "direct", "ahp", "persisted-ahp", "remote"])
+def test_manager_defers_only_shell_delegated_preparation(monkeypatch, route):
+    from worktree_manager import __main__ as entrypoint
+    from worktree_manager import ahp_provider, launcher
+
+    events = []
+    plan = dict(PLAN, worktree_id="wt-a")
+    if route == "remote":
+        plan["action"] = "remote"
+    monkeypatch.setattr(ec, "engine_base_command", lambda: ["engine"])
+    monkeypatch.setattr(
+        entrypoint, "_relocated_launch_script",
+        lambda: None if route == "direct" else Path("launch-session.sh"),
+    )
+
+    def execution_leg(project, worktree_id):
+        events.append("inspect-leg")
+        return {"execution_leg": {"state": "active", "provider": "ahp"} if route == "persisted-ahp" else None}
+
+    monkeypatch.setattr(ec, "execution_leg_get", execution_leg)
+
+    def run(argv, **kwargs):
+        deferred = kwargs["env"].get("AGENT_WORKTREES_DEFER_PROJECTIONS") == "1"
+        assert "--defer-projections" not in argv
+        events.append("resolve-deferred" if deferred else "resolve-prepared")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(plan), "")
+
+    monkeypatch.setattr(engine_process, "run", run)
+    monkeypatch.setattr(
+        entrypoint, "_run_relocated_mux_launch",
+        lambda *a: events.extend(["maintenance", "final-publication", "shell-handoff"]) or 0,
+    )
+    monkeypatch.setattr(launcher, "launch", lambda *a, **kw: events.append("direct-handoff") or 0)
+    monkeypatch.setattr(ahp_provider, "ensure_session", lambda *a: events.append("ahp-ensure"))
+    monkeypatch.setattr(ahp_provider, "attach_plan", lambda plan, attachment: plan)
+    resumed = route in {"shell-resume", "persisted-ahp"}
+    request = SimpleNamespace(
+        project="demo", worktree_id="wt-a" if resumed else None,
+        mode="resume" if resumed else "new", ahp=route == "ahp",
+        machine="remote-host" if route == "remote" else None,
+    )
+    monkeypatch.delenv("AGENT_WORKTREES_DEFER_PROJECTIONS", raising=False)
+    assert entrypoint._run_launch(request) == 0
+    if route in {"shell", "shell-resume"}:
+        assert events == (
+            (["inspect-leg"] if resumed else [])
+            + ["resolve-deferred", "maintenance", "final-publication", "shell-handoff"]
+        )
+    else:
+        assert events.count("resolve-prepared") == 1
+        assert "resolve-deferred" not in events
+        assert "final-publication" not in events
+        assert events[-1] == "direct-handoff"
+        assert events.count("inspect-leg") == (1 if resumed else 0)
+    assert "AGENT_WORKTREES_DEFER_PROJECTIONS" not in os.environ
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_projection_deferral_reaches_only_the_selected_engine_call(monkeypatch, deferred):
+    script = (
+        "import json,os;"
+        f"plan={PLAN!r};"
+        "plan['deferred']=os.environ.get('AGENT_WORKTREES_DEFER_PROJECTIONS');"
+        "print(json.dumps(plan))"
+    )
+    monkeypatch.setattr(ec, "engine_base_command", lambda: [sys.executable, "-c", script])
+    monkeypatch.delenv("AGENT_WORKTREES_DEFER_PROJECTIONS", raising=False)
+    plan = ec.resolve_launch_plan("demo", new=True, defer_projections=deferred)
+    assert plan.raw["deferred"] == ("1" if deferred else None)
+    assert "AGENT_WORKTREES_DEFER_PROJECTIONS" not in os.environ
+
+
+def test_projection_deferral_survives_bare_resume_compatibility_retry(monkeypatch):
+    calls = []
+
+    def old_runtime(project, args, **kwargs):
+        calls.append(kwargs)
+        if "--bare-resume" in args:
+            raise ec.EngineError("unrecognized arguments: --bare-resume")
+        return PLAN
+
+    monkeypatch.setattr(ec, "run_json", old_runtime)
+    assert ec.resolve_launch_plan(
+        "demo", worktree_id="wt-a", bare_resume=True, defer_projections=True,
+    ).is_exec
+    assert len(calls) == 2
+    assert all(call["environment"] == {"AGENT_WORKTREES_DEFER_PROJECTIONS": "1"} for call in calls)
 
 
 def test_progress_arrives_before_slow_real_engine_finishes(tmp_path, monkeypatch):

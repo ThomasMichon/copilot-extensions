@@ -63,9 +63,11 @@ def _settled_pair_receipt(path):
 
 
 @pytest.mark.parametrize(("name", "old_version"), [
-    ("stage", 1), ("take", 1), ("restore", 1), ("finish", 1), ("remove", 2), ("remove", 3),
-])
-def test_seed_client_never_dials_pre_authority_daemon(tmp_path, monkeypatch, name, old_version):
+    (name, version)
+    for name in ("stage", "take", "restore", "finish", "remove")
+    for version in (1, 2, 3)
+] + [("remove", 4)])
+def test_seed_client_never_dials_pre_admission_daemon(tmp_path, monkeypatch, name, old_version):
     from agent_worktrees import locks, status_monitor_runtime
 
     path = _record(tmp_path)
@@ -94,14 +96,17 @@ def test_seed_client_never_dials_pre_authority_daemon(tmp_path, monkeypatch, nam
     }
     if name == "remove":
         before = path.read_bytes(), state.state_path(path).read_bytes()
-        with pytest.raises(ValueError, match="verb version 4"):
+        with pytest.raises(ValueError, match="verb version 5"):
             operations[name]()
         assert (path.read_bytes(), state.state_path(path).read_bytes()) == before
     else:
         assert operations[name]() is not None
 
 
-def test_remove_rejects_real_v3_daemon_without_direct_unlink_fallback(tmp_path, monkeypatch):
+@pytest.mark.parametrize("old_version", [3, 4])
+def test_remove_rejects_real_pre_receipt_daemon_without_direct_unlink_fallback(
+    tmp_path, monkeypatch, old_version,
+):
     from agent_worktrees import locks, status_monitor_runtime
 
     path = _record(tmp_path)
@@ -113,15 +118,44 @@ def test_remove_rejects_real_v3_daemon_without_direct_unlink_fallback(tmp_path, 
     server = tracking_write.start_server(lambda *args: called.append(args) or {"record_removed": True})
     server.start()
     old = tracking_write.rendezvous_fields(server)
-    old["tracking_write_verb_versions"] = {**old["tracking_write_verb_versions"], "launch_seed_remove": 3}
+    old["tracking_write_verb_versions"] = {
+        **old["tracking_write_verb_versions"], "launch_seed_remove": old_version,
+    }
     monkeypatch.setattr(locks, "read_lock", lambda *a: old)
     monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
     monkeypatch.setattr(tracking_write, "run_direct", lambda *a, **k: pytest.fail("direct unlink fallback forbidden"))
     try:
-        with pytest.raises(ValueError, match="verb version 4"):
+        with pytest.raises(ValueError, match="verb version"):
             state.remove(path, remove_record=True)
         assert called == []
         assert {file: file.read_bytes() for file in before} == before
+    finally:
+        server.close()
+
+
+def test_receipt_teardown_retains_launch_admission_at_real_daemon(tmp_path, monkeypatch):
+    from agent_worktrees import launch_admission, locks, status_monitor_runtime
+
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="preserve while launch admission is held")
+    receipt = path.with_suffix(".terminal-pair.json")
+    receipt.write_text('{"version":1}', encoding="utf-8")
+    files = (path, state.state_path(path), receipt)
+    before = {file: file.read_bytes() for file in files}
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    endpoint = tracking_write.rendezvous_fields(server)
+    monkeypatch.setattr(locks, "read_lock", lambda *a: endpoint)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(tracking_write, "run_direct", lambda *a, **k: pytest.fail("daemon required"))
+    try:
+        assert endpoint["tracking_write_verb_versions"]["launch_seed_remove"] == 5
+        with launch_admission.guard(path):
+            with pytest.raises(ValueError, match="launch admission is busy"):
+                state.remove(path, remove_record=True)
+        assert {file: file.read_bytes() for file in files} == before
+        assert state.remove(path, remove_record=True)["record_removed"]
+        assert all(not file.exists() for file in files)
     finally:
         server.close()
 

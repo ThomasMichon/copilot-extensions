@@ -739,8 +739,8 @@ def cmd_mcp(_args: argparse.Namespace) -> int:
     if importlib.util.find_spec("mcp") is None:
         print(
             "agent-index: the optional stdio MCP dependencies are unavailable "
-            "in the lightweight client runtime. Use the read CLI or the hosted "
-            "HTTP service; this command will not install host dependencies.",
+            "in this runtime. Use the read CLI or explicitly provision the "
+            "[stdio-mcp] extra; this command will not install dependencies.",
             file=sys.stderr,
         )
         return 2
@@ -1840,7 +1840,7 @@ def main(argv: list[str] | None = None) -> int:
         if rc is not None:
             return rc
 
-    if sub in {"index", "index-worker", "search", "similar", "clusters", "mcp"}:
+    if sub in {"index", "index-worker", "search", "similar", "clusters"}:
         role, _indexer = transport.plan_route()
         if role == "host":
             try:

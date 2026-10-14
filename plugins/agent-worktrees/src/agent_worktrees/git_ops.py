@@ -11,10 +11,10 @@ import functools
 import hashlib
 import logging
 import os
-import platform
 import re
 import shutil
 import subprocess
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -74,7 +74,7 @@ def repository_identity_env() -> dict[str, str]:
 def _normalize_wt_path(p: str) -> str:
     """Normalize a worktree path for comparison (case-insensitive on Windows)."""
     p = str(Path(p).resolve()).rstrip("/\\")
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         return p.lower()
     return p
 
@@ -396,7 +396,7 @@ def classify_worktree(
     # lowercased).  Use case-insensitive lookup on Windows to match.
     if active_paths is not None:
         norm = worktree_path.rstrip("/\\")
-        _casefold = platform.system() == "Windows"
+        _casefold = sys.platform == "win32"
         if any(
             norm == ap if not _casefold else norm.lower() == ap.lower()
             for ap in active_paths
@@ -1107,7 +1107,7 @@ def _credential_pin_lock(repo_path: Path, git_dir: str):
         if stream.tell() == 0:
             stream.write(b"\0")
             stream.flush()
-        if platform.system() == "Windows":
+        if sys.platform == "win32":
             import msvcrt
             stream.seek(0)
             msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
@@ -1117,7 +1117,7 @@ def _credential_pin_lock(repo_path: Path, git_dir: str):
         try:
             yield
         finally:
-            if platform.system() == "Windows":
+            if sys.platform == "win32":
                 import msvcrt
                 stream.seek(0)
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)

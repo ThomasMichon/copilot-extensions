@@ -3763,14 +3763,16 @@ def test_resolve_local_binstub_skips_ps1_for_directly_launchable_cmd(
     assert os.path.normcase(resolved) == os.path.normcase(str(cmd_shim))
 
 
-def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
+@pytest.mark.parametrize("binding", ["board-sweep-worker", " board-sweep-worker \n"])
+def test_apply_bound_charter_layers_charter_spawn_shape(binding) -> None:
     """agent-bridge-worktree-native-agents (Phase 3): a worktree's bound
     charter borrows its own launch shape (copilot_path/mcp_servers/env, and
     its own copilot_args APPENDED after the venue's) onto the
     venue-resolved target -- host/cwd/project stay the venue's, and the
     venue's own args (e.g. --plugin-dir staging, --allow-all) survive."""
-    from agent_bridge.routes.worktrees import _WorktreeEntry, _apply_bound_charter
+    from agent_bridge.routes.worktrees import _WorktreeEntry
     from agent_bridge.transport import SpawnTarget
+    from agent_bridge.worktree_charter import _apply_bound_charter
 
     venue_target = SpawnTarget(
         type="local", cwd="/wt/path", project="private-downstream-repo",
@@ -3789,10 +3791,12 @@ def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     entry = _WorktreeEntry(
         id="wt1", agent_name="atlas-core-wsl", machine="atlas-core",
         path="/wt/path", branch="b", status="active",
-        bound_agent="board-sweep-worker",
+        bound_agent=binding,
     )
 
     result = _apply_bound_charter(venue_target, resolver, entry, "wt1")
+    resolver.canonical_agent_name.assert_called_once_with("board-sweep-worker")
+    assert entry.bound_agent == binding
 
     assert result.copilot_path == "/opt/special/copilot"
     assert result.copilot_args == [
@@ -3804,11 +3808,13 @@ def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     assert result.project == "private-downstream-repo"
 
 
-def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default() -> None:
+@pytest.mark.parametrize("binding", [None, "", " \t\r\n"])
+def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default(binding) -> None:
     """An unbound worktree, or a bound_agent that no longer resolves in the
     registry, must never fail the spawn -- it just uses the venue default."""
-    from agent_bridge.routes.worktrees import _WorktreeEntry, _apply_bound_charter
+    from agent_bridge.routes.worktrees import _WorktreeEntry
     from agent_bridge.transport import SpawnTarget
+    from agent_bridge.worktree_charter import _apply_bound_charter
 
     venue_target = SpawnTarget(type="local", cwd="/wt/path")
     resolver = MagicMock()
@@ -3817,8 +3823,10 @@ def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default() ->
     unbound = _WorktreeEntry(
         id="wt1", agent_name="atlas-core-wsl", machine="atlas-core",
         path="/wt/path", branch="b", status="active",
+        bound_agent=binding,
     )
     assert _apply_bound_charter(venue_target, resolver, unbound, "wt1") is venue_target
+    resolver.canonical_agent_name.assert_not_called()
 
     stale = _WorktreeEntry(
         id="wt2", agent_name="atlas-core-wsl", machine="atlas-core",
@@ -3839,8 +3847,9 @@ def test_apply_bound_charter_managed_charter_degrades_to_venue_default(
     accurate warning is logged, not a second misleading "not found" one."""
     import logging
 
-    from agent_bridge.routes.worktrees import _WorktreeEntry, _apply_bound_charter
+    from agent_bridge.routes.worktrees import _WorktreeEntry
     from agent_bridge.transport import SpawnTarget
+    from agent_bridge.worktree_charter import _apply_bound_charter
 
     venue_target = SpawnTarget(type="local", cwd="/wt/path")
     managed_charter = MagicMock()

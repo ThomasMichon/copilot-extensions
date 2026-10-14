@@ -71,8 +71,8 @@ INITIAL_RECONNECT_BACKOFF_SECONDS = 1.0
 MAX_RECONNECT_BACKOFF_SECONDS = 30.0
 MAX_RECONNECT_ATTEMPTS = 6
 
-#: The SSE read timeout is intentionally unbounded and the coordinator sends
-#: no periodic keepalive (see client.py's `stream_events()`), so a hung or
+#: The legacy SSE read timeout remains unbounded (new coordinators send
+#: comment keepalives, older ones do not), so a hung or
 #: half-open connection can sit silently forever -- the reader thread never
 #: observes a disconnect, yet every pinned-endpoint `/tasks` probe keeps
 #: failing. Without a bound, `_event_loop` would just keep rescheduling a

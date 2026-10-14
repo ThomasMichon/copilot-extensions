@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; selected-release input landed, central push-backed state design; full lifecycle open
+- **Status:** Active; runtime auth interface proposed, isolated storage merged; integration/lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -29,7 +29,7 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
-| Contract implementer | Release/role contract #6240; first operation/receipt shape slice #6241 | Managed implementation worktree; assigned sub-issues |
+| Contract implementer | Release/role #6240, operation/receipt #6241 and isolated observation-storage #5862 contracts | Managed implementation worktree; assigned sub-issues |
 | Gateway/index integrator | End-to-end new Gateway, index client and subscribed credential integration #6443 | Separate managed worktree; #6443 and index consumer #6383 |
 | Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
 | Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
@@ -142,6 +142,38 @@ The [central backing-store amendment](central-state-backing-store.md) is an
 **agent-recommended design** of the new push/query/subscription direction, not
 permission for an unreviewed runtime or authority migration.
 
+Asked to approve a first transport-neutral storage slice under #5862 in
+`fleet-manager` only, the operator selected verbatim:
+
+> approve-isolated-store
+
+The approved **agent-proposed boundary** is bounded current rows,
+origin-generation fences, idempotent updates and durable query/replay positions.
+It expressly excludes producer/auth code changes, another Gateway and live
+deployment changes. Authenticated transport and client integration still require
+agreement with their retained owners; this is not a transfer of those scopes.
+
+When the missing authentication interface blocked integration, the operator
+directed verbatim:
+
+> I don't think we have an interface going yet for auth so you can propose one based on the vision and what you have needed so far.
+
+The [runtime authentication proposal](runtime-authentication.md) is the
+**agent-recommended interface** responding to that direction. This authorizes
+proposal authoring rather than waiting for an existing interface; it does not
+assert that no prototype exists, authorize an unreviewed auth implementation,
+transfer another owner's active code, or enroll/deploy a live role.
+
+The operator then clarified presence defaults verbatim:
+
+> Make sure that the live user does not have to continuously re-validate presence. We'll want to treat Entra/Windows' own session longevity as presence, and run until the underlyting tokens finally issue presence challenges. We'll rely on explicit revocation, or maybe the user opting into a dead-man switch, to "cut short" access if desired. Default is "run as long as possible"
+
+This longevity/default is **operator-required**, not an optional agent
+recommendation. Token/proof/authorization renewal is silent machine work while
+the underlying provider session permits it; it is not periodic human presence
+validation. Actual provider challenges and revocation remain binding, and the
+dead-man switch is explicit opt-in rather than a default session timeout.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -199,6 +231,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 ### Phase 2a - Gateway/index vertical slice
 - [ ] Review the [slice contract](gateway-index-slice.md) and coordinate #6443,
   #6383 and retained fleet/auth/deployment owners before runtime changes.
+- [ ] Review the shared [runtime authentication interface](runtime-authentication.md)
+  under #5789/#6443, then agree exact records/provider support and exclusive
+  implementation scopes before wiring consumers.
 - [ ] Supply the resident role-selected Gateway and fixed-service index route
   using the existing release, offer/request and operation/receipt contracts.
 - [ ] Authenticate and authorize client/node/controller principals, service
@@ -212,12 +247,17 @@ All detailed slices are **agent-recommended** and remain subject to review.
   persistent index state and scoped negative cases before any native offload.
 
 ### Phase 2b - Central push-backed current state
-- [ ] Review the [backing-store amendment](central-state-backing-store.md) under
+- [x] Review the [backing-store amendment](central-state-backing-store.md) under
   existing #5862, preserving #3761 origin authority and #352 client/mux ownership.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
+  The subsequent operator approval permits only an isolated transport-neutral
+  storage prerequisite; the later auth-proposal direction permits specifying
+  that interface, not unreviewed producer/auth/client integration.
 - [ ] Persist fenced machine/container updates, indexed current projections and
   publication positions coherently, without a rival task/worktree/claim writer.
+  Isolated point-observation storage and bounded replay landed in #6685; actual
+  authorized origin push and complete roster publication remain unimplemented.
 - [ ] Serve UX, CLI and API requests through one scoped current-state contract,
   with snapshot/subscribe consistency, bounded recovery and isolated backpressure.
 - [ ] Prove authorized one-Gateway adoption with owned storage, preserved source
@@ -254,6 +294,12 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 - [ ] Complete the [Gateway/index slice gates](gateway-index-slice.md#validation-and-adoption-gates):
   real CLI/query/credential transport, scope enforcement before retrieval,
   crypto/correlation/revocation, fresh container persistence and live adoption.
+- [ ] Complete the [runtime auth interface proof](runtime-authentication.md#implementation-and-validation-gate):
+  real identity/proof verification, current policy/enrollment, scoped backend/
+  observation enforcement, revocation/recovery and provider/recipient isolation.
+  Prove long-lived provider/OS sessions renew without Gateway-added presence
+  prompts, with real challenge, explicit revocation and optional dead-man
+  outcomes distinct from token/lease churn or temporary unavailability.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
   offline installed use and precise missing/incompatible/unauthorized failures.
 - [ ] Concurrent activation/admission: one authoritative writer, unique resource
@@ -886,3 +932,100 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   clean-room and live implementation proofs are specified, not claimed run or
   delivered. No runtime, deployment, data migration, capacity or lease
   mutation follows from the proposal. Full Phase 1-4/Validation gates stay open.
+- #6670 actually merged at `2026-10-14T08:13:38Z`, commit
+  `a5c71dfc912a6249a6fe61276619172a761ec886`. The exact head
+  `78e8a52007ecc3075b9ef7c04f2aa5f40818406b` received current Copilot
+  APPROVED review with zero findings (Balanced effort); every check completed
+  successfully or legitimately skipped before the normal merge. An initial
+  review timeout was followed by an explicit re-request. No CI gate was bypassed.
+- Re-read the full parent Plan/Validation after merge and synchronized the
+  continuing worktree. Only the Phase 2b design-review item closes; the shared
+  interface, runtime, lifecycle, migration and adoption gates remain open.
+- Next Phase 2b stretch consumes the existing origin-current-projection and
+  observation contracts, agrees the bounded storage/push/query/subscription
+  seams with their retained owners, then implements the first reviewed store
+  slice under #5862. The approved plan is not a deployed central backing store
+  or permission to replace an adopter's current serving/credential owner.
+
+### 2026-10-14 - Isolated current-observation storage boundary approved
+- Traced the committed origin projection and local held feed directly.
+  The origin's bounded current rows, per-project revision, resident generation,
+  demand enrollment and availability notifications are reusable seams;
+  the held feed is not durable central replay or a complete fleet subscription.
+- Retained origin/auth interface requests had no reply. Rather than infer
+  consent or take over their files, asked the operator about the first isolated
+  storage boundary and captured `approve-isolated-store` verbatim in Request.
+  Reserved that implementation under #5862. Source/auth/Manager and live
+  deployment ownership remain unchanged.
+- The Contract implementer transitions from Phase 1 to the isolated Phase 2b
+  storage prerequisite. This is not assignment of origin push, principal/
+  connector authentication, Manager UX or installer implementation.
+- Added explicit local SQLite current slots and bounded replay with distinct
+  admitted binding, producer, export sequence, source revision and central cursor.
+  Atomic update/slot/head persistence, content-bound retries and bounded point/
+  page reads implement only the approved storage prerequisite. Pages do not
+  assert complete roster coverage; typed internal cursors are not access tokens.
+- Installed contained storage selection passes 22 cases, including process
+  crash/retry, independent producer/query processes, exact replay/page/byte
+  bounds and measured point-read access independent of unrelated current rows.
+  The full native contained suite passes 604 with six platform skips in
+  65.32 seconds, within the existing 120-second aggregate deadline; touched
+  lint and the 13-plugin install-contract guard pass. Actual PR review and
+  hosted native platform gates remain pending.
+  Clean-room install/live deployment are not exercised by this unintegrated
+  storage-only slice; no service, transport or installer is changed.
+- Documentation impact covers the product README, storage contract and this
+  canonical plan/index. This realizes part of reviewed shared-state intent
+  without introducing a daemon or duplicating an authority. No full Phase 1-4
+  or Validation Plan item closes, and the effort remains Active.
+- #6685 actually merged at `2026-10-14T09:17:24Z`, commit
+  `10855559d664d936f8dfed9f95d97c46a967f356`. The exact head
+  `1042de5330aee25e4b4aa83a79d1be039d367fed` received actual Copilot APPROVED
+  review `5515664127` with zero findings (Balanced effort), no inline comments,
+  and successful or legitimately skipped checks before the normal merge.
+  The first ten-minute review wait timed out; an explicit re-request produced
+  the passing review. No CI or review gate was bypassed.
+- Re-read the complete parent Plan/Validation and synchronized the continuing
+  worktree onto the actual merge. The storage primitive is merged to `dev`,
+  not a released/installed central service or completed Phase 2b.
+- Next is explicit agreement on the producer export, admitted principal/
+  connector binding and query/subscription adapter with #3761/#5789/#6443/#352.
+  The approved storage exception does not authorize those edits. Preserve
+  current deployments, credential controllers and source responsibilities
+  while those integration boundaries remain unresolved.
+
+### 2026-10-14 - Runtime authentication interface proposed
+- The operator directed proposing the missing auth seam from the vision and
+  actual consumer needs, rather than remaining blocked waiting for one.
+  Captured that Request verbatim. This is proposal authority, not trust/key
+  enrollment, runtime takeover or live deployment permission.
+- Reconciled the current machine-fleet vision, routing foundation, bounded
+  operation and observation contracts, and the index/credential slice.
+  Existing shape/correlation checks are not authentication. Bounded source/
+  tracker inspection found no named current auth interface or conflicting open
+  auth PR; it does not establish absence of unpublished prototypes.
+- Reserved only this documentation proposal under existing #5789/#6443.
+  Recommended a shared verified identity -> enrollment -> policy permit boundary,
+  explicit HTTP JWT/DPoP and local OS-peer profiles, current revocation/leases,
+  independently checked delegation and provider-owned credential delivery.
+- Made consumer seams concrete without replacing their owners: actor/account
+  operation binding, admitted origin/producer fencing, scoped pre-query and
+  subscription decisions, protected per-view cursors, and credential request/
+  recipient correlation. Global store positions and invalidations are not a
+  scoped wire interface; that adapter still needs its own proof.
+- All profile limits and implementation details are agent-recommended and
+  require reviewed DTO/library/source assignments before runtime work. Runtime
+  identity does not create release-signing or special GitHub permissions.
+  Documentation impact is this canonical effort/index and its linked consumer
+  plans. Unit/process/clean-room/live implementation tiers are not run or claimed
+  for this docs-only proposal; their proof obligations are specified.
+  No parent implementation or Validation item closes.
+- The operator clarified that provider/Windows session longevity is presence:
+  default run as long as possible, without continuous user revalidation.
+  Updated the proposal to distinguish silent token/proof/view renewal from
+  actual provider challenges, removed the extra five-minute access lifetime,
+  and made a scoped dead-man switch opt-in/off by default. Revocation and
+  real validity/grant boundaries remain enforced; temporary outage, idle,
+  lock/sleep and reconnect are not invented human-presence requirements.
+  Captured the full clarification verbatim and added longevity/challenge/
+  revocation/opt-in validation obligations.

@@ -11,7 +11,41 @@ import pytest
 
 from agent_index import __main__ as cli
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 PLUGIN = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.guard
+def test_legacy_stdio_dependency_is_not_part_of_host_profile():
+    project = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    extras = project["optional-dependencies"]
+    assert extras["stdio-mcp"] == ["mcp>=2.0,<3.0"]
+    for dependencies in (project["dependencies"], extras["store"], extras["server"]):
+        assert not any(value.startswith("mcp") for value in dependencies)
+    assert "agent-index[store,server,stdio-mcp]" in extras["dev"]
+
+
+@pytest.mark.parametrize("role", ["host", "client", "unconfigured"])
+def test_legacy_stdio_runs_in_opted_in_http_client_without_host_dispatch(monkeypatch, role):
+    from agent_index import transport
+
+    calls = []
+    monkeypatch.setattr(transport, "plan_route", lambda: (role, None))
+    monkeypatch.setattr(
+        cli, "_dispatch_to_server_venv",
+        lambda *_a, **_kw: pytest.fail("HTTP-only adapter must not require the host slot"),
+    )
+    monkeypatch.setitem(
+        sys.modules, "agent_index.mcp_app",
+        SimpleNamespace(serve_stdio=lambda: calls.append("stdio")),
+    )
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
+    assert cli.main(["mcp"]) == 0
+    assert calls == ["stdio"]
 
 
 @pytest.mark.parametrize(
@@ -214,7 +248,9 @@ def test_default_durable_autostart_stays_unprivileged_and_tasks_remain_opt_in():
 def test_lightweight_mcp_reports_unavailable_without_installing(monkeypatch, capsys):
     monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
     assert cli.main(["mcp"]) == 2
-    assert "will not install host dependencies" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "[stdio-mcp] extra" in error
+    assert "will not install dependencies" in error
 
 
 @pytest.mark.parametrize("managed", [False, True])

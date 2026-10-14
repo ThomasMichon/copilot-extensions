@@ -456,9 +456,12 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
     # (#stale-venv-preflight) rather than a raw inline invocation/exit --
     # a transient current-version swap must not kill the whole launch.
     assert (
-        'run_runtime_preflight "Knowledge plugin preflight" '
+        'run_runtime_preflight "Knowledge plugin preflight" --stream-progress '
         '"${_KNOWLEDGE_ARGS[@]}"'
     ) in sh
+    assert 'resolve_args+=(resolve "$@")' in sh
+    assert 'AGENT_WORKTREES_DEFER_PROJECTIONS=1 "$PYTHON"' in sh
+    assert "--prepare-projections --json" in sh
     assert sh_compose < sh.index('PANE_CMD=("${CLEAN_ENV[@]}"')
     assert sh_compose < sh.index('"${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"')
 
@@ -472,8 +475,12 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
     assert "runtime is unavailable after update apply" in ps[ps_refresh:ps_compose]
     assert (
         "Invoke-RuntimePreflight -Label 'Knowledge plugin preflight' "
-        "-PreflightArgs $knowledgeArgs"
+        "-PreflightArgs $knowledgeArgs -StreamProgress"
     ) in ps
+    assert "@('resolve') + $CopilotArgs" in ps
+    assert "$env:AGENT_WORKTREES_DEFER_PROJECTIONS = '1'" in ps
+    assert "$env:AGENT_WORKTREES_DEFER_PROJECTIONS = $savedProjectionDeferral" in ps
+    assert "'--prepare-projections', '--json'" in ps
     assert ps_compose < ps.index("& $cmd[0] $cmd[1..($cmd.Count - 1)]")
 
 

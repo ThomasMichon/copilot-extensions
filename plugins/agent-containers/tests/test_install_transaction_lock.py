@@ -26,7 +26,7 @@ LOCK_START = "# === install-transaction lock (fail-closed) ==="
 LOCK_END = "# === end install-transaction lock ==="
 SELF_STAGE_END = "# === end install-contract:v4 self-stage ==="
 SMOKE_END = "# === end install-contract:v4 smoke seam ==="
-PS_FIRST_MUTATION = "if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }"
+PS_FIRST_MUTATION = "if ($Action -eq 'stamp') {"
 SH_FIRST_MUTATION = "if [[ \"$ACTION\" == \"stamp\" ]]; then"
 LOCK_FAILURE = "Could not acquire the install transaction lock"
 
@@ -77,6 +77,8 @@ def test_lock_is_acquired_after_self_stage_and_before_first_mutation(script: Pat
     assert text.count(LOCK_START) == 1
     assert text.index(SELF_STAGE_END) < text.index(SMOKE_END) < text.index(acquire)
     assert text.index(acquire) < text.index(first_mutation)
+    profile_call = "$profileJson = & $pythonCmd" if script.suffix == ".ps1" else 'profile_result="$("$PYTHON_CMD"'
+    assert text.index(acquire) < text.index(profile_call)
 
 
 @pytest.mark.guard

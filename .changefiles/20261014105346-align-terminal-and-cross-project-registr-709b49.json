@@ -1,0 +1,9 @@
+{
+  "comment": "Align terminal and cross-project registration fixtures with the receiving-side authority resolver used by session registration; preserve the production authority fence.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

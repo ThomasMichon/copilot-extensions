@@ -69,3 +69,40 @@ def test_no_ready_frame_when_not_requested():
         await gen.aclose()
 
     asyncio.run(scenario())
+
+
+def test_keepalive_preserves_subscription_and_real_events():
+    async def scenario():
+        bus = EventBus()
+        bus.bind_loop(asyncio.get_running_loop())
+        gen = bus.subscribe(ready_frame={"type": "ready"}, keepalive=0.01)
+        assert await anext(gen) == {"type": "ready"}
+        assert await anext(gen) == {"type": "keepalive"}
+        assert bus.subscriber_count == 1
+        bus.publish({"type": "task.created"})
+        assert await anext(gen) == {"type": "task.created"}
+        await gen.aclose()
+        assert bus.subscriber_count == 0
+
+    asyncio.run(scenario())
+
+
+def test_keepalive_catches_distinct_legacy_asyncio_timeout(monkeypatch):
+    class LegacyAsyncTimeout(Exception):
+        pass
+
+    async def legacy_timeout(awaitable, timeout):
+        awaitable.close()
+        raise LegacyAsyncTimeout
+
+    monkeypatch.setattr(asyncio, "TimeoutError", LegacyAsyncTimeout)
+    monkeypatch.setattr(asyncio, "wait_for", legacy_timeout)
+
+    async def scenario():
+        stream = EventBus().subscribe(keepalive=0.01)
+        try:
+            assert await anext(stream) == {"type": "keepalive"}
+        finally:
+            await stream.aclose()
+
+    asyncio.run(scenario())

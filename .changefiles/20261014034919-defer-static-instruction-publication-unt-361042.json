@@ -1,0 +1,9 @@
+{
+  "comment": "Defer static instruction publication until final plugin composition and stream final preflight progress",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

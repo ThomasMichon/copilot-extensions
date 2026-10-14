@@ -23,4 +23,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["client_distribution_full: additional native artifact build/refusal matrix for full/manual validation"]
+markers = [
+    "client_distribution_full: additional native artifact build/refusal matrix for full/manual validation",
+    "observation_retention_full: production-size durable replay retention window for full/manual validation",
+]

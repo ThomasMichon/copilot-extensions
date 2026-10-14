@@ -73,6 +73,11 @@ try:
         )
         assert (result.returncode, result.stdout, result.stderr) == (7, "output\n", "error\n")
         report["cycles"] += 1
+    binary = push_timeout.run_bounded(
+        [sys.argv[2], "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read()); sys.stderr.buffer.write(b'\\xfe')"],
+        cwd=workspace, env=env, timeout=5, binary=True, input=b"\0\xff\r\n",
+    )
+    assert (binary.returncode, binary.stdout, binary.stderr) == (0, b"\0\xff\r\n", b"\xfe")
     grandchild = workspace / "grandchild.py"
     grandchild.write_text(
         "import os,time\n"

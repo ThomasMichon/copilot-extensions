@@ -50,6 +50,7 @@ class CrawlManifest:
     deletions: list[DeletedFile] = field(default_factory=list)
     commit: str | None = None
     stats: CrawlStats = field(default_factory=CrawlStats)
+    stored_family: str | None = None
 
     @property
     def is_empty(self) -> bool:

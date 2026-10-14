@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-14
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -540,6 +540,21 @@ missing one, so the model never bit-rots into tribal knowledge scattered across
 session transcripts.
 
 ## Behaviors
+
+### proportionate-cooperation-safeguards
+The marketplace should stay lean: reliable, working inter-process cooperation
+is the outcome, not an expanding chain of proofs. Operating-system permissions,
+identity/access controls, closed or private endpoints, and trusted sources and
+destinations should form the primary security boundary; local reachability alone
+should not grant authority. Within that boundary, already-authorized peers should
+communicate with economical ownership, compatibility and freshness checks.
+Additional hardening should address a concrete threat or failure and justify
+its operational cost, rather than assume equally privileged local agents are
+hostile. Integrity hashes and receipts should serve a named correctness or
+security need, not become redundant attestation chains that obstruct legitimate
+communication. Authorization, consent, privacy, safe destructive operations,
+wrong-owner and stale-process protection, corruption/race prevention, and
+release/review/CI gates should remain intact.
 
 ### collision-free-endpoints
 Two plugin services — and the *same* service running on both sides of a shared

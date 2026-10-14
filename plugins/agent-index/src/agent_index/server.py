@@ -653,6 +653,9 @@ def _index_status(include_sources: bool = False) -> dict[str, Any]:
     index — and is decoupled from the count so a histogram failure can never
     zero a valid ``count_rows()``.
     """
+    from .server_index_status import measure_index
+    from .store.source_layout import SourceLayoutError, domain_for
+
     try:
         import lancedb
 
@@ -664,48 +667,25 @@ def _index_status(include_sources: bool = False) -> dict[str, Any]:
     try:
         cfg = IndexConfig(data_dir=data_dir())
         lance_dir = cfg.lance_dir
+        domain = domain_for(lance_dir)
         if not lance_dir.exists():
             return {"chunks": 0, "available": False, "tables": {}, "sources": {}}
         db = lancedb.connect(str(lance_dir))
-        table_names = sorted(db.table_names())
+    except SourceLayoutError as exc:
+        log.debug("Source-aware index status refused", exc_info=True)
+        return {"chunks": None, "available": None, "tables": {}, "sources": {},
+                "error": format_error(exc)}
     except Exception:
         log.debug("Index status unavailable", exc_info=True)
         return {"chunks": None, "available": None, "tables": {}, "sources": {}}
 
-    tables: dict[str, int | None] = {}
-    for table_name in table_names:
-        try:
-            table = db.open_table(table_name)
-            tables[table_name] = int(table.count_rows())
-        except Exception:
-            # A count failure is "unknown," never a fabricated 0.
-            log.debug("Failed to count index table %s", table_name, exc_info=True)
-            tables[table_name] = None
-
-    # The store was read successfully, so an absent content table means a
-    # measurably-empty index (0), NOT "unknown". Only a failed count_rows()
-    # (recorded as None above) is genuinely unknown.
-    if cfg.content_table in tables:
-        chunks = tables[cfg.content_table]
-    else:
-        chunks = 0
-    available = chunks > 0 if isinstance(chunks, int) else None
-
-    sources: dict[str, int] = {}
-    if include_sources and isinstance(chunks, int) and chunks > 0:
-        # O(n) histogram, kept separate from the count above so a failure here
-        # leaves the valid chunk count intact.
-        try:
-            table = db.open_table(cfg.content_table)
-            rows = table.search().select(["source"]).limit(chunks).to_list()
-            for row in rows:
-                source = row.get("source")
-                if source:
-                    sources[source] = sources.get(source, 0) + 1
-        except Exception:
-            log.debug("Failed to build source histogram", exc_info=True)
-
-    return {"chunks": chunks, "available": available, "tables": tables, "sources": sources}
+    try:
+        with domain.read(db) if domain is not None else contextlib.nullcontext():
+            return measure_index(db, cfg.content_table, include_sources)
+    except SourceLayoutError as exc:
+        log.debug("Source-aware index status refused", exc_info=True)
+        return {"chunks": None, "available": None, "tables": {}, "sources": {},
+                "error": format_error(exc)}
 
 
 def _publish_routing(

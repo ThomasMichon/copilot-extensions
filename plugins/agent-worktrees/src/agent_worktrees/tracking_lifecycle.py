@@ -590,7 +590,7 @@ def create_new_record(
     normalized_parent_session = parent_session or None
     normalized_caller_worktree = caller_worktree or None
     normalized_owner_ref = owner_ref or None
-    normalized_bound_agent = (bound_agent or "").strip() or None
+    normalized_bound_agent = bound_agent if bound_agent and bound_agent.strip() else None
     try:
         controllers, controller_revision = _derive_initial_controller_relations(
             machine=machine,

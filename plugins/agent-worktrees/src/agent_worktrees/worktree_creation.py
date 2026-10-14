@@ -546,6 +546,7 @@ def _create_worktree_core(
     recovery: bool = False,
     bound_agent: str | None = None,
     no_pair: bool = False,
+    defer_projections: bool = False,
     pending_seed: str | None = None,
     pending_seed_id: str | None = None,
     allocation: tuple[str, str] | None = None,
@@ -593,6 +594,7 @@ def _create_worktree_core(
             "dispatch_attempt": dispatch_attempt, "launch_preflight": launch_preflight,
             "recovery": recovery, "bound_agent": bound_agent,
             "no_pair": no_pair, "pending_seed": pending_seed,
+            "defer_projections": defer_projections,
             "pending_seed_id": pending_seed_id, "allocation": allocation,
         }
         return creation_requests.create(
@@ -890,7 +892,7 @@ def _create_worktree_core(
             print("Added worktree path to trustedFolders.", file=sys.stderr)
         if permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
-        local_cache_refresh.prepare_for_launch(worktree_path)
+        composition_ready = True
         if kind == "session" and not no_pair:
             try:
                 with step("Creating paired worktree", worktree_id=worktree_id):
@@ -903,7 +905,15 @@ def _create_worktree_core(
             except Exception as exc:  # pragma: no cover - existing fail-safe pairing policy
                 print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)
                 pair_stamp = None
-            core._stamp_and_compose_paired_knowledge(config, record, worktree_path, pair_stamp)
+                composition_ready = False
+            composition = core._stamp_and_compose_paired_knowledge(config, record, worktree_path, pair_stamp)
+            composition_ready = composition_ready and (
+                not composition or composition.get("action") != "error"
+            )
+        if not composition_ready:
+            local_cache_refresh.mark_pair_pending(worktree_path)
+        if not defer_projections and composition_ready:
+            local_cache_refresh.prepare_for_launch(worktree_path)
         result = {"worktree": core._worktree_to_dict(record)}
         if not launches_copilot:
             return result
@@ -922,6 +932,8 @@ def _create_worktree_core(
             launch_cmd = deferred_command(
                 launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
             )
+        else:
+            launch_cmd = deferred_command(launch_cmd, record.yaml_path, admission_only=True)
         env = _apply_assignment_env(
             core._build_env(
                 selection.profile, core._repo_session_env(config, worktree_path),

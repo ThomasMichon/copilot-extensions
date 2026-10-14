@@ -1,6 +1,6 @@
 {
   "name": "agent-remote-driver-solo",
-  "description": "Tier-P F1 solo scenario: install ONLY agent-remote-driver on a fresh machine and prove its launch-time baseline-drivability contract end-to-end -- no agent-worktrees or agent-bridge installed in the venue, NO model turn submitted (genuinely credit-free: a bare interactive `copilot` session is kept alive under a pty via `script`, with no prompt ever typed). A live copilot session writes a discovery descriptor at ~/.copilot/remote-driver/sessions/<id>.json, the driver's HTTP surface (/health, /events, /send) answers over loopback with the descriptor's bearer token (never persisted unredacted), bin/list-sessions.mjs's aggregated view reflects the live session, and a SIGTERM cleanly removes the descriptor (installSignalCleanup). Name-free / public.",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-remote-driver on a fresh machine and prove launch-time discovery and HTTP admission -- no agent-worktrees or agent-bridge installed in the venue, NO model turn submitted (genuinely credit-free: a bare interactive `copilot` session is kept alive under a pty via `script`, with no prompt ever typed). A live copilot session writes a discovery descriptor at ~/.copilot/remote-driver/sessions/<id>.json, /health and /events answer over authenticated loopback, and /send receives only {} and must return HTTP 400 with the missing-content validation error before SDK send. Real prompt delivery is NOT exercised. The descriptor's bearer token is never persisted unredacted, bin/list-sessions.mjs's aggregated view reflects the live session, and a SIGTERM cleanly removes the descriptor (installSignalCleanup). Name-free / public.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -19,7 +19,7 @@
     { "n": 0, "title": "environment (fresh machine)" },
     { "n": 1, "title": "install ONLY agent-remote-driver" },
     { "n": 2, "title": "live session writes a discovery descriptor (no model turn)" },
-    { "n": 3, "title": "drive the session over its HTTP surface (/health, /events, /send)" },
+    { "n": 3, "title": "observe HTTP surface and reject empty /send (/health, /events, HTTP 400)" },
     { "n": 4, "title": "bin/list-sessions.mjs aggregated view reflects the live session" },
     { "n": 5, "title": "SIGTERM is handled cleanly and removes the discovery descriptor" }
   ]

@@ -59,6 +59,42 @@ _NO_MUX = MuxCapability()
 _capability: MuxCapability = _NO_MUX
 
 
+def uses_ahp(req, worktree_id: str) -> bool:
+    """Select the persisted backend before deciding who prepares a local launch."""
+    from . import engine_client
+
+    use_ahp = bool(getattr(req, "ahp", False))
+    if (
+        getattr(req, "machine", None) is None
+        and worktree_id
+        and getattr(req, "mode", "") in {"resume", "bare-resume"}
+    ):
+        try:
+            persisted = engine_client.execution_leg_get(
+                req.project, worktree_id,
+            ).get("execution_leg")
+        except engine_client.EngineFeatureUnavailable:
+            persisted = None
+        if persisted is not None:
+            if not isinstance(persisted, dict):
+                raise engine_client.EngineError("agent-worktrees returned an invalid execution leg")
+            state = str(persisted.get("state") or "unknown")
+            if state in {"active", "unknown"}:
+                provider = str(persisted.get("provider") or "")
+                if provider != "ahp":
+                    raise engine_client.EngineError(
+                        "worktree requires unsupported execution-leg "
+                        f"provider {provider or '<unknown>'}"
+                    )
+                if req.mode == "bare-resume":
+                    raise engine_client.EngineError(
+                        "bare resume is incompatible with the worktree's "
+                        "active AHP execution leg"
+                    )
+                use_ahp = True
+    return use_ahp
+
+
 def set_mux_capability(cap: MuxCapability | None) -> None:
     """Install the active Manager-owned mux capability (or reset to none)."""
     global _capability

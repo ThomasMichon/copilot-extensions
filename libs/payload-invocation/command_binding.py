@@ -388,6 +388,7 @@ def main() -> int:
     parser.add_argument("--check-lifecycle", action="store_true")
     parser.add_argument("--deferred-runtime", action="store_true")
     parser.add_argument("--teardown", action="store_true")
+    parser.add_argument("--lifecycle-timeout", type=float)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args()
     if arguments.payload_root.resolve() != Path(__file__).resolve().parents[1]:
@@ -397,6 +398,8 @@ def main() -> int:
         parser.error("Specify only one lifecycle operation.")
     if arguments.deferred_runtime and not arguments.run_lifecycle:
         parser.error("--deferred-runtime requires --run-lifecycle.")
+    if arguments.lifecycle_timeout is not None and not arguments.run_lifecycle:
+        parser.error("--lifecycle-timeout requires --run-lifecycle.")
     if arguments.teardown and (not arguments.run_lifecycle or arguments.deferred_runtime):
         parser.error("--teardown requires --run-lifecycle without --deferred-runtime.")
     if arguments.source_payload_root is not None and not (arguments.publish_legacy or lifecycle_action):
@@ -424,6 +427,7 @@ def main() -> int:
                 return lifecycle.run_lifecycle(
                     _rules(), primitive, command,
                     deferred_runtime=arguments.deferred_runtime,
+                    timeout=arguments.lifecycle_timeout,
                     teardown=arguments.teardown, **publication_arguments,
                 )
             elif arguments.write_manifest:

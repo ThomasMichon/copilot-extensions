@@ -26,6 +26,10 @@
     Exact runtime installation root. Structured context callers must supply the
     root selected by the installation-context resolver.
 
+.PARAMETER BootstrapPython
+    Existing absolute Python executable supplied by the cold hook. Ownership
+    admission still runs through the canonical lifecycle helper.
+
 .PARAMETER RemoveConfig
     On uninstall: also delete project config and worktree session metadata.
 
@@ -45,6 +49,7 @@ param(
     [string]$ProjectName,
 
     [string]$InstallDir,
+    [string]$BootstrapPython,
     [switch]$RemoveConfig,
     [switch]$Force,
     [switch]$ZeroDowntime
@@ -52,6 +57,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ($BootstrapPython) {
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    $OutputEncoding = [Console]::OutputEncoding
+}
 
 function ConvertTo-NativeArgument {
     param([AllowEmptyString()][string]$Value)
@@ -129,8 +139,16 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         $env:COPILOT_PLUGIN_STAGED_FROM = $null
     }
     $admissionPython = $null
-    $admissionLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+    if ($BootstrapPython) {
+        if (-not [IO.Path]::IsPathRooted($BootstrapPython) -or -not [IO.File]::Exists($BootstrapPython)) {
+            throw 'The supplied bootstrap Python must be an existing absolute executable.'
+        }
+        $admissionPython = $BootstrapPython
+    }
+    $admissionLauncher = if (-not $admissionPython) {
+        Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+    } else { $null }
     if ($admissionLauncher) {
         $admissionPreviousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
@@ -173,10 +191,17 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         }
         if ($Action -eq 'stamp') { $admissionArgs += '--deferred-runtime' }
         elseif ($Action -eq 'uninstall') { $admissionArgs += '--teardown' }
-        & $admissionPython @admissionArgs --run-lifecycle -- `
-            (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
-            -File $PSCommandPath @admissionForward
-        exit $LASTEXITCODE
+        $admissionPreviousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $admissionPython @admissionArgs --run-lifecycle -- `
+                (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
+                -File $PSCommandPath @admissionForward
+            $admissionExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $admissionPreviousErrorAction
+        }
+        exit $admissionExitCode
     }
 }
 # === end command-lifecycle: admission before staging ===
@@ -552,9 +577,15 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
+                    ForEach-Object {
+                        '"' + ([regex]::Replace(
+                            [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
+                        )) + '"'
+                    }) -join ' '
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
-                    -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd)
+                    -ArgumentList $__selfStageArgs
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -2643,7 +2674,7 @@ function Deploy-Wrappers {
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'post-tool-hook.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
+    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_runtime.py', 'hook_client.py', 'post-tool-hook.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
@@ -3843,6 +3874,20 @@ function Reconcile-Binstubs {
 
 # -- Actions --------------------------------------------------------------
 
+function Copy-StampDirectory {
+    param([string]$Source, [string]$Destination)
+    if ([IO.File]::GetAttributes($Source) -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Snapshot source directory is a reparse point: $Source"
+    }
+    [void][IO.Directory]::CreateDirectory($Destination)
+    foreach ($file in [IO.Directory]::EnumerateFiles($Source)) {
+        [IO.File]::Copy($file, [IO.Path]::Combine($Destination, [IO.Path]::GetFileName($file)), $true)
+    }
+    foreach ($directory in [IO.Directory]::EnumerateDirectories($Source)) {
+        Copy-StampDirectory $directory ([IO.Path]::Combine($Destination, [IO.Path]::GetFileName($directory)))
+    }
+}
+
 function Invoke-Stamp {
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
     # ~/.agent-worktrees/snapshots/<ver>/, record markers, and deploy ONLY the
@@ -3862,7 +3907,12 @@ function Invoke-Stamp {
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
         $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            $destination = [IO.Path]::Combine($snapTmp, $_.Name)
+            if ($_.PSIsContainer) {
+                Copy-StampDirectory $_.FullName $destination
+            } else {
+                [IO.File]::Copy($_.FullName, $destination, $true)
+            }
         }
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
         Write-ServiceOk "Snapshot: $snapDir"

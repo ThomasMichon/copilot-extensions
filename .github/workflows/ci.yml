@@ -748,7 +748,7 @@ jobs:
     name: test runner (ubuntu-latest)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -832,10 +832,10 @@ jobs:
       - name: Test thin fleet planner with installed package and host containment
         if: steps.fleet-contracts.outputs.run == 'true'
         env:
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full"' || '' }}
+          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
         run: |
           uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 120
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && 600 || 120 }}
 
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
@@ -881,7 +881,7 @@ jobs:
     runs-on: windows-latest
     # Native diagnostic/wrapper acceptance shares this job with runner,
     # payload-CWD and fleet contracts; retain each selection's own bound.
-    timeout-minutes: 7
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 7 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -936,6 +936,7 @@ jobs:
         timeout-minutes: 2
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
+          --test-file test_reconcile.py --test-file test_installer_command_binding.py
           -k "runtime_resolution_real_helper_read_only or command_binding"
           --admission-wait 60 --timeout 120
       - id: runner-contracts
@@ -1011,10 +1012,10 @@ jobs:
       - name: Test thin fleet planner with installed package and host containment
         if: steps.fleet-contracts.outputs.run == 'true'
         env:
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full"' || '' }}
+          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
         run: |
           uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 120
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && 600 || 120 }}
 
   archive-sources-windows:
     name: archive sources (windows-latest)

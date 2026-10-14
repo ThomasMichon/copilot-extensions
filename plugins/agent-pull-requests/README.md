@@ -147,6 +147,47 @@ zero-downtime active/passive rollout. See the shared
 [graceful cutover pattern](../../docs/patterns/graceful-daemon-cutover.md)
 for resident-daemon rollout requirements.
 
+## Governed watch-state groundwork (internal)
+
+The watch-state core supplies an inactive construction and quiescence boundary
+for the reviewed governed-cutover design. **No installer or service currently
+opts into it:** ordinary `serve`, stop/restart and callback wire contracts keep
+their existing behavior. These Python methods are owner-adapter seams, not new
+operator commands or evidence that installation-cell adoption is complete.
+
+`WatchDaemon(active=False)` does not read subscriptions, persist state, start
+polling or callbacks, or accept registration/cancellation mutations.
+After acquiring the installation's state-writer authority, the adapter can call
+`reload_state()` to read the final persisted snapshot without starting effects.
+Strict adoption refuses malformed legacy or acknowledged entries instead of
+dropping them. A failed or late read cannot activate an earlier cached registry.
+`resume_effects()` is a separate operation authorized by the owner's durable
+transaction commit; it does not itself acquire or validate leases, installation
+receipts, governance or transaction authorization.
+
+`quiesce(timeout=...)` closes only application mutation admission while retaining
+the authenticated listener and foreground lifecycle. New registration or
+cancellation requests receive an explicit retryable error. Already-admitted
+handlers, pollers, callbacks and ACK writes finish before a final persistence
+acknowledgement permits a quiescent result. Unlike legacy stop's per-batch
+allowance, quiescence never extends its total budget to launch another accepted
+legacy batch. An incomplete drain keeps the registry, queued batches and live
+worker references: it does not authorize releasing the writer lease or loading
+a replacement snapshot. A same-owner abort can resume those retained objects;
+after any writer-authority transfer, the adapter must reload the final state
+before authorizing effects.
+
+Lifecycle operations use serialized admission and a finite positive completion
+budget. Late
+I/O or worker startup is not reported as successful completion or reopened
+mutation admission. Partially started workers remain attributable to the owner
+for cleanup/retry. Activation's terminal-state recheck and worker-stop clearing
+are atomic with shutdown and close, so a terminal acknowledgement cannot be
+followed by activation erasing the stop signal. Invalid close budgets are
+rejected before changing owner state. The installation transaction,
+exact-instance control and retirement, writer-lease handoff, crash journal and governed installer activation
+remain the adopter's separate obligations.
+
 ## Current constraint
 
 The current GitHub implementation still shells out through:

@@ -337,6 +337,8 @@ def _resolve_base_repo(
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
+    if not getattr(args, "defer_projections", False):
+        local_cache_refresh.prepare_for_launch(repo.anchor)
     _emit_plan(
         {
             "action": "exec",
@@ -397,18 +399,24 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
 
     interactive = not getattr(args, "json", False) and not getattr(args, "base", False)
     verdict = None
+    if not args.dry_run:
+        try:
+            verdict = sessions.verify_worktree_active(record)
+        except Exception:
+            verdict = None
     try:
-        staged_seed = seed_for_attempt(record.yaml_path, record, args)
+        staged_seed = seed_for_attempt(record.yaml_path, record, args, verdict=verdict)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         error = f"Could not stage launch prompt: {exc}"
         output.err(error)
         _emit_plan({"action": "error", "error": error, "exit_code": 3})
         return 3
     if (interactive and not args.dry_run) or staged_seed:
-        try:
-            verdict = sessions.verify_worktree_active(record)
-        except Exception:
-            verdict = None
+        if args.dry_run:
+            try:
+                verdict = sessions.verify_worktree_active(record)
+            except Exception:
+                verdict = None
         if staged_seed is not None and plain_live_open(args, verdict):
             staged_seed = None
         if staged_seed is not None:
@@ -506,13 +514,10 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         elif ff.reason in ("ahead", "diverged"):
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
-    if not args.dry_run:
-        # Worktree-scoped dynamic guidance (docs/patterns/worktree-scoped-
-        # dynamic-guidance.md): refresh every enabled source's gitignored
-        # *.local.instructions.md sibling now -- a fast-forward just above
-        # may have changed the installed payload this worktree sees.
-        # Degradation is reported without blocking an otherwise usable launch.
-        local_cache_refresh.prepare_for_launch(record.worktree_path)
+    if not args.dry_run and not getattr(args, "defer_projections", False):
+        local_cache_refresh.prepare_for_launch(
+            record.worktree_path, compose_pair=True, config=config,
+        )
 
     resume_target = None
     if not getattr(args, "no_resume", False):
@@ -595,6 +600,11 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
         )
         print("   Launch prompt staged until Copilot handoff.")
+    else:
+        launch_cmd = deferred_command(
+            launch_cmd, record.yaml_path, admission_only=True,
+            preserve_seed_id=staged_seed.seed_id if staged_seed else None,
+        )
 
     print()
 
@@ -713,6 +723,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
             launch_preflight=launch_preflight,
             recovery=getattr(args, "recovery", False),
             pending_seed=getattr(args, "seed", None),
+            defer_projections=getattr(args, "defer_projections", False),
         )
     except LaunchSeedStagingFailure as exc:
         output.err(str(exc))

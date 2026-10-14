@@ -388,11 +388,11 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         from .runtime_version import write_running_version
 
         write_running_version()
-        fed_runner = _maybe_start_federation()
         app = build_app(cfg)
+        fed_runner = _maybe_start_federation(drain_gate=app.state.drain_gate)
+        app.state.federation_runner = fed_runner
         server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
-        # Expose the uvicorn server so the app's /shutdown drain-seam can request a
-        # clean exit when the cutover orchestrator retires this daemon.
+        # /shutdown requests clean exit through the live server.
         app.state.uvicorn_server = server
         if start_lock is not None:
             # Publishing the route above is not the same moment as actually being
@@ -475,11 +475,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
             sock.close()
 
 
-#: (reserved) -- the live uvicorn server is attached to ``app.state.uvicorn_server``
-#: in :func:`serve` so the coordinator's /shutdown route can request a clean exit.
-
-
-def _maybe_start_federation():
+def _maybe_start_federation(*, drain_gate=None):
     """Start the federation runner alongside the coordinator when a federation
     role is configured (``AGENT_DISPATCH_FEDERATION_ROLE``); return it (so
     :func:`serve` can stop it) or ``None``.
@@ -496,7 +492,7 @@ def _maybe_start_federation():
     try:
         from .federation_runner import runner_from_config
 
-        runner = runner_from_config()
+        runner = runner_from_config(is_active=_owns_active_route, drain_gate=drain_gate)
         if runner is None:
             return None
         runner.start(interval=_cfg.federation_interval())

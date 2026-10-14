@@ -10,7 +10,8 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from . import embody_resume, installer, launch_seed_state, sessions, tracking, tracking_write
+from . import embody_resume, installer, launch_admission, launch_seed_state, sessions
+from . import tracking, tracking_write
 
 BOUNDARY_MARKER = "# agent-worktrees:launch-seed-boundary-v1"
 
@@ -35,6 +36,7 @@ def _final_cold_error(record) -> str | None:
 
 def deferred_command(
     command: list[str], record_path: Path, *, seed_id: str | None = None,
+    admission_only: bool = False, preserve_seed_id: str | None = None,
 ) -> list[str]:
     prefix = [
         sys.executable, "-m", "agent_worktrees.launch_seed_exec",
@@ -42,6 +44,10 @@ def deferred_command(
     ]
     if seed_id:
         prefix += ["--seed-id", seed_id]
+    if admission_only:
+        prefix += ["--admission-only"]
+    if preserve_seed_id:
+        prefix += ["--preserve-seed-id", preserve_seed_id]
     return [*prefix, "--", *command]
 
 
@@ -104,6 +110,22 @@ def _setup_command(record_path: Path, seed_id: str, command: list[str]) -> list[
 
 def launch(
     record_path: Path, command: list[str], *, invoke: bool = False, seed_id: str | None = None,
+    admission_only: bool = False, preserve_seed_id: str | None = None,
+) -> int:
+    if (preserve_seed_id and not admission_only) or (admission_only and (seed_id or invoke)):
+        raise ValueError("Admission-only launch cannot claim a prompt")
+    if admission_only:
+        with launch_admission.guard(record_path):
+            return _launch(
+                record_path, command, invoke=invoke, seed_id=seed_id, admission_only=True,
+                preserve_seed_id=preserve_seed_id,
+            )
+    return _launch(record_path, command, invoke=invoke, seed_id=seed_id)
+
+
+def _launch(
+    record_path: Path, command: list[str], *, invoke: bool, seed_id: str | None,
+    admission_only: bool = False, preserve_seed_id: str | None = None,
 ) -> int:
     try:
         record = tracking.load_record(record_path)
@@ -111,6 +133,15 @@ def launch(
         print(f"Could not read launch-prompt worktree: {exc}", file=sys.stderr)
         return 3
     current = launch_seed_state.peek(record_path)
+    if admission_only:
+        if (
+            record.pending_seed
+            or (preserve_seed_id and (current is None or current.seed_id != preserve_seed_id))
+            or (not preserve_seed_id and current is not None)
+        ):
+            print("Launch intent changed after planning; refresh and retry.", file=sys.stderr)
+            return 3
+        current = None
     if record.pending_seed:
         current = launch_seed_state.stage(record_path)
     if seed_id and (current is None or current.seed_id != seed_id):
@@ -155,7 +186,7 @@ def launch(
             )
             return 3
     try:
-        if os.name != "nt" and not invoke:
+        if os.name != "nt" and not invoke and not admission_only:
             os.execvp(argv[0], argv)
         # A real interactive child inherits this console; non-interactive
         # consumers must not allocate a new one.
@@ -193,13 +224,19 @@ def main() -> int:
     parser.add_argument("--record", type=Path, required=True)
     parser.add_argument("--invoke", action="store_true")
     parser.add_argument("--seed-id", default=None)
+    parser.add_argument("--admission-only", action="store_true")
+    parser.add_argument("--preserve-seed-id", default=None)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a launch command is required")
     try:
-        return launch(args.record, command, invoke=args.invoke, seed_id=args.seed_id)
+        return launch(
+            args.record, command, invoke=args.invoke, seed_id=args.seed_id,
+            admission_only=args.admission_only,
+            preserve_seed_id=args.preserve_seed_id,
+        )
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         print(f"Could not hand off staged launch prompt: {exc}", file=sys.stderr)
         return 3

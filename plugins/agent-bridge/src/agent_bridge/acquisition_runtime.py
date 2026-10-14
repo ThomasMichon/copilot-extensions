@@ -30,8 +30,9 @@ from .acquisition_initial_creation import initial_creation_proven
 from .db_core import live_session_is_fresh, local_pid_alive
 from .models import SessionStatus, StartSessionRequest
 from .preference_requests import apply_request_preferences
-from .routes.worktrees import _fresh_start_locks, _apply_bound_charter
+from .routes.worktrees import _fresh_start_locks
 from .transport import SpawnTarget
+from .worktree_charter import _apply_bound_charter
 
 
 class AcquisitionRuntime:
@@ -445,7 +446,7 @@ class AcquisitionRuntime:
             ) from exc
         if target.type != "local":
             raise AcquisitionRefused("venue_unsupported", "this acquisition adapter is local only")
-        bound = row.get("bound_agent")
+        bound = (row.get("bound_agent") or "").strip()
         if bound and bound != req.target:
             target = _apply_bound_charter(
                 target,

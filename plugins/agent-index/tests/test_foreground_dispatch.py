@@ -97,7 +97,6 @@ def test_cmd_start_reports_missing_host_runtime_without_importing_server(monkeyp
         ["clusters", "--exact-dupes-only"],
         ["index", "--full", "--source", "sample"],
         ["index-worker", "--task", "task"],
-        ["mcp"],
     ],
 )
 def test_host_store_commands_forward_original_arguments(monkeypatch, tmp_path, arguments):

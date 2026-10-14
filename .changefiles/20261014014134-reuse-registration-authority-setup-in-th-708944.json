@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse registration-authority setup in the exact-session fallback scan fixture.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

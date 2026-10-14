@@ -132,7 +132,7 @@ class Endpoint:
                 generation=int(data.get("generation", 0)),
                 process_start_time=start_time,
             )
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
             return None
 
 
@@ -336,6 +336,7 @@ def read_active_endpoint(
 
 
 def _atomic_write(path: Path, data: dict) -> None:
+    _validate_endpoint_rows(data)
     path.parent.mkdir(parents=True, exist_ok=True)
     previous = _read_mutation_table(path.parent)
     if publication_history.KEY in previous and publication_history.read(previous) is None:
@@ -349,9 +350,23 @@ def _atomic_write(path: Path, data: dict) -> None:
     routing_persistence.write(path, following)
 
 
+def _validate_endpoint_rows(table: dict | None) -> None:
+    for key in ("active", "previous"):
+        raw = table.get(key) if table is not None else None
+        if raw is not None and (
+            publication_history._endpoint(raw) is None
+            or (raw.get("version") is not None and not isinstance(raw["version"], str))
+        ):
+            reason = f"{key} endpoint unverifiable; owner-led recovery required"
+            log.error(reason)
+            raise ActivePublicationRefused(reason)
+
+
 def _read_mutation_table(config_dir: str | os.PathLike[str]) -> dict:
     try:
-        return read_table(config_dir, strict=True) or {}
+        table = read_table(config_dir, strict=True) or {}
+        _validate_endpoint_rows(table)
+        return table
     except (OSError, ValueError) as exc:
         reason = f"routing state unverifiable ({type(exc).__name__}); owner-led recovery required"
         log.error(reason)
@@ -566,7 +581,7 @@ def publish_active_with_previous_guarded(
     replacement, so a caller never flips over a newly-published route.
     """
     with _routing_lock(config_dir, deadline=lock_deadline):
-        current = read_table(config_dir) or {}
+        current = _read_mutation_table(config_dir)
         current_raw = current.get("active") if isinstance(current, dict) else None
         if not isinstance(current_raw, dict):
             current_raw = None

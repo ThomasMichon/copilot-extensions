@@ -18,7 +18,8 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 from work_coalescing_singleton import CoalescingServer
 
@@ -99,6 +100,7 @@ class WatchDaemon:
         poll_interval: float = _DEFAULT_POLL_INTERVAL_S,
         idle_exit: float = _POLLER_IDLE_EXIT_S,
         persist: bool = True,
+        active: bool = True,
     ) -> None:
         self._registry = WatchRegistry()
         self._fetch = fetch
@@ -111,10 +113,19 @@ class WatchDaemon:
         self._pollers: dict[WatchKey, threading.Thread] = {}
         self._pollers_lock = threading.Lock()
         self._shutdown_event = threading.Event()
+        self._lifecycle_shutdown_event = threading.Event()
+        self._lifecycle_lock = threading.Lock()
+        self._admission = threading.Condition()
+        self._accepting_mutations = active
+        self._active_mutations = 0
+        self._state_loaded = active
+        self._quiescent = not active
+        if not active:
+            self._shutdown_event.set()
         self._deliveries = Deliveries(
             self._registry, self._notify, self._persist, self._persist_lock, self._shutdown_event,
         )
-        if persist:
+        if persist and active:
             self._reattach_from_disk()
 
     def _reattach_from_disk(self) -> None:
@@ -153,6 +164,20 @@ class WatchDaemon:
     # -- control-plane entrypoint -----------------------------------
 
     def compute(self, kind: str, payload: dict) -> dict:
+        if kind not in {"register", "unregister"}:
+            return self._compute_request(kind, payload)
+        with self._admission:
+            if not self._accepting_mutations:
+                return {"error": "watch owner is not accepting mutations", "retryable": True}
+            self._active_mutations += 1
+        try:
+            return self._compute_request(kind, payload)
+        finally:
+            with self._admission:
+                self._active_mutations -= 1
+                self._admission.notify_all()
+
+    def _compute_request(self, kind: str, payload: dict) -> dict:
         if kind == "register":
             return self._handle_register(payload)
         if kind == "unregister":
@@ -206,7 +231,10 @@ class WatchDaemon:
                 "delivery_error": self._deliveries.start_error,
             }
         if kind == "shutdown":
-            self._shutdown_event.set()
+            with self._admission:
+                self._accepting_mutations = False
+                self._lifecycle_shutdown_event.set()
+                self._shutdown_event.set()
             return {"shutting_down": True}
         return {"error": f"unknown kind {kind!r}"}
 
@@ -266,19 +294,125 @@ class WatchDaemon:
         """Block the caller (``serve``'s own foreground loop) until a
         ``shutdown`` request arrives over the control plane, checking in
         short increments so a ``KeyboardInterrupt`` is still responsive."""
-        while not self._shutdown_event.is_set():
-            self._shutdown_event.wait(timeout=poll_interval)
+        while not self._lifecycle_shutdown_event.is_set():
+            self._lifecycle_shutdown_event.wait(timeout=poll_interval)
+
+    @property
+    def quiescent(self) -> bool:
+        return self._quiescent
+
+    @contextmanager
+    def _lifecycle_operation(self, timeout: float) -> Iterator[float]:
+        deadline = time.monotonic() + positive_seconds(timeout)
+        if not self._lifecycle_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            raise TimeoutError("PR watch lifecycle operation is busy")
+        try:
+            yield deadline
+        finally:
+            self._lifecycle_lock.release()
+
+    def _close_mutation_admission(self, deadline: float) -> None:
+        with self._admission:
+            self._accepting_mutations = False
+            self._shutdown_event.set()
+            while self._active_mutations:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("PR watch admitted mutation handlers did not drain")
+                self._admission.wait(remaining)
+
+    @staticmethod
+    def _check_lifecycle_deadline(deadline: float) -> None:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("PR watch lifecycle deadline expired")
+
+    def quiesce(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
+        """Retain ownership until admitted writes and accepted callbacks have stopped."""
+        with self._lifecycle_operation(timeout) as deadline:
+            if self._lifecycle_shutdown_event.is_set():
+                raise RuntimeError("PR watch owner is shutting down")
+            self._quiescent = False
+            self._close_mutation_admission(deadline)
+            self._stop_workers(deadline, bounded=True)
+            self._check_lifecycle_deadline(deadline)
+            if self._lifecycle_shutdown_event.is_set():
+                raise RuntimeError("PR watch shutdown interrupted quiescence")
+            if self._state_loaded:
+                self._persist()
+            self._check_lifecycle_deadline(deadline)
+            self._quiescent = True
+
+    def reload_state(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
+        """Read the final state without effects, after the owner acquires its writer lease."""
+        with self._lifecycle_operation(timeout) as deadline:
+            if not self._quiescent or self._lifecycle_shutdown_event.is_set():
+                raise RuntimeError("PR watch state reload requires completed quiescence")
+            if not self._persist_enabled:
+                raise RuntimeError("PR watch state adoption requires durable persistence")
+            self._state_loaded = False
+            registry = WatchRegistry()
+            registry.restore_state(read_subscriptions_state(), strict=True)
+            self._check_lifecycle_deadline(deadline)
+            self._registry = registry
+            self._deliveries = Deliveries(
+                registry, self._notify, self._persist, self._persist_lock, self._shutdown_event,
+            )
+            with self._pollers_lock:
+                self._pollers.clear()
+            self._check_lifecycle_deadline(deadline)
+            self._state_loaded = True
+
+    def resume_effects(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
+        """Resume the retained registry only after the owner's transaction authorizes effects."""
+        with self._lifecycle_operation(timeout) as deadline:
+            if not self._state_loaded:
+                raise RuntimeError("PR watch state has not been adopted")
+            if self._lifecycle_shutdown_event.is_set():
+                raise RuntimeError("PR watch owner is shutting down")
+            with self._admission:
+                self._accepting_mutations = False
+            if self._shutdown_event.is_set():
+                scheduler = self._deliveries.scheduler
+                self._deliveries.changed.set()
+                if scheduler is not None and scheduler.ident is not None:
+                    scheduler.join(max(0.0, deadline - time.monotonic()))
+                    if scheduler.is_alive():
+                        raise TimeoutError("PR watch delivery scheduler did not stop")
+            with self._admission:
+                self._check_lifecycle_deadline(deadline)
+                if self._lifecycle_shutdown_event.is_set():
+                    raise RuntimeError("PR watch owner is shutting down")
+                self._quiescent = False
+                self._shutdown_event.clear()
+            self._deliveries.resume()
+            for key in self._registry.active_keys():
+                self._check_lifecycle_deadline(deadline)
+                self._ensure_poller(key)
+            with self._admission:
+                self._check_lifecycle_deadline(deadline)
+                if self._lifecycle_shutdown_event.is_set():
+                    raise RuntimeError("PR watch shutdown interrupted activation")
+                self._accepting_mutations = True
 
     def close(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
         """Stop polling and join in-flight ticks without discarding subscriptions."""
-        self._shutdown_event.set()
-        deadline = time.monotonic() + timeout
+        positive_seconds(timeout)
+        with self._admission:
+            self._accepting_mutations = False
+            self._lifecycle_shutdown_event.set()
+            self._shutdown_event.set()
+        with self._lifecycle_operation(timeout) as deadline:
+            self._close_mutation_admission(deadline)
+            self._stop_workers(deadline, bounded=False)
+
+    def _stop_workers(self, deadline: float, *, bounded: bool) -> None:
         with self._pollers_lock:
             pollers = list(self._pollers.values())
         for thread in pollers:
-            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if thread.ident is not None:
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
         live = [thread.name for thread in pollers if thread.is_alive()]
-        live.extend(self._deliveries.close(deadline))
+        live.extend(self._deliveries.close(deadline, bounded=bounded))
         if live:
             raise TimeoutError(f"PR watch workers did not stop: {', '.join(live)}")
 

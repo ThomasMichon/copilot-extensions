@@ -1,3 +1,8 @@
+param([string]$BootstrapPython = '')
+
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+
 # --- bootstrap-killswitch guard (vendored; see libs/bootstrap-killswitch/README.md) ---
 # One shared, repo-wide switch (not per-plugin) that pauses EVERY adopting
 # plugin's reconcile-on-session-start at once, for when an operator/agent is
@@ -66,9 +71,29 @@ function Test-AwProvisioned {
 if ((-not $VenvPython) -and (-not (Test-AwProvisioned))) {
     $installer = Join-Path $PSScriptRoot 'install.ps1'
     if ((Test-Path $installer) -and (Select-String -Path $installer -Pattern "'stamp'" -Quiet)) {
-        $pw = Get-Command pwsh -ErrorAction SilentlyContinue
-        $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-        & $exe -NoProfile -ExecutionPolicy Bypass -File $installer stamp *> $null
+        if ($BootstrapPython) {
+            $bindingHelper = Join-Path $PSScriptRoot 'command_binding.py'
+            if (-not [IO.File]::Exists($BootstrapPython) -or -not [IO.File]::Exists($bindingHelper)) {
+                [Console]::Error.WriteLine('[agent-worktrees] Bootstrap interpreter or lifecycle helper is unavailable.')
+                [Console]::Out.Write('{}')
+                exit 1
+            }
+            $payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+            $ErrorActionPreference = 'Continue'
+            & $BootstrapPython -I -B -X utf8 $bindingHelper `
+                --payload-root $payloadRoot --plugin-id agent-worktrees `
+                --legacy-root $InstallDir --source-payload-root $payloadRoot `
+                --deferred-runtime --run-lifecycle -- `
+                (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
+                -File $installer stamp -BootstrapPython $BootstrapPython 2>&1 |
+                ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+            $stampExitCode = $LASTEXITCODE
+            if ($stampExitCode -ne 0) {
+                [Console]::Error.WriteLine("[agent-worktrees] Bootstrap stamp failed (exit $stampExitCode).")
+            }
+        } else {
+            & $installer stamp *> $null
+        }
         [Console]::Out.Write('{}')
         exit 0
     }

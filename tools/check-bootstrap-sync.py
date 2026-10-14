@@ -49,11 +49,12 @@ FAMILIES: dict[str, list[str]] = {
     # and gates on a .venv link. The shared, unified template.
     "versioned-venv/psscriptroot": [
         "agent-codespaces",
-        "agent-containers",
         "agent-logger",
         "agent-pull-requests",
         "agent-vault",
     ],
+    # Containers slots also bind its persistent base/provider-exec dependency choice.
+    "versioned-venv/dependency-profile-agent-containers": ["agent-containers"],
     # budget-guidance can stamp its payload-local command before Python exists.
     "versioned-venv/pythonless-budget-guidance": ["budget-guidance"],
     # Agent Index keeps the shared versioned-venv model but is the

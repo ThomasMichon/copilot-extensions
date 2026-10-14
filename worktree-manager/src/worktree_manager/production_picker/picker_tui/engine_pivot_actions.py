@@ -379,6 +379,11 @@ class PickerScreenPivotActionsMixin:
                 _pivots.resolve_path(rec, spec.get("body_from"))
                 or _pivots.resolve_path(rec, "card.body") or action.description
             )
+            self._configuration_preview_generation = object()
+            if action.preview:
+                from .engine_configuration_preview import ConfigurationPreviewFlow
+                ConfigurationPreviewFlow(self, reg, action, rec, ctx, fields, summary).edit()
+                return
 
             def after(values):
                 if values is not None:

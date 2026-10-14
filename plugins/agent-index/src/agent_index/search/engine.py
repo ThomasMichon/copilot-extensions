@@ -9,10 +9,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from agent_index.store.source_layout import source_fts_read, source_read
+
 if TYPE_CHECKING:
-    from agent_index.index_config import IndexConfig
     from agent_index_engine.query_embedder import InProcessQueryEmbedder
+
     from agent_index.engine.client import EngineClient
+    from agent_index.index_config import IndexConfig
     from agent_index.store.multi_model_store import MultiModelStore
     from agent_index.store.store import SearchResult
 
@@ -35,6 +38,7 @@ class SearchEngine:
         self._engine_clients = engine_clients
         self._store = store
 
+    @source_fts_read
     def search(
         self,
         query: str,
@@ -99,6 +103,27 @@ class SearchEngine:
             vectors, query, limit=limit, **filter_kwargs,
         )
 
+    @source_read
+    def search_authorized(
+        self, query: str, *, families: tuple[str, ...], limit: int = 10,
+        language: str | None = None, repo: str | None = None, mode: str = "hybrid",
+    ) -> list[SearchResult]:
+        from agent_index.store.source_search import search_source_store
+
+        if not families:
+            return []
+        if mode not in ("vector", "fts", "hybrid"):
+            raise ValueError("invalid authorized mode")
+        vectors = {
+            model: client.embed_query(query)
+            for model, client in self._engine_clients.items() if mode != "fts"
+        }
+        return search_source_store(
+            self._store, vectors, query, families=families, limit=limit,
+            language=language, repo=repo, include_fts=mode != "vector",
+        )
+
+    @source_read
     def find_similar(
         self,
         chunk_id: str,

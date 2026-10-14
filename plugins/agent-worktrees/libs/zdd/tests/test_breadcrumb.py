@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
-from zdd import breadcrumb
+import pytest
+
+from zdd import breadcrumb, routing
+
+
+@pytest.fixture(autouse=True)
+def process_identities(monkeypatch):
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: str(pid * 10))
 
 
 def test_recover_stale_cutover_brackets_ipv6_old_endpoint(tmp_path: Path):
@@ -51,6 +59,10 @@ def _write_aged_breadcrumb(tmp_path: Path, *, new_pid: int | None, age_s: float,
 
     record = breadcrumb.write_breadcrumb(
         tmp_path, state=state, old=None, new_port=9290, new_pid=new_pid,
+        publication_witness=routing.publication_witness(
+            tmp_path, deadline=time.monotonic() + 1,
+        ),
+        new_process_start_time=str(new_pid * 10) if new_pid is not None else None,
     )
     record["updated_at"] = (
         datetime.now(timezone.utc) - timedelta(seconds=age_s)
@@ -158,4 +170,4 @@ def test_reap_abandoned_passive_terminate_failure_is_reported(tmp_path: Path):
         tmp_path, pid_alive=lambda pid: True, terminate=boom, record=record,
     )
     assert result["reaped"] is False
-    assert "terminate failed" in result["reason"]
+    assert "termination failed" in result["reason"] and result["refused"]

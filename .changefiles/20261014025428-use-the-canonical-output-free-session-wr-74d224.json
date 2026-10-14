@@ -1,0 +1,9 @@
+{
+  "comment": "Use the canonical output-free session wrapper exit contract without changing cue deadlines or output.",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

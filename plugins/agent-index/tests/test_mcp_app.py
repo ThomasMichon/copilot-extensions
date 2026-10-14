@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 
+import anyio
 import pytest
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 import agent_index.mcp_app as mcp_app
 
@@ -19,6 +23,21 @@ def test_all_tools_registered() -> None:
     tools = asyncio.run(mcp_app.mcp.list_tools())
     names = {tool.name for tool in tools}
     assert _TOOLS <= names
+
+
+def test_real_stdio_command_initializes_and_lists_tools() -> None:
+    async def handshake():
+        with anyio.fail_after(20):
+            parameters = StdioServerParameters(
+                command=sys.executable, args=["-I", "-m", "agent_index", "mcp"]
+            )
+            async with stdio_client(parameters) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
+                    assert {tool.name for tool in result.tools} == _TOOLS
+
+    asyncio.run(handshake())
 
 
 def test_search_delegates_and_formats(monkeypatch: pytest.MonkeyPatch) -> None:

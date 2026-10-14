@@ -869,6 +869,10 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
     compose_p.add_argument(
         "--json", action="store_true", help="Emit the composition summary as JSON"
     )
+    compose_p.add_argument(
+        "--prepare-projections", action="store_true",
+        help="Copy declared instructions once, after the final plugin composition",
+    )
     try:
         args = p.parse_args(argv)
     except SystemExit as exc:
@@ -892,6 +896,17 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
         else:
             _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(args.cwd)
             summary = knowledge_plugins.compose_from_pair(cwd=args.cwd)
+        if args.prepare_projections:
+            from dataclasses import asdict
+            from . import local_cache_refresh
+
+            root = args.harness_path or args.cwd or os.getcwd()
+            result = local_cache_refresh.prepare_for_launch(root)
+            summary["projections"] = asdict(result)
+            if result.status not in ("ready", "skipped"):
+                if args.json:
+                    print(json.dumps(summary, indent=2))
+                return 3
     except knowledge_plugins.KnowledgePluginError as exc:
         summary = {
             "action": "error",

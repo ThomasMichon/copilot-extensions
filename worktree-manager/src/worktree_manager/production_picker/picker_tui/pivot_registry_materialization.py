@@ -168,9 +168,14 @@ def _rewrite_manifest_commands(
     require_targets: bool,
 ) -> dict[str, object]:
     """Return a copy whose external argv heads are canonical absolute paths."""
+    from worktree_manager.configuration_preview import validate_preview_actions
+    try:
+        validate_preview_actions(raw)
+    except ValueError as exc:
+        raise ManifestError(str(exc)) from exc
     data = deepcopy(dict(raw))
 
-    def rewrite(container: dict[str, object], key: str) -> None:
+    def rewrite(container: dict[str, object], key: str, *, optional: bool = False) -> None:
         value = container.get(key)
         if value is None:
             return
@@ -181,9 +186,16 @@ def _rewrite_manifest_commands(
             )
         except ManifestError:
             raise
-        except (FileNotFoundError, OSError, TargetUnusableError):
-            if require_targets:
+        except (FileNotFoundError, OSError, TargetUnusableError) as exc:
+            if require_targets and not optional:
                 raise
+            if optional and root is not None:
+                first = cast(Sequence[str], value)[0]
+                candidate = Path(first).expanduser()
+                if not candidate.is_absolute() and ("/" in first or "\\" in first):
+                    container[key] = [str(root / candidate), *cast(Sequence[str], value)[1:]]
+            if optional:
+                container["_preview_error"] = f"Preview command unavailable: {exc}"
         except ValueError as exc:
             # Covers an invalid-path argv head (e.g. an embedded null byte)
             # that `Path()`/`os.path` construction itself rejects before any
@@ -197,8 +209,10 @@ def _rewrite_manifest_commands(
             # and must always propagate unconverted, regardless of
             # `require_targets` (e.g. `_resolve_command`'s own empty-argv
             # check).
-            if require_targets:
+            if require_targets and not optional:
                 raise TargetUnusableError(str(exc)) from exc
+            if optional:
+                container["_preview_error"] = f"Preview command unusable: {exc}"
 
     def rewrite_form(form: object, *, where: str) -> None:
         if not isinstance(form, dict):
@@ -234,6 +248,10 @@ def _rewrite_manifest_commands(
             if collection == "actions" and item.get("kind") in {"internal", "card"}:
                 continue
             rewrite(item, "run")
+            if collection == "actions" and "preview" in item:
+                item.pop("_preview_error", None)
+                item["preview"] = list(_as_argv(item["preview"], where="`actions[].preview`"))
+                rewrite(item, "preview", optional=True)
             if collection == "config_sections":
                 rewrite_form(
                     item.get("configure_action"),

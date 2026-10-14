@@ -128,13 +128,15 @@ timestamp is not proof that the provider metadata was refreshed.
 
 - [x] Add a manual/static adapter that can provide a complete posture without
   network access or another service.
-- [ ] Add a provider API adapter for available personal or organization
+- [x] Add a provider API adapter for available personal or organization
   AI-usage reports, preserving empty, unauthorized, and unsupported results.
+  The personal GitHub report adapter keeps report quantities separate from
+  current entitlement, reset, provider observation time, and session identity.
 - [x] Add a bounded external-command adapter contract for account surfaces or
   organization-specific readers that cannot live in the public plugin.
 - [x] Make adapter order and field authority configurable without allowing
   repository data to override operator-owned credentials or safety policy.
-- [ ] Ensure no adapter failure becomes a zero-consumption success.
+- [x] Ensure no adapter failure becomes a zero-consumption success.
 
 ### Phase 3 - Plugin, status, and context delivery
 
@@ -151,14 +153,14 @@ timestamp is not proof that the provider metadata was refreshed.
 
 ### Phase 4 - Routing composition
 
-- [ ] Let the delegation module in agent-conduct-guidance consume budget posture
+- [x] Let the delegation module in agent-conduct-guidance consume budget posture
   when available without a hard dependency on budget-guidance.
-- [ ] Refine only demonstrated eligible choices; never qualify candidates,
+- [x] Refine only demonstrated eligible choices; never qualify candidates,
   bypass holds, or weaken trial admission.
-- [ ] Preserve explicit operator model/profile choices as authoritative.
-- [ ] Return legible budget-based recommendation, caution, escalation, and
+- [x] Preserve explicit operator model/profile choices as authoritative.
+- [x] Return legible budget-based recommendation, caution, escalation, and
   no-fit reasons without changing direct-versus-delegate decisions.
-- [ ] Keep standalone budget-guidance useful when the delegation module is absent.
+- [x] Keep standalone budget-guidance useful when the delegation module is absent.
 
 ### Phase 5 - Validation, publication, and adoption
 
@@ -220,10 +222,11 @@ timestamp is not proof that the provider metadata was refreshed.
 - [x] The posture contract is provider-neutral and contains no real account,
   allowance, organization, host, or private service.
 - [x] Manual/static configuration works with no network or external service.
-- [ ] Provider and external adapters retain source, capture time, freshness, and
+- [x] Provider and external adapters retain source, capture time, freshness, and
   explicit availability/error status.
-  External-command coverage landed in #6450; provider acquisition remains open.
-- [ ] Missing, stale, unauthorized, empty, or contradictory readings are never
+  External-command coverage landed in #6450; the personal report adapter
+  explicitly leaves provider observation freshness unknown.
+- [x] Missing, stale, unauthorized, empty, or contradictory readings are never
   represented as zero consumption or full remaining allowance.
 - [x] Arithmetic handles partial days, reset boundaries, overspend, and zero
   remaining time deterministically.
@@ -233,9 +236,9 @@ timestamp is not proof that the provider metadata was refreshed.
   resolved posture.
 - [x] Context output stays within its declared budget and carries stable owner
   attribution.
-- [ ] Budget posture cannot qualify an unproven model, clear a hold, arm a
+- [x] Budget posture cannot qualify an unproven model, clear a hold, arm a
   trial, or override an explicit operator choice.
-- [ ] Product correctness, safety, review, publication, and deployment gates
+- [x] Product correctness, safety, review, publication, and deployment gates
   remain unchanged.
 - [x] The plugin has no dependency on a private hostname, service, account, or
   downstream repository.
@@ -265,6 +268,31 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-14 - Optional routing composition merged; acquisition next
+
+- PR #6673 merged as `7a89aece0c207c39b6dff23ffb5206d7a9441c53`
+  after exact-head Copilot approval with zero findings and successful named
+  PR-gate, source-attribution, and workflow-lockdown checks.
+- Closed Phase 4. The delegation resolver optionally consumes bounded,
+  owner-issued advice without importing a budget runtime or recalculating
+  billing arithmetic. The owner bounds advice by field freshness, reset, and
+  a 300-second snapshot age. Explicit choices and trial admission remain
+  authoritative; no advice changes model qualification or blocks launches.
+- Account totals and ordinal model ranks do not establish per-task
+  affordability. The output explicitly leaves that fit unknown and never
+  fabricates a cheaper candidate or worker-count estimate.
+- Full bounded Linux suites passed 65 routing cases and 324 budget cases,
+  with three and eleven explicit platform/tool skips respectively and
+  verified cleanup. Corrected a discovered parity-test prerequisite: comparing
+  Bash and PowerShell requires both interpreters. Native Windows acceptance
+  remains separately transferred to #6644, not credited by these results.
+- Re-read the Plan and Validation Plan after merge. Provider acquisition,
+  independently attributable requesting-account evidence, remaining platform
+  validation, release, and authorized rollout keep the effort Active.
+- Next: resume Phase 2 provider acquisition and its explicit unavailable,
+  unauthorized, empty-report, and freshness semantics. Keep API identity and
+  usage quantity separate from included-credit entitlement and reset authority.
 
 ### 2026-10-14 - Exact-session delivery merged; routing boundary next
 

@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pyarrow as pa
 
+from .source_layout import SourceLayoutError, source_read, source_write
+
 if TYPE_CHECKING:
     from agent_index.chunking.base import Chunk
 
@@ -39,16 +41,22 @@ class VectorTable:
         dim: Embedding dimension for this model.
     """
 
-    def __init__(self, db, *, table_name: str, dim: int = 768) -> None:
+    def __init__(self, db, *, table_name: str, dim: int = 768,
+                 source_domain=None, content_table: str = "chunks") -> None:
         self._db = db
         self._table_name = table_name
         self._dim = dim
         self._table = None
+        self._source_domain = source_domain
+        self._content_table = content_table
         self._schema = pa.schema([
             pa.field("chunk_id", pa.string()),
             pa.field("vector", pa.list_(pa.float32(), dim)),
             pa.field("indexed_at", pa.float64()),
         ])
+        if source_domain is not None:
+            self._schema = self._schema.append(pa.field("source", pa.string()))
+            self._schema = self._schema.append(pa.field("language", pa.string()))
 
     @property
     def dim(self) -> int:
@@ -60,10 +68,14 @@ class VectorTable:
 
     def _get_or_create_table(self):
         if self._table is not None:
+            if self._source_domain is not None:
+                self._table.checkout_latest()
             return self._table
         try:
             self._table = self._db.open_table(self._table_name)
         except Exception:
+            if self._source_domain is not None and not self._source_domain.writing:
+                raise SourceLayoutError("source-aware vector table is not prepared") from None
             self._table = self._db.create_table(
                 self._table_name, schema=self._schema
             )
@@ -72,6 +84,7 @@ class VectorTable:
 
     # -- write ---------------------------------------------------------------
 
+    @source_write
     def upsert(self, chunks: list[Chunk], vectors: np.ndarray) -> int:
         """Insert or update vectors by chunk_id.
 
@@ -94,32 +107,51 @@ class VectorTable:
             }
             for chunk, vec in zip(chunks, vectors, strict=True)
         ]
+        if self._source_domain is not None:
+            from .source_projection import projection_records
+
+            canonical = projection_records(self._db, self._content_table, chunks)
+            for record in records:
+                provenance = canonical[record["chunk_id"]]
+                record.update(source=provenance["source"], language=provenance["language"])
 
         chunk_ids = [c.chunk_id for c in chunks]
+        if self._source_domain is not None:
+            self._source_domain.effect(f"vector-upsert:{self._table_name}")
         try:
             id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
             table.delete(f"chunk_id IN ({id_list})")
         except Exception:
+            if self._source_domain is not None:
+                raise
             pass
 
         table.add(records)
         logger.info("Upserted %d vectors to %s", len(records), self._table_name)
         return len(records)
 
+    @source_write
     def delete_by_chunk_ids(self, chunk_ids: list[str]) -> None:
         """Remove vectors for specific chunk IDs."""
         if not chunk_ids:
             return
         table = self._get_or_create_table()
+        if self._source_domain is not None:
+            self._source_domain.effect(f"vector-delete:{self._table_name}")
         try:
             id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
             table.delete(f"chunk_id IN ({id_list})")
         except Exception:
+            if self._source_domain is not None:
+                raise
             pass
 
+    @source_write
     def delete_stale(self, *, before: float) -> int:
         """Remove vectors not refreshed after *before* timestamp."""
         table = self._get_or_create_table()
+        if self._source_domain is not None:
+            self._source_domain.effect(f"vector-stale:{self._table_name}")
         try:
             initial = table.count_rows()
             table.delete(f"indexed_at < {before}")
@@ -132,10 +164,13 @@ class VectorTable:
                 )
             return removed
         except Exception:
+            if self._source_domain is not None:
+                raise
             return 0
 
     # -- search --------------------------------------------------------------
 
+    @source_read
     def search(
         self,
         vector: np.ndarray,
@@ -177,6 +212,7 @@ class VectorTable:
             for r in results
         ]
 
+    @source_read
     def get_vector(self, chunk_id: str) -> np.ndarray | None:
         """Return the stored embedding for *chunk_id*, or None if absent.
 
@@ -204,6 +240,7 @@ class VectorTable:
             return None
         return arr
 
+    @source_read
     def get_vectors(self, chunk_ids: list[str]) -> dict[str, np.ndarray]:
         """Batch-read stored embeddings for *chunk_ids* present in this table.
 
@@ -237,6 +274,7 @@ class VectorTable:
 
     # -- maintenance ---------------------------------------------------------
 
+    @source_write
     def compact(self, *, older_than_days: int = 2) -> dict[str, int]:
         """Compact fragments and clean up old versions.
 
@@ -262,12 +300,16 @@ class VectorTable:
 
         try:
             cutoff = datetime.timedelta(days=older_than_days)
+            if self._source_domain is not None:
+                self._source_domain.effect(f"vector-compact:{self._table_name}")
             table.optimize(cleanup_older_than=cutoff)
             logger.info(
                 "Optimized table %s (cleanup older than %d days)",
                 self._table_name, older_than_days,
             )
         except Exception:
+            if self._source_domain is not None:
+                raise
             logger.warning(
                 "optimize failed for %s", self._table_name, exc_info=True,
             )
@@ -282,6 +324,7 @@ class VectorTable:
 
     # -- stats ---------------------------------------------------------------
 
+    @source_read
     def count(self) -> int:
         """Number of vectors in this table."""
         table = self._get_or_create_table()

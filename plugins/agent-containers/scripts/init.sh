@@ -8,7 +8,7 @@
 # Run once per machine. Idempotent -- safe to re-run for repairs or upgrades.
 #
 # Usage:
-#   ./init.sh [--force] [--install-dir DIR]
+#   ./init.sh [--force] [--install-dir DIR] [--profile base|provider-exec]
 
 set -euo pipefail
 
@@ -20,18 +20,30 @@ _step() { printf '  ...    %s\n' "$1"; }
 
 FORCE=0
 INSTALL_DIR=""
+PROFILE=""
 # Honor an inherited action: the install-contract:v4 self-stage below re-execs
 # this script with an already-shifted (empty) "$@", so a positional action would
 # be lost across the staging boundary. Carry it through the exec via the env.
 ACTION="${AGENT_CONTAINERS_ACTION:-init}"
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --force) FORCE=1; shift ;;
-        --install-dir) INSTALL_DIR="$2"; shift 2 ;;
-        stamp|provision|init) ACTION="$1"; shift ;;
-        *) shift ;;
-    esac
-done
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) FORCE=1; shift ;;
+            --install-dir) INSTALL_DIR="${2:?--install-dir requires a path}"; shift 2 ;;
+            --profile) PROFILE="${2:?--profile requires base or provider-exec}"; shift 2 ;;
+            stamp|provision|init) ACTION="$1"; shift ;;
+            *) _fail "Unknown installer argument: $1"; exit 2 ;;
+        esac
+    done
+}
+# Resolve caller-relative roots before self-staging changes the working directory.
+parse_arguments "$@"
+case "$PROFILE" in ""|base|provider-exec) ;; *) _fail "Unknown runtime profile: $PROFILE"; exit 2 ;; esac
+case "$INSTALL_DIR" in ""|/*) ;; *) INSTALL_DIR="$PWD/$INSTALL_DIR" ;; esac
+set -- "$ACTION"
+if [[ "$FORCE" == 1 ]]; then set -- "$@" --force; fi
+if [[ -n "$PROFILE" ]]; then set -- "$@" --profile "$PROFILE"; fi
+if [[ -n "$INSTALL_DIR" ]]; then set -- "$@" --install-dir "$INSTALL_DIR"; fi
 export AGENT_CONTAINERS_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -242,97 +254,6 @@ fi
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
-
-_bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
-}
-
-_payload_hash() {
-    # Cheap payload fingerprint for the completion marker (#935): sha256 of
-    # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
-    if [[ -d "$PLUGIN_DIR/libs" ]]; then
-        local __f
-        while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
-        done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
-    fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
-}
-
-_versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
-}
-
-_versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    local ph
-    ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
-}
-# credential-relay dir (vendored): plugin-vendored or repo-root. Force-reinstalled
-# below so a local code change propagates even without a version bump.
-CRED_RELAY_DIR="$PLUGIN_DIR/libs/credential-relay"
-if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
-    CRED_RELAY_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/credential-relay"
-fi
-# config-migrate dir (vendored like credential-relay): plugin-vendored or repo-root.
-CFG_MIGRATE_DIR="$PLUGIN_DIR/libs/config-migrate"
-if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
-    CFG_MIGRATE_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/config-migrate"
-fi
-# zdd dir (uv-editable canonical reference in a dev checkout, real copy in a
-# materialized release payload): plugin-vendored or repo-root.
-ZDD_DIR="$PLUGIN_DIR/libs/zdd"
-if [[ ! -f "$ZDD_DIR/pyproject.toml" ]]; then
-    ZDD_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/zdd"
-fi
-# venue-copilot dir (uv-editable canonical reference in a dev checkout, real
-# copy in a materialized release payload): plugin-vendored or repo-root.
-VENUE_COPILOT_DIR="$PLUGIN_DIR/libs/venue-copilot"
-if [[ ! -f "$VENUE_COPILOT_DIR/pyproject.toml" ]]; then
-    VENUE_COPILOT_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/venue-copilot"
-fi
-# session-liveness-probe dir (uv-editable canonical reference in a dev
-# checkout, real copy in a materialized release payload): plugin-vendored or
-# repo-root.
-SESSION_LIVENESS_PROBE_DIR="$PLUGIN_DIR/libs/session-liveness-probe"
-if [[ ! -f "$SESSION_LIVENESS_PROBE_DIR/pyproject.toml" ]]; then
-    SESSION_LIVENESS_PROBE_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/session-liveness-probe"
-fi
 
 # --- self-provisioning (runtime-self-provisioning pattern) -------------------
 # Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
@@ -556,6 +477,10 @@ trap '_exit_install_lock; exit 143' TERM
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
+    if [[ -n "$PROFILE" ]]; then
+        _fail 'Select a runtime profile with provision, not stamp'
+        exit 2
+    fi
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
@@ -602,155 +527,19 @@ if _ensure_uv; then HAVE_UV=1; fi
 mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
 
-# -- 2. Venv -----------------------------------------------------------
-if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
-    if [[ "$HAVE_UV" -eq 1 ]]; then
-        _step 'Creating venv via uv...'
-        _versioned_slot_clean
-        uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 || {
-            _step 'uv venv failed -- falling back to python -m venv'
-            "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
-        }
-    else
-        _step 'Creating venv via python -m venv...'
-        "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
-    fi
-    if [[ ! -x "$VENV_PYTHON" ]]; then
-        _fail "Venv creation failed -- $VENV_PYTHON not found"
-        exit 1
-    fi
-    _ok 'Venv created'
-else
-    _skip 'Venv already exists'
-fi
-
-# -- 3. Install the package into the venv ------------------------------
-PACKAGE_STATUS=0
-PACKAGE_TAIL=''
-run_bounded_package_command() {
-    local log_path
-    log_path=$(mktemp -t agent-containers-install.XXXXXX) || {
-        PACKAGE_STATUS=1
-        PACKAGE_TAIL='could not create a temporary package-manager log'
-        return 0
-    }
-    PACKAGE_STATUS=0
-    "$@" >"$log_path" 2>&1 || PACKAGE_STATUS=$?
-    PACKAGE_TAIL=''
-    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-        PACKAGE_TAIL=$(tail -n 40 "$log_path" | sed -E \
-            -e 's#(https?://)[^/@[:space:]]+@#\1***@#Ig' \
-            -e 's#((token|password|secret)=)[^&[:space:]]+#\1***#Ig')
-    fi
-    rm -f -- "$log_path"
-    return 0
-}
-
-print_package_diagnostics() {
-    if [[ -n "$PACKAGE_TAIL" ]]; then
-        while IFS= read -r line; do
-            _warn "package-manager: $line"
-        done <<< "$PACKAGE_TAIL"
-    fi
-}
-
-if [[ "$HAVE_UV" -eq 1 ]]; then
-    # credential-relay/config-migrate/zdd/venue-copilot/session-liveness-probe
-    # first (workspace path deps), force-reinstalled so local code changes
-    # propagate even without a version bump; then agent-containers.
-    if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
-        _fail "credential-relay source not found at $CRED_RELAY_DIR"
-        exit 1
-    fi
-    run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-credential-relay "$CRED_RELAY_DIR" --quiet
-    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-        _fail 'credential-relay install failed'
-        print_package_diagnostics
-        exit 1
-    fi
-    if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
-        _fail "config-migrate source not found at $CFG_MIGRATE_DIR"
-        exit 1
-    fi
-    run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-config-migrate "$CFG_MIGRATE_DIR" --quiet
-    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-        _fail 'config-migrate install failed'
-        print_package_diagnostics
-        exit 1
-    fi
-    if [[ ! -f "$ZDD_DIR/pyproject.toml" ]]; then
-        _fail "zdd source not found at $ZDD_DIR"
-        exit 1
-    fi
-    run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-zdd "$ZDD_DIR" --quiet
-    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-        _fail 'zdd install failed'
-        print_package_diagnostics
-        exit 1
-    fi
-    if [[ ! -f "$VENUE_COPILOT_DIR/pyproject.toml" ]]; then
-        _fail "venue-copilot source not found at $VENUE_COPILOT_DIR"
-        exit 1
-    fi
-    run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-venue-copilot "$VENUE_COPILOT_DIR" --quiet
-    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-        _fail 'venue-copilot install failed'
-        print_package_diagnostics
-        exit 1
-    fi
-    if [[ ! -f "$SESSION_LIVENESS_PROBE_DIR/pyproject.toml" ]]; then
-        _fail "session-liveness-probe source not found at $SESSION_LIVENESS_PROBE_DIR"
-        exit 1
-    fi
-    run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-session-liveness-probe "$SESSION_LIVENESS_PROBE_DIR" --quiet
-    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-        _fail 'session-liveness-probe install failed'
-        print_package_diagnostics
-        exit 1
-    fi
-    run_bounded_package_command uv pip install --python "$VENV_PYTHON" "${PLUGIN_DIR}[provider-exec]" --quiet
-    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-        _warn 'Could not install the optional provider-exec SSH transport; falling back to the base package'
-        print_package_diagnostics
-        run_bounded_package_command uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet
-    fi
-else
-    run_bounded_package_command "$VENV_PYTHON" -m pip install --quiet "${PLUGIN_DIR}[provider-exec]"
-    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-        _warn 'Could not install the optional provider-exec SSH transport; falling back to the base package'
-        print_package_diagnostics
-        run_bounded_package_command "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR"
-    fi
-fi
-if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
-    _fail 'Failed to install agent-containers package into venv'
-    print_package_diagnostics
+# -- 2. Provision the selected immutable profile (uv pip install or pip) --
+profile_args=(
+    "$SCRIPT_DIR/runtime_profile.py" --root "$INSTALL_DIR"
+    --payload "$PLUGIN_DIR" --python "$PYTHON_CMD" --tsv
+)
+if [[ "$HAVE_UV" -eq 1 ]]; then profile_args+=(--uv "$(command -v uv)"); fi
+if [[ -n "$PROFILE" ]]; then profile_args+=(--profile "$PROFILE"); fi
+if ! profile_result="$("$PYTHON_CMD" "${profile_args[@]}")"; then
+    _fail 'Failed to provision the selected agent-containers runtime profile'
     exit 1
 fi
-_ok 'Package installed: agent-containers'
-
-# === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
-if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
-    # Point the stable .venv link at this version's freshly-built slot, moving a
-    # legacy real .venv aside on the first migration. Run via the slot's own
-    # python (stdlib-only helper); a CLI plugin has no daemon holding the link.
-    VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"
-    # Health-gate (#935): never swap the stable .venv link onto a slot whose
-    # package does not import -- a broken build must not become the live runtime.
-    # The marker is written only after this gate passes (so "marked" == healthy).
-    if ! "$VENV_PYTHON" -c 'import agent_containers' 2>/dev/null; then
-        _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
-        exit 1
-    fi
-    _versioned_mark_complete
-    if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
-            activate "$SRC_VERSION" --replace-nonlink --no-link >/dev/null 2>&1; then
-        _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
-        exit 1
-    fi
-    _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
-fi
-# === end install-contract:v3 versioned-venv activate ===
+IFS=$'\t' read -r RUNTIME_PROFILE RUNTIME_VERSION VENV_DIR VENV_PYTHON <<< "$profile_result"
+_ok "Runtime profile: $RUNTIME_PROFILE ($RUNTIME_VERSION)"
 
 # -- 4. Binstub --------------------------------------------------------
 deploy_binstub
@@ -809,6 +598,8 @@ cat > "$TMP" << EOF
     "dirty": $DIRTY
   },
   "venv": "$VENV_DIR",
+  "runtime_version": "$RUNTIME_VERSION",
+  "runtime_profile": "$RUNTIME_PROFILE",
   "runtime": "python"
 }
 EOF

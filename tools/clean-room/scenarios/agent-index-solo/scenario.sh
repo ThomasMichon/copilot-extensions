@@ -132,7 +132,7 @@ grep -q "::agent-provisioning::" "$CR_LOGDIR/setup-host.log" ||
     _stop index-config "first-use setup did not reach the runtime provisioning gate"
 _check runtime-ready "real completed venv imports from its slot and reports the released CLI version" runtime "$CELL_ROOT" "$VERSION"
 
-phase 5 "stock PATH payload command, service health and MCP read surfaces"
+phase 5 "stock PATH payload command, service health and optional MCP refusal"
 _run stock-path bash -lc 'printf "%s\n" "$PATH"; command -v python3; test -x "$1"; "$1" --version' _ "$PAYLOAD_CMD"
 _check cli-version-check "payload-local command works on unmodified login-shell PATH" version "$CR_LOGDIR/stock-path.log" "$VERSION"
 _run read-status "$PAYLOAD_CMD" status
@@ -141,7 +141,7 @@ _run read-role "$PAYLOAD_CMD" role --json
 _check read-role-check "installed role remains host" role "$CR_LOGDIR/read-role.log" host
 _check service-health "one live installation-owned service answers real /health and /status" health "$CELL_ROOT" "$MARKETPLACE_ID" "$VERSION"
 RUNTIME_PY="$(python3 "$WITNESS" interpreter "$CELL_ROOT")" || _stop path-binstub "no selected runtime interpreter"
-_check mcp-tools "direct MCP registers the five documented tools without a model build" mcp "$RUNTIME_PY"
+_check mcp-tools "managed host omits optional MCP SDK and refuses stdio without installing it" mcp "$RUNTIME_PY"
 # A completed role-specific slot is not authority to adopt a different/no role.
 mv "$CELL_ROOT/config/config.yaml" "$CELL_ROOT/config/config.yaml.saved"
 mv "$REPO/.copilot-extensions/agent-index/config.yaml" "$REPO/.copilot-extensions/agent-index/config.yaml.saved"

@@ -6,7 +6,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +22,123 @@ from test_command_binding import (
 
 def _lifecycle(fixture: dict):
     return _load(ROOT / "libs/payload-invocation/command_lifecycle.py", "lifecycle_reference")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows strict containment")
+@pytest.mark.parametrize("parent_exits", [False, True])
+def test_command_binding_deadline_stops_tree_before_releasing_admission(
+    binding_fixture: dict, parent_exits: bool,
+) -> None:
+    helper = binding_fixture["payload"] / "libs/agent-procutil/src/agent_procutil/__init__.py"
+    helper.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "libs/agent-procutil/src/agent_procutil/__init__.py", helper)
+    lifecycle = binding_fixture["binding"]._load_lifecycle()
+    marker = binding_fixture["home"] / "child.json"
+    worker = (
+        "import json,os,time; from pathlib import Path; "
+        f"p=Path({str(marker)!r}); "
+        "p.write_text(json.dumps({'pid':os.getpid()})); "
+        "time.sleep(30); p.write_text('escaped mutation')"
+    )
+    parent = (
+        "import subprocess,sys,time; from pathlib import Path; "
+        f"subprocess.Popen([sys.executable,'-c',{worker!r}]); "
+        f"marker=Path({str(marker)!r})\n"
+        "while not marker.exists(): time.sleep(0.01)\n"
+        + ("" if parent_exits else "time.sleep(30)")
+    )
+    result = lifecycle.run_lifecycle(
+        binding_fixture["binding"], binding_fixture["primitive"],
+        [sys.executable, "-c", parent], deferred_runtime=True, timeout=3,
+        **binding_fixture["arguments"],
+    )
+    assert result == (0 if parent_exits else 124)
+    pid = json.loads(marker.read_text())["pid"]
+    assert not binding_fixture["primitive"]._pid_is_live(pid)
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+    with lifecycle.legacy_lifecycle(
+        binding_fixture["binding"], binding_fixture["primitive"], reserve=False,
+        **binding_fixture["arguments"],
+    ) as lease:
+        lease.assert_owned()
+    time.sleep(0.1)
+    assert json.loads(marker.read_text())["pid"] == pid
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+def test_command_binding_invalid_deadline_never_acquires_admission(
+    binding_fixture: dict, timeout: float,
+) -> None:
+    lifecycle = binding_fixture["binding"]._load_lifecycle()
+    with pytest.raises(ValueError, match="finite and positive"):
+        lifecycle.run_lifecycle(
+            binding_fixture["binding"], binding_fixture["primitive"],
+            [sys.executable, "-c", "raise AssertionError('not admitted')"],
+            timeout=timeout, **binding_fixture["arguments"],
+        )
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+
+
+def test_command_binding_posix_deadline_refuses_before_admission_or_spawn(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = binding_fixture["binding"]._load_lifecycle()
+    before = _snapshot(binding_fixture["home"])
+    monkeypatch.setattr(lifecycle, "os", SimpleNamespace(name="posix"))
+
+    def not_spawned(*args, **kwargs):
+        pytest.fail("Unsupported bounded lifecycle spawned a child")
+
+    monkeypatch.setattr(lifecycle.subprocess, "Popen", not_spawned)
+    with pytest.raises(ValueError, match="Windows Job containment"):
+        lifecycle.run_lifecycle(
+            binding_fixture["binding"], binding_fixture["primitive"],
+            [sys.executable, "-c", "pass"], timeout=1,
+            **binding_fixture["arguments"],
+        )
+    assert _snapshot(binding_fixture["home"]) == before
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows strict containment")
+@pytest.mark.parametrize("expired", [False, True])
+def test_command_binding_unverified_job_cleanup_preserves_durable_lock(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, expired: bool,
+) -> None:
+    lifecycle = binding_fixture["binding"]._load_lifecycle()
+    calls = []
+
+    def wait(timeout=None):
+        if timeout is not None and expired:
+            raise subprocess.TimeoutExpired("fixture", timeout)
+        return 0
+
+    def terminate(timeout):
+        calls.append(("terminate", timeout))
+        raise RuntimeError("Job emptiness could not be verified")
+
+    child = SimpleNamespace(wait=wait)
+    job = SimpleNamespace(
+        terminate_and_wait=terminate, close=lambda: calls.append(("close",)),
+    )
+
+    def spawn(command, **kwargs):
+        assert kwargs["require_job"] is True
+        assert kwargs["allow_breakaway"] is False
+        return child, job
+
+    monkeypatch.setattr(
+        lifecycle, "_procutil",
+        lambda root: SimpleNamespace(spawn_sync_in_kill_on_close_job=spawn),
+    )
+    with pytest.raises(RuntimeError, match="emptiness"):
+        lifecycle.run_lifecycle(
+            binding_fixture["binding"], binding_fixture["primitive"],
+            [sys.executable, "-c", "pass"], deferred_runtime=True, timeout=1,
+            **binding_fixture["arguments"],
+        )
+    assert _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+    assert calls == [("terminate", 2), ("close",)]
 
 
 def test_command_binding_pending_failure_keeps_owner_and_never_selects(binding_fixture: dict) -> None:
@@ -353,12 +472,12 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
     dispatch = "switch ($Action) {\n    'provision' {" + source.split(
         "    'provision' {", 1
     )[1].split("    'install' {", 1)[0] + "}\n"
-    stamp = "function Invoke-Stamp {" + source.split(
-        "function Invoke-Stamp {", 1
+    stamp = "function Copy-StampDirectory {" + source.split(
+        "function Copy-StampDirectory {", 1
     )[1].split("if (-not $ContextualInstall -and $Action -in", 1)[0]
     dispatch = dispatch.replace("switch ($Action) {", "switch ($Action) {\n'stamp' { Invoke-Stamp }")
     program = (
-        "param([string]$Action='provision')\n$ErrorActionPreference='Stop'\n"
+        "param([string]$Action='provision',[string]$BootstrapPython='')\n$ErrorActionPreference='Stop'\n"
         "$ContextualInstall=$false\n$PluginDir=Split-Path -Parent $PSScriptRoot\n"
         "$InstallDir=$env:TEST_RUNTIME\n$BinDir=Join-Path $InstallDir 'bin'\n"
         "$LocalBin=Join-Path $InstallDir 'local-bin'\n"
@@ -586,6 +705,47 @@ def test_command_binding_native_stamp_defers_without_stuck_reservation(
     else:
         assert "commandLifecycle" not in manifest
     assert not _lifecycle_lock_path(runtime).exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows first-touch interpreter forwarding")
+def test_command_binding_bootstrap_preserves_off_path_spaced_interpreter_through_stage(
+    binding_fixture: dict,
+) -> None:
+    _prepare_catalog(binding_fixture)
+    payload = binding_fixture["payload"]
+    scripts = payload / "scripts"
+    for name in ("install.ps1", "bootstrap-check.ps1", "bootstrap-killswitch-guard.ps1"):
+        shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/{name}", scripts / name)
+    _write(payload / "plugin.json", {"name": PLUGIN_ID})
+    python_root = binding_fixture["home"] / "Python with spaces"
+    python_root.mkdir()
+    python = python_root / "python.exe"
+    shutil.copyfile(sys.executable, python)
+    (python_root / "pyvenv.cfg").write_text(
+        f"home = {sys.base_prefix}\ninclude-system-site-packages = false\n",
+        encoding="utf-8",
+    )
+    environment = {
+        **_catalog_environment(binding_fixture),
+        "PATH": str(Path(os.environ["SystemRoot"]) / "System32"),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(binding_fixture["home"] / "absent.json"),
+        "COPILOT_PLUGIN_INSTALL_SMOKE": "1", "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "0",
+    }
+    completed = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(scripts / "bootstrap-check.ps1"),
+         "-BootstrapPython", str(python)],
+        env=environment, cwd=binding_fixture["home"], capture_output=True,
+        text=True, encoding="utf-8", timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout) == {}
+    assert "Bootstrap stamp failed" not in completed.stderr
+    smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text())
+    assert smoke["staged"] is True
+    assert Path(smoke["staged_from"]) == payload
+    assert ".install-stage" in smoke["ran_from"]
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
 
 
 @pytest.mark.parametrize("shell", [

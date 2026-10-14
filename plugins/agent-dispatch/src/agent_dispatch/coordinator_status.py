@@ -67,6 +67,7 @@ def register_status_routes(
         loop_health: dict[str, LoopHealth] = getattr(
             request.app.state, "loop_health", {}
         )
+        runner = getattr(request.app.state, "federation_runner", None)
         return {
             "status": "draining" if gate.draining else "ok",
             "version": __version__,
@@ -84,6 +85,8 @@ def register_status_routes(
             # enough (a daemon that doesn't advertise this never receives the
             # request parameter either -- see client.py's stream_events()).
             "events_ready_frame": True,
+            "events_keepalive_seconds": 10.0,
+            "assignment_intake": runner.assignment_status() if runner is not None else None,
             # Advertises that /tasks/{id}/steer recognizes and dedups a
             # repeated idempotency_key, so a client only retries an ambiguous
             # (connected-but-the-response-timed-out) submission once it has
@@ -104,7 +107,7 @@ def register_status_routes(
             # therefore never receives this frame from any daemon, old or
             # new -- see the design doc's version-skew rationale.
             frame = {"type": "ready"} if ready_frame else None
-            async for event in bus.subscribe(ready_frame=frame):
-                yield sse_format(event)
+            async for event in bus.subscribe(ready_frame=frame, keepalive=10.0):
+                yield ": keepalive\n\n" if event.get("type") == "keepalive" else sse_format(event)
 
         return StreamingResponse(gen(), media_type="text/event-stream")

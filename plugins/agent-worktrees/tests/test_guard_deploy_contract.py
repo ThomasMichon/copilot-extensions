@@ -74,6 +74,7 @@ def test_all_installers_deploy_every_py_hook():
         "pr_supersede_guard.py",
         "nudge_status.py",
         "bind_nudge.py",
+        "hook_runtime.py",
         "terminal_probe.py",
     }
     installers = {
@@ -89,6 +90,10 @@ def test_all_installers_deploy_every_py_hook():
         if text.find("anchor_shell_parser.py") > text.find("anchor_write_guard.py"):
             missing.append(
                 f"{name} deploys anchor_shell_parser.py after its importer"
+            )
+        if text.find("hook_runtime.py") > text.find("hook_client.py"):
+            missing.append(
+                f"{name} deploys hook_runtime.py after its importer"
             )
     assert not missing, (
         "python hook(s) wired in hooks.json but not deployed by an "

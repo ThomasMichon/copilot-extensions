@@ -161,6 +161,14 @@ creating another worker accidentally.
 
 ## Troubleshooting and compact terminals
 
+On Windows, generated plugin commands run through their matching PowerShell
+entry point without a batch-file hop, preserving declaration JSON, multiline
+values, and empty arguments. These forms require **PowerShell 7 (`pwsh`)** on
+PATH. Without it, simple legacy commands remain available, but a form requiring
+literal argument preservation reports an explicit error rather than saving
+corrupted values. A missing, unreadable, or mismatched generated launcher also
+reports a command failure; repair the plugin installation before retrying.
+
 ![Workers discovery error with a scoped provider failure and retry path](assets/configuration-workbench/error.png)
 
 *Read the explicit failure, repair the provider, and refresh/retry. Switching
