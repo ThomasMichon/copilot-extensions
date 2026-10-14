@@ -1,5 +1,5 @@
 {
-  "comment": "Add spawn_daemon, the shared resident-daemon launch primitive: windowless, escapes the caller's Job or session, explicit cwd and log file",
+  "comment": "Add spawn_daemon, the shared resident-daemon launch primitive: windowless, escapes the caller's Job or session, explicit cwd and an owner-only (0600 on POSIX) log file",
   "changes": [
     {
       "plugin": "agent-bridge",

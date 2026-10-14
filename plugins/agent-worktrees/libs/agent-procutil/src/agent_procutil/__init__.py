@@ -56,7 +56,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, BinaryIO
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
 # and fall back to the stable ABI literals so this module imports cleanly off
@@ -797,6 +797,38 @@ def _breakaway_denied(exc: OSError, kwargs: dict) -> bool:
     )
 
 
+_DAEMON_LOG_MODE = 0o600
+_DAEMON_LOG_DIR_MODE = 0o700
+
+
+def _open_daemon_log(log_file: str) -> BinaryIO:
+    """Open the daemon log for binary append, private to its owner on POSIX.
+
+    The log receives the daemon's raw stdout/stderr, which may include
+    credential-bearing errors. On POSIX a new log is created ``0600`` (and a
+    missing parent directory ``0700``); an existing log readable by group or
+    others is tightened to ``0600`` before any child can write to it, failing
+    closed if that is not permitted. Pre-existing parent directories are left
+    alone. Windows has no POSIX modes: the log keeps the ACL it inherits.
+    """
+    os.makedirs(os.path.dirname(log_file), mode=_DAEMON_LOG_DIR_MODE, exist_ok=True)
+
+    def opener(path: str, flags: int) -> int:
+        # O_BINARY keeps the Windows CRT from translating newlines on this fd.
+        return os.open(path, flags | getattr(os, "O_BINARY", 0), _DAEMON_LOG_MODE)
+
+    log_fh = open(log_file, "ab", opener=opener)
+    if os.name == "posix":
+        try:
+            fd = log_fh.fileno()
+            if os.fstat(fd).st_mode & 0o077:
+                os.fchmod(fd, _DAEMON_LOG_MODE)
+        except BaseException:
+            log_fh.close()
+            raise
+    return log_fh
+
+
 def _daemon_log_header(stamp: str, cwd: str, executable: str, display: str | None) -> bytes:
     """The durable launch header: never the argv tail or the environment."""
     header = f"{stamp} spawn_daemon cwd={cwd} executable={executable}"
@@ -851,7 +883,10 @@ def spawn_daemon(
       ``log_path`` (must be absolute and, like ``cwd``, outside a plugin
       payload, since the daemon holds it open; parent directories are
       created), after a one-line launch
-      header. The parent closes its copy of the log handle before returning.
+      header. On POSIX the log is private to its owner: created ``0600``
+      (a created parent directory ``0700``), and an existing log readable by
+      group or others is tightened to ``0600`` before the child starts.
+      The parent closes its copy of the log handle before returning.
       The header names the cwd and the executable (``argv[0]``) only, plus
       ``display`` when given: the remaining argv and the environment are never
       written, since either may carry a token, password or credential URL. A
@@ -873,7 +908,6 @@ def spawn_daemon(
     extra_creationflags = _validated_extra_creationflags(extra_creationflags)
     cwd_path = _validated_daemon_cwd(cwd)
     log_file = _validated_daemon_log_path(log_path)
-    os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
     child_env = dict(os.environ if env is None else env)
     if env_overrides:
@@ -883,7 +917,7 @@ def spawn_daemon(
         breakaway=breakaway,
         extra_creationflags=extra_creationflags,
     )
-    with open(log_file, "ab") as log_fh:
+    with _open_daemon_log(log_file) as log_fh:
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         log_fh.write(_daemon_log_header(stamp, cwd_path, command[0], display))
         log_fh.flush()
