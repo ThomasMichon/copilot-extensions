@@ -348,6 +348,14 @@ recorded against each open fork._
   slice does not claim that clean-room enrollment gate. A live fleet/provider
   execution is not exercised by a client-only slice; it remains a required
   campaign gate rather than being treated as satisfied by a generic image.
+- Review/CI corrections: the first complete CI run found one old TLS test
+  patching the factory's former module. Its patch now follows the extraction
+  and still asserts actual HTTP/HTTPS verification arguments. Review also
+  caught URL userinfo injecting Basic auth into direct Python scoped clients;
+  shared endpoint validation now rejects it before constructing a transport.
+  Missing/unreadable completion-result files report local validation errors
+  without sending a request. The corrected native selection passes 56,
+  including all worker contracts and the existing TLS regression.
 
 ### 2026-10-14 -- Phase 2 merged; restricted-worker delivery next
 - PR #6698 squash-merged as `5e2f85636cc9d3e0f47965e71ccf0c041d27faf2`

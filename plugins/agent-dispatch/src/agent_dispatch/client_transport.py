@@ -8,8 +8,23 @@ from __future__ import annotations
 
 import os
 import time
+from urllib.parse import urlsplit
 
 import httpx
+
+
+def validate_task_url(base_url: str) -> None:
+    try:
+        parsed = urlsplit(base_url)
+        valid = (
+            parsed.scheme in {"http", "https"} and parsed.hostname and parsed.port != 0
+            and parsed.username is None and parsed.password is None
+            and not parsed.query and not parsed.fragment
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError("task authority requires a pinned HTTP coordinator without credentials")
 
 
 def make_http_client(
@@ -22,6 +37,7 @@ def make_http_client(
     if task_token is not None:
         if not task_token or token is not None or control_token is not None or tunnel is not None:
             raise ValueError("task credentials require an exclusive pinned HTTP client")
+        validate_task_url(base_url)
         from .task_scope import TASK_SCOPE_HEADER
 
         headers = {TASK_SCOPE_HEADER: task_token}

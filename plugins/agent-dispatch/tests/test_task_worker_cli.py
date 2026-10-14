@@ -194,6 +194,28 @@ def test_task_worker_client_cannot_mix_credentials(extra):
         DispatchClient("http://coordinator.test", task_token="grant", **extra)
 
 
+@pytest.mark.parametrize("url", [
+    "http://user:password@coordinator.test", "http://@coordinator.test",
+    "https://user@coordinator.test", "http://coordinator.test?credential=x",
+    "ftp://coordinator.test", "http://coordinator.test:bad",
+])
+def test_task_worker_python_client_rejects_endpoint_credentials(url):
+    with pytest.raises(ValueError, match="pinned HTTP coordinator"):
+        DispatchClient(url, task_token="grant")
+
+
+def test_task_worker_invalid_result_file_is_local_failure(worker, tmp_path, capsys):
+    task_id, queue, requests = worker
+    assert cli.main([
+        "complete", task_id, "--result-file", str(tmp_path / "missing.json"),
+    ]) == 1
+    stderr = capsys.readouterr().err
+    assert "invalid result" in stderr
+    assert "cannot reach coordinator" not in stderr
+    assert not requests
+    assert queue.get(task_id).status == "started"
+
+
 def test_task_worker_transport_preserves_ordinary_bearer():
     scheme = "Bear" + "er "
     with DispatchClient("http://coordinator.test", token="fake-fleet") as client:

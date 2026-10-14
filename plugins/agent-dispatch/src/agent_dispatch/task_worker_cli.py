@@ -6,9 +6,9 @@ import argparse
 import os
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
 
 from .client import DispatchClient, DispatchError
+from .client_transport import validate_task_url
 from .loop_commands import _resolve_cli_module
 
 _FIELDS = {
@@ -63,16 +63,9 @@ def task_worker(args: argparse.Namespace) -> TaskWorker | None:
         raise DispatchError(403, "task authority cannot be combined with fleet credentials")
     url = values["task_url"]
     try:
-        parsed = urlsplit(url)
-        valid = (
-            parsed.scheme in {"http", "https"} and parsed.hostname and parsed.port != 0
-            and parsed.username is None and parsed.password is None
-            and not parsed.query and not parsed.fragment
-        )
-    except ValueError:
-        valid = False
-    if not valid:
-        raise DispatchError(403, "task-worker projection requires a pinned HTTP coordinator")
+        validate_task_url(url)
+    except ValueError as exc:
+        raise DispatchError(403, str(exc)) from exc
     if getattr(args, "url", None) not in (None, url):
         raise DispatchError(403, "task authority cannot override its pinned coordinator")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", values["task_scope_id"]):
@@ -95,7 +88,7 @@ def run_task_worker(args: argparse.Namespace, worker: TaskWorker) -> int:
     if args.command == "complete":
         try:
             result = core._read_result(args)
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             raise DispatchError(400, f"invalid result: {exc}") from exc
     if args.command == "abandon" and not args.permit:
         raise DispatchError(403, "task abandonment requires --permit")
