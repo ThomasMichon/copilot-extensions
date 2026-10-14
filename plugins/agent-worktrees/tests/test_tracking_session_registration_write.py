@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -177,13 +178,14 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     tmp_path: Path, monkeypatch,
 ):
     """Registration skips full project policy while preserving its authority."""
-    from agent_worktrees import repos as repos_mod
+    from agent_worktrees import git_ops, repos as repos_mod
 
     harness = tmp_path / "harness"
     knowledge = tmp_path / "knowledge"
+    (harness / ".git").mkdir(parents=True)
     cfg.inrepo_config_path(harness).parent.mkdir(parents=True)
     cfg.inrepo_config_path(harness).write_text(
-        "stateless: true\nrequires_external_state_root: true\n",
+        "stateless: false\nrequires_external_state_root: false\n",
         encoding="utf-8",
     )
     (knowledge / ".agent-worktrees").mkdir(parents=True)
@@ -202,6 +204,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
             name: repos_mod.RepoEntry(
                 name=name,
                 repo_class="worktree",
+                default_branch="main",
                 paths={
                     "windows": str(anchor),
                     "wsl": str(anchor),
@@ -215,6 +218,22 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         }
     )
     monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+    committed_path = cfg.inrepo_config_path(Path()).as_posix()
+    timeouts = []
+
+    def committed_config(*args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        if args[0] == "ls-tree":
+            return SimpleNamespace(returncode=0, stdout=f"{committed_path}\n")
+        if args[0] == "show":
+            return SimpleNamespace(
+                returncode=0,
+                stdout="stateless: true\nrequires_external_state_root: true\n",
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(git_ops, "git", committed_config)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     project_root = tmp_path / ".harness"
     project_root.mkdir()
     (project_root / "config.yaml").write_text(
@@ -272,6 +291,10 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     elapsed = time.monotonic() - started
     assert accepted == {"ok": True, "linked_handoff": None}
     assert elapsed < 1.0
+    assert timeouts == [
+        config_authority._GIT_PROBE_TIMEOUT_S,
+        config_authority._GIT_PROBE_TIMEOUT_S,
+    ]
     assert tracking.load_record(local_path).session_entry("sess-local") is not None
 
     before = foreign_path.read_bytes()
@@ -284,6 +307,51 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     )
     assert rejected["error"] == "execution_space"
     assert foreign_path.read_bytes() == before
+
+
+def test_registration_authority_fails_closed_when_committed_config_is_unreadable(
+    tmp_path: Path, monkeypatch,
+):
+    from agent_worktrees import git_ops, repos
+    from agent_worktrees.execution_spaces import ExecutionSpaceError
+
+    anchor = tmp_path / "harness"
+    (anchor / ".git").mkdir(parents=True)
+    registry = repos.ReposRegistry(
+        repos={
+            "harness": repos.RepoEntry(
+                name="harness",
+                repo_class="worktree",
+                default_branch="main",
+                paths={
+                    "windows": str(anchor),
+                    "wsl": str(anchor),
+                    "linux": str(anchor),
+                },
+            )
+        }
+    )
+    monkeypatch.setattr(repos, "read_registry", lambda: registry)
+    project_root = tmp_path / ".harness"
+    project_root.mkdir()
+    (project_root / "config.yaml").write_text(
+        "machine: workstation-windows\nplatform: windows\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_root)
+    monkeypatch.setattr(
+        cfg, "global_config_path", lambda: tmp_path / "missing-global.yaml",
+    )
+    monkeypatch.setattr(
+        git_ops,
+        "git",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=""),
+    )
+
+    with pytest.raises(ExecutionSpaceError, match="cannot read committed authority"):
+        config_authority.require_registration_record_mutation(
+            SimpleNamespace(repo="harness"),
+        )
 
 
 def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkeypatch_config):

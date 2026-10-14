@@ -4,6 +4,51 @@ from __future__ import annotations
 
 from pathlib import Path
 
+_GIT_PROBE_TIMEOUT_S = 0.4
+
+
+def _load_state_root_authority(name: str, anchor: str) -> dict:
+    """Read only state-root gates from the registered committed config."""
+    from . import config as cfg, git_ops, repos
+
+    root = Path(anchor)
+    candidates = (
+        cfg.inrepo_config_path(Path()),
+        cfg.legacy_inrepo_config_path(Path()),
+        Path(cfg.INREPO_CONFIG_FILENAME),
+    )
+    entry = repos.read_registry().repos.get(name)
+    branch = entry.default_branch if entry is not None else ""
+    if not branch:
+        raise ValueError(
+            f"registered default branch is required for project {name!r}"
+        )
+    ref = f"origin/{branch}"
+    listing = git_ops.git(
+        "ls-tree", "-r", "--name-only", ref, "--",
+        *(candidate.as_posix() for candidate in candidates),
+        cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
+    )
+    if listing.returncode != 0:
+        raise ValueError(f"cannot read committed authority config for {name!r}")
+    available = set(listing.stdout.splitlines())
+    selected = next(
+        (candidate for candidate in candidates if candidate.as_posix() in available),
+        None,
+    )
+    if selected is None:
+        return {}
+    content = git_ops.git(
+        "show", f"{ref}:{selected.as_posix()}",
+        cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
+    )
+    if content.returncode != 0:
+        raise ValueError(f"cannot read committed authority config for {name!r}")
+    raw = cfg.yaml.safe_load(content.stdout)
+    if not isinstance(raw, dict):
+        raise ValueError(f"committed authority config for {name!r} is malformed")
+    return raw
+
 
 def load_project_authority_config(
     name: str, *, path: Path | None = None,
@@ -52,15 +97,7 @@ def load_project_authority_config(
             f"{path} or the repos registry"
         )
 
-    inrepo_authority = {}
-    for candidate in (
-        cfg.inrepo_config_path(Path(anchor)),
-        cfg.legacy_inrepo_config_path(Path(anchor)),
-        Path(anchor) / cfg.INREPO_CONFIG_FILENAME,
-    ):
-        if candidate.exists():
-            inrepo_authority = cfg._load_yaml_safe(candidate)
-            break
+    inrepo_authority = _load_state_root_authority(name, str(anchor))
     stateless = bool(
         machine_repo.get("stateless", inrepo_authority.get("stateless", False))
     )
