@@ -206,6 +206,65 @@ def test_default_context_in_memory_tls_uses_default_files(fixture: tuple, verify
         assert call["tls_files"] == {"ca.pem": str(certs / "ca.pem"), "cert.pem": "", "key.pem": ""}
 
 
+@pytest.mark.parametrize("context", [None, "default"])
+def test_tls_home_fallback_uses_supplied_environment_not_ambient(fixture: tuple, monkeypatch, context: str | None) -> None:
+    client, path, state = fixture
+    isolated = path.parent / "isolated home"
+    ambient = path.parent / "ambient home"
+    for home in (isolated, ambient):
+        certs = home / ".docker"
+        certs.mkdir(parents=True)
+        (certs / "ca.pem").write_text("fixture CA", encoding="utf-8")
+    for name in ("cert.pem", "key.pem"):
+        (ambient / ".docker" / name).write_text("unrelated fixture identity", encoding="utf-8")
+    state["context"] = {
+        "Name": "default", "Endpoints": {"docker": {"Host": "tcp://example.invalid:2376", "SkipTLSVerify": False}},
+        "TLSMaterial": {"docker": ["ca.pem"]}, "Storage": {"TLSPath": "<IN MEMORY>"},
+    }
+    path.write_text(json.dumps(state), encoding="utf-8")
+    env = {**client.environment, "HOME": str(isolated), "USERPROFILE": str(isolated),
+           "DOCKER_HOST": "tcp://example.invalid:2376", "DOCKER_TLS_VERIFY": "1"}
+    for name in ("DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_CONTEXT"):
+        env.pop(name, None)
+    if context:
+        env.pop("DOCKER_HOST")
+        env["DOCKER_CONTEXT"] = context
+    monkeypatch.setenv("HOME", str(ambient))
+    monkeypatch.setenv("USERPROFILE", str(ambient))
+    pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert pinned.endpoint.tls_ca == str(isolated / ".docker" / "ca.pem")
+    assert pinned.endpoint.tls_cert is None and pinned.endpoint.tls_key is None
+    assert pinned.probe(identity()) is True
+    for call in logs(path):
+        if call["args"][0] == "--host":
+            assert call["tls_files"] == {"ca.pem": str(isolated / ".docker" / "ca.pem"), "cert.pem": "", "key.pem": ""}
+
+
+def test_tls_missing_supplied_home_refuses_ambient_fallback(fixture: tuple) -> None:
+    client, path, _state = fixture
+    env = {key: value for key, value in client.environment.items() if key not in {
+        "HOME", "USERPROFILE", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_CONTEXT",
+    }}
+    with pytest.raises(VerificationError, match="requires supplied"):
+        DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert not path.with_suffix(".log").exists()
+
+
+@pytest.mark.parametrize("directory_key", ["DOCKER_CERT_PATH", "DOCKER_CONFIG"])
+def test_explicit_tls_directory_does_not_expand_parent_home(fixture: tuple, monkeypatch, directory_key: str) -> None:
+    client, path, _state = fixture
+    monkeypatch.chdir(path.parent)
+    certs = path.parent / "~" / "literal certificates"
+    certs.mkdir(parents=True)
+    (certs / "ca.pem").write_text("fixture CA", encoding="utf-8")
+    env = {**client.environment, directory_key: "~/literal certificates"}
+    env.pop("DOCKER_CONTEXT")
+    if directory_key == "DOCKER_CONFIG":
+        env.pop("DOCKER_CERT_PATH", None)
+    pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert pinned.endpoint.tls_ca == str(certs / "ca.pem")
+
+
 @pytest.mark.parametrize("field,value", [
     ("resource_id", "short-id"), ("generation", True), ("generation", 0),
     ("created", "2026-99-99T00:00:00Z"), ("token", "short"),

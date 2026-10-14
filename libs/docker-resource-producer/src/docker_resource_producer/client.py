@@ -49,9 +49,14 @@ def _optional_client_file(path: Path) -> str | None:
 
 
 def _default_tls_paths(environment: Mapping[str, str]) -> dict[str, str | None]:
-    certs = Path(
-        environment.get("DOCKER_CERT_PATH") or environment.get("DOCKER_CONFIG") or str(Path.home() / ".docker")
-    ).expanduser().resolve()
+    directory = environment.get("DOCKER_CERT_PATH") or environment.get("DOCKER_CONFIG")
+    if not directory:
+        home_key = "USERPROFILE" if os.name == "nt" else "HOME"
+        home = environment.get(home_key)
+        if not home:
+            raise VerificationError(f"Docker TLS directory requires supplied {home_key} or explicit config")
+        directory = str(Path(home) / ".docker")
+    certs = Path(directory).resolve()
     return {
         "tls_ca": str(certs / "ca.pem"),
         "tls_cert": _optional_client_file(certs / "cert.pem"),

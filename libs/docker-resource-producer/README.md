@@ -13,6 +13,10 @@ Transport selection follows Docker CLI's host/context environment precedence:
 a nonempty `DOCKER_HOST` selects the default endpoint before `DOCKER_CONTEXT`.
 The default context's in-memory TLS metadata is resolved to its environment's
 certificate directory, not treated as a stored named-context TLS path.
+TLS directory fallback uses `HOME` on POSIX or `USERPROFILE` on Windows from
+the supplied child environment, never the parent process's home. If that
+environment lacks both an explicit certificate/config directory and its home,
+pinning refuses rather than inspecting ambient credentials.
 Docker's `--tlsverify` flag enables TLS even when set to false, so non-TLS
 endpoints deliberately omit that flag.
 Explicit-host TLS retains the CA path and records genuinely absent optional
