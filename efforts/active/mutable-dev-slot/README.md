@@ -257,6 +257,36 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Journal
 
+### 2026-10-14 -- Full native matrix reaches the real POSIX adopter
+
+Full candidate run 38576292156 reached the real Worktrees lifecycle group
+after the prior bootstrap fixture fixes. Eight other full plugin suites,
+standalone Worktree Manager, both service platforms, and repository guards
+passed. Worktrees exposed two distinct failures: the namespaced fixture
+declared an isolated profile while the POSIX child correctly used passwd
+identity, and a committed, drained monitor transition retained installer
+custody while its parent left the exited predecessor unreaped.
+
+The fixture now isolates only its owned copies' operating-system profile
+lookup, before freezing either input graph; installation authority and
+production lookup rules remain unchanged. Shared Linux liveness now probes
+the kernel's pidfd exit signal instead of treating an unreaped PID as live.
+A regression deliberately leaves its child unreaped while asserting native
+exit, and unit cases distinguish a live process from that terminal evidence.
+The actual lifecycle and drain assertions still require exact-candidate CI.
+
+Automatic PR run 38576262955 separately exposed one stale payload-scope
+assertion of the Windows job's prior seven-minute budget. It now checks the
+already-measured ten-minute job budget; Linux and production deadlines are
+unchanged. The full native run also had one cold Windows read-only helper
+exceed its existing fifteen-second deadline. All eighteen unchanged local
+read-only/binding cases passed within that subprocess deadline, but local
+collection plus calls required 186 seconds and did not fit the CI aggregate's
+120 seconds. A single-compilation experiment did not improve cold helper
+timing and was removed rather than shipped speculatively. The Windows
+read-only timeout, nested backend blockage, full adopter acceptance,
+portfolio rollout and authorized released-runtime proof remain open.
+
 ### 2026-10-14 -- Identify the unfinished Windows backend, not just its deadline
 
 A temporary, isolated diagnostic forwarded each copied fixture's declared

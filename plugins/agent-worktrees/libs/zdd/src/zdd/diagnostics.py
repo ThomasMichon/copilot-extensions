@@ -143,6 +143,22 @@ def _pid_alive(pid: int) -> bool:
         from .diagnostic_exit import pid_alive_windows
 
         return pid_alive_windows(pid)
+    if hasattr(os, "pidfd_open"):
+        from .diagnostic_exit import wait_posix
+
+        try:
+            descriptor = os.pidfd_open(pid)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            pass
+        else:
+            try:
+                return not wait_posix(descriptor, 0)
+            except OSError:
+                return True
+            finally:
+                os.close(descriptor)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

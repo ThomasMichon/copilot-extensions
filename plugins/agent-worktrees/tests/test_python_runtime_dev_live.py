@@ -45,6 +45,22 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
         original_project + '\n[tool.uv.sources.runtime-origin-fixture]\npath="original-only"\n',
         encoding="utf-8",
     )
+    home, result_path = tmp_path / "home", tmp_path / "result.json"
+    home.mkdir()
+    if os.name != "nt":
+        # HOME does not redirect passwd. Isolate only that OS lookup in the
+        # bootstrap and installed API, before either graph is frozen.
+        for directory in (
+            plugin / "scripts" / "installation-context",
+            plugin / "src" / "agent_worktrees",
+        ):
+            resolution = directory / "_installation_context_resolution.py"
+            source = resolution.read_text(encoding="utf-8")
+            lookup = "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"
+            assert source.count(lookup) == 1
+            resolution.write_text(source.replace(
+                lookup, f"profile_value = Path({str(home)!r})",
+            ), encoding="utf-8")
     probe_source = plugin / "src" / "agent_worktrees" / "iteration_probe.py"
     probe_source.write_text("VALUE = 1\n", encoding="utf-8")
     git = shutil.which("git")
@@ -67,9 +83,7 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
         check=True,
         **no_window_kwargs(),
     )
-    home, result_path = tmp_path / "home", tmp_path / "result.json"
     root = home / ".agent-worktrees"
-    home.mkdir()
     environment = dict(os.environ)
     environment.update(HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
     for name in (
