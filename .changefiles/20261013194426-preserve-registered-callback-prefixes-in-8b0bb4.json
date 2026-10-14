@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve registered callback prefixes in same-cell routing and support provider-declared no-provision legacy callbacks",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

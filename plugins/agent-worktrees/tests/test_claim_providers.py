@@ -531,10 +531,11 @@ def test_resolve_claim_status_degrades_when_callback_exits_nonzero(tmp_path, mon
 def test_resolve_claim_reclaim_passes_apply_flag(tmp_path, monkeypatch):
     captured = {}
 
-    def fake_run_callback(provider, *, callback_args, legacy_command, timeout, required_bool_field, cwd=None):
+    def fake_run_callback(provider, *, callback_args, legacy_command, timeout, required_bool_field, cwd=None, kind="status"):
         captured["provider"] = provider.plugin
         captured["callback_args"] = callback_args
         captured["legacy_command"] = legacy_command
+        captured["kind"] = kind
         return {"reclaimed": True}
 
     def fake_discover(_plugins_root):
@@ -554,6 +555,7 @@ def test_resolve_claim_reclaim_passes_apply_flag(tmp_path, monkeypatch):
         "provider": "agent-codespaces@copilot-extensions",
         "callback_args": ("claim-reclaim", "my-box-1", "--apply"),
         "legacy_command": ("agent-codespaces", "claim-reclaim", "my-box-1", "--apply"),
+        "kind": "reclaim",
     }
 
 
@@ -589,10 +591,11 @@ def test_resolve_claim_reclaim_rejects_a_leading_dash_identifier_in_dry_run(tmp_
 def test_resolve_claim_reclaim_omits_apply_flag_in_dry_run(tmp_path, monkeypatch):
     captured = {}
 
-    def fake_run_callback(provider, *, callback_args, legacy_command, timeout, required_bool_field, cwd=None):
+    def fake_run_callback(provider, *, callback_args, legacy_command, timeout, required_bool_field, cwd=None, kind="status"):
         captured["provider"] = provider.plugin
         captured["callback_args"] = callback_args
         captured["legacy_command"] = legacy_command
+        captured["kind"] = kind
         return {"reclaimed": True, "detail": "would delete"}
 
     def fake_discover(_plugins_root):
@@ -612,6 +615,7 @@ def test_resolve_claim_reclaim_omits_apply_flag_in_dry_run(tmp_path, monkeypatch
         "provider": "agent-codespaces@copilot-extensions",
         "callback_args": ("claim-reclaim", "my-box-1"),
         "legacy_command": ("agent-codespaces", "claim-reclaim", "my-box-1"),
+        "kind": "reclaim",
     }
 
 
@@ -662,18 +666,14 @@ def test_windows_batch_argv_routes_cmd_shims_through_comspec(monkeypatch):
     callback would otherwise fail to launch. Exercised on any platform by
     forcing os.name to "nt", since the routing logic itself is pure.
 
-    The batch path and each argument must be SEPARATE argv elements (never
-    pre-joined into one already-quoted string) -- subprocess.run() quotes
-    each element itself when building the real CreateProcess command line,
-    so pre-quoting the whole thing first would double-quote it and break
-    cmd.exe's parsing (regression for an earlier revision of this helper
-    that used list2cmdline() to build one combined string)."""
+    Literal CALL protects a quoted path from /s /c outer-quote stripping.
+    Each argument stays separate rather than double-quoting a composite."""
     monkeypatch.setattr(cp.os, "name", "nt")
     monkeypatch.setenv("ComSpec", r"C:\Windows\System32\cmd.exe")
     argv = cp._windows_batch_argv(("C:\\plugins\\agent-codespaces\\bin\\agent-codespaces.cmd", "claim-status", "my box"))
     assert argv == [
         r"C:\Windows\System32\cmd.exe",
-        "/d", "/s", "/c",
+        "/d", "/s", "/c", "call",
         "C:\\plugins\\agent-codespaces\\bin\\agent-codespaces.cmd",
         "claim-status",
         "my box",
@@ -991,3 +991,17 @@ def test_build_provider_argv_degrades_when_no_provider_registered(tmp_path):
     result = cp.build_provider_argv(
         "codespace", ("delete", True), ("cs-a", False), plugins_root=tmp_path / "empty")
     assert result is None
+
+
+def test_discovery_retains_provider_declared_provisioning_suppression(tmp_path, monkeypatch):
+    root, plugins = _installed_plugins_tree(tmp_path, "fixture")
+    _write_binstub(root, "fixture")
+    _write_manifest(
+        root, "raw-docker", status_command=["fixture", "raw-docker"],
+        no_self_provision_env="FIXTURE_NO_SELFPROVISION",
+    )
+    monkeypatch.setattr(cp, "resolve_active_plugins", lambda: _active_report("fixture@copilot-extensions", root))
+    providers, findings = cp.discover_claim_providers(plugins)
+    assert not findings
+    assert providers["raw-docker"].no_self_provision_env == "FIXTURE_NO_SELFPROVISION"
+    assert providers["raw-docker"].status_command[1:] == ("raw-docker",)

@@ -145,6 +145,7 @@ class ClaimProviderManifest:
     reclaim_command: tuple[str, ...] | None = None
     description: str = ""
     source_path: str = ""
+    no_self_provision_env: str | None = None
 
 
 def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManifest:
@@ -198,6 +199,12 @@ def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManif
     desc = data.get("description", "")
     if not isinstance(desc, str):
         raise ManifestError("`description` must be a string when present")
+    no_provision = data.get("no_self_provision_env")
+    if no_provision is not None and (
+        not isinstance(no_provision, str)
+        or re.fullmatch(r"[A-Z][A-Z0-9_]*_NO_SELFPROVISION", no_provision) is None
+    ):
+        raise ManifestError("`no_self_provision_env` must name an uppercase *_NO_SELFPROVISION variable")
 
     return ClaimProviderManifest(
         namespace=ns,
@@ -207,6 +214,7 @@ def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManif
         reclaim_command=reclaim_command,
         description=desc,
         source_path=source_path,
+        no_self_provision_env=no_provision,
     )
 
 
@@ -304,10 +312,13 @@ def _resolve_command(command: tuple[str, ...], *, root: Path) -> tuple[str, ...]
     if (
         os.name == "nt"
         and canonical.suffix.casefold() in (".cmd", ".bat")
-        and _CMD_METACHAR_RE.search(str(canonical))
+        and any(
+            _CMD_METACHAR_RE.search(token) or any(ord(char) < 32 for char in token)
+            for token in (str(canonical), *command[1:])
+        )
     ):
         raise TargetUnusableError(
-            "command path contains a cmd.exe metacharacter and cannot be safely invoked"
+            "command path or prefix contains a cmd.exe metacharacter or control character"
         )
     return (str(canonical), *command[1:])
 
@@ -395,6 +406,7 @@ def _classify(
         reclaim_command=reclaim_command,
         description=manifest.description,
         source_path=manifest.source_path,
+        no_self_provision_env=manifest.no_self_provision_env,
     )
     return EntryDecision.active(resolved)
 
@@ -579,16 +591,12 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     ``AutoRun`` registry commands (never let an ambient AutoRun script
     inject itself into this call).
 
-    The batch path and each callback argument are passed as **separate**
-    argv elements -- `[comspec, "/d", "/s", "/c", batch_path, *args]` --
-    never pre-joined into one already-quoted string. `subprocess.run`
-    itself quotes each argv element when it builds the actual
-    `CreateProcess` command line; pre-quoting the whole thing first (an
-    earlier revision of this function did, via `list2cmdline`) means that
-    quoting happens a SECOND time on top of the first, breaking cmd.exe's
-    own parsing (especially once any path or argument contains a space).
-    Mirrors `agent_bridge.transport._wrap_batch_for_windows`, an existing,
-    separately-tested precedent for this exact problem.
+    Literal ``call`` prevents ``/s /c`` from treating the quoted batch path as
+    the command's outer quotes and stripping them, truncating a path with
+    spaces. Keep every token separate for native serialization, not a
+    pre-quoted composite string. Paths and registered prefixes have already
+    rejected cmd metacharacters (including percent expansion); callback
+    identifiers pass the safe-token validator.
     """
     # PureWindowsPath, not Path: this only parses a Windows-style path
     # string's suffix -- no filesystem access is needed, and Path() would
@@ -598,48 +606,17 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     if os.name != "nt" or PureWindowsPath(command[0]).suffix.casefold() not in (".cmd", ".bat"):
         return list(command)
     comspec = os.environ.get("ComSpec", "cmd.exe")
-    return [comspec, "/d", "/s", "/c", *command]
+    return [comspec, "/d", "/s", "/c", "call", *command]
 
 
 def peer_env() -> dict[str, str] | None:
     """Legacy environment for invoking a resolved SIBLING plugin's binstub.
 
-    ``agent-worktrees`` ships with ``installationContext: required``
-    (``payload-invocation.json``), so ``COPILOT_EXTENSIONS_CONTEXT`` is
-    present on EVERY real invocation, not just some rare namespaced-cell
-    edge case -- an earlier revision of this helper refused outright
-    whenever that variable was set, which silently disabled this entire
-    registry in every normal marketplace installation (a strictly worse
-    outcome than the residual risk below).
-
-    This path now exists only for callers with NO explicit installation
-    context at all. When ``COPILOT_EXTENSIONS_CONTEXT`` is present and the
-    sibling is a registered peer-launch target, the caller must rebind into
-    the peer's own validated context instead of stripping and downgrading.
-
-    Strips ``COPILOT_EXTENSIONS_CONTEXT``, ``COPILOT_PLUGIN_ROOT``, AND
-    ``GH_TOKEN``/``GITHUB_TOKEN`` before the child inherits any of them
-    unchanged. The sibling's own installation-context resolution (e.g.
-    ``agent_codespaces.worktrees.explicit_context()``) treats an ABSENT
-    context as "not in cell mode" and falls back to its legacy/ambient
-    resolution path -- a supported, non-erroring mode, not a refusal --
-    but leaving the CALLER's own cell-scoped ``GH_TOKEN``/``GITHUB_TOKEN``
-    in place would let that legacy fallback still authenticate as the
-    WRONG cell's identity. Properly rebinding to the target's OWN
-    validated cell context (mirroring each provider plugin's private
-    peer-launch mechanism, e.g. ``agent_codespaces._peer_launch``) would
-    be strictly better, but is real future work this registry cannot
-    safely approximate from the caller's side alone -- this bounded
-    stripping closes the concrete credential-leak risk without disabling
-    the feature entirely.
-
-    Returns ``None`` (inherit the ambient environment completely
-    unmodified) only when this process carries none of these variables set
-    at all -- checked by simple presence, NOT by :meth:`str.strip`, matching
-    ``agent_codespaces.worktrees.explicit_context()``'s own fail-closed
-    presence check: a whitespace-only value is still an explicit (if
-    invalid) context there, not an absent one, so it must still be
-    stripped here rather than silently passed through unmodified."""
+    Cell callbacks use receipt-validated peer launch instead; refusal never
+    downgrades here. Legacy callbacks strip caller installation routing and
+    credentials, retaining other environment data. Whitespace is still explicit
+    routing, not absence. Return None only when no stripping is necessary.
+    """
     stripped = ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "GH_TOKEN", "GITHUB_TOKEN")
     if not any(os.environ.get(name, "") for name in stripped):
         return None
@@ -659,7 +636,12 @@ def _provider_plugin_id(provider: ClaimProviderManifest) -> str:
 
 def _run_legacy_command(
     command: tuple[str, ...], *, timeout: float, cwd: str | None = None,
+    no_self_provision_env: str | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
+    env = peer_env()
+    if no_self_provision_env is not None:
+        env = dict(os.environ) if env is None else env
+        env[no_self_provision_env] = "1"
     try:
         return subprocess.run(
             list(command),
@@ -668,7 +650,7 @@ def _run_legacy_command(
             timeout=timeout,
             encoding="utf-8",
             errors="replace",
-            env=peer_env(),
+            env=env,
             cwd=cwd,
             **no_window_kwargs(),
         )
@@ -683,16 +665,31 @@ def _run_provider_process(
     legacy_command: tuple[str, ...],
     timeout: float,
     cwd: str | None = None,
+    kind: str = "status",
 ) -> subprocess.CompletedProcess[str] | None:
+    if kind not in ("status", "reclaim"):
+        raise ValueError("provider callback kind must be status or reclaim")
+    command = provider.status_command if kind == "status" else provider.reclaim_command
+    if command is None:
+        return None
     plugin_id = _provider_plugin_id(provider)
     if peer_launch_adapter.explicit_context():
         if plugin_id not in PEERS:
             return None
+        # Peer launch executes the primary module, not arbitrary payload shims.
+        if _pure_path_name(command[0]) not in (plugin_id, f"{plugin_id}.cmd"):
+            log.debug("Claim provider command has no same-cell module route: %s", command[0])
+            return None
         try:
-            return peer_launch_adapter.run(plugin_id, *callback_args, timeout=timeout, cwd=cwd)
+            return peer_launch_adapter.run(
+                plugin_id, *command[1:], *callback_args, timeout=timeout, cwd=cwd,
+            )
         except peer_launch_adapter.ContextRefused:
             return None
-    return _run_legacy_command(legacy_command, timeout=timeout, cwd=cwd)
+    return _run_legacy_command(
+        legacy_command, timeout=timeout, cwd=cwd,
+        no_self_provision_env=provider.no_self_provision_env,
+    )
 
 
 def _run_callback(
@@ -703,6 +700,7 @@ def _run_callback(
     timeout: float,
     required_bool_field: str,
     cwd: str | None = None,
+    kind: str = "status",
 ) -> dict | None:
     proc = _run_provider_process(
         provider,
@@ -710,6 +708,7 @@ def _run_callback(
         legacy_command=legacy_command,
         timeout=timeout,
         cwd=cwd,
+        kind=kind,
     )
     if proc is None:
         return None
@@ -859,6 +858,7 @@ def resolve_claim_reclaim(
         legacy_command=legacy_command,
         timeout=timeout,
         required_bool_field="reclaimed",
+        kind="reclaim",
     )
     if result is None:
         return {"available": False, "reason": f"{provider.plugin} claim-reclaim callback failed"}

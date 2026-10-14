@@ -578,6 +578,41 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-13 — Generic disposable ownership slice merged; Docker integration next
+
+- PR #6391 merged to `dev` as `b78c23aa05c74079f9724cfcfff9c4de14e5f37a`
+  at 02:43 Pacific. Its final head
+  `1adf10048aebe52aa89ebfc8a412cec4017e4c53` received a fresh Balanced review
+  with zero open findings; all 29 visible checks passed or intentionally
+  skipped. The exact head and required checks were rechecked immediately
+  before its exclusive serial merge slot was used.
+- The operator accepted the clean automated assessment under the standard CI
+  and serial-coordination gates. The reviewer's final-human-review
+  recommendation was retained; no separate human review is claimed.
+- The merged generic ledger now covers preallocation fencing, immutable
+  identity, exact available-provider closeout, accepted recipient-first
+  transfer and recovery, frozen-owner replay, malformed-metadata preservation,
+  JSON-safe projections, byte-bounded ingress and isolated bundle exports.
+  Source-level fence, accepted-retry and real-finalizer validation items are
+  complete; none implies Docker producer integration or live resource proof.
+- The final runtime snapshot `334217bbd85ed8f4f09c16a08adfb574059fae35`
+  passed 283 contained focused tests, 530 structural guards with 13 intentional
+  skips and 16 exact-snapshot native Windows token/legacy-save regressions.
+  The final head changed only the capabilities reference and source-validation
+  checklist; prior native selections remain scoped to their earlier snapshots.
+- Post-merge reconciliation retained recovery refs and advanced the existing
+  source worktree onto the verified squash merge. The operator authorized
+  continuing the effort in that same workspace while preserving the original
+  source and control context. This changes the working venue, not the parent
+  objective, completion gate or live-operation authority.
+- **Next source stretch:** implement provenance-qualified, non-provisioning
+  Docker identity callbacks and the shared disposable producer integration
+  under [the reviewed scoped plan](temporary-container-obligations.md).
+  Issue #6109, actual Bash/PowerShell/devcontainer integration, Docker
+  lifecycle proof and all remaining parent validation gates stay open.
+  No resource allocation/removal, runtime rollout or service change occurred.
+  The effort remains Active.
+
 ### 2026-10-12 — Suite-wide serving-convergence audit captured
 
 - The read-only audit covers 14 public `agent-*` plugins: 12 runtime providers

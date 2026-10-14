@@ -6,6 +6,25 @@ It does not allocate, start, remove, or discover resources itself. It has no
 Docker dependency, sibling installer, authentication bootstrap, or second ledger.
 Reusable fleet borrowing/return and legacy claims keep their existing semantics.
 
+Provider callback commands may include a registered argument prefix, for example
+`["agent-containers", "raw-docker"]`. Status and reclaim retain their own prefix
+before `claim-status` or `claim-reclaim` and the resource identifier. Installation
+cells use the receipt-validated primary peer module and completed runtime only;
+a different payload command is unavailable rather than silently substituted or
+invoked through legacy fallback.
+Windows legacy batch callbacks use literal `call` routing so quoted payload
+paths with spaces survive `cmd.exe /s /c`; command paths and registered prefixes
+with shell metacharacters or control characters are refused.
+
+A provider manifest may declare `no_self_provision_env`, naming the owning
+launcher's uppercase `*_NO_SELFPROVISION` variable. Legacy callbacks set it to
+`1` in the child environment only, preserving unrelated environment and CWD while
+stripping caller installation routing and credentials. The provider must implement
+that suppression contract; declaring a variable does not itself make an arbitrary
+launcher safe. A missing runtime or refused callback remains unavailable, never
+proof of resource absence. Integrated disposable providers must declare this
+contract; existing fleet providers retain their borrowing semantics.
+
 ## Exact CLI ABI
 
 ```bash

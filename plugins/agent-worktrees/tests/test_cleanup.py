@@ -172,10 +172,11 @@ def test_run_codespaces_uses_providers_reclaim_command(monkeypatch):
                         lambda *a, **k: ({"codespace": provider}, ()))
     captured = {}
 
-    def _run(provider, *, callback_args, legacy_command, timeout, cwd=None):
+    def _run(provider, *, callback_args, legacy_command, timeout, cwd=None, kind="status"):
         captured["provider"] = provider.plugin
         captured["callback_args"] = callback_args
         captured["legacy_command"] = legacy_command
+        captured["kind"] = kind
         return _proc(0)
     monkeypatch.setattr(claim_providers, "_run_provider_process", _run)
     proc = cleanup._run_codespaces([("delete", True), ("cs-x", False), ("--force", True)])
@@ -184,6 +185,7 @@ def test_run_codespaces_uses_providers_reclaim_command(monkeypatch):
         "provider": "agent-codespaces@marketplace",
         "callback_args": ("delete", "cs-x", "--force"),
         "legacy_command": ("agent-codespaces", "delete", "cs-x", "--force"),
+        "kind": "reclaim",
     }
 
 
