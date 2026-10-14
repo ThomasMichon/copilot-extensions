@@ -18,10 +18,14 @@ requests explicitly refuse; no Docker, manager, service, connector enrollment,
 credential issuance or ambient trust discovery is a prerequisite or side effect.
 The default planner and doctor remain read-only and dependency-free.
 
-Installation identity, state root, current policy and artifact sources must be
-explicit local trusted inputs. Installation receipts are not remote operation
-receipts or authorization tokens. The operation ledger and node journal retain
-their own owners and are not repurposed as installation databases.
+Installation identity, state root, attributable selected-release decision,
+current policy and artifact sources must be explicit local trusted inputs.
+The product release authority selects the coordinated release; the adopter
+explicitly selects it for a standalone install. The installer realizes that
+decision, never selects a release because it is signed or has a higher sequence.
+Installation receipts are not remote operation receipts or authorization tokens.
+The operation ledger and node journal retain their own owners and are not
+repurposed as installation databases.
 
 ## Durable admission before candidate execution
 
@@ -33,25 +37,34 @@ crash/retry contract, without candidate execution or selector publication:
    Existing nonempty foreign roots, links/reparse points, mismatched identity,
    corrupt state and unsupported state versions refuse. Ordinary inspection
    never initializes missing state or acquires credentials.
-2. Under the canonical installation-scoped exclusive ownership primitive,
-   re-authenticate the exact manifest using current trusted policy/clock and
-   consume the selected component's immutable snapshot. Do not treat a saved
-   verification report, staged pathname or wheel RECORD as release authority.
-3. Persist accepted release sequence and exact manifest/content identity
-   atomically and durably before any candidate execution. A lower sequence or
-   different content at the same accepted sequence refuses. A retry at the
-   same sequence and identical identity is idempotent, not new authorization.
-   Explicitly distinguish admitted, constructed, healthy and active outcomes.
-4. Advancing admission is monotonic even if later construction fails. Preserve
+2. Require the explicit selected-release record/lock from that trusted decision
+   owner. Bind its owner, decision identity/revision and content digest to the
+   expected release authority, installation, client role, exact manifest
+   digest, sequence and selected role closure. Refuse missing, stale,
+   mismatched or unselected intent before changing admission state. A signing
+   key's validity or a higher sequence does not supply a selection decision.
+   This local intent input is neither a remote grant nor a new release selector.
+3. Under the canonical installation-scoped exclusive ownership primitive,
+   bind that selected intent to a fresh authentication of the exact manifest
+   using current trusted policy/clock and consume the selected components'
+   immutable snapshots. Do not treat a saved verification report, staged
+   pathname or wheel RECORD as release authority or selection.
+4. Persist accepted release sequence, exact manifest/content identity and the
+   attributable selection binding atomically and durably before any candidate
+   execution. A lower sequence or different content at the same accepted
+   sequence refuses. A retry at the same sequence and identical release and
+   selection binding is idempotent, not new authorization. Explicitly
+   distinguish admitted, constructed, healthy and active outcomes.
+5. Advancing admission is monotonic even if later construction fails. Preserve
    the previous active healthy client, and permit a bounded retry of the same
    admitted candidate under freshly verified policy. Never reduce the accepted
    floor as incidental cleanup or error recovery.
-5. For this first slice, an older release cannot become a new candidate through
+6. For this first slice, an older release cannot become a new candidate through
    an implicit downgrade. Existing active/retained-good runtime recovery is
    distinct from admitting a new older release. A separately scoped supported
    rollback policy and data/config compatibility proof are required before
    exposing a rollback command; no generic bypass flag is introduced.
-6. Unknown commit outcome refuses further effects until durable state is
+7. Unknown commit outcome refuses further effects until durable state is
    reread under ownership. Interruption releases kernel ownership, but a
    surviving lease filename is not liveness or success evidence. Reports name
    uncertainty explicitly and never manufacture a completed receipt.
@@ -61,9 +74,10 @@ crash/retry contract, without candidate execution or selector publication:
 The operator directed a working design without over-engineering. Use a small
 installation-owned SQLite journal with the standard library, explicit schema
 version, one installation identity and one highest accepted sequence/content
-record. No generic persistence framework, remote database, operation/outbox
-tables or daemon is added. This is distinct lifecycle state, not a second fleet
-operation ledger.
+record carrying the selection owner, decision identity/revision and digest.
+No generic persistence framework, remote database, operation/outbox tables or
+daemon is added. This is distinct lifecycle state, not a second fleet operation
+ledger. It records a supplied release selection; it does not generate one.
 
 Reuse the existing local ledger's proven `BEGIN IMMEDIATE`, full synchronous
 transaction, scope validation and rollback/connection-close idiom without
@@ -115,6 +129,10 @@ possible reinstall require their own tested generation/fencing contract.
   admission, wrong role/scope, changed/revoked policy, corrupted state and
   interruption before/after durable commit. Verify the persisted bytes, not
   only a returned report. No execution or selector mutation is permitted.
+  A validly signed but unselected higher-sequence release must leave the
+  journal unchanged. Also refuse missing or mismatched selection owner/scope,
+  revision, manifest, sequence or role closure, and prove that a fresh retry
+  binds the same selected intent rather than choosing a replacement.
 - Construction follow-on: actual independently signed artifacts, immutable
   snapshot consumption, fresh installed wheel/client, failed build and failed
   health, retry/recovery, live held leases, preserved user config and no server

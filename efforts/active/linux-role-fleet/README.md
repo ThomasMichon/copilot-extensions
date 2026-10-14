@@ -482,3 +482,10 @@ not to the vision. This effort does not acquire or migrate live capacity.
   release and #6443 Gateway/node ownership. Normal release remains blocked
   under the exact existing #6535 publication defect; a `dev` merge is not live
   installation, useful-service readiness or a completed fleet.
+- Current-head review of #6624 identified a missing release-selection binding.
+  The proposal now requires explicit attributable product-authority/adopter
+  intent, bound to exact manifest, sequence and client closure before durable
+  admission. A valid signature or higher sequence cannot select a release;
+  validation must prove a signed but unselected release leaves state untouched.
+  The minimal SQLite row retains that supplied decision's identity and digest,
+  without adding a selector, ledger framework or runtime behavior before review.
