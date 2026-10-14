@@ -779,19 +779,9 @@ class RegisteredPivotRuntime:
         :func:`format_form_template`, or a plain template via
         :func:`format_template`). ``preserve_output`` retains full receipts on
         both success and failure for full-content Configuration results."""
-        argv = list(argv)
-        if not argv:
-            return (False, "empty action command")
-        try:
-            argv = _resolve_command(argv)
-            proc = subprocess.run(
-                argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
-                check=False, env=_child_process_env(), creationflags=no_window_flags(),
-            )
-        except FileNotFoundError:
-            return (False, f"{argv[0]} not found on PATH")
-        except (OSError, subprocess.SubprocessError) as exc:
-            return (False, str(exc)[:200])
+        proc, error = self._invoke_resolved(argv, timeout=ACTION_TIMEOUT)
+        if proc is None:
+            return False, error
         if preserve_output:
             parts = [(proc.stdout or "").strip()]
             if proc.stderr:
@@ -803,6 +793,36 @@ class RegisteredPivotRuntime:
             detail = (proc.stderr or "").strip().splitlines()
             return (False, (detail[-1] if detail else f"exit {proc.returncode}")[:200])
         return (True, (proc.stdout or "").strip()[:200])
+
+    def preview_resolved(self, argv: Sequence[str]) -> tuple[bool, str]:
+        """Keep successful stdout separate from diagnostics for strict JSON parsing."""
+        proc, error = self._invoke_resolved(argv, timeout=LIST_TIMEOUT)
+        if proc is None:
+            return False, error
+        if proc.returncode:
+            return False, "\n".join(
+                part for part in (proc.stdout.strip(), proc.stderr.strip(), f"exit {proc.returncode}")
+                if part
+            )
+        return True, proc.stdout
+
+    def _invoke_resolved(
+        self, argv: Sequence[str], *, timeout: float,
+    ) -> tuple[subprocess.CompletedProcess[str] | None, str]:
+        argv = list(argv)
+        if not argv:
+            return None, "empty action command"
+        try:
+            argv = _resolve_command(argv)
+            proc = subprocess.run(
+                argv, capture_output=True, text=True, timeout=timeout,
+                check=False, env=_child_process_env(), creationflags=no_window_flags(),
+            )
+        except FileNotFoundError:
+            return None, f"{argv[0]} not found on PATH"
+        except (OSError, subprocess.SubprocessError) as exc:
+            return None, str(exc)[:200]
+        return proc, ""
 
     def run_action_stream(
         self,

@@ -153,6 +153,75 @@ collected values and provider effects before submission, with Cancel selected
 initially. Providers must revalidate values and target identity on submission;
 displaying a preview is not authorization to skip validation.
 
+### Optional provider-computed preview
+
+A Configuration **row form** may add a `preview` argv alongside `run`, with
+`confirm: true`. This is additive within version 1; existing forms keep their
+static confirmation. Preview is not supported on operational forms, create
+actions, view/worktree actions, or legacy `config_sections` forms.
+
+```json
+{
+  "key": "set-local",
+  "label": "Set local preference",
+  "kind": "form",
+  "fields_from": "card.request_input",
+  "confirm": true,
+  "preview": ["agent-example", "preference", "preview", "{id}", "{field.value}"],
+  "run": ["agent-example", "preference", "apply", "{id}", "{field.value}", "--preview", "{configuration_preview}"]
+}
+```
+
+The selected row supplies `configuration.target` with nonempty string
+`installation`, `machine`, and `resource` identities. After collecting fields,
+the host immediately shows a pending screen and runs the bounded read-only
+preview off the render flow. Apply remains disabled until stdout is one strict
+JSON object with exactly these fields:
+
+```json
+{
+  "version": 1,
+  "token": "opaque-owner-computed-proposal",
+  "target": {"installation": "example", "machine": "local", "resource": "sample"},
+  "scope": "machine-local",
+  "operation": "set",
+  "summary": "Set a preference for future launches",
+  "effects": ["Only the supported machine-local override changes."],
+  "findings": [{"code": "future-only", "severity": "warning", "message": "Existing sessions are unchanged."}]
+}
+```
+
+`version` must be integer 1, `token` a nonempty string, `summary` a string,
+`effects` an array of strings, and `findings` an array of code/severity/message
+string records. Findings use `error`, `warning`, or `info`. The returned target
+must equal the row target, scope must be `machine-local`, and operation must
+be `set` or `reset`. Malformed/unsupported output, a target mismatch, nonzero
+exit, timeout, or error finding blocks Apply. Failure is visible and retryable.
+Warnings, target, effects, and collected non-secret values are displayed before
+consent; Cancel is focused initially. Edit preserves in-memory values but
+requires a new preview. Cancel saves no draft. A new interaction or changed
+section/project/action/row invalidates an earlier response.
+
+Only explicit Apply substitutes the received token into the reserved
+`{configuration_preview}` context token. A row or editable field cannot provide
+it; `{field.configuration_preview}` remains an ordinary field, not the host
+token. Substitution is single-pass: braces in values are literal. The owner
+must reject missing/empty/invalid tokens before writing, including when an old
+Manager ignores `preview` and substitutes the unknown token with empty text.
+
+The token is a stale-proposal check, not a credential. Under its shared mutation
+serialization, the provider must revalidate authority, exact target, operation,
+normalized values and all relevant source/local baselines before writing.
+Conflicts require fresh preview and consent, never an automatic broadened retry.
+Reset removes the supported local override and restores current inheritance;
+it never persists a copy of an inherited value. Provider code owns these writes,
+not the Manager. Browse, refresh, preview, edit and cancel must not create state,
+ensure a daemon, reserve work or launch agents. The provider must redact secrets
+before emitting rows, fields, previews, diagnostics, receipts, or argv values;
+this is not a secret editor. Apply uses the existing full stdout/stderr/exit
+receipt and refreshes the originating scope. Missing preview commands block
+only the affected action, leaving its read-only section and peers usable.
+
 Workers owns its catalog, local-instance lifecycle, and activation receipts.
 Catalog rows distinguish configured instances from templates and separately
 expose provenance, prerequisites, desired enablement, observed activity, and

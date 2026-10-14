@@ -1,0 +1,9 @@
+{
+  "comment": "Add optional provider-computed previews and context-bound consent for Configuration row forms.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

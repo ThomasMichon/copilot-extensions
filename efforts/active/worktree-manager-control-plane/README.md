@@ -1218,6 +1218,27 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-14** — Implemented #6717's optional Configuration row-form preview
+  candidate: strict provider result/row-target binding, bounded off-thread
+  reads, Cancel-default consent, context/late-result fencing, reserved token
+  transport and full receipts. Missing/unusable preview commands affect only
+  that action. The isolated real owner CLI proves local set/reset, current
+  inheritance, exact source-tree immutability, competing writes, stale
+  proposals, compatibility and redacted outputs/argv through production UI.
+  Affected Windows contract/backstage/runtime checks and install-contract gate
+  pass; current-head PR review/required CI and actual merge are still pending.
+  This is only the shared interaction; Waves 1-5, native Repositories and
+  authorized installed acceptance remain open.
+
+- **2026-10-14** — Wave 0 design merged through #6713 after current-head
+  approval with zero findings and the required PR gate passing. #6711 is closed;
+  runtime implementation and installed acceptance remain open. Claimed #6717
+  as `creaky-valve` for only the reviewed optional Configuration row-form
+  preview interaction and isolated real-provider fixture proof. Reuse the same
+  pulled-forward managed worktree; do not rebuild the backstage or migrate the
+  Workers lifecycle. #6379/#6283 retain their scopes. Native Repositories
+  integration follows as a separate owner-bound episode.
+
 - **2026-10-14** — Claimed #6711's bounded Phase 5 Wave 0
   reconciliation as `creaky-valve`: inventory the production contribution,
   form/action, and domain configuration paths, then submit a minimal consumer

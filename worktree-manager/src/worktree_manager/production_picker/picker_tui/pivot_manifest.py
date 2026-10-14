@@ -114,6 +114,8 @@ class PivotAction:
     #: ``{"title_from", "status_from", "link_from", "body_from"}`` (each a dotted
     #: path string). Mutually exclusive with ``internal``/``form``.
     card: Mapping[str, object] | None = None
+    preview: tuple[str, ...] = ()
+    preview_error: str = ""
 @dataclass(frozen=True)
 class Column:
     """One declarative column in a registered pivot's table view (D1).
@@ -405,6 +407,11 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
     """
     if not isinstance(data, Mapping):
         raise ManifestError("manifest root must be a JSON object")
+    from worktree_manager.configuration_preview import validate_preview_actions
+    try:
+        validate_preview_actions(data)
+    except ValueError as exc:
+        raise ManifestError(str(exc)) from exc
 
     label = data.get("label")
     if not isinstance(label, str) or not label.strip():
@@ -547,6 +554,8 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
                 progress=a_progress,
                 form=form,
                 card=card,
+                preview=tuple(a.get("preview", ())),
+                preview_error=str(a.get("_preview_error") or ""),
             )
         )
 

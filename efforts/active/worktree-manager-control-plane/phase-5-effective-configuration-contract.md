@@ -1,6 +1,7 @@
 # Phase 5 Wave 0 - Effective Configuration Consumer Contract
 
-- **Status:** Proposed; design only, not an implemented interface.
+- **Status:** Reviewed through #6713; implementation is tracked by #6717.
+  Not yet an implemented interface.
 - **Parent:** [Configuration workbench plan](phase-5-configuration-workbench.md)
   in the [Manager control-plane effort](README.md).
 - **Coordination:** #6711 under #357; shared backstage and Workers remain #6379;
@@ -210,6 +211,18 @@ actual Manager/provider builds, show responsiveness and refreshed results, and
 compare source bytes. Record explicit reasons for unavailable/inapplicable
 tiers; a fixture screenshot or design review is not installed proof.
 
-This planning-only slice runs documentation/effort/link guards. Unit,
-real-consumer, clean-room and live UI execution of the proposed behavior belong
-to the implementation slices; they are not claimed by this document.
+The design review through #6713 ran documentation/effort/link guards. The shared
+interaction candidate under #6717 now exercises the production Textual editor,
+preview, consent, receipt and refresh against a real isolated owner CLI on
+Windows. Focused contract/backstage/action/runtime compatibility checks pass,
+including source-tree comparisons, reset after inherited-source change,
+serialized competing applies, stale-baseline refusal, reserved-token isolation
+and sentinel-redacted provider output/argv. The two cross-distribution Workers
+round-trips remain opt-in and are not evidence for this new interaction.
+
+The synthetic first-touch lane creates no override while browsing or previewing;
+only explicit Apply changes the allowlisted local file. No installer/bootstrap
+path changes, so another installer clean-room run is inapplicable. Linux coverage
+belongs to required CI. Production Repositories integration, promoted/installed
+build identification, authorized live UI acceptance and documentation journeys
+remain open; fixture UI does not close them.
