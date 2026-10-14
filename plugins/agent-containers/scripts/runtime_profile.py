@@ -208,50 +208,58 @@ def provision(
                 if _read_json(slot / PROFILE_FILE) != expected:
                     raise RuntimeError("Completed Containers slot has a conflicting profile")
             elif admission == runtime.ADMIT_CONSTRUCT:
-                slot = runtime.slot(
-                    root, runtime_version, clean_incomplete=True, link_name=".venv"
-                )
-                if os.name == "nt":
-                    _run(
-                        [python, "-m", "venv", "--copies", "--without-pip", str(slot)],
-                        cwd=payload,
+                completed = False
+                try:
+                    slot = runtime.slot(
+                        root, runtime_version, clean_incomplete=True, link_name=".venv"
                     )
-                else:
-                    try:
-                        _run([uv, "venv", "--python", python, str(slot)], cwd=payload)
-                    except RuntimeError:
-                        print(
-                            "uv venv failed; retrying the incomplete slot with python -m venv",
-                            file=sys.stderr,
-                        )
-                        runtime.slot(
-                            root, runtime_version, clean_incomplete=True, link_name=".venv"
-                        )
+                    if os.name == "nt":
                         _run(
                             [python, "-m", "venv", "--copies", "--without-pip", str(slot)],
                             cwd=payload,
                         )
-                package = str(payload)
-                if profile == "provider-exec":
-                    package += "[provider-exec]"
-                targets = [*(str(library) for library in libraries), package]
-                _run(
-                    [
-                        str(venv_python), "-I",
-                        str(Path(__file__).with_name("installer_dependency_policy.py")),
-                        "--uv", uv, "--", "--no-sources",
-                        "--python", str(venv_python), "--quiet", *targets,
-                    ],
-                    cwd=payload,
-                )
-                if os.name == "nt":
-                    for trampoline in (slot / "Scripts").glob("agent-*.exe"):
-                        trampoline.unlink()
-                _health(venv_python, profile, cwd=payload)
-                if _fingerprint(payload, libraries) != fingerprint:
-                    raise RuntimeError("Containers source changed during runtime construction")
-                _write_json(slot / PROFILE_FILE, expected)
-                runtime.mark_complete(root, runtime_version, payload_hash=fingerprint)
+                    else:
+                        try:
+                            _run([uv, "venv", "--python", python, str(slot)], cwd=payload)
+                        except RuntimeError:
+                            print(
+                                "uv venv failed; retrying the incomplete slot with python -m venv",
+                                file=sys.stderr,
+                            )
+                            runtime.slot(
+                                root, runtime_version, clean_incomplete=True, link_name=".venv"
+                            )
+                            _run(
+                                [python, "-m", "venv", "--copies", "--without-pip", str(slot)],
+                                cwd=payload,
+                            )
+                    package = str(payload)
+                    if profile == "provider-exec":
+                        package += "[provider-exec]"
+                    targets = [*(str(library) for library in libraries), package]
+                    _run(
+                        [
+                            str(venv_python), "-I",
+                            str(Path(__file__).with_name("installer_dependency_policy.py")),
+                            "--uv", uv, "--", "--no-sources",
+                            "--python", str(venv_python), "--quiet", *targets,
+                        ],
+                        cwd=payload,
+                    )
+                    if os.name == "nt":
+                        for trampoline in (slot / "Scripts").glob("agent-*.exe"):
+                            trampoline.unlink()
+                    _health(venv_python, profile, cwd=payload)
+                    if _fingerprint(payload, libraries) != fingerprint:
+                        raise RuntimeError("Containers source changed during runtime construction")
+                    _write_json(slot / PROFILE_FILE, expected)
+                    runtime.mark_complete(root, runtime_version, payload_hash=fingerprint)
+                    completed = True
+                finally:
+                    if not completed:
+                        runtime.discard_failed_candidate(
+                            root, runtime_version, link_name=".venv"
+                        )
             else:
                 raise RuntimeError(
                     f"Cannot replace immutable Containers slot {runtime_version}: {admission}; "

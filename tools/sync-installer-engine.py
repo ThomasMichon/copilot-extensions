@@ -273,19 +273,6 @@ def sync() -> list[str]:
                 "installer-engine adopter is not in a complete recognized form:\n  - "
                 + "\n  - ".join(structural_problems)
             )
-        if mode == "canonical":
-            for name in FILES:
-                source = CANONICAL_DIR / name
-                bad_ancestor = uer._find_symlinked_ancestor(source, REPO.resolve())
-                if bad_ancestor is not None:
-                    raise RuntimeError(f"{bad_ancestor} is a symlink -- refusing")
-                if not source.is_file():
-                    raise FileNotFoundError(f"canonical source missing: {source}")
-                destination = REPO / "plugins" / plugin / "scripts" / name
-                if destination.exists() or destination.is_symlink():
-                    destination.unlink()
-                    written.append(f"removed {destination.relative_to(REPO).as_posix()}")
-            continue
         for name in (*FILES, *ier.support_files(CANONICAL_DIR)):
             source = CANONICAL_DIR / name
             bad_ancestor = uer._find_symlinked_ancestor(source, REPO.resolve())
@@ -294,6 +281,11 @@ def sync() -> list[str]:
             destination = REPO / "plugins" / plugin / "scripts" / name
             if not source.is_file():
                 raise FileNotFoundError(f"canonical source missing: {source}")
+            if mode == "canonical" and name in FILES:
+                if destination.exists() or destination.is_symlink():
+                    destination.unlink()
+                    written.append(f"removed {destination.relative_to(REPO).as_posix()}")
+                continue
             content_matches = destination.is_file() and destination.read_bytes() == source.read_bytes()
             mode_matches = destination.is_file() and (
                 os.name == "nt"

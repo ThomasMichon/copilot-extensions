@@ -630,3 +630,22 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   All thirteen installer contracts, canonical fan-out, touched-code lint and
   unchanged source-size ceilings passed. Required current-head CI and a fresh
   genuine review remain unresolved; no merge, promotion or rollout has occurred.
+- Current-head Copilot review identified two Medium findings: the newly
+  integrated Containers coordinator retained failed candidates, and canonical
+  engine-reference synchronization skipped Python policy companions. Failed
+  construction now invokes guarded candidate discard while construction
+  ownership remains held, before propagating the original failure. Creation,
+  dependency, health and source-drift failures all remove the candidate, retain
+  the prior completed selection, release the lease and permit a clean retry.
+  Reused completed slots are never discarded. All 45 native profile/dependency/
+  transaction contracts passed with eight platform skips, including actual
+  subprocess policy refusal and candidate-directory absence.
+- Synchronization now repairs missing or stale Python support in both engine
+  modes while continuing to remove local shell engines for canonical-reference
+  adopters. Repair, permission parity and idempotence contracts passed with the
+  existing finalizer contracts: 24 tests. All thirteen installer contracts and
+  eight canonical-engine adopters remain in sync. Both actual Containers
+  profiles were also freshly built through the configured-feed seasoned
+  resolver, imported successfully and published their exact completed profile
+  selectors after the cleanup correction; neither build reused an old slot.
+  Required fresh-head review and CI remain the next gate.

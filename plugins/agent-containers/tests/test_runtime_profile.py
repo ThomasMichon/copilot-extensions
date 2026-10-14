@@ -155,7 +155,7 @@ def test_requested_provider_failure_never_falls_back_or_changes_active_slot(
         _provision(profiles, root, payload, requested="provider-exec")
     assert (root / "current-version").read_bytes() == previous
     assert profiles.selected_profile(root) == "provider-exec"
-    assert not (root / "versions" / "1.0.0+provider-exec" / ".install-complete.json").exists()
+    assert not (root / "versions" / "1.0.0+provider-exec").exists()
 
 
 def test_native_profile_policy_refusal_retains_selected_runtime(
@@ -213,7 +213,71 @@ def test_native_profile_policy_refusal_retains_selected_runtime(
     assert (root / "current-version").read_bytes() == selector
     assert (previous / ".install-complete.json").read_bytes() == marker
     assert profiles.selected_profile(root) == "provider-exec"
-    assert not (root / "versions" / "1.0.0+provider-exec" / ".install-complete.json").exists()
+    assert not (root / "versions" / "1.0.0+provider-exec").exists()
+
+
+@pytest.mark.parametrize("stage", ["venv", "install", "health", "fingerprint"])
+def test_failed_profile_construction_discards_before_releasing_ownership_and_retries(
+    profiles, payload, commands, monkeypatch, tmp_path, stage,
+):
+    root = tmp_path / "runtime"
+    previous = _provision(profiles, root, payload)
+    selector = (root / "current-version").read_bytes()
+    marker = Path(previous["venv"]) / ".install-complete.json"
+    completed = marker.read_bytes()
+    run = profiles._run
+
+    def failing(arguments, *, cwd):
+        run(arguments, cwd=cwd)
+        if (
+            (stage == "venv" and "venv" in arguments)
+            or (stage == "install" and any(
+                Path(argument).name == "installer_dependency_policy.py" for argument in arguments
+            ))
+            or (stage == "health" and "-c" in arguments)
+        ):
+            raise RuntimeError(f"fixture {stage} failed")
+        if stage == "fingerprint" and "-c" in arguments:
+            (payload / "src" / "module.py").write_text("# changed\n", encoding="utf-8")
+
+    monkeypatch.setattr(profiles, "_run", failing)
+    with pytest.raises(RuntimeError, match="source changed|fixture .* failed"):
+        _provision(profiles, root, payload, requested="provider-exec")
+    assert not (root / "versions" / "1.0.0+provider-exec").exists()
+    assert (root / "current-version").read_bytes() == selector
+    assert marker.read_bytes() == completed
+    assert profiles.selected_profile(root) == "provider-exec"
+    with profiles.runtime.construction_lease(root, "1.0.0+provider-exec", timeout=0.1):
+        pass
+    monkeypatch.setattr(profiles, "_run", run)
+    retry = _provision(profiles, root, payload)
+    assert retry["profile"] == "provider-exec"
+    assert not retry["reused"]
+
+
+def test_reused_profile_health_failure_never_discards_completed_slot(
+    profiles, payload, commands, monkeypatch, tmp_path,
+):
+    root = tmp_path / "runtime"
+    installed = _provision(profiles, root, payload)
+    marker = Path(installed["venv"]) / ".install-complete.json"
+    before = marker.read_bytes()
+    run = profiles._run
+
+    def failing(arguments, *, cwd):
+        if "-c" in arguments:
+            raise RuntimeError("fixture health failure")
+        run(arguments, cwd=cwd)
+
+    monkeypatch.setattr(profiles, "_run", failing)
+    monkeypatch.setattr(
+        profiles.runtime, "discard_failed_candidate",
+        lambda *args, **kwargs: pytest.fail("discarded completed candidate"),
+    )
+    with pytest.raises(RuntimeError, match="health failure"):
+        _provision(profiles, root, payload)
+    assert marker.read_bytes() == before
+    assert (root / "current-version").read_text().strip() == installed["runtimeVersion"]
 
 
 def test_same_version_source_change_refuses_immutable_rebuild(
