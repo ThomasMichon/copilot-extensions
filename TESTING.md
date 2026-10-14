@@ -192,6 +192,12 @@ python tools/run-plugin-tests.py agent-dispatch \
 
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
+Use repeatable `--test-file <path-relative-to-tests>` with one plugin to avoid
+collecting unrelated modules before applying `-k`. Unknown, escaping and
+non-file selections fail before environment preparation. The Windows
+reconciliation smoke names `test_reconcile.py` and
+`test_installer_command_binding.py`, retaining all 18 selected checks and the
+120-second budget without collecting the other 10,000-plus tests.
 
 Managed-worktree removal fixtures accept the canonical project loader's
 keyword-only overlay selection while retaining synthetic receiving-side

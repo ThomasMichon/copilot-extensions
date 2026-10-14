@@ -144,6 +144,7 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert reconciliation["if"] == smoke["if"]
     assert reconciliation["timeout-minutes"] <= 2
     assert "run-plugin-tests.py agent-worktrees" in reconciliation["run"]
+    assert "--test-file test_reconcile.py --test-file test_installer_command_binding.py" in reconciliation["run"]
     assert '-k "runtime_resolution_real_helper_read_only or command_binding"' in reconciliation["run"]
     assert "or command_binding" in reconciliation["run"]
     assert "--timeout 120" in reconciliation["run"]

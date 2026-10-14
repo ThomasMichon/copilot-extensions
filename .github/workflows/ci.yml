@@ -936,6 +936,7 @@ jobs:
         timeout-minutes: 2
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
+          --test-file test_reconcile.py --test-file test_installer_command_binding.py
           -k "runtime_resolution_real_helper_read_only or command_binding"
           --admission-wait 60 --timeout 120
       - id: runner-contracts

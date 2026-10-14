@@ -404,3 +404,20 @@ shared mutable venv is presumed acceptable.
   29,044,088 and 45,901,048 NTFS file-stream bytes respectively on this test host;
   filesystem metadata, shared interpreter and retained production slots are
   excluded. No live rollout is claimed.
+
+### 2026-10-14 - Required Windows reconciliation collection bound
+- The approved profile head could not merge because the actual required CI run
+  timed out in the reconciliation wrapper, despite metadata checks reporting
+  success. The merge guard correctly refused the missing required PR gate.
+- Reproduced the exact selection locally: all 18 checks pass, but collecting
+  10,175 items for those checks takes the suite to 145.09 seconds. Each native
+  policy/pointer case still performs both real helper calls and whole-profile
+  byte/mtime snapshots; this is aggregate collection/cold-start cost, not a
+  diagnosed helper deadlock.
+- Added explicit owned test-file selection to the contained plugin runner.
+  The required lane now collects the two owning files, preserving all 18 checks
+  and the existing 120-second budget rather than skipping policy cases or
+  widening the gate. The actual focused native run passed in 102.84 seconds.
+- Runner selection/admission and all directly dependent CI scope contracts:
+  122 passed / one unavailable-symlink skip. Focused lint and source module
+  ceilings pass. Fresh hosted CI and review remain required before merge.
