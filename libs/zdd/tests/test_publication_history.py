@@ -59,6 +59,18 @@ def test_atomic_write_refuses_invalid_proposed_endpoint(tmp_path, row, value):
     assert path.read_bytes() == original
 
 
+@pytest.mark.parametrize("fields", [
+    {"port": 1}, {"port": 65535}, {"pid": None}, {"pid": 2**32 - 1},
+    {"generation": 0}, {"generation": 2**63 - 1}, {"bind": ""},
+    {"bind": "x" * 255}, {"version": None}, {"version": ""},
+    {"process_start_time": "0"}, {"process_start_time": "1" * 64},
+])
+def test_mutation_preserves_supported_endpoint_boundaries(tmp_path, fields):
+    row = {"bind": "127.0.0.1", "port": 61001, "pid": 101, **fields}
+    routing._atomic_write(routing.routing_table_path(tmp_path), {"active": row})
+    assert routing.read_table(tmp_path)["active"] == row
+
+
 @pytest.mark.parametrize("caller_history", [False, True])
 def test_atomic_write_preserves_input_and_uses_persisted_custody(tmp_path, caller_history):
     witness = routing.publication_witness(tmp_path, deadline=time.monotonic() + 1)

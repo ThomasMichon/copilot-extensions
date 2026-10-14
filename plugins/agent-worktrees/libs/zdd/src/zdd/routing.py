@@ -354,7 +354,8 @@ def _validate_endpoint_rows(table: dict | None) -> None:
     for key in ("active", "previous"):
         raw = table.get(key) if table is not None else None
         if raw is not None and (
-            not isinstance(raw, dict) or Endpoint.from_dict(raw) is None
+            publication_history._endpoint(raw) is None
+            or (raw.get("version") is not None and not isinstance(raw["version"], str))
         ):
             reason = f"{key} endpoint unverifiable; owner-led recovery required"
             log.error(reason)

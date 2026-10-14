@@ -650,6 +650,19 @@ def test_pre_adoption_accepts_consistent_previous_only_selection(tmp_path, monke
     {}, [], False, "", {"bind": "127.0.0.1", "port": "invalid"},
     {"bind": "127.0.0.1", "port": 9281, "process_start_time": "invalid"},
     {"bind": "127.0.0.1", "port": float("inf")},
+    *[
+        {"bind": "127.0.0.1", "port": 9281, "pid": 111, **{field: value}}
+        for field, value in [
+            ("port", 0), ("port", 70000), ("port", True), ("port", "9281"),
+            ("port", 9281.0), ("pid", True), ("pid", 0), ("pid", -1),
+            ("pid", "111"), ("pid", 111.0), ("pid", 2**32),
+            ("generation", -1), ("generation", True), ("generation", "1"),
+            ("generation", 1.0), ("generation", 2**63),
+            ("bind", None), ("bind", 123), ("bind", "x" * 256),
+            ("version", 123), ("version", False),
+            ("process_start_time", "\u0661"), ("process_start_time", "1" * 65),
+        ]
+    ],
 ])
 def test_pre_adoption_refuses_malformed_endpoint_rows_before_any_mutation(
     tmp_path, monkeypatch, row, value,

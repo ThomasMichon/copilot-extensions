@@ -107,6 +107,13 @@ be parsed as endpoints, including empty objects and non-object values. Mutation
 validates both persisted and proposed rows; missing or null rows remain valid
 absence. A malformed row introduced during drain cannot be overwritten by
 guarded publication.
+Mutation uses the publication-custody validator's exact field types and bounds,
+not the read-only endpoint parser's legacy coercions. Ports are integers in
+1..65535; a PID is null or an integer in 1..2^32-1; generations are integers in
+0..2^63-1. Booleans and numeric strings are not integers for this contract.
+Binds are strings of at most 255 characters, optional versions are strings,
+and optional start tokens are nonempty ASCII decimal strings of at most 64
+characters. Supported boundary values and null PIDs remain unchanged on write.
 Passive adapters bind termination to the breadcrumb's original process token,
 not a newly sampled token. Their five-second exit confirmation waits on the
 same pidfd/Windows handle used to signal; acceptance alone is not successful
