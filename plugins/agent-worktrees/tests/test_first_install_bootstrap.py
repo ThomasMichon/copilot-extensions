@@ -443,14 +443,7 @@ def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
     assert "Remove-Item $snapDir" not in stamp
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
-# Real lifecycle admission, staging, activation and two launcher invocations
-# retain the existing item budget; fake uv does not build the runtime package.
-@pytest.mark.timeout(90)
-def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
+def _posix_installer_payload(home: Path) -> Path:
     payload = (
         home
         / ".copilot"
@@ -473,6 +466,18 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
     # Do not fingerprint the growing runtime sources for a fake package install.
     assert not (payload / "src").exists()
     assert not (payload / "libs").exists()
+    return payload
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
+# Real lifecycle admission, staging, activation and two launcher invocations
+# retain the existing item budget; fake uv does not build the runtime package.
+@pytest.mark.timeout(90)
+def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    payload = _posix_installer_payload(home)
 
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
@@ -522,7 +527,7 @@ esac
             "HOME": str(home),
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "REAL_PYTHON": sys.executable,
-            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0",
+            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "20",
         }
     )
     provision = subprocess.run(
@@ -532,7 +537,7 @@ esac
         capture_output=True,
         text=True,
     )
-    assert provision.returncode == 0, provision.stderr
+    assert provision.returncode == 0, provision.stdout + provision.stderr
 
     runtime_bin = home / ".agent-worktrees" / "bin"
     resolver = runtime_bin / "resolve-runtime.sh"
@@ -577,35 +582,7 @@ def _assert_posix_namespace_slot_rejected(
     never be activated.
     """
     home = tmp_path / "home"
-    payload = (
-        home
-        / ".copilot"
-        / "installed-plugins"
-        / "copilot-extensions"
-        / "agent-worktrees"
-    )
-    # uv is fake here: copying/fingerprinting the full growing source tree
-    # adds unrelated, load-dependent work before the health gate is reached.
-    # Keep the real staging, slot admission, resolver and activation code.
-    for relative in (
-        "plugin.json",
-        "pyproject.toml",
-        "scripts/install.sh",
-        "scripts/command_binding.py",
-        "scripts/command_lifecycle.py",
-        "scripts/versioned_runtime.py",
-        "scripts/resolve-runtime.sh",
-        "scripts/resolve-runtime.ps1",
-    ):
-        destination = payload / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(PLUGIN / relative, destination)
-    shutil.copytree(
-        PLUGIN / "scripts" / "installation-context",
-        payload / "scripts" / "installation-context",
-    )
-    assert not (payload / "src").exists()
-    assert not (payload / "libs").exists()
+    payload = _posix_installer_payload(home)
 
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()

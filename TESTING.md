@@ -15,6 +15,9 @@ admission, self-staging, activation, resolver deployment and both generated
 launchers under the existing 90-second item budget. Package construction and
 whole-source fingerprint coverage belong to their own contracts; this fixture
 must not grow with unrelated runtime source files.
+The healthy and namespace/watchdog cases share this source-free payload builder.
+Healthy provision has a 20-second installer-owned deadline inside the unchanged
+90-second pytest ceiling; failures retain both stdout and stderr diagnostics.
 
 ### Derived native installation diagnostics
 
