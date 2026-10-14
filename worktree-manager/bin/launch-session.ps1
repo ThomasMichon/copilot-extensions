@@ -810,11 +810,17 @@ $resolveArgs = @('-m', 'agent_worktrees')
 if ($script:LaunchProject) {
     $resolveArgs += @('--project', $script:LaunchProject)
 }
-$resolveArgs += @('resolve', '--defer-projections') + $CopilotArgs
+$resolveArgs += @('resolve') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
 Write-LaunchTrace 'resolve_start'
 
-$jsonOutput = & $VenvPython @resolveArgs
+$savedProjectionDeferral = $env:AGENT_WORKTREES_DEFER_PROJECTIONS
+try {
+    $env:AGENT_WORKTREES_DEFER_PROJECTIONS = '1'
+    $jsonOutput = & $VenvPython @resolveArgs
+} finally {
+    $env:AGENT_WORKTREES_DEFER_PROJECTIONS = $savedProjectionDeferral
+}
 
 if ($LASTEXITCODE -ne 0) {
     Write-SetupLog "agent_worktrees resolve failed (exit $LASTEXITCODE)" 'ERROR'

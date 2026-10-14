@@ -166,6 +166,60 @@ def test_manager_reaps_foreground_git_descendants(tmp_path, failure):
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
+def test_native_resolve_remains_compatible_with_older_runtime(
+    standalone_workspace, request, shell,
+):
+    from native_shell_support import bash_path, run_headless
+
+    standalone, _, _, _, env = standalone_workspace
+    (standalone / "agent_worktrees" / "__main__.py").write_text(
+        "import argparse,json,os\n"
+        "parser=argparse.ArgumentParser()\n"
+        "sub=parser.add_subparsers(required=True)\n"
+        "sub.add_parser('resolve').add_argument('--json',action='store_true')\n"
+        "args=parser.parse_args()\n"
+        "assert args.json\n"
+        "print(json.dumps({'deferred':os.environ.get('AGENT_WORKTREES_DEFER_PROJECTIONS')}))\n",
+        encoding="utf-8",
+    )
+    env["AGENT_WORKTREES_DEFER_PROJECTIONS"] = "previous"
+    root = Path(__file__).resolve().parents[3] / "worktree-manager" / "bin"
+    if shell == "powershell":
+        executable = request.getfixturevalue("native_powershell")
+        text = (root / "launch-session.ps1").read_text(encoding="utf-8-sig")
+        block = text[text.index("$resolveArgs = @"):text.index("\nif ($LASTEXITCODE -ne 0)", text.index("$resolveArgs = @"))]
+        script = (
+            f"$VenvPython='{sys.executable}'; $script:LaunchProject=$null; "
+            "$CopilotArgs=@('--json')\n"
+            "function Write-SetupLog {}\nfunction Write-LaunchTrace {}\n"
+            + block
+            + "\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
+            + "if ($env:AGENT_WORKTREES_DEFER_PROJECTIONS -ne 'previous') { throw 'environment leaked' }\n"
+            + "$jsonOutput\n"
+        )
+        command = [executable, "-NoProfile", "-NonInteractive", "-Command", script]
+    else:
+        executable = request.getfixturevalue("native_bash")
+        text = (root / "launch-session.sh").read_text(encoding="utf-8")
+        start = text.index("resolve_args=(-m agent_worktrees)")
+        block = text[start:text.index("\nif [[ $RC -ne 0 ]]", start)]
+        script = (
+            f"PYTHON='{bash_path(executable, Path(sys.executable))}'; LAUNCH_PROJECT=''\n"
+            "set -- --json\n" + block
+            + "\n[[ $RC -eq 0 ]] || exit \"$RC\"\n"
+            + "[[ $AGENT_WORKTREES_DEFER_PROJECTIONS == previous ]] || exit 99\n"
+            + "printf '%s' \"$JSON\"\n"
+        )
+        command = [executable, "-c", script]
+    result = run_headless(command, cwd=standalone, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"deferred": "1"}
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash"])
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 def test_native_final_preflight_copies_knowledge_only_provider(
     standalone_workspace, tmp_path, request, shell,
 ):

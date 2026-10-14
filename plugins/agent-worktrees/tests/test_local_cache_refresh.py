@@ -892,8 +892,8 @@ def test_interactive_base_prepares_before_emitting_direct_plan(tmp_path, monkeyp
 def test_launcher_deferral_and_final_batch_order():
     root = Path(__file__).resolve().parents[3]
     for name, defer, final, mux in (
-        ("launch-session.ps1", "'resolve', '--defer-projections'", "'--prepare-projections'", "# Apply environment"),
-        ("launch-session.sh", 'resolve --defer-projections "$@"', "--prepare-projections --json", "# ── tmux"),
+        ("launch-session.ps1", "$env:AGENT_WORKTREES_DEFER_PROJECTIONS = '1'", "'--prepare-projections'", "# Apply environment"),
+        ("launch-session.sh", 'AGENT_WORKTREES_DEFER_PROJECTIONS=1 "$PYTHON"', "--prepare-projections --json", "# ── tmux"),
     ):
         text = (root / "worktree-manager" / "bin" / name).read_text(encoding="utf-8-sig")
         assert text.index(defer) < text.index(final) < text.index(mux)

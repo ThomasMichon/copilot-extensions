@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import os
 import platform
 import sys
 import threading
@@ -235,7 +236,10 @@ def add_parsers(sub) -> None:
     parser = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--recovery", action="store_true")
-    parser.add_argument("--defer-projections", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--defer-projections", action="store_true", help=argparse.SUPPRESS,
+        default=os.environ.get("AGENT_WORKTREES_DEFER_PROJECTIONS") == "1",
+    )
     parser.add_argument(
         "--no-resume", action="store_true", help="Don't auto-resume the last Copilot session"
     )

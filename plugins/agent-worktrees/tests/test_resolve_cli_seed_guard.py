@@ -18,6 +18,18 @@ from agent_worktrees import config as cfg, resolve_cli
 pytestmark = pytest.mark.guard
 
 
+@pytest.mark.parametrize("setting", [None, "0", "1"])
+def test_resolve_projection_deferral_defaults_to_launcher_environment(monkeypatch, setting):
+    if setting is None:
+        monkeypatch.delenv("AGENT_WORKTREES_DEFER_PROJECTIONS", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_WORKTREES_DEFER_PROJECTIONS", setting)
+    parser = argparse.ArgumentParser()
+    resolve_cli.add_parsers(parser.add_subparsers())
+    assert parser.parse_args(["resolve"]).defer_projections is (setting == "1")
+    assert parser.parse_args(["resolve", "--defer-projections"]).defer_projections is True
+
+
 def _args(**overrides):
     base = dict(
         json=True, base=False, new_worktree=True, auto=False,

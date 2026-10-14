@@ -146,6 +146,9 @@ worktree allocation and complete paired-plugin composition. The outer launchers
 defer resolve-time copies and run
 `knowledge compose-plugins --prepare-projections` after maintenance, before
 starting Copilot. No packaged projection engine or authoring plugin is required.
+Resolve deferral uses a call-scoped environment hint, not a new mandatory
+argument, so an older runtime can still reach the launcher's update barrier.
+Direct CLI resolve calls retain preparation by default.
 Generated instructions live under the ignored
 `.github/instructions/agent-worktrees-generated/` namespace; tracked and staged
 paths are protected before any batch copy or cleanup.

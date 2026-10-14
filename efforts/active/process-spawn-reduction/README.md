@@ -273,6 +273,14 @@ single-final-batch contract.
 
 ### 2026-10-14 - In-process startup copy implementation
 
+- Review also identified a mixed-version startup window: a new launcher passed
+  a new resolve argument before reaching its update barrier. Replaced that
+  mandatory argument with a call-scoped environment hint, understood by the new
+  parser and harmless to older runtimes. Both native launcher resolve blocks
+  now execute successfully against a strict old-CLI fixture and restore the
+  caller environment. Current runtimes still defer; direct calls still prepare.
+  Focused source/native compatibility selection: 134 passed / 7 platform skips;
+  all 27 Manager launcher contracts pass. No update barrier was moved earlier.
 - Final review rejects nonregular settings, declarations, templates and exclude
   inputs before opening them, without inspecting instruction content. Declaration
   versions must be integers; malformed boolean/float versions cannot authorize
