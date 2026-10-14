@@ -43,11 +43,12 @@ def _settled_pair_receipt(path):
     sibling = tracking.load_record(path)
     sibling.kind, sibling.status = "bridge", "complete"
     sibling.origin, sibling.owner = "delegate", "dispatcher"
+    sibling.worktree_path = str(path.parent / sibling.worktree_id)
     sibling.pair_id, sibling.pair_role, sibling.pair_kind = "fixture-pair", "knowledge", "worktree"
     sibling.pair_ref = tracking.format_claim_ref("test", "demo", "wt-primary")
     primary = dataclasses.replace(
         sibling, worktree_id="wt-primary", branch="worktree/wt-primary",
-        worktree_path=str(path.parent / "primary"), pair_role="harness",
+        worktree_path=str(path.parent / "wt-primary"), pair_role="harness",
         pair_ref=tracking.format_claim_ref("test", "demo", sibling.worktree_id),
     )
     primary_path = path.parent / "wt-primary.yaml"
@@ -367,6 +368,59 @@ def test_terminal_pair_gc_primary_waits_until_sibling_receipt_is_collected(tmp_p
     assert terminal_pair_progress.gc_preservation_reason(primary_path) is None
     state.remove(primary_path, remove_record=True)
     assert not primary_path.exists() and not primary_path.with_suffix(".terminal-pair.json").exists()
+
+
+def test_pair_gc_primary_preserved_during_sibling_record_rollback(tmp_path, monkeypatch):
+    from agent_worktrees import reap_cli, terminal_pair_progress
+
+    path = _record(tmp_path)
+    primary_path = _settled_pair_receipt(path)
+    receipt_path = path.with_suffix(".terminal-pair.json")
+    before = path.read_bytes(), receipt_path.read_bytes(), primary_path.read_bytes()
+    original_unlink = Path.unlink
+
+    def fail_sibling_yaml(file, *args, **kwargs):
+        if file == path:
+            assert not receipt_path.exists()
+            primary = tracking.load_record(primary_path)
+            primary.branch = primary.worktree_path = ""
+            removed, reasons = reap_cli._remove_managed_worktree(
+                primary, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+            )
+            assert not removed and any("terminal-pair" in reason for reason in reasons)
+            raise OSError("injected sibling YAML rollback")
+        return original_unlink(file, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_sibling_yaml)
+    with pytest.raises(OSError, match="sibling YAML rollback"):
+        state.remove(path, remove_record=True)
+    assert (path.read_bytes(), receipt_path.read_bytes(), primary_path.read_bytes()) == before
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    assert terminal_pair_progress.gc_preservation_reason(path) is None
+    state.remove(path, remove_record=True)
+    assert terminal_pair_progress.gc_preservation_reason(primary_path) is None
+
+
+@pytest.mark.parametrize("fault", ["pair-id", "role", "sibling-ref", "primary-ref"])
+def test_pair_gc_rejects_well_typed_nonreciprocal_proof(tmp_path, fault):
+    from agent_worktrees import terminal_pair_progress
+
+    path = _record(tmp_path)
+    _settled_pair_receipt(path)
+    receipt_path = path.with_suffix(".terminal-pair.json")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if fault == "pair-id":
+        receipt["sibling_pair"]["pair_id"] = "another-pair"
+    elif fault == "role":
+        receipt["sibling_pair"]["pair_role"] = receipt["primary"]["pair"]["pair_role"]
+    elif fault == "sibling-ref":
+        receipt["sibling_pair"]["pair_ref"] = tracking.format_claim_ref("test", "demo", "another-primary")
+    else:
+        receipt["primary"]["pair"]["pair_ref"] = tracking.format_claim_ref("test", "demo", "another-sibling")
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    before = path.read_bytes(), receipt_path.read_bytes()
+    assert terminal_pair_progress.gc_preservation_reason(path) is not None
+    assert (path.read_bytes(), receipt_path.read_bytes()) == before
 
 
 def test_terminal_pair_sidecar_removal_preserves_receipt_when_record_retained(tmp_path):

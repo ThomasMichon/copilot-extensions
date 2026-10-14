@@ -633,3 +633,20 @@ requested contract.
   Existing per-PR patch changefiles cover both plugins. Original timing/crash
   uncertainties remain separate and unproven; fresh publication/review/CI and
   authorized rollout remain coordinator custody.
+
+- **Claim snapshot and reciprocal teardown corrections (PR #6542):** Nine
+  fail-first RPC/race cases plus five GC cases exposed stale retry counters after
+  recovery, unhashable/accepted non-string envelope fields, receipt-before-YAML
+  rollback collection, and well-typed contradictory pair proof. Retired cleanup
+  now claims and validates a due reservation before deriving retry state from
+  that authoritative snapshot. Legacy and structured counters restart at one,
+  while host/generation/outcome guards and business task state stay unchanged.
+  Primary GC waits for both sibling artifacts; both conclusion and GC share
+  exact reciprocal IDs, complementary roles, physical identities and forward/
+  back references. Malformed kind/action values yield the standard typed4xx
+  rejection. Targeted dispatch compatibility passed 260 cases, authoritative
+  seed/GC/rollback tests 63, and exact pair faults 11 under unchanged budgets.
+  No other owner's reconciliation/daemon/supplier files or credentials changed.
+  Existing patch changefiles remain; original UNKNOWN diagnostics are not
+  reclassified. Fresh source review, CI, merge and deployment remain coordinator
+  custody.

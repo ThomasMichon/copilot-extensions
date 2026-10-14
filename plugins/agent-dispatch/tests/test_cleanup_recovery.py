@@ -266,6 +266,99 @@ def test_recovery_requires_incomplete_structured_component(held, payload):
     assert queue.get_reservation(key).conclusion_detail == raw
 
 
+@pytest.mark.parametrize("field", ["cleanup_kind", "action", "structured-action"])
+@pytest.mark.parametrize("value", [[], {}])
+def test_recovery_rpc_refuses_non_string_envelope_values(held, field, value):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient, DispatchError
+    from agent_dispatch.coordinator import create_app
+
+    queue, task_id, key = held
+    payload = json.loads(queue.get_reservation(key).conclusion_detail)
+    if field == "action":
+        payload = {"action": value, "reason": "recorded failure", "attempts": 12}
+    else:
+        payload["action" if field == "structured-action" else field] = value
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET conclusion_detail=? WHERE key=?",
+                     (json.dumps(payload), key))
+    before = asdict(queue.get_reservation(key))
+    app = create_app(
+        queue, control_token="fixture-control", enable_mcp=False, verification_interval=0,
+    )
+    with DispatchClient("http://testserver", control_token="fixture-control") as client:
+        client._http.close()
+        client._http = TestClient(app, raise_server_exceptions=False)
+        with pytest.raises(DispatchError) as error:
+            client.recover_held_cleanup(
+                key, expected_generation=queue.get(task_id).generation, current_host="host",
+            )
+    assert error.value.status_code == 409
+    assert asdict(queue.get_reservation(key)) == before
+    assert queue.cleanup_recovery_history(key) == []
+
+
+@pytest.mark.parametrize("kind", ["worktree", "session", "legacy"])
+def test_supervisor_uses_recovery_reset_after_list_claim_race(held, monkeypatch, kind):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    queue, task_id, key = held
+    task_before = asdict(queue.get(task_id))
+    payload = json.loads(queue.get_reservation(key).conclusion_detail)
+    if kind == "legacy":
+        payload = {"action": "failed", "reason": "retry failure", "attempts": 11}
+    elif kind == "session":
+        payload["session_end"] = {"state": "pending", "session_id": "native-session", "attempts": 11}
+        payload["worktree_cleanup"] = {"state": "complete", "outcome": {"action": "primed"}}
+    else:
+        payload["worktree_cleanup"]["state"] = "pending"
+        payload["worktree_cleanup"]["attempts"] = 11
+    queue.record_spawn_conclusion(key, conclusion_state="pending", conclusion_detail=json.dumps(payload))
+    with DispatchClient("http://testserver") as client:
+        client._http.close()
+        client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
+        original_claim = client.claim_spawn_conclusion_retry
+        claims = []
+
+        def recover_between_list_and_claim(exact_key, **kwargs):
+            claims.append(exact_key)
+            exhausted = json.loads(queue.get_reservation(key).conclusion_detail)
+            exhausted["attempts"] = 12
+            for name in ("session_end", "worktree_cleanup"):
+                if isinstance(exhausted.get(name), dict) and exhausted[name].get("state") == "pending":
+                    exhausted[name].update(state="held", attempts=12)
+            _, other_claimed, other_token = queue.claim_spawn_conclusion_retry(
+                key, claimant_machine="host",
+            )
+            assert other_claimed
+            queue.record_spawn_conclusion(
+                key, conclusion_state="held", conclusion_detail=json.dumps(exhausted),
+                claim_token=other_token, claimant_machine="host",
+            )
+            apply(held, preview(held))
+            return original_claim(exact_key, **kwargs)
+
+        monkeypatch.setattr(client, "claim_spawn_conclusion_retry", recover_between_list_and_claim)
+        supervisor = Supervisor(
+            client, spawn_fn=lambda *a: pytest.fail("business work must not replay"),
+            local_end_fn=lambda *a: False,
+            attempt_conclusion_fn=lambda *a: {"action": "failed", "reason": "fixture failure"},
+            repo=TEST_REPO, machine="host", nudge=False,
+        )
+        supervisor.release_requested_bodies()
+    row = queue.get_reservation(key)
+    updated = json.loads(row.conclusion_detail)
+    component = updated if kind == "legacy" else updated["session_end" if kind == "session" else "worktree_cleanup"]
+    assert row.conclusion_state == "pending"
+    assert component["attempts"] == 1
+    assert claims == [key]
+    assert asdict(queue.get(task_id)) == task_before
+
+
 @pytest.mark.parametrize("kind", ["attempt", "terminal", None])
 def test_session_only_recovery_never_ends_session_without_lease(held, kind):
     from fastapi.testclient import TestClient

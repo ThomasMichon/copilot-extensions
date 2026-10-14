@@ -60,7 +60,9 @@ housekeeping component;
 Only `session_end` and `worktree_cleanup` are supported state-bearing components;
 an unknown component is rejected even when the known components are valid.
 `cleanup_kind` alone is not evidence of pending cleanup. Malformed or unsupported
-envelopes fail explicitly. Session-only envelopes are rejected even when they
+envelopes fail explicitly; kind/action values must be strings and malformed
+containers return the normal typed 4xx refusal, not an internal error.
+Session-only envelopes are rejected even when they
 omit `cleanup_kind`: without `worktree_cleanup`, the existing consumer cannot
 guarantee a lease before the session side effect. A complete worktree component
 with an incomplete session component is supported and claims/validates its
@@ -68,6 +70,10 @@ cleanup lease before ending the exact session.
 
 The task generation, exact provenance and allocation fences are rechecked when
 the supervisor claims and validates its cleanup lease and records the outcome.
+Listed retry state is only a due-time hint: counters, payload and component
+decisions are derived again from the authoritative claimed reservation before
+effects or publication, so an intervening recovery reset cannot be exhausted
+again by stale counters.
 The retained allocation identity includes the execution project, physical
 worktree path, originating reservation, logical creation key/revision, inherited
 worktree and exclusive key. Drifting any of them after acceptance cannot redirect
@@ -117,6 +123,9 @@ records and the receipt with the ordinary pair-preservation reason.
 Managed garbage collection remains the deletion authority.
 The sibling receipt pins the exact primary record, and a primary-side guard
 keeps that record available until the sibling receipt has been collected.
+The primary remains protected until both the sibling receipt and sibling YAML
+are gone, including the receipt-before-YAML rollback window. Conclusion and GC
+share matching-ID, complementary-role and exact reciprocal-reference checks.
 GC preserves both during partial unlink, verifies durable primary unlink before
 collecting the sibling, then collects the primary independently. Missing,
 changed, malformed or unresolved legacy proof remains preserved; absence is

@@ -118,6 +118,7 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
     _bounded_component_failure,
     _cleanup_envelope_state,
     _component_retry_meta,
+    _conclusion_retry_due,
     _conclusion_retry_meta,
     _conclusion_retry_payload,
     _conclusion_state,
@@ -1540,6 +1541,23 @@ class Supervisor:
                 continue
             body_already_released = res.get("state") in SpawnState.RELEASABLE
             can_release = body_already_released
+            claim_token: str | None = None
+            if body_already_released:
+                if not _conclusion_retry_due(res, now):
+                    continue
+                try:
+                    claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
+                    if not claim.get("claimed"):
+                        continue
+                    claim_token = claim.get("claim_token")
+                    claimed_reservation = claim.get("reservation")
+                    if not isinstance(claimed_reservation, dict):
+                        raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
+                    self._conclusion_client.validate_spawn_conclusion_claim(res["key"], claim_token)
+                    res = claimed_reservation
+                except DispatchError:
+                    log.exception("failed to claim or validate cleanup retry for %s", res["key"])
+                    continue
             conclusion_session: str | None = None
             released_target_dir: str | None = None
             retry_payload = self._conclusion_retry_payload(res)
@@ -1548,7 +1566,6 @@ class Supervisor:
                 conclusion_session = str(recorded_acp)
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             local_sid = _parse_local_body_handle(res.get("session_handle"))
-            claim_token: str | None = None
             session_end = retry_payload.get("session_end")
             session_end_pending = (
                 isinstance(session_end, dict) and session_end.get("state") == _CONCLUSION_PENDING
@@ -1579,13 +1596,6 @@ class Supervisor:
                 if next_attempt_at > now:
                     continue
                 if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
-                    try:
-                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
-                    except DispatchError:
-                        continue
-                    if not claim.get("claimed"):
-                        continue
-                    claim_token = claim.get("claim_token")
                     held_payload = self._hold_pending_cleanup(retry_payload)
                     try:
                         self._conclusion_client.record_spawn_conclusion(
@@ -1600,27 +1610,6 @@ class Supervisor:
                         )
                     except DispatchError:
                         pass
-                    continue
-            if body_already_released and cleanup_envelope:
-                if not session_due and not worktree_due:
-                    continue
-                try:
-                    claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
-                except DispatchError:
-                    log.exception(
-                        "failed to claim session cleanup retry for %s",
-                        res["key"],
-                    )
-                    continue
-                if not claim.get("claimed"):
-                    continue
-                claim_token = claim.get("claim_token")
-                try:
-                    self._conclusion_client.validate_spawn_conclusion_claim(
-                        res["key"],
-                        claim_token,
-                    )
-                except DispatchError:
                     continue
             if session_due:
                 cleanup_sid = str(session_end.get("session_id") or local_sid or "")
@@ -1904,26 +1893,7 @@ class Supervisor:
                 }
                 conclusion_state = _CONCLUSION_HELD
             else:
-                if body_already_released and claim_token is None:
-                    try:
-                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
-                    except DispatchError:
-                        log.exception(
-                            "failed to claim cleanup retry for %s",
-                            res["key"],
-                        )
-                        continue
-                    if not claim.get("claimed"):
-                        continue
-                    claim_token = claim.get("claim_token")
-                    try:
-                        self._conclusion_client.validate_spawn_conclusion_claim(
-                            res["key"],
-                            claim_token,
-                        )
-                    except DispatchError:
-                        continue
-                elif body_already_released and claim_token is not None:
+                if body_already_released:
                     try:
                         self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],

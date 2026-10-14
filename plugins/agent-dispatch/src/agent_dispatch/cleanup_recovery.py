@@ -84,6 +84,8 @@ def _reset_payload(raw):
         raise TaskError("cleanup detail is unknown; recovery requires a valid envelope") from exc
     if not isinstance(payload, dict):
         raise TaskError("cleanup detail is unknown; recovery requires a supported cleanup kind")
+    if any(name in payload and not isinstance(payload[name], str) for name in ("cleanup_kind", "action")):
+        raise TaskError("cleanup kind and action must be strings")
     if "cleanup_kind" in payload:
         if payload["cleanup_kind"] not in {"terminal", "attempt"}:
             raise TaskError("unsupported cleanup kind")

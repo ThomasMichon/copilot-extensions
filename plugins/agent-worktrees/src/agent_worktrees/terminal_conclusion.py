@@ -250,25 +250,10 @@ def _reciprocal_pair_valid(
     """
     if sibling.worktree_id != sibling_path.stem:
         return False
-    if Path(sibling.worktree_path).name != sibling.worktree_id:
-        return False
-    if sibling.branch != f"worktree/{sibling.worktree_id}":
-        return False
-    current_pair_id = (record.pair_id or "").strip()
-    sibling_pair_id = (sibling.pair_id or "").strip()
-    if not current_pair_id or current_pair_id != sibling_pair_id:
-        return False
-    current_role = (record.pair_role or "").strip()
-    sibling_role = (sibling.pair_role or "").strip()
-    if {current_role, sibling_role} != {"harness", "knowledge"}:
-        return False
-    if (record.pair_kind or "").strip() != "worktree" or (sibling.pair_kind or "").strip() != "worktree":
-        return False
-    sibling_ref = sibling.pair_claim_ref
-    expected = tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)
-    if sibling_ref is None or sibling_ref.canonical() != expected:
-        return False
-    return True
+    return terminal_pair_progress.reciprocal_identity_valid(
+        terminal_pair_progress._primary_identity(record),
+        terminal_pair_progress._primary_identity(sibling),
+    )
 
 
 def _resolve_pair_sibling(

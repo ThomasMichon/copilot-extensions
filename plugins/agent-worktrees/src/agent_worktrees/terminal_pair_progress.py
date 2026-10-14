@@ -56,6 +56,29 @@ def _supported_pair(pair) -> bool:
     )
 
 
+def reciprocal_identity_valid(primary: dict, sibling: dict) -> bool:
+    """One reciprocal identity predicate for conclusion and retained GC proof."""
+    try:
+        left, right = primary["pair"], sibling["pair"]
+        if (not _supported_pair(left) or not _supported_pair(right)
+                or left["pair_id"].strip() != right["pair_id"].strip()
+                or {left["pair_role"], right["pair_role"]} != {"harness", "knowledge"}):
+            return False
+        for current, other in ((primary, sibling), (sibling, primary)):
+            if (any(not isinstance(current[name], str) or not current[name].strip()
+                    for name in ("machine", "repo", "worktree_id", "worktree_path", "branch"))
+                    or Path(current["worktree_path"]).name != current["worktree_id"]
+                    or current["branch"] != f"worktree/{current['worktree_id']}"):
+                return False
+            ref = tracking.parse_claim_ref(current["pair"]["pair_ref"])
+            expected = tracking.format_claim_ref(other["machine"], other["repo"], other["worktree_id"])
+            if ref is None or not ref.is_qualified or ref.canonical() != expected:
+                return False
+        return True
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def publish(record, sibling, sibling_path: Path, *, primary_path: Path | None = None) -> None:
     """Caller holds both records' locks and has saved the primed reciprocal sibling."""
     receipt = {
@@ -100,6 +123,7 @@ def gc_preservation_reason(sibling_path: Path) -> str | None:
             identity["pair"] = expected["pair"]
             other_name = receipt["sibling_record_path"]
             if (receipt["version"] != 1 or not _supported_pair(expected["pair"])
+                    or not reciprocal_identity_valid(expected, receipt["sibling"])
                     or identity != expected or _document(sibling_path) != document
                     or current.kind not in tracking.MANAGED_KINDS
                     or current.status not in {"complete", "finalized"}
@@ -114,7 +138,10 @@ def gc_preservation_reason(sibling_path: Path) -> str | None:
             try:
                 _receipt_path(other_path).lstat()
             except FileNotFoundError:
-                return None
+                try:
+                    other_path.lstat()
+                except FileNotFoundError:
+                    return None
             return "terminal-pair-sibling-gc-pending"
         if "receipt_role" in receipt:
             return "terminal-pair-receipt-unverified"
@@ -141,7 +168,10 @@ def gc_preservation_reason(sibling_path: Path) -> str | None:
             return "terminal-pair-record-changed"
         identity = _primary_identity(primary)
         identity["pair"] = expected["pair"]
+        sibling_identity = _primary_identity(sibling)
+        sibling_identity["pair"] = receipt["sibling_pair"]
         if (identity != expected or primary.kind not in tracking.MANAGED_KINDS
+                or not reciprocal_identity_valid(expected, sibling_identity)
                 or primary.status not in {"complete", "finalized"}
                 or primary.resolved_origin != "delegate"
                 or not primary.owner or primary.owner != sibling.owner):
