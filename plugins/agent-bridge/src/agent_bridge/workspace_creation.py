@@ -66,10 +66,9 @@ async def _workspace(project: str, worktree_id: str) -> tuple[dict[str, Any], st
     if not isinstance(result.get("worktrees"), list):
         raise AcquisitionRefused("workspace_identity_unknown", "owner returned no authoritative workspace list")
     projection = result.get("projection")
-    if projection is not None and (
-        not isinstance(projection, dict)
-        or projection.get("quality") != "current"
-        or result.get("availability") is not None
+    if result.get("availability") is not None or (
+        projection is not None
+        and (not isinstance(projection, dict) or projection.get("quality") != "current")
     ):
         raise AcquisitionRefused("workspace_identity_unknown", "workspace observation is not current")
     rows = [row for row in result["worktrees"]

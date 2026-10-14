@@ -105,6 +105,7 @@ async def test_missing_workspace_observation_retains_allocation_for_exact_replay
     [
         {"projection": {"quality": "advisory"}},
         {"projection": {"quality": "current"}, "availability": {"status": "stale"}},
+        {"availability": {"status": "stale"}},
         {"projection": {}},
         {"projection": "invalid"},
     ],
