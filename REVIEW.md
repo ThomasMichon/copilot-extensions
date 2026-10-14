@@ -45,7 +45,7 @@ specifically when reviewing a pull request, not a replacement for them.
   `release-pipeline/rollback-*`, same PAT, a single mechanically generated
   `commit-tree` commit -- recognized by branch name plus commit count,
   since its diff is deliberately not single-file) --
-  `main-gate` (ci.yml) enforces this by diff content (or commit count for
+  `main-gate` (base-branch-reminder.yml) enforces this by diff content (or commit count for
   the revert shape), not by admin bypass;
   see ThomasMichon/copilot-extensions#3622-erratum for the incident that
   prompted the hardening. Contributors always target `dev` — a PR whose

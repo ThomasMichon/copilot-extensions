@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees; ordinary changes target `dev`
 - **Created:** 2026-10-12
-- **Status:** Active; first wave live, baseline correction dev-landed, composed validation open
+- **Status:** Active; baseline and main producers live-proven, main-PR CI cutover in progress, artifact recovery separately owned
 - **Vision:** `visions/main-owned-workflow-control/README.md`
 - **Umbrella issue:** #6237
 - **Related campaigns:** #3336; `promotion-failure-reactive-fix-agent`; #6142
@@ -115,8 +115,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   PR ancestry runner allocation. Natural events verified both remaining jobs.
 - [ ] Measure before/after run and check counts and review latency over comparable
   events; retain distinct heavy/platform/installation coverage.
-- [ ] Deploy only the minimal critical control repair required to unblock the
+- [x] Deploy only the minimal critical control repair required to unblock the
   next safe consolidation slice, through the narrow owner-reviewed main path.
+  #6619 unblocked the actual promoter and #6631 merged; post-merge artifact
+  publication remains separately owned under #6632.
 
 ### Phase 2 - Inert preservation support where needed
 
@@ -152,8 +154,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
-- [ ] Verify a covering promotion activates the dev-owned baseline producer on
+- [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
+  #6631 and hosted job `115706505844` prove activation of #6438; this
+  workflow-only capability needs no local plugin/runtime update.
 - [ ] Record ownership completion separately; it is not the prerequisite for
   Phase 1 reductions proven safe under existing protection.
 - [ ] Establish one exact-input validation contract and compact generated
@@ -854,3 +858,159 @@ agent-worktrees patch changefile. The real refresh and launch instrumentation
 supply the simple integration contract. Fresh-install/runtime rollout lanes
 do not apply because no install or runtime behavior changes. Current-head
 hosted checks, review and a containing full validation remain required.
+
+### 2026-10-14 - Clock repair merged; trusted-main recovery remains separate
+
+- #6612 merged at `02:34:51Z` as `0d28a69bdc20`, after exact-head native
+  approval `5512325368` with zero findings and successful required CI.
+  The actual source preflight verified complete paginated requirements,
+  integration-bound evidence and unchanged head before the managed merge.
+- Initial Windows CI repeated the separately tracked #6266 seven-console
+  signature. One recorded unchanged-head diagnostic, requested only after the
+  parent run completed, passed both real integration cases without skips.
+  No safety assertion or required check was changed or bypassed. #6266 stays
+  open with #6274's owner; this observation does not declare that issue fixed.
+- Closed only #6610 after current-head proof and merge, released its bounded
+  fixture reservation, and verified #6237 remains open. The canonical effort
+  still requires a normal containing full validation and release.
+- #6611's reviewed dev adapter mirror merged at `02:29:04Z` as `4a1b15c99fbd`.
+  The latest observed trusted main still contains #6558, not the new promoter
+  adapter. Asked the retained artifact owner to identify the distinct
+  authorized bootstrap execution gate; no main patch or release dispatch
+  is inferred from the dev merge.
+- Next: observe that owner's trusted-main recovery and a normal covering
+  promotion, then prove default-main admission/scanning before removing
+  legacy main-PR CI. Main-push, contributor and distinct deep/platform
+  coverage remain untouched.
+
+### 2026-10-14 - Containing suite clears; authorized bootstrap is already claimed
+
+- Normal run `38502638232` pins exact dev `0d28a69bdc20` and passes every
+  full plugin suite, guards, baseline checks and artifact attestation. Only
+  the old trusted-main promoter fails, in job `115661812252`, with the same
+  payload-hash refusal. This closes the clock repair's containing full-suite
+  validation, not the release or producer-migration gate.
+- The maintainer explicitly authorized this campaign to drive the narrow
+  workflow-only main bootstrap using #6611's reviewed adapter, preserving
+  ordinary review, required checks and artifact validation. No helper-source,
+  token/ruleset, runtime-update or broader control-activation authority follows.
+- The required fresh coordination check found prior stewardship notice
+  `6160133003` and explicit `placid-pendulum-promoter-main-bootstrap` reservation
+  `6160291385`. No competing main patch or workspace was created. Requested
+  one canonical bootstrap PR and execution gate in #6535 comment `6160342204`;
+  this campaign retains the consolidation objective and consumes that same
+  authorized repair rather than preempting its existing executor.
+- The canonical execution is now #6619, acknowledged by the original artifact
+  campaign in comment `6160373797`. Exact head `47113c401948` changes only
+  the one authorized workflow. Its fresh native review approves with zero
+  findings and the main source gate passes; remaining CI and actual merge
+  are still observed gates, not completion. Follow this PR rather than
+  creating another bootstrap.
+
+### 2026-10-14 - Canonical trusted-main bootstrap merged
+
+- #6619 actually merged at `03:52:34Z` as
+  `e1566a2a31a97bc5f084da123da149c88102ae8b`. The exact reviewed head remains
+  `47113c401948`; its native approval, main source gate, guards and existing
+  identifier check all pass. Only the authorized release workflow changed.
+- This deploys the temporary trusted-main compatibility adapter, not the
+  staged admission/scanner producers or a complete consumable release.
+  The passing source gate on this bootstrap was the legacy CI producer.
+- Normal run `38507249476` was created before the bootstrap and still names
+  old main `9c4d6acade64`; do not mistake its later start for the repaired
+  workflow definition. The retained executor owns the next normal full
+  promotion. Observe a fresh trusted-main recipe and exact selected dev
+  input before claiming the artifact refusal is cleared.
+- Keep the release, live producer proof and CI-removal gates open. No
+  additional publication run, updater or temporary-adapter cleanup was
+  performed by this coordinator.
+
+### 2026-10-14 - Promoted source verified; post-merge publisher has a distinct blocker
+
+- Fresh run `38508930963` passed all full suites, coverage requirements,
+  artifact build/attestation and the repaired promoter. Generated #6631
+  merged at `05:24:52Z` as `f5e4e30353a076aec74781e6ef5cfe5df474e939`,
+  from validated dev `e22e05cc54be` and prior main `e1566a2a31a9`.
+- The real annotated tag `promote-20261014052516-f5e4e303` resolves to that
+  exact merged commit. The state file's earlier candidate-time tag prefix
+  is not the actual post-merge tag; verify the real ref rather than infer it.
+- The trusted host, shared scanner action and reporter on actual main have
+  exactly the reviewed blob identities. Their definitions are promoted,
+  but no post-promotion host event has run yet. Live execution proof and
+  legacy-CI removal remain open.
+- Only post-merge publisher job `115696521430` fails: temporary-index
+  `git rm --cached` refuses the new release-state bytes against its older
+  checkout. #6632 and the explicit `placid-pendulum-publisher-index`
+  reservation retain that repair; the owner has reproduced the exact
+  stderr with real Git and will use the normal dev flow. No competing
+  helper patch, retry, asset replacement or integrity waiver is introduced.
+- Source promotion and tagging are confirmed; complete first-party artifact
+  publication is not. Continue read-only producer verification while that
+  separate recovery proceeds, without weakening any cutover gate.
+
+### 2026-10-14 - Dev-owned baseline producer exercised on default main
+
+- Natural post-CI run `38519754668`, job `115706505844`, uses trusted main
+  `f5e4e30353a0` and committed dev input `697df793f896`. Its actual command
+  is `python -I trusted/tools/check-module-size.py --repository candidate
+  --refresh-baseline --widen-only`, followed by the ordinary ceiling check.
+- The real output reports the baseline already current and all source
+  modules within their 1000-line cap/ceiling. Dev advances before publication,
+  so the stale-input fence correctly skips the baseline-only dev PR.
+  No baseline change or PR is invented to make this a positive test.
+- The live post-CI workflow blob exactly matches the reviewed dev-owned
+  publisher configuration; both obsolete main-baseline workflow files are
+  absent from the promoted tree. PR-only completions correctly skip this job.
+- This closes #6438's GitHub-hosted activation proof. It does not claim a
+  fresh baseline PR, local runtime installation, complete artifact
+  publication, or completion of the parent consolidation campaign.
+
+### 2026-10-14 - Both default-main replacements proven; invocation cutover reserved
+
+- Natural #6642, exact head `96193a99e3f7`, exercises trusted host run
+  `38523711315`. Its native main source gate job `115719048291` passes on
+  that exact PR head under the GitHub Actions integration.
+- Scanner job `115719481024` actually checks out promoted main
+  `f5e4e30353a0`, not PR code. Its event is non-stale, denylist configured,
+  and every prerequisite plus actual scan succeeds. The unavailable-scanner
+  fallback is skipped.
+- Successful identifier check `115720880437` completes inside that host's
+  publication step at `06:47:30Z`, scanning 322 changed generated-head files.
+  The legacy caller's successful check `115719481029` scans the same 322
+  files on the same head. This proves active scanning and head-bound
+  reporting, not merely a green job or an unconfigured neutral result.
+- Source promotion and the replacement consumer contract are now proven.
+  Existing #6632/#6633 publication recovery remains with the artifact owner;
+  no signature, immutable-asset or runtime-adoption requirement is waived.
+- Reserved only the planned main-PR invocation cutover in #6237 comment
+  `6162851913`, after fresh open-PR/thread deduplication. Next remove the
+  redundant main-PR CI allocation and duplicate gate through normal dev
+  review, retaining full main/dev push, other PR targets, fork approval
+  and distinct deep/platform coverage. The cutover checkbox stays open
+  until the change and its actual invocation outcome are proven.
+
+### 2026-10-14 - Main-PR CI allocation removed from the candidate
+
+- After the default-main producer proof above, `ci.yml` excludes exactly
+  `main` as a PR base and removes its duplicate admission job. All other
+  PR bases, including a `main` head targeting dev, retain CI. Pushes to
+  main/dev and manual validation retain their complete existing job graph,
+  permissions and selection settings; a parsed before/after comparison
+  confirms no surviving CI job changed.
+- The trusted-CI guard now requires that exact base exclusion, rejecting
+  missing triggers, path/type filtering, dev-only selection and additional
+  excluded branches. Real-Git admission and rollback tests execute the
+  retained trusted host rather than the deleted duplicate.
+- Local validation passes 189 focused CI, admission, scanner, attribution,
+  fleet, installation-context and payload-CWD cases. Ruff F/E9, trusted-CI,
+  documentation, install-contract and whitespace guards pass. The real-Git
+  tests exercise actual shell/subprocess and ancestry boundaries.
+- This closes the vision's gated-reversible-migration slice without
+  extending ownership or activating preservation. No plugin payload,
+  installer, fresh-machine behavior or resident daemon changes, so a
+  clean-room install and local runtime update are not applicable.
+- Current-head native review, configured required checks and the source
+  integration-bound preflight still precede merge. A normal containing
+  promotion must then prove actual main-PR CI invocation absence while
+  the trusted admission/scanner and main-push CI remain. This journal
+  records candidate validation, not release or parent completion.
