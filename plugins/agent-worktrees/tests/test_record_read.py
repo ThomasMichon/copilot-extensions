@@ -213,7 +213,10 @@ def test_record_read_unreadable_explicit(record_fixture, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "status", ["active", "complete", "pushed", "finalized", "orphaned", "archived"]
+    "status", [
+        "active", "complete", "completed", "pushed", "finalizing",
+        "finalized", "orphaned", "archived",
+    ]
 )
 def test_record_read_terminal_and_historical_paths_are_metadata(record_fixture, status):
     data, path = record_fixture
@@ -354,6 +357,57 @@ def test_record_read_opaque_legacy_backend_is_not_sessionless(record_fixture):
     assert result["worktree"]["execution_leg"] is None
     assert result["worktree"]["session_backend"] == data["session_backend"]
     assert result["worktree"]["session_backend_opaque"] is True
+
+
+@pytest.fixture
+def valid_provider_binding():
+    return {
+        "version": 1,
+        "provider": "example-provider",
+        "kind": "ahp",
+        "state": "disposed",
+        "binding_revision": 1,
+        "blob": {},
+        "endpoint_url": "http://localhost:1234",
+        "session_id": "example-session",
+        "protocol_version": "1",
+        "auth_account": "example-account",
+        "created_at": "2026-01-01T00:00:00Z",
+        "last_seen_at": "2026-01-01T00:00:00Z",
+    }
+
+
+@pytest.mark.parametrize("field", ["execution_leg", "session_backend"])
+@pytest.mark.parametrize("version", [True, False, 1.0, "1", None])
+def test_record_read_rejects_non_integer_binding_versions(
+    record_fixture, valid_provider_binding, field, version,
+):
+    data, path = record_fixture
+    data[field] = {**valid_provider_binding, "version": version}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1 and result["error"]["code"] == "record-malformed"
+    assert result["worktree"] is None
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", ["execution_leg", "session_backend"])
+@pytest.mark.parametrize("explicit_version", [False, True])
+def test_record_read_preserves_legacy_version_one_bindings(
+    record_fixture, valid_provider_binding, field, explicit_version,
+):
+    data, path = record_fixture
+    if not explicit_version:
+        valid_provider_binding.pop("version")
+    data[field] = valid_provider_binding
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"][f"{field}_opaque"] is False
+    assert result["worktree"][field]["state"] == "disposed"
+    assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize(

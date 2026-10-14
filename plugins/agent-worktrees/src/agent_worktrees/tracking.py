@@ -37,7 +37,8 @@ TITLE_MAX = 30
 #: ``archived`` is post-``finalized`` -- the tombstone `retire_record`
 #: writes for an unpaired reaped worktree instead of deleting it.
 WorktreeStatus = Literal[
-    "active", "complete", "pushed", "finalized", "orphaned", "archived",
+    "active", "complete", "completed", "pushed", "finalizing",
+    "finalized", "orphaned", "archived",
 ]
 
 # A Copilot session's asserted lifecycle state within its worktree

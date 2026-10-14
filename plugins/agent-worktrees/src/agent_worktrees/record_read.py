@@ -141,6 +141,11 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
                 if "state" in entry and entry["state"] not in get_args(tracking.SessionState):
                     raise ValueError("Recorded session has an unknown state")
         _validate_head_ledger(data)
+        for key in ("execution_leg", "session_backend"):
+            binding = data.get(key)
+            if isinstance(binding, dict) and "version" in binding:
+                if type(binding["version"]) is not int:
+                    raise ValueError(f"Record {key} version must be an integer")
         record = tracking.parse_record_data(data, path=record_path)
         leg = tracking.derive_execution_leg(record)
         worktree = {

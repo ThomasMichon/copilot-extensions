@@ -68,6 +68,13 @@ Other values must be JSON-compatible: mapping keys must be strings, and
 unsupported scalar types, non-finite numbers, and cyclic YAML are malformed.
 Keys are never silently coerced or collapsed during JSON conversion.
 Recognized legacy backends use the existing parsed version-1 representation.
+Explicit binding schema versions must be integers, not booleans, floats,
+strings, or null; malformed versions return `record-malformed` before binding
+interpretation. Unknown integer versions remain opaque, and an omitted legacy
+version retains the existing version-1 compatibility behavior.
+Durable `finalizing` and legacy `completed` statuses are returned unchanged,
+like other recognized lifecycle statuses; reading them grants no execution
+authority.
 
 The stored ID must match the requested ID, the repository must belong to the
 receiving project's configured repositories, and the stored path must be
