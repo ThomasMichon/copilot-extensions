@@ -271,6 +271,45 @@ single-final-batch contract.
 
 ## Journal
 
+### 2026-10-14 - In-process startup copy implementation
+
+- Implemented the declaration-driven contract reviewed in #6676. Startup now
+  copies opaque template bytes in process into the dedicated ignored
+  `agent-worktrees-generated` namespace, preserving declared nested destinations.
+  Removed the unused packaged-engine resolver and seven-file asset manifest;
+  the explicit authoring manager remains separate.
+- Direct creation publishes after applicable allocation and pair composition.
+  The outer PowerShell/Bash launchers explicitly defer resolve-time copying,
+  then perform composition and one publication at their existing final
+  preflight after update maintenance. Direct resume composes its selected pair
+  first. Failed composition reports degradation without publishing a partial
+  harness-only set; recoverable allocations remain in place.
+- Retained per-worktree publication serialization, fresh source snapshots,
+  one index preflight protecting tracked/staged outputs, link containment,
+  overwrite of edited untracked files, and stale-output reconciliation confined
+  to the generated namespace. No content budgets, suitability decisions,
+  provenance generation, sibling discovery, or new resident wrapper.
+- Focused contained source groups: 185 passed / 1 platform skip, then 311
+  passed / 4 platform/explicit-tier skips, with unchanged item, sub-suite,
+  aggregate and resource limits. The initial broad filtered runner exhausted
+  its 300-second collection/sub-suite bound; that run is not a pass. Exact-file
+  contained groups avoid unrelated whole-suite collection, not safety budgets.
+- Simple end-to-end / fresh-environment proof: a copied runtime package with
+  no projection assets, no sibling authoring plugin and an absent old snapshot
+  produces byte-identical nested output through a real Python subprocess.
+  Native PowerShell and Git Bash execute the launchers' actual final argument
+  blocks against real knowledge-only activation and the same isolated runtime:
+  all three standalone/native cases pass. The final wrappers stream stderr
+  progress while retaining clean JSON stdout and existing retry/degrade policy.
+  Final focused source/native group: 191 passed / 1 unavailable-symlink skip;
+  adjacent launch group: 311 passed / 4 existing skips; Manager launcher guards:
+  27 passed. Lint, headless subprocess and install/doc contracts pass.
+- Coordinated the new output contract with #6600's retained-New recovery owner,
+  including #6700. No competing updater or promotion repair was started.
+  Source review/merge, normal promotion, coordinated authorized local update
+  and actual installed-consumer proof remain outstanding. No remote rollout is
+  authorized for this slice. The parent campaign remains Active.
+
 ### 2026-10-14 - Declarations decide static publication
 
 - Clarified that simplicity is an implementation-design principle, not a

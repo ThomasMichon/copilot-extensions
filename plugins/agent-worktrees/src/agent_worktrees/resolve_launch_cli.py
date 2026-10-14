@@ -337,6 +337,8 @@ def _resolve_base_repo(
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
+    if not getattr(args, "defer_projections", False):
+        local_cache_refresh.prepare_for_launch(repo.anchor)
     _emit_plan(
         {
             "action": "exec",
@@ -506,13 +508,10 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         elif ff.reason in ("ahead", "diverged"):
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
-    if not args.dry_run:
-        # Worktree-scoped dynamic guidance (docs/patterns/worktree-scoped-
-        # dynamic-guidance.md): refresh every enabled source's gitignored
-        # *.local.instructions.md sibling now -- a fast-forward just above
-        # may have changed the installed payload this worktree sees.
-        # Degradation is reported without blocking an otherwise usable launch.
-        local_cache_refresh.prepare_for_launch(record.worktree_path)
+    if not args.dry_run and not getattr(args, "defer_projections", False):
+        local_cache_refresh.prepare_for_launch(
+            record.worktree_path, compose_pair=True, config=config,
+        )
 
     resume_target = None
     if not getattr(args, "no_resume", False):
@@ -713,6 +712,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
             launch_preflight=launch_preflight,
             recovery=getattr(args, "recovery", False),
             pending_seed=getattr(args, "seed", None),
+            defer_projections=getattr(args, "defer_projections", False),
         )
     except LaunchSeedStagingFailure as exc:
         output.err(str(exc))

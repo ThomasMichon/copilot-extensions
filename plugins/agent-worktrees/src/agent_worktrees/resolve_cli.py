@@ -235,6 +235,7 @@ def add_parsers(sub) -> None:
     parser = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--recovery", action="store_true")
+    parser.add_argument("--defer-projections", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--no-resume", action="store_true", help="Don't auto-resume the last Copilot session"
     )
@@ -629,9 +630,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         launch_preflight = _preflight_launch(config, state.args, work_dir)
         if launch_preflight.error:
             return output._json_error(launch_preflight.error, exit_code=3)
-        local_cache_refresh.prepare_for_launch(
-            work_dir, dry_run=getattr(state.args, "dry_run", False)
-        )
+        if not getattr(state.args, "defer_projections", False):
+            local_cache_refresh.prepare_for_launch(
+                work_dir, dry_run=getattr(state.args, "dry_run", False)
+            )
         launch_cmd = _build_launch_cmd(
             config,
             state.args,
@@ -664,6 +666,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 owner_ref=getattr(state.args, "owner_ref", None),
                 recovery=getattr(state.args, "recovery", False),
                 pending_seed=getattr(state.args, "seed", None),
+                defer_projections=getattr(state.args, "defer_projections", False),
             )
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)
@@ -699,9 +702,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
         return output._json_error(launch_preflight.error, exit_code=3)
-    local_cache_refresh.prepare_for_launch(
-        record.worktree_path, dry_run=getattr(state.args, "dry_run", False)
-    )
+    if not getattr(state.args, "defer_projections", False):
+        local_cache_refresh.prepare_for_launch(
+            record.worktree_path, dry_run=getattr(state.args, "dry_run", False),
+            compose_pair=True, config=config,
+        )
     if getattr(state.args, "restore", False):
         session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
         restored = _perform_remux(

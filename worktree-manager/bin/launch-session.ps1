@@ -350,7 +350,8 @@ function Invoke-RuntimePreflight {
         [Parameter(Mandatory)][string]$Label,
         [Parameter(Mandatory)][string[]]$PreflightArgs,
         [int]$MaxAttempts = 3,
-        [int]$RetryDelayMs = 400
+        [int]$RetryDelayMs = 400,
+        [switch]$StreamProgress
     )
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         $py = Resolve-RuntimePython
@@ -363,7 +364,13 @@ function Invoke-RuntimePreflight {
             $savedErrorAction = $ErrorActionPreference
             try {
                 $ErrorActionPreference = 'Continue'
-                $output = & $py @PreflightArgs 2>&1
+                $output = & $py @PreflightArgs 2>&1 | ForEach-Object {
+                    if ($StreamProgress -and $_ -is [System.Management.Automation.ErrorRecord]) {
+                        [Console]::Error.WriteLine([string]$_)
+                    } else {
+                        $_
+                    }
+                }
                 $exitCode = $LASTEXITCODE
             } finally {
                 $ErrorActionPreference = $savedErrorAction
@@ -803,7 +810,7 @@ $resolveArgs = @('-m', 'agent_worktrees')
 if ($script:LaunchProject) {
     $resolveArgs += @('--project', $script:LaunchProject)
 }
-$resolveArgs += @('resolve') + $CopilotArgs
+$resolveArgs += @('resolve', '--defer-projections') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
 Write-LaunchTrace 'resolve_start'
 
@@ -1124,8 +1131,8 @@ $knowledgeArgs = @('-m', 'agent_worktrees')
 if ($script:LaunchProject) {
     $knowledgeArgs += @('--project', $script:LaunchProject)
 }
-$knowledgeArgs += @('knowledge', 'compose-plugins', '--cwd', $knowledgeCwd, '--json')
-Invoke-RuntimePreflight -Label 'Knowledge plugin preflight' -PreflightArgs $knowledgeArgs | Out-Null
+$knowledgeArgs += @('knowledge', 'compose-plugins', '--cwd', $knowledgeCwd, '--prepare-projections', '--json')
+Invoke-RuntimePreflight -Label 'Knowledge plugin preflight' -PreflightArgs $knowledgeArgs -StreamProgress | Out-Null
 
 $marketplaceArgs = @('-m', 'agent_worktrees', 'reconcile-marketplaces',
     '--cwd', $knowledgeCwd, '--ensure-ignored', '--json')

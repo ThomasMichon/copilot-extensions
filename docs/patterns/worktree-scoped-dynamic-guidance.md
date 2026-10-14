@@ -63,8 +63,8 @@ reviewed body as the source of truth would leave two gaps:
 
 ### Startup publication contract
 
-This is the prescriptive contract for static startup delivery, distinct from
-the current renderer implementation described in section 4. It serves Vision
+This is the static startup delivery contract, distinct from the checked-in
+authoring renderer's legacy delivery described in section 4. It serves Vision
 `harness-guidance`'s `simple-local-static-delivery` and
 `generated-output-is-disposable-source-is-not` items.
 
@@ -118,6 +118,23 @@ Checked-in maintenance and legacy migration outside the designated generated
 namespace remain separate operations, not prerequisites to copying declared
 instructions.
 
+`agent_worktrees.static_instructions` implements this copy path. Its dedicated
+namespace is `.github/instructions/agent-worktrees-generated/<marketplace>/`,
+followed by the declaration's path relative to `.github/instructions/` with
+the `.local.instructions.md` suffix. The publisher adds that namespace to
+Git's local `info/exclude`; it never edits the consumer's tracked ignore files.
+It resolves user, repository and local activation settings in process and uses
+the existing vendored `plugin_resolve` marketplace/path helpers. Missing enabled
+payloads, invalid declarations and inconclusive index checks report failure
+before publication instead of treating incomplete discovery as an empty set.
+
+Direct creation copies after paired allocation and composition. Direct resume
+composes the selected pair before copying. The outer launchers explicitly defer
+that preparation during `resolve`, then call
+`knowledge compose-plugins --prepare-projections` after their update/maintenance
+barrier, before mux or Copilot startup. SessionStart retains its asynchronous
+backup; it shares the same per-worktree publication lock and copy backend.
+
 A third delivery tier, **worktree-scoped** rather than session-scoped or
 purely checked-in: a gitignored, locally re-rendered cache of auto-discovered
 instruction siblings that lives for as long as the worktree exists, refreshed
@@ -125,7 +142,7 @@ at worktree lifecycle boundaries and session start.
 
 ### 1. The gitignored auto-discovered local body
 
-The sibling layout below describes the current format and compatibility path;
+The sibling layout below describes the authoring renderer's compatibility path;
 the startup contract above requires a dedicated ignored generated namespace.
 
 Every projection destination
@@ -317,26 +334,27 @@ structural tests.
 
 ### 4. Refresh at worktree lifecycle boundaries, not every session
 
-#### Current implementation and compatibility boundary
+#### Historical renderer and compatibility boundary
 
-The implementation description below records the existing packaged renderer;
-it is not a requirement to retain that dependency for the startup publication
-contract above. Changing local delivery must preserve applicable reader and
-backup-delivery behavior without making the authoring manager or its content
-admission policy a prerequisite of the new static-copy path.
+The implementation description below records the previous renderer and its
+reader/backup compatibility contracts, not the current startup publisher.
+Startup no longer packages or invokes that engine: the seven-file asset
+manifest and its runtime resolver have been removed from agent-worktrees.
+The authoring manager remains in customizing-copilot for explicit checked-in
+maintenance. Its content/admission behavior is not part of startup copying.
 
 The render step is triggered by `agent-worktrees` at worktree **create,
 resume, and local JSON launch planning** -- before the first (or next) session in that worktree even starts,
 so the harness's own directory scan (if it reads live files rather than a git
 index) may pick it up with zero reliance on the catch-all at all. This
 mirrors the existing manual "an anchor-repo user restarts to pick up a
-freshly-synced set" behavior, made automatic and moved earlier. **Landed**:
-`agent_worktrees.local_cache_refresh.refresh_local_cache()` invokes
+freshly-synced set" behavior, made automatic and moved earlier. **Historical**:
+`agent_worktrees.local_cache_refresh.refresh_local_cache()` previously invoked
 `render-local-cache` from **agent-worktrees' own payload**, across a
 process boundary. On `dev`, the canonical projection engine remains in
 customizing-copilot's scripts directory; `agent-worktrees/packaged-assets.json`
-declares its complete seven-file runtime closure. Promotion and release preview
-vendor those files byte-identically into agent-worktrees' own
+declared its complete seven-file runtime closure. Promotion and release preview
+vendored those files byte-identically into agent-worktrees' own
 `scripts/instruction-projections/` directory. Canonical changes charge both
 the authoring plugin and packaged consumers in the release/changefile guards.
 There is one authoring source, not a maintained fork.
