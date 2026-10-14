@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -99,6 +100,35 @@ def test_symlink_directory_refuses_escape(tmp_path, monkeypatch, part):
     with pytest.raises(ModelError, match="plain directory"):
         write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("part", [
+    ".copilot", ".copilot/session-state", ".copilot/session-state/test-session",
+    ".copilot/session-state/test-session/instructions",
+    ".copilot/session-state/test-session/instructions/budget-guidance",
+])
+def test_reparse_directory_refuses_write_without_symlink_privileges(tmp_path, monkeypatch, part):
+    import budget_guidance.session_guidance as module
+
+    _config(tmp_path, monkeypatch)
+    written = write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
+    previous = written.read_bytes()
+    reparse = tmp_path / part
+    original_lstat = Path.lstat
+    monkeypatch.setattr(module.stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400, raising=False)
+
+    def reparse_metadata(path, *args, **kwargs):
+        metadata = original_lstat(path, *args, **kwargs)
+        if path == reparse:
+            return SimpleNamespace(st_mode=metadata.st_mode, st_file_attributes=0x410)
+        return metadata
+
+    monkeypatch.setattr(Path, "lstat", reparse_metadata)
+    with pytest.raises(ModelError, match="plain directory"):
+        write_session_guidance(_payload(tmp_path), home=tmp_path, at=AT)
+    assert written.read_bytes() == previous
+    assert not list(written.parent.glob("*.tmp"))
 
 
 def test_atomic_failure_retains_previous_cue_and_removes_only_owned_temp(tmp_path, monkeypatch):
@@ -280,7 +310,8 @@ def test_writer_failure_envelope_is_single_and_redacted(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX one-shot writer deadline")
-def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path):
+@pytest.mark.parametrize("stall", ["import", "main"])
+def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path, stall):
     shell = shutil.which("bash")
     if shell is None:
         pytest.skip("Bash unavailable")
@@ -292,9 +323,12 @@ def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path):
     source = payload / "src/budget_guidance"
     source.mkdir(parents=True)
     (source / "__init__.py").write_text("")
-    (source / "session_guidance.py").write_text(
-        "import time\ndef main():\n    time.sleep(20)\n    return 0\n",
+    workload = (
+        "import time\ntime.sleep(20)\ndef main():\n    return 0\n"
+        if stall == "import" else
+        "import time\ndef main():\n    time.sleep(20)\n    return 0\n"
     )
+    (source / "session_guidance.py").write_text(workload)
     env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(payload)}
     started = time.monotonic()
     result = subprocess.run(

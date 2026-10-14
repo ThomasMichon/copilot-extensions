@@ -24,7 +24,8 @@ drains both output streams concurrently, and bounds the owned writer's wait.
 On Windows it resolves a virtual environment's bounded `pyvenv.cfg` to the
 base console interpreter and refuses `py.exe` launchers, so cancellation targets
 the actual one-shot writer rather than leaving a redirector's child running.
-The isolated POSIX writer arms its own five-second real-time process alarm;
+The isolated POSIX writer arms its own five-second real-time process alarm
+before resolving or importing payload source;
 it does not depend solely on the host's outer hook timeout or a platform-specific
 `timeout` executable. It starts no child processes of its own.
 Missing writer/interpreter or write failures log a fixed, redacted diagnostic

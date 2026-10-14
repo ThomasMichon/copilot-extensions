@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """Use this owning payload's pure posture source without provisioning a runtime."""
 
-from pathlib import Path
 import os
 import signal
 import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from budget_guidance.session_guidance import main
 
 if __name__ == "__main__":
     if os.name != "nt":
@@ -19,4 +14,9 @@ if __name__ == "__main__":
         # This isolated one-shot process has no children or foreign signal policy.
         signal.signal(signal.SIGALRM, signal.SIG_DFL)
         signal.setitimer(signal.ITIMER_REAL, 5)
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from budget_guidance.session_guidance import main
+
     raise SystemExit(main())
