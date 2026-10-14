@@ -135,7 +135,9 @@ native reference **before** an adopter requests graceful lifecycle control.
 with a finite zero-to-30-second budget including reference-lock contention.
 It never samples the PID again, sends a signal, or opens a replacement handle
 after shutdown. Use its context manager or `close()` to release the reference;
-closed references reject waiting.
+closed references reject waiting. References remain local to their creating
+process: a forked child refuses wait/close/context entry before touching a
+possibly orphaned inherited lock or its parent's native reference.
 
 Windows validates creation time through the captured query/synchronization
 handle, without requesting termination rights. Linux reuses canonical pidfd

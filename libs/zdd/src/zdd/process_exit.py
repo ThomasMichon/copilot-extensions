@@ -31,10 +31,16 @@ class ProcessExitReference:
         self._wait = wait
         self._close = close
         self._closed = False
+        self._creating_pid = os.getpid()
         self._lock = threading.Lock()
+
+    def _assert_process(self) -> None:
+        if os.getpid() != self._creating_pid:
+            raise RuntimeError("process exit reference belongs to another process")
 
     def wait(self, timeout: float) -> bool:
         """Confirm native exit within a finite zero-to-30-second budget."""
+        self._assert_process()
         diagnostic_exit.validate_timeout(timeout)
         if timeout is None:
             raise ValueError("exit timeout must be finite")
@@ -49,12 +55,14 @@ class ProcessExitReference:
             self._lock.release()
 
     def close(self) -> None:
+        self._assert_process()
         with self._lock:
             if not self._closed:
                 self._close()
                 self._closed = True
 
     def __enter__(self) -> ProcessExitReference:
+        self._assert_process()
         with self._lock:
             if self._closed:
                 raise RuntimeError("process exit reference is closed")

@@ -148,6 +148,78 @@ def test_contended_wait_cannot_extend_callers_budget():
         reference.close()
 
 
+@pytest.mark.parametrize("operation", ["wait", "close", "__enter__"])
+def test_inherited_reference_refuses_before_touching_parent_lock(monkeypatch, operation):
+    reference = process_exit.ProcessExitReference(
+        123, "456", lambda *_: pytest.fail("inherited reference must not wait"),
+        lambda: pytest.fail("inherited reference must not close"),
+    )
+
+    class ParentLock:
+        def acquire(self, **_):
+            pytest.fail("must not acquire a possibly orphaned inherited lock")
+
+        def __enter__(self):
+            pytest.fail("must not enter a possibly orphaned inherited lock")
+
+        def __exit__(self, *_):
+            pass
+
+    reference._lock = ParentLock()
+    parent_pid = os.getpid()
+    monkeypatch.setattr(process_exit.os, "getpid", lambda: parent_pid + 1)
+    with pytest.raises(RuntimeError, match="another process"):
+        getattr(reference, operation)(*([0] if operation == "wait" else []))
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native Linux inherited-reference refusal")
+def test_forked_child_refuses_orphaned_parent_lock_and_leaves_parent_reference_live():
+    import select
+    import signal
+
+    token = diagnostics.process_start_time(os.getpid())
+    assert token is not None
+    with process_exit.open_process(os.getpid(), token) as reference:
+        reader, writer = os.pipe()
+        reference._lock.acquire()
+        try:
+            child = os.fork()
+        except BaseException:
+            reference._lock.release()
+            os.close(reader)
+            os.close(writer)
+            raise
+        if child == 0:
+            os.close(reader)
+            try:
+                for operation in ("wait", "close", "__enter__"):
+                    try:
+                        getattr(reference, operation)(*([0] if operation == "wait" else []))
+                    except RuntimeError as exc:
+                        if "another process" not in str(exc):
+                            os._exit(2)
+                    else:
+                        os._exit(3)
+                os.write(writer, b"refused")
+            finally:
+                os._exit(0)
+        os.close(writer)
+        finished = False
+        try:
+            ready, _, _ = select.select([reader], [], [], 3)
+            assert ready and os.read(reader, 64) == b"refused"
+            _, status = os.waitpid(child, 0)
+            finished = True
+            assert os.waitstatus_to_exitcode(status) == 0
+        finally:
+            reference._lock.release()
+            os.close(reader)
+            if not finished:
+                os.kill(child, signal.SIGKILL)
+                os.waitpid(child, 0)
+        assert reference.wait(0) is False
+
+
 def test_linux_identity_change_closes_reference(monkeypatch):
     from zdd import singleton_linux
 
