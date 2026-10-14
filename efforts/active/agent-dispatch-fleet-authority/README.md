@@ -327,11 +327,13 @@ recorded against each open fork._
   Local serving-coordinator health reports connection and intake failure state.
 - Native delivery selection: 189 passed; broader coordinator, board relay,
   MCP, client transport and intake selection: 340 passed. Final focused
-  delivery/event run: 58 passed, including case-insensitive affinity,
+  delivery/event run: 61 passed, including case-insensitive affinity,
   credential forwarding, finite timing, exponential backoff across repeated
-  ready/EOF failures and partial thread-start cleanup. Fresh Linux container:
-  50 delivery/event tests passed, including real TCP, before those final
-  incremental assertions; required CI covers the published head.
+  ready/EOF failures, partial thread-start and repeated-stop cleanup.
+  Fresh Linux container: 59 delivery/event tests passed, including real TCP.
+  The later minimum-Python compatibility fix passes the native 61-test run
+  plus a built-candidate Python 3.10.20 keepalive/ready/cancellation exercise.
+  Required CI remains a gate on the published head.
 - Validation tiers: unit contracts plus simple end-to-end TCP enqueue, capacity
   release, startup/reconnect gaps, cancellation and latency below 1.5 seconds.
   The fresh Linux run used an explicit governed dependency-feed fixture and
@@ -342,6 +344,12 @@ recorded against each open fork._
   compatibility fallback, independent presence, health and retiring ownership.
   This closes the reviewed delivery slice of the existing fleet vision;
   it does not extend standing intent or complete the fleet-authority effort.
+- The first PR CI guard caught a real compatibility defect: keepalive caught
+  only builtin `TimeoutError`, and the initial ready wait used the Python
+  3.11-only `asyncio.timeout` despite the runtime's Python 3.10 minimum.
+  Added the distinct legacy asyncio exception, used `wait_for` for the barrier,
+  added portable regressions for both, and exercised the built candidate on
+  actual Python 3.10.20. The CI failure was fixed, not waived or retried away.
 
 ### 2026-10-14 -- Corrective task-authority PR merged; assignment push next
 - PR #6665 merged as `b8d3ec6a710beb376ef655e5a715e7055b783b93` after

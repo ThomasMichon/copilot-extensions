@@ -85,3 +85,24 @@ def test_keepalive_preserves_subscription_and_real_events():
         assert bus.subscriber_count == 0
 
     asyncio.run(scenario())
+
+
+def test_keepalive_catches_distinct_legacy_asyncio_timeout(monkeypatch):
+    class LegacyAsyncTimeout(Exception):
+        pass
+
+    async def legacy_timeout(awaitable, timeout):
+        awaitable.close()
+        raise LegacyAsyncTimeout
+
+    monkeypatch.setattr(asyncio, "TimeoutError", LegacyAsyncTimeout)
+    monkeypatch.setattr(asyncio, "wait_for", legacy_timeout)
+
+    async def scenario():
+        stream = EventBus().subscribe(keepalive=0.01)
+        try:
+            assert await anext(stream) == {"type": "keepalive"}
+        finally:
+            await stream.aclose()
+
+    asyncio.run(scenario())

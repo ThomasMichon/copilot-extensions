@@ -69,7 +69,7 @@ class EventBus:
                 else:
                     try:
                         yield await asyncio.wait_for(q.get(), timeout=keepalive)
-                    except TimeoutError:
+                    except (TimeoutError, asyncio.TimeoutError):
                         yield {"type": "keepalive"}
         finally:
             self._subscribers.discard(q)

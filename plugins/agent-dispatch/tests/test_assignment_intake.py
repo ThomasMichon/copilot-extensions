@@ -242,6 +242,16 @@ def test_assignment_partial_start_failure_retires_started_thread(monkeypatch):
     assert loop.status()["state"] == "stopped"
 
 
+def test_assignment_ready_does_not_require_python311_asyncio_timeout(monkeypatch):
+    monkeypatch.delattr(asyncio, "timeout", raising=False)
+    loop = build_loop(ScriptedEvents(), CountingIntake())
+    loop.start()
+    try:
+        wait_for(lambda: loop.status()["state"] == "connected")
+    finally:
+        assert loop.stop()
+
+
 def test_assignment_stop_retains_inflight_intake_and_cancels_quiet_reader():
     client, intake = ScriptedEvents(), CountingIntake()
     intake.block.clear()

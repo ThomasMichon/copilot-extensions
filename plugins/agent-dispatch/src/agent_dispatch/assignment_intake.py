@@ -138,8 +138,9 @@ class AssignmentIntake:
                 connected_at = None
                 try:
                     self._state("connecting")
-                    async with asyncio.timeout(self._ready_timeout):
-                        first = await anext(stream)
+                    first = await asyncio.wait_for(
+                        anext(stream), timeout=self._ready_timeout
+                    )
                     if first.get("type") != "ready":
                         raise RuntimeError("missing subscription barrier")
                     if self._stop.is_set() or not self._enabled():
