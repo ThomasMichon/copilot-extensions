@@ -59,7 +59,9 @@ observation time. `freshness` therefore remains `unknown`,
 `provider_observed_at` is `null`, and the result explicitly does not claim
 independently verified requesting-session account identity. Its inert
 `budget_reading` remains unavailable with all numeric budget values withheld;
-API acquisition failures remain errors. It can be inspected or passed through
+401/403 and inaccessible/unsupported 404 responses likewise remain unavailable.
+Transport, timeout, throttling, malformed, and other HTTP failures remain errors.
+It can be inspected or passed through
 an [explicit external reader](external-readers.md), but cannot manufacture a
 forecast or an actionable routing posture.
 

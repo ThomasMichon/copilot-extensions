@@ -128,13 +128,15 @@ timestamp is not proof that the provider metadata was refreshed.
 
 - [x] Add a manual/static adapter that can provide a complete posture without
   network access or another service.
-- [ ] Add a provider API adapter for available personal or organization
+- [x] Add a provider API adapter for available personal or organization
   AI-usage reports, preserving empty, unauthorized, and unsupported results.
+  The personal GitHub report adapter keeps report quantities separate from
+  current entitlement, reset, provider observation time, and session identity.
 - [x] Add a bounded external-command adapter contract for account surfaces or
   organization-specific readers that cannot live in the public plugin.
 - [x] Make adapter order and field authority configurable without allowing
   repository data to override operator-owned credentials or safety policy.
-- [ ] Ensure no adapter failure becomes a zero-consumption success.
+- [x] Ensure no adapter failure becomes a zero-consumption success.
 
 ### Phase 3 - Plugin, status, and context delivery
 
@@ -220,10 +222,11 @@ timestamp is not proof that the provider metadata was refreshed.
 - [x] The posture contract is provider-neutral and contains no real account,
   allowance, organization, host, or private service.
 - [x] Manual/static configuration works with no network or external service.
-- [ ] Provider and external adapters retain source, capture time, freshness, and
+- [x] Provider and external adapters retain source, capture time, freshness, and
   explicit availability/error status.
-  External-command coverage landed in #6450; provider acquisition remains open.
-- [ ] Missing, stale, unauthorized, empty, or contradictory readings are never
+  External-command coverage landed in #6450; the personal report adapter
+  explicitly leaves provider observation freshness unknown.
+- [x] Missing, stale, unauthorized, empty, or contradictory readings are never
   represented as zero consumption or full remaining allowance.
 - [x] Arithmetic handles partial days, reset boundaries, overspend, and zero
   remaining time deterministically.

@@ -98,6 +98,21 @@ def test_user_failure_prevents_billing_request(status: int) -> None:
     assert "do-not-render" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("endpoint", [0, 1])
+@pytest.mark.parametrize("status", [200, 401, 403, 404, 429, 500])
+def test_byte_bound_precedes_status_handling_on_every_endpoint(
+    endpoint: int, status: int,
+) -> None:
+    client = Client()
+    client.responses[endpoint] = GitHubResponse(status, b"x" * 65537)
+    result = _read(client)
+    assert len(client.paths) == endpoint + 1
+    assert result["availability"] == "error"
+    assert result["diagnostics"] == ["github-response-exceeds-65536-bytes"]
+    assert result["reported_usage"] is None
+    assert result["budget_reading"]["availability"] == "error"
+
+
 @pytest.mark.parametrize("status", [401, 403, 404, 429, 500, 503])
 def test_http_failures_never_become_zero_or_trigger_retries(status: int) -> None:
     client = Client(status=status)

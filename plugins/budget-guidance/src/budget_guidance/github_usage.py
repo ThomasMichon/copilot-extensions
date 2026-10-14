@@ -96,6 +96,8 @@ async def _get(
         or not isinstance(response.body, bytes)
     ):
         raise TypeError("GitHub transport must return a GitHubResponse")
+    if len(response.body) > MAX_RESPONSE_BYTES:
+        raise ModelError("github-response-exceeds-65536-bytes")
     if response.status_code != 200:
         reason = {
             401: "github-unauthorized", 403: "github-forbidden",
@@ -105,8 +107,6 @@ async def _get(
         result["availability"] = "unavailable" if response.status_code in {401, 403, 404} else "error"
         result["diagnostics"].append(reason)
         return None
-    if len(response.body) > MAX_RESPONSE_BYTES:
-        raise ModelError("github-response-exceeds-65536-bytes")
     return _decode(response.body)
 
 
