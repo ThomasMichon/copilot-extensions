@@ -104,6 +104,7 @@ def build(
         action="settle-publication" if point is not None else "rewrite",
         evidence_fingerprint=_fingerprint((evidence, asdict(point))) if point is not None else evidence,
         evidence_status="unusable" if unusable else "backed-sync" if point is not None else "none",
+        rebase_base_sha=point.target_head if point is not None else "",
         overrides=overrides,
     )
 

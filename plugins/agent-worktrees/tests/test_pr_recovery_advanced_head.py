@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, git_collab, git_ops, pr_break_glass, pr_publish, pr_recovery, pr_rewrite, tracking
+from agent_worktrees import finalize, git_collab, git_ops, pr_break_glass, pr_ops, pr_publish, pr_recovery, pr_rewrite, tracking
 from agent_worktrees.config import Config
 from agent_worktrees.providers.base import PullResult
 from test_pr_break_glass import _recovered_pr
@@ -160,9 +160,16 @@ def test_recovery_cas_never_falls_back_to_unapproved_fast_forward(
 
 
 def backed_publication(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, *, with_base: bool = False,
 ) -> tuple[Config, str, Path, Path, str, str, str]:
     config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    if with_base:
+        current = record(wid)
+        branch = current.pr.branch = f"pr/owned-topic-{git_ops.worktree_suffix(wid)}"
+        current.pr.base_sha = git("merge-base", saved, "origin/master", cwd=wt)
+        current.pr.patch_id = pr_ops._patch_id(current.pr.base_sha, saved, cwd=str(wt))
+        tracking.save_record(current)
+        git("--git-dir", str(remote), "update-ref", f"refs/heads/{branch}", saved, cwd=wt)
     git("reset", "--hard", saved, cwd=wt)
     assert git_collab.sync_forward(wid, config)
     published = git("rev-parse", "HEAD", cwd=wt)
@@ -215,6 +222,44 @@ def test_changed_backed_evidence_invalidates_settlement_confirmation(
     changed = preview(wid, config, first["confirmation"])
     assert changed["confirmation"] != first["confirmation"]
     assert not list(metadata(wt).glob("*break-glass*.json"))
+
+
+def test_settlement_updates_base_and_patch_before_next_sync_publication(
+    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, wt, remote, _saved, branch, published = backed_publication(
+        pr_repo, monkeypatch, with_base=True,
+    )
+    original_base = record(wid).pr.base_sha
+    target = git("rev-parse", "origin/master", cwd=wt)
+    first = preview(wid, config)
+    assert original_base and original_base != target
+    assert first["operation"]["action"] == "settle-publication"
+    assert first["operation"]["rebase_base_sha"] == target
+    with monkeypatch.context() as no_transport:
+        no_transport.setattr(git_ops, "push", lambda *a, **k: pytest.fail("Settlement must not push."))
+        no_transport.setattr(pr_rewrite.providers, "get_provider", lambda *a: pytest.fail("No provider edits."))
+        assert finalize.push_changes(
+            wid, config, break_glass_reason=REASON, confirm_break_glass=first["confirmation"],
+        )
+    settled = record(wid).pr
+    assert settled.head_sha == published
+    assert settled.base_sha == target
+    assert settled.patch_id == pr_ops._patch_id(target, published, cwd=str(wt))
+    assert settled.patch_id != pr_ops._patch_id(original_base, published, cwd=str(wt))
+    anchor = Path(config.default_repo.anchor)
+    (anchor / "next-upstream.txt").write_text("later upstream work\n")
+    git("add", "next-upstream.txt", cwd=anchor)
+    git("commit", "-m", "advance upstream again", cwd=anchor)
+    git("push", "origin", "master", cwd=anchor)
+    assert git_collab.sync_forward(wid, config)
+    assert finalize.push_changes(wid, config)
+    current = record(wid).pr
+    assert current.head_sha == git("rev-parse", "HEAD", cwd=wt)
+    assert current.base_sha == git("rev-parse", "origin/master", cwd=wt) != target
+    assert current.patch_id == pr_ops._patch_id(current.base_sha, current.head_sha, cwd=str(wt))
+    assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == current.head_sha
+    assert git("show", f"{current.head_sha}:unpublished.txt", cwd=wt) == "keep this unpublished"
 
 
 def test_remote_equal_to_source_without_proof_is_not_automatic_settlement(
@@ -283,6 +328,7 @@ def test_plan_fields_bind_action_original_record_and_evidence() -> None:
     for change in (
         {"saved_head": "a" * 40}, {"publication_fingerprint": "a" * 64},
         {"action": "rewrite"}, {"evidence_fingerprint": "a" * 64},
+        {"rebase_base_sha": "b" * 40},
     ):
         assert replace(operation, **change).confirmation(REASON) != operation.confirmation(REASON)
 

@@ -34,6 +34,7 @@ class RecoveryPreview:
     action: Literal["rewrite", "settle-publication"] = "rewrite"
     evidence_fingerprint: str = ""
     evidence_status: Literal["none", "backed-sync", "unusable"] = "none"
+    rebase_base_sha: str = ""
 
     def __post_init__(self) -> None:
         if any(not value.strip() for value in (self.provider, self.repo, self.branch)):

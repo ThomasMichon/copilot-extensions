@@ -381,7 +381,9 @@ expected head, action or evidence requires a fresh preview and sign-off.
 If an existing completed backed-sync checkpoint proves that its exact result
 is already the agreed published head, the preview prefers `settle-publication`:
 confirmation updates only local publication bookkeeping, never pushes or edits
-the PR, and leaves later local work unpublished. Equal source/remote commits
+the PR, and leaves later local work unpublished. The preview binds the checkpoint's
+new base; settlement records that base and its corresponding publication patch ID.
+Equal source/remote commits
 or matching patches alone do not establish this proof. Otherwise `rewrite`
 publishes the pinned committed source as-is with the **previewed live head** as
 its exact CAS lease, not a silently refreshed saved lease. Both actions require

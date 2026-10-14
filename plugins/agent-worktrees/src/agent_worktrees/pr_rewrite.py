@@ -206,7 +206,9 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                     observe=observe_pr, cwd=cwd,
                 )
                 if approved.operation.action == "settle-publication":
-                    pr_publish.record_reconciled_head(config, fresh, pr, remote_tip)
+                    pr_publish.record_reconciled_head(
+                        config, fresh, pr, remote_tip, rebase_base_sha=approved.operation.rebase_base_sha,
+                    )
                     publication_settled = True
                     audit.finish("succeeded")
                     activity.log_event("pr_publication_reconciled", worktree_id=worktree_id, branch=pr.branch)

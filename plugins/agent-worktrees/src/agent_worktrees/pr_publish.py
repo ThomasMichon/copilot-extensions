@@ -610,9 +610,10 @@ def _persist_head(
 
 def record_reconciled_head(
     config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord, head_sha: str,
+    *, rebase_base_sha: str = "",
 ) -> None:
     """Settle a proven existing publication, never push or refresh PR metadata."""
-    _persist_head(config, record, pr, head_sha)
+    _persist_head(config, record, pr, head_sha, rebase_base_sha=rebase_base_sha)
 
 
 def record_pushed_head(
