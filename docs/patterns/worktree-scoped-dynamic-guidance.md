@@ -150,8 +150,11 @@ Foreground preparation has no overall deadline. Explicitly bounded callers,
 including the backup, share their remaining budget across discovery and Git
 preflights and check it before publication mutations; operation-specific Git
 and lock limits remain separate from a broad startup ceiling.
-The publication key is casefolded so case-insensitive macOS checkout aliases
-cannot acquire different locks. After the complete batch preflight, stale
+Publication and preparation keys use NFC normalization plus casefolding so
+equivalent macOS checkout aliases cannot acquire different locks. Destination
+collision keys use the same equivalence without rewriting paths or copied bytes.
+Declared payloads/templates cannot overlap their own disposable output tree.
+After the complete batch preflight, stale
 untracked files and unused empty generated directories are removed before
 installing replacements, allowing file/directory destination migrations in
 either direction without manual cleanup. Tracked blockers still fail the batch

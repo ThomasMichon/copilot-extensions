@@ -313,6 +313,89 @@ def test_publication_lock_coalesces_case_insensitive_checkout_aliases(tmp_path, 
     static.publication_lock(tmp_path / "Checkout")
     static.publication_lock(tmp_path / "checkout")
     assert len(paths) == 2 and paths[0] == paths[1]
+    composed, decomposed = tmp_path / "caf\u00e9", tmp_path / "cafe\u0301"
+    static.publication_lock(composed)
+    static.publication_lock(decomposed)
+    assert paths[2] == paths[3]
+    assert knowledge_plugins._overlay_lock_target(composed) == knowledge_plugins._overlay_lock_target(decomposed)
+
+
+def test_unicode_equivalent_destinations_collide_before_cleanup(copy_workspace):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    previous = output.read_bytes()
+    declaration = template.parents[1] / "instruction-projections.json"
+    data = json.loads(declaration.read_text())
+    data["projections"] = [
+        {**data["projections"][0], "id": str(index),
+         "destination": f".github/instructions/demo/{name}.instructions.md"}
+        for index, name in enumerate(("caf\u00e9", "cafe\u0301"))
+    ]
+    write_json(declaration, data)
+    result = lcr.refresh_local_cache(root)
+    assert result.status == "failed"
+    assert "colliding" in result.detail
+    assert output.read_bytes() == previous
+
+
+@pytest.mark.parametrize("error", [OSError, ValueError, TimeoutError])
+def test_pending_marker_clear_errors_preserve_plugin_error_boundary(copy_workspace, monkeypatch, error):
+    root, home = copy_workspace
+    lcr.mark_pair_pending(root)
+
+    def fail(*args, **kwargs):
+        raise error("marker cleanup refused")
+
+    monkeypatch.setattr(static, "publication_lock", fail)
+    with pytest.raises(knowledge_plugins.KnowledgePluginError, match="marker cleanup refused"):
+        lcr.complete_pair_composition(root, {"paired": True, "action": "composed"})
+    assert static.pair_pending_path(root).exists()
+
+
+def test_declared_source_cannot_be_deleted_as_disposable_output(copy_workspace):
+    root, home = copy_workspace
+    template, _ = provider(root, home)
+    import shutil
+
+    catalog = root / static.NAMESPACE / "embedded"
+    shutil.copytree(template.parents[1], catalog / "demo")
+    write_json(catalog / "marketplace.json", {
+        "name": "embedded", "plugins": [{"name": "demo", "source": "./demo"}],
+    })
+    write_json(root / ".github" / "copilot" / "settings.json", {
+        "enabledPlugins": {"demo@embedded": True},
+        "extraKnownMarketplaces": {"embedded": {"source": {"source": "directory", "path": str(catalog)}}},
+    })
+    result = lcr.refresh_local_cache(root)
+    assert result.status == "failed"
+    assert "overlaps" in result.detail
+    assert (catalog / "demo" / "instructions" / "fallback.md").read_bytes() == template.read_bytes()
+    assert (catalog / "demo" / "plugin.json").exists()
+
+
+def test_declared_template_cannot_be_deleted_as_disposable_output(copy_workspace):
+    root, home = copy_workspace
+    source = root / static.NAMESPACE / "source.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"source must remain untouched")
+    write_json(root / "plugin.json", {"name": "demo"})
+    write_json(root / "marketplace.json", {
+        "name": "embedded", "plugins": [{"name": "demo", "source": "."}],
+    })
+    write_json(root / "instruction-projections.json", {
+        "schema": "copilot-extensions.instruction-projections", "version": 1,
+        "projections": [{
+            "id": "body", "template": f"{static.NAMESPACE}/source.md",
+            "destination": ".github/instructions/demo/body.instructions.md",
+        }],
+    })
+    write_json(root / ".github" / "copilot" / "settings.json", {
+        "enabledPlugins": {"demo@embedded": True},
+        "extraKnownMarketplaces": {"embedded": {"source": {"source": "directory", "path": "."}}},
+    })
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert source.read_bytes() == b"source must remain untouched"
 
 
 def test_recursive_json_errors_remain_failed_diagnostics(copy_workspace, monkeypatch):

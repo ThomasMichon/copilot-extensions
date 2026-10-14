@@ -9,6 +9,7 @@ from pathlib import Path
 import stat
 import tempfile
 import time
+import unicodedata
 
 from plugin_resolve import (
     RepoPluginSettings, SETTINGS_RELS, load_marketplace, marketplace_manifest_name,
@@ -152,6 +153,10 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
         if not enabled[identity]:
             continue
         plugin = _plugin(identity, markets, home, deadline=deadline).resolve(strict=True)
+        source_key = unicodedata.normalize("NFC", plugin.as_posix()).casefold()
+        output_key = unicodedata.normalize("NFC", (root / NAMESPACE).as_posix()).casefold()
+        if source_key == output_key or source_key.startswith(output_key + "/"):
+            raise ValueError(f"instruction source overlaps the disposable output namespace: {identity}")
         declaration = plugin / "instruction-projections.json"
         data = _optional_object(declaration)
         if data is None:
@@ -176,6 +181,9 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
             source = (plugin / template).resolve(strict=True)
             if Path(template).is_absolute() or not source.is_relative_to(plugin):
                 raise ValueError(f"instruction template escapes plugin: {identity}/{source_id}")
+            source_key = unicodedata.normalize("NFC", source.as_posix()).casefold()
+            if source_key == output_key or source_key.startswith(output_key + "/"):
+                raise ValueError(f"instruction template overlaps disposable output: {identity}/{source_id}")
             name, market = split_source(identity)
             destination = entry.get("destination")
             prefix = ".github/instructions/"
@@ -189,7 +197,7 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
                 _component(part)
             local = "/".join(parts)[:-len(".instructions.md")] + ".local.instructions.md"
             relative = f"{market}/{local}"
-            key = relative.casefold()
+            key = unicodedata.normalize("NFC", relative).casefold()
             if any(key == previous or key.startswith(previous + "/") or previous.startswith(key + "/") for previous in folded):
                 raise ValueError(f"colliding instruction destination: {relative}")
             folded.add(key)
@@ -231,7 +239,7 @@ def pair_pending_path(root: Path) -> Path:
 def publication_lock(root: Path, *, deadline: float | None = None):
     from .tracking import _RecordLock
 
-    digest = hashlib.sha256(os.fsencode(str(root).casefold())).hexdigest()
+    digest = hashlib.sha256(os.fsencode(unicodedata.normalize("NFC", str(root)).casefold())).hexdigest()
     lock = Path(tempfile.gettempdir()) / "agent-worktrees" / "static-instructions" / digest
     return _RecordLock(lock, timeout=_remaining(deadline, 30.0), require_sidecar=True)
 

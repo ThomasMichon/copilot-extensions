@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import tempfile
+import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -331,7 +332,7 @@ def _write_overlay(path: Path, result: dict[str, Any]) -> bool:
 
 def _overlay_lock_target(path: Path) -> Path:
     """Return a stable machine-local lock target without touching the repo."""
-    normalized = os.path.abspath(str(path)).casefold()
+    normalized = unicodedata.normalize("NFC", os.path.abspath(str(path))).casefold()
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     return (
         Path(tempfile.gettempdir())

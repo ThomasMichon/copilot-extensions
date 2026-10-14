@@ -92,16 +92,22 @@ def mark_failed_pair_composition(resolution: StatePair) -> None:
 def complete_pair_composition(repo_root: str | Path, summary: dict) -> None:
     if not summary.get("paired") or summary.get("action") not in ("composed", "disabled"):
         return
-    root = Path(repo_root).resolve()
-    if not (root / ".git").exists():
-        return
     from .static_instructions import pair_pending_path, publication_lock
 
-    marker = pair_pending_path(root)
-    if not marker.exists():
-        return
-    with publication_lock(root):
-        marker.unlink(missing_ok=True)
+    try:
+        root = Path(repo_root).resolve()
+        try:
+            (root / ".git").lstat()
+            marker = pair_pending_path(root)
+            marker.lstat()
+        except FileNotFoundError:
+            return
+        with publication_lock(root):
+            marker.unlink(missing_ok=True)
+    except (OSError, ValueError, RuntimeError) as exc:
+        from .knowledge_plugins import KnowledgePluginError
+
+        raise KnowledgePluginError(f"cannot complete paired preparation: {exc}") from exc
 
 
 def prepare_for_launch(

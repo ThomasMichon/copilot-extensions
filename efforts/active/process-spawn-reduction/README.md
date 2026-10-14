@@ -394,6 +394,17 @@ single-final-batch contract.
   prior bytes. Final publisher selection: 62 passed / 1 unavailable-symlink skip
   in 36.74s, unchanged budgets; the expanded native/ownership result above still
   covers the unchanged process seam.
+- The subsequent review exposed canonically equivalent Unicode destinations
+  and raw marker-clear errors. NFC/casefolded collision and lock keys now cover
+  both destination and preparation/publication identity without rewriting paths
+  or bytes. Marker-clear I/O/lock errors translate to the existing plugin error
+  boundary, preserving degraded create/final preflight behavior and pending state.
+- Added source/output disjointness checks so disposable cleanup cannot delete a
+  declared payload or template stored in its own generated namespace. These are
+  filesystem preservation checks, not content admission. Focused source/native
+  group: 245 passed / 1 unavailable-symlink skip in 99.04s; final publisher file,
+  including the individual-template overlap case: 68 passed / 1 same skip in
+  40.66s. Lint passes; all test budgets remain unchanged.
 
 ### 2026-10-14 - Declarations decide static publication
 
