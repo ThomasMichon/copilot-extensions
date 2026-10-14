@@ -159,7 +159,9 @@ def _expand_kpdb(value: Any, *, base_dir: Path | None = None) -> str | None:
     path = Path(expanded)
     if base_dir is not None and not path.is_absolute():
         path = base_dir / path
-    return str(path)
+    # Absolute before it reaches a request: the service resolves it from its
+    # own runtime root, not the caller's directory.
+    return os.path.abspath(path)
 
 
 def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:

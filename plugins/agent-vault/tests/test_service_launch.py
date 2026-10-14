@@ -88,6 +88,7 @@ def test_relative_path_overrides_are_passed_resolved(monkeypatch, tmp_path):
     relative = {
         config.CONFIG_ENV: "settings.json", config.RUN_DIR_ENV: "run",
         config.PID_ENV: "vault.pid", config.LOG_ENV: "vault.log", config.SOCKET_ENV: "vault.sock",
+        launch.CACHE_DIR_ENV: "cache", "KPDB": "vault.kdbx",
     }
     for name, value in relative.items():
         monkeypatch.setenv(name, value)
@@ -106,3 +107,13 @@ def test_unset_path_overrides_stay_unset(monkeypatch, tmp_path):
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
     assert not set(launch._PATH_OVERRIDES) & set(seen["env_overrides"])
+
+
+def test_relative_database_path_is_absolute_before_any_request(monkeypatch, tmp_path):
+    # Requests carry the client's kpdb; the service resolves it from its own
+    # runtime root, so a relative one must already be absolute.
+    monkeypatch.chdir(tmp_path)
+    assert config._expand_kpdb("vault.kdbx") == str(tmp_path / "vault.kdbx")
+    assert config._expand_kpdb("db/vault.kdbx", base_dir=tmp_path / "repo") == str(
+        tmp_path / "repo" / "db" / "vault.kdbx"
+    )

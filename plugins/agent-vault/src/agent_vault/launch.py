@@ -15,10 +15,12 @@ from pathlib import Path
 from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
 from . import config
+from .cache import CACHE_DIR_ENV
 
 SERVICE_STDIO_LOG = "service-stdio.log"
 _PATH_OVERRIDES = (
     config.CONFIG_ENV, config.RUN_DIR_ENV, config.PID_ENV, config.LOG_ENV, config.SOCKET_ENV,
+    CACHE_DIR_ENV, "KPDB",
 )
 
 
