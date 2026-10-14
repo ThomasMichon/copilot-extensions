@@ -189,13 +189,17 @@ def test_posix_context_does_not_group_launchers(monkeypatch):
     assert daemon_health._context().group_launchers is False
 
 
-def _windows_backstop(tmp_path, monkeypatch, processes, *, lock_pid, abandoned_pid=None):
+def _windows_backstop(
+    tmp_path, monkeypatch, processes, *, lock_pid, abandoned_pid=None, outside_parents=None,
+):
     """Drive the real post-cutover backstop (``status-monitor-reap-stale``)
     and the real status-monitor doctor wiring over a fake Windows census.
 
     ``processes`` maps pid -> (ppid, "launcher" | "worker"); start times
     follow pid order. ``abandoned_pid`` names the never-published passive of
     a stale cutover breadcrumb -- the one target generic repair terminates.
+    ``outside_parents`` maps a live parent pid the census omits to its
+    executable (``"launcher"``, any other image, or ``None`` if unreadable).
     Returns the list of pids the doctor terminated.
     """
     import argparse
@@ -224,9 +228,23 @@ def _windows_backstop(tmp_path, monkeypatch, processes, *, lock_pid, abandoned_p
         for pid, start in sorted(live.items())
     ])
     monkeypatch.setattr(daemon_health.procs, "parent_pid", lambda pid: processes[pid][0])
+    outside = dict(outside_parents or {})
+
+    def image_of(pid):
+        if pid in outside:
+            return launcher if outside[pid] == "launcher" else outside[pid]
+        return launcher if processes[pid][1] == "launcher" else "C:/py/python.exe"
+
+    monkeypatch.setattr(daemon_health.procs, "process_executable_path", image_of)
+    real_alive, real_start = daemon_health.locks.pid_alive, daemon_health.locks.process_start_time
     monkeypatch.setattr(
-        daemon_health.procs, "process_executable_path",
-        lambda pid: launcher if processes[pid][1] == "launcher" else "C:/py/python.exe",
+        daemon_health.locks, "pid_alive",
+        lambda pid: True if pid in outside else real_alive(pid),
+    )
+    # An outside parent started before every census member (no PID reuse).
+    monkeypatch.setattr(
+        daemon_health.locks, "process_start_time",
+        lambda pid: "1" if pid in outside else real_start(pid),
     )
 
     def terminate(pid, expected_start_time, *, exit_timeout=None):
@@ -378,6 +396,58 @@ def test_backstop_terminates_nothing_for_a_launcher_whose_worker_was_missed(
     out = capsys.readouterr().out
     assert "terminations skipped" in out
     assert "launcher candidate 303 has no captured worker" in out
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("parent_image", [None, "launcher"])
+def test_backstop_terminates_nothing_for_a_worker_whose_live_launcher_was_missed(
+    tmp_path, monkeypatch, capsys, parent_image
+):
+    # The abandoned passive's launcher (303) is alive but absent from the
+    # census (e.g. its command line was unreadable); only its worker 404 was
+    # captured. Terminating 404 would kill half of a live pair.
+    terminated = _windows_backstop(
+        tmp_path, monkeypatch, {101: (1, "worker"), 404: (303, "worker")},
+        lock_pid=101, abandoned_pid=404, outside_parents={303: parent_image},
+    )
+
+    assert terminated == []
+    out = capsys.readouterr().out
+    assert "terminations skipped" in out
+    assert "parent 303 of candidate 404 not in census" in out
+
+
+@pytest.mark.guard
+def test_backstop_still_repairs_a_worker_whose_missing_parent_is_not_a_launcher(
+    tmp_path, monkeypatch
+):
+    terminated = _windows_backstop(
+        tmp_path, monkeypatch, {101: (1, "worker"), 404: (303, "worker")},
+        lock_pid=101, abandoned_pid=404,
+        outside_parents={303: "C:/Windows/explorer.exe"},
+    )
+
+    assert terminated == [404]
+
+
+@pytest.mark.guard
+def test_outside_parent_is_gone_only_when_dead_or_reused(monkeypatch):
+    starts = {}
+    alive = {}
+    monkeypatch.setattr(daemon_health.locks, "pid_alive", lambda pid: alive[pid])
+    monkeypatch.setattr(daemon_health.locks, "process_start_time", lambda pid: starts[pid].pop(0))
+    monkeypatch.setattr(daemon_health.procs, "process_executable_path", lambda pid: "C:/x.exe")
+
+    alive[303] = False
+    assert daemon_health._outside_parent(303, "500") == (None, True)
+    alive[303], starts[303] = True, ["900"]
+    assert daemon_health._outside_parent(303, "500") == (None, True), "PID reused later"
+    starts[303] = ["100", "100"]
+    assert daemon_health._outside_parent(303, "500") == ("C:/x.exe", False)
+    starts[303] = ["100", "700"]
+    assert daemon_health._outside_parent(303, "500") == (None, False), "identity changed"
+    starts[303] = [None]
+    assert daemon_health._outside_parent(303, "500") == (None, False)
 
 
 @pytest.mark.guard

@@ -47,6 +47,11 @@ class DaemonCandidate:
     # Structural facts for generation grouping (``DiagnosticContext.group_launchers``).
     ppid: int | None = None
     image: str | None = None
+    # For a parent the census did not capture: its executable (``None`` when
+    # unreadable) and whether it is provably gone (dead, or its PID now names
+    # a process started after this candidate). See ``zdd.generations``.
+    parent_image: str | None = None
+    parent_gone: bool = False
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {"pid": self.pid, "start_time": self.start_time}
@@ -56,6 +61,10 @@ class DaemonCandidate:
             data["ppid"] = self.ppid
         if self.image is not None:
             data["image"] = self.image
+        if self.parent_image is not None:
+            data["parent_image"] = self.parent_image
+        if self.parent_gone:
+            data["parent_gone"] = True
         return data
 
 

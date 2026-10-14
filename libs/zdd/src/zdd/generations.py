@@ -108,6 +108,31 @@ def _unreadable_image(candidate: DaemonCandidate) -> str:
     return f"executable of candidate {candidate.pid} unreadable"
 
 
+def _outside_parent_problem(
+    candidate: DaemonCandidate, is_launcher_image: Callable[[str], bool]
+) -> str | None:
+    """Why a worker whose parent the census missed may be half a generation.
+
+    A census can drop a live launcher (for example when its command line is
+    unreadable) while still capturing its worker, which then carries only
+    the launcher's PID. Unless that parent is proven not to be a launcher --
+    no real parent (PID 0/1), provably gone, or a readable non-launcher
+    image -- the worker is not a proven whole generation.
+    """
+    ppid = candidate.ppid
+    if ppid is None or ppid in (0, 1, candidate.pid) or candidate.parent_gone:
+        return None
+    if not candidate.image or is_launcher_image(candidate.image):
+        # Unreadable images are already uncertain; a launcher's own parent is
+        # never the other half of its generation.
+        return None
+    if candidate.parent_image is None:
+        return f"parent {ppid} of candidate {candidate.pid} not in census"
+    if is_launcher_image(candidate.parent_image):
+        return f"launcher parent {ppid} of candidate {candidate.pid} not in census"
+    return None
+
+
 def _pair_problem(
     parent: DaemonCandidate,
     child: DaemonCandidate,
@@ -147,7 +172,9 @@ def group_generations(
     to a longer candidate chain, and C provably started after P. Any
     candidate whose parent or executable is unreadable, any launcher-image
     candidate with no captured worker (its worker may be the half the census
-    missed), or any parent/child relation that fails those checks, makes the
+    missed), any worker whose live parent the census did not capture and
+    which is not proven to be a non-launcher (the launcher may be the missed
+    half), or any parent/child relation that fails those checks, makes the
     grouping uncertain (the returned reason).
     """
     ordered = [candidate for _, candidate in sorted(candidates.items())]
@@ -167,6 +194,10 @@ def group_generations(
             problems.append(f"parent of candidate {candidate.pid} unreadable")
         elif candidate.ppid in candidates and candidate.ppid != candidate.pid:
             children.setdefault(candidate.ppid, []).append(candidate)
+        else:
+            outside = _outside_parent_problem(candidate, classify)
+            if outside is not None:
+                problems.append(outside)
     worker_of: dict[int, DaemonCandidate] = {}
     for parent_pid, kids in children.items():
         parent = candidates[parent_pid]

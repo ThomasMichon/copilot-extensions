@@ -16,25 +16,36 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
     if sys.platform == "win32":
         from . import windows_process_census
 
-        candidates = []
+        matched = []
         for item in windows_process_census.snapshot():
             if not status_monitor_cutover._is_status_monitor_cmdline(item["command_line"]):
                 continue
             if not item["cwd"]:
                 raise OSError(f"Cannot establish runtime scope for monitor PID {item['pid']}")
             if procs._is_under(item["cwd"], runtime_root):
-                # A venv-redirector launcher and its base-interpreter worker
-                # both match; the parent PID and executable let the shared
-                # doctor group them into one generation (and refuse repair
-                # when it cannot).
-                candidates.append(
-                    diagnostics.DaemonCandidate(
-                        pid=item["pid"],
-                        start_time=item["start_time"],
-                        ppid=procs.parent_pid(item["pid"]),
-                        image=procs.process_executable_path(item["pid"]),
-                    )
+                matched.append(item)
+        census = {item["pid"] for item in matched}
+        candidates = []
+        for item in matched:
+            # A venv-redirector launcher and its base-interpreter worker
+            # both match; the parent PID and executable let the shared
+            # doctor group them into one generation (and refuse repair
+            # when it cannot, including when the census missed a live
+            # parent that may be the worker's launcher).
+            ppid = procs.parent_pid(item["pid"])
+            parent_image, parent_gone = None, False
+            if isinstance(ppid, int) and ppid > 1 and ppid not in census:
+                parent_image, parent_gone = _outside_parent(ppid, item["start_time"])
+            candidates.append(
+                diagnostics.DaemonCandidate(
+                    pid=item["pid"],
+                    start_time=item["start_time"],
+                    ppid=ppid,
+                    image=procs.process_executable_path(item["pid"]),
+                    parent_image=parent_image,
+                    parent_gone=parent_gone,
                 )
+            )
         return candidates
     if sys.platform == "darwin":
         scoped_pids = {
@@ -56,6 +67,30 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
         for pid in sorted(status_monitor_cutover._iter_status_monitor_pids())
         if pid in scoped_pids
     ]
+
+
+def _outside_parent(ppid: int, child_start: object) -> tuple[str | None, bool]:
+    """``(image, gone)`` for a parent the census did not capture.
+
+    ``gone`` only when the parent is provably dead or its PID now names a
+    process started after the child (PID reuse). The image is reported only
+    when the parent's identity held steady across the read; otherwise it is
+    ``None`` (unknown), which keeps the grouping uncertain.
+    """
+    if not locks.pid_alive(ppid):
+        return None, True
+    before = locks.process_start_time(ppid)
+    if before is None:
+        return None, False
+    try:
+        if int(before) > int(str(child_start)):
+            return None, True
+    except ValueError:
+        return None, False
+    image = procs.process_executable_path(ppid)
+    if locks.process_start_time(ppid) != before:
+        return None, False
+    return image, False
 
 
 def _darwin_pid_under_root(pid: int, runtime_root: str) -> bool:

@@ -15,6 +15,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from zdd import breadcrumb, diagnostics, routing
 from zdd.generations import group_generations, is_venv_redirector
 
@@ -32,6 +34,7 @@ def _ctx(tmp_path: Path, state: dict, *, group: bool = True, is_superseded=None)
             diagnostics.DaemonCandidate(
                 pid=pid, start_time=start,
                 ppid=state["ppid"].get(pid, 1), image=state["image"].get(pid, WORKER),
+                **state.get("parent", {}).get(pid, {}),
             )
             for pid, start in sorted(state["live"].items())
         ]
@@ -444,3 +447,88 @@ def test_unpaired_launcher_reasons():
     why = reason(_candidate(1, "10", 0, WORKER), _candidate(2, "11", 1, LAUNCHER))
     assert "not a launcher/worker pair" in why
     assert "launcher candidate 2 has no captured worker" in why
+
+
+# -- a worker whose launcher the census missed --------------------------------
+
+
+def test_worker_with_live_parent_outside_census_blocks_duplicate_repair(tmp_path: Path):
+    # The owner is a proven pair (101 -> 202). A second generation's launcher
+    # (303) is alive but missing from the census (its command line was
+    # unreadable); only its worker 404 was captured, carrying ppid 303.
+    # Repairing 404 as a whole duplicate generation would kill half a pair.
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    state = _pair_state()
+    state["live"][404] = "1004"
+    state["ppid"][404] = 303
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state))
+
+    assert report["grouping_uncertain"] is True
+    assert report["grouping_uncertain_reason"] == "parent 303 of candidate 404 not in census"
+    (finding,) = report["findings"]
+    assert finding["kind"] == "duplicate_resident"
+    assert finding["repairable"] is False
+    assert finding["blocked_reason"] == "generation grouping uncertain"
+
+    diagnostics.apply_daemon_health(_ctx(tmp_path, state))
+    assert state["terminated"] == []
+    assert set(state["live"]) == {101, 202, 404}
+
+
+def test_worker_whose_missing_parent_is_a_launcher_blocks_abandoned_repair(tmp_path: Path):
+    state = _lone_passive_state(tmp_path, 77)
+    state["parent"] = {303: {"parent_image": LAUNCHER}}
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state))
+
+    assert report["grouping_uncertain_reason"] == (
+        "launcher parent 77 of candidate 303 not in census"
+    )
+    diagnostics.apply_daemon_health(_ctx(tmp_path, state))
+    assert state["terminated"] == []
+
+
+@pytest.mark.parametrize(
+    "parent", [{"parent_image": "C:/Windows/explorer.exe"}, {"parent_gone": True}]
+)
+def test_worker_whose_missing_parent_is_proven_not_a_launcher_is_repaired(
+    tmp_path: Path, parent
+):
+    state = _lone_passive_state(tmp_path, 77)
+    state["parent"] = {303: parent}
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state))
+    assert report["grouping_uncertain"] is False
+    (finding,) = report["findings"]
+    assert finding["kind"] == "abandoned_passive"
+    assert finding["repairable"] is True
+
+    result = diagnostics.apply_daemon_health(_ctx(tmp_path, state))
+    assert all(action["kind"] != "generation_grouping" for action in result["actions"])
+
+
+def test_outside_parent_reasons():
+    def reason(item):
+        return group_generations({item.pid: item}, structural=True, is_launcher_image=_is_launcher)[1]
+
+    def worker(ppid, **parent):
+        return diagnostics.DaemonCandidate(
+            pid=2, start_time="11", ppid=ppid, image=WORKER, **parent)
+
+    assert reason(worker(77)) == "parent 77 of candidate 2 not in census"
+    assert reason(worker(77, parent_image=LAUNCHER)) == (
+        "launcher parent 77 of candidate 2 not in census"
+    )
+    assert reason(worker(77, parent_image=WORKER)) is None
+    assert reason(worker(77, parent_gone=True)) is None
+    assert reason(worker(77, parent_image=LAUNCHER, parent_gone=True)) is None
+    for no_real_parent in (0, 1, 2):
+        assert reason(worker(no_real_parent)) is None
+    # A launcher-image candidate's own parent is never its generation's
+    # other half: only its missing worker makes it uncertain.
+    assert reason(_candidate(2, "11", 77, LAUNCHER)) == (
+        "launcher candidate 2 has no captured worker"
+    )
+    # Without structural grouping nothing changes.
+    assert group_generations({2: worker(77)}, structural=False)[1] is None
