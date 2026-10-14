@@ -338,6 +338,12 @@ recorded against each open fork._
   Three native workflow contract checks and touched-code lint passed;
   the real repaired CI run must still prove completion before merge.
 - No retry, CI bypass or manual promotion substitutes for that proof.
+- The repaired-head run 38617667464 proved bridge completion within the
+  new bound, but exposed the same teardown failure in the combined native
+  Windows runner: every step succeeded and the job exceeded seven minutes
+  at 7m5s. Extend only that job's overall allowance to nine minutes, retaining
+  each selected diagnostic/wrapper/payload/fleet step's own limit. This
+  remains part of #6733; the required aggregate is not waived.
 
 ### 2026-10-14 -- Trusted renewal and private credential-file boundary
 - Added control-only `POST /tasks/{id}/task-grant` and
