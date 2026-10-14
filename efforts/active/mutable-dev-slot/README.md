@@ -277,10 +277,28 @@ success does not close that gate.
 The existing full CI workflow was dispatched without inputs or matrix changes
 as [run 38557786361](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38557786361),
 against candidate `22aa858bf36d2c908c162f274ec6de0838c7a7b8`. Its nine-plugin
-Ubuntu matrix includes the full Worktrees suite. The run's result is pending,
-not inferred from dispatch acceptance. The draft is not ready for review or
-merge; source-free deployed release, the complete adopter portfolio, normal
-promotion and authorized installed proof remain open.
+Ubuntu matrix includes the full Worktrees suite. The run failed in the
+foundation, Windows provenance, and Worktrees jobs; the other eight full-plugin
+suites and worktree-manager passed. Worktrees stopped in sub-suite four of
+sixteen, before the new complete native adopter fixtures.
+
+The failures exposed coupled test seams left on the old shell builder:
+command-lifecycle fixtures still mocked the removed construction function and
+assumed `stamp` was the first dispatch arm; bootstrap guards still expected
+shell-owned UV and activation. Their replacements follow the Python owner.
+The installed-payload fixtures now use the release materializer to close
+canonical dependency references, rather than staging a raw dev plugin without
+its external libraries. Lean provisioning uses real package construction.
+Namespace-health and watchdog fixtures inject their fault only at the actual
+installed health invocation and assert that boundary was reached, so an earlier
+construction failure cannot masquerade as a health or teardown pass.
+
+Those fixture changes pass the local bootstrap selection (21 passed, four
+platform skips) and the Windows native command-lifecycle selection (four passed,
+four platform skips). Their POSIX behavior still requires the next native CI
+head. The draft is not ready for review or merge; source-free deployed release,
+the complete adopter portfolio, normal promotion and authorized installed proof
+remain open.
 
 ### 2026-10-13 -- Codespaces module-launch health prerequisite merged
 
