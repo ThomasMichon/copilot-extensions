@@ -756,16 +756,14 @@ def promote(
             return {"promoted": False, "reason": "no content change vs. main", **summary}
 
         from promotion_python_artifacts import (
-            PromotionArtifactError, candidate_projects, export_artifacts, validate_artifacts,
+            PromotionArtifactError, export_artifacts, validate_composed_artifacts,
         )
 
         if python_artifacts_dir is not None:
             try:
-                validate_artifacts(
-                    python_artifacts_dir, content_tree=content_tree,
+                validate_composed_artifacts(
+                    python_artifacts_dir, scratch=scratch, content_tree=content_tree,
                     dev_head=dev_head, main_before=main_head,
-                    projects=candidate_projects(scratch),
-                    candidate_root=scratch,
                 )
             except PromotionArtifactError as exc:
                 raise PromotionError(str(exc)) from exc

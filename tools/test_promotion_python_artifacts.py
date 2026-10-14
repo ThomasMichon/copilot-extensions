@@ -783,7 +783,7 @@ def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo,
 
 @pytest.mark.parametrize("suffix", ["ps1", "cmd"])
 @pytest.mark.parametrize("eol", ["crlf", "lf"])
-@pytest.mark.parametrize("entrypoint", ["cli", "workflow"])
+@pytest.mark.parametrize("entrypoint", ["cli", "workflow", "promote"])
 def test_candidate_artifact_validation_checks_out_composed_attributes(
     repo, tmp_path, monkeypatch, suffix, eol, entrypoint,
 ):
@@ -811,6 +811,12 @@ def test_candidate_artifact_validation_checks_out_composed_attributes(
     )
     if entrypoint == "workflow":
         _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+        index = json.loads((directory / artifacts.INDEX_NAME).read_text())
+    elif entrypoint == "promote":
+        report = promotion.promote(
+            repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=directory,
+        )
+        assert report["promoted"]
         index = json.loads((directory / artifacts.INDEX_NAME).read_text())
     else:
         index = artifacts.validate_candidate_artifacts(
@@ -1238,7 +1244,7 @@ def test_workflow_validator_rejects_changed_bundle(repo, tmp_path, monkeypatch):
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
-@pytest.mark.parametrize("entrypoint", ["cli", "workflow"])
+@pytest.mark.parametrize("entrypoint", ["cli", "workflow", "promote"])
 def test_candidate_artifact_validation_resolves_temporary_root_aliases(
     repo, tmp_path, monkeypatch, entrypoint,
 ):
@@ -1269,6 +1275,11 @@ def test_candidate_artifact_validation_resolves_temporary_root_aliases(
     monkeypatch.setattr(artifacts.tempfile, "TemporaryDirectory", AliasedTemporaryDirectory)
     if entrypoint == "workflow":
         _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+    elif entrypoint == "promote":
+        report = promotion.promote(
+            repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=directory,
+        )
+        assert report["promoted"]
     else:
         artifacts.validate_candidate_artifacts(
             directory, repo=repo, dev_head=dev, main_before=main,

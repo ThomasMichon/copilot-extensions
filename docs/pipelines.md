@@ -112,7 +112,9 @@ source closure, checks distribution names and versions, and recomputes each
 payload hash from that candidate data. Before hashing, it checks out the
 composed index through Git so declared checkout attributes, including CRLF
 scripts, match the fresh candidate checkout used by the exporter. It does not
-normalize payload hashes or waive byte equality. Candidate-supplied hashes and
+normalize payload hashes or waive byte equality. The promoter uses the same
+canonical composed-index validator before creating a release candidate.
+Candidate-supplied hashes and
 first-party labels alone never establish source provenance. The publisher
 repeats this source binding against the actual merged snapshot.
 It rejects duplicate, extra, missing, non-regular or unsafe members, with a
