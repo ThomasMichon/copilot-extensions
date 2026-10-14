@@ -54,7 +54,11 @@ and #1919's catalog contract, not another catalog or store of record.
    sending refresh controls or relying on the metadata. Legacy daemons retain
    their supported request shape; missing metadata means freshness/completeness
    unknown, never proof of current complete evidence. Do not silently claim the
-   new render latency contract for a legacy daemon.
+   new render latency contract for a legacy daemon. Gate prompt cold-cache
+   rendering behind a versioned request opt-in and migrate rendering readers
+   to it. Unversioned requests retain their existing blocking cold-cache
+   behavior, so an old client cannot mistake empty warming `groups` for a
+   complete inventory merely because it ignores additive metadata.
 7. Add focused route/cache tests and source-owner regressions where integration
    changes them. Update existing reader/API reality docs and the required
    changefile for each changed plugin. Land the plan first, then serial
@@ -85,7 +89,9 @@ and #1919's catalog contract, not another catalog or store of record.
 - [ ] Protocol/capability gating handles old-client/new-daemon and
       new-client/old-daemon combinations. Unsupported refresh controls are not
       sent; metadata-free legacy responses remain explicitly unknown without
-      breaking the prior supported request/response shape.
+      breaking the prior supported request/response shape. An old client's
+      unversioned cold request retains blocking semantics; only an opted-in
+      rendering reader receives prompt warming/unknown results.
 - [ ] Exact-action detail/resume/lineage, optional-sibling fallback, ownership,
       namespace circuit and privacy regressions remain green on supported
       platforms; existing test containment and portfolio limits are preserved.
