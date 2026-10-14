@@ -5,8 +5,8 @@
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-10-02
 - **Status:** Active
-- **Current investigation:** [#6647](https://github.com/ThomasMichon/copilot-extensions/issues/6647)
-  (Phase 6 only; not the parent effort's completion tracker)
+- **Current work:** [#6664](https://github.com/ThomasMichon/copilot-extensions/issues/6664)
+  (SDK prompt prerequisite, followed by driver arbitration under #5930)
 - **Vision:** [`visions/cli-default-bridging`](../../../visions/cli-default-bridging/README.md)
   (leaf, cross-cutting; contests `remote-interactive-sessions`'
   `opt-in-not-ambient-default` stance pending this effort's validation) —
