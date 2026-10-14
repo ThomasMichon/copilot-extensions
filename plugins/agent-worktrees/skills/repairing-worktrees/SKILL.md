@@ -11,7 +11,7 @@ description: >
   - 'clean up empty sessions'
   - 'clean up / organize / backfill worktrees'
   - 'backfill worktree status' / 'backfill sessions'
-  - 'recover worktrees' / 'orphaned worktree session'
+  - 'recover worktrees' / 'New prompt staging failed'
   - 'why is a worktree showing 0 turns' / 'picker shows wrong session'
   - 'copilot -p stole the worktree head' / 'subprocess became head session'
   - 'head points to a pre-handoff session'
@@ -90,6 +90,43 @@ shared across projects, so the guards (current + registered session ids) protect
 live work regardless of which project you invoke it from. For a machine-wide
 sweep, enumerate every adopted project first; a clean report from the project
 you happen to be standing in says nothing about sibling project registries.
+
+## A New worktree exists but creation setup was interrupted
+
+A failed prompt-staging response can leave the original checkout and retained
+New intent without the later permission, trust, guidance, or knowledge-pair
+setup. **Do not repeat `--new` or use the original prompt as a launch probe.**
+Inspect only that allocation first:
+
+```text
+<agent-worktrees catalog argv[0]> doctor --repair-creation <full-worktree-id> --json
+```
+
+Review the reported intent identity and checks. Complete the missing setup with
+an explicit, exact identity:
+
+```text
+<agent-worktrees catalog argv[0]> doctor --repair-creation <full-worktree-id> --seed-id <reported-seed-id> --fix --json
+```
+
+This targeted scope neither starts Copilot nor takes, replaces, or finishes the
+prompt. It requires a confirmed cold, nonterminal local session worktree and
+an unclaimed New intent; Resume intents and ambiguous handoffs refuse. It uses
+the normal permission, pairing, composition, and projection machinery. An
+existing reciprocal companion is reused, never recreated; an untracked,
+conflicting, moved, terminal, or live retained companion refuses. Other doctor
+repair scopes and GC cannot be combined with it.
+
+Reports do not render guidance (`projection_status: not_checked`). Fix verifies
+the parent and companion permissions, rechecking cold state under their native
+lifecycle locks. A missing Copilot configuration or unusable knowledge binding
+fails closed instead of reporting a partial setup as ready.
+
+Only `prepared: true` with all checks true and `projection_status: ready`
+confirms complete setup. Failures retain the intent and name the missing step.
+After that result, use the normal existing-worktree `copilot` or detached
+`embody` flow to deliver the **actual original task once**, without another
+`--new` or replacement `--seed`. Never edit tracking YAML or deployed code.
 
 ## Cross-machine transcript investigation from a four-character suffix
 
