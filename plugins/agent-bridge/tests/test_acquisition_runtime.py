@@ -70,11 +70,18 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
 
     async def command(args, project):
         calls.append((args, project))
-        if args[0] == "list":
+        if args[0] == "record":
             assert args == [
-                "list", "--json", "--cache-only", "--worktree-id", "worktree-a",
+                "record", "--worktree-id", "worktree-a", "--json",
             ]
-            return {"worktrees": [{"id": "worktree-a", "path": str(tmp_path), "status": "active"}]}
+            return {"version": 1, "ok": True, "worktree": {
+                "id": "worktree-a", "repo": "test-project", "path": str(tmp_path),
+                "status": "active", "creation_nonce": "original-allocation",
+                "session_count": 1 if head["id"] else 0, "last_session_id": head["id"],
+                "execution_leg": None, "sessions_indexed": True,
+                "execution_leg_opaque": False, "session_backend": None,
+                "session_backend_opaque": False,
+            }}
         if args[0] == "head-session":
             return {"tracked": True, "head_session": head["id"],
                     "active": bool(head["id"]), "state": "active" if head["id"] else None}
@@ -149,15 +156,48 @@ async def test_default_cli_worker_needs_no_acp_registry_profile(rig):
 
 @pytest.mark.asyncio
 async def test_exact_prepared_refusal_reports_not_started_on_replay(rig, monkeypatch):
-    async def missing(_request):
-        raise AcquisitionRefused("worktree_unknown", "owner did not resolve target")
-    monkeypatch.setattr(acquisition_runtime, "verify_worktree", missing)
+    command = acquisition_authority.worktree_command
+
+    async def terminal_record(args, project):
+        result = await command(args, project)
+        assert args[0] == "record"
+        result["worktree"]["status"] = "finalized"
+        return result
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", terminal_record)
     for _ in range(2):
         with pytest.raises(AcquisitionRefused) as failure:
             await rig.runtime.acquire(req())
         assert failure.value.effect == "not_started"
+        assert failure.value.code == "worktree_terminal"
     assert not rig.manager.list_sessions()
     assert not rig.db.execute_read("SELECT * FROM acquisition_bindings")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [
+    {"version": 1, "ok": False, "worktree": None,
+     "error": {"code": "record-missing", "message": "record unavailable"}},
+    {"version": 1, "ok": True, "worktree": None},
+    {"worktrees": [{"id": "worktree-a", "status": "finalized"}],
+     "projection": {"quality": "current"}},
+])
+async def test_exact_record_failure_never_proves_absence_of_native_start(rig, monkeypatch, payload):
+    command = AsyncMock(return_value=payload)
+    monkeypatch.setattr(acquisition_authority, "worktree_command", command)
+    marker = AsyncMock()
+    monkeypatch.setattr(acquisition_runtime, "mark_dispatch_acquisition", marker)
+    for _ in range(2):
+        with pytest.raises(AcquisitionRefused) as failure:
+            await rig.runtime.acquire(req())
+        assert failure.value.code in {"owner_refused", "owner_response_invalid"}
+        assert failure.value.effect is None
+        assert not rig.runtime.store.journal.refused_before_effect(req())
+    assert [call.args[0][0] for call in command.await_args_list] == ["record", "record"]
+    marker.assert_not_awaited()
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM acquisition_bindings")
+    assert not rig.db.execute_read("SELECT * FROM turns")
 
 
 @pytest.mark.asyncio
@@ -201,8 +241,8 @@ async def test_real_dispatch_allocation_qualifies_bridge_acquisition(rig, tmp_pa
     original_command = acquisition_authority.worktree_command
     async def command(args, project):
         result = await original_command(args, project)
-        if args[0] == "list":
-            result["worktrees"][0]["repo"] = "test-project"
+        if args[0] == "record":
+            result["worktree"]["repo"] = "test-project"
         return result
     monkeypatch.setattr(acquisition_authority, "worktree_command", command)
     request = req(
@@ -388,7 +428,7 @@ async def test_missing_owner_preflight_precedes_mark_and_preserves_ambiguity(rig
     marker = AsyncMock()
     monkeypatch.setattr(acquisition_runtime, "mark_dispatch_acquisition", marker)
     monkeypatch.setattr(
-        acquisition_runtime, "verify_worktree",
+        acquisition_authority, "worktree_command",
         AsyncMock(side_effect=AcquisitionRefused("worktrees_unavailable", "owner missing")),
     )
     before = rig.db.execute_read("SELECT COUNT(*) AS n FROM acquisition_attempts")[0]["n"]
@@ -407,7 +447,7 @@ async def preflight_retry(rig, monkeypatch, mode="acp"):
     first = req(mode=mode)
     with monkeypatch.context() as patch:
         patch.setattr(
-            acquisition_runtime, "verify_worktree",
+            acquisition_authority, "worktree_command",
             AsyncMock(side_effect=AcquisitionRefused("worktrees_unavailable", "owner missing")),
         )
         with pytest.raises(AcquisitionRefused, match="owner missing"):
@@ -446,7 +486,7 @@ async def test_every_preflight_retry_retains_a_bound_refusal_receipt(rig, monkey
     second = await preflight_retry(rig, monkeypatch)
     with monkeypatch.context() as patch:
         patch.setattr(
-            acquisition_runtime, "verify_worktree",
+            acquisition_authority, "worktree_command",
             AsyncMock(side_effect=AcquisitionRefused("worktrees_unavailable", "owner missing")),
         )
         with pytest.raises(AcquisitionRefused):

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 
-from .acquisition_authority import worktree_command
+from .acquisition_authority import read_worktree_record, worktree_command
 from .acquisition_contract import AcquisitionRefused
 from .acquisition_executor import executor
 from .acquisition_store import AcquisitionStore
@@ -75,25 +75,14 @@ async def start_request(
     )
 
 
-async def _workspace(project: str, worktree_id: str) -> tuple[dict[str, Any], str | None]:
-    result = await worktree_command(
-        ["list", "--json", "--cache-only", "--worktree-id", worktree_id], project,
-    )
-    if not isinstance(result.get("worktrees"), list):
-        raise AcquisitionRefused("workspace_identity_unknown", "owner returned no authoritative workspace list")
-    projection = result.get("projection")
-    if result.get("availability") is not None or (
-        projection is not None
-        and (not isinstance(projection, dict) or projection.get("quality") != "current")
+async def _workspace(
+    project: str, worktree_id: str, *, expected: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    row = await read_worktree_record(worktree_id, project, command=worktree_command)
+    if expected is not None and any(
+        row.get(field) != expected.get(field) for field in ("id", "repo", "path", "creation_nonce")
     ):
-        raise AcquisitionRefused("workspace_identity_unknown", "workspace observation is not current")
-    rows = [row for row in result["worktrees"]
-            if isinstance(row, dict) and row.get("id") == worktree_id]
-    if not rows:
-        raise AcquisitionRefused("workspace_identity_unknown", "owner has not resolved the original workspace")
-    if len(rows) != 1 or rows[0].get("repo") != project or not rows[0].get("path"):
-        raise AcquisitionRefused("workspace_identity_unknown", "owner did not resolve the exact workspace")
-    row = rows[0]
+        raise AcquisitionRefused("creation_conflict", "original workspace identity changed")
     if row.get("status") in {"finalized", "archived", "complete", "completed"}:
         raise AcquisitionRefused("creation_terminal", "original workspace is terminal")
     head = parse_head_payload(json.dumps(await worktree_command(
@@ -125,6 +114,8 @@ def _sessionless(
         row.get("status") != "active"
         or row.get("session_count") != 0 or row.get("last_session_id") or head
         or row.get("execution_leg") or row.get("execution_leg_live")
+        or row.get("execution_leg_opaque") or row.get("session_backend")
+        or row.get("session_backend_opaque") or row.get("sessions_indexed") is False
         or manager.db.list_fresh_live_sessions(worktree_id, now=time.time())
         or manager.db.get_worktree_ownership(worktree_id)
         or any(item.target.worktree_id == worktree_id for item in manager.list_sessions())
@@ -204,7 +195,7 @@ async def start(
         async with _fresh_start_locks.setdefault(worktree_id, asyncio.Lock()):
             with executor(db, worktree_id):
                 try:
-                    row, head = await _workspace(target.project, worktree_id)
+                    row, head = await _workspace(target.project, worktree_id, expected=saved)
                 except AcquisitionRefused as exc:
                     if exc.code == "creation_terminal":
                         _update(db, digest, state="terminal")
@@ -246,7 +237,7 @@ async def start(
                         worktree_id, delivery_id, "acp", operation["session_id"], None, "agent-bridge",
                     )
                     try:
-                        current, current_head = await _workspace(target.project, worktree_id)
+                        current, current_head = await _workspace(target.project, worktree_id, expected=saved)
                         if any(
                             current.get(field) != saved.get(field)
                             for field in ("id", "repo", "path", "creation_nonce")

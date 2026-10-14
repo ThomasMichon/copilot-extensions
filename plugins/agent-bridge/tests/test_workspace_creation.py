@@ -31,6 +31,8 @@ def creation_rig(rig, monkeypatch, tmp_path):
     row = {
         "id": "worktree-a", "repo": "test-project", "path": str(tmp_path),
         "creation_nonce": "original-allocation", "session_count": 0, "status": "active",
+        "last_session_id": None, "execution_leg": None, "sessions_indexed": True,
+        "execution_leg_opaque": False, "session_backend": None, "session_backend_opaque": False,
     }
 
     async def command(args, project):
@@ -38,8 +40,11 @@ def creation_rig(rig, monkeypatch, tmp_path):
         assert project == "test-project"
         if args[0] == "create":
             return {"worktree": dict(row), "creation": {"version": 1, "status": "complete"}}
+        if args[0] == "record":
+            assert args == ["record", "--worktree-id", row["id"], "--json"]
+            return {"version": 1, "ok": True, "worktree": dict(row)}
         if args[0] == "list":
-            return {"worktrees": [dict(row)]}
+            return {"worktrees": []}
         if args[0] == "head-session":
             return {
                 "tracked": True, "head_session": rig.head["id"],
@@ -48,6 +53,7 @@ def creation_rig(rig, monkeypatch, tmp_path):
         assert args[0] == "bind-session"
         rig.head["id"] = args[args.index("--session-id") + 1]
         row["session_count"] = 1
+        row["last_session_id"] = rig.head["id"]
         return {"ok": True}
 
     monkeypatch.setattr(workspace_creation, "worktree_command", command)
@@ -69,12 +75,14 @@ async def test_missing_workspace_observation_retains_allocation_for_exact_replay
     async def lagging_owner(args, project):
         nonlocal reads
         result = await command(args, project)
-        if args[0] == "list":
+        if args[0] == "record":
             reads += 1
             if reads == missing_read:
-                result["worktrees"] = []
-            if projected:
-                result["projection"] = {"quality": "current"}
+                result = (
+                    {"worktrees": [], "projection": {"quality": "current"}} if projected
+                    else {"version": 1, "ok": False, "worktree": None,
+                          "error": {"code": "record-missing", "message": "record missing"}}
+                )
         return result
 
     monkeypatch.setattr(workspace_creation, "worktree_command", lagging_owner)
@@ -82,7 +90,8 @@ async def test_missing_workspace_observation_retains_allocation_for_exact_replay
         await workspace_creation.start(
             rig.manager, rig.target, key="logical-work", prompt="Do the work",
         )
-    assert refused.value.code == "workspace_identity_unknown"
+    assert refused.value.code == ("owner_response_invalid" if projected else "owner_refused")
+    assert refused.value.effect is None
     saved = rig.db.execute_read("SELECT state,session_id,worktree_json FROM workspace_embodiments")[0]
     assert saved["state"] == "allocated"
     assert not rig.manager.list_sessions()
@@ -118,15 +127,16 @@ async def test_noncurrent_workspace_observation_cannot_launch_or_terminalize(
 
     async def stale_owner(args, project):
         result = await command(args, project)
-        if args[0] == "list":
-            result.update(metadata)
+        if args[0] == "record":
+            result = {"worktrees": [dict(rig.row)], **metadata}
         return result
 
     monkeypatch.setattr(workspace_creation, "worktree_command", stale_owner)
     for _ in range(2):
         with pytest.raises(AcquisitionRefused) as refused:
             await workspace_creation.start(rig.manager, rig.target, key="logical-work")
-        assert refused.value.code == "workspace_identity_unknown"
+        assert refused.value.code == "owner_response_invalid"
+        assert refused.value.effect is None
     assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "allocated"
     assert sum(args[0] == "create" for args, _ in rig.calls) == 1
     assert not rig.manager.list_sessions()
@@ -146,13 +156,17 @@ async def test_legacy_terminal_reconciles_only_unstarted_original_allocation(
     command = workspace_creation.worktree_command
 
     async def legacy_missing_owner(args, project):
-        if args[0] == "list":
-            raise AcquisitionRefused("creation_terminal", "original workspace is no longer tracked")
+        if args[0] == "record":
+            return {"worktrees": []}
         return await command(args, project)
 
     monkeypatch.setattr(workspace_creation, "worktree_command", legacy_missing_owner)
-    with pytest.raises(AcquisitionRefused, match="no longer tracked"):
+    with pytest.raises(AcquisitionRefused) as failed_read:
         await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Do the work")
+    assert failed_read.value.code == "owner_response_invalid"
+    assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "allocated"
+    # Reproduce a terminal journal written by the historical roster-based reader.
+    rig.db.execute_write("UPDATE workspace_embodiments SET state='terminal'")
     original = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
     assert original["state"] == "terminal" and original["native_session_id"] is None
     monkeypatch.setattr(workspace_creation, "worktree_command", command)
@@ -184,7 +198,11 @@ async def test_legacy_terminal_reconciles_only_unstarted_original_allocation(
             await workspace_creation.start(
                 rig.manager, rig.target, key="logical-work", prompt="Do the work",
             )
-        assert refused.value.code == ("creation_conflict" if blocker == "nonce" else "creation_terminal")
+        expected = (
+            "creation_conflict" if blocker == "nonce"
+            else "owner_response_invalid" if blocker == "status" else "creation_terminal"
+        )
+        assert refused.value.code == expected
         assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "terminal"
         assert not rig.manager.list_sessions()
         assert not rig.db.execute_read("SELECT * FROM turns")
@@ -207,7 +225,7 @@ async def test_legacy_terminal_reconciles_only_unstarted_original_allocation(
     ("field", "changed", "code"),
     [
         ("creation_nonce", "replacement-allocation", "creation_conflict"),
-        ("status", None, "live_holder"),
+        ("status", None, "owner_response_invalid"),
     ],
 )
 async def test_allocation_change_during_revalidation_prevents_native_start(
@@ -219,7 +237,7 @@ async def test_allocation_change_during_revalidation_prevents_native_start(
 
     async def changed_owner(args, project):
         nonlocal reads
-        if args[0] == "list":
+        if args[0] == "record":
             reads += 1
             if reads == 2:
                 rig.row[field] = changed
@@ -247,6 +265,43 @@ async def test_known_terminal_workspace_still_permanently_refuses_replay(creatio
     assert sum(args[0] == "create" for args, _ in rig.calls) == 1
     assert not rig.manager.list_sessions()
     assert not rig.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [
+    ("path", "/other-workspace"), ("creation_nonce", "replacement-allocation"),
+])
+async def test_changed_terminal_record_cannot_terminalize_original_allocation(
+    creation_rig, monkeypatch, field, value,
+):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+    reads = 0
+
+    async def replaced_owner(args, project):
+        nonlocal reads
+        result = await command(args, project)
+        if args[0] == "record":
+            reads += 1
+            if reads == 2:
+                result["worktree"].update({field: value, "status": "finalized"})
+        return result
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", replaced_owner)
+    with pytest.raises(AcquisitionRefused) as failure:
+        await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+    assert failure.value.code == "creation_conflict"
+    original = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    assert original["state"] == "allocated"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    monkeypatch.setattr(workspace_creation, "worktree_command", command)
+    session, receipt = await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+    assert session.session_id == original["session_id"]
+    assert receipt["worktree"]["path"] == rig.row["path"]
+    assert receipt["worktree"]["creation_nonce"] == rig.row["creation_nonce"]
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
@@ -485,6 +540,8 @@ async def test_existing_sessionless_allocation_is_embodied_without_create(creati
     assert result["worktree"]["id"] == session.target.worktree_id == "worktree-a"
     assert session.target.cwd == rig.row["path"]
     assert not any(args[0] == "create" for args, _ in rig.calls)
+    assert any(args[0] == "record" for args, _ in rig.calls)
+    assert not any(args[0] == "list" for args, _ in rig.calls)
 
 
 @pytest.mark.asyncio
@@ -510,6 +567,9 @@ async def test_caller_session_changes_do_not_redefine_the_owner_worktree(creatio
 @pytest.mark.asyncio
 @pytest.mark.parametrize("field,value", [
     ("creation_nonce", None), ("session_count", 1), ("execution_leg_live", True),
+    ("sessions_indexed", False), ("session_count", None),
+    ("execution_leg_opaque", True), ("session_backend_opaque", True),
+    ("session_backend", {"version": 99, "kind": "future-provider"}),
 ])
 async def test_legacy_or_occupied_allocation_cannot_start_another_conversation(creation_rig, field, value):
     rig = creation_rig
