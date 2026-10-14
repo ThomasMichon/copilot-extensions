@@ -311,6 +311,324 @@ obligation directly, while preserving existing code, open PRs and adjacent
 adopter ownership. This is not permission to overwrite another contributor's
 active expression or declare the Phase 3 gate complete.
 
+### 2026-10-14 -- Separate dev inputs from installation authority
+
+The mode bootstrap now checks dev ownership against the actual input worktree,
+not the unrelated authorized installation payload. Its installed control build
+carries the captured source path, commit, branch, dirty state, and package
+version into candidate construction. Native context staging preserves both
+roots: construction uses the source adapter and inputs, while receipt validation
+continues to use the authorized payload. PowerShell context-child output is
+captured on both streams before waiting and forwarded after settlement.
+
+The focused mode contracts passed (10 tests). A real namespaced attempt also
+constructed the original and entered dev through PowerShell with the extra
+original-only dependency absent from the dev graph. That attempt then rejected
+a Git Bash namespace refresh: the POSIX validator cannot consume native Windows
+receipt paths. The Windows namespace fixture now uses both PowerShell hosts;
+the legacy fixture retains Git Bash, and actual POSIX namespace validation is
+still owed on a native lane. Neither matrix substitution nor a partial run
+closes the source-deletion/deployed-release gate.
+
+Other attempts timed out in different UV backends or in the outer test budget.
+An instrumented real build retained verbose backend diagnostics on failure.
+Production logging was restored after capture; its UV-child and context-child limits remain
+180 and 480 seconds. Namespace validation/staging occur before that context-child
+clock, so the fixture's separate aggregate budget accounts for them. Profiling
+the unchanged full graph found 957 files (about 16.6 MB) and a 108-second freeze
+in one run, including two cold hash passes of about 43 and 50 seconds. A warm
+hash took about 6 seconds; repeated parent resolution accounted for only about
+0.3 seconds, disproving that proposed bottleneck. No hashing coverage or
+production deadline was weakened.
+
+The larger contract run exposed a stale native provision assertion, now updated
+to require UV bootstrap before the Python-owned runtime call. Its independent
+whole-graph freeze test now has a bounded 180-second aggregate budget, after
+measuring a complete 108-second freeze rather than assuming the former
+90-second test envelope covered it. This changes no production operation budget
+or content coverage; neither earlier failure is treated as a passing gate.
+The final namespace/legacy release rehearsal, combined adopter
+gate, native POSIX/CI, portfolio adoption, normal release, and installed proof
+remain open.
+
+The latest exact non-adopter contract set passes (136 tests, one platform skip);
+the final PowerShell guard set also passes (34 tests, one platform skip).
+Both PowerShell hosts drained 100,000 characters from each redirected stream
+in a real bounded capture check. These do not replace the separately open
+actual installer/drain and full lifecycle tests.
+
+With the corrected aggregate fixture budget, the real namespace run completed
+its original construction and first PowerShell dev build, then timed out in
+the second PowerShell host's UV refresh. Verbose evidence identifies `agent-zdd`
+as the only unfinished package: its setuptools 84 metadata hook wrote
+`SOURCES.txt` but did not advance to wheel construction before the unchanged
+180-second limit. An isolated owned build of that backend completed in about
+14 seconds; this is not an explanation of the integration failure. A supported
+serial-build configuration also failed the real control build, so it is not a
+workaround or adoption proof. Source deletion and deployed release have still
+not been reached.
+
+### Deployed lifecycle progress -- final live gate remains open
+
+Worktrees now stages its Python lifecycle, engine, registry helper, and
+installation-context validators into the constructed runtime. The deployed
+`dev-status` and `dev-release` commands use those retained resources rather than
+the claiming checkout. Release uses the existing whole-operation owner and
+relinquishes the claim only after restoration settles; it does not rebuild a
+control environment or require UV. Installed registry validation also uses the
+retained validator, not today's payload code.
+
+Original-target health validates that target's own recorded local installation
+origins, without comparing its graph to the newer dev build. Targets predating
+the receipt retain legacy health behavior. Conflicting ownership and failed
+health remain refusals, not force takeovers or success-shaped fallbacks.
+The focused deployed/registry/lazy/mode/lifecycle contracts pass (84 tests),
+including a namespaced registry whose live payload helpers have been replaced
+with deliberate failures while its installed validators remain usable.
+
+The final real rehearsal is still open. It constructed the original with an
+extra local package absent from the dev graph, and successfully entered dev
+through PowerShell. The subsequent Git Bash refresh timed out in UV after
+180 seconds, before reaching the new deployed-release assertions. The fixture's
+outer budget now covers its two serial control/candidate builds; production
+child defaults remain unchanged. A diagnostic follow-up preserves both backend
+streams after actual descendant teardown before rethrowing a timeout. Both
+focused timeout tests pass, including real descendant termination and preserved
+stdout/stderr; the live retry must identify the actual stalled backend stage
+rather than weakening the deadline or omitting refresh.
+
+There is also a specific namespaced-adoption gap: dev owner containment must
+describe the input worktree, independently of its stable authorized installed
+payload, and candidate source provenance must come from the frozen control
+build rather than that authorization payload. The legacy source-free rehearsal
+does not close this separate-root case. It, the completed live release gate,
+native POSIX/CI, the final combined adopter gate, portfolio waves, normal release,
+and authorized installed proof remain required. No first-adopter or portfolio
+completion checkbox is closed by this progress entry.
+
+### 2026-10-13 -- Serving-build diagnostics and combined-gate progress
+
+Worktrees monitor lock/control-health records now carry the startup-cached
+package version and concrete slot alongside the build UUID. Reconciliation's
+read-only diagnostic includes Worktrees without adding it to the ordinary
+self-update plan, verifies its PID/start-time lock, and reads the selected
+installation-cell root. Equal package versions with different known build
+UUIDs report serving-build drift rather than silently declaring a repaired/dev
+process current or reinstalling an unchanged package. Legacy unknown evidence
+is not fabricated. The focused diagnostic/generation/monitor suite passes
+332 tests with one platform skip.
+
+The actual combined namespaced rehearsal uncovered more than unit lock-order
+checks could: governance waits inherited the helper's five-second initialization
+budget, Windows build-backend working directories exceeded CreateProcess's
+limit, and private-control interpreter paths needed explicit application-path
+launching. Installer governance now forwards its caller's declared budget.
+Windows frozen inputs use a scope-owned OS temporary workspace without moving
+the authorized installed slot; an immutable exact package-origin receipt
+supports later health-checked reuse. A real UV fixture proves an interpreter
+path longer than 260 characters, a shorter frozen input path, reuse after that
+workspace is gone, and refusal of corrupted recorded origins. The broader
+input/custody slice passes 27 checks; the focused long-path/diagnostic/budget
+slice passes three.
+
+A real directory-lock owner handoff also exposed a transient stable-read
+failure that was being classified as corrupt ownership when the next owner
+had already recreated the same path. Typed file-observation changes now retry
+only during bounded acquisition; malformed owner data, permissions failures,
+and release-time ownership uncertainty still fail closed. Eight focused
+handoff/strict-release checks pass, including bounded observation retries
+without releasing a live owner. Child failures print through stderr so a
+Windows console encoding cannot mask the actual package-build error.
+
+The combined live rehearsal passes in 682.92 seconds with an explicitly
+declared test wait budget covering two serialized cold builds. It overlaps an
+ordinary first build, whole-operation repair, a real already-held cutover,
+subsequent real monitor cutovers, and a genesis/install governance contender.
+It confirms construction release before settlement, unchanged original and
+baseline completion evidence, and final agreement among the selected manifest,
+live monitor lock, and control health for package, slot and build UUID.
+Scoped process Jobs and attributable monitor identities are cleaned up.
+
+No whole-adoption or release/installed completion box is checked by this slice.
+Native POSIX/CI, deployed command UX, the remaining portfolio, normal release,
+and authorized installed proof remain outstanding.
+
+The final selected installer/identity/reconciliation contracts pass 243 checks
+with one platform skip; the two publication interruption fixtures were then
+updated for the explicit wait-budget argument and pass alongside the exact
+shared-deadline contract. Canonical fan-out, the 13-plugin install-contract
+check, and the full tracked module ceiling gate pass without widening a
+baseline. The live combined run preceded the final fresh-origin-presence
+assertion and shared-deadline arithmetic adjustment; those have targeted
+regressions, and the complete adopter's final live gate still remains open.
+
+### 2026-10-13 -- Generation discovery and restored deployment evidence
+
+Ordinary Worktrees provisioning now discovers an exact-content repaired
+generation from frozen inputs, retains and health-checks it, and hands its
+concrete slot to publication separately from the requested package version.
+The shared ordering seam and both native resolver families compare the package
+release before the repair suffix. This change reaches all 13 canonical
+primitive consumers and 12 canonical resolver consumers; it does not advertise
+complete installer adoption for those consumers.
+
+The installed build retains its original source footprint and frozen payload
+fingerprint. Its Python lifecycle publishes that deployment manifest under
+cutover/governance authority and restores exact prior manifest bytes on a
+rollback; committed publication failures retain custody through retry. Native
+writers do not recompute the deployed footprint from the current checkout.
+Package version, concrete runtime slot, and generated build identity are
+separate manifest fields. A startup-cached process generation, a slot-local
+generation token, and monitor lock/control-health generation evidence prevent
+equal-prefix dev rebuilds from being mistaken for an already-current process.
+Legacy runtimes without saved evidence remain explicitly unknown.
+
+All three actual Windows native repair lanes, each followed by ordinary
+provisioning, passed together in 545.60 seconds. They reused the same healthy
+repair while preserving broken original bytes, repaired completion bytes,
+installed build identity, and original source evidence. The actual
+PowerShell 7 dev / Git Bash source-only refresh / PowerShell 5.1 release lane
+passed in 580.16 seconds with new assertions that the restored manifest's
+complete source footprint and build UUID equal the original deployment,
+not the edited dev source. The first Bash manifest assertion caught a success
+flag mistakenly placed in an error branch; moving it to the successful
+handover path fixed the overwrite before these passing runs.
+
+Focused verification includes 280 monitor/updater/publication contracts and
+99 final generation/engine/lifecycle/lazy-dispatch contracts, including six
+real native resolver first-run comparisons and rejection of old lock or health
+generations at an equal prefix and held-custody manifest restore/commit-forward
+after a lost publication acknowledgement. The shared primitive adopter suite
+also passed 124 contracts (four platform-specific skips). Tracked module
+ceilings, both canonical sync checks, the install-contract guard, and new-module
+lint passed without widening. These are Windows/Git Bash lanes, not native
+Linux/macOS evidence. Combined real ordinary-build/repair/cutover/governance
+contention, deployed dev-release/status accessibility, remaining running-version
+diagnostics, canonical portfolio rollout, normal release, and authorized installed
+proof remain open. The whole effort stays Active.
+
+### 2026-10-13 -- Whole-operation repair and claimed-dev owner progress
+
+Both Worktrees native entrypoints now route explicit `repair`, `dev`, and
+`dev-release` to one installed Python lifecycle owner. A private frozen control
+environment uses the existing construction engine and supplies its complete
+dependency graph without selecting a replacement. The owner takes the existing
+cutover guard before target allocation, then installation governance and the
+target construction lease; it retains the guard through actual settlement.
+Ordinary construction continues to release construction/governance before
+joining cutover. No lock broker or cross-interpreter borrowed authority is added.
+
+Actual cold repair against deliberately corrupt published completion evidence
+preserved the original marker/sentinel bytes and allocated distinct generations
+through PowerShell 5.1, PowerShell 7, and Git Bash on Windows. The latter needed
+an explicit `.exe` suffix on its resolved uv path: MSYS's existence probe also
+finds the suffixless alias, whereas native Python correctly rejects that path.
+The final isolated Bash lane passed in 208.79 seconds. This is Windows Bash
+evidence, not a Linux/macOS claim.
+
+Focused tests also cover repair guard-before-allocation/governance, construction
+failure release, retained broken predecessors, original-governance handover,
+same-owner mutable refresh, competing-owner refusal, and claim retention until
+original-runtime restoration actually settles. The dev implementation uses the
+pattern's frozen non-editable rebuild form and reuses the mutable environment;
+it does not stamp generated installed provenance into editable worktree code.
+Same-prefix dev publication forces a monitor transition rather than claiming
+that an old dev process is the freshly rebuilt generation.
+
+The actual cross-entrypoint source-edit/restore lane passed in 766.87 seconds:
+PowerShell 7 claimed and built dev, Git Bash refreshed it with a source-only
+edit, and PowerShell 5.1 restored the original deployment before removing the
+claim. The installed CLI observed the new source value and a new generated build
+identity; the original numbered completion bytes and installed build/source
+remained unchanged throughout and after restoration. These were isolated roots,
+not a modification of the operator's deployed Worktrees runtime.
+
+Full generation propagation (including ordinary reuse of repaired identities and release ordering),
+exact restored-manifest provenance, combined concurrent guard/governance evidence,
+deployed release accessibility, portfolio adoption, native POSIX evidence, and
+normal release plus authorized installed proof remain open. This progress does
+not complete the Worktrees adoption, Phase 3, or the parent effort.
+
+### 2026-10-13 -- Real monitor drain and native exit evidence
+
+The isolated frozen-runtime monitor lane now passes actual cutover, not a
+no-live-monitor shortcut. A real classify request remains in flight across the
+route flip; exclusive kernel probes refuse both serving and candidate slots.
+The installer waits for the request to finish and predecessor exit, then
+reattests the published successor's PID and slot before releasing custody.
+The successor's existing worktree-status subscription is renewed under the
+owning transition stack through drain and retirement. Rendezvous reads tolerate
+the bounded publication window only while the successor remains the routed PID.
+
+This exposed a Windows native-exit bug: opening a process object does not mean
+the process is running when another owner retains an exited process handle.
+ZDD now uses its existing native exit-wait helper on a synchronizable handle.
+A real retained-handle regression and eight transition-demand contracts pass;
+the integrated 45-contract lifecycle/monitor selection also passed before that
+native fix. The subsequent frozen slot-local bootstrap now acquires process
+retention before site/application imports. Four bootstrap contracts and the
+bootstrapped real-monitor cutover pass together; a separate Python 3.12 lane
+proves older venv prefix initialization, owner-death survival and default-GC
+protection alongside the real cold/reuse PowerShell 5.1, PowerShell 7 and
+Windows-kernel Bash entrypoints. The broader engine/settlement selection passes
+84 cases. Full modes,
+generation propagation, portfolio and release/installed gates remain open.
+
+### 2026-10-13 -- Exception-safe publication and same-owner recovery progress
+
+Selector publication now shares the owning monitor exception boundary. Failures
+before, between, or after selector writes retain the candidate and rollback
+slots through observed rollback or commit-forward; transient settlement writes
+retry under custody before the original exception is rethrown. Native LF/CRLF
+selector bytes are handled explicitly without accepting unrelated selections.
+The actual serving monitor's slot is pinned even when it differs from the
+previous selector.
+
+The focused lifecycle suite passes twenty contracts, including nine publication
+failure/outcome combinations. Nine additional recovery contracts pass actual
+native transition-authority checks, both recovery outcomes, durable-write
+failure, process-identity refusal, corrupt/unknown evidence and predecessor
+drain gating. The same owning receiver retries attributable publication rather
+than waiting for an external installer blocked by its retained guards.
+
+The isolated real-monitor lane is still under investigation: its first fixture
+incorrectly required the optional hook surface instead of the resident classify
+surface, then did not observe a successor within its twenty-second window.
+The transition is being retried with full diagnostics and a retained in-flight
+request; these failures are not credited as live proof. Abrupt receiver
+death also requires a slot-local retention bootstrap for surviving passive
+children, before their installed imports; process enumeration is not a
+replacement for that ownership. Full modes, generation propagation, portfolio,
+release and installed-state gates remain open and unchecked.
+
+### 2026-10-13 -- Worktrees Python entrypoint and candidate preparation progress
+
+Both native ordinary install/update/provision paths now call the vendored Python
+lifecycle driver in the active implementation worktree. Candidate preparation
+stamps the installed copy before full command-surface/origin health and immutable
+completion; version comparison honors normalized distribution metadata, retains
+the declared version spelling, and assigns a separate runtime generation.
+Windows unsigned agent console trampolines are removed without touching the
+signed interpreter or POSIX scripts. Exact reuse does not prepare or restamp.
+
+The focused eight-contract run exercised a real cold frozen build, missing-uv
+reuse, installed build-info immutability, and real PowerShell 5.1, PowerShell 7
+and Git Bash provision entrypoints. It caught and fixed Bash bootstrap selection
+of WindowsApps aliases, MSYS executable suffix/path conversion, CRLF output and
+native manifest path attribution. This is Windows-kernel Bash evidence, not a
+native POSIX construction/owner-death proof.
+
+The subsequent settlement work adds restart process-handle custody and preserves
+the legacy asynchronous backstop unless a caller owns both the cutover guard
+and child settlement. The integrated sixty-contract run passes frozen
+construction, child/owner-death custody, native provision, interrupted
+rollback/commit-forward selection, observed failed-child exit, uncertain-witness
+retention and guard ownership. Small owning-package preparation and spawn leaves
+keep the existing module ceilings unchanged. Actual live monitor settlement/recovery, claimed
+dev/release, distinct-generation repair, generation propagation, portfolio
+adoption and normal release/installed proof remain open. No full-adopter or
+parent checklist item is checked by this progress entry.
+
 ### 2026-10-13 - Finite-provider deadline prerequisite delivered
 
 The finite-profile probe correction #6404 merged as
@@ -390,6 +708,112 @@ prerequisite failures is the next integration prerequisite, before descriptor
 lifetime, dev/release, and distinct-generation repair integration. Existing
 host/WSL source ownership and release-pipeline recovery ownership are preserved.
 The effort and all full-adopter validation checkboxes remain Active.
+
+### 2026-10-13 -- Worktrees activation publication failures now propagate
+
+#6447 merged into `dev` as
+`9a62459856ff1d44c1b62c545a5a2434952a2d9d`. Both native entrypoints now stop
+before selector publication, last-known-good, monitor cutover, cleanup or
+mtime changes when completion or bootstrap prerequisites fail. Healthy
+same-content publication preserves the existing evidence instead of refreshing
+its timestamp or helper PID. The final current-head owner review had no open
+Medium/High findings; the remaining Low overview observation was addressed
+with the required status-monitor impact assessment. All required checks
+passed before the managed merge.
+
+The final native Windows publication/GC/health selection passed 57 cases;
+earlier PowerShell 5.1, PowerShell 7 and Git Bash lanes also exercised the
+failure paths. Native Linux/macOS execution was not claimed. Normal promotion
+and authorized installed proof of publication and these activation checks
+remain outstanding. This closes the native caller error-propagation
+prerequisite, not Python descriptor integration, full installer adoption,
+dev/release, repair generation propagation or portfolio validation.
+
+### 2026-10-13 -- Python construction custody foundation (not adoption)
+
+The existing installer-engine home now has an ordinary-numbered Python
+construction context over the complete frozen local dependency graph. It
+uses the explicitly supplied base interpreter's copied venv, installs all
+local packages non-editably through one real uv invocation with source
+overrides disabled and copy link mode, verifies installed origins and the
+isolated health module, then publishes completion. Exact reuse requires no
+construction tools or exclusive construction lease. Candidate retention is
+acquired before construction release and survives through caller settlement.
+
+Bounded child ownership uses the frozen canonical strict Windows Job helper,
+not native build callbacks or a duplicate Job implementation. The POSIX
+owner-death guardian holds an inherited construction descriptor while
+terminating and verifying its owned writer group. The canonical POSIX lease
+therefore releases on final descriptor close, not an explicit unlock that
+could revoke a still-live guardian's custody.
+
+Native Windows validation exercised actual offline uv construction from
+fresh fixture inputs, installed imports after source mutation, two-process
+first-build coalescing, exact marker/payload/inode/mtime reuse, candidate
+retention against GC, failed isolated health, child timeout, and abrupt owner
+death. Nineteen construction/frozen-input cases passed, including the actual
+Worktrees dependency graph; the existing construction/retention selection
+passed 74 cases with one platform skip. The executable install contracts
+passed for all 13 copies.
+
+These are foundation proofs, not the deployment acceptance lane. Neither
+native entrypoint is wired to the Python lifecycle. Installation-cell
+authority and combined lock ordering, actual monitor cutover/drain/rollback,
+claimed dev/release, distinct repair generation identity, self-contained
+release materialization, equivalent POSIX execution and live installed proof
+remain open. No first-adopter or portfolio checkbox is completed; the effort
+remains Active.
+
+The subsequent teardown-failure audit closed two custody gaps before adoption:
+an unavailable Job/group attestation now logs and retries without unwinding
+construction or frozen inputs, then reports the original failure after verified
+settlement; POSIX retains the unreaped leader identity until descendant writers
+have exited. Native Windows regressions check frozen-input survival, held
+construction ownership and absent publication during failed Job accounting.
+The complete foundation selection passed 23 cases. A separate group-ordering
+test verifies the POSIX algorithm's reaping order, not native POSIX execution.
+These fixes do not complete any entrypoint or deployment acceptance gate.
+
+The next local integration prerequisites expose borrowed retention custody
+through the same canonical lease and add isolated health checks for reuse,
+including lazy command-surface validation before fresh publication. Matching
+reuse still needs neither construction tools nor an exclusive construction
+lease. A failed direct health probe leaves published payload, completion
+evidence and selectors unchanged. The full foundation selection passed 25
+native Windows cases; the canonical retention selection passed 51 with one
+platform skip. Sync, focused lint and module-size gates passed. The explicit
+single-file helper ceiling change is 2,362 to 2,376 lines in the canonical file
+and all 13 vendored copies, retaining standalone artifact consumption.
+
+The existing monitor API can consume its exact, already-held cutover guard
+without recursive acquisition or premature release. Native kernel-lock tests
+exercise both successful and exceptional settlement, foreign/unheld refusal,
+and explicit candidate-interpreter propagation through the legacy restart
+path. Fourteen monitor cases passed with one platform skip; the actual restart
+interpreter regression also passed. Native POSIX execution, combined
+governance/repair ordering, entrypoint adoption and actual deployment remain
+open. No first-adopter checkbox is completed by these local prerequisites.
+
+The unpublished adopter workspace was subsequently pulled forward while
+preserving #6164's owner-checked conditional recovery and all incoming baseline
+shrinks. The current monitor/restart selection passed 43 native Windows cases
+with one platform skip; standalone contracts, sync, lint and module ceilings
+passed. Initial validation exposed an old generated ZDD build whose bytes
+matched the installed package and lacked the newly required recovery API.
+Removing that exact generated build and using the runner's supported
+environment refresh with cache disabled loaded current source without changing
+dependency feeds, production code or a selected runtime. The construction
+engine and kernel helper were byte-identical across the rebase, so their
+settled proofs were not repeated.
+
+Normal publication release verification remains blocked by the independently
+owned artifact-attestation failure #6535. Run `38444006215` failed literally
+with `manifest payload hash differs from candidate` in trusted-default-branch
+validation. The source repair #6537 is merged, but its owner's separately
+reviewed workflow-only bootstrap still requires explicit operator
+authorization. Earlier release failures already have source repairs #6508
+and #6522; this effort does not duplicate them, patch the generated release
+candidate, bypass attestation or claim a successful installed update.
 
 ### 2026-10-13 — Canonical candidate and rollback retention merged
 

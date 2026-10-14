@@ -24,6 +24,7 @@ def fake_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(sync_installer_engine, "REPO", tmp_path)
     monkeypatch.setattr(sync_installer_engine, "CANONICAL_DIR", canonical_dir)
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ("agent-registered",))
+    monkeypatch.setattr(sync_installer_engine, "PYTHON_ADOPTERS", ())
     return tmp_path
 
 
@@ -31,6 +32,28 @@ def _mk_plugin_scripts(repo: Path, name: str) -> Path:
     scripts = repo / "plugins" / name / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
     return scripts
+
+
+def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monkeypatch):
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine, "PYTHON_ADOPTERS", ("agent-python",))
+    for name in sync_installer_engine.ier.PYTHON_FILES:
+        (sync_installer_engine.CANONICAL_DIR / name).write_text(name, encoding="utf-8")
+    assert len(sync_installer_engine.verify()) == len(sync_installer_engine.ier.PYTHON_FILES)
+    assert len(sync_installer_engine.sync()) == len(sync_installer_engine.ier.PYTHON_FILES)
+    assert sync_installer_engine.verify() == []
+    scripts = fake_repo / "plugins" / "agent-python" / "scripts"
+    (scripts / "installer_engine_process.py").write_text("drift", encoding="utf-8")
+    assert any("installer_engine_process.py" in problem for problem in sync_installer_engine.verify())
+    assert len(sync_installer_engine.sync()) == 1
+    assert sync_installer_engine.verify() == []
+
+
+def test_unregistered_python_engine_is_rejected(fake_repo, monkeypatch):
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    scripts = _mk_plugin_scripts(fake_repo, "agent-unregistered")
+    (scripts / "installer_engine.py").write_text("stray", encoding="utf-8")
+    assert any("unregistered Python" in problem for problem in sync_installer_engine.verify())
 
 
 def _write_canonical_refs(scripts: Path) -> None:

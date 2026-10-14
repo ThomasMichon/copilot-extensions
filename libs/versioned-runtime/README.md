@@ -16,6 +16,23 @@ as the stable runtime-facing path. See
 [`docs/patterns/README.md`](../../docs/patterns/README.md) §"Runtime installs are
 immutable and versioned".
 
+## Package releases and runtime generations
+
+Selectors and retention leases name concrete slots. `package_version(slot_name)`
+separates an installer-generated `+repair.<32-hex-id>` suffix (or `.repair.<id>`
+after an existing local version) from its unchanged package version. Python and
+both canonical native resolvers order supported package releases first, then
+their slot identities. A repaired older package cannot win a newest-slot
+fallback over a later release. Current and last-known-good selection still take
+priority over that fallback.
+
+The installer engine's opt-in `reuse_generations=True` ordinary admission
+discovers matching completed generations only after freezing the caller's full
+input. It acquires the existing retention custody and performs isolated installed
+health before reuse. No marker, timestamp, or package file is rewritten; failed
+health requires explicit repair, and a generation with different content cannot
+be selected as a successful reuse.
+
 ## Why this is vendored, not a package
 
 Unlike the other `libs/*` entries, this is **not** an installable package and has

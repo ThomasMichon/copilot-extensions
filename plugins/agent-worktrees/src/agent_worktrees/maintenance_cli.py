@@ -10,8 +10,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import installer as inst
-from . import output, reclaim, sessions, tracking
-from . import worktree_identity
+from . import output, reclaim, sessions, tracking, worktree_identity
 
 
 def _core():
@@ -818,11 +817,15 @@ def _render_doctor_report(
 
     lag = report.get("runtime_lag") or []
     if lag:
-        print(f"  ! Runtime version lag: {len(lag)} service(s) serving older code than installed")
+        print(f"  ! Runtime drift: {len(lag)} service(s) differ from installed payload/build")
         for entry in lag:
+            if entry.get("running_generation"):
+                running = f"build {entry['running_generation']} ({entry.get('running_slot') or 'unknown slot'})"
+                installed = f"{entry['installed_generation']} ({entry.get('installed_slot') or 'unknown slot'})"
+            else:
+                running, installed = entry["running"], entry["payload"]
             print(
-                f"      - {entry['service']}: running {entry['running']} but "
-                f"{entry['payload']} installed -> "
+                f"      - {entry['service']}: running {running} but {installed} installed -> "
                 f"{entry['service']} service restart"
             )
         print(

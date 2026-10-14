@@ -2164,6 +2164,96 @@ def test_running_version_lag_empty_without_settings(env):
     assert reconcile.running_version_lag(env.repo) == []
 
 
+@pytest.mark.parametrize("slot", ["1.0.0+repair." + "b" * 32, "dev"])
+@pytest.mark.parametrize("live", [True, False])
+def test_equal_package_build_drift_uses_live_monitor_identity(env, monkeypatch, slot, live):
+    from agent_worktrees import locks
+
+    name = "agent-worktrees"
+    env.write_settings({f"{name}@{MKT}": True})
+    env.install_payload(name, "1.0.0", scope="universal")
+    env.deploy_runtime(name, "1.0.0")
+    root = env.home / ".agent-worktrees"
+    manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8"))
+    manifest.update(runtime_slot=slot, runtime_generation="b" * 32)
+    (root / "deploy-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (root / "status-monitor.lock").write_text(json.dumps({
+        "version": "1.0.0", "pid": 4321, "runtime_slot": "1.0.0",
+        "runtime_generation": "a" * 32, "prefix": str(root / "versions" / "1.0.0"),
+    }), encoding="utf-8")
+    monkeypatch.setattr(locks, "lock_is_live", lambda record: live)
+    plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
+    assert _runtime_updates(plan) == []  # Same package is not a reason to reinstall.
+    assert "diagnostics" not in plan  # Worktrees retains its separate self-update path.
+    lags = reconcile.running_version_lag(env.repo)
+    if live:
+        assert reconcile.runtime_running_version(name, root=root) == "1.0.0"
+        assert lags[0]["running_generation"] == "a" * 32
+        assert lags[0]["installed_generation"] == "b" * 32
+        assert lags[0]["running"] == lags[0]["payload"] == "1.0.0"
+        assert lags[0]["installed_slot"] == slot
+    else:
+        assert "diagnostics" not in plan
+        assert lags == []
+
+
+def test_reconcile_reports_same_package_build_drift_without_reinstall(env, monkeypatch):
+    name = "agent-bridge"
+    env.write_settings({f"{name}@{MKT}": True})
+    env.install_payload(name, "1.0.0", scope="universal")
+    env.deploy_runtime(name, "1.0.0")
+    env.deploy_running(name, "1.0.0")
+    root = env.home / f".{name}"
+    for filename, generation in [
+        ("deploy-manifest.json", "b" * 32), ("running-version.json", "a" * 32),
+    ]:
+        path = root / filename
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record["runtime_generation"] = generation
+        path.write_text(json.dumps(record), encoding="utf-8")
+    monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    plan = reconcile.build_plan(env.repo, machine="anywhere", cache={}, save=False)
+    assert _runtime_updates(plan) == []
+    assert plan["diagnostics"][0]["reason"] == "runtime-running-generation-drift"
+
+
+def test_running_build_lag_uses_selected_namespaced_root_not_legacy(env, monkeypatch):
+    name = "agent-worktrees"
+    env.write_settings({f"{name}@{MKT}": True})
+    payload = env.install_payload(name, "1.0.0", scope="universal")
+    _, root = env.select_context(name, payload, "1.0.0", "1.0.0")
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a, **k: ({}, root))
+    monkeypatch.setattr(reconcile.runtime_identity, "monitor_record", lambda selected: (
+        {"version": "1.0.0", "runtime_generation": "a" * 32, "runtime_slot": "dev"}
+        if selected == root else None
+    ))
+    manifest_path = root / "deploy-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update(runtime_generation="b" * 32, runtime_slot="1.0.0+repair." + "b" * 32)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    lags = reconcile.running_version_lag(env.repo)
+    assert len(lags) == 1
+    assert lags[0]["installed_generation"] == "b" * 32
+    assert lags[0]["running_slot"] == "dev"
+
+
+@pytest.mark.parametrize("installed,serving", [
+    ("a" * 32, "a" * 32), ("a" * 32, None), (None, "b" * 32),
+])
+def test_generation_equality_requires_known_evidence_without_legacy_false_drift(
+    installed, serving,
+):
+    assert reconcile.runtime_identity.generation_drift(
+        {"runtime_generation": installed}, {"runtime_generation": serving},
+    ) == {}
+
+
+def test_process_generation_id_is_not_an_installed_build_uuid():
+    assert reconcile.runtime_identity.generation_drift(
+        {"runtime_generation": "a" * 32}, {"generation_id": "service-pid-started_at"},
+    ) == {}
+
+
 # ---------------------------------------------------------------------------
 # apply_plan -- in-process 2-pass execution (session-start self-provisioning)
 # ---------------------------------------------------------------------------

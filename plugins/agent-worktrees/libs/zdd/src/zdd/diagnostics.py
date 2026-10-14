@@ -140,24 +140,9 @@ def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
     if platform.system() == "Windows":
-        try:
-            import ctypes
-            from ctypes import wintypes
+        from .diagnostic_exit import pid_alive_windows
 
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            ERROR_INVALID_PARAMETER = 87
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-            k32.OpenProcess.restype = wintypes.HANDLE
-            k32.CloseHandle.argtypes = [wintypes.HANDLE]
-            k32.CloseHandle.restype = wintypes.BOOL
-            handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-            if handle:
-                k32.CloseHandle(handle)
-                return True
-            return ctypes.get_last_error() != ERROR_INVALID_PARAMETER
-        except (OSError, ctypes.ArgumentError):
-            return True
+        return pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

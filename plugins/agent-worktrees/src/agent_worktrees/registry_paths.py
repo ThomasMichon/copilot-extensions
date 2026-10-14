@@ -29,8 +29,14 @@ def _payload_root() -> Path:
 
 
 def _helper() -> ModuleType:
-    helper = _payload_root() / "scripts" / "registry_root.py"
-    if not helper.is_file():
+    bootstrap = Path(sys.prefix) / ".runtime-bootstrap"
+    if bootstrap.is_symlink():
+        raise ValueError("agent-worktrees installed registry bootstrap is a symlink")
+    helper = (
+        bootstrap / "registry_root.py" if bootstrap.is_dir()
+        else _payload_root() / "scripts" / "registry_root.py"
+    )
+    if not helper.is_file() or helper.is_symlink():
         raise ValueError("agent-worktrees registry-root helper is unavailable")
     spec = importlib.util.spec_from_file_location(
         "_agent_worktrees_registry_root", helper

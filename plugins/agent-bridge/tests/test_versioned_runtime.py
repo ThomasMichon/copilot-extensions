@@ -1025,6 +1025,31 @@ def test_windows_gc_reclaims_junction_slot_under_nonzero_min_age(tmp_path):
 # fingerprint_source / check_admission (phase-3-runtime-admission, #5472/#5788)
 # ---------------------------------------------------------------------------
 
+def test_fingerprint_explicit_files_label_linearly_without_changing_digest(tmp_path, monkeypatch):
+    import hashlib
+
+    files = []
+    expected = hashlib.sha256()
+    for number in range(32):
+        path = tmp_path / f"{number:02}.py"
+        path.write_bytes(f"VALUE = {number}\n".encode())
+        files.append(path)
+        for value in (f"{path.name}/.".encode(), b"file", path.read_bytes()):
+            expected.update(len(value).to_bytes(8, "big") + value)
+    relative_to = Path.relative_to
+    calls = 0
+
+    def count_relative_to(path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return relative_to(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "relative_to", count_relative_to)
+    assert vr.fingerprint_source(files) == expected.hexdigest()
+    assert calls < 10 * len(files)
+    assert vr.fingerprint_source([tmp_path, *reversed(files)]) == expected.hexdigest()
+
+
 def test_fingerprint_source_is_stable_for_identical_content(tmp_path):
     src = tmp_path / "src"
     src.mkdir()

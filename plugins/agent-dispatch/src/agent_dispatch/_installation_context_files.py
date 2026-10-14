@@ -71,7 +71,7 @@ def _read_regular_file(
                 _fail(f"{label} must be an ordinary file.")
             try:
                 named_stat = os.lstat(path)
-            except OSError:
+            except FileNotFoundError:
                 os.close(descriptor)
                 descriptor = -1
                 continue
@@ -86,7 +86,7 @@ def _read_regular_file(
             os.close(descriptor)
             descriptor = -1
         else:
-            _fail(f"{label} changed while it was being opened.")
+            raise _FileIdentityChanged(f"{label} changed while it was being opened.")
         chunks: list[bytes] = []
         while True:
             chunk = os.read(descriptor, 1024 * 1024)
@@ -101,8 +101,10 @@ def _read_regular_file(
             _stat_identity(opened_stat) != _stat_identity(final_stat)
             or _stat_metadata(opened_stat) != _stat_metadata(final_stat)
         ):
-            _fail(f"{label} changed while it was being read.")
+            raise _FileIdentityChanged(f"{label} changed while it was being read.")
     except OSError as error:
+        if require_stable_identity and isinstance(error, FileNotFoundError):
+            raise _FileIdentityChanged(f"Cannot read {label.lower()} '{path}': {error}") from error
         _fail(f"Cannot read {label.lower()} '{path}': {error}")
     finally:
         if descriptor >= 0:
@@ -110,6 +112,8 @@ def _read_regular_file(
     try:
         current_stat = os.lstat(path)
     except OSError as error:
+        if require_stable_identity and isinstance(error, FileNotFoundError):
+            raise _FileIdentityChanged(f"Cannot inspect {label.lower()} '{path}': {error}") from error
         _fail(f"Cannot inspect {label.lower()} '{path}': {error}")
     if _is_link_or_junction(path):
         _fail(f"{label} may not be a symbolic link or reparse point.")
@@ -124,7 +128,7 @@ def _read_regular_file(
         # Compare each API's complete metadata only with that same API.
         or _stat_metadata(current_stat) != _stat_metadata(named_stat)
     ):
-        _fail(f"{label} changed while it was being read.")
+        raise _FileIdentityChanged(f"{label} changed while it was being read.")
     return b"".join(chunks), current_stat
 
 
