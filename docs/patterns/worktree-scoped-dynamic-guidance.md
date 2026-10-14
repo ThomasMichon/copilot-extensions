@@ -72,6 +72,11 @@ the current renderer implementation described in section 4. It serves Vision
   sources locally. Finish all applicable worktree allocations, paired knowledge
   composition and effective local settings before publishing one final batch.
   Do not copy an incomplete harness-only set and repeat it after pairing.
+- Serialize publications for the same worktree using a lightweight local
+  publication gate. Resolve or revalidate the complete current source set
+  inside that gate, then retain it through destination checks and copying;
+  an overlapping launch or session-start backup must not publish an older
+  selection last. This requires no resident coordinator or packaged manager.
 - Copy declared static content into a dedicated, Git-ignored generated
   instruction namespace using the `.local.instructions.md` suffix. Preserve
   source scope/frontmatter and deterministic source-to-destination mapping.
@@ -81,8 +86,13 @@ the current renderer implementation described in section 4. It serves Vision
   including files without ownership markers or with changed contents. This
   namespace is generated output, not an editing surface. Keep writes contained
   there; do not infer ownership of unrelated untracked repository files.
-- Before any copy, check the complete destination set against Git's index in
-  one batch. A **tracked** destination, including a staged addition, is a hard
+- Reconcile generated instruction files to the complete selected set: remove
+  untracked generated outputs for disabled or removed sources so they cannot
+  remain auto-discovered. Incomplete source discovery is not evidence that an
+  old output should be removed. Limit cleanup to this generated namespace.
+- Before any copy or removal, check all replacement and stale-removal targets
+  against Git's index in one batch. A **tracked** target, including a staged
+  addition, is a hard
   publication failure even if ignored or a forced refresh was requested. An
   inconclusive index check must not authorize an overwrite. Refusing an unsafe
   publication does not turn unrelated ambient-delivery failures into a new

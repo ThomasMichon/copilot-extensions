@@ -148,6 +148,9 @@ Static plugin guidance should be delivered as a simple local operation over the
 complete selected plugin set. All applicable workspace allocation and plugin
 composition should precede one final publication batch, so partial preparation
 does not cause repeated copies from incomplete source sets.
+Disabled or removed sources should not leave generated instructions applying
+indefinitely, and overlapping refreshes should not let an older source
+selection supersede a newer one.
 
 Delivering already-static files should not require a separately packaged
 projection engine, authoring/review framework, sibling runtime, service or

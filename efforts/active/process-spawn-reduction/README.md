@@ -175,6 +175,10 @@ ignored generated namespace; never overwrite tracked repository content.
   a small in-process batch over declared static files. Force-replace untracked
   generated outputs; refuse tracked destinations before copying the batch.
   Keep the separate checked-in authoring/review tools and reader guarantees.
+- [ ] _(Agent-recommended preservation of existing behavior)_ Keep lightweight
+  per-worktree publication ordering and refresh the source set within it.
+  Reconcile stale generated instructions for disabled/removed sources, with
+  both overwrites and removals covered by the tracked-file preflight.
 - [x] Revise the owning vision and design pattern for simple local delivery
   and fit-for-purpose reuse before the implementation changes behavior.
 - [ ] Keep maintenance separate from offline planning and final projection.
@@ -224,6 +228,10 @@ ignored generated namespace; never overwrite tracked repository content.
   runtime-assets manifest, sibling runtime or network access. Existing
   untracked generated files are replaced; tracked and staged-added
   destinations refuse the batch without modifying repository source.
+- [ ] Concurrent launch/backup publications cannot restore an older source
+  selection; disabled/removed sources leave no stale generated instructions.
+  Incomplete discovery cannot authorize cleanup, and tracked stale outputs
+  are preserved with an explicit publication failure.
 
 ## Proposal
 
