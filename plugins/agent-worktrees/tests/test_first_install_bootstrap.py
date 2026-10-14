@@ -474,7 +474,7 @@ def _posix_installer_payload(home: Path) -> Path:
 # retain the existing item budget; fake uv does not build the runtime package.
 @pytest.mark.timeout(90)
 def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     home = tmp_path / "home"
     payload = _posix_installer_payload(home)
@@ -521,15 +521,18 @@ esac
     )
     fake_uv.chmod(0o755)
 
+    monkeypatch.setenv("AGENT_WORKTREES_INSTALL_DEADLINE_SEC", "0")
     env = os.environ.copy()
     env.update(
         {
             "HOME": str(home),
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "REAL_PYTHON": sys.executable,
+            "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "20",
             "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "20",
         }
     )
+    assert env["AGENT_WORKTREES_INSTALL_DEADLINE_SEC"] == "20"
     provision = subprocess.run(
         ["bash", str(payload / "scripts" / "install.sh"), "provision"],
         cwd=home,
