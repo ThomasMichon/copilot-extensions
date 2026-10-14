@@ -20,6 +20,8 @@ experiment with the operator's allowed feed and release-age policy configured,
 never as a replacement for the supported installer. Feed and uv policy
 environment settings are preserved; only project-venv and Python import
 overrides are removed.
+Evidence checks and retirement guards raise explicit errors even under
+optimized Python; `-O` must not turn a rejected run into a passing report.
 
 1. Run `experiments/helper_closure_probe.py --repo <checkout> --uv <uv-path>
    --root <new-source-directory>`.

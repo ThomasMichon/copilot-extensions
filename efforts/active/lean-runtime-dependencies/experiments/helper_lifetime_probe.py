@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from helper_closure_probe import packages, python_at, run
+from helper_closure_probe import packages, python_at, require, run
 
 
 PROBE = """
@@ -14,10 +14,12 @@ from pathlib import Path
 import sys
 import zdd
 from zdd.routing import read_table
-assert Path(zdd.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+if not Path(zdd.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()):
+    raise RuntimeError("ZDD module escapes runtime")
 root = Path(sys.argv[1])
 for consumer in ("alpha", "beta"):
-    assert read_table(root / consumer, strict=True) == {"fixture": consumer}
+    if read_table(root / consumer, strict=True) != {"fixture": consumer}:
+        raise RuntimeError("routing fixtures crossed consumer boundary")
 print(hashlib.sha256(Path(zdd.__file__).read_bytes()).hexdigest())
 """
 
@@ -32,14 +34,18 @@ def main():
         root / name for name in ("uv-cache", "agent-containers", "agent-bridge")
     )
     report = json.loads((root / "closure-results.json").read_text(encoding="utf-8"))
-    assert report.get("same_distribution_closures_as_reference") is True
-    assert cache.is_dir() and first.is_dir() and second.is_dir()
-    assert not any(path.is_symlink() for path in (cache, first, second))
-    assert all(path.resolve().parent == root for path in (cache, first, second))
+    require(report.get("same_distribution_closures_as_reference") is True,
+            "retirement requires an accepted closure-parity report")
+    require(cache.is_dir() and first.is_dir() and second.is_dir(),
+            "disposable experiment directories are missing")
+    require(not any(path.is_symlink() for path in (cache, first, second)),
+            "disposable experiment directories are linked")
+    require(all(path.resolve().parent == root for path in (cache, first, second)),
+            "disposable experiment directories escape selected root")
     expected = packages(second)
-    assert expected == report["consumers"][1]["packages"]
+    require(expected == report["consumers"][1]["packages"], "second closure changed")
     first_packages = packages(first)
-    assert first_packages == report["consumers"][0]["packages"]
+    require(first_packages == report["consumers"][0]["packages"], "first closure changed")
     fixture = root / "routing-fixtures"
     fixture.mkdir()
     for consumer in ("alpha", "beta"):
@@ -53,15 +59,15 @@ def main():
         args.uv, "--cache-dir", cache, "pip", "uninstall",
         "--python", python_at(first), *[item["name"] for item in first_packages],
     ])
-    assert packages(first) == []
+    require(packages(first) == [], "first consumer still has distributions")
     run([args.uv, "--cache-dir", cache, "cache", "clean"])
-    assert packages(second) == expected
+    require(packages(second) == expected, "remaining closure changed after retirement")
     after, _ = run([python_at(second), "-I", "-B", "-c", PROBE, fixture], cwd=root)
-    assert before == after
+    require(before == after, "remaining ZDD module changed after retirement")
     output, elapsed = run(
         [python_at(second), "-I", "-B", "-m", "agent_bridge", "--help"], cwd=root
     )
-    assert "usage" in output.lower()
+    require("usage" in output.lower(), "remaining actual CLI did not return help")
     report["consumer_and_cache_retirement"] = {
         "first_consumer_distribution_count_after_uninstall": 0,
         "remaining_consumer_distribution_count": len(expected),

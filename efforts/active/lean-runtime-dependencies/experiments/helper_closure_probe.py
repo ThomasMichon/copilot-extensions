@@ -13,6 +13,11 @@ import time
 import tomllib
 
 
+def require(condition, reason):
+    if not condition:
+        raise RuntimeError(reason)
+
+
 def run(argv, **kwargs):
     started = time.perf_counter()
     completed = subprocess.run(
@@ -58,7 +63,7 @@ def allocated(path):
         info = StandardInfo()
         if not query(handle, 1, ctypes.byref(info), ctypes.sizeof(info)):
             raise ctypes.WinError(ctypes.get_last_error())
-        assert info.size == path.stat().st_size
+        require(info.size == path.stat().st_size, "allocation probe size changed")
         return info.allocation
     finally:
         close(handle)
@@ -117,7 +122,8 @@ import sys
 root = Path(sys.prefix).resolve()
 packages = []
 for dist in distributions():
-    assert Path(dist.locate_file("")).resolve().is_relative_to(root), dist.metadata["Name"]
+    if not Path(dist.locate_file("")).resolve().is_relative_to(root):
+        raise RuntimeError("distribution escapes runtime: " + dist.metadata["Name"])
     paths = [dist.locate_file(item).resolve() for item in dist.files or []]
     paths = [path for path in paths if path.is_file() and path.is_relative_to(root)]
     packages.append(dict(name=dist.metadata["Name"], version=dist.version,
@@ -139,12 +145,15 @@ def allocation_proof(root):
     before = inventory([probe])
     os.link(first, probe / "linked.bin")
     linked = inventory([probe])
-    assert linked["unique_allocated_bytes"] == before["unique_allocated_bytes"] > 0
-    assert linked["logical_bytes"] == 2 * before["logical_bytes"]
-    assert linked["duplicate_file_links"] == 1
+    require(linked["unique_allocated_bytes"] == before["unique_allocated_bytes"] > 0,
+            "hardlink changed unique allocation")
+    require(linked["logical_bytes"] == 2 * before["logical_bytes"],
+            "hardlink logical accounting differs")
+    require(linked["duplicate_file_links"] == 1, "hardlink identity was not shared")
     (probe / "copied.bin").write_bytes(first.read_bytes())
     copied = inventory([probe])
-    assert copied["unique_allocated_bytes"] == 2 * before["unique_allocated_bytes"]
+    require(copied["unique_allocated_bytes"] == 2 * before["unique_allocated_bytes"],
+            "independent copy allocation differs")
     return dict(single=before, hardlink=linked, independent_copy=copied)
 
 
@@ -154,7 +163,7 @@ def wheel_requirements(repo, project, wheels):
         metadata = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))
         for requirement in metadata["project"].get("dependencies", []):
             match = re.match(r"^([A-Za-z0-9_.-]+)(?:\[([^\]]+)\])?", requirement)
-            assert match, requirement
+            require(match is not None, "invalid requirement: " + requirement)
             if match[2]:
                 extras.setdefault(match[1], set()).update(match[2].split(","))
     constraints = []
@@ -245,7 +254,7 @@ def main():
             [python_at(runtime), "-I", "-B", "-m", name.replace("-", "_"), "--help"],
             cwd=root, env=env,
         )
-        assert "usage" in output.lower()
+        require("usage" in output.lower(), "actual CLI did not return help")
         roots.append(runtime)
         runtime_roots.append(runtime)
         after = inventory(roots)
@@ -269,10 +278,10 @@ def main():
     if args.reference_report:
         reference = json.loads(args.reference_report.read_text(encoding="utf-8"))
         for current, previous in zip(report["consumers"], reference["consumers"], strict=True):
-            assert current["name"] == previous["name"]
-            assert [(item["name"], item["version"]) for item in current["packages"]] == [
+            require(current["name"] == previous["name"], "reference consumer mismatch")
+            require([(item["name"], item["version"]) for item in current["packages"]] == [
                 (item["name"], item["version"]) for item in previous["packages"]
-            ], current["name"]
+            ], "reference distribution closure differs: " + current["name"])
         report["same_distribution_closures_as_reference"] = True
     (root / "closure-results.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8"

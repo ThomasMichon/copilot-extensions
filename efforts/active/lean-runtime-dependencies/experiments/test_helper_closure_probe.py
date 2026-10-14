@@ -88,6 +88,30 @@ class ClosureProbeTests(unittest.TestCase):
             self.assertIn("FileExistsError", result.stderr)
             self.assertEqual(json.loads(sentinel.read_text()), {"preserve": True})
 
+    def test_retirement_guard_survives_optimized_python(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "closure-results.json").write_text("{}", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, "-O",
+                 str(Path(__file__).with_name("helper_lifetime_probe.py")),
+                 "--root", str(root), "--uv", "never-invoked"],
+                capture_output=True, text=True, timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("retirement requires an accepted closure-parity report", result.stderr)
+
+    def test_measurement_guard_survives_optimized_python(self):
+        result = subprocess.run(
+            [sys.executable, "-O", "-c",
+             "from helper_closure_probe import require; require(False, 'reject false evidence')"],
+            cwd=Path(__file__).parent, capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("reject false evidence", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
