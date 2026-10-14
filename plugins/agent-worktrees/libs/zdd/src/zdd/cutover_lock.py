@@ -148,6 +148,8 @@ class CutoverLock:
     exhausting the full wait budget without ever acquiring the lock raises
     :class:`CutoverLockedError`. ``timeout=0`` (the default) preserves the
     original fail-immediately behavior for a caller that wants that instead.
+    Borrowing and release belong to the acquiring process and thread; an
+    inherited handle must not unlock its parent's transaction after a fork.
     """
 
     def __init__(self, config_dir: str | os.PathLike[str]) -> None:
@@ -235,7 +237,20 @@ class CutoverLock:
 
     def release(self) -> None:
         """Release the lock (idempotent)."""
+        owner = self._owner
+        if owner is None:
+            if self._fh is None:
+                return
+            raise CutoverBorrowError("cutover guard has no acquiring execution")
+        if owner[0] != os.getpid():
+            raise CutoverBorrowError("cutover guard belongs to another process")
+        if owner[1] is not threading.current_thread():
+            raise CutoverBorrowError(
+                "cutover guard must be released by its acquiring process and thread"
+            )
         with self._state_lock:
+            if self._owner is not owner:
+                raise CutoverBorrowError("cutover guard ownership changed before release")
             if self._borrowed:
                 raise CutoverBorrowError("cannot release an actively borrowed cutover guard")
             if self._fh is None:

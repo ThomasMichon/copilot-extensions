@@ -252,7 +252,10 @@ then drains before the publication adapter promotes the passive and publishes
 its route; forced incomplete drains are refused. That adapter still owns
 exact-instance promotion, final-state adoption, and selection reconciliation.
 On rollback, the orchestrator confirms the successor's exit before restoring
-and undraining the predecessor. If exit cannot be confirmed, it does not resume
+and undraining the predecessor. It records whether this attempt actually
+invoked predecessor drain. Failures before that invocation only clean up the
+passive: they do not republish or reopen a predecessor, including one that was
+independently drained. If exit cannot be confirmed, it does not resume
 a drained predecessor or change an undrained one's state; the actual unresolved
 phase remains in the breadcrumb. With no predecessor, an already-published successor
 is not terminated during rollback: a healthy successor commits forward, while
@@ -291,7 +294,9 @@ pass it as `run(held_lock=lease)`. The orchestrator accepts only a held canonica
 lock for its own routing directory and does not release the caller's lease.
 Borrowing is bound to the acquiring PID and `Thread` object identity, not a
 recyclable numeric thread identifier.
-Only its acquiring process and thread may lend that guard, and overlapping or
+Only its acquiring process and thread may lend or release that guard. A forked
+child refuses release before touching an inherited thread lock or unlocking its
+parent's native lease. Overlapping or
 nested borrowers and release during a borrow are refused.
 Hold that same guard across the entire transaction, including cold selection,
 rollback, commit-forward, and every mutating repair path.

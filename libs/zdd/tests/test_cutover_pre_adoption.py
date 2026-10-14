@@ -162,6 +162,53 @@ def test_failed_passive_health_keeps_undrained_predecessor_and_started_phase(
     assert "publish-9281" not in events and "shutdown-9281" not in events
     assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "started"
 
+
+@pytest.mark.parametrize("failure", ["health", "drain-journal"])
+@pytest.mark.parametrize("confirms_exit", [False, True])
+@pytest.mark.parametrize("independently_drained", [False, True])
+def test_early_failure_preserves_predecessor_route_and_admission(
+    tmp_path, monkeypatch, failure, confirms_exit, independently_drained,
+):
+    orch, events, healthy = orchestrator(
+        tmp_path, monkeypatch, confirms_exit=confirms_exit,
+    )
+    original_route = routing.read_table(tmp_path)
+    admission_open = not independently_drained
+    client = orch.make_client("http://127.0.0.1:9281")
+    undrain = client.undrain
+
+    def reopen():
+        nonlocal admission_open
+        admission_open = True
+        return undrain()
+
+    monkeypatch.setattr(client, "undrain", reopen)
+    if failure == "health":
+        healthy.remove(9290)
+    else:
+        write = breadcrumb.write_breadcrumb
+        failed = False
+
+        def fail_before_drain(config_dir, **kwargs):
+            nonlocal failed
+            if kwargs["state"] == "draining" and not failed:
+                failed = True
+                raise OSError("drain journal write failed")
+            return write(config_dir, **kwargs)
+
+        monkeypatch.setattr(breadcrumb, "write_breadcrumb", fail_before_drain)
+
+    result = orch.run(health_timeout=0.05, drain_timeout=1)
+    assert not result.ok and not result.committed
+    assert result.rolled_back is confirms_exit
+    assert routing.read_table(tmp_path) == original_route
+    assert admission_open is (not independently_drained)
+    assert events == (
+        ["terminate-new", "confirmed-new-exit"] if confirms_exit
+        else ["terminate-new"]
+    )
+
+
 def test_failed_post_publication_health_keeps_flipped_phase_when_exit_is_uncertain(
     tmp_path, monkeypatch,
 ):
@@ -683,6 +730,96 @@ def test_same_guard_cannot_be_shared_with_another_thread(tmp_path, monkeypatch):
         assert len(results) == 1 and not results[0].ok
         assert "acquiring process and thread" in results[0].error
         assert events == [] and lease.held
+
+
+@pytest.mark.parametrize("borrowed_once", [False, True])
+def test_foreign_release_cannot_open_transaction_guard(tmp_path, borrowed_once):
+    errors = []
+    with CutoverLock(tmp_path) as lease:
+        if borrowed_once:
+            with lease.borrow():
+                pass
+
+        def release():
+            try:
+                lease.release()
+            except CutoverBorrowError as exc:
+                errors.append(str(exc))
+
+        thread = threading.Thread(target=release)
+        thread.start()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        assert len(errors) == 1
+        assert lease.held
+        with pytest.raises(CutoverLockedError):
+            CutoverLock(tmp_path).acquire()
+
+
+def test_foreign_release_refuses_before_accessing_inherited_thread_lock(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from zdd import cutover_lock
+
+    class InheritedLock:
+        def __enter__(self):
+            pytest.fail("foreign process accessed an inherited execution lock")
+
+        def __exit__(self, *args):
+            pass
+
+    process_id = os.getpid()
+    with CutoverLock(tmp_path) as lease:
+        with monkeypatch.context() as patch:
+            patch.setattr(cutover_lock, "os", SimpleNamespace(
+                getpid=lambda: process_id + 1,
+            ))
+            patch.setattr(lease, "_state_lock", InheritedLock())
+            with pytest.raises(CutoverBorrowError, match="another process"):
+                lease.release()
+        assert lease.held
+        with pytest.raises(CutoverLockedError):
+            CutoverLock(tmp_path).acquire()
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires native fork")
+def test_foreign_release_after_fork_preserves_parent_native_lock(tmp_path):
+    import select
+    import signal
+
+    with CutoverLock(tmp_path) as lease:
+        reader, writer = os.pipe()
+        child = os.fork()
+        if child == 0:
+            os.close(reader)
+            try:
+                try:
+                    lease.release()
+                except CutoverBorrowError:
+                    os.write(writer, b"refused")
+                else:
+                    os.write(writer, b"released")
+            finally:
+                os._exit(0)
+        os.close(writer)
+        reaped = False
+        try:
+            ready, _, _ = select.select([reader], [], [], 3)
+            assert ready, "forked release hung on an inherited execution lock"
+            assert os.read(reader, 16) == b"refused"
+            _, status = os.waitpid(child, 0)
+            reaped = True
+            assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+            with pytest.raises(CutoverLockedError):
+                CutoverLock(tmp_path).acquire()
+        finally:
+            os.close(reader)
+            if not reaped:
+                try:
+                    os.kill(child, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                os.waitpid(child, 0)
 
 
 def test_inherited_guard_cannot_be_borrowed_by_another_process(tmp_path, monkeypatch):

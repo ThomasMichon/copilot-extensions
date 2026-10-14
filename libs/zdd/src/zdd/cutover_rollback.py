@@ -47,6 +47,7 @@ def _rollback(
     flipped: bool,
     expected_old: Endpoint | None = None,
     expected_new: Endpoint | None = None,
+    drain_started: bool = True,
 ) -> None:
     from .cutover import CutoverError
 
@@ -55,7 +56,9 @@ def _rollback(
     old_live: bool | None = None
     if self.drain_before_publish:
         try:
-            old_live = bool(old and self.health_check(old.client_host, old.port))
+            old_live = bool(
+                drain_started and old and self.health_check(old.client_host, old.port)
+            )
         except Exception:
             old_live = False
         if old_live or not flipped:
@@ -72,10 +75,13 @@ def _rollback(
                 return
             result.steps.append("rollback: confirmed successor exit before restoring old")
             successor_stopped = True
+        if not flipped and not drain_started:
+            result.rolled_back = successor_stopped
+            return
 
     # 1. Try to restore the old endpoint as active (only if it is still alive).
     old_restored = False
-    if old is not None:
+    if old is not None and (not self.drain_before_publish or drain_started):
         try:
             predecessor_live = (
                 old_live if old_live is not None

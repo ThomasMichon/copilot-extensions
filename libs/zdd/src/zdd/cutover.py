@@ -519,6 +519,7 @@ class CutoverOrchestrator:
         # (#5195, reap_abandoned_passive). Threaded through every later update
         # like started_at.
         flipped = False
+        drain_started = False
         new_for_cas = None
         phase = "started"
         try:
@@ -552,6 +553,7 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                     requires_writer_reconciliation=self.drain_before_publish,
                 )
+                drain_started = True
                 self._drain_old(old, result, drain_timeout=drain_timeout, force=False)
 
             # Flip the route: new active, old demoted to previous. From here a
@@ -645,7 +647,7 @@ class CutoverOrchestrator:
                     )
                 if terminated:
                     restored = True
-                    if self.drain_before_publish and old is not None:
+                    if self.drain_before_publish and old is not None and drain_started:
                         current = self._raw_active()
                         restored = (
                             (Endpoint.from_dict(current) if current else None) == old_for_cas
@@ -826,6 +828,12 @@ class CutoverOrchestrator:
             )
             if conditional:
                 conditional.rollback(handle, result, flipped=flipped)
+            elif self.drain_before_publish:
+                self._rollback(
+                    old, handle, new_port, result, flipped=flipped,
+                    expected_old=old_for_cas, expected_new=new_for_cas,
+                    drain_started=drain_started,
+                )
             else:
                 self._rollback(
                     old, handle, new_port, result, flipped=flipped,
@@ -957,10 +965,12 @@ class CutoverOrchestrator:
         self, old: Endpoint | None, handle: _Handle, new_port: int,
         result: CutoverResult, *, flipped: bool,
         expected_old: Endpoint | None = None, expected_new: Endpoint | None = None,
+        drain_started: bool = True,
     ) -> None:
         from .cutover_rollback import _rollback
 
         _rollback(
             self, old, handle, new_port, result, flipped=flipped,
             expected_old=expected_old, expected_new=expected_new,
+            drain_started=drain_started,
         )
