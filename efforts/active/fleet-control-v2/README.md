@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; isolated observation storage implementation, authenticated integration gated; full lifecycle open
+- **Status:** Active; runtime auth interface proposed, isolated storage merged; integration/lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -153,6 +153,17 @@ It expressly excludes producer/auth code changes, another Gateway and live
 deployment changes. Authenticated transport and client integration still require
 agreement with their retained owners; this is not a transfer of those scopes.
 
+When the missing authentication interface blocked integration, the operator
+directed verbatim:
+
+> I don't think we have an interface going yet for auth so you can propose one based on the vision and what you have needed so far.
+
+The [runtime authentication proposal](runtime-authentication.md) is the
+**agent-recommended interface** responding to that direction. This authorizes
+proposal authoring rather than waiting for an existing interface; it does not
+assert that no prototype exists, authorize an unreviewed auth implementation,
+transfer another owner's active code, or enroll/deploy a live role.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -210,6 +221,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 ### Phase 2a - Gateway/index vertical slice
 - [ ] Review the [slice contract](gateway-index-slice.md) and coordinate #6443,
   #6383 and retained fleet/auth/deployment owners before runtime changes.
+- [ ] Review the shared [runtime authentication interface](runtime-authentication.md)
+  under #5789/#6443, then agree exact records/provider support and exclusive
+  implementation scopes before wiring consumers.
 - [ ] Supply the resident role-selected Gateway and fixed-service index route
   using the existing release, offer/request and operation/receipt contracts.
 - [ ] Authenticate and authorize client/node/controller principals, service
@@ -228,9 +242,12 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
   The subsequent operator approval permits only an isolated transport-neutral
-  storage prerequisite; producer/auth/client integration remains behind this gate.
+  storage prerequisite; the later auth-proposal direction permits specifying
+  that interface, not unreviewed producer/auth/client integration.
 - [ ] Persist fenced machine/container updates, indexed current projections and
   publication positions coherently, without a rival task/worktree/claim writer.
+  Isolated point-observation storage and bounded replay landed in #6685; actual
+  authorized origin push and complete roster publication remain unimplemented.
 - [ ] Serve UX, CLI and API requests through one scoped current-state contract,
   with snapshot/subscribe consistency, bounded recovery and isolated backpressure.
 - [ ] Prove authorized one-Gateway adoption with owned storage, preserved source
@@ -267,6 +284,9 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 - [ ] Complete the [Gateway/index slice gates](gateway-index-slice.md#validation-and-adoption-gates):
   real CLI/query/credential transport, scope enforcement before retrieval,
   crypto/correlation/revocation, fresh container persistence and live adoption.
+- [ ] Complete the [runtime auth interface proof](runtime-authentication.md#implementation-and-validation-gate):
+  real identity/proof verification, current policy/enrollment, scoped backend/
+  observation enforcement, revocation/recovery and provider/recipient isolation.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
   offline installed use and precise missing/incompatible/unauthorized failures.
 - [ ] Concurrent activation/admission: one authoritative writer, unique resource
@@ -945,3 +965,45 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   canonical plan/index. This realizes part of reviewed shared-state intent
   without introducing a daemon or duplicating an authority. No full Phase 1-4
   or Validation Plan item closes, and the effort remains Active.
+- #6685 actually merged at `2026-10-14T09:17:24Z`, commit
+  `10855559d664d936f8dfed9f95d97c46a967f356`. The exact head
+  `1042de5330aee25e4b4aa83a79d1be039d367fed` received actual Copilot APPROVED
+  review `5515664127` with zero findings (Balanced effort), no inline comments,
+  and successful or legitimately skipped checks before the normal merge.
+  The first ten-minute review wait timed out; an explicit re-request produced
+  the passing review. No CI or review gate was bypassed.
+- Re-read the complete parent Plan/Validation and synchronized the continuing
+  worktree onto the actual merge. The storage primitive is merged to `dev`,
+  not a released/installed central service or completed Phase 2b.
+- Next is explicit agreement on the producer export, admitted principal/
+  connector binding and query/subscription adapter with #3761/#5789/#6443/#352.
+  The approved storage exception does not authorize those edits. Preserve
+  current deployments, credential controllers and source responsibilities
+  while those integration boundaries remain unresolved.
+
+### 2026-10-14 - Runtime authentication interface proposed
+- The operator directed proposing the missing auth seam from the vision and
+  actual consumer needs, rather than remaining blocked waiting for one.
+  Captured that Request verbatim. This is proposal authority, not trust/key
+  enrollment, runtime takeover or live deployment permission.
+- Reconciled the current machine-fleet vision, routing foundation, bounded
+  operation and observation contracts, and the index/credential slice.
+  Existing shape/correlation checks are not authentication. Bounded source/
+  tracker inspection found no named current auth interface or conflicting open
+  auth PR; it does not establish absence of unpublished prototypes.
+- Reserved only this documentation proposal under existing #5789/#6443.
+  Recommended a shared verified identity -> enrollment -> policy permit boundary,
+  explicit HTTP JWT/DPoP and local OS-peer profiles, current revocation/leases,
+  independently checked delegation and provider-owned credential delivery.
+- Made consumer seams concrete without replacing their owners: actor/account
+  operation binding, admitted origin/producer fencing, scoped pre-query and
+  subscription decisions, protected per-view cursors, and credential request/
+  recipient correlation. Global store positions and invalidations are not a
+  scoped wire interface; that adapter still needs its own proof.
+- All profile limits and implementation details are agent-recommended and
+  require reviewed DTO/library/source assignments before runtime work. Runtime
+  identity does not create release-signing or special GitHub permissions.
+  Documentation impact is this canonical effort/index and its linked consumer
+  plans. Unit/process/clean-room/live implementation tiers are not run or claimed
+  for this docs-only proposal; their proof obligations are specified.
+  No parent implementation or Validation item closes.

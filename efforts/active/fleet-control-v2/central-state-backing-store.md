@@ -114,6 +114,12 @@ Publishing state, reading state and invoking lifecycle commands are separate
 capabilities. Tokens, credential contents and unselected transcript bodies do
 not enter records, events, logs or fixtures.
 
+The [runtime authentication interface proposal](runtime-authentication.md)
+defines the recommended admission and view-lease seam. The isolated store's
+global positions and page-change signals are not a scoped wire protocol;
+authenticated per-view pagination/replay still requires an adapter that preserves
+consistency without exposing another scope's activity.
+
 ## Lifecycle and adoption
 
 Use the selected Gateway's existing release, installer/update and activation

@@ -65,6 +65,11 @@ cryptographic libraries, not handwritten token verification. The index image
 slice can use its existing loopback service contract independently; full Gateway
 integration cannot be credited from that image proof alone.
 
+The shared [runtime authentication interface proposal](runtime-authentication.md)
+specifies the proposed identity/enrollment/permit, delegation, view and credential
+boundaries for this slice and the central-state plane. It is not an implemented
+verifier or a transfer of the retained routing/auth owner.
+
 ## Ownership and implementation order
 
 The Gateway/index integrator owns the vertical integration and its PRs under
