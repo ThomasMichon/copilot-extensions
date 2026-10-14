@@ -180,6 +180,7 @@ def _run_shimmed(tmp_path: Path, owner: str, live: list[str], hooks: str) -> tup
     return result.stdout.strip(), violations.read_text() if violations.exists() else ""
 
 
+@pytest.mark.guard
 def test_pid_fallback_never_unlinks_a_lock_that_vanished_before_readlink(
     tmp_path: Path,
 ) -> None:
@@ -198,6 +199,7 @@ def test_pid_fallback_never_unlinks_a_lock_that_vanished_before_readlink(
     assert status == "acquired" and holder == pid
 
 
+@pytest.mark.guard
 def test_pid_fallback_reaper_rechecks_liveness_under_the_mutex(tmp_path: Path) -> None:
     """The owner looked dead before the reap mutex was taken but names a live
     holder by the time the reaper re-reads the link (pid reuse: the stale lock
@@ -218,6 +220,7 @@ def test_pid_fallback_reaper_rechecks_liveness_under_the_mutex(tmp_path: Path) -
     assert status == "acquired" and holder == pid
 
 
+@pytest.mark.guard
 def test_pid_fallback_reaper_never_unlinks_a_newer_holder_released_mid_check(
     tmp_path: Path,
 ) -> None:
@@ -240,4 +243,71 @@ def test_pid_fallback_reaper_never_unlinks_a_newer_holder_released_mid_check(
     out, violations = _run_shimmed(tmp_path, "6161", [], hooks)
     assert violations == ""
     status, pid, holder = out.split()
+    assert status == "acquired" and holder == pid
+
+
+ENGINE_SH = (
+    Path(__file__).resolve().parents[3] / "libs" / "installer-engine" / "installer-engine.sh"
+)
+
+
+def _generated_binstub_lock(bash: str, tmp_path: Path) -> str:
+    """Generate the simple binstub with the canonical installer-engine and
+    return its provisioning-lock section (from the lock path through the
+    acquisition loop)."""
+    posix = str(tmp_path).replace("\\", "/")
+    engine = str(ENGINE_SH).replace("\\", "/")
+    gen = tmp_path / "gen.sh"
+    gen.write_bytes((
+        "_ok() { :; }; _warn() { :; }; _fail() { :; }\n"
+        f". '{engine}'\n"
+        f"write_simple_binstub stub stub_mod '{posix}/root' '{posix}/bin' '{posix}/root/bin' "
+        "scripts/install.sh STUB_NO_SELFPROVISION\n"
+    ).encode())
+    result = subprocess.run([bash, f"{posix}/gen.sh"], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    stub = (tmp_path / "bin" / "stub").read_text(encoding="utf-8")
+    start = stub.index('_lock="$_root/.provision.lock"\n')
+    end = stub.index("trap '_unlock_provision' EXIT INT TERM\n", start)
+    return stub[start:end]
+
+
+@pytest.mark.guard
+def test_generated_binstub_never_unlinks_a_provision_lock_that_vanished(tmp_path: Path) -> None:
+    """The simple binstub written by the canonical installer-engine has the
+    same no-flock pid-symlink fallback: when the holder releases between the
+    failed ``ln -s`` and ``readlink`` and a competitor takes the lock right
+    after the re-read sees it absent, the empty owner must never lead to an
+    unlink of the competitor's live lock."""
+    bash = _shim_bash()
+    if bash is None:
+        pytest.skip("bash not available")
+    section = _generated_binstub_lock(bash, tmp_path)
+    root = tmp_path / "root"
+    root.mkdir(exist_ok=True)
+    state = tmp_path / "state"
+    state.mkdir()
+    (root / ".provision.lock.pid").write_bytes(b"4242")
+    (state / "live").write_bytes(b"4242\n5151\n")
+    posix = str(tmp_path).replace("\\", "/")
+    shim = _SHIM.replace(
+        'LINK="$INSTALL_DIR/.install.lock.pid"', 'LINK="$_root/.provision.lock.pid"'
+    )
+    hooks = (
+        'before_read() { if [[ "$1" == 1 ]]; then command rm -f "$LINK"; fi; }\n'
+        'after_read() { if [[ "$1" == 2 && ! -e "$LINK" ]]; then printf 5151 > "$LINK"; fi; }\n'
+    )
+    script = (
+        f"_root='{posix}/root'\nSTATE='{posix}/state'\n" + shim + hooks + section
+        + 'echo "acquired $$ $(cat "$LINK")"\n'
+    )
+    (tmp_path / "harness.sh").write_bytes(script.encode())
+    result = subprocess.run(
+        [bash, f"{posix}/harness.sh"], capture_output=True, text=True, timeout=60,
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    violations = state / "violations"
+    assert not violations.exists(), violations.read_text()
+    status, pid, holder = result.stdout.split()
     assert status == "acquired" and holder == pid

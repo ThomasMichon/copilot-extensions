@@ -721,22 +721,21 @@ if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$LOCK_LINK.reap" 2>/dev/null; then
-                # Review finding (round 10, on the stamp lock's identical
-                # sibling pattern below): a plain readlink-then-rm here is a
-                # TOCTOU race -- another process could reap the same stale
-                # link and create its own live one between our two readlink
-                # calls, and this rm -f would then delete THAT live lock. A
-                # PID-bearing symlink (same pattern as the main lock, NOT a
-                # bare `mkdir`) is atomic AND self-healing: only one process
-                # at a time can hold it, and if ITS owner dies before
-                # cleanup, the `elif` branch below reclaims it instead of
-                # wedging every future reap attempt forever (round-11
-                # finding on the round-10 fix itself).
-                # Unlink only if the link still holds the owner judged stale above
-                # and that owner is still not live: a dead owner cannot release its
-                # own link and only serialized reapers remove a stale one, so that
-                # value is stable under this mutex. An absent link, or one naming a
-                # different (possibly just-released) holder, is never removed.
+                # Stale-owner recovery is serialized by this reap mutex. A
+                # plain readlink-then-rm would be a TOCTOU race: another
+                # process could reap the same stale link and take its own live
+                # lock between the two reads, and the rm -f would then delete
+                # that live lock. The mutex is a PID-bearing symlink (like the
+                # main lock, not a bare `mkdir`) so it is atomic and
+                # self-healing: only one process at a time holds it, and if
+                # its owner dies before cleanup the `elif` branch below
+                # reclaims it rather than wedging every later reap attempt.
+                # Unlink only if the link still holds the owner judged stale
+                # above and that owner is still not live: a dead owner cannot
+                # release its own link and only serialized reapers remove a
+                # stale one, so that value is stable under this mutex. An
+                # absent link, or one naming a different (possibly
+                # just-released) holder, is never removed.
                 owner_now="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
                 if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
                     case "$owner_now" in
@@ -1606,20 +1605,21 @@ if [[ "$ACTION" == "stamp" ]]; then
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$_stamp_lock_link.reap" 2>/dev/null; then
-                # Review finding (round 10): a plain readlink-then-rm is a
-                # TOCTOU race -- another process could reap the same stale
-                # link and create its own live one between our two readlink
-                # calls, and this rm -f would then delete THAT live lock. A
-                # PID-bearing symlink (NOT a bare `mkdir`) is atomic AND
-                # self-healing: if ITS owner dies before cleanup, the next
-                # `elif` branch below reclaims it instead of wedging every
-                # future reap attempt forever (round-11 finding on the
-                # round-10 fix itself).
-                # Unlink only if the link still holds the owner judged stale above
-                # and that owner is still not live: a dead owner cannot release its
-                # own link and only serialized reapers remove a stale one, so that
-                # value is stable under this mutex. An absent link, or one naming a
-                # different (possibly just-released) holder, is never removed.
+                # Stale-owner recovery is serialized by this reap mutex. A
+                # plain readlink-then-rm would be a TOCTOU race: another
+                # process could reap the same stale link and take its own live
+                # lock between the two reads, and the rm -f would then delete
+                # that live lock. The mutex is a PID-bearing symlink (like the
+                # main lock, not a bare `mkdir`) so it is atomic and
+                # self-healing: only one process at a time holds it, and if
+                # its owner dies before cleanup the `elif` branch below
+                # reclaims it rather than wedging every later reap attempt.
+                # Unlink only if the link still holds the owner judged stale
+                # above and that owner is still not live: a dead owner cannot
+                # release its own link and only serialized reapers remove a
+                # stale one, so that value is stable under this mutex. An
+                # absent link, or one naming a different (possibly
+                # just-released) holder, is never removed.
                 owner_now="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
                 if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
                     case "$owner_now" in
