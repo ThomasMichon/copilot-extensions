@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -53,6 +55,7 @@ SPEC.loader.exec_module(MODULE)
         "libs/payload-invocation/templates/catalog-posix.tmpl",
         "tools/sync-installation-context.py",
         ".github/workflows/ci.yml",
+        ".github/workflows/installation-context-acceptance.yml",
         "tools/installation_context_ci_scope.py",
         "tools/test_installation_context_ci_scope.py",
     ],
@@ -175,8 +178,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     assert job["timeout-minutes"] == 4
     matrix = job["strategy"]["matrix"]
     assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest"}
-    assert set(matrix["mode"]) == {"legacy", "active"}
-    assert set(matrix["pointer"]) == {"absent", "retained"}
+    assert set(matrix["mode"]) == {"mode_legacy", "mode_active"}
+    assert set(matrix["pointer"]) == {"pointer_absent", "pointer_retained"}
     assert job["strategy"]["fail-fast"] is False
     step = next(step for step in job["steps"] if step.get("name") == "All derived native copies")
     assert "test_derived_diagnostic_cli.py" in step["run"]
@@ -193,3 +196,44 @@ def test_foundation_lane_leaves_new_native_matrix_to_its_scoped_step() -> None:
     assert "--ignore=libs/payload-invocation/tests/test_derived_diagnostic_cli.py" in foundation["run"]
     assert "libs/payload-invocation/tests" in foundation["run"]
     assert "plugins/agent-index/tests/test_command_catalog.py" in foundation["run"]
+
+
+@pytest.mark.parametrize("mode", ["mode_legacy", "mode_active"])
+@pytest.mark.parametrize("pointer", ["pointer_absent", "pointer_retained"])
+def test_full_native_matrix_collects_exact_inventory_partition(
+    mode: str, pointer: str,
+) -> None:
+    root = HERE.parent
+    spec = importlib.util.spec_from_file_location(
+        "native_partition_inventory", HERE / "sync-installation-context.py",
+    )
+    assert spec and spec.loader
+    inventory = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inventory)
+    script = "installation-context.ps1" if os.name == "nt" else "installation-context.sh"
+    expected = {
+        destination.relative_to(root).as_posix()
+        for source, destination in inventory.vendor_pairs()
+        if source.name == script
+    }
+    environment = {**os.environ, "PYTEST_ADDOPTS": "", "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "pytest", "--collect-only", "-q", "--color=no",
+            "-p", "no:cacheprovider",
+            "libs/payload-invocation/tests/test_derived_diagnostic_cli.py",
+            "-k", f"{mode} and {pointer}",
+        ],
+        cwd=root, env=environment, capture_output=True, text=True, check=False,
+        timeout=20, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    selected = [
+        line for line in result.stdout.splitlines()
+        if "::test_derived_native_diagnostic_cli_read_only[" in line
+    ]
+    assert len(selected) == len(expected), result.stdout
+    assert {
+        line.split(f"[{pointer}-{mode}-", 1)[1].removesuffix("]")
+        for line in selected
+    } == expected, result.stdout

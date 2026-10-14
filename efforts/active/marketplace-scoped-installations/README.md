@@ -495,6 +495,24 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-14 — Correct native diagnostic argument transport and matrix admission
+
+- [#6645](https://github.com/ThomasMichon/copilot-extensions/pull/6645)'s
+  first native Windows smoke failed before diagnostic execution:
+  PowerShell array splatting treated named CLI switches as positional values.
+  Fixture-owned launch scripts now spell the unchanged diagnostic command
+  with real named parameters and forward its exit code. The accepted host
+  initialization and complete profile snapshots are unchanged.
+- A real PowerShell regression preserves quoted paths and JSON arguments
+  through that boundary, including successful and refused exit codes over
+  two cycles. The acceptance workflow now participates in its own change
+  detector; explicit mode/pointer tokens and actual pytest collection prove
+  every manual partition selects exactly the dynamic native-copy inventory.
+- The corrected smoke, transport regressions, collection partitions, and CI
+  contracts passed 56 local cases. Current-head review, native Windows
+  execution, and required checks remain necessary; full native copy acceptance
+  and the broader diagnostic prerequisite remain open.
+
 ### 2026-10-13 — Lifecycle-owned catalogs merged; derived native diagnostic acceptance
 
 - [#6546](https://github.com/ThomasMichon/copilot-extensions/pull/6546)

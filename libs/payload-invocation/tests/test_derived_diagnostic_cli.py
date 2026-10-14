@@ -60,6 +60,56 @@ def _profile_environment(home: Path) -> dict[str, str]:
     return environment
 
 
+def _powershell_command(home: Path, script: Path, arguments: list[str]) -> list[str]:
+    def literal(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    wrapper = home / f"invoke-{arguments[0]}.ps1"
+    tokens = [literal(arguments[0])]
+    for index in range(1, len(arguments), 2):
+        flag, value = arguments[index:index + 2]
+        assert flag.startswith("-") and flag[1:].isalnum(), flag
+        tokens.extend((flag, literal(value)))
+    wrapper.write_text(
+        f"& {literal(str(script))} {' '.join(tokens)}\nexit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    assert POWERSHELL is not None
+    return [POWERSHELL, "-NoProfile", "-File", str(wrapper)]
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_derived_diagnostic_host_preserves_named_arguments(
+    tmp_path: Path, exit_code: int,
+) -> None:
+    home = tmp_path / "space ' quoted home"
+    home.mkdir()
+    script = home / "advanced-parameter-fixture.ps1"
+    script.write_text(
+        "[CmdletBinding()]param([string]$Action,[string]$PayloadRoot,[string]$SourceJson)\n"
+        "@{Action=$Action;PayloadRoot=$PayloadRoot;SourceJson=$SourceJson}"
+        "|ConvertTo-Json -Compress\n"
+        f"exit {exit_code}\n",
+        encoding="utf-8",
+    )
+    arguments = ["status", "-PayloadRoot", str(home), "-SourceJson", '{"quote":"a\'b"}']
+    command = _powershell_command(home, script, arguments)
+    host = _PowerShellHost(home, _profile_environment(home))
+    before = _snapshot(home)
+    try:
+        for _ in range(2):
+            completed = host.run(command)
+            assert completed.returncode == exit_code, completed.stderr
+            assert json.loads(completed.stdout) == {
+                "Action": arguments[0], "PayloadRoot": arguments[2], "SourceJson": arguments[4],
+            }
+            assert _snapshot(home) == before
+    finally:
+        host.close()
+    assert _snapshot(home) == before
+
+
 @pytest.mark.parametrize("copy", [
     pytest.param(
         copy, id=copy.relative_to(ROOT).as_posix(),
@@ -67,8 +117,8 @@ def _profile_environment(home: Path) -> dict[str, str]:
     )
     for copy in _native_copies()
 ])
-@pytest.mark.parametrize("namespaced", [False, True], ids=["legacy", "active"])
-@pytest.mark.parametrize("pointer_exists", [False, True], ids=["absent", "retained"])
+@pytest.mark.parametrize("namespaced", [False, True], ids=["mode_legacy", "mode_active"])
+@pytest.mark.parametrize("pointer_exists", [False, True], ids=["pointer_absent", "pointer_retained"])
 def test_derived_native_diagnostic_cli_read_only(
     tmp_path: Path, copy: Path, namespaced: bool, pointer_exists: bool,
 ) -> None:
@@ -98,16 +148,23 @@ def test_derived_native_diagnostic_cli_read_only(
     copies = _native_copies()
     assert copies
     assert len(copies) == len(INVENTORY.ADOPTERS)
+    commands = {}
+    for action in ("status", "probe-legacy"):
+        command = GOVERNANCE._runner_command(
+            runner, GOVERNANCE._cli_arguments(layout, legacy, action=action),
+        )
+        script_index = command.index("-File") + 1 if runner == "powershell" else 1
+        command[script_index] = str(copy)
+        commands[action] = (
+            _powershell_command(home, copy, command[script_index + 1:])
+            if runner == "powershell" else command
+        )
     host = _PowerShellHost(home, environment) if runner == "powershell" else None
     before = _snapshot(home)
     try:
         for _ in range(2):
             for action in ("status", "probe-legacy"):
-                command = GOVERNANCE._runner_command(
-                    runner, GOVERNANCE._cli_arguments(layout, legacy, action=action),
-                )
-                script_index = command.index("-File") + 1 if host else 1
-                command[script_index] = str(copy)
+                command = commands[action]
                 completed = host.run(command) if host else subprocess.run(
                     command, cwd=home, env=environment, capture_output=True,
                     text=True, encoding="utf-8", check=False, timeout=30,

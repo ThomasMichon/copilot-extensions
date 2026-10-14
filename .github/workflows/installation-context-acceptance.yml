@@ -15,8 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        mode: [legacy, active]
-        pointer: [absent, retained]
+        mode: [mode_legacy, mode_active]
+        pointer: [pointer_absent, pointer_retained]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

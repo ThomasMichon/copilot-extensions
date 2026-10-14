@@ -12,6 +12,7 @@ def needs_installation_context_smoke(paths: Iterable[str]) -> bool:
     for path in paths:
         if path in {
             ".github/workflows/ci.yml",
+            ".github/workflows/installation-context-acceptance.yml",
             "tools/sync-installation-context.py",
             "tools/installation_context_ci_scope.py",
             "tools/test_installation_context_ci_scope.py",
