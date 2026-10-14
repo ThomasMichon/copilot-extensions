@@ -979,6 +979,37 @@ jobs:
             echo "::error::Enrolled plugin(s) missing a collected coverage baseline this run: ${missing[*]} -- refusing to promote without the evidence these plugins are supposed to produce."
             exit 1
           fi
+      - name: Prepare temporary trusted-main promoter adapter
+        if: steps.decide.outputs.proceed == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/trusted-promoter.py" <<'PY'
+          import os
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          repo = Path(sys.argv[1]).resolve(strict=True)
+          sys.path.insert(0, str(repo / "tools"))
+          import promote_release as promotion
+          import promotion_python_artifacts as artifacts
+
+          # Remove this adapter after the repaired CLI has reached trusted main.
+          if not hasattr(artifacts, "validate_composed_artifacts"):
+              validate = artifacts.validate_artifacts
+
+              def validate_canonical(directory, *, candidate_root, **kwargs):
+                  with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
+                      candidate = Path(temporary).resolve()
+                      artifacts._run(
+                          ["git", "checkout-index", "--all", f"--prefix={candidate}{os.sep}"],
+                          cwd=candidate_root,
+                      )
+                      return validate(directory, candidate_root=candidate, **kwargs)
+
+              artifacts.validate_artifacts = validate_canonical
+
+          raise SystemExit(promotion.main(sys.argv[2:]))
+          PY
       - name: Promote (push a candidate branch; report-only if push=false)
         id: promote
         if: steps.decide.outputs.proceed == 'true'
@@ -1012,13 +1043,13 @@ jobs:
           COVERAGE_BASELINES_DIR: coverage-baselines
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            output=$("$RUNNER_TEMP/artifact-validator/bin/python" tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+            output=$("$RUNNER_TEMP/artifact-validator/bin/python" -I -B "$RUNNER_TEMP/trusted-promoter.py" "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main \
               --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
               --python-artifacts-dir python-artifacts)
             echo "$output"
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
-            output=$("$RUNNER_TEMP/artifact-validator/bin/python" tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+            output=$("$RUNNER_TEMP/artifact-validator/bin/python" -I -B "$RUNNER_TEMP/trusted-promoter.py" "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main \
               --push --candidate-branch "$CANDIDATE_BRANCH" \
               --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
               --python-artifacts-dir python-artifacts)
