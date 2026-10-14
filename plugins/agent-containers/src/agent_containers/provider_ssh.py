@@ -293,10 +293,7 @@ def ssh_profile_spec(
             ],
             "venue": result["venue"],
             "capabilities": {
-                "list": True,
-                "messages": True,
-                "sessions": True,
-                "refresh": True,
+                **dict.fromkeys(("list", "messages", "sessions", "refresh", "claims"), True),
                 "open": False,
                 "resume": False,
                 "stop": False,

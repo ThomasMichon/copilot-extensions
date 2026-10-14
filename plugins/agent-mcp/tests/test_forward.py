@@ -350,6 +350,204 @@ def test_ensure_serve_returns_existing_without_spawning(tmp_path, monkeypatch):
         srv.stop()
 
 
+def test_spawn_serve_host_launches_through_spawn_daemon(tmp_path, monkeypatch):
+    """The on-demand host launches through ``agent_procutil.spawn_daemon`` with
+    the stable AGENT_MCP_HOME as cwd (never the forwarder's own cwd) and a log
+    file under it (never DEVNULL)."""
+    import subprocess
+
+    import agent_procutil
+
+    captured: dict = {}
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(agent_procutil, "spawn_daemon",
+                        lambda argv, **kw: captured.update(argv=argv, kwargs=kw))
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda *_a, **_k: pytest.fail("must not hand-roll a Popen for the host"))
+
+    forward._spawn_serve_host(str(tmp_path / "serve.sock"))
+
+    home = (tmp_path / "home").resolve()
+    assert captured["argv"][0] == agent_procutil.windowless_python(sys.executable)
+    assert captured["argv"][1:] == [
+        "-m", "agent_mcp", "serve", "--socket", str((tmp_path / "serve.sock").resolve())]
+    assert captured["kwargs"]["cwd"] == home
+    assert home.is_dir()
+    assert captured["kwargs"]["log_path"] == home / "serve.log"
+    assert captured["kwargs"]["env_overrides"]["AGENT_MCP_HOME"] == str(home)
+    assert captured["kwargs"]["contained_fallback"] is True
+    assert captured["kwargs"]["display"] == "agent_mcp serve"
+
+
+@pytest.mark.parametrize("socket_arg, env_socket, expected", [
+    ("rel/serve.sock", None, ("rel", "serve.sock")),
+    (None, "env/serve.sock", ("env", "serve.sock")),
+    (None, None, ("home", "serve.sock")),
+])
+def test_ensure_serve_polls_the_absolute_path_the_host_binds(
+    tmp_path, monkeypatch, socket_arg, env_socket, expected,
+):
+    """A relative --socket, AGENT_MCP_SERVE_SOCKET or AGENT_MCP_HOME is
+    resolved here, against the forwarder's cwd: the host runs from
+    AGENT_MCP_HOME, so a handle it resolved itself would bind somewhere other
+    than the path this forwarder polls."""
+    import agent_procutil
+
+    spawned: dict = {}
+    polled: list = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AGENT_MCP_NO_SERVE", raising=False)
+    monkeypatch.setenv("AGENT_MCP_HOME", "home")
+    if env_socket is None:
+        monkeypatch.delenv("AGENT_MCP_SERVE_SOCKET", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", env_socket)
+    monkeypatch.setattr(agent_procutil, "spawn_daemon",
+                        lambda argv, **kw: spawned.update(argv=argv, kwargs=kw))
+    monkeypatch.setattr(forward.sockio, "serve_socket_if_available",
+                        lambda handle=None: polled.append(handle))
+    monkeypatch.setattr(forward, "_ENSURE_SERVE_TIMEOUT", 0.01)
+
+    assert forward._ensure_serve(socket_arg) is None
+
+    want = str(tmp_path.resolve().joinpath(*expected))
+    argv = spawned["argv"]
+    assert argv[argv.index("--socket") + 1] == want
+    assert polled and all(handle == want for handle in polled)
+    env = spawned["kwargs"]["env_overrides"]
+    home = (tmp_path / "home").resolve()
+    assert env["AGENT_MCP_HOME"] == str(home)
+    assert spawned["kwargs"]["cwd"] == home
+    if env_socket is not None:
+        assert env["AGENT_MCP_SERVE_SOCKET"] == want
+
+
+def test_ensure_serve_falls_back_when_the_spawn_is_refused(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENT_MCP_NO_SERVE", raising=False)
+
+    def _refuse(_handle):
+        raise ValueError("spawn_daemon cwd is inside a plugin payload")
+
+    monkeypatch.setattr(forward, "_spawn_serve_host", _refuse)
+    assert forward._ensure_serve(str(tmp_path / "serve.sock")) is None
+
+
+def _symlink_loop_at(monkeypatch, looped: str) -> None:
+    """Make ``Path.resolve`` fail on ``looped`` the way a symlink loop does
+    (``RuntimeError`` on most supported Pythons, not ``OSError``)."""
+    import pathlib
+
+    real_resolve = pathlib.Path.resolve
+
+    def resolve(self, *args, **kwargs):
+        if str(self) == looped:
+            raise RuntimeError(f"Symlink loop from {looped!r}")
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "resolve", resolve)
+
+
+@pytest.mark.parametrize("site", ["serve-handle", "spawn-env"])
+def test_unresolvable_serve_path_falls_back_to_the_direct_bridge(tmp_path, monkeypatch, site):
+    """A symlink loop in the forwarder's own handle, or in the ambient
+    AGENT_MCP_SERVE_SOCKET the spawned host inherits, must not abort
+    forwarding: the session runs on the direct bridge instead."""
+    import agent_procutil
+
+    looped = str(tmp_path / "loop.sock")
+    socket_arg = looped if site == "serve-handle" else str(tmp_path / "serve.sock")
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", looped)
+    for name in ("AGENT_MCP_NO_SERVE", "AGENT_MCP_NO_ENSURE_SERVE", "AGENT_MCP_NO_MULTIPLEX"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(forward.sockio, "serve_socket_if_available", lambda handle=None: None)
+    monkeypatch.setattr(agent_procutil, "spawn_daemon",
+                        lambda *_a, **_k: pytest.fail("no host may spawn on an unresolved path"))
+    monkeypatch.setattr(forward, "_run_direct", lambda bridge: 42)
+    _symlink_loop_at(monkeypatch, looped)
+
+    assert forward._ensure_serve(socket_arg) is None
+    assert forward.run("echo", socket_arg) == 42
+
+
+def _handle_dereferences_to(monkeypatch, handle: str, target: str) -> None:
+    """Make ``Path.resolve`` follow ``handle`` to ``target``, as a POSIX
+    symlink handle does when cutover points it at one generation's socket."""
+    import pathlib
+
+    real_resolve = pathlib.Path.resolve
+
+    def resolve(self, *args, **kwargs):
+        if str(self) == handle:
+            return pathlib.Path(target)
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "resolve", resolve)
+
+
+def test_serve_handle_is_never_dereferenced_to_one_generation(tmp_path, monkeypatch):
+    """The fixed handle is repointed atomically by cutover: callers keep the
+    handle itself, so each poll follows the promoted generation."""
+    handle = str(tmp_path / "serve.sock")
+    _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
+
+    assert forward._serve_handle(handle) == handle
+
+
+def test_spawned_host_inherits_the_fixed_handle_not_its_target(tmp_path, monkeypatch):
+    handle = str(tmp_path / "serve.sock")
+    monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", handle)
+    _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
+
+    env = forward.sockio.daemon_env_overrides(tmp_path / "home")
+
+    assert env["AGENT_MCP_SERVE_SOCKET"] == handle
+
+def test_spawned_host_is_told_the_fixed_handle_not_its_target(tmp_path, monkeypatch):
+    import agent_procutil
+
+    handle = str(tmp_path / "serve.sock")
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("AGENT_MCP_SERVE_SOCKET", raising=False)
+    _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
+    spawned = []
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", lambda cmd, **_k: spawned.append(cmd))
+
+    forward._spawn_serve_host(handle)
+
+    (cmd,) = spawned
+    assert cmd[cmd.index("--socket") + 1] == handle
+
+
+def test_serve_binds_the_fixed_handle_not_its_target(tmp_path, monkeypatch):
+    import argparse
+
+    from agent_mcp import __main__ as cli
+    from agent_mcp import serve
+
+    handle = str(tmp_path / "serve.sock")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
+    bound = []
+
+    class _Stop(Exception):
+        pass
+
+    def _server(socket_path, **_kwargs):
+        bound.append(socket_path)
+        raise _Stop
+
+    monkeypatch.setattr(serve, "Server", _server)
+    args = argparse.Namespace(passive=False, socket=handle, idle_timeout=0.0,
+                              control_port=None)
+
+    with pytest.raises(_Stop):
+        cli._cmd_serve(args)
+
+    assert bound == [handle]
+
 def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
     """With no host up, _ensure_serve spawns a detached `agent-mcp serve`, waits
     for its socket, and returns it; the spawned host answers a ping."""
@@ -360,6 +558,7 @@ def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
 
     got = forward._ensure_serve(str(sock))
     assert got is not None, "ensure-serve did not bring up a host in time"
+    assert (tmp_path / "serve.log").is_file(), "the host's output must be logged"
     try:
         pong = asyncio.run(request_via_socket(got, {"op": "ping"}))
         assert pong["ok"] and pong["pong"]

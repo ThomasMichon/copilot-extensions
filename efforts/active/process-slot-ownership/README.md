@@ -103,6 +103,19 @@ process slots across agent-worktrees, agent-bridge, and agent-dispatch.
 The execution decomposition and acceptance details below are
 **agent-recommended refinements**, not new operator requirements.
 
+### Rendering and explicit refresh latency
+
+The operator clarified the next reader contract:
+
+> I expect enumerationg for rendering to be under 2 seconds; this is achieved by ensuring the reader-bridge to Worktree Manager is backed by a DB/cache in memory. If a "live" on-demand refresh is needed, this is where the 10-second goal comes into play.
+
+The subsequent policy selection was **wall-only**: rendering must read the
+existing DB/in-memory projection in under 2 seconds wall time; explicit live
+refresh has a separate 10-second wall-clock goal. Numeric CPU admission limits
+are deferred; the provisional CPU ceiling is superseded, not approved policy.
+The implementation and truthful degraded-state refinements are
+_(agent-recommended)_ and specified in [reader rendering latency](reader-render-latency.md).
+
 ## Plan
 
 ### Historical phase mapping
@@ -158,6 +171,9 @@ verified by this effort's Validation Plan.
 - [x] Reduce [collector role totals and provenance](reader-role-accounting.md)
       under bounded provider epochs, without numeric enforcement
       _(agent-recommended measurement refinement)_.
+- [ ] Implement [cache-backed rendering and explicit refresh latency](reader-render-latency.md):
+      rendering under 2 seconds, explicit refresh with a 10-second wall goal;
+      reuse #1919's catalog and preserve native-holder ownership.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
 - [ ] Open admission circuits on repeated budget overruns without reclaiming
       live progressing holders; successful bounded probes close them.
@@ -174,6 +190,10 @@ verified by this effort's Validation Plan.
 
 ## Validation Plan
 
+- [ ] Cached rendering responds in under 2 seconds without foreground
+      discovery/classification; explicit refresh has a bounded 10-second
+      wall wait and truthful completion state, as specified in
+      [reader rendering latency](reader-render-latency.md).
 - [ ] Across agent-worktrees, agent-bridge, and agent-dispatch, each role slot
       has exactly one logical owner session; concurrent claims cannot gain
       a second live holder.
@@ -564,3 +584,19 @@ _(agent-recommended)_; extending measurement to the remaining reader inventory
 can proceed without inventing enforcement policy. Global logical ownership,
 admission enforcement, exact-identity/no-progress reclamation, release and
 authorized running-state adoption remain separate parent obligations.
+
+### 2026-10-13 - Rendering and refresh latency clarification
+
+The operator separated render enumeration (under 2 seconds from the existing
+DB/in-memory cache) from explicit live refresh (10-second wall-clock goal).
+The subsequent wall-only selection defers numeric CPU enforcement and
+supersedes the provisional CPU ceiling. This is a new reviewed-plan gate,
+not permission to shorten native execution deadlines or terminate holders.
+
+The bounded next slice is [reader rendering latency](reader-render-latency.md).
+It reuses #1919's existing catalog contract; full catalog pagination and
+incremental reconciliation are not taken over by this reader integration.
+Cold/warming/stale/unknown evidence and retained good snapshots on refresh
+failure are _(agent-recommended)_ correctness refinements. Exact-action
+lookups, namespace budgets, process-registry ownership and the parent
+effort's remaining acceptance gates stay unchanged.

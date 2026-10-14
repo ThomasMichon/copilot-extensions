@@ -89,7 +89,8 @@ unchanged.
   reassignment. Registered commands use an owner-private stable launcher that
   follows the active runtime in Python isolated mode. Releasing a target removes
   its Picker registrations. The initial contract is read-only:
-  list, recent-message, session, and refresh operations are advertised, while
+  list, recent-message, session, refresh, and explicit claim-inspection operations
+  are advertised, while
   create and lifecycle actions remain explicitly disabled. Remove a retired
   registration with `agent-containers source-remove <name> --project <project>`;
   removal does not require the target to still exist or be running.

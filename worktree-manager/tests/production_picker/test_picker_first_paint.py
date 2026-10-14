@@ -1007,13 +1007,20 @@ def test_stream_source_is_not_authoritative_until_done(monkeypatch):
 
     first_row = threading.Event()
     finish = threading.Event()
+    head = {
+        "schema_version": 1, "quality": "current", "generation": "a" * 32,
+        "revision": 1, "observed_at": 1, "roster_count": 1, "selected_count": 1,
+    }
 
     class Stdout:
         def __iter__(self):
-            yield json.dumps({"type": "worktree", "wt": {"id": "wt-a"}})
+            yield json.dumps({
+                "type": "begin", "contract_version": 1, "projection": head, "selected_count": 1,
+            })
+            yield json.dumps({"type": "worktree", "projection": head, "wt": {"id": "wt-a"}})
             first_row.set()
             assert finish.wait(2)
-            yield json.dumps({"type": "done"})
+            yield json.dumps({"type": "done", "projection": head})
 
     class Proc:
         stdout = Stdout()
@@ -1044,7 +1051,7 @@ def test_stream_source_is_not_authoritative_until_done(monkeypatch):
     worker.start()
     assert first_row.wait(2)
 
-    assert loader.records_for_source(source.source_id)
+    assert loader.records_for_source(source.source_id) == []
     assert loader.authoritative_source_ids() == set()
 
     finish.set()

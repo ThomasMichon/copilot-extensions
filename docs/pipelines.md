@@ -114,6 +114,18 @@ composed index through Git so declared checkout attributes, including CRLF
 scripts, match the fresh candidate checkout used by the exporter. It does not
 normalize payload hashes or waive byte equality. The promoter uses the same
 canonical composed-index validator before creating a release candidate.
+That boundary first verifies the composed index's tree identity, before reading
+artifacts or checking out source. It reports index drift separately from an
+artifact/source mismatch rather than comparing unrelated snapshots and emitting
+an opaque payload-hash refusal. Working-file timestamps, untracked caches and
+raw LF/CRLF generator output are not source identity: only the admitted index's
+canonical checkout is hashed. Attribute lookup is explicitly pinned to that
+same tree, not `HEAD` or unstaged/untracked `.gitattributes` in the scratch
+directory. Canonical validation requires Git 2.45 or newer and never falls back
+to working-tree attribute policy. A real source-content or checkout-policy mismatch
+still refuses publication and names the plugin/version and expected/actual
+payload digests. Archive and wheel digests remain exact integrity checks; they
+are not relaxed or used as a substitute for this source contract.
 Candidate-supplied hashes and
 first-party labels alone never establish source provenance. The publisher
 repeats this source binding against the actual merged snapshot.
@@ -178,6 +190,10 @@ publishes nothing.
 
 Only after the exact candidate PR really merges does publication recheck its
 actual parent/content tree and project set and revalidate archive contents.
+Content-tree filtering removes only release state and coverage pointers from a
+throwaway index loaded from the supplied candidate tree. Its index-only removal
+does not require those entries to match the publisher's older trusted checkout;
+the real index, working files and candidate payload remain unchanged.
 Assets live under the deterministic
 `<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
 manifest's content-addressed `artifact_id`, permitting independently attested

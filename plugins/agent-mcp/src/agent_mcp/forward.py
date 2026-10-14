@@ -93,39 +93,55 @@ def _abs_bridge_ref(bridge: str) -> str:
 
 
 def _serve_handle(socket_path: str | None) -> str:
-    """The socket handle both the forwarder and a spawned host agree on."""
-    return (socket_path or os.environ.get("AGENT_MCP_SERVE_SOCKET")
-            or str(sockio.default_socket_path()))
+    """The socket handle both the forwarder and a spawned host agree on.
+
+    Always absolute: the host runs from ``AGENT_MCP_HOME``, not from this
+    forwarder's cwd, so a relative ``--socket``/``AGENT_MCP_SERVE_SOCKET`` (or a
+    relative ``AGENT_MCP_HOME``) resolved by the host would bind somewhere
+    other than the path this forwarder polls.
+    """
+    raw = (socket_path or os.environ.get("AGENT_MCP_SERVE_SOCKET")
+           or str(sockio.default_socket_path()))
+    return sockio.absolute_handle(raw)
 
 
 def _spawn_serve_host(handle: str) -> None:
     """Spawn a detached ``agent-mcp serve`` host bound to ``handle``.
 
-    Fully detached (its own session/process group) so it **outlives** this
-    forwarder and serves later sessions too; the host installs no parent-death
-    watchdog, and its single-instance lease collapses concurrent spawns from
-    racing forwarders into exactly one live host. Best-effort: a failure to spawn
-    just leaves the caller to fall back to a direct bridge.
+    Fully detached (its own session/process group, and on Windows broken away
+    from any kill-on-close Job around this forwarder) so that it normally
+    **outlives** this forwarder and serves later sessions too; the host
+    installs no parent-death watchdog, and its single-instance lease collapses
+    concurrent spawns from racing forwarders into exactly one live host.
+    Survival is conditional on breakaway being permitted: when the
+    forwarder's Job forbids breakaway, the host is started *inside* that Job
+    instead (``contained_fallback``, logged as a warning and in
+    ``serve.log``) and dies when the Job closes, and contained test mode
+    (``COPILOT_EXTENSIONS_TEST_CONTAINED=1``) never requests breakaway at
+    all. Launched through the shared resident-daemon primitive
+    ``agent_procutil.spawn_daemon``: no console
+    window, the stable ``AGENT_MCP_HOME`` directory as its cwd (never this
+    forwarder's cwd, which may be a worktree that is later removed), and its
+    stdout/stderr appended to ``$AGENT_MCP_HOME/serve.log`` rather than
+    discarded. Best-effort: a failure to spawn just leaves the caller to fall
+    back to a direct bridge.
     """
-    import subprocess
-
-    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+    from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
     python = sys.executable
+    handle = sockio.absolute_handle(handle)
     cmd = [windowless_python(python), "-m", "agent_mcp", "serve", "--socket", handle]
-    env = dict(os.environ)
-    env.update(windowless_python_env(python))
-    kwargs: dict = {
-        "env": env,
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-    }
-    # Fully detach: own session/process group and (on Windows) no console -- so
-    # the host outlives this forwarder and never flashes a window. Routed through
-    # agent_procutil so the creation flags can't drift (headless-launch guard).
-    kwargs.update(detached_kwargs())
-    subprocess.Popen(cmd, **kwargs)
+    home = sockio.default_home_dir().resolve()
+    home.mkdir(parents=True, exist_ok=True)
+    env_overrides = sockio.daemon_env_overrides(home)
+    env_overrides.update(windowless_python_env(python))
+    # contained_fallback: before adopting spawn_daemon this host always ran
+    # inside the forwarder's Job; if that Job forbids breakaway, a host with
+    # the forwarder's lifetime still beats losing the multiplexer entirely.
+    # That host does NOT outlive the Job; spawn_daemon logs the fallback.
+    spawn_daemon(cmd, cwd=home, log_path=home / "serve.log",
+                 env_overrides=env_overrides,
+                 contained_fallback=True, display="agent_mcp serve")
 
 
 def _ensure_serve(socket_path: str | None):
@@ -138,13 +154,19 @@ def _ensure_serve(socket_path: str | None):
     """
     import time
 
-    handle = _serve_handle(socket_path)
+    # Path resolution here (and in the spawn's environment) can fail on a
+    # symlink loop with RuntimeError rather than OSError; any such failure
+    # must still fall back to the direct bridge rather than abort forwarding.
+    try:
+        handle = _serve_handle(socket_path)
+    except (OSError, RuntimeError, ValueError):
+        return None
     existing = sockio.serve_socket_if_available(handle)
     if existing is not None:
         return existing
     try:
         _spawn_serve_host(handle)
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
         return None
     deadline = time.monotonic() + _ENSURE_SERVE_TIMEOUT
     while time.monotonic() < deadline:

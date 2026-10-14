@@ -982,6 +982,281 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-10-14 - Phase 6d publication, ordering and adoption review corrections
+
+Review of #6595 exposed three availability/provenance gaps: the early mux
+failure path bypassed producer-failure notification, cold publication failure
+hid its actionable reason, and the Manager admitted contradictory advisory
+availability on current-quality rows. The corrected paths mark published and
+demanded projects explicitly unavailable/stale and enforce quality/status
+agreement. A later review found ordinary creation and yielded-head scalar
+fields missing from the bounded schema; both are now explicitly typed rather
+than dropping current identity or resumability semantics.
+
+Successor promotion now refuses adoption if current-roster activation fails;
+the unpublished successor retains retry state and cannot sweep before activation.
+Held updates carry committed identity order in bounded 128-ID frames. Both
+receivers require the exact final identity permutation at commit, preserving
+reorder-only publications and front insertion without resending unchanged rows.
+The real TCP relay covers 300-row reorder/insertion, while the actual local
+and SSH loader children assert the same committed ordering.
+
+Current evidence: 44 publication/producer/schema cases pass; the affected
+resident/feed matrix has 231 passes and one platform skip, with its strict
+1100-row CLI child missing the unchanged two-second first-load budget on two
+attempts and passing its isolated retry. Failure diagnostics now retain the
+bounded child error/exit state instead of reporting only an empty queue.
+The final held-feed/adoption rerun passes all 29 cases, including the unchanged
+strict load assertion. The activation/adoption subset passes 13 cases, and the Manager current-feed,
+current-roster and SSH-source subset passes 156 with one platform skip.
+The timing variability is not a live performance pass or a reason to raise
+the budget. Normal promotion, deployment, installed full-roster timing,
+rendering and CPU/preservation evidence remain required.
+
+The next review caught the typed non-Picker consumer rejecting integer dirty
+counts greater than one. Its Boolean indicator now accepts nonnegative counts
+while preserving the exact count in the raw current row and rejecting negatives.
+Provider-exec claim inspection now negotiates a supported read-only capability:
+the Manager registry admits `claims`, and the container source descriptor
+advertises it. Existing live instance, target, lease and transport checks still
+gate the explicit read; mutation capabilities remain disabled. The changefile
+also covers that provider payload. Manager typed-client, source and detail
+contracts pass 206 with one platform skip; provider SSH contracts pass 28 with
+two platform skips. The older README and CLI descriptions now consistently
+state the mandatory current-authority/upgrade contract.
+
+A subsequent review alleged that the second of two owned read-only hardlinks
+fails against a stale cached count. The exact shared-cache callback sequence
+does not reproduce that claim: the last link has `st_nlink == 1` and skips the
+multi-link comparison. Native complete cleanup also passes with two, three
+and sixteen read-only hardlinks across separate directories; chmod clears
+the shared file's read-only attribute. The runner contract suite passes 62
+with one platform skip. Added these regressions without weakening ownership
+checks or inventing a counter change for an unobserved failure.
+
+The next review found a genuine machine-SSH argv corruption: the encoding-aware
+transform visits every argument, so appending `--follow` modified the executable,
+SSH options and alias as well as the remote command. It now replaces the
+existing `--stream` flag inside the remote command, including encoded PowerShell.
+Both Bash and PowerShell regressions assert that every executable/option/alias
+argument remains byte-for-byte unchanged and that the decoded remote command
+adds exactly one held-feed flag. The full current-feed/current-roster/SSH-source
+selection passes 158 with one platform skip; whole-tree Ruff and all 29 changed
+source-module ceilings pass. This is source evidence, not deployed SSH proof.
+
+The producer failure boundary now marks every ordinary exception stale before
+re-raising to the monitor's logging boundary, including SQLite operational and
+lookup failures formerly outside its explicit exception tuple. Real owner
+serialization/publication tests retain the last-good row and notify held
+readers of the same failure; 54 producer/runtime/projection cases pass.
+The detail card no longer promises a provider error after closing when the
+quiet background contract cannot deliver one. Its existing visible failure
+state remains explicit; 50 detail/current-roster/feed cases pass.
+
+Snapshot admission now explicitly rejects non-object decoded frames before
+field access. Scalar/array cases before and inside a publication barrier, plus
+the actual one-shot loader error path, verify a visible failed source rather
+than an uncaught thread exception. The current-roster/feed/SSH selection passes
+171 cases with one platform skip.
+
+Authority startup now always attempts elected activation: absence of the active
+route is a failure, not permission to skip activation and acknowledge adoption.
+Both missing-election and SQLite-failure regressions prove refusal followed by
+successful retry. Existing monitor fixtures now provide an explicit elected
+route and bounded retirement; all 205 monitor cases pass with one platform skip.
+Held commits advance the presentation clock and refresh relative age, last-used
+and pulse fields even when facts are unchanged. The shared normalizer uses the
+same helper, while unchanged factual/asset presentation is still reused. A
+controlled-clock regression covers reused and changed rows without full
+renormalization of the former; 175 current-feed/source/pulse/recency cases pass
+with one platform skip.
+
+The relay now preserves structured reconnect policy across its CLI error
+boundary. Disconnect/unready failures remain retryable; live-peer timeout,
+malformed transaction, incompatible capability and authentication errors stop
+automatic Manager child respawn. The Manager validates the Boolean policy and
+treats its own watchdog as terminal. Real child tests assert a single launch,
+visible failure and complete owned-process cleanup for terminal frames;
+existing graceful/crash reconnect cases still pass. The relay/client selection
+passes 55 cases and the Manager current-roster/feed/source selection passes
+178 with one platform skip. No daemon-recovery or deadline policy was relaxed.
+
+### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
+
+The existing authenticated status-monitor control endpoint now offers the
+versioned held feed. Subscriber admission precedes initial publication capture;
+monotonic project-revision cursors and complete snapshot/update barriers fence
+incremental upserts and deletions. A subscriber retains only one notification
+stamp and its last committed roster, so bursts coalesce against the latest
+complete publication rather than queueing historical payloads. Admission is
+bounded to 32 feeds. Heartbeats do not decode unchanged rosters. Producer
+availability changes are explicit and preserve current rows.
+
+Planned drain, shutdown and supersession emit a reasoned going-away notice
+before release. Feed demand and response lifetime participate in monitor
+accounting. Independent pre-submit review found two consequential lifecycle
+gaps: a retained crashed endpoint did not invoke bounded recovery, and ordinary
+point responses were not included in drain. Both are corrected and covered by
+regressions; slow/malformed live peers still cannot trigger recovery or compute.
+The existing installer/activation path owns cutover, with no new daemon or
+deadline/lease increase.
+
+The CLI's additive `--follow` negotiates the feed capability and validates full
+transactions before relaying stdout. Default local and machine-SSH Manager
+loads now hold that CLI boundary, keep stale last-good rows during reconnect,
+and atomically admit a complete replacement generation. Complete updates
+reuse unchanged presentation rows instead of re-normalizing all facts.
+Periodic polling/reconcile cannot overwrite an active feed. Explicit one-shot
+compatibility remains current-authority-only. Demo and legacy test fixtures
+now honor the same complete envelope/barrier or explicitly choose one-shot
+mode; unsupported held capability remains an upgrade error.
+
+Windows contained evidence: the final affected engine matrix passes 498 cases
+with two platform skips after the named review fixes; the corrected runtime/feed
+matrix passes 39, including a real CLI child loading all 1100 published rows
+under two seconds, receiving one changed-row commit and a cutover notice.
+Focused Manager contracts pass 148 with one platform skip; all 12 coupled
+full-suite failures pass after updating their authoritative fixtures/demos.
+The full Manager run had 2040 passes, 13 skips and 13 failures, not a pass:
+its remaining independent tar-symlink fixture mismatch was explicitly cleared
+by that owner and repaired as a native Path comparison at the fixture seam.
+The complete Manager portfolio now passes 2054 cases with 13 platform skips
+across two complementary contained selections, without omissions or raising
+the existing per-run budget. The runner's Windows temporary Git-object cleanup
+refusal needed a separate bounded correction: restore write permission only
+for regular read-only files within the owned sandbox, with every hardlink
+accounted for there. Symlinks, outside targets and permanent failures do not
+gain a permissive fallback. The cleanup's 15-second sharing retry is unchanged.
+Its contained contracts pass 46 cases with one platform skip, and the exact
+native Git-object failure plus feed/fixture regressions pass 19 with clean
+runner exit. An initial abrupt-disconnect fixture incorrectly slept instead
+of crashing; it now actually exits and proves that separate reconnect path.
+
+Documentation impact: the engine/Picker contract and Manager README now
+describe held barriers, bounds, explicit recovery/availability and lifecycle;
+the testing guide records bounded cleanup and complete-portfolio partitioning.
+The existing changefile covers both payloads. This is realization of the
+reviewed Phase 6d direction, not a new intent revision. Publication, platform/
+external coverage, live daemon generation and consumer stability, promotion,
+unified rollout and actual latency/CPU acceptance remain open. No installed
+or live-roster success is asserted by these source fixtures.
+
+### 2026-10-13 - Phase 6d.1 resident serving and ordinary reader enrollment
+
+The current roster now runs inside the existing resident monitor. Its
+authenticated control surface advertises a versioned capability, reads only
+published rows, and reports unready, draining, incompatible or unavailable
+state explicitly. Election is rechecked inside the ownership transaction;
+an unelected late initial activation cannot steal a newer publisher, and one
+bounded CAS retry handles a genuinely raced predecessor commit. Monitor
+publication reuses the existing serializer and git/session/mux reductions,
+captures its project/repository explicitly, and reports failed publications
+while retaining labeled last-good rows. Unchanged identity/filter indexes
+are neither rebuilt nor rewritten for fact-only publications.
+
+Ordinary production JSON and one-shot stream reads select that authority.
+The Manager requires `--current` locally and remotely; optional flag retries
+cannot remove it, and point refresh cannot backfill or enumerate the fleet.
+Local Group C reconcile no longer overwrites current rows. The CLI uses
+existing owner authentication without minting a token, enforces a total
+request deadline and bounded point response, and permits only independently
+indexed advisory state after failure. The wire preserves UTF-8 byte bounds
+rather than expanding valid rows past them through ASCII escaping.
+
+Both ordinary envelopes and one-shot streams carry selected-row counts.
+The Manager admits only a complete publication barrier, rejects mixed
+revisions, duplicates, historical collections and truncated responses, and
+labels advisory/stale rows without changing their stored state. This is
+not a claim that the held incremental feed is implemented.
+
+Validation: 474 focused engine cases passed with two platform-dependent
+skips; the remaining new producer fixture needed an explicitly configured
+project and passes separately after that correction. The focused Manager
+suite passes 236 cases with one platform-dependent skip. Current-component
+Ruff, changed Python syntax lint, staged module ceilings, whitespace and all
+13 install contracts pass. These are Windows contained/transport checks,
+not installed, live-roster, Linux/macOS or external-venue acceptance.
+Documentation impact: the engine/Picker contract records the authority,
+availability, bounded-row and one-shot barrier changes; the existing
+changefile covers both runtime payloads. This realizes the already-reviewed
+authoritative-daemon direction, without adding a daemon or changing installer
+ownership. Held-feed drain/notice, live stability, promotion, rollout and
+latency/CPU acceptance remain open; continue the parent rather than treating
+this reader enrollment as completion.
+
+### 2026-10-13 - Phase 6d.1 current claim aggregates and explicit detail inspection
+
+The owner-side adapter now reuses the engine serializer in a current-only
+mode: full resource/PR/profile histories stay out, while the active PR and exact
+counts remain. Held-claim type/count aggregates preserve the Manager's existing
+active/at-rest presentation; ranked links have an explicit total/completeness
+marker and bounded preview. Current materialization surfaces registry/ranking
+errors rather than silently publishing an empty claim summary. Exercising the
+real serializer, including 1,000 held claims and git dirty-file counts, exposed
+and corrected the foundation's mistaken boolean type for `dirty`.
+
+The Manager accepts those aggregates without visiting a ledger. View details
+opens immediately with the held count and loads the full list through its
+existing background/Inbox path only on explicit demand; failures stay visible,
+and the full list never flows back into ordinary cached rows. Local reads use
+the selected provider and exact worktree identity. Remote reads retain the
+source incarnation/assignment/transport checks, sharing the existing session
+detail-query admission path rather than introducing a second transport.
+The detail screen and query helpers were split at their natural seams to
+preserve the repository's source-module ceilings.
+
+Validation: 50 engine cases pass (projection, current materialization and
+existing serializer semantics); 137 Manager cases pass, with one existing
+platform-dependent skip (source routing, asset presentation and native detail
+loading/error paths). The strict 1,100-row native viewport cases still pass
+all eight unchanged 200 ms gates, with a maximum of 149.54 ms including GC.
+These are source/contained checks, not installed or live-roster acceptance.
+The resident producer, authenticated projection serving and ordinary consumer
+read routing are still unwired; neither this chunk nor a repaint result closes
+the load-under-2-second requirement or Phase 6d.
+
+### 2026-10-13 - Phase 6d.1 indexed selections and publisher fencing
+
+The storage seam now materializes status/platform/checkout-presence selections,
+exact-before-unique-suffix aliases and case-sensitive codenames on publication.
+Duplicate codenames still fail before selection filters, while suffix ambiguity
+is evaluated inside the selected roster, matching the existing CLI semantics.
+Both resident and advisory point reads decode one addressed row; durable alias
+resolution uses the SQLite primary-key index, not a fleet scan. Ambiguity reports
+retain the exact count with a bounded preview rather than expanding every match.
+Checkout presence is an explicit producer fact; an unenrolled presence filter
+is unready, not a silently shortened roster.
+
+An explicit compare-and-swap generation handover fences the durable publisher.
+Constructing another store, reading advisory rows or reusing a generation cannot
+take ownership. A late prior-owner publication is refused and its resident view
+is closed; monitor election, request admission and planned drain still own the
+runtime transition. The contained storage/selector/fencing suite passes 33
+cases, including 1,100 unrelated rows with corrupted payloads and unchanged
+point decode counts. This remains unwired source foundation: no installed
+latency, producer completeness, authenticated transport or consumer acceptance
+is claimed. The Phase 6d and parent completion gates remain open.
+
+### 2026-10-13 - Phase 6d.1 current-roster storage foundation
+
+Taking the reviewed resident-projection slice under #5555, separately from
+#6086's warm-pass/cross-cycle enrichment work. The initial source storage seam
+accepts explicitly declared, typed and size-bounded current fields, not whole
+tracking records, ledgers or session/handoff/PR history. Complete project
+publications replace rows atomically, including deletes; exact point reads
+decode only that independently addressed slot. The resident view is in memory;
+the SQLite projection is advisory after restart and is never promoted to
+current merely because it exists. Missing, invalid, oversized and incomplete
+publications fail explicitly instead of fabricating an empty successful roster.
+
+This is a storage foundation, not a completed authority or latency fix.
+Producer enrollment, current claims summaries preserving the Manager's asset
+presentation, owner/generation fencing, filter and suffix/codename indices,
+authenticated capability-negotiated transport and consumer routing remain
+open. No runtime or ordinary read uses this new seam yet. Held feed admission,
+snapshot barriers and cutover stay in 6d.2. All parent validation boxes remain
+unchanged; the storage tests do not establish a real Manager load budget.
+
 ### 2026-10-12 — Materialized schema-bounded read-side goal
 
 The operator explicitly requires constant-schema current-state reads, pushed

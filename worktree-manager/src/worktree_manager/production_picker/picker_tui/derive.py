@@ -19,6 +19,7 @@ from .. import prune
 from . import reciprocal
 from .controller_workspaces import managed_child, sessionless as _sessionless
 from . import source_identity
+from .worktree_assets import asset_hints as _asset_hints
 
 # The "now" derived ages are measured against. Data sources refresh this to the
 # real clock before normalizing a batch (see ``data_local``).
@@ -391,90 +392,6 @@ def status_line_segments(markers, asset_hints, overflow, width):
     return segments
 
 
-#: Bounded per-kind short codes for the tile asset-hint line (#6443/upstream
-#: #1979). Falls back to an upper-cased 4-char code for a kind this map
-#: doesn't recognize, so a future ``ResourceKind`` addition degrades safely
-#: instead of vanishing from the tile.
-_ASSET_CODES = {
-    "pr": "PR",
-    "worktree": "WT",
-    "codespace": "CS",
-    "container": "CTR",
-    "ssh": "SSH",
-    "workdir": "DIR",
-}
-
-#: Held-claim dispositions: a claim not yet released/abandoned still rides on
-#: the worktree, so it belongs in the tile's asset summary. An empty state is
-#: the legacy default and normalizes to "active" (held). Mirrors the
-#: ``resources`` ledger's own held-vs-released disposition convention
-#: (``active``/``at-rest`` = held; ``released``/``abandoned`` = not held).
-_HELD_CLAIM_STATES = ("", "active", "at-rest")
-
-
-def _asset_hints(w):
-    """Bounded type/count breakdown of the worktree's HELD outbound claims
-    (the ``resources`` ledger -- #6443/upstream #1979 Phase 6), e.g.
-    ``["PR", "WT×2"]`` -- distinct from ``status_markers``'s bare ``C<N>``
-    held-claims COUNT: this groups the same held claims by ``kind`` so a
-    cross-repo PR reads differently from a child worktree or a Codespace at a
-    glance. Bounded to 4 hint tokens (with an ``overflow`` count) so a
-    worktree carrying many claim kinds can never blow out the tile's width.
-    Also returns the full per-claim detail (kind/ref/note/state) for a
-    width-constrained consumer (the action menu) to render in full. Returns
-    ``{"hints": [...], "overflow": int, "details": [...]}`` -- empty lists
-    when the worktree holds no claims (never omitted, so a caller need not
-    guard for the key's absence).
-    """
-    raw = w.get("resources")
-    kind_counts: dict[str, int] = {}
-    details = []
-    if isinstance(raw, list):
-        for claim in raw:
-            if not isinstance(claim, dict):
-                continue
-            state = str(claim.get("state") or "").strip()
-            if state not in _HELD_CLAIM_STATES:
-                continue
-            kind = str(claim.get("kind") or "").strip() or "resource"
-            kind_counts[kind] = kind_counts.get(kind, 0) + 1
-            details.append({
-                "kind": kind,
-                "ref": str(claim.get("ref") or "").strip(),
-                "note": str(claim.get("note") or "").strip(),
-                "state": state or "active",
-            })
-    # Count by the raw ``kind`` first (above), then resolve a display code
-    # only now -- never the reverse. Counting straight into the code would
-    # silently merge two DISTINCT kinds whose fallback 4-char codes happen to
-    # collide (e.g. "workspace" and "workflow" both -> "WORK"), understating
-    # the real per-kind breakdown the operator is reading. Aggregating by
-    # code here is still an explicit, intentional step -- multiple raw kinds
-    # sharing one code are summed into that code's token, but never silently
-    # dropped or conflated during counting itself.
-    code_counts: dict[str, int] = {}
-    for kind, n in kind_counts.items():
-        code = _ASSET_CODES.get(kind, kind.upper()[:4] or "RES")
-        code_counts[code] = code_counts.get(code, 0) + n
-    # Deterministic hint order (never insertion/dict order, which tracks
-    # arbitrary ``resources`` list order and would make the tile line and any
-    # snapshot/TUI test brittle): the curated ``_ASSET_CODES`` kinds first, in
-    # their declared (most-common-first) order, then any remaining
-    # unrecognized-kind fallback codes, alphabetically.
-    ordered_codes = [
-        c for c in _ASSET_CODES.values() if c in code_counts
-    ] + sorted(c for c in code_counts if c not in _ASSET_CODES.values())
-    hints = [
-        code if code_counts[code] == 1 else f"{code}×{code_counts[code]}"
-        for code in ordered_codes
-    ]
-    return {
-        "hints": hints[:4],
-        "overflow": max(0, len(hints) - 4),
-        "details": details,
-    }
-
-
 def _sess(w):
     """LIVE column value (operator feedback, 2026-09-29): ``MUX``/``ACP``/
     ``PROC``/``LOCK``/``-``, replacing the prior glyph set (``●N``/``○``).
@@ -552,6 +469,18 @@ def _last_active_display(w):
         else w.get("started_at")
     )
     return _age(ts)
+
+
+def time_fields(w):
+    """Refresh relative presentation without re-deriving unchanged row facts."""
+    return {
+        "live_pulse": _pulse_level(w),
+        "age": _age(
+            w.get("completed_at") if w.get("status") == "finalized" else w.get("started_at")
+        ),
+        "age_secs": _age_secs(w),
+        "used": _last_active_display(w),
+    }
 
 
 def _bucket_from_raw(w):
@@ -771,6 +700,10 @@ def norm(
     # a bound-but-un-muxed Copilot is the more urgent signal than a follow-up.
     if bare_orphan:
         disp_title = f"⚠ {disp_title}"
+    if (w.get("_projection") or {}).get("quality") == "advisory":
+        disp_title = f"[advisory] {disp_title}"
+    elif (w.get("_availability") or {}).get("status") == "stale":
+        disp_title = f"[stale] {disp_title}"
     source = source_identity.metadata(source_kind, source_id, source_label)
     source.update(source_metadata or {})
     capabilities = dict(source_capabilities or {})
@@ -814,7 +747,6 @@ def norm(
         # line no longer expires -- ``live_rest`` grades its colour (amber
         # awaiting-operator, dim busy, grey idle) but never drops it.
         "live_intent": (w.get("live_intent") or "").strip(),
-        "live_pulse": _pulse_level(w),
         "live_rest": (w.get("live_rest") or "").strip(),
         "awaiting_operator": awaiting_operator,
         "kind": kind,
@@ -825,13 +757,7 @@ def norm(
         "asset_hints": _asset_hints(w),
         "relation": relation_label,
         "reciprocal_relation": reciprocal_relation,
-        "age": _age(
-            w.get("completed_at") if w.get("status") == "finalized"
-            else w.get("started_at")
-        ),
-        "age_secs": _age_secs(w),
-        # #3307 follow-up: recency of last interaction, distinct from AGE.
-        "used": _last_active_display(w),
+        **time_fields(w),
         "sess": _sess(w),
         "turns": w.get("turn_count", 0),
         "session_count": w.get("session_count"),

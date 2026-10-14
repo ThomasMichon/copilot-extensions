@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -61,8 +62,35 @@ def main(argv: list[str] | None = None) -> int:
         i += 1
 
     if verb == "list":
-        json.dump(demo.list_envelope(), sys.stdout)
-        sys.stdout.write("\n")
+        envelope = demo.list_envelope()
+        rows = envelope["worktrees"]
+        if worktree_id is not None:
+            rows = [row for row in rows if row["id"].endswith(worktree_id)]
+        head = {
+            "schema_version": 1, "quality": "current", "generation": "d" * 32,
+            "revision": 1, "observed_at": 1, "roster_count": len(envelope["worktrees"]),
+            "selected_count": len(rows),
+        }
+        if "--stream" in args or "--follow" in args:
+            def emit(frame):
+                print(json.dumps(frame), flush=True)
+
+            emit({
+                "type": "begin", "contract_version": 1, "projection": head,
+                "selected_count": len(rows), "cursor": 1, "base_cursor": None,
+            })
+            for row in rows:
+                emit({"type": "worktree", "phase": "current", "wt": row, "projection": head})
+            emit({"type": "done", "projection": head, "cursor": 1})
+            while "--follow" in args:
+                time.sleep(2)
+                emit({"type": "heartbeat", "generation": head["generation"], "cursor": 1})
+        else:
+            json.dump({
+                **envelope, "ok": True, "contract_version": 1,
+                "worktrees": rows, "projection": head,
+            }, sys.stdout)
+            sys.stdout.write("\n")
         return 0
     if verb == "resolve":
         json.dump(demo.resolve_plan(worktree_id, new=new, bare_resume=bare_resume),

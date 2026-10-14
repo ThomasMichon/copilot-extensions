@@ -540,7 +540,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
         )
 
         def directory_symlink(src: str, dst: str) -> None:
-            assert src == "nested/real-target"
+            assert Path(src) == Path("nested") / "real-target"
             assert Path(dst).name == "copilot-extensions-main"
             os.symlink(str(Path(src)), dst, target_is_directory=True)
 

@@ -164,6 +164,10 @@ Implementation sequencing below is **agent-recommended**:
   Client artifact-contained lifecycle primitives and local resource diagnostics
   are the first prerequisite under #6424/#6240; managed lifecycle execution and
   controller/connector components remain open.
+  The common authenticated byte-stage prerequisite is merged in #6569.
+  [Client lifecycle admission](client-lifecycle-admission.md) proposes the next
+  serial durable-admission, construction and owned-activation/removal gates;
+  it does not deliver a managed installer or authorize a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal; it does not implement
   execution or require downstream plugins to create core installation cells.
@@ -451,3 +455,42 @@ not to the vision. This effort does not acquire or migrate live capacity.
   retaining recovery refs. Both efforts stay Active; controller/connector,
   useful service roles, authorization, provider admission and adopter migration
   completion gates remain unresolved.
+
+### 2026-10-14 - Authenticated staging merged; managed admission remains open
+- #6569 merged at `2026-10-14T03:30:07Z`, commit
+  `fb06b7ae8b516cff4c432019603d598afc4e93cf`, after actual clean current-head
+  review, all required checks and resolved threads. Its bounded workspace is
+  finalized; that does not finalize this campaign or #6424.
+- The delivered common stage returns currently authenticated immutable byte
+  snapshots, not reusable public paths. Re-verification/consumption serialize
+  with shutdown. POSIX cleanup captures into an exclusively owned private
+  quarantine and retains identity mismatches with explicit errors; Windows
+  admits and deletes consistent native full-width identities through handles.
+  Same-user hostile-process isolation and actual ReFS-volume proof are not
+  claimed by these contracts.
+- Exact required native portfolio passed 489 cases with eight skips and seven
+  full-build deselections in 106.14 seconds under the explicit 120-second
+  deadline. Existing native Linux source/OS cleanup proofs passed; current-head
+  hosted Linux/Windows checks passed before merge. Artifact execution,
+  durable rollback state, candidate health and activation remain undelivered.
+- #6499 is closed with explicit operator approval because #6497 substantively
+  superseded its pointer-preserving inspection split. Source/backups/evidence
+  remain retained, and no retired pointer contract was reintroduced.
+- The next #6424 serial slice is the proposed
+  [client lifecycle admission](client-lifecycle-admission.md) boundary.
+  Implementation waits for this plan's review gate, retaining #6240 product
+  release and #6443 Gateway/node ownership. Normal release remains blocked
+  under the exact existing #6535 publication defect; a `dev` merge is not live
+  installation, useful-service readiness or a completed fleet.
+- Current-head review of #6624 identified a missing release-selection binding.
+  The proposal now requires explicit attributable product-authority/adopter
+  intent, bound to exact manifest, sequence and client closure before durable
+  admission. A valid signature or higher sequence cannot select a release;
+  validation must prove a signed but unselected release leaves state untouched.
+  The minimal SQLite row retains that supplied decision's identity and digest,
+  without adding a selector, ledger framework or runtime behavior before review.
+- Re-review confirmed the selection finding resolved and identified one useful
+  low-severity omission in the construction follow-on. The plan now names the
+  established client-closure/API/data-schema compatibility gate before execution
+  and activation, with an incompatible-candidate refusal case that preserves
+  the prior active client/configuration and the monotonic admission floor.

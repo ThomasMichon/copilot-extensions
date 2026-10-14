@@ -623,10 +623,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 2
 
     socket_path = args.socket or str(ipc.default_socket_path())
-    # Resolve BEFORE the chdir below, in case a caller ever passes a relative
-    # --socket -- it must still mean "relative to the caller's cwd", not to
-    # the daemon's own (about to change) cwd.
-    socket_path = str(Path(socket_path).resolve())
+    # Make it absolute BEFORE the chdir below, in case a caller ever passes a
+    # relative --socket -- it must still mean "relative to the caller's cwd",
+    # not to the daemon's own (about to change) cwd. Lexically, never
+    # dereferenced: the fixed handle is a symlink that cutover repoints, and a
+    # host bound to its current target would be pinned to that generation.
+    socket_path = os.path.abspath(socket_path)
     control_token = os.environ.get("AGENT_MCP_CONTROL_TOKEN") or None
 
     # Pin the resident daemon's CWD to the stable AGENT_MCP_HOME directory

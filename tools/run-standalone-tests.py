@@ -7,14 +7,22 @@ import argparse
 import math
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
+from functools import partial
 from pathlib import Path
 
 from _admission_protocol import AlreadyRunningError, acquire
-from plugin_test_containment import ContainmentError, Limits, isolated_environment, run_contained
+from plugin_test_containment import (
+    ContainmentError,
+    Limits,
+    isolated_environment,
+    run_contained,
+)
 from standalone_consumers import STANDALONE_CONSUMERS
 
 REPO = Path(__file__).resolve().parent.parent
@@ -32,14 +40,70 @@ def extended_windows_path(path: str) -> str:
     return "\\\\?\\" + path
 
 
+def _owned_file_links(root: Path) -> Counter:
+    links = Counter()
+    for directory, children, files in os.walk(root, followlinks=False):
+        current = Path(directory)
+        retained = []
+        for name in children:
+            info = (current / name).lstat()
+            if (
+                stat.S_ISDIR(info.st_mode)
+                and not getattr(info, "st_file_attributes", 0) & 0x400
+            ):
+                retained.append(name)
+        children[:] = retained
+        for name in files:
+            info = (current / name).lstat()
+            if stat.S_ISREG(info.st_mode):
+                links[(info.st_dev, info.st_ino)] += 1
+    return links
+
+
+def _remove_readonly_file(root: Path, function, path: str, exc_info, *, link_counts=None) -> None:
+    error = exc_info[1]
+    if (
+        not isinstance(error, PermissionError)
+        or getattr(error, "winerror", None) != 5
+        or function not in {os.unlink, os.remove}
+    ):
+        raise error
+    target = Path(path)
+    info = target.lstat()
+    if (
+        not target.resolve().is_relative_to(root)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_mode & stat.S_IWRITE
+    ):
+        raise error
+    if info.st_nlink > 1:
+        if link_counts is None:
+            link_counts = _owned_file_links(root)
+        elif not link_counts:
+            link_counts.update(_owned_file_links(root))
+        if link_counts.get((info.st_dev, info.st_ino)) != info.st_nlink:
+            raise error
+    target.chmod(info.st_mode | stat.S_IWRITE)
+    function(path)
+
+
 def cleanup_sandbox(temporary: tempfile.TemporaryDirectory) -> None:
     deadline = time.monotonic() + 15
+    link_counts = {}
     while True:
         try:
             if os.name == "nt" and isinstance(temporary, tempfile.TemporaryDirectory):
-                root = Path(temporary.name).resolve()
-                if root.exists():
-                    shutil.rmtree(extended_windows_path(str(root)))
+                allocated = Path(temporary.name)
+                if allocated.exists() or allocated.is_symlink():
+                    info = allocated.lstat()
+                    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                        raise OSError("refusing redirected temporary cleanup root")
+                    root = allocated.resolve()
+                    extended = Path(extended_windows_path(str(root))).resolve()
+                    shutil.rmtree(
+                        str(extended),
+                        onerror=partial(_remove_readonly_file, extended, link_counts=link_counts),
+                    )
             temporary.cleanup()
             return
         except OSError as exc:

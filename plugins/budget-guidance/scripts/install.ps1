@@ -294,6 +294,21 @@ function Write-Skip    { param([string]$Msg) Write-Host "  [SKIP] $Msg" -Foregro
 function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -ForegroundColor Red }
 function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 
+function Remove-BudgetBuildArtifacts {
+    param([Parameter(Mandatory)][string]$Root)
+    $artifacts = @()
+    $build = Join-Path $Root 'build'
+    if (Test-Path -LiteralPath $build) { $artifacts += Get-Item -LiteralPath $build }
+    foreach ($directory in @($Root, (Join-Path $Root 'src'))) {
+        if (Test-Path -LiteralPath $directory) {
+            $artifacts += Get-ChildItem -LiteralPath $directory -Filter '*.egg-info' -Force
+        }
+    }
+    foreach ($artifact in $artifacts) {
+        Remove-Item -LiteralPath $artifact.FullName -Recurse -Force -ErrorAction Stop
+    }
+}
+
 function Install-BudgetGuidancePackage {
     param(
         [Parameter(Mandatory = $true)][string]$Python,
@@ -301,14 +316,18 @@ function Install-BudgetGuidancePackage {
         [string[]]$Dependencies = @()
     )
 
+    $pipSources = @($Dependencies) + @($Source)
+    foreach ($root in $pipSources) { Remove-BudgetBuildArtifacts -Root $root }
     $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
     if ($uvCommand) {
         $uvResult = 1
         try {
-            & $uvCommand.Source pip install --python $Python $Source --quiet 2>&1 | Out-Null
+            & $uvCommand.Source pip install --python $Python @Dependencies $Source --quiet 2>&1 | Out-Null
             $uvResult = $LASTEXITCODE
         } catch {
             Write-Step 'uv package install could not start -- falling back to python -m pip'
+        } finally {
+            foreach ($root in $pipSources) { Remove-BudgetBuildArtifacts -Root $root }
         }
         if ($uvResult -eq 0) { return $true }
         if ($uvResult -ne 1) {
@@ -316,9 +335,13 @@ function Install-BudgetGuidancePackage {
         }
     }
 
-    $pipSources = @($Dependencies) + @($Source)
-    & $Python -m pip install --quiet @pipSources 2>&1 | Out-Null
-    return $LASTEXITCODE -eq 0
+    foreach ($root in $pipSources) { Remove-BudgetBuildArtifacts -Root $root }
+    try {
+        & $Python -m pip install --quiet @pipSources 2>&1 | Out-Null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        foreach ($root in $pipSources) { Remove-BudgetBuildArtifacts -Root $root }
+    }
 }
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -657,6 +680,18 @@ function Invoke-Stamp {
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
+    $procutil = Join-Path $PluginDir 'libs/agent-procutil'
+    if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
+        $procutil = Join-Path $PluginDir '../../libs/agent-procutil'
+    }
+    if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
+        Write-Fail 'Owning agent-procutil source is missing'; exit 1
+    }
+    $snapshotLib = Join-Path $snapTmp 'libs/agent-procutil'
+    if (-not (Test-Path $snapshotLib)) {
+        New-Item -ItemType Directory -Path (Join-Path $snapTmp 'libs') -Force | Out-Null
+        Copy-Item -LiteralPath $procutil -Destination $snapshotLib -Recurse -Force
+    }
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
@@ -800,7 +835,14 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
-$vendoredDependencies = @()
+$procutil = Join-Path $PluginDir 'libs/agent-procutil'
+if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
+    $procutil = Join-Path $PluginDir '../../libs/agent-procutil'
+}
+if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
+    Write-Fail 'Owning agent-procutil source is missing'; exit 1
+}
+$vendoredDependencies = @($procutil)
 $pkgInstalled = Install-BudgetGuidancePackage `
     -Python $VenvPython `
     -Source $PluginDir `

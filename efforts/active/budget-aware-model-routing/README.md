@@ -129,9 +129,9 @@ timestamp is not proof that the provider metadata was refreshed.
   network access or another service.
 - [ ] Add a provider API adapter for available personal or organization
   AI-usage reports, preserving empty, unauthorized, and unsupported results.
-- [ ] Add a bounded external-command adapter contract for account surfaces or
+- [x] Add a bounded external-command adapter contract for account surfaces or
   organization-specific readers that cannot live in the public plugin.
-- [ ] Make adapter order and field authority configurable without allowing
+- [x] Make adapter order and field authority configurable without allowing
   repository data to override operator-owned credentials or safety policy.
 - [ ] Ensure no adapter failure becomes a zero-consumption success.
 
@@ -200,6 +200,10 @@ timestamp is not proof that the provider metadata was refreshed.
 
 ## Validation Plan
 
+- [x] Native Windows external-reader lifecycle validation observes a real
+  windowless parent, two console-descendant cycles, no visible windows/focus or
+  Default Terminal acquisitions, and complete timeout cleanup; batch/stream
+  grant refusals run in the same native lane.
 - [ ] The quota skill/helper identifies the requesting session's account rather
   than silently reading a fresh runtime's global default.
 - [x] Acquisition time and provider-observation freshness are distinct; cached
@@ -256,8 +260,51 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-13 - External-reader native acceptance and safe group ownership
+
+- Verified the native Windows lane on exact source `1b8da8b66`: six passed,
+  zero failed/skipped, with an interactive desktop and supervisor cleanup.
+  Two successful console-descendant cycles and timeout cleanup retain the
+  original acquisition limits and acceptance assertions. Five grant cases cover
+  trailing-name batch aliases and executable streams.
+- Independently matched the executed native archive to the authoritative Git
+  archive with its recorded prefix, plus the reader and witness file hashes.
+  Earlier source snapshots failed their first acquisition; the cause remains
+  unproven. This receipt credits the literal current-source witness only,
+  not a relaxed retry or an inferred historical repair.
+- Hardened POSIX cleanup against ignored `SIGCHLD` and foreign waiters: the
+  isolated group owner stays alive until control-pipe EOF and terminates its
+  own live group. The caller never signals a numeric PID/group after ownership
+  may be lost; unexpected owner exit refuses cleanup confirmation.
+- Publication review and required checks are still pending for the latest
+  corrections. Provider/account identity, native macOS lifecycle evidence,
+  session delivery, routing, release, and authorized rollout remain open.
+
+### 2026-10-13 - Bounded external-reader implementation
+
+- Implemented the Phase 2 external-command contract: configuration holds only
+  adapter ID, source, and field authority; execution requires an invocation-owned
+  operator grant. Acquired readings reuse the existing resolver and arithmetic.
+- Kept output/deadline limits, unavailable/error states, source and capture
+  validation, diagnostic redaction, and owned process cleanup explicit. Review
+  regressions cover option-presence validation, host-interpreter refusal, missing
+  configuration, and preservation of primary failures alongside cleanup errors.
+- The full contained plugin suite reports 253 passed and four platform skips.
+  Linux-native lifecycle evidence is recorded; Windows and macOS native lifecycle
+  validation remain open, with unsupported capabilities refusing execution.
+- Implementation is complete for this contract, not for the provider API
+  adapter, publication gate, live-account identity, release, or authorized rollout.
+  The effort remains Active; the merge receipt will be recorded after landing.
+- Next: continue provider acquisition and requesting-account proof, then current
+  session guidance and routing integration. Do not grant repository data command
+  authority or treat captures as live provider refresh evidence.
+
 ### 2026-10-12 - Same-period cycle-average pacing
 
+- PR #6417 merged as `8b21c9788bab1fa492a678239b66c9bae4da34a2` after
+  current-head Copilot approval with zero open findings and successful required
+  checks. The implemented pacing slice is landed; the effort remains Active
+  and release, authorized rollout, and live-account proof are not claimed.
 - Qualified the selected provider's user-scoped AI-credit monthly usage against
   its authoritative account consumption, reset, observation ordering, and
   freshness. Missing cycle starts and incompatible evidence withhold the rate;
@@ -268,9 +315,15 @@ promotion authority, task queue, or dashboard.
   from account totals, change workers, or block operator work.
 - Preserved filesystem error causes for quota captures while retaining opaque
   JSON-parse diagnostic redaction.
+- Added missing/null monthly-enum regressions so absent rate evidence preserves
+  valid account balances, plus a real missing-capture-path regression that
+  preserves lookup causes while retaining regular-file rejection.
 - Live provider acquisition and independent selected-account proof, raw legacy
   reset reconciliation, provider/external adapters, launch delivery, routing,
   cross-platform validation, and release/rollout remain open.
+- Next: resume Phase 2 through a bounded external-reader contract. Keep
+  invocation authority operator-owned, deadlines and output bounded, and
+  missing/unauthorized/error evidence distinct from numeric success.
 
 ### 2026-10-12 - Provider observation and reset evidence
 

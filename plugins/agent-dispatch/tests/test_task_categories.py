@@ -227,68 +227,123 @@ def test_actual_cli_and_board_contract_with_first_touch_coordinator(queue, monke
         assert rows[0]["title"] == "upkeep" and rows[0]["category"] == "maintenance"
 
 
-def test_native_cli_rpc_first_touch_and_both_pivots(queue):
+@pytest.fixture
+def native_category_server(queue):
     import os
-    import subprocess
-    import sys
-    from agent_procutil import no_window_kwargs
     from tests.test_mcp_http import _boot
 
     url, stop = _boot(create_app(queue))
     source = str(Path(__file__).resolve().parents[1] / "src")
-    env = {**os.environ, "PYTHONPATH": source, "AGENT_DISPATCH_SUPERVISE_MACHINE": "worker"}
-
-    def run(module, *arguments):
-        result = subprocess.run(
-            [sys.executable, "-m", module, *arguments],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=True,
-            **no_window_kwargs(),
-        )
-        return json.loads(result.stdout)
-
+    env = {
+        **os.environ,
+        "PYTHONPATH": source,
+        "AGENT_DISPATCH_SUPERVISE_MACHINE": "worker",
+        "AGENT_DISPATCH_URL": url,
+        "AGENT_DISPATCH_ENDPOINT": url,
+    }
     try:
         with DispatchClient(url) as producer:
             ordinary = producer.create("ordinary", repo=REPO)
             upkeep = producer.create("upkeep", repo=REPO, category="maintenance")
         assert ordinary["category"] == "work" and upkeep["category"] == "maintenance"
-        assert (
-            run("agent_dispatch", "--url", url, "list", "--repo", REPO, "--limit", "1")[0]["id"]
-            == ordinary["id"]
-        )
-        assert (
-            len(run("agent_dispatch", "--url", url, "list", "--repo", REPO, "--category", "all"))
-            == 2
-        )
-        env["AGENT_DISPATCH_URL"] = url
-        env["AGENT_DISPATCH_ENDPOINT"] = url
-        rows = run(
-            "agent_dispatch.board_cli",
-            "--machine",
-            "worker",
-            "--category",
-            "maintenance",
-            "--limit",
-            "1",
-        )
-        assert rows[0]["id"] == upkeep["id"]
+        yield queue, url, env, ordinary, upkeep
+    finally:
+        stop()
+
+
+@pytest.mark.parametrize(
+    "view", ["default-work", "all-categories", "maintenance-board", "evidence"]
+)
+def test_native_cli_category_view_contract(native_category_server, view):
+    import subprocess
+    import sys
+    from agent_procutil import no_window_kwargs
+
+    queue, url, env, ordinary, upkeep = native_category_server
+    module = "agent_dispatch"
+    if view == "default-work":
+        arguments = ["--url", url, "list", "--repo", REPO, "--limit", "1"]
+    elif view == "all-categories":
+        arguments = ["--url", url, "list", "--repo", REPO, "--category", "all"]
+    elif view == "maintenance-board":
+        module = "agent_dispatch.board_cli"
+        arguments = ["--machine", "worker", "--category", "maintenance", "--limit", "1"]
+    else:
         owner = "worker/worktree"
         queue.claim_one(owner, task_id=upkeep["id"])
         queue.start(upkeep["id"], owner)
         queue.bind_owner_session(upkeep["id"], owner, "session")
         queue.record_progress(upkeep["id"], owner, phase="checked", summary="healthy")
         queue.complete(upkeep["id"], owner, result={"logs": ["log-ref"], "count": 2})
-        evidence = run("agent_dispatch", "--url", url, "inspect-task", upkeep["id"])
+        arguments = ["--url", url, "inspect-task", upkeep["id"]]
+    completed = subprocess.run(
+        [sys.executable, "-m", module, *arguments],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=True,
+        **no_window_kwargs(),
+    )
+    value = json.loads(completed.stdout)
+    if view == "default-work":
+        assert value[0]["id"] == ordinary["id"]
+    elif view == "all-categories":
+        assert len(value) == 2
+    elif view == "maintenance-board":
+        assert value[0]["id"] == upkeep["id"]
+    else:
+        evidence = value
         assert evidence["task"]["category"] == "maintenance"
         assert evidence["progress"][0]["summary"] == "healthy"
         assert evidence["attachments"][0]["session_id"] == "session"
+        assert evidence["attachments"][0]["worktree_id"] == "worktree"
+        assert evidence["task"]["owner_session_id"] == "session"
         assert evidence["statistics"]["attempts"] == 1
         assert evidence["result"]["result"] == {"logs": ["log-ref"], "count": 2}
-    finally:
-        stop()
+
+
+@pytest.mark.guard
+def test_native_category_views_keep_one_cold_cli_boundary_per_item():
+    import ast
+
+    module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    contract = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "test_native_cli_category_view_contract"
+    )
+    launches = [
+        node
+        for node in ast.walk(contract)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+    ]
+    assert len(launches) == 1
+    assert not any(isinstance(node, (ast.For, ast.While)) for node in ast.walk(contract))
+    assert (
+        ast.literal_eval(
+            next(keyword.value for keyword in launches[0].keywords if keyword.arg == "timeout")
+        )
+        == 20
+    )
+    parameterization = next(
+        node
+        for node in contract.decorator_list
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "parametrize"
+    )
+    assert ast.literal_eval(parameterization.args[1]) == [
+        "default-work",
+        "all-categories",
+        "maintenance-board",
+        "evidence",
+    ]
 
 
 def test_http_classification_control_auth_and_preview(queue):

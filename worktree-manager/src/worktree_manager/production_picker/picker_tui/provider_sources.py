@@ -20,7 +20,7 @@ from . import source_identity
 SOURCES_DIR_ENV = "AGENT_WORKTREES_SOURCES_DIR"
 SCHEMA_VERSION = 1
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_READ_ONLY_CAPABILITIES = frozenset({"list", "messages", "sessions", "refresh"})
+_READ_ONLY_CAPABILITIES = frozenset({"list", "messages", "sessions", "refresh", "claims"})
 _LOG = logging.getLogger(__name__)
 
 

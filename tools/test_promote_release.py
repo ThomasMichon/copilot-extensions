@@ -107,6 +107,48 @@ def test_promote_reports_no_change_when_dev_matches_main(repo: Path):
     assert "no content change" in report["reason"]
 
 
+@pytest.mark.parametrize("bookkeeping", [(), ("state",), ("baseline",), ("state", "baseline")])
+def test_tree_filter_uses_candidate_index_without_changing_checkout(
+    repo: Path, bookkeeping: tuple[str, ...],
+) -> None:
+    paths = {
+        "state": pr.PIPELINE_STATE_PATH,
+        "baseline": f"{pr.COVERAGE_BASELINES_DIR}/nested/demo-plugin.json",
+    }
+    for kind in bookkeeping:
+        path = repo / paths[kind]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"generation": "old"}\n', encoding="utf-8")
+    sibling = repo / f"{pr.COVERAGE_BASELINES_DIR}-extra" / "keep.json"
+    sibling.parent.mkdir(parents=True, exist_ok=True)
+    sibling.write_text("keep\n", encoding="utf-8")
+    old = _commit(repo, "old trusted checkout")
+    for kind in bookkeeping:
+        (repo / paths[kind]).write_text('{"generation": "new"}\n', encoding="utf-8")
+    (repo / "README.md").write_text("candidate payload\n", encoding="utf-8")
+    candidate = _commit(repo, "merged candidate bookkeeping")
+    tree = _git(["rev-parse", f"{candidate}^{{tree}}"], repo)
+    _git(["checkout", "-q", old], repo)
+    (repo / "README.md").write_text("unrelated staged work\n", encoding="utf-8")
+    _git(["add", "README.md"], repo)
+    index_path = repo / _git(["rev-parse", "--git-path", "index"], repo)
+    index_before = index_path.read_bytes()
+    status_before = _git(["status", "--porcelain"], repo)
+    expected = set(_git(["ls-tree", "-r", "--name-only", tree], repo).splitlines())
+    expected.difference_update(paths[kind] for kind in bookkeeping)
+
+    filtered = pr._tree_excluding_state(tree, repo=repo)
+
+    assert set(_git(["ls-tree", "-r", "--name-only", filtered], repo).splitlines()) == expected
+    assert _git(["show", f"{filtered}:README.md"], repo) == "candidate payload"
+    assert index_path.read_bytes() == index_before
+    assert _git(["status", "--porcelain"], repo) == status_before
+    assert _git(["rev-parse", "HEAD"], repo) == old
+    assert (repo / "README.md").read_text(encoding="utf-8") == "unrelated staged work\n"
+    for kind in bookkeeping:
+        assert (repo / paths[kind]).read_text(encoding="utf-8") == '{"generation": "old"}\n'
+
+
 def test_promote_creates_wholesale_replace_commit(repo: Path):
     _git(["checkout", "-q", "dev"], repo)
     changefile_dir = repo / ".changefiles"

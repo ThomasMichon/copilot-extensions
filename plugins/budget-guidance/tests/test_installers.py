@@ -20,6 +20,14 @@ VERSION = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
 pytestmark = pytest.mark.guard
 
 
+def _copy_payload(target: Path) -> None:
+    shutil.copytree(PLUGIN, target)
+    shutil.copytree(
+        PLUGIN.parents[1] / "libs" / "agent-procutil",
+        target / "libs" / "agent-procutil",
+    )
+
+
 def test_installers_recommend_supported_version_flag():
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -28,6 +36,16 @@ def test_installers_recommend_supported_version_flag():
     assert "Try: budget-guidance --version" in powershell
     assert "Try: budget-guidance version" not in posix
     assert "Try: budget-guidance version" not in powershell
+
+
+def test_package_installers_retain_quiet_native_output_with_explicit_failure():
+    posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    assert '"$procutil" "$PLUGIN_DIR" --quiet 2>/dev/null' in posix
+    assert '--quiet "$procutil" "$PLUGIN_DIR" 2>/dev/null' in posix
+    assert '@Dependencies $Source --quiet 2>&1 | Out-Null' in powershell
+    assert "Failed to install budget-guidance package into venv" in posix
+    assert "Failed to install budget-guidance package into venv" in powershell
 
 
 def _fake_uv_environment(tmp_path: Path) -> tuple[Path, dict[str, str]]:
@@ -42,6 +60,7 @@ import shutil
 import site
 import subprocess
 import sys
+import json
 
 args = sys.argv[1:]
 base = os.environ["TEST_BASE_PYTHON"]
@@ -51,13 +70,47 @@ if args and args[0] == "venv":
     if log:
         with Path(log).open("a", encoding="utf-8") as stream:
             stream.write(str(target) + "\\n")
-    raise SystemExit(subprocess.run(
+    rc = subprocess.run(
         [base, "-m", "venv", "--without-pip", str(target)],
         check=False,
-    ).returncode)
+    ).returncode
+    if rc == 0 and os.environ.get("TEST_BUILD_ARTIFACT_PROBE"):
+        python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        site_dir = subprocess.check_output(
+            [str(python), "-c", "import site; print(site.getsitepackages()[0])"], text=True,
+        ).strip()
+        pip = Path(site_dir) / "pip"
+        pip.mkdir()
+        (pip / "__init__.py").write_text("", encoding="utf-8")
+        (pip / "__main__.py").write_text(
+            "import os, runpy\\n"
+            "runpy.run_path(os.environ['TEST_UV_DRIVER'], run_name='__main__')\\n",
+            encoding="utf-8",
+        )
+    raise SystemExit(rc)
+is_pip = args[:1] == ["install"]
+if is_pip:
+    args = ["pip", "install", "--python", sys.executable, *args[1:]]
 if args[:2] == ["pip", "install"]:
     python = args[args.index("--python") + 1]
     plugin = Path(args[-2] if args[-1] == "--quiet" else args[-1])
+    if os.environ.get("TEST_BUILD_ARTIFACT_PROBE"):
+        sources = [Path(arg) for arg in args if (Path(arg) / "pyproject.toml").is_file()]
+        artifacts = []
+        for source in sources:
+            artifacts.extend(source.glob("*.egg-info"))
+            artifacts.extend((source / "src").glob("*.egg-info"))
+            if (source / "build").exists():
+                artifacts.append(source / "build")
+        assert not artifacts, f"stale artifacts reached build: {artifacts}"
+        with Path(os.environ["TEST_INSTALL_ATTEMPTS_LOG"]).open("a", encoding="utf-8") as log:
+            log.write(json.dumps({"engine": "pip" if is_pip else "uv", "sources": len(sources)}) + "\\n")
+        for source in sources:
+            (source / "build" / "lib").mkdir(parents=True)
+            (source / "stale.egg-info").mkdir()
+            (source / "src" / "stale.egg-info").mkdir()
+        if not is_pip:
+            raise SystemExit(9)
     site_dir = subprocess.check_output(
         [python, "-c", "import site; print(site.getsitepackages()[0])"],
         text=True,
@@ -65,6 +118,12 @@ if args[:2] == ["pip", "install"]:
     shutil.copytree(
         plugin / "src" / "budget_guidance",
         Path(site_dir) / "budget_guidance",
+        dirs_exist_ok=True,
+    )
+    procutil = next(Path(arg) for arg in args if Path(arg).name == "agent-procutil")
+    shutil.copytree(
+        procutil / "src" / "agent_procutil",
+        Path(site_dir) / "agent_procutil",
         dirs_exist_ok=True,
     )
     raise SystemExit(0)
@@ -88,6 +147,7 @@ raise SystemExit(2)
         "USERPROFILE": str(tmp_path / "home"),
         "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
         "TEST_BASE_PYTHON": sys.executable,
+        "TEST_UV_DRIVER": str(driver),
         "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
         "COMPUTERNAME": "TEST-HOST",
     }
@@ -133,7 +193,7 @@ def test_powershell_self_stage_preserves_spaced_paths_and_force(tmp_path: Path):
         / "market with spaces"
         / "budget-guidance"
     )
-    shutil.copytree(PLUGIN, installed)
+    _copy_payload(installed)
     custom_root = tmp_path / "custom runtime with spaces"
     venv_log = tmp_path / "powershell uv venv.log"
     env["TEST_UV_VENV_LOG"] = str(venv_log)
@@ -265,6 +325,8 @@ def test_posix_stamp_uses_owned_versioned_snapshot_without_marketplace_fallback(
     assert snapshot == install_dir / "snapshots" / VERSION
     assert snapshot != PLUGIN
     assert (snapshot / "scripts" / "install.sh").is_file()
+    assert (snapshot / "libs" / "agent-procutil" / "pyproject.toml").is_file()
+    assert (snapshot / "pyproject.toml").read_bytes() == (PLUGIN / "pyproject.toml").read_bytes()
     assert (snapshot / ".payload-source").read_text(encoding="utf-8").strip() == str(
         PLUGIN
     )
@@ -296,7 +358,7 @@ def test_posix_self_stage_forwards_custom_root_and_force(tmp_path: Path):
         / "example"
         / "budget-guidance"
     )
-    shutil.copytree(PLUGIN, installed)
+    _copy_payload(installed)
     custom_root = tmp_path / "custom-runtime"
     venv_log = tmp_path / "uv-venv.log"
     env["TEST_UV_VENV_LOG"] = str(venv_log)

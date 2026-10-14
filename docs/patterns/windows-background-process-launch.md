@@ -25,8 +25,8 @@ change the symptom, but it is never part of the launch contract.
 | Short-lived child with captured or redirected stdio | A console-subsystem root plus `agent_procutil.no_window_kwargs()` / `no_window_flags()`, or the owning shared library's equivalent | `CREATE_NO_WINDOW`; pipes and exit status preserved; timeout owns the complete tree |
 | Non-interactive OpenSSH transport with redirected stdio | `ssh_manager.proxy.create_ssh_subprocess()` | `DETACHED_PROCESS` for the SSH root; a configured native proxy runs through an owned loopback broker; pipes, exit status, and cleanup remain owned |
 | Console descendant controlled by a third-party OpenSSH `ProxyCommand` | A windowless binary stdio client connects to an owned loopback broker; the broker launches the console child with `no_window_kwargs()` | Preserve SSH's original host/port and token expansion; authenticate the local channel; protocol bytes and child cleanup remain owned |
-| Long-lived Python daemon with no recurring console descendants | `windowless_python()` plus `detached_kwargs(breakaway=True)` when it must outlive the caller | No root console; lifetime escape is explicit; occasional captured console children use the short-lived primitive |
-| Long-lived Python daemon with recurring console descendants | Console-subsystem Python plus `windowless_daemon_kwargs(breakaway=True)` when it must outlive the caller | One inherited hidden console contains descendants; durable lifetime is separate from headlessness |
+| Long-lived Python daemon with no recurring console descendants | `agent_procutil.spawn_daemon(argv, cwd=..., log_path=...)` with `windowless_python()` (or `windowless_python()` plus `detached_kwargs(breakaway=True)` at sites not yet migrated) | No root console; lifetime escape is explicit; explicit durable cwd; output logged; occasional captured console children use the short-lived primitive |
+| Long-lived Python daemon with recurring console descendants | `spawn_daemon(..., console_children=True)` with a console-subsystem Python (or `windowless_daemon_kwargs(breakaway=True)` at sites not yet migrated) | One inherited hidden console contains descendants; durable lifetime is separate from headlessness |
 | PowerShell startup or scheduled launcher whose output is not captured | `conhost.exe --headless <interpreter> ...` | Headless console inherited by descendants; stable installed target; explicit stop/cutover ownership |
 | Intentional interactive terminal | An explicit interactive launcher | Reviewable exception with `# headless-guard: allow <reason>` when low-level flags are necessary |
 
@@ -72,11 +72,22 @@ closed. Successful installer exit is therefore not a durable-service witness.
 Keep bounded helpers and their descendants inside caller-owned containment.
 For a durable daemon whose contract requires it to outlive the installer or
 request, opt out explicitly with the owning primitive:
-`agent_procutil.windowless_daemon_kwargs(breakaway=True)` for recurring console
-descendants, or the corresponding `detached_kwargs(breakaway=True)` shape.
+`agent_procutil.spawn_daemon()` (breakaway by default; `console_children=True`
+for recurring console descendants), or, at sites not yet migrated to it,
+`windowless_daemon_kwargs(breakaway=True)` / `detached_kwargs(breakaway=True)`.
+`spawn_daemon` also requires an explicit durable `cwd` (the runtime root or
+home, never the caller's cwd or a plugin payload) and appends the daemon's
+output to a `log_path` instead of discarding it.
 Do not remove the caller's Job or make every child break away to repair one
 daemon. The containing Job must permit breakaway; a rejected spawn is an error
 to surface, not a reason to silently retry with caller-owned lifetime.
+`spawn_daemon` raises `DaemonSpawnError` in that case. A caller whose daemon
+already ran inside its caller's Job before migrating, and for which that
+degraded lifetime is still better than no daemon, may opt in to
+`contained_fallback=True`: the daemon then starts inside the caller's Job, with
+the fallback logged as a warning and in the daemon log, and does not outlive the
+Job. Durable survival therefore holds only where breakaway is permitted (and
+never in contained test mode).
 Contained tests deliberately suppress escape and retain process-tree cleanup.
 
 PowerShell `Start-Process` and .NET `CreateNoWindow` provide no Job-escape
@@ -110,6 +121,10 @@ check into recurring self-SSH process churn.
   `CREATE_NEW_CONSOLE`;
 - a genuine interactive or low-level exception requires an inline
   `# headless-guard: allow <reason>` marker.
+
+`agent_procutil.spawn_daemon` is an approved headless primitive: a launch
+through it is windowless by construction. It approves only its own call; a raw
+`subprocess` spawn beside it in the same function is still checked.
 
 Canonical shared libraries and every shipped vendored copy are scanned directly.
 The vendored-library synchronization guard is also required in CI and pre-push,

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "budget-guidance"
-version = "0.1.13-dev1"
+version = "0.1.14-dev1"
 description = "Provider-neutral current AI usage budget posture."
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,10 @@ requires-python = ">=3.10"
 authors = [
     { name = "Thomas Michon" }
 ]
-dependencies = []
+dependencies = ["agent-procutil"]
+
+[tool.uv.sources]
+agent-procutil = { path = "libs/agent-procutil" }
 
 [project.optional-dependencies]
 dev = [

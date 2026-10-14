@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 import json
 from pathlib import Path
 from typing import Any
@@ -54,7 +54,7 @@ def load_json(path: Path, *, max_bytes: int | None = None) -> dict[str, Any]:
             parse_int=Decimal,
             object_pairs_hook=_strict_object,
         )
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, DecimalException) as exc:
         raise ModelError(f"cannot read JSON configuration: {exc}") from exc
     if not isinstance(value, dict):
         raise ModelError("configuration root must be an object")
@@ -164,13 +164,23 @@ class StaticAdapter:
     adapter_id: str
     authority: int
     reading: BudgetReading
+    acquired_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ExternalCommandAdapter:
+    """An inert reference; executable authority belongs to the caller."""
+
+    adapter_id: str
+    authority: int
+    source: str
 
 
 @dataclass(frozen=True)
 class BudgetConfig:
     """Version 1 budget-guidance configuration."""
 
-    adapters: tuple[StaticAdapter, ...]
+    adapters: tuple[StaticAdapter | ExternalCommandAdapter, ...]
 
 
 def _parse_rate(value: Any, index: int, label: str) -> TrailingRate:
@@ -270,27 +280,36 @@ def parse_config(value: dict[str, Any]) -> BudgetConfig:
     raw_adapters = value["adapters"]
     if not isinstance(raw_adapters, list):
         raise ModelError("config.adapters must be an array")
-    adapters: list[StaticAdapter] = []
+    adapters: list[StaticAdapter | ExternalCommandAdapter] = []
     seen_ids: set[str] = set()
     for index, raw in enumerate(raw_adapters):
         label = f"config.adapters[{index}]"
         if not isinstance(raw, dict):
             raise ModelError(f"{label} must be an object")
-        _exact_keys(raw, {"type", "id", "authority", "reading"}, set(), label)
-        if raw["type"] != "static":
-            raise ModelError(f"{label}.type is unsupported: {raw['type']!r}")
+        kind = raw.get("type")
+        if kind not in ("static", "external-command"):
+            raise ModelError(f"{label}.type is unsupported: {kind!r}")
+        _exact_keys(
+            raw, {"type", "id", "authority", "reading" if kind == "static" else "source"},
+            set(), label,
+        )
         adapter_id = _text(raw["id"], f"{label}.id")
         if adapter_id in seen_ids:
             raise ModelError(f"duplicate adapter id: {adapter_id}")
         seen_ids.add(adapter_id)
+        authority = _integer(
+            raw["authority"], f"{label}.authority", maximum=MAX_AUTHORITY,
+        )
+        if kind == "external-command":
+            adapters.append(ExternalCommandAdapter(
+                adapter_id=adapter_id, authority=authority,
+                source=_text(raw["source"], f"{label}.source"),
+            ))
+            continue
         adapters.append(
             StaticAdapter(
                 adapter_id=adapter_id,
-                authority=_integer(
-                    raw["authority"],
-                    f"{label}.authority",
-                    maximum=MAX_AUTHORITY,
-                ),
+                authority=authority,
                 reading=parse_reading(raw["reading"], f"{label}.reading"),
             )
         )

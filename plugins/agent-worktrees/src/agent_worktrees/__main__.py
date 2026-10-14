@@ -93,8 +93,8 @@ from lazy_cli_dispatch import dispatch_lazy as _shared_dispatch_lazy
 from lazy_cli_dispatch import self_override as _shared_self_override
 from . import (
     activity,
-    claim_kinds_registry,
-    claims_rank,
+    claim_kinds_registry as claim_kinds_registry,
+    claims_rank as claims_rank,
     codename_tracking,
     disposition_history,
     effort_focus,
@@ -882,14 +882,16 @@ cmd_worktree_status_audit = worktree_status_audit.cmd_worktree_status_audit
 def _classify_records_live(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
+    *,
+    repo=None,
 ) -> dict[str, git_ops.WorktreeStateInfo]:
     """The actual ~5-git-calls-per-worktree batch classification.
 
     Factored out of :func:`_classify_records` so the lease wrapper can call it
     only when it actually won the race; a losing caller never reaches this.
     """
-    config = cfg.load_config()
-    repo = config.default_repo
+    if repo is None:
+        repo = cfg.load_config().default_repo
     active_paths = _build_active_paths(records, session_ctx)
     return {
         rec.worktree_id: _classify_one_record(
@@ -1088,6 +1090,7 @@ def _worktree_to_dict(
     bare_orphan_wts: set[str] | None = None,
     bridge_live_wts: set[str] | None = None,
     include_profile_assignment_history: bool = False,
+    current_only: bool = False,
 ) -> dict:
     """Serialize a WorktreeRecord to a JSON-friendly dict.
 
@@ -1208,9 +1211,7 @@ def _worktree_to_dict(
         controller_findings = _controller_findings(rec)
         d["controller_findings"] = controller_findings
     d["reciprocal_relation"] = reciprocal_presentation.derive(rec, controller_findings,)
-    # resource-claims: expose the backward owner link + forward outbound claim
-    # list so the ledger view (and consumers like `run`) can read a worktree's
-    # full claim set. Emitted only when present, keeping the envelope lean.
+    # Full ledgers remain explicit inspection, not current-state projection.
     if rec.owner_ref:
         d["owner_ref"] = rec.owner_ref
     # citadel paired -harness/-knowledge lifecycle (#957): expose the pair
@@ -1222,7 +1223,7 @@ def _worktree_to_dict(
         d["pair_role"] = rec.pair_role
     if rec.pair_kind:
         d["pair_kind"] = rec.pair_kind
-    if rec.resources:
+    if rec.resources and not current_only:
         d["resources"] = [
             c.to_public_dict()
             for c in rec.resources
@@ -1236,7 +1237,7 @@ def _worktree_to_dict(
             if current_assignment is not None
             else None
         )
-        if include_profile_assignment_history:
+        if include_profile_assignment_history and not current_only:
             d["profile_assignments"] = [
                 profile_assignment.metadata(assignment) for assignment in rec.profile_assignments
             ]
@@ -1380,39 +1381,15 @@ def _worktree_to_dict(
     if rec.prs:
         active = rec.active_pr()
         d["pr"] = pr_ops._pr_to_dict(active) if active is not None else None
-        d["prs"] = [pr_ops._pr_to_dict(p) for p in rec.prs]
+        if not current_only:
+            d["prs"] = [pr_ops._pr_to_dict(p) for p in rec.prs]
         d["pr_count"] = len(rec.prs)
     else:
         active = None
-    # #3307 Phase 4: the Worktrees pivot's own ranked ``claims_summary``,
-    # computed HERE (not by the Picker) since this is the one process that
-    # can import ``claims_rank`` directly rather than crossing the
-    # Manager/engine subprocess boundary. See
-    # ``claims_rank.claim_entries_for_worktree``'s own docstring for the
-    # ranking + PR-backfill details. #3307 follow-up: also emits the
-    # structured ``claims_links`` list (label + resolvable URL per claim,
-    # cross-repo-aware) the Picker uses to render a real hyperlink and to
-    # avoid mid-value truncation; ``claims_summary`` (a flat joined string)
-    # stays for pivots that only want plain text.
-    try:
-        pecking_order = claim_kinds_registry.effective_pecking_order()
-        label_overrides = claim_kinds_registry.effective_label_overrides()
-    except Exception:
-        pecking_order = None
-        label_overrides = None
     active_pr = ({"repo": active.repo, "number": active.number, "state": active.state}
                  if active is not None else None)
-    try:
-        entries = claims_rank.claim_entries_for_worktree(
-            rec.resources, active_pr, own_repo=rec.repo,
-            pecking_order=pecking_order, label_overrides=label_overrides,
-        )
-    except Exception:
-        entries = []
-    summary = " \u00b7 ".join(e["label"] for e in entries)
-    if summary:
-        d["claims_summary"] = summary
-        d["claims_links"] = entries
+    from .worktrees_current_rows import populate_claims
+    populate_claims(d, rec, active_pr, current_only=current_only)
     # #93: mark a worktree hosting a bare (un-muxed) bound Copilot so the picker
     # can annotate its row with an orphan marker (a Copilot the mux fleet view
     # cannot see). Set only when true, to keep the dict lean.
@@ -3082,6 +3059,8 @@ def _monitor_sweep(
     governance=None,
     managed_mux_cache=None,
     config_cache_for_project=None,
+    roster_publisher=None,
+    roster_failure=None,
 ) -> int:
     """One coalescing pass over the Step 4 served-session union."""
     from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
@@ -3113,6 +3092,8 @@ def _monitor_sweep(
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
+            if roster_failure is not None:
+                roster_failure(RuntimeError("mux-session enumeration unavailable"))
             return -1
         unmanaged_live_wt, stale_sessions = _monitor_unmanaged_live_sessions({n for n in live if n.startswith("wt-")}, registry, managed_entries, managed_mux_cache=managed_mux_cache)
         observed_sessions |= unmanaged_live_wt
@@ -3303,11 +3284,15 @@ def _monitor_sweep(
                 cfg.set_active_project(project)
                 config_scope = _config_cache.project_scope(config_cache_for_project, project)
                 with config_scope:
-                    _warm_list_cache_for_active_project(interval=interval)
+                    if roster_publisher is not None:
+                        roster_publisher()
+                    else:
+                        _warm_list_cache_for_active_project(interval=interval)
             except _StatusMonitorGovernanceDeferred:
                 raise
-            except Exception:
-                pass
+            except Exception as exc:
+                if roster_publisher is not None:
+                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
     return len(served)
 
 

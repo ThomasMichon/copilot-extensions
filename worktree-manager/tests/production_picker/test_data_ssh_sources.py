@@ -725,6 +725,35 @@ def test_provider_routes_reads_but_suppresses_mutations(monkeypatch):
     )
 
 
+def test_provider_claims_capability_is_admitted_and_routes_with_live_identity(monkeypatch):
+    _install_roster(monkeypatch, {}, machine="local", local_id=("local", "linux"))
+    registered = provider_sources._parse_source(
+        _provider_descriptor(capabilities={"list": True, "claims": True}),
+        "agent-containers",
+    )
+    monkeypatch.setattr(data_ssh.provider_sources, "load", lambda _project: [registered])
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", lambda *_args: False)
+    fingerprint = data_ssh._provider_transport_fingerprint(registered)
+    argv = data_ssh.claims_argv(
+        "", "", "wt-1", source_id=registered.source_id,
+        expected_instance_id=registered.instance_id, expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    )
+    assert argv and "claims wt-1 --json" in argv[-1]
+    proxy = next(part for part in argv if part.startswith("ProxyCommand="))
+    assert "--expected-instance-id instance-1" in proxy
+    assert "--expected-target-id container:one" in proxy
+    assert "example-effort" in proxy
+    assert data_ssh.claims_argv(
+        "", "", "wt-1", source_id=registered.source_id,
+        expected_instance_id="replaced", expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    ) is None
+    assert data_ssh.remote_op_argv(
+        "", "", "cleanup", "wt-1", source_id=registered.source_id,
+    ) is None
+
+
 def test_provider_read_route_requires_matching_live_instance(monkeypatch):
     _install_roster(
         monkeypatch,
@@ -1247,7 +1276,8 @@ def test_absent_local_machine_still_gets_local_source(monkeypatch):
 # ── #1421 continuous background poll: LiveLoader.repoll_silent ────────────────
 
 def _ready_loader(monkeypatch, records):
-    """A LiveLoader with one ready source seeded with ``records``."""
+    """A one-shot compatibility loader seeded with ``records``."""
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "0")
     src = data_ssh.Source("M", "Win", ["ssh", "m", "list"], ready=True)
     loader = data_ssh.LiveLoader([src])
     with loader._lock:
@@ -1348,7 +1378,7 @@ def test_argv_for_pwsh_uses_encoded_command():
     decoded = base64.b64decode(enc).decode("utf-16-le")
     # Windows/pwsh targets also pull the machine's other-platform (WSL) worktrees.
     assert decoded == (
-        "dotfiles list --json --classify --mux-details --include-other-platforms"
+        "dotfiles list --json --current --classify --mux-details --include-other-platforms"
     )
 
 
@@ -1412,7 +1442,7 @@ def test_classify_fallback_is_encoding_aware(monkeypatch):
     dec = base64.b64decode(
         remote.split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
     assert "--classify" not in dec
-    assert dec == "dotfiles list --json --mux-details --include-other-platforms"
+    assert dec == "dotfiles list --json --current --mux-details --include-other-platforms"
 
     # End-to-end via _fetch: the first call errors as classify-unsupported; the
     # retry (decoded, no --classify) succeeds and use_classify is persisted off.
@@ -1430,7 +1460,14 @@ def test_classify_fallback_is_encoding_aware(monkeypatch):
             a[-1].split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
         if "--classify" in d:
             return _Proc(2, stderr="error: unrecognized arguments: --classify")
-        return _Proc(0, stdout='{"worktrees": []}')
+        return _Proc(0, stdout=_json.dumps({
+            "ok": True, "contract_version": 1, "worktrees": [],
+            "projection": {
+                "schema_version": 1, "quality": "current", "generation": "a" * 32,
+                "revision": 1, "observed_at": 123, "roster_count": 0,
+                "selected_count": 0,
+            },
+        }))
 
     monkeypatch.setattr(data_ssh, "_run", fake_run)
     src = data_ssh.Source("Cloud1", "Win", argv, ready=True)
@@ -1560,7 +1597,7 @@ def test_remote_cmd_str_decodes_encoded_command():
     # bash form is passed through verbatim (nothing to decode).
     bash = data_ssh._argv_for("bash", "host", "dotfiles", classify=True)
     assert data_ssh._remote_cmd_str(bash).endswith(
-        "bash -lc 'dotfiles list --json --classify --mux-details'")
+        "bash -lc 'dotfiles list --json --current --classify --mux-details'")
 
 
 def test_fetch_raises_remote_fetch_error_with_detail(monkeypatch):
@@ -1915,22 +1952,27 @@ def _stream_src():
     return data_ssh.Source("dev6", "Win", argv, ready=True, alias="host-dev6")
 
 
-def test_stream_paints_fast_then_classified(monkeypatch, tmp_path):
+def _current_stream(rows):
+    head = {
+        "schema_version": 1, "quality": "current", "generation": "a" * 32,
+        "revision": 1, "observed_at": 123, "roster_count": len(rows),
+        "selected_count": len(rows),
+    }
+    return [
+        _nd({"type": "begin", "contract_version": 1, "projection": head,
+             "selected_count": len(rows)}),
+        *[_nd({"type": "worktree", "phase": "current", "wt": row, "projection": head})
+          for row in rows],
+        _nd({"type": "done", "projection": head}),
+    ]
+
+
+def test_stream_paints_one_complete_current_publication(monkeypatch, tmp_path):
     monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
-    # Keep the record identity trivial so we can assert the fast->classified swap.
     monkeypatch.setattr(
         data_ssh.derive, "norm", lambda wt, m, e, **source: dict(wt)
     )
-    lines = [
-        _nd({"type": "begin", "count": 2}),
-        _nd({"type": "worktree", "phase": "fast", "wt": {"id": "A"}}),
-        _nd({"type": "worktree", "phase": "fast", "wt": {"id": "B"}}),
-        _nd({"type": "worktree", "phase": "classified",
-             "wt": {"id": "A", "state": "clean"}}),
-        _nd({"type": "worktree", "phase": "classified",
-             "wt": {"id": "B", "state": "unused"}}),
-        _nd({"type": "done", "count": 2}),
-    ]
+    lines = _current_stream([{"id": "A", "state": "clean"}, {"id": "B", "state": "unused"}])
     src = _stream_src()
     loader = data_ssh.LiveLoader([src])
     monkeypatch.setattr(loader, "_spawn_stream", lambda argv: _FakeStreamProc(lines))
@@ -1940,14 +1982,14 @@ def test_stream_paints_fast_then_classified(monkeypatch, tmp_path):
     assert loader.state("dev6", "Win") == "ready"
     recs = loader.records()
     assert [r["id"] for r in recs] == ["A", "B"]         # first-seen order kept
-    assert recs[0]["state"] == "clean"                   # classified swapped in
+    assert recs[0]["state"] == "clean"
     assert recs[1]["state"] == "unused"
     assert "streamed 2 worktree(s)" in (tmp_path / "l.log").read_text("utf-8")
 
 
 def test_stream_empty_remote_resolves_ready(monkeypatch, tmp_path):
     monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
-    lines = [_nd({"type": "begin", "count": 0}), _nd({"type": "done", "count": 0})]
+    lines = _current_stream([])
     src = _stream_src()
     loader = data_ssh.LiveLoader([src])
     monkeypatch.setattr(loader, "_spawn_stream", lambda argv: _FakeStreamProc(lines))
@@ -1985,24 +2027,24 @@ def test_stream_hard_failure_marks_failed(monkeypatch, tmp_path):
     assert "[stream]" in (tmp_path / "l.log").read_text("utf-8")
 
 
-def test_load_one_prefers_stream_then_falls_back(monkeypatch, tmp_path):
+def test_load_one_prefers_held_authority_without_legacy_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "1")
     src = _stream_src()
     loader = data_ssh.LiveLoader([src])
     calls = []
-    # Streaming declines (old remote) -> _load_one must fall back to two-phase.
+    monkeypatch.setattr(loader, "_load_current_feed",
+                        lambda s, gen: calls.append("held"))
     monkeypatch.setattr(loader, "_load_remote_stream",
                         lambda s, gen: calls.append("stream") or False)
     monkeypatch.setattr(loader, "_load_remote_two_phase",
                         lambda s, gen: calls.append("two_phase"))
     loader._load_one(src)
-    assert calls == ["stream", "two_phase"]
+    assert calls == ["held"]
 
 
 def test_load_one_skips_stream_when_disabled(monkeypatch):
-    # Default (gate off): _load_one goes straight to two-phase, never streams.
-    monkeypatch.delenv("AGENT_WORKTREES_PICKER_STREAM", raising=False)
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "0")
     src = _stream_src()
     loader = data_ssh.LiveLoader([src])
     calls = []
@@ -2016,7 +2058,7 @@ def test_load_one_skips_stream_when_disabled(monkeypatch):
 
 def test_stream_enabled_reads_env(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_PICKER_STREAM", raising=False)
-    assert data_ssh._stream_enabled() is False
+    assert data_ssh._stream_enabled() is True
     for v in ("1", "true", "YES", "on"):
         monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", v)
         assert data_ssh._stream_enabled() is True
@@ -2573,6 +2615,7 @@ def test_refresh_one_and_reconcile_one_tag_their_procs_by_source(monkeypatch):
     """_refresh_one/_reconcile_one must also tag `_active_source` so their
     spawned children are trackable by cancel_source -- previously only
     _load_one did, leaving a repoll/reconcile's child unkillable."""
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "0")
     src = _remote_src()
     loader = data_ssh.LiveLoader([src])
     loader._state[src.cache_key] = "ready"
@@ -2614,4 +2657,3 @@ def test_register_proc_tags_by_active_source():
 
     assert proc not in loader._procs
     assert src.cache_key not in loader._procs_by_source
-

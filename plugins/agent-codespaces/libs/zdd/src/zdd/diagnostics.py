@@ -13,12 +13,26 @@ from typing import Any
 
 from . import breadcrumb, routing
 from .diagnostic_recovery import IdentityTerminator
+from .generations import (
+    GROUPING_UNCERTAIN,
+    Generation,
+    block_on_uncertain_grouping,
+    generation_of,
+    group_generations,
+    is_venv_redirector,
+    owner_pids,
+    same_generation,
+)
+from .generations import inspect_duplicates as _inspect_duplicates
+from .generations import inspect_superseded_generations as _inspect_superseded_generations
 
 __all__ = [
     "DaemonCandidate",
     "DiagnosticContext",
+    "Generation",
     "apply_daemon_health",
     "audit_daemon_health",
+    "is_venv_redirector",
     "lock_data_is_live",
     "process_start_time",
     "terminate_pid_if_identity",
@@ -30,11 +44,27 @@ class DaemonCandidate:
     pid: int
     start_time: str | None = None
     note: str | None = None
+    # Structural facts for generation grouping (``DiagnosticContext.group_launchers``).
+    ppid: int | None = None
+    image: str | None = None
+    # For a parent the census did not capture: its executable (``None`` when
+    # unreadable) and whether it is provably gone (dead, or its PID now names
+    # a process started after this candidate). See ``zdd.generations``.
+    parent_image: str | None = None
+    parent_gone: bool = False
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {"pid": self.pid, "start_time": self.start_time}
         if self.note:
             data["note"] = self.note
+        if self.ppid is not None:
+            data["ppid"] = self.ppid
+        if self.image is not None:
+            data["image"] = self.image
+        if self.parent_image is not None:
+            data["parent_image"] = self.parent_image
+        if self.parent_gone:
+            data["parent_gone"] = True
         return data
 
 
@@ -326,6 +356,10 @@ class DiagnosticContext:
     make_client: Callable[[str], Any] | None = None
     health_check: Callable[[str, int], bool] | None = None
     abandoned_passive_grace_seconds: float = breadcrumb.DEFAULT_ABANDONED_PASSIVE_GRACE_S
+    # Opt in where a daemon may run as a launcher/worker process pair (a
+    # Windows venv redirector): group them as one generation (zdd.generations).
+    group_launchers: bool = False
+    is_launcher_image: Callable[[str], bool] | None = None
 
 
 def _candidate_map(candidates: list[DaemonCandidate]) -> dict[int, DaemonCandidate]:
@@ -341,6 +375,7 @@ def _validated_lock_owner(
     candidates: dict[int, DaemonCandidate],
     lock_data: dict | None,
     active_pid: int | None,
+    generations: list[Generation] = (),
 ) -> tuple[dict[str, object] | None, str | None]:
     """The lock-file-based validation :func:`_validated_owner` used to be
     the entirety of. Split out unchanged so the routing-table fallback
@@ -353,7 +388,7 @@ def _validated_lock_owner(
     pid = lock_data.get("pid")
     if not isinstance(pid, int):
         return None, "lock missing owner pid"
-    if isinstance(active_pid, int) and active_pid != pid:
+    if isinstance(active_pid, int) and not same_generation(generations, active_pid, pid):
         return None, "lock owner disagrees with routed active pid"
     candidate = candidates.get(pid)
     if candidate is None:
@@ -373,18 +408,32 @@ def _validated_lock_owner(
     }, None
 
 
+def _with_generation(
+    owner: dict[str, object], generations: list[Generation]
+) -> dict[str, object]:
+    generation = generation_of(generations, owner.get("pid"))
+    if generation is not None and generation.launcher is not None:
+        owner["generation_pids"] = sorted(generation.pids)
+    return owner
+
+
 def _validated_owner(
     ctx: DiagnosticContext,
     candidates: dict[int, DaemonCandidate],
     table: dict | None,
+    generations: list[Generation] = (),
 ) -> tuple[dict[str, object] | None, str | None]:
+    """The validated live owner; a route or lock PID naming either member of
+    a launcher/worker generation identifies that whole generation."""
     active_raw = table.get("active") if isinstance(table, dict) else None
     active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
 
     lock_data = ctx.read_lock()
-    owner, reason = _validated_lock_owner(ctx, candidates, lock_data, active_pid)
+    owner, reason = _validated_lock_owner(
+        ctx, candidates, lock_data, active_pid, generations
+    )
     if owner is not None:
-        return owner, None
+        return _with_generation(owner, generations), None
 
     # Only fall back when the lock's own pid actively DISAGREES with the
     # routing table -- exactly what an old generation stuck mid-retire
@@ -411,12 +460,12 @@ def _validated_owner(
     ):
         candidate = candidates.get(active_pid)
         if candidate is not None:
-            return {
+            return _with_generation({
                 "pid": candidate.pid,
                 "start_time": candidate.start_time,
                 "lock": None,
                 "routed_active_pid": active_pid,
-            }, None
+            }, generations), None
     return None, reason
 
 
@@ -495,6 +544,7 @@ def _inspect_abandoned_passive(
     candidates: dict[int, DaemonCandidate],
     *,
     now: datetime | None = None,
+    generations: list[Generation] = (),
 ) -> tuple[dict[str, object] | None, int | None]:
     if not breadcrumb.is_stale(record):
         return None, None
@@ -506,12 +556,14 @@ def _inspect_abandoned_passive(
     age_s = _record_age_seconds(record, now=now)
     if age_s is None or age_s < ctx.abandoned_passive_grace_seconds:
         return None, None
-    if active_pid is not None and new_pid == active_pid:
+    if active_pid is not None and same_generation(generations, new_pid, active_pid):
         return None, None
     candidate = candidates.get(new_pid)
     if candidate is None:
         return None, None
-    repairable = ctx.repair_supported and candidate.start_time is not None
+    generation = generation_of(generations, new_pid)
+    targets = generation.targets() if generation is not None else [candidate.to_dict()]
+    repairable = ctx.repair_supported and all(item.get("start_time") for item in targets)
     return (
         {
             "kind": "abandoned_passive",
@@ -526,107 +578,11 @@ def _inspect_abandoned_passive(
                     else "candidate start_time unavailable"
                 )
             ),
-            "targets": [candidate.to_dict()],
+            "targets": targets,
             "age_seconds": age_s,
         },
         new_pid,
     )
-
-
-def _inspect_superseded_generations(
-    ctx: DiagnosticContext,
-    table: dict | None,
-    candidates: dict[int, DaemonCandidate],
-) -> tuple[dict[str, object] | None, set[int]]:
-    if not isinstance(table, dict):
-        return None, set()
-    targets: list[dict[str, object]] = []
-    matched: set[int] = set()
-    for slot in ("previous", "active"):
-        raw = table.get(slot)
-        if not isinstance(raw, dict):
-            continue
-        pid = raw.get("pid")
-        candidate = candidates.get(pid) if isinstance(pid, int) else None
-        if candidate is None:
-            continue
-        try:
-            generation = int(raw.get("generation", 0))
-        except (TypeError, ValueError):
-            continue
-        if generation <= 0 or not ctx.is_superseded(candidate.pid, generation):
-            continue
-        matched.add(candidate.pid)
-        item = candidate.to_dict()
-        item["slot"] = slot
-        item["generation"] = generation
-        targets.append(item)
-    if not targets:
-        return None, set()
-    repairable = ctx.repair_supported and all(item.get("start_time") for item in targets)
-    return (
-        {
-            "kind": "superseded_generation",
-            "summary": "a routed, superseded generation is still running past self-retire",
-            "repairable": repairable,
-            "blocked_reason": (
-                None
-                if repairable
-                else (
-                    "identity-bound repair unsupported on this platform"
-                    if not ctx.repair_supported
-                    else "candidate start_time unavailable"
-                )
-            ),
-            "targets": targets,
-        },
-        matched,
-    )
-
-
-def _inspect_duplicates(
-    ctx: DiagnosticContext,
-    candidates: dict[int, DaemonCandidate],
-    owner: dict[str, object] | None,
-    excluded_pids: set[int],
-) -> dict[str, object] | None:
-    if len(candidates) <= 1:
-        return None
-    owner_pid = owner.get("pid") if isinstance(owner, dict) else None
-    targets = [
-        candidate.to_dict()
-        for pid, candidate in sorted(candidates.items())
-        if pid not in excluded_pids and pid != owner_pid
-    ]
-    if owner_pid is None:
-        targets = [candidate.to_dict() for _, candidate in sorted(candidates.items())]
-    if not targets:
-        return None
-    repairable = (
-        ctx.repair_supported
-        and owner_pid is not None
-        and all(item.get("start_time") for item in targets)
-    )
-    return {
-        "kind": "duplicate_resident",
-        "summary": "more than one live daemon matches the resident active slot",
-        "repairable": repairable,
-        "blocked_reason": (
-            None
-            if repairable
-            else (
-                "identity-bound repair unsupported on this platform"
-                if not ctx.repair_supported
-                else (
-                "no validated live owner"
-                if owner_pid is None
-                else "candidate start_time unavailable"
-                )
-            )
-        ),
-        "owner": owner,
-        "targets": targets,
-    }
 
 
 def _counts(findings: list[dict[str, object]]) -> dict[str, int]:
@@ -701,8 +657,13 @@ def _audit_daemon_health(
                 "census_available": False, "candidate_count": None, "candidates": [],
                 "findings": [finding], "counts": _counts([finding]),
             }
+        generations, grouping_reason = group_generations(
+            candidates,
+            structural=ctx.group_launchers,
+            is_launcher_image=ctx.is_launcher_image,
+        )
         table = routing.read_table(ctx.config_dir)
-        owner, owner_reason = _validated_owner(ctx, candidates, table)
+        owner, owner_reason = _validated_owner(ctx, candidates, table, generations)
         record = breadcrumb.read_breadcrumb(ctx.config_dir)
         active_raw = table.get("active") if isinstance(table, dict) else None
         active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
@@ -716,25 +677,28 @@ def _audit_daemon_health(
             int(active_pid) if isinstance(active_pid, int) else None,
             candidates,
             now=now,
+            generations=generations,
         )
         if abandoned is not None:
             findings.append(abandoned)
 
         superseded, superseded_pids = _inspect_superseded_generations(
-            ctx, table, candidates
+            ctx, table, candidates, generations
         )
         if superseded is not None:
             findings.append(superseded)
 
         excluded = set(superseded_pids)
         if abandoned_pid is not None:
-            excluded.add(abandoned_pid)
-        duplicate = _inspect_duplicates(ctx, candidates, owner, excluded)
+            abandoned_generation = generation_of(generations, abandoned_pid)
+            excluded |= abandoned_generation.pids if abandoned_generation else {abandoned_pid}
+        duplicate = _inspect_duplicates(ctx, generations, owner, excluded)
         if duplicate is not None:
             findings.append(duplicate)
         from .diagnostic_recovery import mark_custody_refusals
 
         mark_custody_refusals(findings, table or {}, record or {})
+        block_on_uncertain_grouping(findings, grouping_reason)
     finally:
         if guard is not None and hasattr(guard, "release"):
             guard.release()
@@ -748,6 +712,10 @@ def _audit_daemon_health(
         "cutover_guard_error": guard_error,
         "candidate_count": len(candidates),
         "candidates": [candidate.to_dict() for _, candidate in sorted(candidates.items())],
+        "generation_count": len(generations),
+        "generations": [generation.to_dict() for generation in generations],
+        "grouping_uncertain": grouping_reason is not None,
+        "grouping_uncertain_reason": grouping_reason,
         "findings": findings,
         "counts": _counts(findings),
     }
@@ -809,16 +777,23 @@ def _apply_daemon_health_locked(
     try:
         before = _audit_daemon_health(ctx, now=now, cutover_state="held")
         actions: list[dict[str, object]] = []
-        def blocked_census(report):
+        def blocked_census(report, kind="census_unavailable",
+                           reason="fresh daemon process census unavailable"):
             return {
                 "service": ctx.service, "mode": "apply", "before": before,
                 "after": report, "findings": before["findings"],
                 "remaining_findings": report["findings"], "counts": report["counts"],
-                "actions": actions + [{
-                    "kind": "census_unavailable", "blocked": True,
-                    "reason": "fresh daemon process census unavailable",
-                }],
+                "actions": actions + [{"kind": kind, "blocked": True, "reason": reason}],
             }
+
+        def refuse_termination(report):
+            # Fail closed: never terminate on a census that cannot be grouped
+            # into generations with confidence (zdd.generations).
+            if report.get("census_available") is False:
+                return blocked_census(report)
+            if report.get("grouping_uncertain"):
+                return blocked_census(report, "generation_grouping", GROUPING_UNCERTAIN)
+            return None
 
         if before.get("census_available") is False:
             return blocked_census(before)
@@ -854,8 +829,14 @@ def _apply_daemon_health_locked(
             break
 
         current = _audit_daemon_health(ctx, now=now, cutover_state="held")
-        if current.get("census_available") is False:
-            return blocked_census(current)
+        refused = refuse_termination(current)
+        if refused is None and before.get("grouping_uncertain"):
+            # The abandoned-passive targets below come from ``before``: a
+            # census that could not be grouped never supplies a target, even
+            # when a later census groups cleanly.
+            refused = blocked_census(current, "generation_grouping", GROUPING_UNCERTAIN)
+        if refused is not None:
+            return refused
         attempted: set[int] = set()
         for finding in before.get("findings", []):
             if finding.get("kind") != "abandoned_passive":
@@ -889,7 +870,7 @@ def _apply_daemon_health_locked(
                     )
                     attempted.add(item["pid"])
                     continue
-                if item["pid"] == owner.get("pid"):
+                if item["pid"] in owner_pids(owner):
                     actions.append(
                         {
                             "kind": "abandoned_passive",
@@ -916,8 +897,9 @@ def _apply_daemon_health_locked(
         max_iterations = max(1, before.get("candidate_count", 0) * 3)
         for _ in range(max_iterations):
             current = _audit_daemon_health(ctx, now=now, cutover_state="held")
-            if current.get("census_available") is False:
-                return blocked_census(current)
+            refused = refuse_termination(current)
+            if refused is not None:
+                return refused
             next_target = None
             for kind, item in _target_pid_sequence(current):
                 if item["pid"] not in attempted:
@@ -949,7 +931,7 @@ def _apply_daemon_health_locked(
                 )
                 attempted.add(item["pid"])
                 continue
-            if item["pid"] == owner.get("pid"):
+            if item["pid"] in owner_pids(owner):
                 actions.append(
                     {
                         "kind": kind,
@@ -974,8 +956,11 @@ def _apply_daemon_health_locked(
             attempted.add(item["pid"])
 
         after = _audit_daemon_health(ctx, now=now, cutover_state="held")
-        if after.get("census_available") is False:
-            return blocked_census(after)
+        # The final census is held to the same fail-closed rule: a refusal it
+        # reveals is reported, never summarized as a clean apply.
+        refused = refuse_termination(after)
+        if refused is not None:
+            return refused
         return {
             "service": ctx.service,
             "mode": "apply",

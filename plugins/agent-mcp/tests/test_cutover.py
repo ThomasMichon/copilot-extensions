@@ -42,17 +42,16 @@ def _free_port() -> int:
         s.close()
 
 
-def test_spawn_passive_daemon_uses_standard_headless_detach_helpers(
+def test_spawn_passive_daemon_launches_through_spawn_daemon(
     tmp_path, monkeypatch,
 ):
-    """Regression test: spawn_passive_daemon() must route through the repo's
-    standard agent_procutil headless/detached spawn helpers (the same
-    pattern as forward._spawn_serve_host), not a hand-rolled
-    `if sys.platform != "win32"` check. windowless_python() avoids a Windows
-    venv python.exe re-exec flashing a fresh console; detached_kwargs()
-    fully detaches the child so it outlives this short-lived cutover
-    process. A bespoke check drifts from that pattern and, on Windows,
-    would leave the child console-attached."""
+    """Regression test: spawn_passive_daemon() must launch through the shared
+    resident-daemon primitive ``agent_procutil.spawn_daemon`` -- which breaks
+    the child away from a kill-on-close Job around this short-lived cutover
+    process -- with an explicit cwd at the stable data root (never the
+    caller's cwd) and the generation's own log file (never DEVNULL), plus
+    windowless_python() so a Windows venv python.exe re-exec cannot flash a
+    fresh console. The control token travels only as an env override."""
     import agent_procutil
 
     captured: dict = {}
@@ -60,14 +59,16 @@ def test_spawn_passive_daemon_uses_standard_headless_detach_helpers(
     class _FakeProc:
         pid = 99999
 
-    def _fake_popen(cmd, **kwargs):
-        captured["cmd"] = cmd
+    def _fake_spawn_daemon(argv, **kwargs):
+        captured["argv"] = argv
         captured["kwargs"] = kwargs
         return _FakeProc()
 
-    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", _fake_spawn_daemon)
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda *_a, **_k: pytest.fail("must not hand-roll a Popen for the daemon"))
     expected_python = agent_procutil.windowless_python(sys.executable)
-    expected_detached = agent_procutil.detached_kwargs()
 
     ctx = _cutover._CutoverContext(
         data_root=tmp_path, new_socket_path=tmp_path / "g2.sock",
@@ -77,10 +78,87 @@ def test_spawn_passive_daemon_uses_standard_headless_detach_helpers(
     proc = _cutover.spawn_passive_daemon(ctx, 12345)
 
     assert proc.pid == 99999
-    assert captured["cmd"][0] == expected_python
-    for key, value in expected_detached.items():
-        assert captured["kwargs"].get(key) == value, (
-            f"missing/mismatched detached_kwargs() key {key!r}")
+    assert captured["argv"][0] == expected_python
+    assert captured["argv"][1:4] == ["-m", "agent_mcp", "serve"]
+    assert "--passive" in captured["argv"]
+    kwargs = captured["kwargs"]
+    assert kwargs["cwd"] == tmp_path.resolve()
+    assert kwargs["log_path"] == (tmp_path / "g2.log").resolve()
+    assert kwargs["env_overrides"]["AGENT_MCP_CONTROL_TOKEN"] == "tok"
+    # A refused breakaway must fail this pre-commit spawn (rolled back), never
+    # promote a generation that dies when the launching updater's Job closes.
+    assert not kwargs.get("contained_fallback")
+    assert ctx.token_by_port[12345] == "tok"
+
+
+def test_spawn_passive_daemon_resolves_relative_home_before_the_spawn(
+    tmp_path, monkeypatch,
+):
+    """With a relative AGENT_MCP_HOME the generation paths are relative to the
+    cutover caller; the daemon runs from the resolved home, so it must receive
+    them (and AGENT_MCP_HOME itself) already absolute, never ``home/home/...``."""
+    from pathlib import Path
+
+    import agent_procutil
+
+    captured: dict = {}
+
+    class _FakeProc:
+        pid = 4242
+
+    def _fake_spawn_daemon(argv, **kwargs):
+        captured.update(argv=argv, kwargs=kwargs)
+        return _FakeProc()
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", _fake_spawn_daemon)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_MCP_HOME", "home")
+    rel = Path("home")
+    ctx = _cutover._CutoverContext(
+        data_root=rel, new_socket_path=rel / "serve-g2.sock",
+        new_log_path=rel / "serve-g2.log", new_control_token="tok",
+        old_control_token=None, token_by_port={},
+    )
+    _cutover.spawn_passive_daemon(ctx, 12345)
+
+    home = (tmp_path / "home").resolve()
+    argv, kwargs = captured["argv"], captured["kwargs"]
+    assert argv[argv.index("--socket") + 1] == str(home / "serve-g2.sock")
+    assert kwargs["cwd"] == home
+    assert kwargs["log_path"] == home / "serve-g2.log"
+    assert kwargs["env_overrides"]["AGENT_MCP_HOME"] == str(home)
+    assert kwargs["env_overrides"]["AGENT_MCP_CONTROL_TOKEN"] == "tok"
+
+
+def test_spawn_passive_daemon_real_spawn_logs_and_runs_from_data_root(
+    tmp_path, monkeypatch,
+):
+    """End to end through the real primitive: the generation log gets the
+    launch header and the child runs from the data root."""
+    import agent_procutil
+
+    seen: dict = {}
+    real = agent_procutil.spawn_daemon
+
+    def _record(argv, **kwargs):
+        seen.update(kwargs)
+        return real([sys.executable, "-c", "import os; print(os.getcwd())"], **kwargs)
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", _record)
+    home = tmp_path / "home"
+    home.mkdir()
+    ctx = _cutover._CutoverContext(
+        data_root=home, new_socket_path=home / "g3.sock",
+        new_log_path=home / "g3.log", new_control_token="ctl-sentinel-5e9b",
+        old_control_token=None, token_by_port={},
+    )
+    proc = _cutover.spawn_passive_daemon(ctx, 23456)
+    assert proc.wait(timeout=60) == 0
+    lines = (home / "g3.log").read_text(encoding="utf-8").splitlines()
+    assert "spawn_daemon cwd=" in lines[0]
+    assert "display=agent_mcp serve --passive --control-port 23456" in lines[0]
+    assert "ctl-sentinel-5e9b" not in lines[0], "the control token never reaches the log header"
+    assert os.path.samefile(lines[-1].strip(), home)
 
 
 # ── control op dispatch (unit-level, no sockets) ─────────────────────────

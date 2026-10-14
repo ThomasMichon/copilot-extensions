@@ -13,11 +13,17 @@ aggregate operational evidence, not a portable benchmark: invocation mixes,
 repository sizes, network state and machine contention were not controlled.
 It demonstrates the cost of repeating an end-to-end command, not its cause.
 
+A separate read-only stack sample identified a long stall in a Windows
+platform/WMI query during configuration/home discovery, before the finalize
+handler was entered. This is a startup availability problem, not evidence that
+a lifecycle lock or filesystem removal caused that particular stall.
+
 Source tracing identifies opportunities, not measured attribution:
 
 | Candidate | Existing boundary | Proposed experiment / constraint |
 |-----------|-------------------|----------------------------------|
 | Remove per-worktree interpreter/shim startup | Manual driver calls `finalize` separately; resident has an owning process | Invoke the shared lifecycle operation with explicit context. Count Python/PowerShell/CLI launches. Retain canonical process containment for required children. |
+| Avoid heavyweight platform discovery in configuration hot paths | `config._home` calls `platform.system`, which can enter `platform.uname` and Windows WMI | Use already-known platform/home facts where sufficient; reserve richer machine discovery for explicit bounded capability probes. Test unresponsive WMI without contacting or restarting a real system service. |
 | Coalesce upstream refresh | `finalize` refreshes the repository; finished-session sweep already uses `fetch=False` | Share repository-scoped refresh evidence; fetch at most once per repo per due refresh generation, outside lifecycle/record locks. Offline or failed refresh holds unproven work. Do not add a fetch to every GC candidate. |
 | Share discovery | Collectors scan sessions/mux and derive active paths | Reuse an attributable batch snapshot for nomination; perform fresh bounded candidate checks at removal. Compare enumeration counts and total work. |
 | Avoid rescanning unchanged records | Registry/tracking/status owners already observe changes | Prioritize affected candidates, retain a bounded rescan/cursor for missed events, and invalidate on branch/content/claim/session/policy changes. No duplicate safety ledger. |

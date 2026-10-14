@@ -10,6 +10,34 @@ def _cutover_blocked(report: dict[str, object]) -> bool:
     return isinstance(nested, dict) and bool(nested.get("cutover_in_progress"))
 
 
+def _census(report: dict[str, object]) -> dict[str, object]:
+    # An apply report's fresh re-census can become uncertain even when the
+    # pre-repair census was not; show the census that explains the refusal.
+    after = report.get("after")
+    if isinstance(after, dict) and after.get("grouping_uncertain"):
+        return after
+    before = report.get("before")
+    return before if isinstance(before, dict) else report
+
+
+def _generation_lines(census: dict[str, object]) -> list[str]:
+    """A launcher and its worker are one daemon generation, shown as one."""
+    lines: list[str] = []
+    generations = census.get("generations")
+    for generation in generations if isinstance(generations, list) else []:
+        if isinstance(generation, dict) and generation.get("launcher_pid") is not None:
+            lines.append(
+                f"      generation: launcher pid {generation['launcher_pid']} -> "
+                f"worker pid {generation.get('worker_pid')} (one daemon)"
+            )
+    if census.get("grouping_uncertain"):
+        lines.append(
+            "      ! generation grouping uncertain; terminations refused "
+            f"({census.get('grouping_uncertain_reason')})"
+        )
+    return lines
+
+
 def render_daemon_health_report(report: dict[str, object]) -> None:
     chk = "\u2713"
     findings = report.get("findings")
@@ -18,6 +46,8 @@ def render_daemon_health_report(report: dict[str, object]) -> None:
         return
     if not isinstance(findings, list) or not findings:
         print(f"  {chk} Resident daemon health: no abnormal cutover findings")
+        for line in _generation_lines(_census(report)):
+            print(line)
         return
 
     mode = str(report.get("mode") or "report")
@@ -46,7 +76,7 @@ def render_daemon_health_report(report: dict[str, object]) -> None:
         targets = finding.get("targets")
         if isinstance(targets, list):
             target_bits = [
-                f"pid {item['pid']}"
+                f"pid {item['pid']}" + (f" ({item['role']})" if item.get("role") else "")
                 for item in targets
                 if isinstance(item, dict) and "pid" in item
             ]
@@ -55,6 +85,8 @@ def render_daemon_health_report(report: dict[str, object]) -> None:
         if blocked and mode != "apply":
             suffix += f" [{blocked}]"
         print(f"      - {summary}{suffix}")
+    for line in _generation_lines(_census(report)):
+        print(line)
 
     actions = report.get("actions")
     if not isinstance(actions, list):

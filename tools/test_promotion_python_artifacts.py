@@ -734,7 +734,7 @@ def resolve_toolchain_lock(*args, **kwargs):
     real_run = artifacts._run
 
     def trusted_fixture_run(argv, *, cwd=None):
-        if argv[2] == "--repo":
+        if argv[2:3] == ["--repo"]:
             assert Path(argv[1]) == Path(artifacts.__file__).resolve()
             argv = [argv[0], str(driver / "promotion_python_artifacts.py"), *argv[2:]]
             cwd = driver
@@ -825,6 +825,83 @@ def test_candidate_artifact_validation_checks_out_composed_attributes(
         )
     assert index["dev_head"] == dev
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
+
+
+@pytest.mark.parametrize("mutation", ["changed-index", "invalid-tree"])
+def test_composed_source_identity_refuses_before_checkout_or_artifact_reads(
+    repo, tmp_path, monkeypatch, mutation,
+):
+    tree = _git(["write-tree"], repo)
+    if mutation == "changed-index":
+        (repo / "README.md").write_text("another composed snapshot\n", encoding="utf-8")
+        _git(["add", "README.md"], repo)
+    else:
+        tree = "--not-a-tree"
+    run = artifacts._run
+
+    def guarded_run(argv, **kwargs):
+        assert "checkout-index" not in argv
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(artifacts, "_run", guarded_run)
+    monkeypatch.setattr(artifacts, "validate_artifacts", lambda *a, **kw: pytest.fail(
+        "artifact reads must not precede composed source identity admission"
+    ))
+    with pytest.raises(artifacts.PromotionArtifactError, match="composed source"):
+        artifacts.validate_composed_artifacts(
+            tmp_path / "unread-artifacts", scratch=repo, content_tree=tree,
+            dev_head=DEV, main_before=MAIN,
+        )
+
+
+@pytest.mark.parametrize(
+    "attribute_noise", ["none", "unstaged-root", "untracked-nested", "staged-policy"],
+)
+def test_composed_source_ignores_working_tree_representation_and_noise(
+    repo, tmp_path, monkeypatch, attribute_noise,
+):
+    relative = Path("plugins/demo-plugin/generated.ps1")
+    (repo / ".gitattributes").write_text("*.ps1 text eol=crlf\n", encoding="utf-8")
+    (repo / relative).write_bytes(b"first line\nsecond line\n")
+    _commit(repo, "canonical source contract")
+    tree = _git(["write-tree"], repo)
+    expected = b"first line\r\nsecond line\r\n"
+    if attribute_noise == "staged-policy":
+        (repo / ".gitattributes").write_text("*.ps1 text eol=lf\n", encoding="utf-8")
+        _git(["add", ".gitattributes"], repo)
+        tree = _git(["write-tree"], repo)
+        (repo / ".gitattributes").write_text("*.ps1 text eol=crlf\n", encoding="utf-8")
+        expected = b"first line\nsecond line\n"
+    elif attribute_noise != "none":
+        attributes = repo / (
+            ".gitattributes" if attribute_noise == "unstaged-root"
+            else "plugins/demo-plugin/.gitattributes"
+        )
+        attributes.write_text("*.ps1 text eol=lf\n", encoding="utf-8")
+    (repo / relative).write_bytes(b"first line\nsecond line\n")
+    os.utime(repo / relative, (1, 1))
+    noise = repo / "plugins/demo-plugin/.pytest_cache"
+    noise.mkdir()
+    (noise / "cache.json").write_text("untracked fixture noise", encoding="utf-8")
+    checked = []
+
+    def validate(directory, **kwargs):
+        candidate = kwargs["candidate_root"]
+        checked.append(candidate)
+        assert kwargs["content_tree"] == tree
+        assert (candidate / relative).read_bytes() == expected
+        assert not (candidate / "plugins/demo-plugin/.pytest_cache").exists()
+        return {"canonical": True}
+
+    monkeypatch.setattr(artifacts, "validate_artifacts", validate)
+    assert artifacts.validate_composed_artifacts(
+        tmp_path / "artifacts", scratch=repo, content_tree=tree,
+        dev_head=DEV, main_before=MAIN,
+    ) == {"canonical": True}
+    assert _git(["write-tree"], repo) == tree
+    assert len(checked) == 1 and not checked[0].exists()
+    assert (repo / relative).read_bytes() == b"first line\nsecond line\n"
+    assert (noise / "cache.json").read_text() == "untracked fixture noise"
 
 
 def test_missing_artifacts_fail_before_candidate_push(repo, tmp_path, monkeypatch):
@@ -1208,11 +1285,15 @@ def test_changed_candidate_source_blocks_publication_before_any_release_write(tm
     (tmp_path / "plugins" / "demo" / "injected.py").write_text("changed source")
     calls = []
     monkeypatch.setattr(publisher, "_gh", lambda *a, **kw: calls.append(a))
-    with pytest.raises(artifacts.PromotionArtifactError, match="payload hash differs"):
+    with pytest.raises(artifacts.PromotionArtifactError, match="payload hash differs") as refused:
         publisher.publish_artifacts(
             directory, repository="example/plugins", merged_commit=TREE, dev_head=DEV,
             repo=tmp_path,
         )
+    assert "demo@1.0" in str(refused.value)
+    assert "expected=sha256:" in str(refused.value)
+    assert "actual=sha256:" in str(refused.value)
+    assert str(tmp_path) not in str(refused.value)
     assert not calls
 
 

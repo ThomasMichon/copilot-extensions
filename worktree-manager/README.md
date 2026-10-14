@@ -96,13 +96,16 @@ The initial loading tab is labelled `Local` with its environment until the
 machine roster resolves its canonical name. It does not present the OS hostname
 as a configured machine or add roster/configuration I/O to first paint.
 
-The Picker's fast worktree listing joins cached rows with one mux-session
-enumeration on the target machine. Mux presence and attached-client counts
-therefore make Open available before git and transcript enrichment completes.
-If mux enumeration is unavailable, the listing reports the failure and leaves
-the live mux observation unknown rather than probing each worktree or declaring
-its session absent. Slow classification failures retain the fast rows and are
-reported separately.
+Ordinary Worktrees loads require the engine's resident current-roster
+publication, including its observed git/session/mux facts and bounded claim
+aggregates. The local and machine-SSH loaders hold the CLI's
+`list --current --stream --follow` feed by default; the Manager never connects
+to daemon transport directly or recomputes/overlays those facts. Complete
+snapshot/update barriers replace rows atomically. Planned cutover notices and
+abrupt disconnects are distinct; reconnect retains explicitly stale last-good
+rows until the replacement generation completes. Unsupported authority is an
+actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
+selects current one-shot reads, not a direct computation fallback.
 
 Sessionless workspaces retained by another controller appear separately under
 **Owned**, not as ordinary resumable conversations. Use **Go to controller**
@@ -304,12 +307,15 @@ uv run python -m worktree_manager contracts --project <name> # contributed pivot
 
 The **worktrees** views are the first slice of the extracted Picker: they read
 **live** worktrees by shelling out to the `agent-worktrees` engine
-(`agent-worktrees --project <p> list --json --classify`) — the **process
+(`agent-worktrees --project <p> list --json --current`) — the **process
 boundary** the Textual Picker will sit on. The Manager never imports the plugin;
 the only coupling is the engine's stable `--json` verbs (the pinned
 [engine ↔ Picker contract](../plugins/agent-worktrees/docs/engine-picker-contract.md)),
 and the client ([`engine_client.py`](src/worktree_manager/engine_client.py))
-tolerates an older engine by degrading a request rather than failing.
+requires the current-roster authority contract. Older or incompatible engines
+produce an actionable upgrade error rather than silently dropping authority.
+Unreachable residents permit only explicitly labeled, independently indexed
+advisory rows or an unavailable error, never caller-side reconstruction.
 
 Plugin-contributed interactive surfaces are discovered independently from each
 enabled plugin's installed payload. `worktree-manager contracts` validates the

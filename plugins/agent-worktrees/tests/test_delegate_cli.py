@@ -6,6 +6,8 @@ import sys
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 
+import pytest
+
 from agent_worktrees import delegate_cli
 from agent_worktrees import list_cli
 from agent_worktrees import list_views_cli
@@ -381,3 +383,23 @@ def test_finalize_target_parses_banner_noise(monkeypatch):
 
     assert result["ok"] is True
     assert result["worktree_id"] == "wt"
+
+
+@pytest.mark.parametrize("local", [True, False])
+def test_finalize_target_uses_shared_headless_flags_for_local_and_ssh(monkeypatch, local):
+    calls = []
+    monkeypatch.setattr(delegate_cli.list_views_cli, "_local_binstub", lambda _: "fixture")
+    monkeypatch.setattr(
+        delegate_cli.subprocess, "run",
+        lambda argv, **kwargs: calls.append((argv, kwargs)) or SimpleNamespace(
+            returncode=0, stdout='{"success":true}', stderr="",
+        ),
+    )
+    result = delegate_cli._finalize_target(
+        _row("wt", machine="host", platform="windows", status="active"),
+        project="project", timeout=1,
+        host_index={("host", "windows"): ("host", "pwsh", local)},
+    )
+    assert result["ok"] is True
+    for name, value in delegate_cli.no_window_kwargs().items():
+        assert calls[0][1][name] == value

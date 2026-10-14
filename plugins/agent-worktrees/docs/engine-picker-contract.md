@@ -44,14 +44,119 @@ Replay also checks the stored fingerprint and prompt kind against the request,
 and Resume must retain its requested worktree identity, including after the
 locked receipt reload.
 A target without the request capability rejects before mutation.
-## Fresh list snapshots
+## Resident current-roster reads
 
-Ordinary unscoped `list --json` requests consult their exact fresh result
-snapshot before enumerating tracking records or booting the monitor. A hit
-still records demand for resident refresh. `--fresh`, exact worktree/codename
-reads, refresh, streaming, glance and `--cache-only` retain their dedicated
-paths; this fast-hit contract does not imply those paths are database-backed.
-Missing or expired snapshots retain the existing live-scan behavior.
+The Manager requires `list --json --current`. Ordinary JSON/stream listings
+also select that authority while resident monitoring is enabled; explicit
+profile-history inspection and glance retain their separate workflow paths.
+`--classify`, `--cache-only`, `--fresh`, exact IDs/codenames and `--refresh`
+do not authorize a different caller-side computation. A row refresh selects
+one indexed slot; it does not backfill sessions or enumerate the fleet.
+
+The existing authenticated monitor control endpoint advertises
+`worktrees-current-v1`. Its request carries `contract_version: 1`, project,
+optional status/platform/ID/codename selection and Boolean `include_missing`.
+Results carry `ok`, `contract_version`, `worktrees` and `projection`:
+schema version, generation, revision, observation timestamp, complete-roster
+and selected-row counts, and quality. Current rows are independently bounded to 64 KiB and omit
+growing resources, PR/session/profile histories and graphs. Exact claim totals
+and kinds remain in `claims_assets`; full claims use explicit on-demand details.
+The bounded current identity fields include string `creation_nonce` and Boolean
+`head_yielded`, preserving creation identity and resumable yielded-head semantics
+without carrying the creation or session-transition histories.
+
+The resident publishes complete project replacements into its SQLite WAL
+store, then swaps the in-memory publication. It claims the writer generation
+only after monitor election. Drained/superseded endpoints refuse current reads;
+a late predecessor cannot reclaim the durable owner. Failure retains the
+last complete publication with explicit `availability.status: stale`.
+Missing publication, malformed data and incompatible capability are explicit
+errors, never fabricated empty rosters. Confirmed successful empty publication
+is distinct and deletes the prior rows.
+
+Unreachable, slow, upgrading or incompatible residents permit only an
+independently indexed durable read, labeled `quality: advisory` with an
+availability reason, or an explicit unavailable error. Ordinary readers never
+load tracking YAML or compute git/session/mux facts in any such branch.
+Readers use the existing owner token without creating or replacing it.
+The Manager displays advisory/stale labels and never overlays Group C
+reconcile onto a current row. Unsupported `--current` is an actionable upgrade
+error; optional-flag retries cannot remove it.
+
+The one-shot `--stream` current snapshot emits `begin` with the publication
+and selected row count, `worktree` frames from that same publication, then
+`done`. The Manager admits a complete barrier before replacing its rows and
+rejects mixed revisions, duplicates and incomplete snapshots. This one-shot
+contract remains one-shot for existing consumers.
+
+### Held current-roster feed and cutover
+
+`list --current --stream --follow` is an additive held contract. `--follow`
+implies current/stream authority even without the other flags. The same
+authenticated control endpoint advertises `worktrees-feed-v1`; the CLI
+negotiates that capability, relays complete transactions over stdout and
+uses the existing owner token. It never silently removes `--follow` or
+`--current` on capability skew. The Manager's local and machine-SSH loaders
+use this path by default; `AGENT_WORKTREES_PICKER_STREAM=0` explicitly selects
+the current one-shot compatibility path instead.
+
+An admitted feed registers its project notification before reading its initial
+publication. Its `begin` includes the complete projection, `selected_count`,
+`cursor` (the project publication revision) and null `base_cursor`; `done`
+commits all initial `worktree` rows. A later `update` names the same generation,
+a strictly greater cursor and the prior committed `base_cursor`. Changed rows
+use `worktree`, removals use `delete`, and `commit` atomically admits the result.
+Each update also includes the complete committed identity order in `order`
+frames of at most 128 IDs. Receivers require an exact permutation of the final
+selected roster and rebuild in that order at commit, including reorder-only
+publications and front insertions without re-emitting unchanged row values.
+Selection changes caused by current facts are inserts/removals in that same
+transaction. A publication racing initial delivery remains signaled until the
+reader has incorporated it; readers never splice partial rows into a visible
+roster.
+
+At most 32 feeds are admitted per resident. Each subscription holds one
+notification stamp, not a queue of row payloads. Slow readers diff their last
+committed roster against the latest complete publication, coalescing any number
+of intervening revisions without losing the final selected state. CLI/Manager
+transaction buffers remain bounded by the two current rosters and each row's
+schema, not historical update volume. Individual frames have a byte/character
+bound. Initial and update transactions have total deadlines; heartbeat progress
+cannot extend an unfinished publication. Idle heartbeats do not re-read or
+decode an unchanged roster. Producer failure emits an explicit availability
+change while preserving the last complete rows.
+
+Relay error frames carry `error.code`, `error.message` and Boolean
+`error.retry`. Disconnect and unready responses permit reconnect; live-peer
+timeouts, malformed transactions, incompatible capabilities and authentication
+failures are terminal for that load. The Manager retains labeled last-good
+rows but stops automatic CLI respawn for terminal errors until an explicit
+reload. Its own publication/heartbeat watchdog is terminal too. Neither
+classification authorizes daemon restart or caller-side fact computation.
+
+Held projects remain demanded for the subscription lifetime; cancellation
+releases the subscription and resumes the ordinary bounded linger. Planned
+drain, update, shutdown or supersession sends `going-away` with reason,
+generation and last cursor before the feed closes. Both feed subscriptions
+and ordinary current-read handlers participate in monitor drain accounting,
+including ordinary response delivery. The existing status-monitor installer
+and activation/cutover path still own the daemon; no service, competing updater
+or cutover deadline increase is added.
+Successor promotion refuses adoption when current-roster authority activation
+fails. The unpublished successor retains retry state; it cannot sweep or
+acknowledge adoption until activation succeeds.
+
+Each committed publication advances the Manager's relative age, last-used and
+pulse presentation, including unchanged rows, without recomputing domain facts.
+The Manager retains explicitly stale last-good rows during reconnect, then
+replaces them only after a complete new-generation snapshot. Each retry starts
+the selected CLI again, re-resolving daemon discovery. A retained route whose
+listener refuses/resets a connection gets the existing bounded recovery;
+a slow, malformed or incompatible live resident does not get rebooted or
+license independent recomputation. Graceful notices and abrupt disconnects are
+reported distinctly. Provider-exec sources retain their separately negotiated
+one-shot contract. Full claims remain an explicit background details request,
+not a feed payload.
 
 ## Provider-backed source registry
 
@@ -154,7 +259,9 @@ different versions on the same machine. So the `--json` verbs the Picker consume
 are a **stable, versioned contract**: the engine keeps them backward-compatible
 within a contract window, and a newer Manager tolerates an older engine —
 degrading a single feature rather than failing (the *version-skew-tolerant
-contract* property).
+contract* property). The current-roster authority capability is a deliberate
+exception: older engines require an upgrade, because dropping that capability
+would admit an independent computation rather than merely omit presentation.
 
 This document **pins** that contract: the verbs, their required flags, and the
 compatibility rules. Change a pinned verb's output shape only additively;
@@ -178,9 +285,10 @@ Neither refinement discards the leaf's fetch-attempt/failure or sync fields.
 
 Both coalescing request servers run inside the one resident status-monitor.
 Their project-batch and single-worktree request shapes, rendezvous fields, and
-cache policies remain distinct. Sharing computation does not itself establish
-daemon-only read authority or a snapshot/incremental stream: the existing
-caller-side fallback and polling contracts remain until that separate cutover.
+cache policies remain distinct. Worktrees current-roster requests now read
+owner publications rather than invoking those compute callbacks. Other bundle
+consumers retain their separate contract; this does not assert consolidation
+or a held incremental feed for every pivot.
 
 Resident warming of recently requested list shapes shares read enrichment
 within one pass when their tracking-status, platform and checkout-existence
@@ -301,7 +409,8 @@ automatically restore a potentially submitted prompt.
 
 | Verb (as invoked) | Purpose | Notes |
 |---|---|---|
-| `<project> list --json --classify --mux-details` | The core enumeration — every worktree with git-derived `state`, sync tags, mux details, and additive normalized `reciprocal_relation` presentation state. | `--include-other-platforms` (Windows), `--cache-only` (fast paint), `--stream` (incremental) are **optional** accelerators; the engine must still answer without them. An engine too old for `--classify` is tolerated by re-running without it. A Picker facing an older engine treats a missing reciprocal field as legacy data; it never infers controller authority from partial fields. |
+| `<project> list --json --current --classify --mux-details` | The core enumeration from one resident publication, with git-derived `state`, sync tags, mux details and normalized reciprocal presentation. | `--current` is mandatory and cannot be dropped. Other optional presentation/selection flags retain compatibility retries. An older authority is an upgrade error or explicitly advisory durable read, never caller-side recomputation. |
+| `<project> list --current --stream --follow` | Held current-roster snapshot, incremental upserts/deletes, atomic commit barriers and cutover notices, relayed by the CLI. | Requires `worktrees-feed-v1`; cursor/reset/lifecycle rules above apply. Unsupported authority is an upgrade error, never silent caller-side fallback. |
 | `<project> list-sessions --worktree <id> --json` | Sessions belonging to a worktree. | |
 | `<project> recent-messages --worktree <id> --limit N --json` | Last few conversation turns (the read-only Messages overlay). | |
 | `<project> picker-paths --json` | Low-frequency Picker runtime paths: `{"version":1,"install_dir":"<abs>","installed_plugins_dir":"<abs>"}`. | Contract v1 additive addition for Phase 3d Group A. These are one-shot setup reads (pivot registry scan), not render-tick data. |

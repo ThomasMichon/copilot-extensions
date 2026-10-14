@@ -21,6 +21,8 @@ import sys
 from collections import defaultdict
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import list_views_cli
 from . import tracking
@@ -83,6 +85,7 @@ def annotate_delegate_graph(
     worktrees: list[dict[str, Any]],
     *,
     reachable_hosts: dict[tuple[str, str], bool] | None = None,
+    current_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Annotate ``list``/``fleet`` rows with caller/host + delegate state."""
     id_index: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -154,7 +157,7 @@ def annotate_delegate_graph(
                 row["delegate_finalizable_reason"] = (
                     f"host-{host_status}" if host_status else "host-unknown"
                 )
-            host.setdefault("delegates", []).append({
+            delegate = {
                 "worktree_id": row.get("id"),
                 "machine": row.get("machine"),
                 "platform": row.get("platform"),
@@ -162,7 +165,9 @@ def annotate_delegate_graph(
                 "status": row.get("status"),
                 "finalizable": bool(row.get("delegate_finalizable")),
                 "reason": row.get("delegate_finalizable_reason"),
-            })
+            }
+            if not current_only:
+                host.setdefault("delegates", []).append(delegate)
         elif len(matches) > 1:
             caller_state["state"] = "ambiguous"
             caller_state["candidates"] = [
@@ -174,8 +179,10 @@ def annotate_delegate_graph(
                     "path": candidate.get("path"),
                     "status": candidate.get("status"),
                 }
-                for candidate in matches
+                for candidate in (matches[:8] if current_only else matches)
             ]
+            if current_only:
+                caller_state["candidate_count"] = len(matches)
             row["delegate_finalizable"] = False
             row["delegate_finalizable_reason"] = "host-ambiguous"
         else:
@@ -339,6 +346,7 @@ def _finalize_target(
                 capture_output=True,
                 text=True,
                 timeout=timeout + 4,
+                **no_window_kwargs(),
             )
         else:
             proc = subprocess.run(
@@ -354,6 +362,7 @@ def _finalize_target(
                 capture_output=True,
                 text=True,
                 timeout=timeout + 4,
+                **no_window_kwargs(),
             )
     except (OSError, subprocess.SubprocessError) as exc:
         result["ok"] = False

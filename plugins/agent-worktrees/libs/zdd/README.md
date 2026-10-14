@@ -269,6 +269,30 @@ Conditional or unverifiable recovery state is non-repairable and requires its
 owner, regardless of reachability or duplicate-process classification; retained
 promoted generations cannot be discarded by the generic cleanup path.
 
+**Generations, not PIDs.** On Windows a daemon started through a venv
+`python.exe`/`pythonw.exe` redirector appears twice in a process census: the
+redirector (launcher) and the base interpreter it starts (worker). A consumer
+whose daemons can run that way sets `DiagnosticContext.group_launchers=True`
+(optionally with `is_launcher_image`, default `zdd.generations.is_venv_redirector`)
+and fills each `DaemonCandidate`'s `ppid` and `image`. The doctor then groups
+the census structurally (`zdd.generations.group_generations`): a candidate and
+its parent form one generation only when the parent is a launcher image, the
+child is not, the parent has no other candidate child, neither is part of a
+longer candidate chain, and the child provably started after the parent. A
+route, lock or breadcrumb PID naming either member identifies the whole
+generation, so the validated owner's launcher is never a target, and a
+`duplicate_resident` finding names a second *generation* (worker first, then
+launcher, each with a `role`). Reports add `generation_count`, `generations`,
+`grouping_uncertain` and `grouping_uncertain_reason`. When grouping is
+uncertain (an unreadable parent or executable, a launcher-image candidate with
+no captured worker, or a parent/child relation that fails those checks), every
+terminating finding is reported with `repairable: false` /
+`blocked_reason: "generation grouping uncertain"`, and
+`apply_daemon_health()` refuses every termination with a `generation_grouping`
+action whenever the initial census or any fresh re-census is uncertain:
+diagnostics reports what it sees but never kills on a guess. Consumers
+that do not opt in keep one generation per candidate.
+
 ### `zdd.singleton_manager` -- Linux supervision across cutover and exec
 
 `SingletonManager` claims Linux subreaper ownership before spawning, validates

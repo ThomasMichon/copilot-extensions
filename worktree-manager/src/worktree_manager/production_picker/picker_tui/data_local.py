@@ -285,11 +285,9 @@ def load(
     overrides them so the local machine's rows carry its ``machines.yaml``
     display name and env label, matching the multi-machine tab descriptors.
 
-    ``classify=False`` requests cached rows with one live mux enumeration;
-    ``classify=True`` requests canonical git/session/mux enrichment plus the
-    Group C batched PR/session/mux reconcile overlay. Both calls cross the same
-    attributable process boundary as remote reads and run on the caller's
-    background loader thread, never the Textual event loop.
+    Both refresh modes read the same resident publication through the selected
+    engine on a background loader thread. Neither reconciles or overlays a
+    competing caller-side answer.
     """
     derive.NOW = _dt.datetime.now()
     machine = machine if machine is not None else LOCAL[0]
@@ -299,9 +297,6 @@ def load(
         "source_id": source_id,
         "source_label": source_label,
     }
-    batch = None
-    if classify:
-        batch = reconcile_local_batch(runner=runner)
     rows = list(
         engine_client.list_worktree_rows(
             context.project(),
@@ -311,8 +306,6 @@ def load(
             runner=runner,
         )
     )
-    if classify:
-        rows = _overlay_reconcile_rows(rows, batch=batch, runner=runner)
     return [derive.norm(row, machine, env, **norm_source) for row in rows]
 
 
@@ -330,7 +323,7 @@ def _stamp_from_raw(rec, raw: dict, reconcile_row: dict | None) -> None:
 
 def refresh_one(worktree_id: str, machine: str | None = None,
                 env: str | None = None, *, runner=None):
-    """Live-gather for ONE worktree -- the picker's per-row Refresh."""
+    """Read ONE current slot -- the picker's per-row Refresh."""
     derive.NOW = _dt.datetime.now()
     machine = machine if machine is not None else LOCAL[0]
     env = env if env is not None else LOCAL[1]
@@ -347,5 +340,4 @@ def refresh_one(worktree_id: str, machine: str | None = None,
     )
     if not rows:
         return None
-    rows = _overlay_reconcile_rows(rows, worktree_ids=[worktree_id], runner=runner)
     return derive.norm(rows[0], machine, env)

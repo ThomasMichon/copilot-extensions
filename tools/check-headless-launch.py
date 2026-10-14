@@ -48,7 +48,12 @@ call (or its enclosing function, to tolerate the common
 shape without real data-flow analysis) already references a raw flag
 (``creationflags=``/``startupinfo=``) or one of the shared helpers
 (``no_window_kwargs``/``detached_kwargs``/``windowless_daemon_kwargs``/
-``_process_tree_kwargs``/``no_window_flags``). Only a **literal, resolvable**
+``_process_tree_kwargs``/``no_window_flags``). ``agent_procutil.spawn_daemon``
+is the approved headless primitive for a resident daemon: it is built on the
+detach helpers and is not itself a ``subprocess`` call, so a launch through it
+is never reported. It is deliberately *not* one of the helpers above: a
+``spawn_daemon(...)`` call says nothing about a raw ``subprocess`` spawn beside
+it in the same function, which is still checked on its own. Only a **literal, resolvable**
 argv[0] is checked -- a dynamically-built command (a variable, a function
 call) is silently skipped rather than risk a false positive from a value this
 guard cannot actually resolve. The same inline ``# headless-guard: allow
@@ -571,7 +576,8 @@ def verify() -> list[str]:
                     "a window-less parent (a detached waiter, a background "
                     "daemon) would surface a brand-new visible console for "
                     "this; pass creationflags/startupinfo or splat "
-                    f"agent_procutil's no_window_kwargs()/detached_kwargs(), "
+                    f"agent_procutil's no_window_kwargs()/detached_kwargs() "
+                    "(launch a resident daemon with agent_procutil.spawn_daemon()), "
                     f"or add '# {_ALLOW} <why>'  ::  {line.strip()}"
                 )
 

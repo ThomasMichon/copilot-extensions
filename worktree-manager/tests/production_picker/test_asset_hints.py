@@ -7,6 +7,8 @@ width-constrained consumer (the action menu)."""
 
 from __future__ import annotations
 
+import pytest
+
 from worktree_manager.production_picker.picker_tui import derive
 
 
@@ -99,3 +101,41 @@ def test_malformed_resource_entries_are_skipped_not_fatal():
     ]), "host", "windows")
     assert row["asset_hints"]["hints"] == ["PR"]
     assert len(row["asset_hints"]["details"]) == 1
+
+
+def test_current_aggregate_preserves_hints_without_enumerating_a_ledger():
+    class NeverRead(list):
+        def __iter__(self):
+            raise AssertionError("current presentation enumerated the ledger")
+
+    row = derive.norm(_raw(
+        claims_assets={"held_count": 1101, "by_kind": {"worktree": 1100, "pr": 1},
+                       "details_available": True},
+        resources=NeverRead(),
+    ), "host", "windows")
+    assert row["asset_hints"] == {
+        "hints": ["PR", "WT\u00d71100"], "overflow": 0, "details": [],
+        "held_count": 1101, "details_available": True,
+    }
+
+
+def test_current_aggregate_keeps_code_collisions_and_overflow():
+    kinds = {"workspace": 2, "workflow": 3, "pr": 1, "worktree": 1,
+             "codespace": 1, "container": 1, "ssh": 1}
+    row = derive.norm(_raw(claims_assets={
+        "held_count": 10, "by_kind": kinds, "details_available": True,
+    }), "host", "windows")
+    assert row["asset_hints"]["hints"] == ["PR", "WT", "CS", "CTR"]
+    assert row["asset_hints"]["overflow"] == 2
+    assert row["asset_hints"]["held_count"] == 10
+
+
+@pytest.mark.parametrize("summary", [
+    {}, [],
+    {"held_count": 3, "by_kind": {"pr": 2}, "details_available": True},
+    {"held_count": 1, "by_kind": {"pr": True}, "details_available": True},
+    {"held_count": 0, "by_kind": {}, "details_available": True},
+])
+def test_malformed_current_aggregate_is_explicit_not_no_claims(summary):
+    with pytest.raises(ValueError, match="held-claim summary"):
+        derive.norm(_raw(claims_assets=summary), "host", "windows")

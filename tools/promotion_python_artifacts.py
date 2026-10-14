@@ -717,8 +717,13 @@ def validate_source_binding(manifest: dict, root: Path) -> None:
                 raw_version=project["version"], wheel_version=info["version"],
                 label=wheel["source"],
             )
-        if manifest["payload_hash"] != builder.compute_payload_hash(directories):
-            raise PromotionArtifactError("manifest payload hash differs from candidate")
+        actual = builder.compute_payload_hash(directories)
+        if manifest["payload_hash"] != actual:
+            raise PromotionArtifactError(
+                f"{manifest['plugin']}@{manifest['version']}: manifest payload hash differs "
+                f"from candidate (expected={manifest['payload_hash']}, actual={actual}); "
+                "source content or checkout policy differs from the artifact build"
+            )
     except (
         ArtifactBuildError, OSError, UnicodeDecodeError, tomllib.TOMLDecodeError,
         KeyError, TypeError, ValueError,
@@ -732,10 +737,19 @@ def validate_composed_artifacts(
     source_policy: str | None = None, min_age_days: int | None = None,
 ) -> dict:
     """Validate a composed index through its canonical checkout representation."""
+    if not isinstance(content_tree, str) or not _SHA.fullmatch(content_tree):
+        raise PromotionArtifactError("invalid composed source tree identity")
+    actual_tree = _run(["git", "write-tree"], cwd=scratch).strip()
+    if actual_tree != content_tree:
+        raise PromotionArtifactError(
+            f"composed source index changed (expected={content_tree}, actual={actual_tree}); "
+            "recompose the candidate before validating artifacts"
+        )
     with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
         candidate = Path(temporary).resolve()
         _run(
-            ["git", "checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
+            ["git", f"--attr-source={content_tree}", "checkout-index", "--all",
+             f"--prefix={candidate}{os.sep}"], cwd=scratch,
         )
         return validate_artifacts(
             directory, content_tree=content_tree,

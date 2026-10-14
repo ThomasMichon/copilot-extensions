@@ -74,7 +74,18 @@ def test_engine_environment_preserves_differently_cased_posix_names(monkeypatch)
     assert ec._is_parent_python_variable("virtual_env", windows=True)
 
 
-_ONE_WT = {
+def _current_envelope(payload):
+    return {
+        **payload, "ok": True, "contract_version": 1,
+        "projection": {
+            "schema_version": 1, "quality": "current", "generation": "a" * 32,
+            "revision": 1, "observed_at": 123, "roster_count": len(payload["worktrees"]),
+            "selected_count": len(payload["worktrees"]),
+        },
+    }
+
+
+_ONE_WT = _current_envelope({
     "version": 1,
     "worktrees": [
         {
@@ -91,13 +102,13 @@ _ONE_WT = {
             "path": "/w/x",
         }
     ],
-}
+})
 
 
 def test_list_worktrees_parses_rows(monkeypatch):
     def handler(cmd, kw):
         assert "--project" in cmd and "dotfiles" in cmd
-        assert "list" in cmd and "--json" in cmd and "--classify" in cmd
+        assert "list" in cmd and "--json" in cmd and "--classify" in cmd and "--current" in cmd
         return _fake_completed(cmd, stdout=json.dumps(_ONE_WT))
 
     _install_fake(monkeypatch, handler)
@@ -112,11 +123,28 @@ def test_list_worktrees_parses_rows(monkeypatch):
 
 
 def test_title_null_is_none(monkeypatch):
-    payload = {"version": 1, "worktrees": [{"id": "aaaa", "title": "null"}]}
+    payload = _current_envelope({"version": 1, "worktrees": [{"id": "aaaa", "title": "null"}]})
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout=json.dumps(payload)))
     (w,) = ec.list_worktrees("dotfiles")
     assert w.title is None
     assert w.id4 == "aaaa"
+
+
+@pytest.mark.parametrize("dirty", [0, 1, 4, 1100])
+def test_list_worktrees_preserves_current_dirty_count_and_converts_typed_indicator(monkeypatch, dirty):
+    payload = _current_envelope({
+        "worktrees": [{"id": "one", "dirty": dirty, "state": "wip"}],
+    })
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout=json.dumps(payload)))
+    (row,) = ec.list_worktrees("project")
+    assert row.dirty is (dirty > 0)
+    assert row.raw["dirty"] == dirty
+    assert type(row.raw["dirty"]) is int
+
+
+def test_worktree_model_rejects_negative_dirty_counts():
+    with pytest.raises(ValueError, match="nonnegative"):
+        ec.worktree_from_dict({"id": "one", "dirty": -1})
 
 
 def test_engine_absent_raises_install_hint(monkeypatch):
@@ -147,6 +175,7 @@ def test_classify_rejection_retries_without(monkeypatch):
     # First attempt carried --classify; the retry dropped it.
     assert any("--classify" in c for c in calls)
     assert any("--classify" not in c for c in calls)
+    assert all("--current" in c for c in calls)
 
 
 def test_error_envelope_is_surfaced(monkeypatch):
@@ -209,26 +238,26 @@ def test_project_passthrough_uses_resolved_installer_binstub(monkeypatch):
 
 def test_empty_worktrees_list(monkeypatch):
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
-        cmd, stdout=json.dumps({"version": 1, "worktrees": []})))
+        cmd, stdout=json.dumps(_current_envelope({"version": 1, "worktrees": []}))))
     assert ec.list_worktrees("dotfiles") == []
 
 
 def test_list_worktree_rows_preserves_picker_fields(monkeypatch):
-    payload = {
+    payload = _current_envelope({
         "version": 1,
         "worktrees": [{
             "id": "wt-ab12",
             "session_bridge_live": True,
             "live_intent": "Reviewing",
         }],
-    }
+    })
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps(payload)))
 
     rows = ec.list_worktree_rows(
         "dotfiles", classify=False, mux_details=True, cache_only=True)
 
-    assert rows == payload["worktrees"]
+    assert rows == [{**payload["worktrees"][0], "_projection": payload["projection"], "_availability": None}]
 
 
 def test_list_worktree_rows_uses_supplied_cancellable_runner(monkeypatch):
@@ -238,7 +267,7 @@ def test_list_worktree_rows_uses_supplied_cancellable_runner(monkeypatch):
         seen["cmd"] = cmd
         seen["timeout"] = timeout
         return _fake_completed(
-            cmd, stdout=json.dumps({"version": 1, "worktrees": []}))
+            cmd, stdout=json.dumps(_current_envelope({"version": 1, "worktrees": []})))
 
     _install_fake(
         monkeypatch,
@@ -280,10 +309,10 @@ def test_current_worktree_status_passes_fetch_flag(monkeypatch):
 def test_find_worktree_for_path_matches_exact_path(monkeypatch, tmp_path):
     wt_dir = tmp_path / "wt-ab12"
     wt_dir.mkdir()
-    payload = {
+    payload = _current_envelope({
         "version": 1,
         "worktrees": [{"id": "wt-ab12", "path": str(wt_dir)}],
-    }
+    })
 
     def handler(cmd, kw):
         assert "--cache-only" in cmd
@@ -294,27 +323,27 @@ def test_find_worktree_for_path_matches_exact_path(monkeypatch, tmp_path):
 
     row = ec.find_worktree_for_path(str(wt_dir))
 
-    assert row == payload["worktrees"][0]
+    assert row == {**payload["worktrees"][0], "_projection": payload["projection"], "_availability": None}
 
 
 def test_find_worktree_for_path_matches_ancestor_directory(monkeypatch, tmp_path):
     wt_dir = tmp_path / "wt-ab12"
     nested = wt_dir / "sub" / "dir"
     nested.mkdir(parents=True)
-    payload = {
+    payload = _current_envelope({
         "version": 1,
         "worktrees": [{"id": "wt-ab12", "path": str(wt_dir)}],
-    }
+    })
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps(payload)))
 
     row = ec.find_worktree_for_path(str(nested))
 
-    assert row == payload["worktrees"][0]
+    assert row == {**payload["worktrees"][0], "_projection": payload["projection"], "_availability": None}
 
 
 def test_find_worktree_for_path_returns_none_when_untracked(monkeypatch, tmp_path):
-    payload = {"version": 1, "worktrees": [{"id": "wt-ab12", "path": str(tmp_path / "other")}]}
+    payload = _current_envelope({"version": 1, "worktrees": [{"id": "wt-ab12", "path": str(tmp_path / "other")}]})
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps(payload)))
 
@@ -454,7 +483,7 @@ def test_refresh_worktree_uses_exact_provider_contract(monkeypatch):
         seen["cmd"] = cmd
         return _fake_completed(
             cmd,
-            stdout=json.dumps({"version": 1, "worktrees": [{"id": "wt-ab12"}]}),
+            stdout=json.dumps(_current_envelope({"version": 1, "worktrees": [{"id": "wt-ab12"}]})),
         )
 
     _install_fake(monkeypatch, handler)
@@ -467,14 +496,15 @@ def test_refresh_worktree_uses_exact_provider_contract(monkeypatch):
         refresh=True,
     )
 
-    assert rows == [{"id": "wt-ab12"}]
-    assert seen["cmd"][-8:] == [
-        "list", "--json", "--classify", "--mux-details", "--fresh",
+    assert len(rows) == 1 and rows[0]["id"] == "wt-ab12"
+    assert rows[0]["_projection"]["quality"] == "current"
+    assert seen["cmd"][-9:] == [
+        "list", "--json", "--current", "--classify", "--mux-details", "--fresh",
         "--worktree-id", "ab12", "--refresh",
     ]
 
 
-def test_refresh_worktree_falls_back_for_older_provider(monkeypatch):
+def test_refresh_worktree_does_not_backfill_or_list_fleet_for_older_provider(monkeypatch):
     calls = []
 
     def handler(cmd, kw):
@@ -496,17 +526,12 @@ def test_refresh_worktree_falls_back_for_older_provider(monkeypatch):
         )
 
     _install_fake(monkeypatch, handler)
-    assert ec.list_worktree_rows(
-        "dotfiles",
-        classify=True,
-        mux_details=True,
-        fresh=True,
-        worktree_id="ab12",
-        refresh=True,
-    ) == [{"id": "wt-ab12"}]
-    assert len(calls) == 3
-    assert "backfill-sessions" in calls[1]
-    assert "--refresh" not in calls[2]
+    with pytest.raises(ec.EngineError, match="unrecognized arguments"):
+        ec.list_worktree_rows(
+            "dotfiles", classify=True, mux_details=True, fresh=True,
+            worktree_id="ab12", refresh=True,
+        )
+    assert len(calls) == 1 and "--current" in calls[0]
 
 
 def test_list_worktree_sessions_parses_rows(monkeypatch):
@@ -826,7 +851,7 @@ def test_captured_engine_call_is_tui_safe(monkeypatch):
 
     def handler(cmd, kw):
         seen.update(kw)
-        return _fake_completed(cmd, stdout='{"version":1,"worktrees":[]}')
+        return _fake_completed(cmd, stdout=json.dumps(_current_envelope({"version": 1, "worktrees": []})))
 
     _install_fake(monkeypatch, handler)
     ec.list_worktrees("dotfiles")

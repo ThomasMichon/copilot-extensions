@@ -141,6 +141,12 @@ self-update tier calls this on every opted-in machine, so a stale cached id
 self-heals within about an hour instead of silently breaking inbound SSH until
 an operator notices and re-runs discovery by hand.
 
+The fragment's registry provenance is retained in `.agent-ssh-sources` beside
+`config.d`, outside its OpenSSH Include glob. Content-addressed snapshots reuse
+unchanged discovery evidence and keep an existing profile's source valid while
+a new fragment is atomically published. Registry-retention failures are reported
+without replacing the existing profile; `doctor` remains report-only.
+
 The repository-gated mesh pointer also names the maintenance fallback for a
 machine that remains unreachable after bounded diagnosis. Repeatable state
 belongs in agent-machines requirement packages or another declared auto-update

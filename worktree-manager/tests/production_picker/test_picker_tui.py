@@ -3982,6 +3982,8 @@ def test_tui_live_multi_machine():
 
 def test_live_loader_classify_fallback(monkeypatch):
     """A remote that rejects --classify is retried without it (older remotes)."""
+    import json
+
     from worktree_manager.production_picker.picker_tui import data_ssh
 
     calls = []
@@ -3997,13 +3999,19 @@ def test_live_loader_classify_fallback(monkeypatch):
         joined = " ".join(argv)
         if "--classify" in joined:
             return _Proc(2, stderr="error: unrecognized arguments: --classify")
-        return _Proc(0, stdout='{"worktrees": []}')
+        return _Proc(0, stdout=json.dumps({
+            "ok": True, "contract_version": 1, "worktrees": [],
+            "projection": {
+                "schema_version": 1, "quality": "current", "generation": "a" * 32,
+                "revision": 1, "observed_at": 1, "roster_count": 0, "selected_count": 0,
+            },
+        }))
 
     monkeypatch.setattr(data_ssh, "_run", fake_run)
     src = data_ssh.Source(
         "Emancipation-Cube", "Win",
         ["ssh", "emancipation-cube", "pwsh -NoProfile -Command 'p list --json "
-         "--classify --mux-details --include-other-platforms'"],
+         "--current --classify --mux-details --include-other-platforms'"],
         ready=True,
     )
     recs = data_ssh._fetch(src)
@@ -4011,6 +4019,7 @@ def test_live_loader_classify_fallback(monkeypatch):
     assert len(calls) == 2
     assert "--classify" in " ".join(calls[0])
     assert "--classify" not in " ".join(calls[1])
+    assert "--current" in " ".join(calls[1])
     assert src.use_classify is False
 
 
@@ -5877,6 +5886,7 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
     (including the SSH fan-out) had resolved."""
     from worktree_manager.production_picker.picker_tui import data_ssh
 
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "0")
     sentinel = [{"id4": "abcd", "machine": "anomalous-potato", "env": "Win"}]
     gate = threading.Event()
 
@@ -5917,6 +5927,7 @@ def test_live_loader_reload_local_refetches(monkeypatch):
     # classify=True), so a single load event calls data_local.load more than
     # once. Return the currently-staged rows regardless of call count / phase,
     # and let the test swap what "current" means between start and reload.
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "0")
     state = {"rows": [{"id4": "a"}]}
 
     def _load(m=None, e=None, *, classify=True, **source):
@@ -5946,6 +5957,7 @@ def test_live_loader_local_two_phase_fast_then_fill(monkeypatch):
     a slow/stalled git classification never blocks the whole tab."""
     from worktree_manager.production_picker.picker_tui import data_ssh
 
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "0")
     fast_gate = threading.Event()
     full_gate = threading.Event()
     calls = []

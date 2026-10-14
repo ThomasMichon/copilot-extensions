@@ -9,15 +9,45 @@ _skip() { printf '  [SKIP] %s\n' "$1"; }
 _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
 
-_install_budget_guidance_package() {
-    if [[ "$HAVE_UV" -eq 1 ]]; then
-        if uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
-            return 0
+_remove_budget_build_artifacts() {
+    local root="$1" artifact
+    for artifact in "$root/build" "$root"/*.egg-info "$root"/src/*.egg-info; do
+        [[ -e "$artifact" || -L "$artifact" ]] || continue
+        if ! rm -rf -- "$artifact"; then
+            _fail 'Cannot remove owned package build artifacts'
+            return 1
         fi
+    done
+}
+
+_install_budget_guidance_package() {
+    local procutil="$PLUGIN_DIR/libs/agent-procutil"
+    if [[ ! -f "$procutil/pyproject.toml" ]]; then
+        procutil="$PLUGIN_DIR/../../libs/agent-procutil"
+    fi
+    [[ -f "$procutil/pyproject.toml" ]] || { _fail 'Owning agent-procutil source is missing'; return 1; }
+    _remove_budget_build_artifacts "$procutil" || return 1
+    _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
+    if [[ "$HAVE_UV" -eq 1 ]]; then
+        local uv_rc=0
+        if uv pip install --python "$VENV_PYTHON" "$procutil" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+            uv_rc=0
+        else
+            uv_rc=$?
+        fi
+        _remove_budget_build_artifacts "$procutil" || return 1
+        _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
+        [[ "$uv_rc" -ne 0 ]] || return 0
         _step 'uv package install failed -- falling back to python -m pip'
     fi
 
-    "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null
+    _remove_budget_build_artifacts "$procutil" || return 1
+    _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
+    local pip_rc=0
+    "$VENV_PYTHON" -m pip install --quiet "$procutil" "$PLUGIN_DIR" 2>/dev/null || pip_rc=$?
+    _remove_budget_build_artifacts "$procutil" || return 1
+    _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
+    return "$pip_rc"
 }
 
 ACTION="${BUDGET_GUIDANCE_ACTION:-install}"
@@ -493,6 +523,15 @@ if [[ "$ACTION" == "stamp" ]]; then
     rm -rf -- "$snap_tmp"
     mkdir -p "$snap_tmp"
     cp -a "$PLUGIN_DIR/." "$snap_tmp/"
+    procutil="$PLUGIN_DIR/libs/agent-procutil"
+    if [[ ! -f "$procutil/pyproject.toml" ]]; then
+        procutil="$PLUGIN_DIR/../../libs/agent-procutil"
+    fi
+    [[ -f "$procutil/pyproject.toml" ]] || { _fail 'Owning agent-procutil source is missing'; exit 1; }
+    if [[ ! -d "$snap_tmp/libs/agent-procutil" ]]; then
+        mkdir -p "$snap_tmp/libs"
+        cp -a "$procutil" "$snap_tmp/libs/agent-procutil"
+    fi
     rm -rf -- \
         "$snap_tmp/.git" \
         "$snap_tmp/.venv" \

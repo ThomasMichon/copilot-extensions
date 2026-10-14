@@ -205,6 +205,25 @@ def add_parsers(sub) -> None:
     )
 
 
+def log_path() -> Path:
+    """Durable outcome log for the unattended backstop: the detached process
+    has no console, so what it repaired -- or refused to -- lands here."""
+    from . import config as _cfg
+
+    return _cfg.install_dir() / "logs" / "status-monitor-reap-stale.log"
+
+
+def _record(message: str) -> None:
+    print(message)
+    try:
+        path = log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {message}\n")
+    except Exception:  # noqa: BLE001 -- evidence is best-effort, never fatal
+        pass
+
+
 def schedule_delayed_daemon_health_reap(
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
 ) -> bool:
@@ -336,11 +355,38 @@ def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
         # independently and reports its own failures safely; returning
         # here would skip healing the exact zero-monitor state this
         # command exists for.
-        print(f"status-monitor-reap-stale: repair attempt failed (non-fatal): {exc}")
+        _record(f"status-monitor-reap-stale: repair attempt failed (non-fatal): {exc}")
     else:
         findings = report.get("findings") if isinstance(report, dict) else None
         count = len(findings) if isinstance(findings, list) else 0
-        print(f"status-monitor-reap-stale: applied daemon-health repair ({count} finding(s))")
+        # The doctor itself refuses every termination when it cannot group a
+        # launcher/worker census into generations with confidence (it never
+        # guesses which half of a pair is a duplicate); record that here so an
+        # unattended run leaves evidence of what it declined to touch, and
+        # never also record the refused repair as applied.
+        actions = report.get("actions") if isinstance(report, dict) else None
+        refusal = next(
+            (
+                action for action in (actions if isinstance(actions, list) else [])
+                if isinstance(action, dict) and action.get("kind") == "generation_grouping"
+            ),
+            None,
+        )
+        if refusal is None:
+            _record(f"status-monitor-reap-stale: applied daemon-health repair ({count} finding(s))")
+        else:
+            detail = next(
+                (
+                    census.get("grouping_uncertain_reason")
+                    for census in (report.get("after"), report.get("before"))
+                    if isinstance(census, dict) and census.get("grouping_uncertain_reason")
+                ),
+                refusal.get("reason"),
+            )
+            _record(
+                "status-monitor-reap-stale: terminations skipped -- "
+                f"generation grouping uncertain ({detail}; {count} finding(s))"
+            )
 
     # The repair above only audits/terminates EXISTING live candidates -- a
     # rollback that left ZERO live monitors (the other documented ambiguous
@@ -350,8 +396,8 @@ def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
     # not a check against this already-stale report).
     outcome = _ensure_monitor_if_zero_candidates_under_cutover_guard()
     if outcome == "ensured":
-        print("status-monitor-reap-stale: no live monitor after repair -- ensured")
+        _record("status-monitor-reap-stale: no live monitor after repair -- ensured")
     elif outcome.startswith("error:"):
-        print(f"status-monitor-reap-stale: ensure-monitor attempt failed (non-fatal): {outcome[6:]}")
+        _record(f"status-monitor-reap-stale: ensure-monitor attempt failed (non-fatal): {outcome[6:]}")
     return 0
 

@@ -38,7 +38,6 @@ that one-time bootstrap transition is a plain stop/start, not a regression.
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import socket as _socket
 import subprocess
@@ -115,48 +114,48 @@ class _CutoverContext:
     token_by_port: dict[int, str]
 
 
-def _passive_stdio_kwargs(log_path: Path) -> tuple[dict, list]:
-    """Redirect the spawned passive daemon's stdio to its own log file.
-
-    Without this, a POSIX child inherits whatever fds the launcher held open
-    at spawn time -- a long-running daemon holding such a pipe open means the
-    *launcher's* pipe/terminal never sees EOF, exactly the class of bug fixed
-    in agent-bridge's ``spawn_passive`` (copilot-extensions#2200/#2201).
-    """
-    log = open(log_path, "ab")
-    return {"stdout": log, "stderr": log, "stdin": subprocess.DEVNULL}, [log]
-
-
 def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.Popen:
     """``zdd`` ``spawn_passive`` callback: launch the installed code as a
     passive ``serve`` instance on its own data socket + this control port.
 
-    Uses the repo's standard headless/detached spawn helpers (the same
-    pattern as ``forward._spawn_serve_host``) rather than a hand-rolled
-    platform check: ``windowless_python()`` avoids a Windows venv
-    ``python.exe`` re-exec flashing a fresh console, and ``detached_kwargs()``
-    fully detaches the child (own session on POSIX, ``DETACHED_PROCESS |
-    CREATE_NEW_PROCESS_GROUP`` on Windows) so it outlives this short-lived
-    cutover process and its lifetime never drifts from the existing
-    detach pattern used elsewhere in this plugin.
+    Launches through the shared resident-daemon primitive
+    ``agent_procutil.spawn_daemon`` (the same one ``forward._spawn_serve_host``
+    uses): ``windowless_python()`` avoids a Windows venv ``python.exe`` re-exec
+    flashing a fresh console, and ``spawn_daemon`` fully detaches the child,
+    breaks it away from a kill-on-close Job around this short-lived cutover
+    process (an updater's, for instance; contained test mode never requests
+    breakaway), runs it from the stable
+    ``AGENT_MCP_HOME`` data root rather than the caller's cwd, and appends its
+    stdout/stderr to the generation's own log file. Without that log, a POSIX
+    child would inherit whatever fds the launcher held open, and a daemon
+    holding such a pipe open means the launcher's pipe never sees EOF (the
+    class of bug fixed in agent-bridge's ``spawn_passive``,
+    copilot-extensions#2200/#2201). A Job that refuses breakaway raises
+    ``DaemonSpawnError`` here, failing the cutover before commit rather than
+    promoting a generation that would die with the launching process.
     """
-    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+    from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
+    from .sockio import daemon_env_overrides
+
+    # Resolve every path against THIS process's cwd before the spawn: the
+    # child runs from the data root, so a relative AGENT_MCP_HOME-derived
+    # socket/log path (or AGENT_MCP_HOME itself) would otherwise be resolved a
+    # second time there and name ``home/home/...``.
+    home = Path(ctx.data_root).resolve()
+    socket_path = Path(ctx.new_socket_path).resolve()
+    log_path = Path(ctx.new_log_path).resolve()
     python = sys.executable
     cmd = [windowless_python(python), "-m", "agent_mcp", "serve",
-          "--socket", str(ctx.new_socket_path),
-          "--passive", "--control-port", str(control_port)]
-    env = dict(os.environ)
-    env["AGENT_MCP_CONTROL_TOKEN"] = ctx.new_control_token
-    env.update(windowless_python_env(python))
-    kwargs, opened = _passive_stdio_kwargs(ctx.new_log_path)
-    kwargs["env"] = env
-    kwargs.update(detached_kwargs())
-    try:
-        proc = subprocess.Popen(cmd, **kwargs)
-    finally:
-        for f in opened:
-            f.close()
+           "--socket", str(socket_path),
+           "--passive", "--control-port", str(control_port)]
+    env_overrides = daemon_env_overrides(home)
+    env_overrides["AGENT_MCP_CONTROL_TOKEN"] = ctx.new_control_token
+    env_overrides.update(windowless_python_env(python))
+    home.mkdir(parents=True, exist_ok=True)
+    proc = spawn_daemon(cmd, cwd=home, log_path=log_path,
+                        env_overrides=env_overrides,
+                        display=f"agent_mcp serve --passive --control-port {control_port}")
     ctx.token_by_port[control_port] = ctx.new_control_token
     return proc
 

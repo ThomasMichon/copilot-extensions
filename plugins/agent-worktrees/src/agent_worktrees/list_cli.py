@@ -64,6 +64,10 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("list", help="List worktrees from tracking records")
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument(
+        "--current", action="store_true",
+        help="Read the resident current-roster contract; never scan or recompute in the caller.",
+    )
+    p.add_argument(
         "--mux-details",
         action="store_true",
         help="Include mux session attached/detached status (JSON only)",
@@ -112,11 +116,16 @@ def add_parsers(sub) -> None:
     p.add_argument(
         "--stream",
         action="store_true",
-        help="Emit newline-delimited JSON (one worktree per line, "
-        "flushed) for the Picker's streaming SSH consumer: a "
-        "begin frame, fast (unclassified) rows, then classified "
-        "rows (with --classify), then a done frame. Implies "
-        "--json.",
+        help="Emit newline-delimited JSON with a complete current-roster "
+        "begin/worktree/done publication barrier. Implies --json. "
+        "Use --follow for held incremental updates.",
+    )
+    p.add_argument(
+        "--follow",
+        action="store_true",
+        help="Hold a daemon-owned current-roster feed until cancelled; "
+        "emit an atomic snapshot, incremental commits, and cutover notices. "
+        "Implies --current and --stream; requires worktrees-feed-v1.",
     )
     p.add_argument(
         "--fresh",
@@ -461,6 +470,15 @@ def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List worktrees from tracking records."""
+    if getattr(args, "follow", False) or getattr(args, "current", False) or (
+        (getattr(args, "json", False) or getattr(args, "stream", False))
+        and not getattr(args, "glance", False)
+        and not getattr(args, "profile_assignment_history", False)
+        and _status_monitor_enabled()
+    ):
+        from .worktrees_client import emit_current
+
+        return emit_current(args)
     _lc_key = None
     _project = None
     if (

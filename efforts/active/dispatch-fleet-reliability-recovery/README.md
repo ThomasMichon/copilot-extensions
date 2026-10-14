@@ -193,6 +193,26 @@ requested contract.
 
 ## Journal
 
+### 2026-10-14 - Native category contract budget composition
+
+- The native category fixture put four serial cold CLI calls, each permitted
+  20 seconds, inside one 30-second item plus real HTTP/setup/teardown. That is
+  a contract-composition mismatch, not evidence of the original timeout cause.
+- A measured normal run recorded CLI durations of 3.81, 4.39, 4.23 and 4.20
+  seconds and an 18.28-second item interval. A contained nine-second cold-start
+  delay left completed CLI calls within 20 seconds but exhausted the old
+  aggregate item during the third call. The real modules and HTTP remained
+  unmocked; neither timeout budget changed.
+- Separate function-scoped view items preserve every selector, pivot, result,
+  progress, statistics and attachment/session/worktree assertion. Under the
+  same controlled delay all four real CLI calls passed in 12.27, 18.77, 14.06
+  and 14.74 seconds, with each item below 30 seconds.
+- Original failed-integration process/socket evidence is absent and the cause
+  remains unproven. Its tracking and diagnostic disposition remain open with
+  the coordinator; this fix does not declare the unknown hang resolved or
+  accept it as a flake. No production lifecycle, pool, schema or rollout change
+  is part of this test-contract correction.
+
 ### 2026-10-13 - Category source completion and inherited cwd admission
 
 - #6543 merged to dev as `e45220dc726b22c5aad147a23094796b582fe4b3`

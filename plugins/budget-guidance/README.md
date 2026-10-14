@@ -1,10 +1,9 @@
 # budget-guidance
 
 `budget-guidance` resolves current, provider-neutral usage-budget readings into
-one attributable posture. The first slice is deliberately offline: strict
-manual/static adapters provide partial or complete readings, deterministic
-field authority composes them, and one posture drives both JSON and concise
-human status.
+one attributable posture. The offline foundation uses strict
+manual/static adapters to provide partial or complete readings. Deterministic
+field authority composes them, and one posture drives both JSON and concise human status.
 
 ```bash
 budget-guidance status --config ./budget.json --json
@@ -16,10 +15,12 @@ Without `--config`, the command reads
 reported as unavailable; it is never interpreted as zero consumption or a full
 allowance.
 
-Configuration is inert JSON. The plugin does not source configuration, execute
-commands from it, call a network service, store a longitudinal ledger, qualify
-models, or alter routing decisions. Provider and bounded external-reader
-adapters, concise session guidance, and routing composition are later slices.
+Configuration is inert JSON. The plugin does not source configuration or execute
+commands from it. [Bounded external readers](docs/external-readers.md) require
+an explicit invocation-owned command grant, separate from configuration.
+The plugin does not itself call a provider network service, store a
+longitudinal ledger, qualify models, or alter routing decisions. Provider
+refresh adapters, concise session guidance, and routing composition are later slices.
 
 The current `sessionStart` hook is output-free: it only performs bounded,
 restart-safe runtime bootstrap and emits `{}`. The payload retains its command

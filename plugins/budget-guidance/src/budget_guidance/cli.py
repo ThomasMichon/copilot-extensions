@@ -13,6 +13,7 @@ import sys
 from typing import Any
 
 from . import __version__
+from .external_reader import CommandReader, acquire_config
 from .models import ModelError, load_json, parse_config, parse_instant
 from .posture import build_posture, unavailable_posture
 from .quota import normalize_quota
@@ -73,15 +74,47 @@ def _status(args: argparse.Namespace) -> int:
     # empty string ("--at \"\"") is still validated and rejected rather than
     # silently defaulting to "now".
     try:
-        at = parse_instant(args.at, "--at") if args.at is not None else datetime.now(timezone.utc)
+        at = parse_instant(args.at, "--at") if args.at is not None else None
     except ModelError as exc:
         return _emit_model_error(args, exc, human_prefix="")
     try:
+        readers: dict[str, CommandReader] = {}
+        if args.reader_id is not None or args.reader_command is not None:
+            if not args.reader_id or not args.reader_command or not args.reader_cwd:
+                raise ModelError("--reader-id, --reader-cwd and --reader-command are required together")
+            readers[args.reader_id] = CommandReader(
+                tuple(args.reader_command), Path(args.reader_cwd),
+                10 if args.reader_timeout is None else args.reader_timeout,
+                65536 if args.reader_output_limit is None else args.reader_output_limit,
+            )
+        elif (
+            args.reader_cwd is not None or args.reader_timeout is not None
+            or args.reader_output_limit is not None
+        ):
+            raise ModelError("reader options require --reader-id and --reader-command")
+    except ModelError as exc:
+        return _emit_model_error(args, exc, human_prefix="invalid invocation: ")
+    try:
         config_path = Path(args.config).expanduser()
         if not config_path.is_file():
-            posture = unavailable_posture(at, f"configuration not found: {config_path}")
+            if readers:
+                return _emit_model_error(
+                    args, ModelError("cannot validate reader grants without configuration"),
+                    human_prefix="invalid invocation: ",
+                )
+            posture = unavailable_posture(
+                at if at is not None else datetime.now(timezone.utc),
+                f"configuration not found: {config_path}",
+            )
         else:
-            posture = build_posture(parse_config(load_json(config_path)), at)
+            config = parse_config(load_json(config_path))
+            try:
+                config = acquire_config(config, readers)
+            except ModelError as exc:
+                return _emit_model_error(args, exc, human_prefix="invalid invocation: ")
+            posture = build_posture(
+                config, at if at is not None else datetime.now(timezone.utc),
+            )
     except ModelError as exc:
         return _emit_model_error(args, exc, human_prefix="invalid configuration: ")
     if args.json:
@@ -159,6 +192,14 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--config", default=str(_default_config()))
     status.add_argument("--at", help="evaluate freshness at an RFC 3339 instant")
     status.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    status.add_argument("--reader-id", help="explicitly authorize one configured external adapter")
+    status.add_argument("--reader-cwd", help="absolute operator-selected reader working directory")
+    status.add_argument("--reader-timeout", type=float, help="deadline in seconds (default: 10)")
+    status.add_argument("--reader-output-limit", type=int, help="stdout bytes (default: 65536)")
+    status.add_argument(
+        "--reader-command", nargs=argparse.REMAINDER,
+        help="absolute executable followed by literal arguments; this option must be last",
+    )
     status.set_defaults(handler=_status)
     quota = subparsers.add_parser("quota", help="inspect a bounded session quota capture")
     quota.add_argument("--capture", required=True, help="allowlisted JSON capture, at most 64 KiB")

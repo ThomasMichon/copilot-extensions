@@ -15,6 +15,13 @@ The static adapter is intentionally complete enough for offline operation and
 partial enough to exercise multi-source composition. It performs no I/O beyond
 reading the selected JSON file.
 
+`external_reader.py` acquires inert external references using invocation-owned
+operator grants, then passes ordinary readings to the same pure resolution.
+Repository/configuration data cannot grant execution authority, and the plugin
+does not acquire credentials. An explicit operator grant may authorize a
+repository executable; its location is not itself a trust guarantee.
+The [external-reader contract](external-readers.md) owns bounds and failures.
+
 The fast installer stamp copies the exact owning payload into an immutable
 versioned snapshot. Both compatibility and payload-local wrappers provision
 only from that recorded snapshot, serialize through the runtime root's
@@ -23,6 +30,11 @@ not search other marketplace installations for a same-named plugin.
 Session bootstrap also reads deployed and payload versions without ambient
 Python, so an older valid runtime cannot suppress reconciliation to a newer
 owning payload on a Python-less host.
+Snapshots also materialize the owning `agent-procutil` dependency; both installer
+paths pass its local source explicitly rather than resolving an index package.
+Both package build roots clear setuptools `build/` and root/src `*.egg-info`
+artifacts before and after every uv or pip attempt, including the fallback, so
+partial build residue cannot shadow current source.
 The bootstrap hook is declared output-free and emits only `{}`. Command-catalog
 rendering remains a plugin-owned emitter for explicit use and a future native
 host-composition seam; no custom cross-plugin authority invokes it.

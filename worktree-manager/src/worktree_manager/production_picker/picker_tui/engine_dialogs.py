@@ -5,11 +5,10 @@ from __future__ import annotations
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, SelectionList, Static
 
-from . import derive
 from .engine_focus import FocusGroup, _ScopeSelectionList
 from .engine_helpers import (
     ACTION_DESC,
@@ -26,6 +25,7 @@ from .engine_helpers import (
     MAINT_ACTION_DESC,
 )
 from .field_widgets import compose_field
+from .worktree_details_screen import WtDetailsScreen as WtDetailsScreen
 
 class QuitConfirmScreen(ModalScreen[bool]):
     """Native modal confirm for Esc/q on a top-level picker view (#88 F4;
@@ -435,10 +435,11 @@ class SubMenuScreen(ModalScreen[tuple]):
         # modal's max-height with no scrollbar to recover the hidden verbs.
         # Bounded to a single count line instead; "View details" (always the
         # last verb) opens the full breakdown in its own scrollable card.
-        details = list((rec.get("asset_hints") or {}).get("details") or [])
-        if details:
+        assets = rec.get("asset_hints") or {}
+        count = assets.get("held_count", len(assets.get("details") or []))
+        if count:
             t.append(
-                f"\n {len(details)} held claim{'s' if len(details) != 1 else ''}"
+                f"\n {count} held claim{'s' if count != 1 else ''}"
                 " — see View details", style=C_DIM)
         return t
 
@@ -558,108 +559,6 @@ class SubMenuScreen(ModalScreen[tuple]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
-
-class WtDetailsScreen(ModalScreen[None]):
-    """Read-only, scrollable "View details" card for one worktree
-    (fold-the-claims-list follow-up).
-
-    The Actions menu's own header (:meth:`SubMenuScreen._header`) is bounded
-    to a handful of fixed lines so the always-needed verb list never gets
-    pushed past the modal's max-height with no way to scroll back to it. This
-    screen is the escape hatch for everything that used to render there
-    unbounded (the full held-claims/asset breakdown) plus the rest of the
-    record's identity/status detail an operator might want: title, path, id,
-    status, the full claim list, and session detail. Built entirely from the
-    ``rec`` dict already held by the picker -- no new gather/IO, so it opens
-    instantly like every other menu here.
-    """
-
-    CSS = """
-    WtDetailsScreen { align: center middle; background: $background 55%; }
-    WtDetailsScreen > #details-frame {
-        width: 84; height: auto; max-height: 90%;
-        border: round #ffaf00; background: $surface; padding: 1 2;
-    }
-    WtDetailsScreen #details-body { height: auto; max-height: 100%; }
-    WtDetailsScreen #details-foot { color: grey; height: 1; padding: 1 0 0 0; }
-    """
-    BINDINGS = [
-        Binding("escape", "close", show=False),
-        Binding("q", "close", show=False),
-        Binding("enter", "close", show=False),
-    ]
-
-    def __init__(self, rec) -> None:
-        super().__init__()
-        self._rec = rec
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="details-frame"):
-            with VerticalScroll(id="details-body"):
-                yield Static(self._body())
-            yield Static(" Esc/Enter: close", id="details-foot")
-
-    @staticmethod
-    def _asset_label(c) -> str:
-        ref, note = (c.get("ref") or "").strip(), (c.get("note") or "").strip()
-        return f"{ref} — {note}" if ref and note else ref or note or "(unlabeled)"
-
-    def _body(self) -> Text:
-        rec = self._rec
-        raw = rec.get("raw") or {}
-        t = Text()
-        t.append(f"{rec.get('title') or '(untitled)'}\n", style="bold")
-        path = raw.get("path") or raw.get("worktree_path") or ""
-        if path:
-            t.append(f"path    {path}\n", style=C_DIM)
-        t.append(f"id      {raw.get('id') or rec.get('id4') or ''}\n", style=C_DIM)
-        t.append(
-            f"status  {rec.get('state')} · {rec.get('machine')} · "
-            f"{rec.get('env')}\n", style=C_DIM)
-        t.append(
-            f"age {rec.get('age')} · sess {rec.get('sess')} · "
-            f"turns {rec.get('turns')} · PR {rec.get('pr')}\n", style=C_DIM)
-        markers = (rec.get("status_markers") or "").strip()
-        if markers:
-            t.append("\nstatus markers:\n", style="bold")
-            for text, is_warn in derive.status_marker_segments(markers, 999):
-                t.append(text, style=C_WARN if is_warn else C_DIM)
-            t.append("\n")
-        relation = (rec.get("reciprocal_relation") or {}).get("state")
-        if relation and relation != "unbound":
-            t.append(f"\nrelation  {relation}\n", style=C_DIM)
-        sid = rec.get("last_session_id")
-        if sid:
-            if rec.get("mux_live") and rec.get("session_bare_orphan"):
-                lock = " · ⚠ inconsistent (mux + stray orphan — Repair fixes it)"
-            elif rec.get("session_bare_orphan"):
-                lock = " · bound (⚠ bare orphan — Reclaim frees it)"
-            elif rec.get("session_lock_live") and not rec.get("mux_live"):
-                lock = " · bound (lock live — Reclaim frees it)"
-            elif rec.get("session_lock_live"):
-                lock = " · bound (lock live)"
-            elif rec.get("session_lock_stale") and not rec.get("mux_live"):
-                lock = " · stale lock (residue — Reclaim clears it)"
-            else:
-                lock = ""
-            t.append(f"\nsession   {sid}{lock}\n", style=C_DIM)
-        details = list((rec.get("asset_hints") or {}).get("details") or [])
-        if details:
-            t.append(f"\nheld claims ({len(details)}):\n", style="bold")
-            for c in details:
-                t.append(
-                    f"  {c.get('kind', 'resource')} [{c.get('state') or 'active'}]"
-                    f": {self._asset_label(c)}\n", style=C_DIM)
-        else:
-            t.append("\nheld claims: none\n", style=C_DIM)
-        t.append(
-            "\nUse the Messages action (from the Actions menu) to peek this "
-            "worktree's recent conversation.", style=C_DIM)
-        return t
-
-    def action_close(self) -> None:
-        self.dismiss(None)
-
 
 class ScopeDlgScreen(ModalScreen[bool]):
     """Native modal scope dialog for Clean/Sync and New-worktree options (#88 F4;

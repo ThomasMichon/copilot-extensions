@@ -25,6 +25,7 @@ match bypasses the SSH probe entirely rather than dialing out.
 
 from __future__ import annotations
 
+import hashlib
 import socket
 import subprocess
 import sys
@@ -34,11 +35,14 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import no_window_kwargs
+from dropin_registry import atomic_write_text
 
 from . import fragment_registry, ssh_profile
 from . import mesh as mesh_mod
 from .host_restore import payload_root as _default_payload_root
 from .probe import probe_alias
+
+_SOURCE_DIR_NAME = ".agent-ssh-sources"  # marketplace-isolation: allow shared-config-source
 
 
 def _normalize_hostname(hostname: str) -> str:
@@ -132,6 +136,19 @@ def _dtssh_transport_paths(root: Path) -> tuple[Path, Path]:
     return script, module
 
 
+def _retain_registry(registry_path: Path, config_d: Path | None) -> Path:
+    data = registry_path.read_bytes()
+    managed_dir = config_d or (ssh_profile._ssh_dir() / "config.d")
+    sources = managed_dir.parent / _SOURCE_DIR_NAME
+    sources.mkdir(mode=0o700, parents=True, exist_ok=True)
+    sources = ssh_profile._regular_config_directory(sources)
+    ssh_profile._chmod(sources, 0o700)
+    retained = sources / f"dtssh-{hashlib.sha256(data).hexdigest()}.yaml"
+    atomic_write_text(retained, data.decode("utf-8"))
+    ssh_profile._chmod(retained, 0o600)
+    return retained
+
+
 def refresh_mesh(
     *,
     machines_yaml: Path | None = None,
@@ -153,7 +170,8 @@ def refresh_mesh(
        ``emit-registry`` script to capture the live tunnel ids (never trust a
        cached tunnel id: dtssh tunnel ids rotate).
     4. Re-render this machine's managed SSH ``config.d`` fragment from that
-       live registry.
+       live registry, retaining a durable content-addressed source outside
+       the OpenSSH Include directory.
     5. Probe reachability of every known alias with the refreshed profile --
        except an alias whose declared ``hostname`` matches this machine's own
        raw hostname, which is never dialed over SSH (see module docstring).
@@ -222,11 +240,12 @@ def refresh_mesh(
         try:
             cfg = ssh_profile.load_file(registry_path)
             module = ssh_profile.load_file(module_path)
+            retained_registry = _retain_registry(registry_path, config_d)
             ssh_profile.write_fragment(
                 cfg,
                 module,
                 config_d=config_d,
-                registry_path=registry_path.resolve(),
+                registry_path=retained_registry,
                 module_path=module_path.resolve(),
             )
         except (OSError, KeyError, TypeError, ValueError) as exc:
