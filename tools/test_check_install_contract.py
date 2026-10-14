@@ -390,6 +390,19 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
             "_versioned_mark_complete() {\n    \"$py\" \"${args[@]}\" 2>&1\n    return 0\n}\n"
             "main() {\n    _versioned_mark_complete || exit 1\n}\n",
         ),
+        ("install.sh", _SH_HELPER + "main() {\n    ok=0\n    _versioned_mark_complete || return \"$ok\"\n}\n"),
+        ("install.ps1", _PS1_HELPER + "    if (-not (Invoke-VersionedMarkComplete)) { exit $code }\n"),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    local out=\"$(\"$py\" \"${args[@]}\" 2>&1)\"\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    local rc=0\n"
+            "    local out=\"$(\"$py\" \"${args[@]}\" 2>&1)\" || rc=$?\n    return \"$rc\"\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
     ],
     ids=[
         "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
@@ -405,7 +418,8 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         "sh-helper-conditional-return",
         "ps1-positive-if-no-else", "ps1-positive-if-else-warns", "ps1-assigned-result",
         "sh-command-substitution", "sh-captured-status-returns-0", "sh-rc-test-only-warns",
-        "sh-writer-status-dropped",
+        "sh-writer-status-dropped", "sh-or-return-zero-variable", "ps1-exit-arbitrary-variable",
+        "sh-local-masks-writer", "sh-local-masks-captured-writer",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:

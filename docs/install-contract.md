@@ -1709,7 +1709,8 @@ published. `tools/check-install-contract.py` rejects a completion-marker helper
 that does not fail when its writer fails, and any call site that ignores the
 helper's result. A call is accepted only as a checked statement
 (`helper || exit 1`) or inside an `if` whose failure branch fails on every
-path (non-zero `exit`/`return`, `return $false` or `throw`); any other form,
+path (a literal non-zero `exit`/`return`, the writer's own captured status,
+`return $false` or `throw`); any other form,
 such as assigning the result, is rejected as unrecognized.
 `tools/test_check_install_contract.py` also runs every shipped shell helper
 against a stub writer.

@@ -407,20 +407,26 @@ _MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMar
 _IMMEDIATE_STATUS = re.compile(r"\s*(?:return|exit)\s+\"?\$\?\"?(?![\w-])")
 _FAILS = re.compile(
     r"\bthrow\b|\breturn\s+\$false\b"
-    r"|\b(?:exit|return)\s+(?:[1-9]\d*|\"?\$\{?(?!(?:true|null)\b)[A-Za-z_]\w*\}?\"?)(?![\w-])"
+    r"|\b(?:exit|return)\s+[1-9]\d*(?![\w-])"
 )
 _QUOTED_STATUS = re.compile(r'"(\$(?:\{?[A-Za-z_]\w*\}?|\?))"')
 _PARAM_EXPANSION = re.compile(r"\$\{(\w+)[^}]*\}")
 
 
-def _fails_unconditionally(body: str) -> bool:
+def _fails_unconditionally(body: str, status_vars: tuple[str, ...] = ()) -> bool:
     """Whether ``body`` reports failure on every path through it.
 
     Only a top-level statement counts: a stop nested in a conditional
     (``if (...) { return $false }``, ``[[ ... ]] && exit 1``, an inner
     ``if ... fi`` or ``{ ... }`` block) can be skipped, letting the failure
-    fall through to activation.
+    fall through to activation. A variable status counts only when it is one of
+    ``status_vars``, a status the caller proved was captured from the failing
+    writer; any other variable (``ok=0; return "$ok"``) may hold success.
     """
+    fails = _FAILS
+    if status_vars:
+        names = "|".join(map(re.escape, status_vars))
+        fails = re.compile(rf"{_FAILS.pattern}|\b(?:exit|return)\s+\$\{{?(?:{names})\}}?(?![\w-])")
     code = _PARAM_EXPANSION.sub(r"$\1", _QUOTED_STATUS.sub(r"\1", body))
     code = _strip_quoted_strings(code).strip()
     if code.startswith("{") and code.endswith("}"):
@@ -436,7 +442,7 @@ def _fails_unconditionally(body: str) -> bool:
     for statement in (s.strip() for s in statements):
         if re.match(r"(?:if|while|until|for|case)\b", statement):
             nested += 1
-        if nested == 0 and _FAILS.match(statement):
+        if nested == 0 and fails.match(statement):
             return True
         if re.match(r"(?:fi|done|esac)\b", statement) and nested:
             nested -= 1
@@ -472,6 +478,7 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
 
 
 _SH_RC_CAPTURE = re.compile(r"(?:^|\|\|)\s*(?:local\s+)?rc=\$\?|PIPESTATUS", re.M)
+_SH_DECLARATION = re.compile(r"^\s*(?:local|declare|typeset|export|readonly)\b")
 _SH_RC_TEST = re.compile(
     r'^\s*if\s+(?:\[\[\s*"?\$\{?rc\}?"?\s+-ne\s+0\s*\]\]|\(\(\s*rc\s*(?:!=\s*0\s*)?\)\))'
 )
@@ -488,12 +495,15 @@ def _sh_writer_status_kept(lines: list[str], index: int) -> bool:
     not count.
     """
     line, rest = lines[index], lines[index + 1:]
+    # `local out="$(writer)"` returns the builtin's status (0), not the writer's.
+    if _SH_DECLARATION.match(line):
+        return False
     following = "\n".join([line, *rest[:1]])
     if _SH_RC_CAPTURE.search(following) or any("PIPESTATUS" in r for r in rest):
         after = "\n".join(rest)
         tests = [i for i, r in enumerate(rest) if _SH_RC_TEST.match(r)]
-        return _fails_unconditionally(after) or any(
-            _sh_failure_branch_stops(rest[i:], negated=True) for i in tests
+        return _fails_unconditionally(after, ("rc",)) or any(
+            _sh_failure_branch_stops(rest[i:], negated=True, status_vars=("rc",)) for i in tests
         )
     if re.match(r"\s*if\s+!", line):
         return _sh_failure_branch_stops(lines[index:], negated=True)
@@ -507,7 +517,9 @@ _MARK_COMPLETE_SH_IF = re.compile(r"^\s*(?:el)?if\s+(!\s*)?_versioned_mark_compl
 _SH_KEYWORD = re.compile(r"(?<![\w$/.-])(then|if|fi|else|elif)(?![\w-])")
 
 
-def _sh_failure_branch_stops(lines: list[str], *, negated: bool) -> bool:
+def _sh_failure_branch_stops(
+    lines: list[str], *, negated: bool, status_vars: tuple[str, ...] = ()
+) -> bool:
     """Whether the shell ``if``/``elif`` starting ``lines`` stops on helper failure.
 
     The failure branch is the ``then`` body of ``if ! helper`` and the ``else``
@@ -535,7 +547,7 @@ def _sh_failure_branch_stops(lines: list[str], *, negated: bool) -> bool:
                 break
             branch, begin = word, keyword.end()
     failure = bodies.get("then" if negated else "else")
-    return failure is not None and _fails_unconditionally(failure)
+    return failure is not None and _fails_unconditionally(failure, status_vars)
 
 
 def _braced_body(text: str) -> str:
