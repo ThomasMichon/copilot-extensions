@@ -1,0 +1,9 @@
+{
+  "comment": "Keep fake-uv lean provisioning tests independent of runtime source-tree growth",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

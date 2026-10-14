@@ -9,6 +9,13 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The POSIX lean-provision launcher test uses fake uv and excludes runtime `src`
+and `libs` trees from its temporary payload. It still exercises real lifecycle
+admission, self-staging, activation, resolver deployment and both generated
+launchers under the existing 90-second item budget. Package construction and
+whole-source fingerprint coverage belong to their own contracts; this fixture
+must not grow with unrelated runtime source files.
+
 ### Derived native installation diagnostics
 
 `libs/payload-invocation/tests/test_derived_diagnostic_cli.py` executes the
