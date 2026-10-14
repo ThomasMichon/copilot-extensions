@@ -545,3 +545,10 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   declare the actual setuptools floor and wheel dependency through the same
   canonical seasoned resolver. The workflow contract asserts those explicit
   prerequisites; no missing-backend skip or build-isolation bypass was added.
+- Subsequent genuine review confirmed the retained-resource and cleanup-lock
+  fixes, then identified a migrated-engine status regression. Status now resolves
+  its interpreter once and reports unavailable selection explicitly without
+  hiding health/PID diagnostics or allowing launch to fall back to a legacy
+  environment. All 33 daemon contracts passed, including real stale-selector
+  and missing-resolver cases. Fresh-head review and complete required CI remain
+  blocking.

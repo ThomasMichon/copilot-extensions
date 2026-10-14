@@ -425,6 +425,14 @@ def test_stop_terminates(monkeypatch, tmp_path):
 
 
 def test_status_shape(monkeypatch, tmp_path):
+    resolve = daemon.engine_venv_python
+    resolutions = []
+
+    def resolve_once(home):
+        resolutions.append(home)
+        return resolve(home)
+
+    monkeypatch.setattr(daemon, "engine_venv_python", resolve_once)
     monkeypatch.setattr(
         daemon,
         "health",
@@ -450,6 +458,32 @@ def test_status_shape(monkeypatch, tmp_path):
     assert st["provisioned"] is False
     assert st["healthy"] is True
     assert st["observed_generation"] == "engine-v1"
+    assert resolutions == [tmp_path]
+
+
+@pytest.mark.parametrize("selector", ["current-version", "last-known-good"])
+@pytest.mark.parametrize("resolver_present", [False, True])
+def test_status_retains_diagnostics_when_migrated_interpreter_is_unavailable(
+    tmp_path, monkeypatch, selector, resolver_present,
+):
+    legacy = daemon.engine_venv_python(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy")
+    if resolver_present:
+        _stage_engine_resolver(tmp_path)
+    (tmp_path / selector).write_text("missing-slot\n")
+    daemon._pid_file(tmp_path).write_text("4242\n")
+    monkeypatch.setattr(daemon, "_pid_alive", lambda pid: pid == 4242)
+    monkeypatch.setattr(daemon, "health", lambda *_a, **_k: {
+        "status": "ok", "generation": "observed", "detail": "fixture-health",
+    })
+    report = daemon.status(tmp_path)
+    assert report["venv_python"] is None and report["provisioned"] is False
+    assert report["pid"] == 4242 and report["pid_alive"] is True
+    assert report["healthy"] is True and report["observed_generation"] == "observed"
+    assert report["detail"] == "fixture-health" and legacy.read_bytes() == b"legacy"
+    with pytest.raises(FileNotFoundError):
+        daemon.engine_command(tmp_path)
 
 
 # -- CLI ---------------------------------------------------------------------

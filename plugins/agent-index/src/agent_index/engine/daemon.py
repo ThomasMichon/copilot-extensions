@@ -300,6 +300,10 @@ def status(home: Path | None = None) -> dict:
     host, port = engine_endpoint()
     pid = _read_pid(home)
     observed = health(host, port)
+    try:
+        python = engine_venv_python(home)
+    except FileNotFoundError:
+        python = None
     return {
         "healthy": observed.get("status") != "unreachable",
         "host": host,
@@ -307,8 +311,8 @@ def status(home: Path | None = None) -> dict:
         "pid": pid,
         "pid_alive": bool(pid and _pid_alive(pid)),
         "engine_home": str(home),
-        "venv_python": str(engine_venv_python(home)),
-        "provisioned": engine_venv_python(home).exists(),
+        "venv_python": str(python) if python is not None else None,
+        "provisioned": python is not None and python.exists(),
         "generation": current_engine_generation(),
         "observed_generation": observed.get("generation"),
         "gpu_deps_installed": observed.get("gpu_deps_installed"),

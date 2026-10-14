@@ -268,6 +268,9 @@ non-mutating `inactive` result; before setup in an active repository it returns
 `setup_required`.
 - `agent-index role` — whether this machine is acting as `host` or `client`.
 - `agent-index engine status` — durable engine health, PID, endpoint, and venv.
+  A stale migrated selector with no selectable completed interpreter reports
+  `venv_python: null` and `provisioned: false`, retaining health and PID
+  diagnostics. Launches still refuse rather than falling back to the legacy venv.
 - `scripts/maintenance_tick.py` — a host-only deterministic maintenance body
   for agent-dispatch's script embodiment: health-checks the self-supervised
   service + durable engine, starts only what is down, then runs incremental
