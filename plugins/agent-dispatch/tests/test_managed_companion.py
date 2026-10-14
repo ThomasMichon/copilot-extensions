@@ -162,7 +162,8 @@ class Harness:
             sleep=self.advance,
         )
         # These state-machine fixtures use a simulated clock and process table.
-        # Real concurrent receipt operations are covered by the bounded/native suites.
+        # Real concurrent providers and receipts are covered by the bounded/native suites.
+        daemon._provider_executor = Executor()
         daemon._inventory_executor = Executor()
         daemon._receipt_executor = Executor()
         self.daemons.append(daemon)
@@ -1008,8 +1009,11 @@ def test_transition_group_restart_mid_cutover_rolls_back_pair_atomically(
     transition_group_harness,
 ):
     h = transition_group_harness
+    started = time.monotonic()
     assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
+    print(f"rollback fixture first launch={time.monotonic() - started:.3f}s", flush=True)
     h.daemon.reconcile_once()
+    print(f"rollback fixture settled cycle={time.monotonic() - started:.3f}s", flush=True)
     selected, rollback, _pending = h.daemon._read_transition_group(h.group_id)
 
     h.change(
@@ -1024,6 +1028,7 @@ def test_transition_group_restart_mid_cutover_rolls_back_pair_atomically(
         for rid in (h.engine_id, h.service_id)
     }
     assert all(snapshot is not None for snapshot in target.values())
+    print(f"rollback fixture target snapshots={time.monotonic() - started:.3f}s", flush=True)
     target = {rid: snapshot for rid, snapshot in target.items() if snapshot is not None}
     h.daemon._write_transition_group(
         h.group_id,
@@ -1033,10 +1038,12 @@ def test_transition_group_restart_mid_cutover_rolls_back_pair_atomically(
     )
     assert h.daemon._stop(h.engine_id)
     h.daemon._launch_managed(target[h.engine_id], ReconcileSummary(), bucket="restarted")
+    print(f"rollback fixture partial cutover={time.monotonic() - started:.3f}s", flush=True)
 
     h.controller = h.make_controller()
     h.daemon = h.make_daemon()
     h.daemon.reconcile_once()
+    print(f"rollback fixture restored={time.monotonic() - started:.3f}s", flush=True)
 
     record = h.group_record()
     assert record["pending"] is None

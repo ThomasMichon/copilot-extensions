@@ -495,3 +495,26 @@ requested contract.
   waived or classified as a proven flake. Full combined coverage, remaining
   gates, publication, fresh review and required CI remain open. No deployment,
   independent keeper custody or fleet processing proof is claimed.
+- Subsequent current combined coverage passes 136 tests with one existing
+  platform skip, including actual inherited-pipe timeout at 5.062 seconds,
+  transition-group rollback at 12.968 seconds, and native readiness, repeated
+  health, rollback and stop at 25.187 seconds. The state-machine fixture also
+  controls its known provider responses so a 50ms validation test does not
+  accidentally test an unresolved provider's different authority policy.
+- Coupled companion/retention/progress coverage then passes 132 tests with one
+  platform skip and one failure: the real materialization-process lock fixture
+  did not publish its build marker within the existing ten-second admission
+  wait. Its diagnostic `communicate(timeout=1)` timed out against a still-running
+  worker that the fixture had not yet released, so it does not establish which
+  startup phase was delayed.
+  This newly exposed native boundary remains unresolved; no timeout waiver,
+  publication or release is authorized by the earlier combined pass.
+- Added actual child-entry, runtime-import, fixture-import and materialization
+  phase evidence without changing that ten-second wait or the worker/cleaner
+  release protocol. The exact native lock test passes; subsequent complete
+  coupled coverage passes 133 tests with one existing platform skip. Actual
+  child-entry-to-build time was 5.954 seconds in the combined run. The original
+  missing-marker observation remains unexplained rather than retroactively
+  labeled a pass or a proven flake. The latest two complete selections now
+  cover 136 and 133 passing cases, respectively; publication and review gates
+  remain separate and no live deployment is claimed.
