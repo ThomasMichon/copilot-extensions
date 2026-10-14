@@ -81,6 +81,15 @@ into eight independently bounded four-minute jobs. Run it against the exact
 candidate ref before claiming all-copy native acceptance. A smoke pass or
 byte-identical vendoring check alone does not satisfy that broader gate.
 
+### Assignment reconnect contracts
+
+The assignment TCP reconnect guard holds the replacement SSE subscription at
+an explicit server-side barrier while creating unannounced work. It releases
+that barrier only after checking the disconnected queue, rather than assuming
+an HTTP request and a fixed sleep fit inside the real reconnect backoff.
+The blocked-spawn presence guard also waits for actual reader readiness;
+heartbeat progress alone does not prove the independent reader connected.
+
 ### Native category view contracts
 
 `plugins/agent-dispatch/tests/test_task_categories.py` gives each native view
