@@ -962,6 +962,18 @@ def test_configured_roles_are_reported_without_mutation(
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
+@pytest.mark.parametrize("role", ["client", "host"])
+def test_stdio_mcp_never_provisions_missing_runtime(tmp_path: Path, shell: str, role: str):
+    script, env = _fixture(tmp_path, shell)
+    env["TEST_PYTHON"] = ""
+    env["AGENT_INDEX_ROLE"] = role
+    result = _run(shell, script, env, "mcp")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "this command cannot provision a runtime" in result.stderr
+    assert "::agent-provisioning::" not in result.stderr
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
 def test_noninteractive_setup_requires_explicit_role(
     tmp_path: Path, shell: str
 ) -> None:

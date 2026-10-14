@@ -75,7 +75,11 @@ remaining checks are direct CLI/API calls, not Tier-E agent evaluation.
 | Governed first-use provisioning | Explicit OS-profile installation-mode opt-in and generation-pinned activation precede first-use setup, which must reach the real runtime gate's cell installer. Default policy retains legacy mode without activation. Existing legacy metadata is truthfully retained inert, not declared absent. No authorization override or legacy-probe bypass. |
 | Owned runtime and promoted health | The real venv must import from its slot and report the exact released version. `/health` and `/status` must identify that installed host profile, one live owned instance, PID and token; health must be promoted, non-passive and `ok`. |
 
-The direct MCP check registers the five shipped tools but never invokes reindex.
+The managed host omits the optional MCP SDK. The direct MCP check proves the
+SDK is absent and `mcp` refuses with exit 2 and `[stdio-mcp]` opt-in guidance.
+An explicitly opted-in adapter's five-tool stdio handshake is covered separately
+by the plugin suite; this solo installer scenario does not mutate a completed
+managed slot to add the extra.
 No embedding engine, torch, model cache, GPU access, scheduler or production
 service is needed. This is Linux/base-image proof, not native Windows/macOS,
 GPU/model or production deployment proof. Every failed command/assertion is

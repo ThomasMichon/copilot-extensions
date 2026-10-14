@@ -721,7 +721,7 @@ if [ -z "${AGENT_RT_PY:-}" ]; then
         exit 1
     fi
     case "$COMMAND" in
-        setup|search|similar|clusters|index|mcp|capability|engine) ;;
+        setup|search|similar|clusters|index|capability|engine) ;;
         *) printf '%s\n' '[agent-index] this command cannot provision a runtime.' >&2; exit 2 ;;
     esac
     _provision_runtime || {

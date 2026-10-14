@@ -94,6 +94,7 @@ server = [
 dev = [
     "pytest",
     "httpx",
+    "tomli>=2 ; python_version < '3.11'",
     # The test suite exercises the store/indexing/search/server modules, so dev
     # pulls all tested extras (self-reference) even though normal installations
     # do not need the legacy stdio adapter.

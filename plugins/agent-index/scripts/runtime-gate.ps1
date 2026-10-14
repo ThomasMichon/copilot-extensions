@@ -944,7 +944,7 @@ if (-not $Python) {
         [Console]::Error.WriteLine('[agent-index] runtime is not ready and self-provisioning is disabled.')
         exit 1
     }
-    if ($Command -notin @('setup', 'search', 'similar', 'clusters', 'index', 'mcp', 'capability', 'engine')) {
+    if ($Command -notin @('setup', 'search', 'similar', 'clusters', 'index', 'capability', 'engine')) {
         [Console]::Error.WriteLine('[agent-index] this command cannot provision a runtime.')
         exit 2
     }
