@@ -7,7 +7,7 @@ from dataclasses import asdict
 import hashlib
 import json
 
-from . import git_ops, pr_break_glass, pr_publication_state, pr_publish, pr_recovery, tracking
+from . import git_ops, output, pr_break_glass, pr_publication_state, pr_publish, pr_recovery, tracking
 from .config import Config
 from .providers.base import PullResult
 from .providers.pr_source import same_repository
@@ -26,14 +26,62 @@ def saved_publication(pr: tracking.PRRecord) -> dict[str, object]:
     )}
 
 
+def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
+    """Bind imperfect bytes and all referenced refs, not just a first failure."""
+    path = pr_recovery._path(cwd)
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return "", False
+    except OSError as exc:
+        snapshot: dict[str, object] = {"read_error": type(exc).__name__, "errno": exc.errno}
+        try:
+            info = path.stat()
+            snapshot["stat"] = (info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_mode, info.st_ino)
+        except OSError as stat_error:
+            snapshot["stat_error"] = (type(stat_error).__name__, stat_error.errno)
+        return _fingerprint(snapshot), True
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = None
+    point = None
+    if isinstance(data, dict):
+        points = data.get("checkpoints")
+        point = points.get(pr.pr_id) if isinstance(points, dict) else data
+    refs = {}
+    if isinstance(point, dict):
+        for field in ("local_ref", "published_ref", "lineage_ref"):
+            ref = point.get(field)
+            if isinstance(ref, str) and ref:
+                result = git_ops.git(
+                    "--no-replace-objects", "rev-parse", "--verify", "--end-of-options",
+                    f"{ref}^{{commit}}", cwd=cwd, check=False, isolated_repository=True,
+                )
+                refs[field] = (result.returncode, result.stdout.strip())
+    return _fingerprint({"bytes": hashlib.sha256(raw).hexdigest(), "refs": refs}), False
+
+
 def build(
     config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
     *, source_head: str, expected_head: str, identity: str, overrides: tuple[str, ...],
     cwd: str,
 ) -> pr_break_glass.RecoveryPreview:
     point = None
+    evidence = ""
+    unusable = False
     if expected_head != pr.head_sha:
-        point = pr_recovery.synced(record, pr, pr.head_sha, source_head, cwd=cwd)
+        evidence, unusable = _evidence_snapshot(pr, cwd)
+        try:
+            point = pr_recovery.synced(record, pr, pr.head_sha, source_head, cwd=cwd)
+        except (ValueError, OSError, git_ops.GitError):
+            unusable = True
+        if unusable:
+            point = None
+            output.warn(
+                "Recovery settlement evidence is unusable; the preview requires explicit rewrite sign-off. "
+                "Historical evidence is preserved, not repaired or treated as publication authority."
+            )
         if point is not None and point.synced_head != expected_head:
             point = None
     if pr.number is None:
@@ -48,7 +96,8 @@ def build(
             pr.pr_id, pr_publication_state.authority(pr), config.default_repo.pr.api_base,
         )),
         action="settle-publication" if point is not None else "rewrite",
-        evidence_fingerprint=_fingerprint(asdict(point)) if point is not None else "",
+        evidence_fingerprint=_fingerprint((evidence, asdict(point))) if point is not None else evidence,
+        evidence_status="unusable" if unusable else "backed-sync" if point is not None else "none",
         overrides=overrides,
     )
 

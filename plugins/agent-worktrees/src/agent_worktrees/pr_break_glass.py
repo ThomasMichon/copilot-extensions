@@ -33,6 +33,7 @@ class RecoveryPreview:
     publication_fingerprint: str = ""
     action: Literal["rewrite", "settle-publication"] = "rewrite"
     evidence_fingerprint: str = ""
+    evidence_status: Literal["none", "backed-sync", "unusable"] = "none"
 
     def __post_init__(self) -> None:
         if any(not value.strip() for value in (self.provider, self.repo, self.branch)):
@@ -52,6 +53,8 @@ class RecoveryPreview:
                 raise ValueError("Recovery requires full publication and evidence fingerprints.")
         if self.action not in ("rewrite", "settle-publication"):
             raise ValueError("Unknown recovery action.")
+        if self.evidence_status not in ("none", "backed-sync", "unusable"):
+            raise ValueError("Unknown recovery evidence status.")
         if self.action == "settle-publication" and not self.evidence_fingerprint:
             raise ValueError("Settlement requires independently validated publication evidence.")
 

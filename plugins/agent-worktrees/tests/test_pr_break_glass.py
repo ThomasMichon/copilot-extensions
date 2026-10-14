@@ -104,6 +104,7 @@ def test_blank_reason_is_not_confirmation(
     {"evidence_fingerprint": "short"},
     {"action": "refresh-lease"},
     {"action": "settle-publication"},
+    {"evidence_status": "assumed"},
 ])
 def test_malformed_operation_is_explicit(changes: dict[str, object]) -> None:
     fields = {

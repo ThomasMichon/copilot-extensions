@@ -1100,6 +1100,10 @@ patches without that checkpoint are not proof. Otherwise `rewrite` requires
 explicit confirmation of the exact source and agreed live CAS lease. The
 original saved lease is retained as evidence, never silently replaced before
 approval; normal publication and ordinary `--rewrite-pr` still refuse it.
+Corrupt, unreadable or dangling optional checkpoints mark settlement evidence
+`unusable` in the preview and audit. They disable settlement, not an explicit
+rewrite preview; their bytes/available file identity and referenced-ref state
+remain bound to confirmation and are never silently repaired.
 
 The exception waives historical original-owner, suffix and replay proof, not
 provider authentication, exact source/destination validation, an unchanged
