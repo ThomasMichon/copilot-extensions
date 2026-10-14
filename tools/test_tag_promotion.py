@@ -116,6 +116,37 @@ def test_cli_reports_errors_with_nonzero_exit(repo, capsys):
     assert f"pushed {STEM}-{sha[:8]}" in capsys.readouterr().out
 
 
+def test_cli_emits_only_a_verified_tag_receipt(repo, tmp_path):
+    work, _origin = repo
+    sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    output = tmp_path / "output"
+    argv = ["--merge-sha", sha, "--dev-sha", DEV_SHA, "--repo", str(work),
+            "--github-output", str(output)]
+    assert tp.main(argv) == 0
+    assert output.read_text() == f"promotion_tag={STEM}-{sha[:8]}\n"
+    assert tp.main(argv) == 0
+    assert output.read_text().splitlines() == [f"promotion_tag={STEM}-{sha[:8]}"] * 2
+
+
+@pytest.mark.parametrize("stem", ["promote-", "promote-x", STEM + "\nforged=value"])
+def test_invalid_state_stem_cannot_create_a_workflow_receipt(repo, tmp_path, stem):
+    work, _origin = repo
+    sha = _commit_state(work, {"tag": stem, "dev_head": DEV_SHA})
+    output = tmp_path / "output"
+    assert tp.main(["--merge-sha", sha, "--dev-sha", DEV_SHA, "--repo", str(work),
+                    "--github-output", str(output)]) == 1
+    assert not output.exists()
+
+
+def test_control_head_can_advance_beyond_the_published_release(repo):
+    work, origin = repo
+    sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    later = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    assert later != sha
+    assert _tag(work, sha) == (f"{STEM}-{sha[:8]}", True)
+    assert _remote_tag(origin, f"{STEM}-{sha[:8]}") == sha
+
+
 def test_retry_after_a_failed_push_pushes_the_existing_local_tag(repo):
     work, origin = repo
     sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})

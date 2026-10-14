@@ -127,7 +127,8 @@ base branch.
 >    "merge = shipped" mental model: your merge has to (a) finish `dev`'s own
 >    CI, (b) clear the `Validation Gate`, (c) get promoted into a generated
 >    `release/promote-<run id>` candidate PR against `main`, and (d) have that
->    candidate PR's own (fast) check pass before it auto-merges. If you want to
+>    candidate PR's own (fast) check pass before the pipeline performs an
+>    atomic expected-head squash merge. If you want to
 >    confirm your change actually shipped, watch for that candidate PR
 >    merging (`gh pr list --search "is:merged head:release/promote-"`, or just
 >    watch `main`'s commit history) rather than assuming your `dev` merge was

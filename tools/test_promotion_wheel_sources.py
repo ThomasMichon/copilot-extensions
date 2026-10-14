@@ -266,17 +266,18 @@ def test_validator_provisioning_never_exposes_release_authority():
 def test_promotion_actions_never_receive_or_persist_the_release_pat():
     import yaml
     root = Path(__file__).resolve().parent.parent
-    job = yaml.safe_load(
+    jobs = yaml.safe_load(
         (root / ".github" / "workflows" / "validate-and-promote.yml").read_text(),
-    )["jobs"]["promote"]
+    )["jobs"]
+    job = jobs["promote"]
     assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
     for scope in ("pull-requests", "checks", "statuses"):
         assert job["permissions"][scope] == "read"
     allowed = {
         "Promote (push a candidate branch; report-only if push=false)",
         "Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)",
+        "Publish and read back exact-candidate artifacts before enabling merge",
         "Land the candidate branch on main via PR + squash-merge",
-        "Tag the real post-merge commit",
     }
     writers = set()
     for step in job["steps"]:
@@ -289,8 +290,14 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
     assert writers == allowed
     identity = next(step for step in job["steps"] if step.get("name") == "Configure git identity for the generated commit")
     assert "gh auth setup-git --hostname github.com" in identity["run"]
-    wait = next(step for step in job["steps"] if step.get("id") == "merged")
-    assert "APERTURE_RELEASE_TOKEN" not in json.dumps(wait)
+    merger = jobs["merge-promotion"]
+    assert "secrets." not in json.dumps(merger)
+    assert all("uses" not in step for step in merger["steps"])
+    wait = next(step for step in merger["steps"] if step.get("id") == "merged")
+    assert wait["env"]["PROMOTION_MERGE_TOKEN"] == "${{ github.token }}"
+    assert 'merge_token = os.environ.pop("PROMOTION_MERGE_TOKEN")' in wait["run"]
+    assert wait["run"].count("env=read_env") == 3
+    assert wait["run"].count("env=merge_env") == 1
     assert '"pr", "view"' in wait["run"] and '"pr", "checks"' in wait["run"]
 
 

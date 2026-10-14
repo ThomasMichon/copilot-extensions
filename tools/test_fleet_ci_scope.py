@@ -18,7 +18,7 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
     ) == 2
     assert WORKFLOW.count(
         "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 "
-        "--timeout ${{ github.event_name == 'workflow_dispatch' && 600 || 120 }}"
+        "--timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}"
     ) == 2
 
 

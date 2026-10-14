@@ -698,6 +698,22 @@ def test_reverify_signature_skips_control_jobs_and_non_reportable_conclusions(wa
     assert calls == []
 
 
+@pytest.mark.parametrize("job_name", [
+    "Promote dev -> main",
+    "Merge the exact ready candidate without administrator authority",
+    "Publish attested first-party Python artifacts",
+    "Verify required workflows at the immutable merged release",
+])
+def test_reverify_signature_includes_every_artifact_promotion_failure(watchdog, monkeypatch, job_name):
+    signature = watchdog.build_signatures(job_name, SAMPLE_PYTEST_LOG)[0]
+    monkeypatch.setattr(watchdog, "_fetch_run_jobs", lambda repo, run_id: [
+        {"id": 1, "name": job_name, "conclusion": "failure"},
+    ])
+    monkeypatch.setattr(watchdog, "_fetch_job_log", lambda repo, job_id: SAMPLE_PYTEST_LOG)
+    result = watchdog.reverify_signature("owner/repo", "1", signature.key)
+    assert result.job_name == job_name and result.key == signature.key
+
+
 def test_reverify_signature_propagates_lookup_failed_from_jobs_fetch(watchdog, monkeypatch):
     def _raise(repo, run_id):
         raise watchdog.LookupFailed("simulated")

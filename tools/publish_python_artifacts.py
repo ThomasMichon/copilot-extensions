@@ -16,13 +16,16 @@ from promotion_python_artifacts import (
 )
 
 
-def _gh(argv: list[str], *, verification: bool = False) -> subprocess.CompletedProcess:
+def _gh(
+    argv: list[str], *, verification: bool = False, binary: bool = False,
+    timeout: int = 120,
+) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     if verification and "ARTIFACT_VERIFY_TOKEN" in env:
         env["GH_TOKEN"] = env["ARTIFACT_VERIFY_TOKEN"]
     env.pop("ARTIFACT_VERIFY_TOKEN", None)
     return subprocess.run(
-        ["gh", *argv], capture_output=True, text=True, env=env,
+        ["gh", *argv], capture_output=True, text=not binary, env=env, timeout=timeout,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
@@ -138,25 +141,44 @@ def _release(result: subprocess.CompletedProcess, tag: str) -> dict:
         raise PromotionArtifactError(f"{tag}: invalid release response") from exc
 
 
-def publish_artifacts(
-    directory: Path, *, repository: str, merged_commit: str, dev_head: str, repo: Path,
-) -> None:
-    """Publish only after verifying the actual merged candidate's exact composition."""
+def validate_commit_artifacts(
+    directory: Path, *, commit: str, dev_head: str, repo: Path,
+) -> dict:
+    """Bind the signed set to a commit's actual source tree and parent."""
     import promote_release as promotion
 
-    if not re.fullmatch(r"[0-9a-f]{40}", merged_commit):
-        raise PromotionArtifactError("invalid merged promotion commit")
-    tree = promotion._git(["rev-parse", f"{merged_commit}^{{tree}}"], cwd=repo)
-    main_before = promotion._git(["rev-parse", f"{merged_commit}^"], cwd=repo)
-    scratch = promotion.add_scratch_worktree(merged_commit, repo=repo)
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise PromotionArtifactError("invalid promotion commit")
+    tree = promotion._git(["rev-parse", f"{commit}^{{tree}}"], cwd=repo)
+    main_before = promotion._git(["rev-parse", f"{commit}^"], cwd=repo)
+    scratch = promotion.add_scratch_worktree(commit, repo=repo)
     try:
-        index = validate_artifacts(
+        return validate_artifacts(
             directory, content_tree=promotion._tree_excluding_state(tree, repo=repo),
             dev_head=dev_head, main_before=main_before, projects=candidate_projects(scratch),
             candidate_root=scratch,
         )
     finally:
         promotion.remove_scratch_worktree(scratch, repo=repo)
+
+
+def publish_artifacts(
+    directory: Path, *, repository: str, merged_commit: str, dev_head: str, repo: Path,
+    candidate_commit: str | None = None,
+) -> None:
+    """Publish only after verifying the actual merged candidate's exact composition."""
+    if candidate_commit is not None:
+        import promote_release as promotion
+
+        if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (candidate_commit, merged_commit)):
+            raise PromotionArtifactError("invalid candidate/final commit identity")
+        candidate_tree = promotion._git(["rev-parse", f"{candidate_commit}^{{tree}}"], cwd=repo)
+        merged_tree = promotion._git(["rev-parse", f"{merged_commit}^{{tree}}"], cwd=repo)
+        if candidate_tree != merged_tree:
+            raise PromotionArtifactError("final merge differs from the complete ready candidate tree")
+    index = validate_commit_artifacts(
+        directory, commit=merged_commit, dev_head=dev_head, repo=repo,
+    )
     for entry in index["artifacts"]:
         tag = f"{entry['plugin']}-v{entry['version']}"
         asset = str(directory / entry["filename"])
@@ -200,26 +222,43 @@ def publish_artifacts(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("verify", "publish"))
+    parser.add_argument("operation", choices=("verify", "prepare", "publish"))
     parser.add_argument("--directory", required=True, type=Path)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--signer-digest", required=True)
     parser.add_argument("--source-digest", required=True)
     parser.add_argument("--source-ref", required=True)
     parser.add_argument("--merged-commit")
+    parser.add_argument("--candidate-commit")
     parser.add_argument("--dev-head")
     args = parser.parse_args(argv)
-    if args.operation == "publish" and (not args.merged_commit or not args.dev_head):
-        parser.error("publish requires --merged-commit and --dev-head")
+    if args.operation == "publish" and (
+        not args.merged_commit or not args.candidate_commit or not args.dev_head
+    ):
+        parser.error("publish requires --merged-commit, --candidate-commit and --dev-head")
+    if args.operation == "prepare" and (not args.candidate_commit or not args.dev_head):
+        parser.error("prepare requires --candidate-commit and --dev-head")
     try:
         verify_attestations(
             args.directory, repository=args.repository, signer_digest=args.signer_digest,
             source_digest=args.source_digest, source_ref=args.source_ref,
         )
+        repo = Path(__file__).resolve().parent.parent
+        if args.operation == "prepare" or (
+            args.operation == "publish" and args.candidate_commit
+        ):
+            from promotion_artifact_readiness import prepare_artifacts, verify_ready_artifacts
+
+            operation = prepare_artifacts if args.operation == "prepare" else verify_ready_artifacts
+            tag = operation(
+                args.directory, repository=args.repository, candidate_commit=args.candidate_commit,
+                dev_head=args.dev_head, repo=repo,
+            )
+            print(f"artifact-ready: {tag}")
         if args.operation == "publish":
             publish_artifacts(
                 args.directory, repository=args.repository, merged_commit=args.merged_commit,
-                dev_head=args.dev_head, repo=Path(__file__).resolve().parent.parent,
+                dev_head=args.dev_head, repo=repo, candidate_commit=args.candidate_commit,
             )
     except PromotionArtifactError as exc:
         print(f"promotion-python-artifacts: FAILED: {exc}", file=sys.stderr)
