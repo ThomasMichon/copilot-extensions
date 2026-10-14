@@ -647,11 +647,14 @@ win grows with build complexity.
   has not been established here. Existing publisher/workflow custody stays.
 - A direct read of the new main's runtime plugins/shared libraries found no
   Python artifact-manifest/admission integration. The reported updater
-  refusal still needs its literal error and input identity; no claim that
-  executable client code requires these artifacts is justified yet.
-  Publication proof for this campaign must not become an agent-only
-  install/update prerequisite. No updater, rerun or deployed-copy edit was
-  performed as part of this diagnosis.
+  owner then confirmed the hold was its coordination prerequisite, not an
+  executable artifact rejection: no updater had run against that new main
+  and no first-party artifact identity had been selected. The owner removed
+  that extra gate and retained one already-authorized update through the
+  existing source/venv path; its actual installation result remains pending.
+  Publication proof for this campaign is not an agent-only install/update
+  prerequisite. This investigation started no second updater, rerun or
+  deployed-copy edit.
 
 ### 2026-10-14 - Explicit local fallback; artifact publication remains incomplete
 
