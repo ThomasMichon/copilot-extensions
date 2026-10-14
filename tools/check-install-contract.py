@@ -311,7 +311,8 @@ def _exec_stderr_swallow_violations(plugins_dir: Path) -> list[str]:
 # or failed `mark-complete` must stop activation, never be swallowed. The helper
 # must not end its writer pipeline in `|| true` (on one line or across line
 # continuations), and no caller may invoke it -- with or without arguments -- as
-# a statement whose result is ignored.
+# a statement whose result is ignored, or test it in a conditional whose
+# failure branch does not stop (`if ! helper; then warn; fi`).
 _MARK_COMPLETE_SWALLOW = re.compile(r"mark-complete.*\|\|\s*true|\|\s*sed\b.*\|\|\s*true")
 _MARK_COMPLETE_CALL = re.compile(r"^\s*(?:_versioned_mark_complete|Invoke-VersionedMarkComplete)(?:\s|$)")
 _LINE_CONTINUATION = re.compile(r"(?:\\|`)[ \t]*\n[ \t]*")
@@ -344,6 +345,8 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
             elif _MARK_COMPLETE_IF_NOT.search(line):
                 tail = "\n".join(lines[lineno - 1:lineno + 20])
                 stops = bool(_STOPS.search(_braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):])))
+            elif match := _MARK_COMPLETE_SH_IF.match(line):
+                stops = _sh_failure_branch_stops(lines[lineno - 1:], negated=bool(match.group(1)))
             else:
                 continue
             if not stops:
@@ -357,6 +360,37 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
 _PS1_HELPER = "Invoke-VersionedMarkComplete"
 _MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMarkComplete\b")
 _STOPS = re.compile(r"\b(?:exit|return|throw)\b")
+_MARK_COMPLETE_SH_IF = re.compile(r"^\s*(?:el)?if\s+(!\s*)?_versioned_mark_complete\b")
+_SH_KEYWORD = re.compile(r"(?<![\w$/.-])(then|if|fi|else|elif)(?![\w-])")
+
+
+def _sh_failure_branch_stops(lines: list[str], *, negated: bool) -> bool:
+    """Whether the shell ``if``/``elif`` starting ``lines`` stops on helper failure.
+
+    The failure branch is the ``then`` body of ``if ! helper`` and the ``else``
+    body of ``if helper``; a positive test with no ``else`` ignores the failure.
+    """
+    code = "\n".join(
+        _strip_quoted_strings(line) for line in lines if not line.lstrip().startswith("#")
+    )
+    keywords = list(_SH_KEYWORD.finditer(code))
+    start = next((k for k in keywords if k.group(1) == "then"), None)
+    if start is None:
+        return False
+    depth, branch, bodies, begin = 0, "then", {}, start.end()
+    for keyword in (k for k in keywords if k.start() >= start.end()):
+        word = keyword.group(1)
+        if word == "if":
+            depth += 1
+        elif word == "fi" and depth:
+            depth -= 1
+        elif depth == 0 and word in ("else", "elif", "fi"):
+            bodies.setdefault(branch, code[begin:keyword.start()])
+            if word == "fi":
+                break
+            branch, begin = word, keyword.end()
+    failure = bodies.get("then" if negated else "else")
+    return failure is not None and bool(_STOPS.search(failure))
 
 
 def _braced_body(text: str) -> str:

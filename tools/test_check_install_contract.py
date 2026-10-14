@@ -256,11 +256,34 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
             "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
             "    if (-not (Invoke-VersionedMarkComplete)) {\n        Write-Warn 'marker not published'\n    }\n",
         ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            "    if ! _versioned_mark_complete; then\n        _warn 'marker not published'\n    fi\n"
+            "    activate\n}\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            "    if ! _versioned_mark_complete; then _warn 'exit skipped'; fi\n    activate\n}\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            "    if _versioned_mark_complete; then\n        activate\n    else\n        _warn 'x'\n    fi\n}\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            "    if ! _versioned_mark_complete; then\n        _warn 'x'\n    else\n        return 0\n    fi\n}\n",
+        ),
     ],
     ids=[
         "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
         "sh-multiline-swallow", "ps1-ignored-call-with-arguments", "ps1-continued-ignored-call",
         "sh-or-true", "sh-or-warn-only", "ps1-warn-only-body",
+        "sh-if-not-warn-only", "sh-if-not-one-line-quoted-stop", "sh-if-else-warn-only",
+        "sh-if-not-stop-only-on-success",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:
@@ -281,8 +304,19 @@ def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text)
             "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
             "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
         ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            "    if ! _versioned_mark_complete; then\n        if [[ -n x ]]; then _warn 'x'; fi\n"
+            "        return 1\n    fi\n}\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            "    if _versioned_mark_complete; then\n        activate\n    else\n        exit 1\n    fi\n}\n",
+        ),
     ],
-    ids=["sh-checked", "ps1-checked"],
+    ids=["sh-checked", "ps1-checked", "sh-if-not-checked-nested", "sh-if-else-checked"],
 )
 def test_checked_completion_marker_publication_passes(tmp_path, name, text) -> None:
     assert checker._mark_complete_result_violations(_scripts(tmp_path, name, text)) == []

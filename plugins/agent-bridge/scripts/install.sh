@@ -784,13 +784,13 @@ _versioned_mark_complete() {
     # A refused publication fails the caller (#5472).
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
+    # Prefer the freshly built slot's own interpreter: it already passed the
+    # health gate, and an ambient one may be absent or unusable.
     local py=""
     if [[ -x "$VENV_DIR/bin/python" ]]; then
         py="$VENV_DIR/bin/python"
     else
-        # The freshly built slot's own interpreter: it already passed the health
-    # gate, and an ambient one may be absent or unusable.
-    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
+        py="$(_bootstrap_python)" || py=""
     fi
     if [[ -z "$py" ]]; then
         _fail "No python available to publish the completion marker for runtime slot versions/$SRC_VERSION"
