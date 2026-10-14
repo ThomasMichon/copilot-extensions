@@ -6,6 +6,8 @@
 - **Created:** 2026-10-10
 - **Status:** Active
 - **Vision:** `visions/plugin-services/README.md` - service-scaled process count, transient hooks, discovered local endpoints
+- **Startup guidance vision:** `visions/harness-guidance/README.md` -
+  `simple-local-static-delivery`, `generated-output-is-disposable-source-is-not`
 - **Umbrella issue:** #6086
 - **Sub-issues:** #6087, #4644
 - **Related, independently owned:** #6040, #6077, #6079, #6088, #6092
@@ -91,6 +93,18 @@ This means one final projection pass, not a new rollback-capable filesystem
 transaction. Current machine-preference behavior and asynchronous mux-daemon
 registration remain unchanged.
 
+Further operator decisions, verbatim:
+
+> Our goal is that all the files copy into some folder we've gitignored, so ideally there won't be anything there to collide with. We should probably always force-override what is present, on the assumption it was ours from before. What should cause a hard-fail is copying over a *tracked* file.
+>
+> Great. Drive this update visions or other durable guidance. We want an emphasis on simplicity rather than over reusue of related systems that don't actually fit
+
+The operator's static-delivery clarification, summarized: resolve the selected
+plugins, read their declared static instruction files, then copy them with the
+local-instruction suffix. Do not require a separately packaged projection
+engine for this operation. Overwrite untracked files within the dedicated
+ignored generated namespace; never overwrite tracked repository content.
+
 ## Plan
 
 ### Phase 1 - Reviewed scope and baseline
@@ -157,6 +171,12 @@ registration remain unchanged.
   and the complete combined plugin surface and local overrides are ready.
   Preserve direct creation and direct launch-plan consumers as well as both
   shell launchers; avoid early or repeated projection passes.
+- [ ] Replace the startup dependency on the packaged projection manager with
+  a small in-process batch over declared static files. Force-replace untracked
+  generated outputs; refuse tracked destinations before copying the batch.
+  Keep the separate checked-in authoring/review tools and reader guarantees.
+- [x] Revise the owning vision and design pattern for simple local delivery
+  and fit-for-purpose reuse before the implementation changes behavior.
 - [ ] Keep maintenance separate from offline planning and final projection.
   Record allocation/retry behavior when maintenance or later preparation fails;
   do not invent rollback of shared plugin/runtime updates.
@@ -200,6 +220,10 @@ registration remain unchanged.
   process or a mandatory daemon bridge.
 - [ ] Failure-path checks retain recoverable worktree identities, surface
   preparation errors and preserve existing update/ownership safeguards.
+- [ ] Static publication works without the packaged projection engine, its
+  runtime-assets manifest, sibling runtime or network access. Existing
+  untracked generated files are replaced; tracked and staged-added
+  destinations refuse the batch without modifying repository source.
 
 ## Proposal
 
@@ -219,11 +243,26 @@ small and explicit while unit policy tests remain in-process.
 _(Agent-recommended startup mechanics)_ Let an outer launcher defer projection
 publication until its maintenance and knowledge/settings preflights finish;
 direct callers still prepare their final surface before returning a launch
-plan. Reuse existing progress/reporting and rendering APIs, not a new resident
-or pane-side helper. Do not add cross-file transaction machinery for this
+plan. Reuse existing progress/reporting and small helpers only where their
+contracts fit the static-copy operation, not a new resident or pane-side helper.
+Replace the oversized packaged-renderer dependency rather than retaining it
+merely for code reuse. Do not add cross-file transaction machinery for this
 single-final-batch contract.
 
 ## Journal
+
+### 2026-10-13 - Simple static startup publication contract
+
+- Captured the operator's generated-output overwrite policy and explicit
+  preference for simplicity over reuse of related but mismatched systems.
+- Revised the guidance vision and right-sized-design principle; the detailed
+  pattern separates one final local copy batch from the existing packaged
+  renderer and checked-in authoring/review tools.
+- Untracked generated destinations may be replaced without ownership markers.
+  Tracked destinations refuse publication before any copy; reader authority
+  and source safety remain separate from output overwrite policy.
+- This is durable intent and planning, not a claim that the runtime copy path,
+  snapshot-packaging symptom or earlier release obligations are fixed.
 
 ### 2026-10-13 - Real listing workload and request-budget boundary
 

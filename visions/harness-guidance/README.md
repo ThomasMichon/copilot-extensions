@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-10-13
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -142,6 +142,19 @@ capability grounding, and deferred references. Composition should preserve
 source attribution and owner boundaries rather than rewriting independent
 policy into an unattributed central voice.
 
+### simple-local-static-delivery
+
+Static plugin guidance should be delivered as a simple local operation over the
+complete selected plugin set. All applicable workspace allocation and plugin
+composition should precede one final publication batch, so partial preparation
+does not cause repeated copies from incomplete source sets.
+
+Delivering already-static files should not require a separately packaged
+projection engine, authoring/review framework, sibling runtime, service or
+network operation. Shared machinery should be reused only when its contracts
+and operating costs fit the task; conceptual similarity alone is not a reason
+to expand the startup dependency or failure surface.
+
 ### coordinator-first-task-routing
 
 Harnesses should provide model-neutral guidance that helps a coordinating agent
@@ -206,6 +219,15 @@ contained implementation, and ordinary publication gates. Trial workers should
 be isolated from credentials and authority their assigned role does not need.
 
 ## Behaviors
+
+### generated-output-is-disposable-source-is-not
+
+Local static guidance should occupy a clearly designated, ignored generated
+namespace. Existing untracked outputs there should be freely replaceable,
+without requiring per-file ownership proofs. Tracked repository content should
+never be overwritten by this publication, even when an ignore rule or forced
+refresh is present. Publication should refuse unsafe destinations before
+changing the batch and report the actual conflict.
 
 ### lean-repository-waypoint
 
