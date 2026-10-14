@@ -840,6 +840,8 @@ worktree-manager.
 ### Phase 5 — Configurator: adoption, discovery, per-plugin config (Planned — #356 / #357)
 The [Configuration workbench plan](phase-5-configuration-workbench.md) applies
 the revised [canonical vision](../../../visions/installer/configurator/README.md).
+Its [Wave 0 inventory/design](phase-5-effective-configuration-contract.md)
+consumes the backstage already merged through #6427 rather than recreating it.
 Direct writes are machine-local; repository, knowledge, plugin, and preset
 sources are read-only. The sequencing and validation below are
 _(agent-recommended)_ realizations of that operator-approved boundary.
@@ -1213,6 +1215,14 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-14** — Claimed #6711's bounded Phase 5 Wave 0
+  reconciliation as `creaky-valve`: inventory the production contribution,
+  form/action, and domain configuration paths, then submit a minimal consumer
+  design for review before runtime implementation. Reuse the Configuration
+  backstage already merged through #6427; #6379 retains the shared shell,
+  worker-instance lifecycle, publication, and installed acceptance scope.
+  This slice owns no deployment, source writer, service, or fleet activation.
 
 - **2026-10-11** — Claimed the planning-only Phase 5 continuation on #357.
   The revised Configuration vision landed through #6178. Added a linked
