@@ -17,7 +17,13 @@ CLI = (
 )
 
 
-@pytest.mark.parametrize("flags", [[], ["-P"], ["-I"]])
+@pytest.mark.parametrize("flags", [
+    [],
+    pytest.param(["-P"], marks=pytest.mark.skipif(
+        sys.version_info < (3, 11), reason="Python safe-path flag requires 3.11+",
+    )),
+    ["-I"],
+])
 def test_projection_cli_uses_own_modules_under_isolation(tmp_path, flags):
     (tmp_path / "instruction_projections.py").write_text(
         'raise AssertionError("renderer imported an untrusted checkout module")\n',
