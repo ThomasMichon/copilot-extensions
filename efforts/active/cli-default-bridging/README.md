@@ -4,7 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-10-02
-- **Status:** Draft
+- **Status:** Active
+- **Current investigation:** [#6647](https://github.com/ThomasMichon/copilot-extensions/issues/6647)
+  (Phase 6 only; not the parent effort's completion tracker)
 - **Vision:** [`visions/cli-default-bridging`](../../../visions/cli-default-bridging/README.md)
   (leaf, cross-cutting; contests `remote-interactive-sessions`'
   `opt-in-not-ambient-default` stance pending this effort's validation) —
@@ -307,6 +309,12 @@ and ordering before Phase 0 work begins.)_
       **Still open: a CodeSpace venue** — `agent-codespaces`' own
       `codespacePlugins` injection seam remains untested. Left as the one
       remaining item before this checklist entry fully closes.
+- [ ] **Compatibility prerequisite (agent-recommended, #6664):** repair and
+      regression-test the remote driver's SDK prompt construction for send
+      and steer. Phase 6's actual-SDK synthetic probe found that the inspected
+      SDK drops a content-only send object. Preserve HTTP `content` input;
+      do not treat HTTP admission or historical launch presence as proof of
+      prompt delivery on an untested SDK/native pair.
 
 ### Phase 2 — Driver exclusivity arbitration for mux-hosted sessions
 
@@ -363,88 +371,29 @@ and ordering before Phase 0 work begins.)_
 ### Phase 6 — ACP fidelity investigation (idle / background-task state)
 
 Forward-looking, **not a gate on Phase 5's default-promotion decision** for
-this effort's current narrow scope — captured here because it directly
-feeds Validation Plan track (d)'s side-by-side ACP comparison and because
-the underlying gap is real and already evidenced (see Journal entry below).
-Confirmed fact set this phase starts from: `agent-remote-driver`'s SDK-based
-path gets the Copilot SDK's own typed `assistant.idle` / `session.idle` /
-`subagent.started|completed|failed` / `session.background_tasks_changed`
-events for free (it forwards the raw event stream verbatim). The ACP path
-`agent-bridge` actually drives (`plugins/agent-bridge/src/agent_bridge/acp_client.py`)
-does not surface this in the inspected receiver — SDK-extension availability
-is a separate launch-time/native-version proof, and `agent-bridge`'s own
-receiver side (`_BridgeClientImpl.session_update(self,
-session_id, update, **kwargs)`) silently **discards** `**kwargs` entirely,
-so even an already-present `_meta` payload on the wire would currently be
-thrown away unobserved. This is a confirmed **client-observability gap**,
-not proof that the wire traffic itself carries nothing — without a packet
-capture or the (closed-source) ACP-agent implementation's own source, it is
-not established whether Copilot's `--acp --stdio` process already attaches
-`_meta` metadata that `agent-bridge` simply never looks at. What IS directly
-confirmed: `acp_client.py` currently **reconstructs** both idle/background
-signals heuristically regardless — a synthesized `session_state_changed:
-idle` via a quiescence timer bracketing "out-of-turn" content, and
-background-sub-agent tracking by **regex-scraping the `task` tool's own
-human-readable text output** (`"started in background with agent_id: <id>"`
-/ `"status: idle|completed|failed|..."` — the code's own comment: *"There is
-no structured ACP field for this... Copilot exposes no structured
-background-task signal"*).
+this effort's current narrow scope. The two requested tracks have been
+investigated; [the findings and evidence boundaries](phase-6-acp-fidelity.md)
+are the detailed record. Neither investigation authorizes implementation of
+an SDK migration.
 
-Two candidate tracks to investigate — **do both, they are not mutually
-exclusive** — before deciding which (if either) to execute:
-
-- [ ] **(a) "Widen the pipe": a custom ACP extension payload.** The real
-      `agent-client-protocol` package (Zed's ACP, what `copilot --acp --stdio`
-      speaks; an ordinary installed pip dependency of `agent-bridge`'s —
-      `plugins/agent-bridge/pyproject.toml`'s `agent-client-protocol>=0.12.0,<1`
-      — not vendored source)
-      already has a genuine, spec-level vendor-extension mechanism that goes
-      unused here today:
-      - every ACP message type carries an optional `_meta` field
-        (`field_meta` in the Python bindings) reserved for exactly this kind
-        of additional metadata — already used by `acp_agent.py` for the
-        delegation-contract's owner/guest role tag
-        (`_meta["agent-bridge"].role`), just never for idle/background state;
-      - a formal underscore-prefixed extension-**method** dispatch exists in
-        `acp.router.MessageRouter.__call__` (`method.startswith("_")` routes
-        to a dedicated extension handler instead of "method not found") —
-        `agent-bridge` never registers `handle_extension_request`/
-        `handle_extension_notification` anywhere.
-      Investigate whether the Copilot CLI's own `--acp --stdio` ACP agent
-      implementation could be taught to emit a custom `_`-prefixed
-      notification (or attach `_meta` to its existing `session/update`
-      notifications) carrying the SDK's own idle/background-task event data
-      structurally, replacing `acp_client.py`'s text-scraping heuristic with
-      something authoritative. **This track is NOT bounded to the ACP-agent
-      side alone — confirmed, not assumed:** `agent-bridge`'s own receiver,
-      `_BridgeClientImpl.session_update`, currently registers no extension
-      handler at all and discards `session_update`'s `**kwargs` (where a
-      `_meta` payload would land) unconditionally. Either transport choice
-      (a new `_`-prefixed notification, or `_meta` on the existing
-      `session/update`) requires a matching **receiver-side change in
-      `agent-bridge` itself** before the text-scraping heuristic can be
-      removed — a known, already-identified requirement to carry into the
-      investigation, even though the detailed mechanism (new handler vs.
-      stop discarding kwargs vs. both) is left to it.
-- [ ] **(b) Switch `agent-bridge`'s own driving mechanism off `--acp --stdio`
-      onto `@github/copilot-sdk` directly** (the same SDK `agent-remote-driver`
-      and the CLI's own interactive-mode extensions already use), getting
-      `assistant.idle`/`session.idle`/`subagent.*` natively with no
-      reconstruction needed at all. **Explicitly flagged as a large,
-      structural undertaking** — likely its own effort, not a
-      `cli-default-bridging` execution task — since it would mean
-      `agent-bridge` no longer spawns/drives Copilot via the ACP JSON-RPC
-      protocol at all, a change with implications well beyond this one
-      fidelity gap (the operator's own framing: "it might let us fix many
-      structural issues with agent-bridge"). This phase's job is only to
-      **investigate and scope** that possibility — name which of
-      `agent-bridge`'s other known structural pain points an SDK-based
-      driving mechanism would or wouldn't actually fix, and produce enough
-      of a sketch that a real go/no-go decision (and, if "go," a proper
-      effort of its own) can be made — not to execute the migration here.
-- [ ] Bring both tracks' findings back here (or spin an SDK-migration
-      candidate into its own effort if track (b) looks worth pursuing) before
-      this phase is considered closed.
+- [x] **(a) Widen the ACP pipe.** Current dev already requests and routes
+      `github.com/copilot/sessionEvent` for sub-agent attribution, following
+      #5279 and #5666. Idle/background state remains reconstructed; the
+      existing best-effort feed is not teardown authority. The investigation
+      distinguishes enclosing notification metadata from nested update
+      metadata and identifies native coverage, continuity, and reconciliation
+      proof required before removing the heuristics.
+- [x] **(b) Scope SDK-backed driving.** The inspected bundled SDK supplies
+      typed idle/lifecycle events, task-query APIs, create/resume, callbacks,
+      and transports. A separate bounded adapter proof is plausible, but
+      ownership, Session Host survival, replay, interaction routing,
+      credentials, cleanup, and version compatibility remain explicit
+      obligations. No SDK migration was executed.
+- [x] Bring both tracks' findings back to this effort. Agent-recommended
+      next steps are a bounded experiment using the existing ACP feed and,
+      only through a separate reviewed plan, an SDK-adapter proof. No
+      transport/default changed, and no Phase 1-5 validation item is closed
+      by this research.
 
 ## Validation Plan
 
@@ -470,8 +419,11 @@ without unacceptable regression before Phase 5 can promote anything:
 
 ## Proposal
 
-_Pending — this effort is in Draft; Phase 0 confirmation and operator review
-come before execution begins._
+The Phase 0-1 implementation and Phase 6 investigation follow the reviewed
+per-phase plans. Repair the concrete SDK prompt prerequisite (#6664), then
+continue Phase 2's driver arbitration (#5930). Phase 3-5 and the outstanding
+cross-venue/version-floor proofs remain open. An SDK transport migration is
+outside this effort's execution scope.
 
 ## Journal
 
@@ -1004,3 +956,45 @@ rather than losing the thread — see the Plan section above for the two
 checklist tracks. Neither track has been started; this entry is the
 evidentiary record a future session should start from, not a substitute
 for actually doing either investigation.
+
+### 2026-10-14 — Phase 6 investigation: existing ACP feed and SDK boundaries
+
+Resumed the main effort and investigated both requested tracks under #6647.
+The detailed, source-grounded findings and future proof obligations are in
+[`phase-6-acp-fidelity.md`](phase-6-acp-fidelity.md); the Phase 6 Plan is now a
+summary pointing there instead of retaining a superseded receiver premise.
+
+Current dev already has the vendor-event route added by #5279 and corrected
+by #5666. An actual ACP 0.12.1 in-process routing probe confirmed enclosing
+metadata propagation, nested metadata preservation, lifecycle dispatch, the
+unhandled idle/background-state types, and underscore extension dispatch.
+That is receiver evidence, not a native wire capture. Public #5660 separately
+reports successful native subscription on CLI 1.0.93; it does not establish
+the version floor or authoritative delivery of idle/background state.
+
+The SDK investigation used the bundle accompanying CLI 1.0.88, identified as
+SDK 1.0.14-preview.1. Its task-change event is an ephemeral invalidation,
+not the task snapshot itself. Native types and task-query APIs offer a
+stronger starting point, but SDK selection alone does not replace Session
+Host survival, replay, ownership, cleanup, or interactive input routing.
+The existing remote-driver HTTP surface also does not expose a task snapshot.
+
+Agent-recommended outcome: experiment with the existing ACP feed before
+inventing another extension method; consider an SDK-adapter proof only as a
+separately reviewed effort. Neither route is ready to replace teardown
+authority or the production transport on this evidence alone. No plugin
+behavior, default, or installation was changed, and no native runtime or
+external venue was launched for this research. Unit/plugin, clean-room, and
+live-venue suites were not run because this slice changes effort documentation
+only; their implementation obligations remain explicit in the findings.
+
+The actual-SDK synthetic probe also exposed a concrete prerequisite: the
+remote driver passes `content`, but the inspected SDK serializes `prompt`.
+Four input-shape cases confirmed the request-construction defect without
+launching a runtime; native rejection was not exercised. Tracked and claimed
+#6664 for a surgical send/steer fix, with no transport migration bundled into it.
+
+Phase 6's investigation is complete, not the parent effort. Repair #6664
+before continuing Phase 2 / #5930; Phase 1's remaining cross-venue/version-floor
+proof and Phase 3-5 stay open. The original 2026-10-05 entry above is retained
+as historical evidence, not a description of the current receiver.
