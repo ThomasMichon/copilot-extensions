@@ -910,6 +910,8 @@ def session_admission(
     container: str,
     *,
     expected_assignment: dict | None = None,
+    dispatch_container_id: str | None = None,
+    dispatch_binding_id: str | None = None,
 ) -> Iterator[SessionAdmission]:
     """Admit one provider launch only when no destructive hold is present."""
     token = uuid.uuid4().hex
@@ -956,6 +958,17 @@ def session_admission(
             SessionAdmission,
             SESSION_ADMISSION_TTL,
         )
+        if dispatch_container_id is not None or dispatch_binding_id is not None:
+            if not dispatch_container_id or not dispatch_binding_id:
+                raise ProviderAdmissionError("Task admission requires both physical and binding identities")
+            from .dispatch_projection import verify_binding
+
+            try:
+                verify_binding(dispatch_container_id, dispatch_binding_id)
+            except RuntimeError as exc:
+                raise ProviderAdmissionError(str(exc)) from exc
+            if any(item.container == container for item in admissions.values()):
+                raise ProviderAdmissionError("Dispatch-only container already has an admitted worker")
         admissions[key] = admission
         _write_records(_SESSION_ADMISSIONS_FILE, admissions)
     heartbeat_stop = threading.Event()

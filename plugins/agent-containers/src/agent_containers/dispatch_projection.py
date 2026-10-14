@@ -1,0 +1,398 @@
+"""Provider-owned, one-incarnation credential delivery for restricted workers."""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import re
+import subprocess
+import time
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from agent_procutil import no_window_flags
+
+from .config import (
+    DISPATCH_BINDING_LABEL, DISPATCH_ONLY_LABEL, FLEET_LABEL,
+    RESTRICTED_PROFILE, SECURITY_PROFILE_LABEL, STATE_DIR,
+)
+from .private_state import atomic_write_json, write_json_exclusive
+from .restricted_exec import resolve_executable, sanitized_exec_prefix
+
+TOKEN_FILE = "/run/agent-dispatch/task-token"
+_STATE = STATE_DIR / "dispatch-bindings"
+_FACTS = {"task_id", "worker_id", "generation", "coordinator_epoch", "coordinator_url"}
+_ID = re.compile(r"[0-9a-f]{64}")
+_BINDING_ID = re.compile(r"[0-9a-f]{32}")
+
+# Runs only as root through an immutable Node executable; credentials use stdin.
+_WRITE_TOKEN = r"""
+const fs = require('fs');
+const crypto = require('crypto');
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => {
+  input += chunk;
+  if (Buffer.byteLength(input, 'utf8') > 8192) process.exit(1);
+});
+process.stdin.on('end', () => {
+  let tmp;
+  try {
+    if (process.getuid() !== 0 || !/^[\x21-\x7e]{1,8192}$/.test(input)) throw Error();
+    const run = fs.lstatSync('/run');
+    if (!run.isDirectory() || run.uid !== 0 || ((run.mode & 2) && !(run.mode & 512))) throw Error();
+    const dir = '/run/agent-dispatch';
+    try { fs.mkdirSync(dir, {mode: 0o755}); }
+    catch (err) { if (err.code !== 'EEXIST') throw err; }
+    const st = fs.lstatSync(dir);
+    if (!st.isDirectory() || st.uid !== 0 || (st.mode & 0o777) !== 0o755) throw Error();
+    const dest = dir + '/task-token';
+    try {
+      const old = fs.lstatSync(dest);
+      if (!old.isFile() || old.uid !== 0 || (old.mode & 0o777) !== 0o444) throw Error();
+    } catch (err) { if (err.code !== 'ENOENT') throw err; }
+    tmp = dir + '/.' + crypto.randomBytes(16).toString('hex');
+    const fd = fs.openSync(tmp, fs.constants.O_CREAT | fs.constants.O_EXCL |
+                          fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o444);
+    try { fs.writeFileSync(fd, input, 'utf8'); fs.fchmodSync(fd, 0o444); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, dest);
+  } catch (_) {
+    if (tmp) { try { fs.unlinkSync(tmp); } catch (_) {} }
+    process.stderr.write('Restricted task credential publication failed\n');
+    process.exitCode = 1;
+  }
+});
+"""
+
+
+def _path(container_id: str) -> Path:
+    if not isinstance(container_id, str) or not _ID.fullmatch(container_id):
+        raise RuntimeError("Task projection requires the full physical container ID")
+    return _STATE / f"{container_id}.json"
+
+
+def _text(value: object, label: str) -> str:
+    if (
+        not isinstance(value, str) or not value or len(value) > 1024
+        or any(ord(char) < 33 or ord(char) > 126 for char in value)
+    ):
+        raise RuntimeError(f"Invalid task projection {label}")
+    return value
+
+
+def _facts(request: object) -> dict:
+    if not isinstance(request, dict) or set(request) != _FACTS:
+        raise RuntimeError("Task preparation requires the exact incarnation fields")
+    for name in ("task_id", "worker_id", "coordinator_url"):
+        _text(request[name], name)
+    for name in ("generation", "coordinator_epoch"):
+        if type(request[name]) is not int or request[name] < 0:
+            raise RuntimeError(f"Invalid task projection {name}")
+    try:
+        url = urlsplit(request["coordinator_url"])
+        port = url.port
+    except ValueError:
+        raise RuntimeError("Invalid task projection coordinator URL") from None
+    if (
+        url.scheme not in {"http", "https"} or not url.hostname
+        or url.username is not None or url.password is not None
+        or url.query or url.fragment or port == 0
+        or "?" in request["coordinator_url"] or "#" in request["coordinator_url"]
+    ):
+        raise RuntimeError("Invalid task projection coordinator URL")
+    return dict(request)
+
+
+def _read(container_id: str) -> dict | None:
+    path = _path(container_id)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError):
+        raise RuntimeError("Container task binding is unreadable; refusing admission") from None
+    try:
+        if (
+            not isinstance(raw, dict)
+            or set(raw) != _FACTS | {
+                "version", "container_id", "binding_id", "owner_session_id", "expires_at"
+            }
+            or type(raw["version"]) is not int or raw["version"] != 1
+            or raw["container_id"] != container_id
+            or not _BINDING_ID.fullmatch(raw["binding_id"])
+        ):
+            raise ValueError
+        facts = {key: raw[key] for key in _FACTS}
+        if any(value is not None for value in facts.values()):
+            _facts(facts)
+        elif raw["owner_session_id"] is not None or raw["expires_at"] is not None:
+            raise ValueError
+        if raw["owner_session_id"] is not None:
+            _text(raw["owner_session_id"], "owner_session_id")
+        expiry = raw["expires_at"]
+        if expiry is not None and (
+            type(expiry) not in (int, float) or not math.isfinite(expiry) or expiry <= 0
+        ):
+            raise ValueError
+    except (KeyError, TypeError, ValueError, RuntimeError):
+        raise RuntimeError("Container task binding is invalid; refusing admission") from None
+    return raw
+
+
+def verify_binding(container_id: str, binding_id: str) -> dict:
+    binding = _read(container_id)
+    if binding is None or binding["binding_id"] != binding_id or binding["task_id"] is None:
+        raise RuntimeError("Container task binding does not match this launch")
+    return binding
+
+
+def register_birth(container_id: str, binding_id: str) -> None:
+    """Retain one provider birth; missing authority never means an unused slot."""
+    if not isinstance(binding_id, str) or not _BINDING_ID.fullmatch(binding_id):
+        raise RuntimeError("Invalid container dispatch birth identity")
+    write_json_exclusive(_path(container_id), {
+        **dict.fromkeys(_FACTS), "version": 1, "container_id": container_id,
+        "binding_id": binding_id, "owner_session_id": None, "expires_at": None,
+    })
+
+
+def creation_args(fleet_name: str, fleet, name: str) -> list[str]:
+    args = [
+        "run", "-d", "--name", name,
+        "--label", f"{FLEET_LABEL}={fleet_name}",
+        "--label", f"{SECURITY_PROFILE_LABEL}={fleet.security_profile}",
+    ]
+    if fleet.dispatch_only:
+        import uuid
+
+        fleet.validate_restricted()
+        args += [
+            "--label", f"{DISPATCH_ONLY_LABEL}=true",
+            "--label", f"{DISPATCH_BINDING_LABEL}={uuid.uuid4().hex}",
+        ]
+    return args
+
+
+def run_image(fleet, args: list[str], *, run):
+    result = run(args, timeout=120)
+    if fleet.dispatch_only and result.returncode == 0:
+        birth = next(value.partition("=")[2] for value in args if value.startswith(DISPATCH_BINDING_LABEL + "="))
+        register_birth(result.stdout.strip(), birth)
+    return result
+
+
+def prepare(name: str, expected_container_id: str, request: object) -> dict:
+    """Seal a physical container to one task incarnation before worker startup."""
+    from . import lease, lifecycle
+    from .resolver import resolve_live_exec_target
+
+    facts = _facts(request)
+    _path(expected_container_id)
+    with lease._lease_lock():
+        target = resolve_live_exec_target(name, dispatch_management=True)
+        if (
+            target.actual_profile != RESTRICTED_PROFILE or not target.fleet.dispatch_only
+            or target.container_id != expected_container_id
+        ):
+            raise RuntimeError("Task preparation requires the exact dispatch-only container")
+        holds = lease._read_live_records(
+            lease._DEPLOY_HOLDS_FILE, lease.DeployHold, lease.DEPLOY_HOLD_TTL,
+        )
+        admissions = lease._read_live_records(
+            lease._SESSION_ADMISSIONS_FILE, lease.SessionAdmission, lease.SESSION_ADMISSION_TTL,
+        )
+        if name in holds or any(item.container == name for item in admissions.values()):
+            raise RuntimeError("Container is busy; refusing task preparation")
+        binding = _read(expected_container_id)
+        if binding is None:
+            raise RuntimeError("Container dispatch birth authority is missing; recreate it")
+        inspected = lifecycle.inspect_container(expected_container_id)
+        labels = (inspected.get("Config") or {}).get("Labels") or {}
+        if (
+            inspected.get("Id") != expected_container_id
+            or labels.get(DISPATCH_BINDING_LABEL) != binding["binding_id"]
+        ):
+            raise RuntimeError("Container dispatch birth identity does not match retained authority")
+        if binding["task_id"] is not None:
+            if any(binding[key] != facts[key] for key in _FACTS):
+                raise RuntimeError("Physical container already belongs to another task incarnation; recreate it")
+        else:
+            binding.update(facts)
+            atomic_write_json(_path(expected_container_id), binding)
+    return binding
+
+
+def project(name: str, expected_container_id: str, request: object) -> dict:
+    """Publish or rotate a trusted issuer's credential without persisting it."""
+    from . import lease, lifecycle
+    from .resolver import resolve_live_exec_target
+
+    if not isinstance(request, dict) or set(request) != {
+        "binding_id", "owner_session_id", "task_token", "expires_at",
+    }:
+        raise RuntimeError("Credential projection requires the exact grant fields")
+    owner = _text(request["owner_session_id"], "owner_session_id")
+    token = request["task_token"]
+    if (
+        not isinstance(token, str) or not 0 < len(token) <= 8192
+        or any(ord(char) < 33 or ord(char) > 126 for char in token)
+    ):
+        raise RuntimeError("Invalid task credential")
+    expiry = request["expires_at"]
+    if type(expiry) not in (int, float) or not math.isfinite(expiry) or expiry <= time.time():
+        raise RuntimeError("Task credential expiry is invalid or expired")
+    with lease._lease_lock():
+        binding = verify_binding(expected_container_id, request["binding_id"])
+        if binding["owner_session_id"] not in (None, owner):
+            raise RuntimeError("Physical container native session cannot be rebound; recreate it")
+        if binding["expires_at"] is not None and expiry < binding["expires_at"]:
+            raise RuntimeError("Task credential rotation cannot move expiry backwards")
+        target = resolve_live_exec_target(
+            name, dispatch_binding_id=binding["binding_id"],
+        )
+        if target.container_id != expected_container_id:
+            raise RuntimeError("Container physical identity changed before credential delivery")
+        holds = lease._read_live_records(
+            lease._DEPLOY_HOLDS_FILE, lease.DeployHold, lease.DEPLOY_HOLD_TTL,
+        )
+        if name in holds:
+            raise RuntimeError("Container lifecycle is busy; refusing credential delivery")
+        # Retain the native-session fence even if Docker publication is interrupted.
+        binding["owner_session_id"] = owner
+        atomic_write_json(_path(expected_container_id), binding)
+        inspected = lifecycle.inspect_container(expected_container_id)
+        if inspected.get("Id") != expected_container_id:
+            raise RuntimeError("Container physical identity changed before credential delivery")
+        node, home = resolve_executable(
+            expected_container_id, "0", inspected, kind="node",
+            deadline=time.monotonic() + 30,
+        )
+        prefix = sanitized_exec_prefix(expected_container_id, "0", home)
+        try:
+            result = subprocess.run(
+                [*prefix[:2], "-i", *prefix[2:], node, "-e", _WRITE_TOKEN],
+                input=token, text=True, capture_output=True, timeout=30,
+                creationflags=no_window_flags(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError("Restricted task credential delivery failed") from None
+        if result.returncode:
+            raise RuntimeError("Restricted task credential delivery failed")
+        binding["expires_at"] = expiry
+        atomic_write_json(_path(expected_container_id), binding)
+    return binding
+
+
+def environment(binding: dict) -> dict[str, str]:
+    """Return only the nonsecret, immutable worker call projection."""
+    return {
+        "AGENT_DISPATCH_TASK_ID": binding["task_id"],
+        "AGENT_DISPATCH_TASK_WORKER_ID": binding["worker_id"],
+        "AGENT_DISPATCH_TASK_URL": binding["coordinator_url"],
+        "AGENT_DISPATCH_TASK_TOKEN_FILE": TOKEN_FILE,
+    }
+
+
+def build_spawn_command(target, binding: dict, acp_command: str) -> list[str]:
+    from . import lifecycle
+
+    inspected = lifecycle.inspect_container(target.container_id)
+    if inspected.get("Id") != binding["container_id"]:
+        raise RuntimeError("Container physical identity changed before task launch")
+    bash, home = resolve_executable(
+        target.container_id, target.user, inspected, kind="bash",
+        deadline=time.monotonic() + 30,
+    )
+    prefix = sanitized_exec_prefix(target.container_id, target.user, home)
+    projected = environment(binding)
+    if target.fleet.native_inference is not None:
+        projected.update(target.fleet.native_inference.environment())
+    env_args = [part for key, value in projected.items() for part in ("-e", f"{key}={value}")]
+    return [
+        *prefix[:2], "-i", *prefix[2:-1], *env_args, prefix[-1],
+        bash, "--noprofile", "--norc", "-c", acp_command,
+    ]
+
+
+def launch_task(args, run_stdio) -> int:
+    """Admit the explicit task lane without widening ordinary provider launches."""
+    from .config import load_config
+    from .lease import session_admission
+    from .resolver import _append_copilot_args, resolve_extra_copilot_args, resolve_live_exec_target
+
+    binding_id, expected_id = args.dispatch_binding_id, args.expected_container_id
+    if not binding_id or not expected_id:
+        raise RuntimeError("Task launch requires both physical and binding identities")
+    target = resolve_live_exec_target(args.name, dispatch_binding_id=binding_id)
+    if target.container_id != expected_id:
+        raise RuntimeError("Container physical identity changed before task launch")
+    with session_admission(
+        args.name, dispatch_container_id=expected_id, dispatch_binding_id=binding_id,
+    ):
+        target = resolve_live_exec_target(
+            args.name, config=load_config(), dispatch_binding_id=binding_id,
+        )
+        if target.container_id != expected_id:
+            raise RuntimeError("Container physical identity changed after task admission")
+        command = build_spawn_command(
+            target, verify_binding(expected_id, binding_id),
+            _append_copilot_args(
+                target.acp_command, resolve_extra_copilot_args(getattr(args, "copilot_args", None)),
+            ),
+        )
+        env = os.environ.copy()
+        if args.stdio:
+            return run_stdio(command, env)
+        return subprocess.run(command, env=env, creationflags=no_window_flags()).returncode
+
+
+def add_subparsers(sub) -> None:
+    for command, action in (("dispatch-prepare", prepare), ("dispatch-project", project)):
+        parser = sub.add_parser(command, help="Apply a trusted task projection from bounded JSON stdin")
+        parser.add_argument("name")
+        parser.add_argument("--expected-container-id", required=True)
+        parser.set_defaults(func=lambda args, action=action: _command(args, action))
+
+
+def add_exec_subparser(sub) -> None:
+    parser = sub.add_parser("exec", help="Run the ACP launch command in a container")
+    parser.add_argument("name", help="Container name")
+    parser.add_argument("--stdio", action="store_true", help="Attach stdio transport.")
+    parser.add_argument("--dispatch-binding-id")
+    parser.add_argument("--expected-container-id")
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Terminate a live SSH holder and take over this trusted container",
+    )
+    parser.add_argument("copilot_args", nargs="*", help="Extra copilot args (after --).")
+
+
+def _command(args, action) -> int:
+    import sys
+
+    from ._invoke import payload_command_argv
+
+    raw = sys.stdin.read(16385)
+    try:
+        size = len(raw.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise RuntimeError("Task projection request is not valid UTF-8") from None
+    if size > 16384:
+        raise RuntimeError("Task projection request exceeds its byte limit")
+    try:
+        request = json.loads(raw)
+    except json.JSONDecodeError:
+        raise RuntimeError("Task projection request is not valid JSON") from None
+    binding = action(args.name, args.expected_container_id, request)
+    result = {
+        **binding, "task_token_file": TOKEN_FILE,
+        "spawn_command": [
+            *payload_command_argv(), "exec", "--stdio", args.name,
+            "--dispatch-binding-id", binding["binding_id"],
+            "--expected-container-id", binding["container_id"],
+        ],
+    }
+    print(json.dumps(result))
+    return 0

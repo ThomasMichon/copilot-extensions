@@ -326,6 +326,44 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-14 -- Restricted provider delivery and birth authority
+- Added an explicit `dispatch_only` creation policy for restricted
+  image-backed fleets. Provider creation pins a random, nonsecret birth
+  identity in an immutable Docker label and an exclusive private record.
+  Missing or corrupt birth records cannot be treated as a free container.
+- Preparation seals that physical identity to one task, worker, generation,
+  epoch and endpoint. The native conversation is bound once during delivery,
+  before credential publication; interrupted delivery retains that fence.
+  A different incarnation requires a newly created physical container.
+- The host sends only the task credential over Docker stdin, through an
+  immutable absolute Node helper, to an atomic root-owned `0444` file under
+  protected `/run` state. The worker receives nonsecret pinned call fields and
+  the file path. Ordinary launch/provider SSH cannot adopt the task-only
+  member, and provider admission permits only one worker at a time.
+- The native contained projection/admission/profile selection passed 220
+  tests with three opt-in/platform skips. A disposable real Docker run proved
+  two credential publications, nonroot read/no-write permissions, no token
+  in retained state or Docker configuration, refusal to rebind task/native
+  identities, and the actual fresh provider CLI launch/ordinary-peer denial.
+  The first CLI fixture used integer CPU configuration rather than the
+  loader's canonical float, correctly triggering the policy fingerprint
+  guard; its corrected canonical fixture passed.
+- The expanded ordinary CLI/fleet/provider-SSH compatibility selection passed
+  304 tests with five opt-in/platform skips. Touched-code lint and the
+  thirteen-plugin install contract passed.
+- Publication caught growth past the CLI's shrink-only ceiling and the
+  fleet module's cap. The task-only launch and exec registrar, plus the
+  birth-aware image argument/publication seam, now live in the provider
+  projection module without changing ordinary transport or monkeypatch
+  boundaries. The complete native plugin suite passed both sub-suites
+  (793 passed, 22 skipped), and the actual fresh Docker/CLI proof passed
+  again after extraction. No module baseline was widened.
+- This closes only the provider channel, not automatic supervisor scheduling,
+  credential renewal delivery, admitted fleet selection, central/local
+  projections, first-touch installation or real coordinator task execution.
+  The opt-in channel composes the existing Docker provider and admission
+  lifecycle; it introduces no new queue, credential issuer or daemon.
+
 ### 2026-10-15 -- Known supersession takes precedence over discovery outage
 - Further #6722 review reproduced an active epoch-one lease renewing during a
   discovery-only outage after independently reading floor five. The lease now

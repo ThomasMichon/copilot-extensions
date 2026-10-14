@@ -35,6 +35,8 @@ from agent_procutil import no_window_flags
 from . import lifecycle
 from ._invoke import payload_command_argv
 from .config import (
+    DISPATCH_ONLY_LABEL,
+    DISPATCH_BINDING_LABEL,
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
     TRUSTED_PROFILE,
@@ -483,6 +485,8 @@ def resolve_live_exec_target(
     name: str,
     *,
     config: ContainersConfig | None = None,
+    dispatch_binding_id: str | None = None,
+    dispatch_management: bool = False,
 ) -> LiveExecTarget:
     """Resolve one running fleet member and validate its live trust posture."""
     config = config or load_config()
@@ -547,6 +551,20 @@ def resolve_live_exec_target(
                 f"Container '{name}' does not satisfy the restricted "
                 f"security policy: {'; '.join(posture_errors)}"
             )
+    labels = (inspected.get("Config") or {}).get("Labels") or {}
+    dedicated = labels.get(DISPATCH_ONLY_LABEL) == "true"
+    if dedicated != fleet.dispatch_only:
+        raise RuntimeError("Container dispatch-only creation policy does not match configuration")
+    if dedicated and not dispatch_management:
+        if not dispatch_binding_id:
+            raise RuntimeError("Dispatch-only container requires its retained task binding")
+        from .dispatch_projection import verify_binding
+
+        binding = verify_binding(inspected_id, dispatch_binding_id)
+        if labels.get(DISPATCH_BINDING_LABEL) != binding["binding_id"]:
+            raise RuntimeError("Container dispatch birth identity does not match retained authority")
+    elif dispatch_binding_id and not dedicated:
+        raise RuntimeError("Task bindings require a dispatch-only container")
 
     return LiveExecTarget(
         name=name,
@@ -697,6 +715,10 @@ class ContainerResolver:
         }
         if restricted:
             spec["venue"]["lifecycle_hold"] = hold_status
+        if fleet.dispatch_only:
+            spec["venue"]["dispatch_only"] = True
+            spec["venue"]["ready"] = False
+            spec["venue"]["capabilities"]["task_projection"] = True
         if not restricted:
             ssh_config = await asyncio.to_thread(
                 prepare_ssh_config,
@@ -784,6 +806,8 @@ class ContainerResolver:
                 f"Container '{name}' security profile does not match its fleet "
                 f"(configured={fleet.security_profile!r}, live={actual_profile!r})"
             )
+        if fleet.dispatch_only:
+            raise RuntimeError("Dispatch-only container requires explicit task preparation, not ordinary readiness")
         if fleet.restricted:
             deploy_hold = await asyncio.to_thread(get_deploy_hold, name)
             if deploy_hold:

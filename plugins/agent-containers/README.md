@@ -34,6 +34,44 @@ in. It does not enable a repair worker or supply inference/repository authority.
    missing binstub/payload makes only that namespace inactive and is diagnosed
    by `agent-bridge doctor`.
 
+## Dispatch-only restricted workers
+
+An image-backed restricted fleet can opt into `dispatch_only: true`. This is a
+creation-time policy, not an advisory borrow: ordinary `exec`, provider SSH and
+unqualified bridge launches are refused. Existing ordinary restricted fleets
+remain unchanged. Recreate an old member when changing this policy.
+
+The trusted host calls `dispatch-prepare <name> --expected-container-id <full-id>`
+with a bounded JSON object on stdin containing `task_id`, `worker_id`,
+`generation`, `coordinator_epoch` and `coordinator_url`. The provider retains a
+nonsecret binding and returns its explicit `spawn_command`; a different task,
+generation, epoch, worker or endpoint cannot reuse that physical container.
+Releasing a borrow or ending a session does not clear this fence: a different
+incarnation needs a new physical container. One provider worker is admitted at
+a time. The provider's creation-time binding identity is pinned in both an
+immutable Docker label and owner-private state. Missing, corrupt or mismatched
+birth state is not an unused slot: preparation refuses it and requires
+recreation instead of letting a surviving old worker consume a new task grant.
+
+After establishing the worker's native session and obtaining its grant from the
+coordinator, the trusted host calls
+`dispatch-project <name> --expected-container-id <full-id>` with `binding_id`,
+`owner_session_id`, `task_token` and `expires_at` on stdin. The native session
+is write-once, including after an interrupted delivery. Only the credential
+travels over stdin to a root-owned atomic file at
+`/run/agent-dispatch/task-token`; the nonroot worker can read but not overwrite
+it. Neither Docker configuration, retained binding metadata, launch argv nor
+command output stores the token. Rotation preserves the same incarnation.
+
+The explicit launch projects only the pinned task/worker/endpoint and token-file
+path, using an immutable absolute Bash executable outside writable mounts and
+without shell startup files. The image must provide Bash and Node outside its
+writable surfaces, plus its own worker tools. No host signing key, shared bearer
+or credential relay is projected. This channel does not issue grants, extend
+task leases, schedule renewal, supply inference credentials or open a network:
+the supervisor and coordinator still own those decisions. Automatic dispatch
+placement and supervisor renewal are not yet integrated.
+
 ## Concepts
 
 ### Optional restricted SSH runtime

@@ -77,6 +77,8 @@ SECURITY_HOME_LABEL = "agent-containers.security-home"
 SECURITY_UID_LABEL = "agent-containers.security-uid"
 SECURITY_GID_LABEL = "agent-containers.security-gid"
 SECURITY_IMAGE_ID_LABEL = "agent-containers.security-image-id"
+DISPATCH_ONLY_LABEL = "agent-containers.dispatch-only"
+DISPATCH_BINDING_LABEL = "agent-containers.dispatch-binding"
 
 # Default ACP launch command run inside the container. Mirrors the codespaces
 # resolver. ``--allow-all`` prevents interactive permission prompts during
@@ -234,6 +236,7 @@ class FleetConfig:
     # Trusted development venues preserve the historical host-integrated
     # behavior. Restricted venues are a fail-closed transport boundary.
     security_profile: str = TRUSTED_PROFILE
+    dispatch_only: bool = False
     # Docker network name/mode. Restricted fleets default to "none"; trusted
     # fleets retain Docker's default network when this is unset.
     network: str | None = None
@@ -368,6 +371,10 @@ class FleetConfig:
                 raise RuntimeError(
                     "native_inference environment must not be overridden by environment"
                 )
+        if type(self.dispatch_only) is not bool:
+            raise RuntimeError("dispatch_only must be a boolean")
+        if self.dispatch_only and (not self.restricted or self.devcontainer_path):
+            raise RuntimeError("dispatch_only requires a restricted image-backed fleet")
         if not self.restricted:
             return
         if self.host_workspace_path or self.host_home_path or self.systemd_capable:
@@ -437,6 +444,8 @@ class FleetConfig:
         }
         if self.native_inference is not None:
             policy["native_inference"] = self.native_inference.environment()
+        if self.dispatch_only:
+            policy["dispatch_only"] = True
         encoded = json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()[:16]
 
@@ -836,6 +845,9 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
             exec_user=raw.get("exec_user"),
             acp_command=raw.get("acp_command"),
             security_profile=security_profile,
+            dispatch_only=_strict_bool(
+                raw.get("dispatch_only", False), f"Fleet '{name}' dispatch_only"
+            ),
             network=raw.get("network"),
             memory=raw.get("memory"),
             cpus=(float(raw["cpus"]) if raw.get("cpus") is not None else None),

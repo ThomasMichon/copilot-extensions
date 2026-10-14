@@ -23,12 +23,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import (
-    FLEET_LABEL,
     SECURITY_GID_LABEL,
     SECURITY_HOME_LABEL,
     SECURITY_IMAGE_ID_LABEL,
     SECURITY_POLICY_LABEL,
-    SECURITY_PROFILE_LABEL,
     SECURITY_UID_LABEL,
     ContainersConfig,
     FleetConfig,
@@ -278,12 +276,8 @@ def _image_run(
     exec_user: str,
 ) -> str:
     """Run one warm container directly from an image; return its name."""
-    args = [
-        "run", "-d",
-        "--name", name,
-        "--label", f"{FLEET_LABEL}={fleet_name}",
-        "--label", f"{SECURITY_PROFILE_LABEL}={fleet.security_profile}",
-    ]
+    from . import dispatch_projection
+    args = dispatch_projection.creation_args(fleet_name, fleet, name)
     if fleet.restricted:
         network = fleet.effective_network()
         _validate_restricted_network(network)
@@ -422,7 +416,7 @@ def _image_run(
     else:
         cmd = ["sleep", "infinity"]
     args += [fleet.image, *cmd]
-    res = _docker(args, timeout=120)
+    res = dispatch_projection.run_image(fleet, args, run=_docker)
     if res.returncode != 0:
         raise RuntimeError(f"docker run failed for {name}: {res.stderr.strip()}")
     return name
