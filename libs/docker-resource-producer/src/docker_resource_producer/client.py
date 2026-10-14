@@ -38,6 +38,16 @@ def _json(raw: str) -> Any:
         raise VerificationError("Malformed Docker JSON response") from error
 
 
+def _optional_client_file(path: Path) -> str | None:
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise VerificationError("Cannot inspect optional TLS client identity file") from error
+    return str(path)
+
+
 class DockerClient:
     """No installer, authentication bootstrap, SDK or ledger dependency."""
 
@@ -115,7 +125,11 @@ class DockerClient:
                 certs = Path(
                     env.get("DOCKER_CERT_PATH") or env.get("DOCKER_CONFIG") or str(Path.home() / ".docker")
                 ).expanduser().resolve()
-                paths = dict(zip(paths, (str(certs / name) for name in ("ca.pem", "cert.pem", "key.pem"))))
+                paths = {
+                    "tls_ca": str(certs / "ca.pem"),
+                    "tls_cert": _optional_client_file(certs / "cert.pem"),
+                    "tls_key": _optional_client_file(certs / "key.pem"),
+                }
         else:
             context = context or probe._checked(["context", "show"], pinned=False).strip()
             text(context, "Docker context", limit=256)

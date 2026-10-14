@@ -236,3 +236,67 @@ def test_named_context_tls_paths_and_verification_are_pinned(fixture: tuple, ver
         assert "--tls=true" in call["args"]
         assert f"--tlsverify={'true' if verify else 'false'}" in call["args"]
         assert call["args"][call["args"].index("--tlskey") + 1] == str(root / "docker" / "key.pem")
+
+
+@pytest.mark.parametrize("fraction", ["", ".1", ".123", ".12345", ".123456", ".123456789"])
+def test_valid_timestamp_fraction_preserves_original_identity(fraction: str) -> None:
+    created = "2026-10-13T00:00:00" + fraction + "Z"
+    value = replace(identity(), created=created)
+    assert value.created == created
+    assert value.to_json()["created"] == created
+
+
+def test_explicit_host_ca_only_tls_omits_absent_client_identity(fixture: tuple) -> None:
+    client, path, _state = fixture
+    certs = path.parent / "CA only material"
+    certs.mkdir()
+    (certs / "ca.pem").write_text("fixture CA", encoding="utf-8")
+    env = {**client.environment, "DOCKER_HOST": "tcp://example.invalid:2376",
+           "DOCKER_CERT_PATH": str(certs), "DOCKER_TLS_VERIFY": "1"}
+    env.pop("DOCKER_CONTEXT", None)
+    pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert pinned.endpoint.tls_ca == str(certs / "ca.pem")
+    assert pinned.endpoint.tls_cert is None and pinned.endpoint.tls_key is None
+    assert pinned.probe(identity()) is True
+    for call in logs(path):
+        assert "--tlsverify=true" in call["args"]
+        assert "--tlscert" not in call["args"] and "--tlskey" not in call["args"]
+
+
+def test_explicit_host_client_identity_files_are_retained(fixture: tuple) -> None:
+    client, path, _state = fixture
+    certs = path.parent / "client material"
+    certs.mkdir()
+    for name in ("ca.pem", "cert.pem", "key.pem"):
+        (certs / name).write_text("fixture material", encoding="utf-8")
+    env = {**client.environment, "DOCKER_HOST": "tcp://example.invalid:2376",
+           "DOCKER_CERT_PATH": str(certs), "DOCKER_TLS_VERIFY": "1"}
+    env.pop("DOCKER_CONTEXT", None)
+    pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert pinned.endpoint.tls_cert == str(certs / "cert.pem")
+    assert pinned.endpoint.tls_key == str(certs / "key.pem")
+    assert "--tlscert" in logs(path)[0]["args"] and "--tlskey" in logs(path)[0]["args"]
+
+
+def test_inaccessible_optional_client_identity_is_not_ca_only_fallback(monkeypatch, tmp_path: Path) -> None:
+    from docker_resource_producer.client import _optional_client_file
+
+    def denied(_path: Path, *args, **kwargs):
+        raise PermissionError("fixture permission denial")
+
+    monkeypatch.setattr(Path, "stat", denied)
+    with pytest.raises(VerificationError, match="Cannot inspect"):
+        _optional_client_file(tmp_path / "key.pem")
+
+
+def test_partial_client_identity_refuses_before_docker_invocation(fixture: tuple) -> None:
+    client, path, _state = fixture
+    certs = path.parent / "partial client material"
+    certs.mkdir()
+    (certs / "cert.pem").write_text("fixture certificate", encoding="utf-8")
+    env = {**client.environment, "DOCKER_HOST": "tcp://example.invalid:2376",
+           "DOCKER_CERT_PATH": str(certs), "DOCKER_TLS_VERIFY": "1"}
+    env.pop("DOCKER_CONTEXT", None)
+    with pytest.raises(VerificationError, match="must be paired"):
+        DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert not path.with_suffix(".log").exists()

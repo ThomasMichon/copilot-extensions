@@ -132,8 +132,13 @@ class Identity:
             raise VerificationError("Container identity requires a full ID; volume identity requires a unique name")
         if not isinstance(self.created, str) or _CREATED.fullmatch(self.created) is None:
             raise VerificationError("Invalid creation evidence")
+        validation_time = re.sub(
+            r"\.(\d{1,9})(?=Z|[+-]\d\d:\d\d\Z)",
+            lambda match: "." + match.group(1)[:6].ljust(6, "0"),
+            self.created,
+        )
         try:
-            datetime.fromisoformat(self.created.replace("Z", "+00:00"))
+            datetime.fromisoformat(validation_time.replace("Z", "+00:00"))
         except ValueError as error:
             raise VerificationError("Invalid creation evidence") from error
         daemon_id(self.daemon_id)
