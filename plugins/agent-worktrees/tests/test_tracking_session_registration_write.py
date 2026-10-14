@@ -446,6 +446,104 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
         )
 
 
+@pytest.mark.parametrize(
+    ("probe_duration", "accepted"),
+    [(0.09, True), (0.19, False)],
+)
+def test_registration_authority_bounds_cumulative_git_probes(
+    tmp_path: Path, monkeypatch, probe_duration, accepted,
+):
+    from agent_worktrees import git_ops, repos
+    from agent_worktrees.execution_spaces import ExecutionSpaceError
+
+    anchor = tmp_path / "harness"
+    (anchor / ".git").mkdir(parents=True)
+    registry = repos.ReposRegistry(
+        repos={
+            "harness": repos.RepoEntry(
+                name="harness",
+                repo_class="worktree",
+                default_branch="registry",
+                paths={
+                    "windows": str(anchor),
+                    "wsl": str(anchor),
+                    "linux": str(anchor),
+                },
+            )
+        }
+    )
+    monkeypatch.setattr(repos, "read_registry", lambda: registry)
+    project_root = tmp_path / ".harness"
+    project_root.mkdir()
+    (project_root / "config.yaml").write_text(
+        "machine: workstation-windows\n"
+        "platform: windows\n"
+        "repos:\n"
+        "  harness:\n"
+        f"    anchor: {anchor}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_root)
+    monkeypatch.setattr(
+        cfg, "global_config_path", lambda: tmp_path / "missing-global.yaml",
+    )
+    committed_path = cfg.inrepo_config_path(Path()).as_posix()
+    clock = {"now": 1000.0}
+    calls = []
+
+    def slow_git(*args, **kwargs):
+        timeout = kwargs["timeout"]
+        calls.append((args[0], timeout))
+        clock["now"] += min(probe_duration, timeout)
+        if timeout < probe_duration:
+            raise subprocess.TimeoutExpired("git", timeout)
+        if args[0] == "remote":
+            return SimpleNamespace(returncode=0, stdout="upstream\n")
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(
+                returncode=0,
+                stdout="refs/remotes/upstream/main\n",
+            )
+        if args[0] == "ls-tree":
+            return SimpleNamespace(
+                returncode=(
+                    1 if args[3].startswith("refs/remotes/") else 0
+                ),
+                stdout=(
+                    "" if args[3].startswith("refs/remotes/")
+                    else f"{committed_path}\n"
+                ),
+            )
+        if args[0] == "show":
+            ref = args[1].split(":", 1)[0]
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "default_branch: dev\nstateless: false\n"
+                    if ref.endswith("/main")
+                    else "stateless: true\n"
+                ),
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(git_ops, "git", slow_git)
+    monkeypatch.setattr(
+        config_authority.time, "monotonic", lambda: clock["now"],
+    )
+
+    started = clock["now"]
+    if accepted:
+        config = config_authority.load_project_authority_config("harness")
+        assert config.default_repo.stateless is True
+        assert len(calls) == 8
+    else:
+        with pytest.raises(ExecutionSpaceError, match="timed out"):
+            config_authority.require_registration_record_mutation(
+                SimpleNamespace(repo="harness"),
+            )
+    assert clock["now"] - started <= config_authority._AUTHORITY_GIT_BUDGET_S
+
+
 def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkeypatch_config):
     """End-to-end: proves ``tracking.register_session`` reaches
     ``apply_session_register`` via an actual ``CoalescingServer`` (the

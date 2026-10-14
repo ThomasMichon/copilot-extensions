@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 _GIT_PROBE_TIMEOUT_S = 0.2
+_AUTHORITY_GIT_BUDGET_S = 0.75
 
 
 def _load_state_root_authority(
@@ -15,16 +17,27 @@ def _load_state_root_authority(
     from . import config as cfg, git_ops, repos
 
     root = Path(anchor)
+    deadline = time.monotonic() + _AUTHORITY_GIT_BUDGET_S
+
+    def _git(*args: str):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError(
+                f"committed authority budget exhausted for project {name!r}"
+            )
+        return git_ops.git(
+            *args, cwd=root, check=False, capture=True,
+            timeout=min(_GIT_PROBE_TIMEOUT_S, remaining),
+            isolated_repository=True,
+        )
+
     candidates = (
         cfg.inrepo_config_path(Path()),
         cfg.legacy_inrepo_config_path(Path()),
         Path(cfg.INREPO_CONFIG_FILENAME),
     )
     if remote_name is None:
-        remotes = git_ops.git(
-            "remote", cwd=root, check=False, capture=True,
-            timeout=_GIT_PROBE_TIMEOUT_S, isolated_repository=True,
-        )
+        remotes = _git("remote")
         if remotes.returncode != 0:
             raise ValueError(f"cannot resolve local remote for project {name!r}")
         names = [line.strip() for line in remotes.stdout.splitlines() if line.strip()]
@@ -50,11 +63,9 @@ def _load_state_root_authority(
         ref = ""
         listing = None
         for candidate_ref in _refs(branch):
-            candidate_listing = git_ops.git(
+            candidate_listing = _git(
                 "ls-tree", "-r", "--name-only", candidate_ref, "--",
                 *(candidate.as_posix() for candidate in candidates),
-                cwd=root, check=False, capture=True,
-                timeout=_GIT_PROBE_TIMEOUT_S, isolated_repository=True,
             )
             if candidate_listing.returncode == 0:
                 ref, listing = candidate_ref, candidate_listing
@@ -79,10 +90,8 @@ def _load_state_root_authority(
                     f"committed authority config is absent for project {name!r}"
                 )
             return None
-        content = git_ops.git(
+        content = _git(
             "show", f"{ref}:{selected.as_posix()}",
-            cwd=root, check=False, capture=True,
-            timeout=_GIT_PROBE_TIMEOUT_S, isolated_repository=True,
         )
         if content.returncode != 0:
             raise ValueError(
@@ -99,10 +108,8 @@ def _load_state_root_authority(
         f"refs/remotes/{remote_name}/HEAD"
         if remote_name else "HEAD"
     )
-    head = git_ops.git(
+    head = _git(
         "symbolic-ref", "-q", head_ref,
-        cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
-        isolated_repository=True,
     )
     prefix = (
         f"refs/remotes/{remote_name}/"
