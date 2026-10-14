@@ -4,12 +4,12 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; common authenticated staging landed, role lifecycle next; GitHub proof deferred
+- **Status:** Active; selected-release input landed, central push-backed state design; full lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
-  #6443 Gateway/index vertical slice. Existing dependencies #5789, #6030,
-  #5861, #5862 retain ownership.
+  #6443 Gateway/index vertical slice; existing #5862 coherent observation and
+  central push-backed state. Existing #5789, #6030 and #5861 retain ownership.
 
 ## Guiding Intent
 
@@ -48,6 +48,12 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
   competing Gateway or ledger. Existing contract, auth, deployment and migration
   owners retain their work; inventory unmerged prototypes before duplicating
   implementation. The integrator owns the slice's PRs, not the whole V2 effort.
+- **Central state and observation:** Reuse #5862 for the shared backing-store
+  and query/subscription plane, not a competing observer. #3761 retains origin
+  agency/write-through authority; #352 retains Manager UX/mux ownership.
+  A selected containerized Gateway is one deployment of the coordination
+  product, not a second native/prototype Gateway beside it. Existing credential
+  coordinators and unselected adopter deployments are not duplicate cleanup.
 - **Handoff:** Continue from the first unresolved Plan item with its validation
   gates and current owner, not merely from the most recent merged PR.
 - **Canonical home:** This effort and its linked proposal are the upstream
@@ -124,6 +130,18 @@ the [standalone index effort](../agent-index-standalone-service/README.md).
 The [Gateway/index slice](gateway-index-slice.md) below is an
 **agent-recommended implementation elaboration** of that assignment.
 
+Further operator clarification, captured verbatim (generic architecture portion):
+
+> What you can do is look to how we're going to build a central backing store for Worktree Manager, the uber-status-monitor that receives updates via push from all machines and containers, and then supports requests with subscriptions for all UX surfaces, CLI tools, and other API requests.
+
+Adopter-specific reconciliation and deployment identities are recorded outside
+this public repository. The requested container preference selects one canonical
+Gateway deployment for that adopter; it is not authority to add a third Gateway,
+retire unrelated credential coordinators, or bypass current lease/data owners.
+The [central backing-store amendment](central-state-backing-store.md) is an
+**agent-recommended design** of the new push/query/subscription direction, not
+permission for an unreviewed runtime or authority migration.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -149,9 +167,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   landed in #6451, pinned-key manifest verification in #6475 and retained
   authenticated artifact staging in #6569. Staging yields selected immutable
   bytes, not candidate construction, lifecycle admission or activation.
-  Explicit selected-release data correlates a trusted current decision with the
-  manifest, sequence, scope and role closure; it supplies no selection authority
-  or durable admission. The reviewed
+  Explicit selected-release data landed in #6637 and correlates a trusted current
+  decision with the manifest, sequence, scope and role closure; it supplies no
+  selection authority or durable admission. The reviewed
   [client admission plan](../linux-role-fleet/client-lifecycle-admission.md)
   retains installation-owned state and candidate execution with #6424.
   GitHub-positive proof is deferred under the operator's authentication constraint;
@@ -193,6 +211,18 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Prove the real CLI/Gateway/container/controller path, independently
   persistent index state and scoped negative cases before any native offload.
 
+### Phase 2b - Central push-backed current state
+- [ ] Review the [backing-store amendment](central-state-backing-store.md) under
+  existing #5862, preserving #3761 origin authority and #352 client/mux ownership.
+- [ ] Agree authenticated origin/push, current-projection, persistence and
+  query/subscription interfaces with the retained owners before runtime edits.
+- [ ] Persist fenced machine/container updates, indexed current projections and
+  publication positions coherently, without a rival task/worktree/claim writer.
+- [ ] Serve UX, CLI and API requests through one scoped current-state contract,
+  with snapshot/subscribe consistency, bounded recovery and isolated backpressure.
+- [ ] Prove authorized one-Gateway adoption with owned storage, preserved source
+  responsibilities, explicit offline/gap states and no per-client fleet polling.
+
 ### Phase 3 - Transfer authority without duplicate writers
 - [ ] Inventory V1 authorities, state schemas, live hosts, receipts and obligations;
   coordinate imports with their current owners.
@@ -218,6 +248,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 
 All entries are **agent-recommended implementation gates**, not completed tests.
 
+- [ ] Complete the [central-state gates](central-state-backing-store.md#validation-gates-and-rollout-boundary):
+  actual machine/container push, scoped shared reads/subscriptions, commit/ack
+  crash recovery, snapshot/stream consistency and one owned serving deployment.
 - [ ] Complete the [Gateway/index slice gates](gateway-index-slice.md#validation-and-adoption-gates):
   real CLI/query/credential transport, scope enforcement before retrieval,
   crypto/correlation/revocation, fresh container persistence and live adoption.
@@ -821,3 +854,35 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   hosted native platform gates remain separate. #6424 owns durable admission
   and the construction/health/removal follow-ons; #6443/#5789 retain authenticated
   runtime integration. All full Phase 1-4/Validation items remain open.
+- #6637 actually merged at `2026-10-14T06:27:20Z`, commit
+  `bf1ec290b0c175e047f281417b529d103252e0a3`. The exact final head received
+  current Copilot APPROVED review with zero findings (Balanced effort), and all
+  required CI passed. An initial ten-minute review timeout led to an explicit
+  re-request; the earlier dismissed review was not used as the completion gate.
+  No CI gate was bypassed. Re-read the complete parent Plan/Validation and
+  synchronized before selecting the next stretch.
+- Delivered the actual common input API to #6424. Its installation-owned
+  admission and execution follow-ons remain with that owner; authenticated
+  resident Gateway/index and credential transport remain under #6443/#5789.
+  Current interface work does not establish owner authentication or complete
+  product assembly. Source merge, signed publication and authorized runtime
+  rollout remain distinct outcomes.
+
+### 2026-10-14 - Central backing-store clarification
+- Captured the operator's generic Worktree Manager push/subscription direction
+  in Request; adopter-specific deployment identities and live reconciliation
+  remain outside this public repository. The selected deployment uses one
+  Gateway authority; credential coordinators are not automatically duplicates.
+- Reconciled the design with the existing #5862 observation/recovery charter,
+  #3761 origin write-through daemon, #352 Manager/mux separation and the
+  machine-fleet vision. Reserved only the plan amendment on #5862 rather than
+  starting a competing observer, Gateway or agency writer.
+- Extended standing intent with a shared central current-state backing store
+  and push-backed coherent reads. The linked proposal recommends one Gateway
+  module, attributable persistent state, fenced origin updates and one query/
+  snapshot/subscription boundary, while canonical domain owners retain writes,
+  commands, receipts, credentials and execution.
+- This slice changes vision/effort documents only. Unit, process E2E,
+  clean-room and live implementation proofs are specified, not claimed run or
+  delivered. No runtime, deployment, data migration, capacity or lease
+  mutation follows from the proposal. Full Phase 1-4/Validation gates stay open.

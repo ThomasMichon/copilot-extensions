@@ -34,6 +34,15 @@ Gateway, restore a native database backup into a concurrent writer, or duplicate
 the workspace/allocation/effect-owner campaigns. Publication is not enrollment,
 offload or completion of the broader V2 effort.
 
+"New Gateway" names the product role/interface, not a second permanent
+coordination deployment. An adopter selecting its containerized Gateway
+integrates this slice through that service's owned lifecycle rather than
+starting an index Gateway beside a status Gateway. The
+[central backing-store plane](central-state-backing-store.md) uses the same
+selected Gateway role with independently scoped capabilities. Unselected
+adopter deployments stay untouched; a separate credential coordinator/controller
+is not a duplicate Gateway to retire.
+
 ## Current reusable contracts and missing runtime
 
 - `fleet-manager` provides role/release declarations, offline planning and local
