@@ -169,8 +169,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   gates are required and proven; migrate old contexts/callers before deletion.
 - [ ] Reconcile repair ownership with #6142 and existing remediation effort;
   disabled repair automation must escalate to a named owner.
-- [ ] Route Dependabot contribution PRs to dev; remove redundant rejected
-  release-branch contribution runs without weakening dependency validation.
+- [x] Route configured Dependabot version-update PRs to dev without weakening
+  dependency validation. All eleven uv entries target dev; the existing
+  `test_dependency_version_updates_use_the_contribution_branch` guards this
+  contract, and live Dependabot #6710 targets dev. Event-normalized invocation
+  savings remain part of Phase 1 measurement, not an inferred result here.
 
 ### Phase 6 - Observe and complete
 
@@ -1301,3 +1304,99 @@ hosted checks, review and a containing full validation remain required.
   docs and whitespace checks pass. No production installer changed.
   Linux current-head guard/full validation remains outstanding, and #6747
   remains an investigation rather than a claimed root cause or accepted flake.
+
+### 2026-10-14 - Harness isolation reviewed; later scoping fixture blocks release
+
+- #6756 merged at `21:18:05Z` as
+  `4578b90c131e0b7bdd58282da125b439d0ac7a01`, after exact-head Copilot
+  approval `5524739132`, all three successful same-head suites and the fresh
+  source required-check verifier. No bypass was used.
+- Its Linux CI logger job `116105413372` runs the complete suite, not merely
+  guards: 476 passed/29 skipped and 823 passed/32 skipped across both groups.
+  The original unexplained #6747 timeout remains open. The next full run's
+  unmodified logger also passes before this harness change is included, so
+  neither result establishes the original cause or licenses flake acceptance.
+- Normal full validation `38637663769` actually checks out dev
+  `c45b1430b53a387ddb588ab5c9708d35273393e5`, containing the Resume
+  correction but predating #6756. Its later Worktrees group now fails
+  `test_create_worktree_core_plan_project_matches_repo_name_not_ambient_global`
+  with an incomplete resolved-config namespace (`yaml_path`, then `repo`).
+  That group reports 511 passed and 26 skipped; the remaining groups are not
+  established by that failed job.
+- Deduplication finds no existing writer for this exact scoping fixture.
+  Continue bounded diagnosis while preserving the real project-selection
+  assertion; no publication rerun or production authority relaxation.
+
+### 2026-10-14 - Scoping failure traced to incomplete tracking-record double
+
+- Reserved #6758 and reproduced the exact failure locally. The provisional
+  resolved-config description was imprecise: the helper returns a four-field
+  namespace from `tracking.create_new_record`. The real deferred-command
+  constructor now reads `record.yaml_path`; its failure wrapper also needs
+  `record.repo`.
+- Reuse the existing complete `WorktreeRecord` fixture through
+  `dataclasses.replace`, keeping the creation factory's requested identity,
+  repository, machine, platform and kind. No production field fallback or
+  authority check changes. The actual core/deferred-command path and both
+  selected-project assertions remain intact.
+- The complete scoping module passes four cases. Its existing behavioral
+  create-plan case now joins fast guards. Expand contained local coverage
+  before publication because earlier full gates stopped at successive stale
+  fixtures; do not mistake an earlier group's pass for the remaining groups.
+
+### 2026-10-14 - Equivalent scoping PR discovered before publication
+
+- A second writer independently claimed #6759 and published #6763 while this
+  session was broadening native coverage. Its exact patch is the same typed
+  record/real deferred-plan repair, with the requested codename and owning
+  tracking-directory argument also preserved. It has current-head approval.
+- Retain #6763 as the sole published repair rather than compete over claim
+  timing. Withdrew only this session's unpublished duplicate fixture,
+  documentation and generated changefile; the local four-case result remains
+  evidence, not a claim that this session's code shipped.
+- The optional full native Windows run stopped at the unchanged 300-second
+  bound in group 1/16 without reporting an assertion failure. It is not a
+  full-suite pass, and no limit was raised or bypassed. Existing required
+  Windows lanes and actual containing Linux full validation remain distinct
+  obligations. Follow #6763's normal merge and the next containing release.
+
+### 2026-10-14 - Canonical scoping repair merged; next failures already owned
+
+- #6763 merged as `95d9d6b92208fa79f49fc424cface20602deab57` at
+  `21:54:09Z`. Closed this session's duplicate #6758 implementation claim
+  into #6759/#6763; #6237 release-proof ownership remains here.
+- Natural full validation `38645036098` actually checks out dev
+  `5d08c74d7185dcaf3b3f5c61af97c997576e427f`. The repaired scoping group
+  now passes 512 cases with 26 skips. Logger also passes; this does not
+  establish #6747's original timeout cause or accept it as a flake.
+- The full gate fails in the next Worktrees group on the exclude-FIFO
+  refusal (`timeout` instead of `failed`, #6770). Existing #6769 already
+  owns the unsafe-input-before-Git diagnosis. Dispatch separately fails
+  startup/reconnect delivery timing (#6771), whose retained writer has
+  claimed the actual TCP/SSE diagnosis. Do not compete with either repair.
+- The promoter job's green status is only its early refusal/no-op: candidate,
+  signing, merge and artifact-publication steps are skipped after failed
+  validation. No release occurred. Follow the retained repairs and next
+  normal containing validation; no retry, skip, timeout increase or CI waiver.
+
+### 2026-10-14 - Reconcile the next reuse and repair-ownership gate
+
+- Both #6769 and #6771 retain their original repair owners; no published
+  containing fix was found at this refresh. Natural validation `38647658802`
+  is queued. No competing diagnosis, manual dispatch or release waiver.
+- The configured Dependabot version-update route is already implemented,
+  regression-protected and observed on live #6710. Close only that scoped Plan
+  item; this does not prove security-update routing or a measured run reduction.
+- Made the next exact-input reuse boundary explicit in `design.md`: actual
+  checkout, execution recipe, platform, run/attempt/jobs and composed output
+  must be reconciled before any further validation removal. The current signed
+  artifact index does not itself contain suite/recipe evidence. Main-push CI
+  and the distinct coverage collection remain intact.
+- #6142 supplies offline construction, not a deployed repair service. The
+  optional cloud fixer is currently `disabled_manually`; an explicit disabled
+  skip is not a named repair owner or acceptance of the underlying failure.
+  Failure routing/escalation therefore remains an open consolidation gate.
+- The retained #6697 publisher is separately changing the routine merge event
+  contract. Its proposed explicit post-merge CI/lockdown dispatch must be
+  recorded as such, not substituted for this campaign's outstanding natural
+  main-push proof. No competing bootstrap or policy mutation is introduced.

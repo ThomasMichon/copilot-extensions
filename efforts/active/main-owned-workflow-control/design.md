@@ -126,3 +126,45 @@ failure, deduplicate signatures and escalate when the bounded repair worker is
 disabled. Reconcile existing #6142 rather than introducing a second repair loop.
 Ownership and candidate enforcement are prerequisites only for reductions that
 depend on their new guarantees, not for every redundant event or optional check.
+
+### Exact-input reuse acceptance boundary
+
+This is the next consolidation contract, not an enabled evidence consumer or
+permission to remove main-push CI. Reuse the existing validation and artifact
+owners; do not introduce another signer, scheduler or credential.
+
+| Identity | Evidence required before treating two executions as equivalent |
+|----------|---------------------------------------------------------------|
+| Source | Repository and actual checked-out commit/tree, not the outer dispatch's `head_sha`, latest branch tip or PR synthetic merge |
+| Recipe | Workflow/tool source commits, selected suite/test set, arguments, relevant environment and dependency/toolchain identity |
+| Platform | Operating system, architecture and interpreter/shell profile; Linux success does not discharge native Windows coverage |
+| Execution | Authoritative run ID, attempt and job IDs, complete terminal results and expected coverage outputs |
+| Composition | Pinned dev/main inputs and actual generated content tree, including versioning, materialization and checkout attributes |
+
+A suite name, green aggregate, coverage JSON or signed package index alone is
+not proof of that tuple. `tools/promotion_python_artifacts.py`'s current transfer
+index binds `dev_head`, `main_before`, `content_tree` and bundle records; it
+does not record the suite/recipe/run evidence above. Its existing artifact
+attestation must not be relabeled as a test-suite attestation.
+
+The compact candidate check must establish the expected tuple independently,
+then verify complete authoritative evidence for every reused requirement.
+Missing, failed, skipped, cancelled, wrong-attempt, wrong-recipe or wrong-input
+evidence cannot authorize pruning that requirement's existing execution.
+Different recipes need an explicit coverage-equivalence proof, not just matching
+source SHAs. Generated output still needs its distinct composition/installation
+checks; a dev-source pass cannot stand in for behavior changed by materialization.
+
+Keep the existing seven deep/platform lanes and six schedules until each affected
+row has its own replacement proof. The full validator's ordinary suite execution
+and separate instrumented coverage collection are another possible consolidation,
+but changing their failure, containment or coverage-output contract requires a
+separate demonstrated equivalent path. Do not remove either merely because both
+call pytest.
+
+The existing #6142 emitter/template is offline construction, not a live repair
+owner. Before retiring a failure-producing lane, record its component repair
+claim, release steward and escalation destination when automation is disabled,
+declines or cannot authenticate. Keep the existing watchdog's signature dedup
+and ordinary reviewed dev repair path. Neither this contract nor a green
+disabled-fixer skip authorizes activating a worker or accepting a test flake.
