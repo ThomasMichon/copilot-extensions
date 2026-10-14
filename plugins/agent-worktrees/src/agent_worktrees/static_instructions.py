@@ -21,6 +21,15 @@ NAMESPACE = ".github/instructions/agent-worktrees-generated"
 _COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
 
+def _remaining(deadline: float | None, ceiling: float | None = None) -> float | None:
+    if deadline is None:
+        return ceiling
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("instruction publication budget exhausted")
+    return min(remaining, ceiling) if ceiling is not None else remaining
+
+
 def _object(path: Path) -> dict:
     from .reconcile import _strict_json_object
 
@@ -45,14 +54,15 @@ def _component(value: object) -> str:
     return value
 
 
-def _settings(root: Path, home: Path) -> tuple[dict, dict]:
+def _settings(root: Path, home: Path, *, deadline: float | None = None) -> tuple[dict, dict]:
     enabled: dict[str, bool] = {}
     markets: dict[str, tuple[dict, Path]] = {}
     layers = [
-        (home / ".copilot" / name, home)
+        (home / ".copilot" / name, home / ".copilot")
         for name in ("settings.json", "settings.local.json")
     ] + [(root.joinpath(*rel), root) for rel in SETTINGS_RELS]
     for path, base in layers:
+        _remaining(deadline)
         data = _optional_object(path)
         if data is None:
             continue
@@ -69,7 +79,8 @@ def _settings(root: Path, home: Path) -> tuple[dict, dict]:
     return enabled, markets
 
 
-def _plugin(identity: str, markets: dict, home: Path) -> Path:
+def _plugin(identity: str, markets: dict, home: Path, *, deadline: float | None = None) -> Path:
+    _remaining(deadline)
     name, market = split_source(identity)
     _component(name)
     if market:
@@ -102,6 +113,7 @@ def _plugin(identity: str, markets: dict, home: Path) -> Path:
             if not path.is_absolute():
                 path = base / path
         catalog = load_marketplace(path)
+        _remaining(deadline)
         if kind == "agent-worktrees-repo" and catalog is not None and catalog.name != market:
             raise ValueError(f"registered marketplace identity mismatch: {market}")
         resolved = plugin_dir(catalog, name) if catalog is not None else None
@@ -111,6 +123,7 @@ def _plugin(identity: str, markets: dict, home: Path) -> Path:
     path = home / ".copilot" / "installed-plugins"
     path = path / market / name if market else path / name
     for rel in PLUGIN_MANIFEST_RELS:
+        _remaining(deadline)
         manifest = path.joinpath(*rel)
         if manifest.exists():
             if _object(manifest).get("name") != name:
@@ -119,14 +132,15 @@ def _plugin(identity: str, markets: dict, home: Path) -> Path:
     raise ValueError(f"enabled plugin payload missing: {identity}")
 
 
-def _snapshot(root: Path, home: Path) -> dict[str, bytes]:
-    enabled, markets = _settings(root, home)
+def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[str, bytes]:
+    enabled, markets = _settings(root, home, deadline=deadline)
     result: dict[str, bytes] = {}
     folded: set[str] = set()
     for identity in sorted(enabled):
+        _remaining(deadline)
         if not enabled[identity]:
             continue
-        plugin = _plugin(identity, markets, home).resolve(strict=True)
+        plugin = _plugin(identity, markets, home, deadline=deadline).resolve(strict=True)
         declaration = plugin / "instruction-projections.json"
         data = _optional_object(declaration)
         if data is None:
@@ -137,6 +151,7 @@ def _snapshot(root: Path, home: Path) -> dict[str, bytes]:
         ):
             raise ValueError(f"invalid instruction declarations: {declaration}")
         for entry in data["projections"]:
+            _remaining(deadline)
             if not isinstance(entry, dict):
                 raise ValueError(f"invalid instruction declaration: {declaration}")
             if entry.get("customizationKind", "instructions") != "instructions":
@@ -166,12 +181,16 @@ def _snapshot(root: Path, home: Path) -> dict[str, bytes]:
                 raise ValueError(f"colliding instruction destination: {relative}")
             folded.add(key)
             result[relative] = source.read_bytes()
+    _remaining(deadline)
     return result
 
 
-def _git(root: Path, *args: str, input: bytes | None = None) -> bytes:
+def _git(
+    root: Path, *args: str, input: bytes | None = None, deadline: float | None = None,
+) -> bytes:
     result = subprocess.run(
-        ["git", "-C", str(root), *args], input=input, capture_output=True, timeout=15,
+        ["git", "-C", str(root), *args], input=input, capture_output=True,
+        timeout=_remaining(deadline, 15.0),
         env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
         **no_window_kwargs(),
     )
@@ -206,16 +225,14 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
 
     digest = hashlib.sha256(os.fsencode(os.path.normcase(str(root)))).hexdigest()
     lock = Path(tempfile.gettempdir()) / "agent-worktrees" / "static-instructions" / digest
-    remaining = deadline - time.monotonic() if deadline is not None else 30.0
-    if remaining <= 0:
-        raise TimeoutError("no instruction publication budget remains")
-    with _RecordLock(lock, timeout=min(30.0, remaining), require_sidecar=True):
-        desired = _snapshot(root, home)
+    with _RecordLock(lock, timeout=_remaining(deadline, 30.0), require_sidecar=True):
+        desired = _snapshot(root, home, deadline=deadline)
         output = root / NAMESPACE
         _safe_path(root, output)
         existing: set[str] = set()
         if output.exists():
             for parent, directories, files in os.walk(output, followlinks=False, onerror=_walk_error):
+                _remaining(deadline)
                 for name in directories + files:
                     path = Path(parent) / name
                     _safe_path(root, path)
@@ -225,8 +242,8 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                         existing.add(path.relative_to(output).as_posix())
         # Include staged removals, even when Git could classify one as a rename.
         tracked = (
-            _git(root, "ls-files", "-z", "--", ".github")
-            + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ".github")
+            _git(root, "ls-files", "-z", "--", ".github", deadline=deadline)
+            + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ".github", deadline=deadline)
         ).split(b"\0")
         namespace = NAMESPACE.casefold()
         for raw in tracked:
@@ -238,16 +255,15 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
             _safe_path(root, path)
             if path.exists() and not path.is_file():
                 raise ValueError(f"instruction destination is not a regular file: {path}")
-        if desired != _snapshot(root, home):
+        if desired != _snapshot(root, home, deadline=deadline):
             raise ValueError("instruction sources changed during preparation; retry publication")
-        if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError("instruction preparation exhausted backup budget")
-        exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude")).strip())
+        exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
         if not exclude.is_absolute():
             exclude = root / exclude
         rule = f"/{NAMESPACE}/"
         previous = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
         if rule not in previous.splitlines():
+            _remaining(deadline)
             exclude.parent.mkdir(parents=True, exist_ok=True)
             with exclude.open("a", encoding="utf-8") as handle:
                 handle.write(f"\n{rule}\n")
@@ -255,12 +271,13 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
             paths = {os.fsencode(f"{NAMESPACE}/{relative}") for relative in desired}
             ignored = _git(
                 root, "check-ignore", "--no-index", "-z", "--stdin",
-                input=b"\0".join(sorted(paths)) + b"\0",
+                input=b"\0".join(sorted(paths)) + b"\0", deadline=deadline,
             )
             if paths - set(ignored.split(b"\0")):
                 raise ValueError("instruction output namespace is not completely ignored by Git")
         changed = unchanged = 0
         for relative, content in desired.items():
+            _remaining(deadline)
             path = output / relative
             if path.exists() and path.read_bytes() == content:
                 unchanged += 1
@@ -271,6 +288,7 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                 with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
                     temporary = Path(handle.name)
                     handle.write(content)
+                _remaining(deadline)
                 os.replace(temporary, path)
             finally:
                 if temporary is not None:
@@ -278,5 +296,7 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
             changed += 1
         stale = existing - desired.keys()
         for relative in sorted(stale):
+            _remaining(deadline)
             (output / relative).unlink()
+        _remaining(deadline)
         return changed, unchanged, len(stale)

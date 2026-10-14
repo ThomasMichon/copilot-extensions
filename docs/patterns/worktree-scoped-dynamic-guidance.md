@@ -134,6 +134,10 @@ that preparation during `resolve`, then call
 `knowledge compose-plugins --prepare-projections` after their update/maintenance
 barrier, before mux or Copilot startup. SessionStart retains its asynchronous
 backup; it shares the same per-worktree publication lock and copy backend.
+Foreground preparation has no overall deadline. Explicitly bounded callers,
+including the backup, share their remaining budget across discovery and Git
+preflights and check it before publication mutations; operation-specific Git
+and lock limits remain separate from a broad startup ceiling.
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
 purely checked-in: a gitignored, locally re-rendered cache of auto-discovered

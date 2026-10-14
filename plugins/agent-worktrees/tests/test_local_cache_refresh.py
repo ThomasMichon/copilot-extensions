@@ -176,8 +176,8 @@ def test_publication_resolves_sources_after_acquiring_lock(copy_workspace, monke
     original = static._snapshot
     calls = []
 
-    def snapshot(*args):
-        value = original(*args)
+    def snapshot(*args, **kwargs):
+        value = original(*args, **kwargs)
         calls.append(threading.current_thread().name)
         if len(calls) == 1:
             entered.set()
@@ -261,6 +261,66 @@ def test_repository_ignore_negation_cannot_publish_unignored_files(copy_workspac
     (root / ".gitignore").write_text("!**/\n!*.local.instructions.md\n", encoding="utf-8")
     result = lcr.refresh_local_cache(root)
     assert result.status == "failed"
+    assert not output.exists()
+
+
+def test_user_directory_marketplace_is_relative_to_copilot_settings(copy_workspace):
+    root, home = copy_workspace
+    template, _ = provider(root, home)
+    import shutil
+
+    catalog = home / ".copilot" / "marketplace"
+    shutil.copytree(template.parents[1], catalog / "demo")
+    write_json(catalog / "marketplace.json", {
+        "name": "catalog-name", "plugins": [{"name": "demo", "source": "./demo"}],
+    })
+    write_json(root / ".github" / "copilot" / "settings.json", {})
+    write_json(home / ".copilot" / "settings.json", {
+        "enabledPlugins": {"demo@alias": True},
+        "extraKnownMarketplaces": {"alias": {"source": {"source": "directory", "path": "./marketplace"}}},
+    })
+    result = lcr.refresh_local_cache(root)
+    assert result.status == "ready", result.diagnostic
+    output = root / static.NAMESPACE / "alias" / "demo" / "fallback.local.instructions.md"
+    assert output.read_bytes() == template.read_bytes()
+
+
+def test_each_git_operation_uses_only_remaining_explicit_budget(tmp_path, monkeypatch):
+    clock = [100.0]
+    timeouts = []
+    monkeypatch.setattr(static, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    def run(argv, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        clock[0] += 2
+        return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(static.subprocess, "run", run)
+    static._git(tmp_path, "ls-files", deadline=105)
+    static._git(tmp_path, "diff", deadline=105)
+    assert timeouts == [5, 3]
+    clock[0] = 105
+    with pytest.raises(TimeoutError):
+        static._git(tmp_path, "rev-parse", deadline=105)
+    assert len(timeouts) == 2
+
+
+@pytest.mark.parametrize("phase", ["rev-parse", "check-ignore"])
+def test_expired_late_preflight_never_starts_copy(copy_workspace, monkeypatch, phase):
+    root, home = copy_workspace
+    _, output = provider(root, home)
+    clock = [time.monotonic()]
+    monkeypatch.setattr(static, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    original = static._git
+
+    def git(root, *args, **kwargs):
+        result = original(root, *args, **kwargs)
+        if args[0] == phase:
+            clock[0] = kwargs["deadline"] + 1
+        return result
+
+    monkeypatch.setattr(static, "_git", git)
+    assert lcr.refresh_local_cache(root, timeout=10).status == "timeout"
     assert not output.exists()
 
 

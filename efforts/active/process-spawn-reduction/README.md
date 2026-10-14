@@ -323,6 +323,15 @@ single-final-batch contract.
   `PYTHONSAFEPATH` false/true regression in the new standalone-copy test instead
   of resurrecting the removed engine dependency. Canonical authoring changes
   remain untouched.
+- Follow-up review found user-global relative marketplace paths needed the
+  settings directory as their base, matching canonical activation. Corrected
+  that origin and added a real relative-directory/marketplace-alias case.
+  Existing explicit backup/caller deadlines now flow through discovery and all
+  Git operations, with each child capped to remaining time and publication
+  mutations checked against that same budget. Foreground startup remains
+  deadline-free. Late-preflight expiry and exact remaining-child-budget cases
+  pass. Final focused source/native selection: 202 passed / 1 unavailable-symlink
+  skip, with unchanged test limits.
 
 ### 2026-10-14 - Declarations decide static publication
 
