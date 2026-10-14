@@ -68,20 +68,24 @@ def resolve(config: BudgetConfig, at: datetime) -> Resolution:
         if not isinstance(adapter, StaticAdapter):
             raise ModelError("external adapters must be acquired before pure resolution")
         reading = adapter.reading
-        freshness = _freshness(adapter, at)
+        future_capture = adapter.acquired_at is not None and reading.captured_at > at
+        freshness = "future" if future_capture else _freshness(adapter, at)
         adapter_states.append(
             {
                 "id": adapter.adapter_id,
                 "source": reading.source,
                 "authority": adapter.authority,
-                "availability": reading.availability,
-                "error": reading.error,
+                "availability": "error" if future_capture else reading.availability,
+                "error": (
+                    "reader capture time is later than evaluation"
+                    if future_capture else reading.error
+                ),
                 "captured_at": instant_text(reading.captured_at),
                 "freshness": freshness,
                 "freshness_seconds": reading.freshness_seconds,
             }
         )
-        if reading.availability != "available":
+        if future_capture or reading.availability != "available":
             continue
         for field in READING_FIELDS:
             value = getattr(reading, field)

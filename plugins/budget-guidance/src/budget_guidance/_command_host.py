@@ -1,44 +1,58 @@
-"""POSIX group owner: stay alive until the caller closes its control pipe."""
+"""Isolated POSIX supervisor retaining its reader's group identity until cleanup."""
 
 from __future__ import annotations
 
 import os
 import select
 import signal
-import subprocess
 import sys
 
 
 def main() -> int:
-    """Report reader status, then terminate this live owned group on control EOF."""
-    os.setpgid(0, 0)
+    """Report status without reaping, then acknowledge explicit owned cleanup."""
     signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+    reader: int | None = None
+    requested = False
+    reported = False
     try:
         if select.select([0], [], [], 0)[0]:
-            return 126
+            requested = os.read(0, 1) == b"C"
+            return 0
         try:
-            reader = subprocess.Popen(
-                sys.argv[1:], stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )  # headless-guard: allow POSIX-only group owner; Windows never invokes this host
+            reader = os.posix_spawn(
+                sys.argv[1], sys.argv[1:], os.environ, setpgroup=0,
+                file_actions=[
+                    (os.POSIX_SPAWN_OPEN, 0, os.devnull, os.O_RDONLY, 0),
+                    (os.POSIX_SPAWN_OPEN, 2, os.devnull, os.O_WRONLY, 0),
+                ],
+            )  # headless-guard: allow isolated POSIX-only supervisor; Windows never invokes this host
         except OSError:
             os.write(2, b"126\n")
             os.close(1)
-            os.close(2)
-            reader = None
         reported = reader is None
         while True:
             if select.select([0], [], [], 0.01)[0]:
-                return 126
+                requested = os.read(0, 1) == b"C"
+                return 0
             if not reported and reader is not None:
-                status = reader.poll()
+                status = os.waitid(
+                    os.P_PID, reader, os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                )
                 if status is not None:
-                    os.write(2, f"{status}\n".encode("ascii"))
+                    code = status.si_status if status.si_code == os.CLD_EXITED else -status.si_status
+                    os.write(2, f"{code}\n".encode("ascii"))
                     os.close(1)
-                    os.close(2)
                     reported = True
     finally:
-        # The owner itself is still alive; its group identity cannot have been reused.
-        os.killpg(os.getpgrp(), signal.SIGKILL)
+        if not reported:
+            os.write(2, b"126\n")
+            os.close(1)
+        if reader is not None:
+            # Only this isolated single-threaded parent can reap its retained root.
+            os.killpg(reader, signal.SIGKILL)
+            os.waitpid(reader, 0)
+        if requested:
+            os.write(2, b"cleaned\n")
 
 
 if __name__ == "__main__":

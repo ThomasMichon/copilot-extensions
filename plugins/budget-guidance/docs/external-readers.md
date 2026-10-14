@@ -59,7 +59,8 @@ acquired = acquire_config(config, readers)
 
 Every grant must match a configured external adapter ID. Each adapter executes
 once per acquisition, not once per field or presentation. The resulting config
-contains ordinary static readings, so resolution remains pure and field
+contains ordinary static readings with runtime-only acquisition provenance,
+so resolution remains pure and field
 authority, contradictions, freshness, and arithmetic use the existing contract.
 Direct resolution of an unacquired external reference is an explicit error.
 Invocation errors are distinguished from invalid configuration in human output.
@@ -74,7 +75,13 @@ The reader emits exactly one UTF-8 JSON object matching the versioned
 [budget-reading contract](configuration.md), then exits successfully.
 Its `source` must exactly match the configured source. The reader owns
 `captured_at` and `freshness_seconds`; acquisition never substitutes the current
-time for provider observation. Future capture times are rejected. Missing
+time for provider observation. Capture times later than acquisition or the
+posture's evaluation instant are rejected, including direct library use of an
+acquired config. Evaluation-time refusals preserve the reported timestamp and
+expose `freshness: "future"` while withholding every field. An explicit `--at`
+remains authoritative; the default evaluation instant is sampled after readers
+finish. Inert manual/static readings retain their existing semantics.
+Missing
 fields remain missing, stale evidence remains stale, and explicit unavailable
 or error readings retain that state without budget values.
 
@@ -90,30 +97,38 @@ stdout, stderr, arguments, paths, or opaque reader error text.
 
 Windows uses the canonical headless process helper and a required,
 non-breakaway, kill-on-close Job before the executable can run. POSIX uses a
-small isolated, no-site Python host (`-I -S`) that establishes an owned process
-group without leaving the caller's session, preserving contained-test supervision.
+small isolated, no-site Python supervisor (`-I -S`) that atomically creates the
+reader's owned process group with `posix_spawn(setpgroup=0)`, without leaving the
+caller's session and while preserving contained-test supervision.
 The host stays alive while its granted reader runs and after reporting that
-reader's status. Closing the caller-owned control pipe triggers the live host
-to terminate its own group, including itself; the caller never signals a
+reader's status. It observes completion with non-reaping `waitid(WNOWAIT)` and
+retains the root until cleanup; its single-threaded, isolated process is the
+only parent that can reap that root. An explicit control byte triggers the host
+to terminate the retained reader group, reap the root, acknowledge cleanup over
+its private pipe, and exit successfully. The supervisor stays outside that group.
+The caller requires both the acknowledgment and successful host completion,
+not a liveness check or an ordinary pipe close. The caller never signals a
 numeric PID/group that an external waiter could have reaped and reused.
 The host resets only its own `SIGCHLD` disposition for its private reader wait,
 not the caller's signal policy.
 Descendants are terminated after success as well as on timeout or output
 overflow. The contract is for one-shot readers, never detached services.
-POSIX platforms lacking the group primitives report unsupported
+POSIX platforms lacking the spawn, group, or non-reaping wait primitives report unsupported
 execution, rather than silently falling back to unbounded spawning.
 The host does not run ambient `.pth`/`sitecustomize` code or honor Python
 startup overrides before containment. It preserves the original environment
 for the explicitly authorized reader. Reader stdin/stderr remain null; the
-host's separate stderr pipe carries only its bounded 64-byte internal exit-status
-protocol. Caller termination closes the control pipe and triggers the same
-group teardown. Unexpected host exit refuses cleanup confirmation.
+host's separate stderr pipe carries only its bounded internal exit-status and
+cleanup-acknowledgment protocol (at most 64 bytes per phase).
+Caller termination closes the control pipe and triggers the same group teardown,
+but EOF alone never produces an explicit cleanup acknowledgment.
+Unexpected host exit or a missing acknowledgment refuses cleanup confirmation.
 
 | Platform | Implementation and validation status |
 |----------|--------------------------------------|
 | Windows | Strict headless Job containment is implemented through the canonical helper. The native interactive-desktop lane passed on source `1b8da8b66`: two successful console-descendant cycles, timeout/tree cleanup, and five batch/stream grant cases (six passed, zero skipped); assertions and acquisition limits were unchanged. |
 | Linux | The capability-gated group host is implemented; contained native regressions exercise timeout, output bounds, and descendant termination after root exit. |
-| macOS | The same group/control-pipe host is conditional on the Python/OS group capability gate; it no longer requires non-reaping `waitid`. Missing capabilities explicitly refuse reader execution; native macOS lifecycle validation is not yet recorded. No Linux `/proc` witness is claimed as macOS proof. |
+| macOS | The same supervisor is conditional on `posix_spawn`, group signaling, and non-reaping `waitid(WNOWAIT)` support. Missing capabilities explicitly refuse reader execution; native macOS lifecycle validation is not yet recorded. No Linux `/proc` witness is claimed as macOS proof. |
 
 The focused native Windows witness is opt-in and excluded from the ordinary
 Linux/fast guard lane. From an interactive Windows desktop, set
@@ -129,7 +144,7 @@ The recorded native run used an interactive Windows Session 1 with
 failed the first acquisition; their exact cause remains unproven, and the
 successful current-source witness is not a claim about those earlier failures.
 
-Empty/malformed/duplicate-key JSON, nonzero exit, oversized output, timeout,
+Empty/malformed/duplicate-key JSON or unrepresentable Decimal exponents, nonzero exit, oversized output, timeout,
 source mismatch, future capture, launch/containment failure, and unconfirmed
 cleanup produce an explicit error reading with no numeric values. Missing
 authorization produces an unavailable reading. Neither becomes zero usage.

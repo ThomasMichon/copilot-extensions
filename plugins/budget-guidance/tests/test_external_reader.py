@@ -285,7 +285,8 @@ def test_cli_requires_explicit_authority_and_renders_same_posture(tmp_path, caps
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX capability refusal")
 @pytest.mark.parametrize("capability", [
-    "setpgid", "getpgrp", "killpg",
+    "posix_spawn", "POSIX_SPAWN_OPEN", "killpg", "waitid", "waitpid",
+    "P_PID", "WEXITED", "WNOHANG", "WNOWAIT", "CLD_EXITED",
 ])
 def test_missing_posix_capability_is_a_redacted_error(tmp_path, monkeypatch, capability):
     import budget_guidance.external_reader as module
@@ -310,15 +311,14 @@ def test_invalid_reader_options_are_not_labeled_invalid_configuration(capsys):
 def test_status_read_failure_is_explicit_not_a_raw_exception(tmp_path, monkeypatch):
     import budget_guidance.external_reader as module
 
-    read_output = module._read_output
+    read_status = module._read_status
 
-    def fail_status(stream, limit, result):
-        if limit == 64:
-            result.put(module.ReaderFailure("private-status-detail"))
-        else:
-            read_output(stream, limit, result)
+    def fail_status(stream, result, cleanup):
+        result.put(module.ReaderFailure("private-status-detail"))
+        discarded = module.Queue()
+        read_status(stream, discarded, cleanup)
 
-    monkeypatch.setattr(module, "_read_output", fail_status)
+    monkeypatch.setattr(module, "_read_status", fail_status)
     reader = _reader(tmp_path, f"print({json.dumps(_reading())!r})")
     posture = _posture(acquire_config(_config(), {"report": reader}))
     assert posture["calculated"] is None
@@ -448,6 +448,7 @@ def test_completed_output_after_spawn_exhausts_deadline_is_not_success(tmp_path,
 
     clock = [0.0]
     spawn = module.spawn_sync_in_kill_on_close_job
+    thread = module.Thread
 
     def spawn_after_deadline(*args, **kwargs):
         process, job = spawn(*args, **kwargs)
@@ -473,7 +474,13 @@ def test_completed_output_after_spawn_exhausts_deadline_is_not_success(tmp_path,
 
     monkeypatch.setattr(module, "spawn_sync_in_kill_on_close_job", spawn_after_deadline)
     monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(module, "Thread", ImmediateOutput)
+    monkeypatch.setattr(
+        module, "Thread",
+        lambda **kwargs: (
+            thread(**kwargs) if kwargs["target"] is module._read_status
+            else ImmediateOutput(**kwargs)
+        ),
+    )
     reader = _reader(tmp_path, f"print({json.dumps(_reading())!r})", timeout_seconds=1)
     posture = _posture(acquire_config(_config(), {"report": reader}))
     assert posture["calculated"] is None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 from io import BufferedReader
 import json
 import math
@@ -77,10 +77,28 @@ def _read_output(stream: BufferedReader, limit: int, result: Queue[bytes | Reade
         result.put(ReaderFailure("reader output could not be read"))
 
 
+def _read_status(
+    stream: BufferedReader, status: Queue[bytes | ReaderFailure],
+    cleanup: Queue[bytes | ReaderFailure],
+) -> None:
+    reported = False
+    try:
+        status.put(stream.readline(65))
+        reported = True
+        cleanup.put(stream.read(65))
+    except OSError:
+        failure = ReaderFailure("reader host status could not be read")
+        # Each queue has one producer; a failed second read must not refill status.
+        if not reported:
+            status.put(failure)
+        cleanup.put(failure)
+
+
 def _run(reader: CommandReader) -> bytes:
     windows = os.name == "nt"
     posix_capabilities = (
-        "setpgid", "getpgrp", "killpg",
+        "posix_spawn", "POSIX_SPAWN_OPEN", "killpg", "waitid", "waitpid",
+        "P_PID", "WEXITED", "WNOHANG", "WNOWAIT", "CLD_EXITED",
     )
     if not windows and not all(hasattr(os, name) for name in posix_capabilities):
         raise ReaderFailure("bounded reader execution is unsupported on this runtime")
@@ -110,11 +128,12 @@ def _run(reader: CommandReader) -> bytes:
         daemon=True,
     )
     status_result: Queue[bytes | ReaderFailure] = Queue(maxsize=1)
+    cleanup_result: Queue[bytes | ReaderFailure] = Queue(maxsize=1)
     status_thread: Thread | None = None
     if not windows:
         assert process.stderr is not None
         status_thread = Thread(
-            target=_read_output, args=(process.stderr, 64, status_result), daemon=True,
+            target=_read_status, args=(process.stderr, status_result, cleanup_result), daemon=True,
         )
     primary_error: ReaderFailure | None = None
     try:
@@ -174,8 +193,21 @@ def _run(reader: CommandReader) -> bytes:
             else:
                 ownership_lost = process.poll() is not None
                 assert process.stdin is not None
-                process.stdin.close()
-            process.wait(timeout=5)
+                try:
+                    process.stdin.write(b"C")
+                    process.stdin.flush()
+                finally:
+                    process.stdin.close()
+            exit_code = process.wait(timeout=5)
+            if not windows:
+                if status_thread is not None and status_thread.ident is None:
+                    assert process.stderr is not None
+                    _read_status(process.stderr, status_result, cleanup_result)
+                acknowledgment = cleanup_result.get(timeout=5)
+                if ownership_lost:
+                    raise ReaderFailure("reader host ownership was lost")
+                if exit_code != 0 or acknowledgment != b"cleaned\n":
+                    raise ReaderFailure("reader host cleanup was not acknowledged")
             for worker in (thread, status_thread):
                 if worker is not None and worker.ident is not None:
                     worker.join(timeout=5)
@@ -184,9 +216,7 @@ def _run(reader: CommandReader) -> bytes:
             process.stdout.close()
             if process.stderr is not None:
                 process.stderr.close()
-            if ownership_lost:
-                raise ReaderFailure("reader host ownership was lost")
-        except (ReaderFailure, OSError, RuntimeError, TimeoutError, subprocess.TimeoutExpired) as exc:
+        except (ReaderFailure, Empty, OSError, RuntimeError, TimeoutError, subprocess.TimeoutExpired) as exc:
             cleanup_error = "reader process cleanup could not be confirmed"
             if isinstance(exc, ReaderFailure):
                 cleanup_error = f"{exc}; {cleanup_error}"
@@ -211,7 +241,7 @@ def _acquire(adapter: ExternalCommandAdapter, reader: CommandReader | None) -> S
                     object_pairs_hook=_strict_object,
                 )
                 reading = parse_reading(value)
-            except (ValueError, UnicodeDecodeError, TypeError, RecursionError):
+            except (ValueError, UnicodeDecodeError, TypeError, RecursionError, DecimalException):
                 raise ReaderFailure("reader returned an invalid budget reading") from None
             if reading.source != adapter.source:
                 raise ReaderFailure("reader source does not match configured source")
@@ -220,7 +250,7 @@ def _acquire(adapter: ExternalCommandAdapter, reader: CommandReader | None) -> S
             # Reader error text may contain credentials; retain state, not opaque text.
             if reading.error is not None:
                 reading = replace(reading, error="reader reported an acquisition error")
-            return StaticAdapter(adapter.adapter_id, adapter.authority, reading)
+            return StaticAdapter(adapter.adapter_id, adapter.authority, reading, acquired_at)
         except ReaderFailure as exc:
             error = str(exc)
     return StaticAdapter(

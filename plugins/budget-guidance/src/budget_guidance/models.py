@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 import json
 from pathlib import Path
 from typing import Any
@@ -54,7 +54,7 @@ def load_json(path: Path, *, max_bytes: int | None = None) -> dict[str, Any]:
             parse_int=Decimal,
             object_pairs_hook=_strict_object,
         )
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, DecimalException) as exc:
         raise ModelError(f"cannot read JSON configuration: {exc}") from exc
     if not isinstance(value, dict):
         raise ModelError("configuration root must be an object")
@@ -164,6 +164,7 @@ class StaticAdapter:
     adapter_id: str
     authority: int
     reading: BudgetReading
+    acquired_at: datetime | None = None
 
 
 @dataclass(frozen=True)

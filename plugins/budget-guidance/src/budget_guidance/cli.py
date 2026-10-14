@@ -74,7 +74,7 @@ def _status(args: argparse.Namespace) -> int:
     # empty string ("--at \"\"") is still validated and rejected rather than
     # silently defaulting to "now".
     try:
-        at = parse_instant(args.at, "--at") if args.at is not None else datetime.now(timezone.utc)
+        at = parse_instant(args.at, "--at") if args.at is not None else None
     except ModelError as exc:
         return _emit_model_error(args, exc, human_prefix="")
     try:
@@ -102,14 +102,19 @@ def _status(args: argparse.Namespace) -> int:
                     args, ModelError("cannot validate reader grants without configuration"),
                     human_prefix="invalid invocation: ",
                 )
-            posture = unavailable_posture(at, f"configuration not found: {config_path}")
+            posture = unavailable_posture(
+                at if at is not None else datetime.now(timezone.utc),
+                f"configuration not found: {config_path}",
+            )
         else:
             config = parse_config(load_json(config_path))
             try:
                 config = acquire_config(config, readers)
             except ModelError as exc:
                 return _emit_model_error(args, exc, human_prefix="invalid invocation: ")
-            posture = build_posture(config, at)
+            posture = build_posture(
+                config, at if at is not None else datetime.now(timezone.utc),
+            )
     except ModelError as exc:
         return _emit_model_error(args, exc, human_prefix="invalid configuration: ")
     if args.json:
