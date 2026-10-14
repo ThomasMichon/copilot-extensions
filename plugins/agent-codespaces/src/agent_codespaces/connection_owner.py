@@ -58,6 +58,7 @@ from .config import RUNTIME_DIR, ensure_runtime_dir
 from .owner_identity import beacon_identity, owner_identity_matches, owner_process_identity
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
+from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, wait_for_owner_startup
 
 if TYPE_CHECKING:
     from .session_forwards import SessionForwards
@@ -959,9 +960,6 @@ async def run_owner_daemon(
         await owner.shutdown()
 
 
-DEFAULT_OWNER_STARTUP_TIMEOUT = 30.0
-
-
 def ensure_owner_running(
     config: Any, *, spawn_timeout: float = DEFAULT_OWNER_STARTUP_TIMEOUT, poll: float = 0.2
 ) -> bool:
@@ -996,28 +994,7 @@ def ensure_owner_running(
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False
-    deadline = time.monotonic() + max(0.0, spawn_timeout)
-    while time.monotonic() < deadline:
-        if is_owner_live():
-            return True
-        returncode = child.poll()
-        if returncode is not None:
-            # A losing singleton contender can exit while the winner goes live.
-            if is_owner_live():
-                return True
-            log.warning(
-                "Connection Owner exited before readiness (exit code %s); "
-                "see %s", returncode, RUNTIME_DIR / "logs" / "owner.log",
-            )
-            return False
-        remaining = deadline - time.monotonic()
-        if remaining > 0:
-            time.sleep(min(poll, remaining))
-    if is_owner_live():
-        return True
-    log.warning(
-        "Connection Owner did not become live within %.1f seconds; "
-        "startup may still be in progress; see %s",
-        spawn_timeout, RUNTIME_DIR / "logs" / "owner.log",
+    return wait_for_owner_startup(
+        child, is_owner_live, timeout=spawn_timeout, poll=poll,
+        log_path=RUNTIME_DIR / "logs" / "owner.log",
     )
-    return False
