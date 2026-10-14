@@ -331,6 +331,14 @@ Both owned and caller-held authority enforce the same recovery refusals.
 
 ### `zdd.diagnostics` -- daemon-health audit + repair
 
+Diagnostic apply validates canonical guards through `CutoverLock.borrow()`
+before any repair, not by inspecting an open-handle field. Closed, nested,
+foreign-thread or inherited-process guards are blocked without mutation or
+release. The diagnostic acquire callback owns acquisition on behalf of that
+call: a successfully validated guard is released only after its borrow ends,
+including on repair exceptions. A separate consumer guard does not replace
+the native installation guard; both remain held through the repair.
+
 An unavailable native/process census is reported as `census_unavailable`,
 with `census_available: false` and `candidate_count: null`, rather than a
 healthy empty census. Repair stops at any failed fresh census, and the
