@@ -740,6 +740,12 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
     assert r"standalone_consumers\.py" in detector
     for path in ("services/index/", "plugins/agent-index/", "libs/", "tools/"):
         assert path in discovery
+    for name in ("test-runner-linux", "test-runner-windows"):
+        command = next(
+            step["run"] for step in ci[name]["steps"]
+            if step.get("name") == "Test runner admission and isolation"
+        )
+        assert 'python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel' in command
     for name in ("agent-index-service-linux", "agent-index-service-windows"):
         assert ci[name]["needs"] == "discover"
         assert "needs.discover.outputs.standalone_service == 'true'" in ci[name]["if"]

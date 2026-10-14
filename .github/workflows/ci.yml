@@ -913,7 +913,7 @@ jobs:
           PYTHONPATH: libs/single-instance-lease/src
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel &&
           python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_environment_admission.py
@@ -1112,7 +1112,7 @@ jobs:
           PYTHONPATH: libs/single-instance-lease/src
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel &&
           python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_environment_admission.py

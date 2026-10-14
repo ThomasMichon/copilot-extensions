@@ -539,3 +539,9 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   canonical metadata and source graphs but use bounded fixture code bodies;
   real product artifact coverage remains separate. Touched-code lint and all
   thirteen installer/fan-out contracts passed without raising any deadline.
+- Fresh provider CI correctly refused the new real-wheel regression because
+  the runner-contract lane had provisioned only pytest and YAML, leaving its
+  isolated child interpreter without setuptools. Both native runner lanes now
+  declare the actual setuptools floor and wheel dependency through the same
+  canonical seasoned resolver. The workflow contract asserts those explicit
+  prerequisites; no missing-backend skip or build-isolation bypass was added.
