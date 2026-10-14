@@ -56,13 +56,31 @@ crash/retry contract, without candidate execution or selector publication:
    surviving lease filename is not liveness or success evidence. Reports name
    uncertainty explicitly and never manufacture a completed receipt.
 
-The implementation must reuse an established atomic-write/durable persistence
-primitive after inspecting its actual consumer contract. If the available
-primitive cannot supply the required persistence or installation-wide fencing,
-coordinate that missing shared seam with its owner before adding another
-engine. The detailed state format and primitive choice must be documented with
-the implementation; this proposal does not assume a current path lock is an
-isolated boundary against another process running as the same OS principal.
+### Minimal persistence choice
+
+The operator directed a working design without over-engineering. Use a small
+installation-owned SQLite journal with the standard library, explicit schema
+version, one installation identity and one highest accepted sequence/content
+record. No generic persistence framework, remote database, operation/outbox
+tables or daemon is added. This is distinct lifecycle state, not a second fleet
+operation ledger.
+
+Reuse the existing local ledger's proven `BEGIN IMMEDIATE`, full synchronous
+transaction, scope validation and rollback/connection-close idiom without
+modifying its schema or exposing its executor authority. The canonical
+installation ownership primitive still fences filesystem construction and
+activation; SQLite serializes admission transactions rather than replacing
+those leases. Read-only inspection must open existing state in read-only mode,
+never create it. Missing/corrupt/unrecognized state refuses until an explicit
+owned initialization or recovery flow establishes it.
+
+The current runtime completion/selector helpers provide atomic publication,
+but they are not a durable anti-rollback journal and must not be credited as
+one. Cross-process commit/reopen and interruption tests must verify actual
+SQLite persistence and conflict refusal, not just mock a returned commit.
+Document the detailed state format with the implementation. A private local
+root and kernel/SQLite locks do not isolate the journal from a hostile process
+running as the same OS principal; do not claim that threat boundary.
 
 ## Construction, activation and removal follow-ons
 
