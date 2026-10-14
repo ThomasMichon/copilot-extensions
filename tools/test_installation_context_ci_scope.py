@@ -105,9 +105,13 @@ def test_diff_error_is_not_reported_as_unrelated(monkeypatch, capsys) -> None:
 
 def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    job = workflow["jobs"]["test-runner-windows"]
-    assert job["timeout-minutes"] == (
-        "${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}"
+    job = workflow["jobs"]["installation-context-windows"]
+    assert job["timeout-minutes"] == 5
+    assert "installation-context-windows" in workflow["jobs"]["pr-gate"]["needs"]
+    assert job["if"] == workflow["jobs"]["test-runner-windows"]["if"]
+    assert not any(
+        step.get("id") == "installation-context"
+        for step in workflow["jobs"]["test-runner-windows"]["steps"]
     )
     steps = job["steps"]
     detection = next(step for step in steps if step.get("id") == "installation-context")
@@ -154,7 +158,7 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
 
 @pytest.mark.parametrize("job_name,step_name", [
     ("checks", "Derived native diagnostics (POSIX)"),
-    ("test-runner-windows", "Derived native diagnostics (Windows PowerShell 5.1)"),
+    ("installation-context-windows", "Derived native diagnostics (Windows PowerShell 5.1)"),
 ])
 def test_derived_native_diagnostics_select_focused_smoke_in_bounded_lane(
     job_name: str, step_name: str,
@@ -168,7 +172,7 @@ def test_derived_native_diagnostics_select_focused_smoke_in_bounded_lane(
     assert step["timeout-minutes"] == 2
     assert "libs/payload-invocation/tests/test_derived_diagnostic_cli.py" in step["run"]
     assert '-m "not derived_diagnostic_full"' in step["run"]
-    if job_name == "test-runner-windows":
+    if job_name == "installation-context-windows":
         assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
 
 

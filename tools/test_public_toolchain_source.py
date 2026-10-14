@@ -52,6 +52,7 @@ def test_workflow_host_pytest_provisioning_is_seasoned(workflow):
     document = yaml.safe_load((root / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
     job_names = (
         ["windows-python-artifact-builder", "test-runner-linux", "test-runner-windows",
+         "installation-context-windows",
          "coverage-guided-selection-integration"]
         if workflow == "ci.yml" else ["linux", "windows"]
     )

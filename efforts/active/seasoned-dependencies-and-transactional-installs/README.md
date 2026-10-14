@@ -459,3 +459,9 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   npm update-notifier requests rather than raising its 45-second child limit.
   This fresh isolated npm lane is clean-room/local integration evidence;
   native provider CI, fresh review and deployed rollout remain open.
+- A second native provider run exposed the cancelled-job cause: the Windows
+  runner lane's combined diagnostics, wrapper, payload and Fleet work exhausted
+  its seven-minute job limit. Native diagnostics and wrappers now run in their
+  own five-minute required lane, preserving every selection and child deadline.
+  Runner/Fleet work retains its existing seven-minute limit. The aggregate must
+  observe both jobs; no test, budget or required check is waived.

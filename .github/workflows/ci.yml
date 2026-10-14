@@ -1010,13 +1010,13 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$CI_PROMOTION_RUN" ]; then MODE=""; fi
           python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
-  test-runner-windows:
-    name: test runner (windows-latest)
+  installation-context-windows:
+    name: Installation-context native diagnostics (Windows)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
-    # Native diagnostic/wrapper acceptance shares this job with runner,
-    # payload-CWD and fleet contracts; retain each selection's own bound.
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}
+    # Keep native acceptance independent of runner/fleet work; their combined
+    # elapsed time can cancel an otherwise passing required Windows lane.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1074,6 +1074,20 @@ jobs:
           --test-file test_reconcile.py --test-file test_installer_command_binding.py
           -k "runtime_resolution_real_helper_read_only or command_binding"
           --admission-wait 60 --timeout 120
+
+  test-runner-windows:
+    name: test runner (windows-latest)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
       - id: runner-contracts
         name: Detect runner contract changes
         shell: bash
@@ -1509,6 +1523,7 @@ jobs:
       - agent-index-service-windows
       - test-runner-linux
       - test-runner-windows
+      - installation-context-windows
       - archive-sources-windows
       - discover
       - smoke
