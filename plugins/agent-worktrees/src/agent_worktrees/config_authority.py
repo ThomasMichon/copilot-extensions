@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 
@@ -242,7 +241,7 @@ def require_registration_record_mutation(record) -> None:
         require_record_mutation(record, config)
     except (
         OSError, ValueError, KeyError, TypeError,
-        cfg.yaml.YAMLError, subprocess.TimeoutExpired,
+        cfg.yaml.YAMLError,
     ) as exc:
         raise ExecutionSpaceError(
             f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"

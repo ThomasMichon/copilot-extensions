@@ -17,7 +17,6 @@ precisely so a sessionStart hook is never made to wait on a daemon boot.
 
 from __future__ import annotations
 
-import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -396,7 +395,6 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     ("failure", "message"),
     [
         ("nonzero", "cannot read committed authority"),
-        ("timeout", "timed out"),
         ("absent", "committed authority config is absent"),
         ("remote_error", "cannot verify committed authority ref"),
     ],
@@ -442,8 +440,6 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
     def failed_git(*_args, **kwargs):
         assert kwargs["isolated_repository"] is True
         assert "timeout" not in kwargs
-        if failure == "timeout":
-            raise subprocess.TimeoutExpired("git", 1.5)
         if failure == "remote_error" and _args[0] == "show-ref":
             return SimpleNamespace(returncode=2, stdout="")
         if failure == "absent":
