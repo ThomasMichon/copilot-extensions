@@ -137,7 +137,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "sha256": "378724c75ff132a7ecaa50de90d8c5e45aef5b051326a0c815fb546d84b50abc",
+          "sha256": "916d4687bab944aa33ab395e70d506535e4d3e180ab59b6f3d3cd3d195ee83c3",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -976,9 +976,23 @@
           "sha256": "f358c0403ea4cee994786e990c613e31a8d6dbaf219f45665e42bf05d13e58a7",
           "generation": 36,
           "role": "Bridge-owned receipt-backed remote wait fields; external carrier envelope unchanged"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-36.json",
+          "sha256": "a6adb0411237066595f76c0f5e2e33a6bf313c3ba7d7cb79027f6bc69ed07b80",
+          "generation": 36,
+          "role": "Zero-second remote reply wait returns durable admission without requiring a response"
         }
       ],
       "provenance": [
+        {
+          "commit": "567bd805b23397346bda927274cbb96a92e697dd",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+          "capture_method": "Capture committed finite 0..600 remote reply-wait model; real CLI-to-two-bridge/carrier regressions compare zero-wait admission and preserve zero through every deadline layer."
+        },
         {
           "commit": "c6f00b2348a172bba3b7bc7cac1d7b1ad64c91a1",
           "plugin_version": "0.4.1-dev3",

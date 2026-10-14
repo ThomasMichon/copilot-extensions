@@ -333,6 +333,11 @@ def test_remote_cli_zero_and_fractional_waits_return_admission(
         assert hosting.list_pending_live_messages("recipient")[0]["id"] == result["message_id"]
         assert packets[0]["wait_timeout"] == reply_timeout
         assert packets[0]["version"] == 5
+        if reply_timeout == 0:
+            fixture_path = (Path(__file__).parents[1] / "contract" / "fixtures" / "http"
+                            / "current" / "remote-zero-reply-generation-36.json")
+            expected = json.loads(fixture_path.read_text(encoding="utf-8"))["response"]
+            assert {key: result[key] for key in expected} == expected
     finally:
         source.close()
         hosting.close()
