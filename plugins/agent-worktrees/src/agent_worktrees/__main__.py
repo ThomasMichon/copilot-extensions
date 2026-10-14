@@ -1954,100 +1954,7 @@ from .worktree_creation import (  # noqa: E402 -- re-export position matches ori
 )
 
 
-def _self_owner_ref(work_dir: str | None, *, config: cfg.Config | None = None) -> str | None:
-    """Qualified ClaimRef of the worktree rooted at ``work_dir`` (None if not one).
-
-    The identity a launched session advertises via ``AGENT_WORKTREES_OWNER_REF``
-    so any resource it creates (a nested ``create``, a borrowed CodeSpace)
-    inherits *this* worktree as owner and the finalize gate can hold it
-    accountable (resource-obligation-settlement Ph6). Returns None for a
-    non-worktree path (e.g. the repo anchor) -- resources created there are
-    top-level, not owned -- and is fully best-effort (never raises).
-    """
-    if not work_dir:
-        return None
-    try:
-        # Resolve the worktree id the authoritative way -- git-identity first
-        # (root-independent, matches `get owner-ref`), then a tracked-path match.
-        wd = Path(work_dir)
-        wid = _worktree_id_from_git(wd) or tracking.find_worktree_id_by_cwd(str(wd))
-        if not wid:
-            return None
-        if config is None:
-            config = cfg.load_config()
-        try:
-            project = cfg.project_name()
-        except Exception:
-            project = config.repo_name
-        session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-        return tracking.format_claim_ref(config.machine, project, wid, session)
-    except Exception:
-        return None
-
-
-def _build_env(
-    profile: cfg.CopilotProfile | None,
-    session_env: dict[str, str] | None = None,
-    work_dir: str | None = None,
-    *,
-    config: cfg.Config | None = None,
-) -> dict[str, str]:
-    """Build env dict with auto-injected vars, repo session_env, then profile.
-
-    Convention-based vars (like COPILOT_CUSTOM_INSTRUCTIONS_DIRS) are set
-    first, then the repo's ``session_env`` (e.g. COPILOT_FEATURE_FLAGS), then
-    profile env merges on top.  For path-list vars like
-    COPILOT_CUSTOM_INSTRUCTIONS_DIRS, profile values are appended rather
-    than replacing the auto-injected value.
-
-    When ``work_dir`` names a managed worktree, its qualified ClaimRef is
-    exported as ``AGENT_WORKTREES_OWNER_REF`` so any resource an agent creates
-    inside the launched session inherits this worktree as owner (Ph6 ambient
-    owner identity). A non-worktree ``work_dir`` (the anchor) or a failure to
-    resolve it simply omits the var.
-    """
-    env: dict[str, str] = {}
-
-    # Auto-inject: dynamic instructions live in ~/.{project}
-    project_dir = str(cfg.project_dir())
-    env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = project_dir
-
-    # Arm the PR-workflow git-hook shims for this launch when the repo uses PR
-    # mode. The shims are inert unless AGENT_WORKTREES_HOOKS=1 is present; scope
-    # it to the launched session env (not a global/user var) so external and
-    # recovery git operations stay unguarded by default (#234 defect 1).
-    try:
-        launch_config = config if config is not None else cfg.load_config()
-        if launch_config.default_repo.pr.enabled:
-            env["AGENT_WORKTREES_HOOKS"] = "1"
-    except Exception:
-        pass
-
-    # Ambient owner identity (Ph6): advertise the launched worktree's own
-    # ClaimRef so a resource it creates inherits it as owner. Each launch stamps
-    # SELF (overwriting any inherited value), so a chain A->B->C inherits one hop
-    # at each level. Best-effort; omitted for a non-worktree path (anchor).
-    owner_self = (
-        _self_owner_ref(work_dir, config=config) if config is not None
-        else _self_owner_ref(work_dir)
-    )
-    if owner_self:
-        env["AGENT_WORKTREES_OWNER_REF"] = owner_self
-
-    # Repo-declared session env (below the profile so a profile can override).
-    if session_env:
-        env.update(session_env)
-
-    # Merge profile env, appending for path-list keys
-    if profile and profile.env:
-        _PATH_LIST_KEYS = {"COPILOT_CUSTOM_INSTRUCTIONS_DIRS"}
-        for k, v in profile.env.items():
-            if k in _PATH_LIST_KEYS and k in env:
-                env[k] = env[k] + os.pathsep + v
-            else:
-                env[k] = v
-
-    return env
+from .launch_environment import _build_env, _self_owner_ref  # noqa: E402,F401 -- compatibility exports
 
 
 def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
@@ -2426,7 +2333,7 @@ from .worktree_identity import (  # noqa: E402 -- re-export position matches ori
     _adopt_linked_worktree,  # noqa: F401 -- session_binding_cli accesses via __main__
     _infer_worktree_id_from_cwd,  # noqa: F401 -- re-exported for unit tests
     _infer_worktree_id_from_worktree_root,  # noqa: F401 -- re-exported for unit tests
-    _worktree_id_from_git,
+    _worktree_id_from_git,  # noqa: F401 -- compatibility export for launch_environment
     _worktree_path_for_id,  # noqa: F401 -- re-exported for context_cli
     resolve_worktree_id_by_codename,  # noqa: F401 -- re-exported for session_metadata_cli
 )

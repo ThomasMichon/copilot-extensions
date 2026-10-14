@@ -28,10 +28,11 @@ from __future__ import annotations
 
 import os
 import platform
-from collections.abc import Iterable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from . import locks, process_table_cache, sessions, tracking
+from . import locks, sessions, tracking
+from . import process_table_cache  # noqa: F401 -- compatibility export for binding consumers
+from .reclaim_binding import resolve_bound_copilots
 
 __all__ = [
     "build_process_table",
@@ -310,127 +311,6 @@ def _resolve_worktree_id_for_cwd(cwd: str) -> str | None:
     except Exception:
         pass
     return _worktree_id_from_path(cwd)
-
-
-def resolve_bound_copilots(
-    *,
-    session_id: str | None = None,
-    worktree_id: str | None = None,
-    worktree_path: str | None = None,
-    table: dict[int, dict] | None = None,
-    session_ids: Iterable[str] | None = None,
-) -> list[dict]:
-    """Resolve the live Copilot process(es) bound to a session/worktree.
-
-    The binding is authoritative: a process is reported only when a live
-    ``inuse.<pid>.lock`` for it exists inside a session-state dir AND the pid is
-    a live Copilot process (guards pid-reuse). Detached parent-continuation
-    sessions are skipped (they reuse a foreign cwd and must never be attributed
-    to a worktree).
-
-    Filtering (any combination; all applied):
-
-    * ``session_id`` -- exact session dir name, or an unambiguous prefix.
-    * ``worktree_id`` -- the session's cwd resolves to this worktree id.
-    * ``worktree_path`` -- the session's cwd is at/under this path.
-    * ``session_ids`` -- exact registered session directories, without a
-      session-state discovery sweep. An empty registry returns immediately.
-
-    With no filter, every bound Copilot on the machine is returned. Each item::
-
-        {session_id, pid, cwd, worktree_id, homing}
-
-    ``homing`` is ``mux``/``bare``/``unknown`` (see module docstring).
-    """
-    if session_ids is None and table is None:
-        table = process_table_cache.cached(build_process_table)
-    state_dir = sessions._session_state_dir()
-    results: list[dict] = []
-    if not state_dir.exists():
-        return results
-    if session_ids is None:
-        entries = sorted(state_dir.iterdir())
-    else:
-        from .session_projection import _valid_session_id
-
-        ids = sorted(set(session_ids))
-        if any(not _valid_session_id(sid) for sid in ids):
-            raise ValueError("Invalid registered session identity")
-        if not ids:
-            return results
-        entries = [state_dir / sid for sid in ids]
-    table = process_table_cache.cached(build_process_table) if table is None else table
-
-    _posix = platform.system() != "Windows"
-    _pane_ttys: list = [None]  # lazy, memoized tmux pane-tty set (POSIX only)
-
-    for entry in entries:
-        if not entry.is_dir():
-            continue
-
-        sid = entry.name
-        if session_id and not (sid == session_id or sid.startswith(session_id)):
-            continue
-
-        # Cheap gate FIRST: only a dir with a live bound Copilot is of interest.
-        # The vast majority of session-state dirs are historical (no live lock),
-        # so resolve the lock pids -- a cheap glob -- before paying for the
-        # workspace.yaml read + worktree-id resolution below. This keeps the
-        # scan O(live sessions) instead of O(all sessions ever), which matters
-        # on the picker/list hot path where hundreds of dirs accumulate.
-        live_pids = [
-            pid for pid in _lock_pids(entry)
-            if sessions._is_process_alive(pid)
-            and sessions._is_copilot_process(pid)
-        ]
-        if not live_pids:
-            continue
-
-        if sessions._is_detached_session(entry):
-            continue
-
-        cwd = _session_cwd(entry)
-        if worktree_path and not _cwd_under(cwd, worktree_path):
-            continue
-        if session_ids is not None and worktree_id:
-            wt_id = worktree_id
-        else:
-            wt_id = _resolve_worktree_id_for_cwd(cwd) if cwd else None
-        if wt_id is None:
-            try:
-                wt_id = tracking.find_worktree_id_by_session(sid)
-            except Exception:
-                wt_id = None
-
-        if worktree_id and wt_id != worktree_id:
-            continue
-
-        for pid in live_pids:
-            homing = homing_of(pid, table)
-            if homing == "bare" and _posix:
-                # reptyr adopts a bare Copilot into a tmux pane by moving its
-                # controlling terminal (not its ppid), so a ppid-only walk still
-                # reads it as bare. Upgrade to mux when its tty is a tmux pane.
-                # Fetch pane ttys ONCE, lazily, and only when a bare-by-ppid
-                # candidate actually appears -- keeping the common (all-mux) case
-                # off the tmux subprocess on the hot path.
-                if _pane_ttys[0] is None:
-                    from . import remux
-                    _pane_ttys[0] = remux.tmux_pane_ttys()
-                if _pane_ttys[0]:
-                    from . import remux
-                    tty = remux.process_tty(pid)
-                    if tty and tty in _pane_ttys[0]:
-                        homing = "mux"
-            results.append({
-                "session_id": sid,
-                "pid": pid,
-                "start_time": locks.process_start_time(pid),
-                "cwd": cwd,
-                "worktree_id": wt_id,
-                "homing": homing,
-            })
-    return results
 
 
 # ---------------------------------------------------------------------------
