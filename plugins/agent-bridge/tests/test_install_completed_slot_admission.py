@@ -1171,7 +1171,7 @@ def test_sh_pid_fallback_lock_reports_contention_as_75(tmp_path: Path) -> None:
     """Without flock the pid-symlink fallback still serializes: a live holder
     makes the waiter time out with 75 (contention), never proceed."""
     action = (
-        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
         'mkdir -p "$INSTALL_DIR"\n'
         'MSYS=winsymlinks:nativestrict ln -s "$$" "$INSTALL_DIR/.install.lock.pid"\n'
         '[[ -L "$INSTALL_DIR/.install.lock.pid" ]] || { echo NOSYMLINK; exit 0; }\n'
@@ -1280,7 +1280,7 @@ def test_sh_pid_fallback_contention_needs_a_live_owner(
     cannot proceed (its reap mutex is held) is a lock fault (1) at the
     deadline. Shims stand in for symlinks so this runs without that privilege."""
     action = (
-        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
         'mkdir -p "$INSTALL_DIR"\n'
         "ln() { return 1; }\nreadlink() { echo 424242; }\nrm() { :; }\n"
         f"kill() {{ return {0 if owner_alive else 1}; }}\n"
@@ -1292,11 +1292,64 @@ def test_sh_pid_fallback_contention_needs_a_live_owner(
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_pid_fallback_rejects_a_link_created_inside_a_directory(tmp_path: Path) -> None:
+    """`ln -s` into a directory at the lock path succeeds by creating a child;
+    that is not this run's lock, so it is a fault, never an acquisition."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        "ln() { return 0; }\nreadlink() { return 1; }\n"
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    assert "RC=1" in result.stdout, result.stdout + result.stderr
+
+
+_FLOCK_HOLDER = """
+import fcntl, sys, time
+handle = open(sys.argv[1], "a+b")
+fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+print("HELD", flush=True)
+time.sleep(60)
+"""
+
+
+@pytest.mark.skipif(_bash() is None or os.name == "nt", reason="needs bash and POSIX flock(2)")
+@pytest.mark.parametrize("held", [True, False], ids=["held-by-flock", "free"])
+def test_sh_without_flock_binary_shares_the_flock_lock(tmp_path: Path, held: bool) -> None:
+    """Without a flock binary the installer still takes flock(2) on
+    .install.lock (through Python), so it excludes a flock or PowerShell
+    holder of the same file instead of using a separate protocol."""
+    lock = tmp_path / "install" / ".install.lock"
+    lock.parent.mkdir(parents=True)
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    holder = None
+    if held:
+        holder = subprocess.Popen(
+            [sys.executable, "-c", _FLOCK_HOLDER, str(lock)], stdout=subprocess.PIPE, text=True,
+        )
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "HELD"
+    try:
+        result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    finally:
+        if holder is not None:
+            holder.kill()
+            holder.wait(timeout=30)
+    assert f"RC={75 if held else 0}" in result.stdout, result.stdout + result.stderr
+    assert not (lock.parent / ".install.lock.pid").exists()
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 def test_sh_pid_fallback_unattributable_lock_path_is_a_fault(tmp_path: Path) -> None:
     """A lock path that can never be created or attributed (here a regular
     file) is a lock fault, not another install holding the lock."""
     action = (
-        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
         'mkdir -p "$INSTALL_DIR"\n'
         'echo not-a-link > "$INSTALL_DIR/.install.lock.pid"\n'
         "rc=0; _enter_install_lock || rc=$?\n"

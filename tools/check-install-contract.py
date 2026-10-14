@@ -356,13 +356,15 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
                     index += 1
                 tail = statement.split("||", 1)[1] if "||" in statement else None
                 # `|| return $?` right after the call returns the helper's own status.
+                ps1 = path.suffix == ".ps1"
                 stops = tail is not None and bool(
-                    _IMMEDIATE_STATUS.match(tail) or _fails_unconditionally(tail)
+                    (not ps1 and _IMMEDIATE_STATUS.match(tail))
+                    or _fails_unconditionally(tail, ps1=ps1)
                 )
             elif _MARK_COMPLETE_IF_NOT.search(line):
                 tail = "\n".join(lines[lineno - 1:lineno + 20])
                 stops = _fails_unconditionally(
-                    _braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):])
+                    _braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):]), ps1=True
                 )
             elif _MARK_COMPLETE_IF_PS1.search(line):
                 stops = _ps1_else_fails("\n".join(lines[lineno - 1:lineno + 40]))
@@ -399,21 +401,25 @@ def _ps1_else_fails(text: str) -> bool:
     start = text.index("{", text.index(_PS1_HELPER))
     after = text[start + len(_braced_body(text[start:])) + 2:]
     branch = re.match(r"\s*else\s*\{", after)
-    return bool(branch) and _fails_unconditionally(_braced_body(after[branch.end() - 1:]))
+    return bool(branch) and _fails_unconditionally(
+        _braced_body(after[branch.end() - 1:]), ps1=True
+    )
 _MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMarkComplete\b")
-# A failure branch must report failure: a non-zero or status-variable
-# exit/return, ``return $false`` or ``throw`` -- never ``return 0``/``exit 0``
-# or a bare ``return`` (which reports the previous command's success).
+# A failure branch must report failure in its own language -- never
+# ``return 0``/``exit 0`` or a bare ``return`` (the previous command's status).
+# Shell: a non-zero ``exit``/``return``. PowerShell: ``return $false``,
+# ``throw`` or a non-zero ``exit``; ``return 1`` there is truthy, so a caller's
+# ``if (-not (...))`` would read it as success.
 _IMMEDIATE_STATUS = re.compile(r"\s*(?:return|exit)\s+\"?\$\?\"?(?![\w-])")
-_FAILS = re.compile(
-    r"\bthrow\b|\breturn\s+\$false\b"
-    r"|\b(?:exit|return)\s+[1-9]\d*(?![\w-])"
-)
+_FAILS = re.compile(r"\b(?:exit|return)\s+[1-9]\d*(?![\w-])")
+_PS1_FAILS = re.compile(r"\bthrow\b|\breturn\s+\$false\b|\bexit\s+[1-9]\d*(?![\w-])")
 _QUOTED_STATUS = re.compile(r'"(\$(?:\{?[A-Za-z_]\w*\}?|\?))"')
 _PARAM_EXPANSION = re.compile(r"\$\{(\w+)[^}]*\}")
 
 
-def _fails_unconditionally(body: str, status_vars: tuple[str, ...] = ()) -> bool:
+def _fails_unconditionally(
+    body: str, status_vars: tuple[str, ...] = (), *, ps1: bool = False
+) -> bool:
     """Whether ``body`` reports failure on every path through it.
 
     Only a top-level statement counts: a stop nested in a conditional
@@ -423,10 +429,10 @@ def _fails_unconditionally(body: str, status_vars: tuple[str, ...] = ()) -> bool
     ``status_vars``, a status the caller proved was captured from the failing
     writer; any other variable (``ok=0; return "$ok"``) may hold success.
     """
-    fails = _FAILS
+    fails = _PS1_FAILS if ps1 else _FAILS
     if status_vars:
         names = "|".join(map(re.escape, status_vars))
-        fails = re.compile(rf"{_FAILS.pattern}|\b(?:exit|return)\s+\$\{{?(?:{names})\}}?(?![\w-])")
+        fails = re.compile(rf"{fails.pattern}|\b(?:exit|return)\s+\$\{{?(?:{names})\}}?(?![\w-])")
     code = _PARAM_EXPANSION.sub(r"$\1", _QUOTED_STATUS.sub(r"\1", body))
     code = _strip_quoted_strings(code).strip()
     if code.startswith("{") and code.endswith("}"):
@@ -471,7 +477,9 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
     if suffix == ".ps1":
         writer = _PS1_WRITER.search(code)
         check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
-        return bool(check) and _fails_unconditionally(_braced_body(code[check.end() - 1:]))
+        return bool(check) and _fails_unconditionally(
+            _braced_body(code[check.end() - 1:]), ps1=True
+        )
     lines = [line for line in code.splitlines() if line.strip()]
     found = [i for i, line in enumerate(lines) if _SH_WRITER.search(line)]
     return bool(found) and all(_sh_writer_status_kept(lines, i) for i in found)

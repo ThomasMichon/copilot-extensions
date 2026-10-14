@@ -403,6 +403,13 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
             "    local out=\"$(\"$py\" \"${args[@]}\" 2>&1)\" || rc=$?\n    return \"$rc\"\n}\n"
             "main() {\n    _versioned_mark_complete || exit 1\n}\n",
         ),
+        (
+            "install.ps1",
+            _PS1_HELPER.replace("return $false\n    }", "return 1\n    }")
+            + "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+        ),
+        ("install.ps1", _PS1_HELPER + "    if (-not (Invoke-VersionedMarkComplete)) { return 1 }\n"),
+        ("install.sh", _SH_HELPER + "main() {\n    _versioned_mark_complete || return $false\n}\n"),
     ],
     ids=[
         "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
@@ -420,6 +427,7 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         "sh-command-substitution", "sh-captured-status-returns-0", "sh-rc-test-only-warns",
         "sh-writer-status-dropped", "sh-or-return-zero-variable", "ps1-exit-arbitrary-variable",
         "sh-local-masks-writer", "sh-local-masks-captured-writer",
+        "ps1-helper-returns-numeric", "ps1-call-returns-numeric", "sh-returns-ps1-false",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:

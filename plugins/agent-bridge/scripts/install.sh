@@ -1596,6 +1596,44 @@ _enter_install_lock() {
         __install_lock_fd=8
         return 0
     fi
+    # No flock binary (macOS, minimal images): take the same flock(2) lock on
+    # .install.lock through Python, so this run still excludes flock-based and
+    # PowerShell (FileShare.None) installers. The lock belongs to fd 8's open
+    # file description and outlives the short-lived Python process.
+    local __py="" __c
+    for __c in python3 python; do
+        command -v "$__c" >/dev/null 2>&1 && { __py="$(command -v "$__c")"; break; }
+    done
+    if [[ -n "$__py" && "${COPILOT_EXT_NO_PYFLOCK:-}" != "1" ]]; then
+        { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
+        local __prc=0
+        "$__py" -c '
+import sys, time
+try:
+    import fcntl
+except ImportError:
+    sys.exit(3)
+deadline = time.monotonic() + float(sys.argv[1])
+while True:
+    try:
+        fcntl.flock(8, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        sys.exit(0)
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            sys.exit(75)
+        time.sleep(0.25)
+    except OSError:
+        sys.exit(1)
+' "$__timeout" || __prc=$?
+        if [[ "$__prc" -eq 0 ]]; then
+            __install_lock_fd=8
+            return 0
+        fi
+        exec 8>&-
+        [[ "$__prc" -eq 3 ]] || { [[ "$__prc" -eq 75 ]] && return 75; return 1; }
+    fi
+    # Last resort, no flock(2) available at all: a pid symlink. It excludes
+    # only other installers that also lack flock(2).
     local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __now __held=0
     __deadline=$(( $(date +%s) + __timeout ))
     until ln -s "$$" "$__link" 2>/dev/null; do
@@ -1643,6 +1681,12 @@ _enter_install_lock() {
             sleep 0.1
         fi
     done
+    # `ln -s` into an existing directory creates a child and succeeds: accept
+    # only our own pid link at the lock path itself.
+    if [[ ! -L "$__link" || "$(readlink "$__link" 2>/dev/null || true)" != "$$" ]]; then
+        [[ -L "$__link/$$" ]] && rm -f "$__link/$$"
+        return 1
+    fi
     __install_lock_link="$__link"
     return 0
 }
