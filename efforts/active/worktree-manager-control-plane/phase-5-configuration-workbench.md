@@ -57,15 +57,19 @@ permission to plan/claim a wave, not blanket deployment or destructive authority
 - [x] Inventory current production section/action/form contracts, effective
   configuration resolvers, supported local writers, and helper lifecycles.
   See the [source-cited inventory](phase-5-effective-configuration-contract.md#inventory-existing-behavior-not-missing-work).
-- [ ] Specify typed source provenance, editable scope, override/reset semantics,
+- [x] Specify typed source provenance, editable scope, override/reset semantics,
   validation/findings, and preview/apply outcomes; version existing contracts
   compatibly rather than add a parallel manifest registry.
-- [ ] Reconcile #543 with the read-only source boundary; treat #6044/#6096 as
+  See the [consumer contract](phase-5-effective-configuration-contract.md).
+- [x] Reconcile #543 with the read-only source boundary; treat #6044/#6096 as
   completed confirmation prior art and coordinate remaining dispatch toggles
   with `agent-dispatch-workers-config-section`. Do not close implementation
   issues on a planning amendment.
-- [ ] Resolve whether helper-backed widgets need a new capability or can use
+  #6379/#6283 retain the existing Workers/remote ownership; #543 remains open.
+- [x] Resolve whether helper-backed widgets need a new capability or can use
   current process/service boundaries; keep static reads daemon-independent.
+  Bounded provider commands suffice for the proposed first consumer; no helper
+  service is added.
 
 **Exit:** reviewed design identifies concrete owners and consumer contracts,
 old-provider degradation, supported local writes, and rejection behavior.

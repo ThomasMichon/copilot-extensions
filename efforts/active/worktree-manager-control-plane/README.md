@@ -846,9 +846,11 @@ Direct writes are machine-local; repository, knowledge, plugin, and preset
 sources are read-only. The sequencing and validation below are
 _(agent-recommended)_ realizations of that operator-approved boundary.
 
-- [ ] Wave 0: review contribution, effective-state, and local-write contracts
+- [x] Wave 0: review contribution, effective-state, and local-write contracts
       against existing owners; reconcile #543's old direct-repository-write
       premise without claiming its implementation complete.
+      The linked #6711 design names the remaining implementation and acceptance
+      obligations; Waves 1-5 remain open.
 - [ ] Wave 1: effective configuration/provenance and machine-local preview,
       apply, reset, and killswitch controls through plugin-owned adapters.
 - [ ] Wave 2: first editable vertical slice for related repositories, venues,
