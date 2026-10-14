@@ -186,8 +186,9 @@ silently.
 
 - **Not the builder or the promotion pipeline.** Building, promoting, and
   attesting artifacts belong to the release pipeline
-  ([`docs/pipelines.md`](../../../docs/pipelines.md)). This vision covers
-  their consumption only.
+  ([`docs/pipelines.md`](../../../docs/pipelines.md)). This vision owns
+  consumer admission and the cross-boundary pre-merge availability
+  requirement, not the pipeline mechanism that satisfies it.
 - **Not release selection.** Which release, role closure, or optional
   environment a host should run is decided by the release authority
   ([plugin-services *one-authority-per-lifecycle-decision*](../README.md#one-authority-per-lifecycle-decision)).

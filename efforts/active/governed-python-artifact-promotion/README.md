@@ -5,7 +5,7 @@
 - **Branch(es):** per-slice (see Coordination)
 - **Created:** 2026-10-01
 - **Status:** Active
-- **Vision:** extends `visions/installer/README.md`, `visions/plugin-services/installation-cells/README.md`, and the agent-index runtime vision; this effort does not replace any of them
+- **Vision:** extends `visions/installer/README.md`, `visions/plugin-services/installation-cells/README.md`, `visions/plugin-services/runtime-assembly/README.md`, and the agent-index runtime vision; this effort does not replace any of them
 - **Umbrella issue:** [#4876](https://github.com/ThomasMichon/copilot-extensions/issues/4876)
 - **Sub-issues:** _pending_
 
