@@ -200,6 +200,10 @@ timestamp is not proof that the provider metadata was refreshed.
 
 ## Validation Plan
 
+- [x] Native Windows external-reader lifecycle validation observes a real
+  windowless parent, two console-descendant cycles, no visible windows/focus or
+  Default Terminal acquisitions, and complete timeout cleanup; batch/stream
+  grant refusals run in the same native lane.
 - [ ] The quota skill/helper identifies the requesting session's account rather
   than silently reading a fresh runtime's global default.
 - [x] Acquisition time and provider-observation freshness are distinct; cached
@@ -255,6 +259,26 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-13 - External-reader native acceptance and safe group ownership
+
+- Verified the native Windows lane on exact source `1b8da8b66`: six passed,
+  zero failed/skipped, with an interactive desktop and supervisor cleanup.
+  Two successful console-descendant cycles and timeout cleanup retain the
+  original acquisition limits and acceptance assertions. Five grant cases cover
+  trailing-name batch aliases and executable streams.
+- Independently matched the executed native archive to the authoritative Git
+  archive with its recorded prefix, plus the reader and witness file hashes.
+  Earlier source snapshots failed their first acquisition; the cause remains
+  unproven. This receipt credits the literal current-source witness only,
+  not a relaxed retry or an inferred historical repair.
+- Hardened POSIX cleanup against ignored `SIGCHLD` and foreign waiters: the
+  isolated group owner stays alive until control-pipe EOF and terminates its
+  own live group. The caller never signals a numeric PID/group after ownership
+  may be lost; unexpected owner exit refuses cleanup confirmation.
+- Publication review and required checks are still pending for the latest
+  corrections. Provider/account identity, native macOS lifecycle evidence,
+  session delivery, routing, release, and authorized rollout remain open.
 
 ### 2026-10-13 - Bounded external-reader implementation
 

@@ -111,7 +111,7 @@ group teardown. Unexpected host exit refuses cleanup confirmation.
 
 | Platform | Implementation and validation status |
 |----------|--------------------------------------|
-| Windows | Strict headless Job containment is implemented through the canonical helper; native reader lifecycle/window-suppression validation is not yet recorded. |
+| Windows | Strict headless Job containment is implemented through the canonical helper. The native interactive-desktop lane passed on source `1b8da8b66`: two successful console-descendant cycles, timeout/tree cleanup, and five batch/stream grant cases (six passed, zero skipped); assertions and acquisition limits were unchanged. |
 | Linux | The capability-gated group host is implemented; contained native regressions exercise timeout, output bounds, and descendant termination after root exit. |
 | macOS | The same group/control-pipe host is conditional on the Python/OS group capability gate; it no longer requires non-reaping `waitid`. Missing capabilities explicitly refuse reader execution; native macOS lifecycle validation is not yet recorded. No Linux `/proc` witness is claimed as macOS proof. |
 
@@ -124,6 +124,10 @@ reader/descendant cycles plus timeout, pins process creation identities, checks
 window/foreground and Default Terminal acquisitions, and verifies every owned
 root/descendant handle is signaled after cleanup. A noninteractive window station
 is a failure when this lane is requested, not a headlessness pass.
+The recorded native run used an interactive Windows Session 1 with
+`WSF_VISIBLE=true` and verified supervisor cleanup. Earlier source snapshots
+failed the first acquisition; their exact cause remains unproven, and the
+successful current-source witness is not a claim about those earlier failures.
 
 Empty/malformed/duplicate-key JSON, nonzero exit, oversized output, timeout,
 source mismatch, future capture, launch/containment failure, and unconfirmed
