@@ -20,7 +20,8 @@ source. It requires an available Python 3.10+ interpreter; it does not install
 one or depend on a stale installed runtime. Bash and PowerShell wrappers resolve
 the plugin root through the runtime's documented root variables and emit exactly
 `{}`. The PowerShell wrapper suppresses console allocation at process creation,
-drains both output streams concurrently, and bounds the owned writer's wait.
+drains both output streams concurrently, and enforces one five-second deadline
+across asynchronous stdin delivery and the owned writer's exit.
 On Windows it resolves a virtual environment's bounded `pyvenv.cfg` to the
 base console interpreter and refuses `py.exe` launchers, so cancellation targets
 the actual one-shot writer rather than leaving a redirector's child running.

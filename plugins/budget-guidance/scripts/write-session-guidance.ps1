@@ -49,12 +49,17 @@ try {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
     $process = [Diagnostics.Process]::Start($psi)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    $process.StandardInput.Write($payload)
+    $process.StandardInput.AutoFlush = $true
+    $inputDelivery = $process.StandardInput.WriteAsync($payload)
+    $remaining = [int][Math]::Max(0, 5000 - $deadline.ElapsedMilliseconds)
+    if (-not $inputDelivery.Wait($remaining)) { throw 'writer input deadline exceeded' }
     $process.StandardInput.Close()
-    if (-not $process.WaitForExit(5000)) {
+    $remaining = [int][Math]::Max(0, 5000 - $deadline.ElapsedMilliseconds)
+    if (-not $process.WaitForExit($remaining)) {
         $process.Kill()
         if (-not $process.WaitForExit(1000)) { throw 'writer cleanup exceeded deadline' }
         throw 'writer deadline exceeded'

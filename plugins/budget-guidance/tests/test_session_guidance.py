@@ -267,6 +267,8 @@ def test_projection_and_hook_declarations_are_output_free_and_owner_scoped():
     assert "write-session-guidance.sh" in hooks["hooks"]["sessionStart"][1]["bash"]
     assert "write-session-guidance.ps1" in hooks["hooks"]["sessionStart"][1]["powershell"]
     assert json.loads((PLUGIN / "session-context.json").read_text())["sessionStart"]["context"] == "none"
+    pointer = (PLUGIN / "instructions/session-guidance.instructions.md").read_text()
+    assert "as authoritative for this session" in pointer
 
 
 @pytest.mark.parametrize("platform", ["python", "posix", "powershell"])
@@ -366,3 +368,27 @@ def test_windows_writer_resolves_venv_base_without_launching_redirector(tmp_path
     assert result.stdout == "{}"
     target = tmp_path / ".copilot/session-state/test-session/instructions/budget-guidance/session-guidance.instructions.md"
     assert _data(target)["error"] == "configuration not found"
+
+
+def test_powershell_writer_bounds_maximum_stdin_delivery_to_stalled_child(tmp_path):
+    shell = shutil.which("pwsh") or (shutil.which("powershell.exe") if os.name == "nt" else None)
+    if shell is None:
+        pytest.skip("PowerShell unavailable")
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy2(PLUGIN / "scripts/write-session-guidance.ps1", scripts)
+    (scripts / "write_session_guidance.py").write_text(
+        "import time\ntime.sleep(20)\n", encoding="utf-8",
+    )
+    env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(payload)}
+    started = time.monotonic()
+    result = subprocess.run(
+        [shell, "-NoProfile", "-File", str(scripts / "write-session-guidance.ps1")],
+        input="x" * 65536, text=True, capture_output=True, env=env,
+        timeout=9, **no_window_kwargs(),
+    )
+    assert 5 <= time.monotonic() - started < 9
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+    assert result.stderr.strip() == "budget-guidance: session cue could not be written"
