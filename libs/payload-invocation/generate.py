@@ -459,7 +459,7 @@ def render(
             'SELF_ROOT="$self_root" ' if data["catalogBinding"] else ""
         ),
         "CATALOG_BINDING_FLAGS_POSIX": (
-            " -B" if data["catalogBinding"] else ""
+            " -I -B -X utf8" if data["catalogBinding"] else ""
         ),
         "CATALOG_BINDING_POWERSHELL": (
             "$bindingPython = $null\n"

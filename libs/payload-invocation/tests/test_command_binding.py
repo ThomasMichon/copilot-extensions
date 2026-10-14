@@ -319,7 +319,6 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
     wrapper_dir = fixture["home"] / "test-bin"
     wrapper_dir.mkdir()
     bootstrap = (
-        f"#!{sys.executable}\n"
         "import os,pwd,runpy,sys\n"
         "sys.dont_write_bytecode=True\n"
         "original=pwd.getpwuid\n"
@@ -344,10 +343,52 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
     )
     for name in ("python3", "python"):
         wrapper = wrapper_dir / name
-        wrapper.write_text(bootstrap, encoding="utf-8")
+        wrapper.write_text(
+            f"#!{sys.executable}\n"
+            "import os,sys\n"
+            "if '-I' in sys.argv[1:]:\n"
+            "    os.execv(sys.executable,[sys.executable,'-I','-B','-X','utf8','-c',"
+            f"{bootstrap!r},*sys.argv[1:]])\n"
+            + bootstrap,
+            encoding="utf-8",
+        )
         wrapper.chmod(0o755)
     environment["PATH"] = str(wrapper_dir) + os.pathsep + os.environ["PATH"]
     return environment
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX catalog interpreter")
+def test_command_binding_catalog_isolates_project_and_pythonpath(
+    binding_fixture: dict,
+) -> None:
+    _prepare_catalog(binding_fixture)
+    _publish(binding_fixture)
+    environment = _catalog_environment(binding_fixture)
+    project = binding_fixture["home"] / "project"
+    inherited = binding_fixture["home"] / "inherited-python"
+    for directory in (project, inherited):
+        directory.mkdir()
+        (directory / "json.py").write_text(
+            "from pathlib import Path\n"
+            "Path(__file__).with_name('imported').write_text('unexpected import')\n"
+            "raise RuntimeError('project or inherited Python import executed')\n",
+            encoding="utf-8",
+        )
+    environment["PYTHONPATH"] = str(inherited)
+    before = _snapshot(binding_fixture["home"])
+    for _ in range(2):
+        completed = subprocess.run(
+            ["bash", str(binding_fixture["payload"] / "scripts/emit-command-catalog.sh")],
+            env=environment, cwd=project, capture_output=True, text=True, timeout=30,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        envelope = json.loads(completed.stdout)
+        match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
+        assert match, completed.stdout
+        catalog = json.loads(match[1])
+        assert catalog["binding"]["status"] == "selected", catalog
+        assert catalog["binding"]["source"]["identity"]["canonical"] == "github:example/plugins"
+        assert _snapshot(binding_fixture["home"]) == before
 
 
 class _PowerShellHost:

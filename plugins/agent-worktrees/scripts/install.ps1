@@ -117,6 +117,65 @@ if ($InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 }
 $ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT
+# === command-lifecycle: admission before staging ===
+if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall')) {
+    $admissionPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $admissionSource = if ($env:COPILOT_PLUGIN_STAGED_FROM -and
+        (($PSScriptRoot -replace '\\', '/') -notmatch '/\.copilot/installed-plugins/')) {
+        $env:COPILOT_PLUGIN_STAGED_FROM
+    } else { $admissionPayload }
+    $admissionPython = $null
+    $admissionLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($admissionLauncher) {
+        $admissionPreviousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $candidate = & $admissionLauncher.Source -3 -I -B -X utf8 -c 'import sys; print(sys.executable)' 2>$null
+        } finally {
+            $ErrorActionPreference = $admissionPreviousErrorAction
+        }
+        if ($LASTEXITCODE -eq 0 -and $candidate -and [IO.File]::Exists([string]$candidate)) {
+            $admissionPython = [string]$candidate
+        }
+    }
+    if (-not $admissionPython) {
+        foreach ($name in @('python3', 'python')) {
+            $candidate = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
+                Select-Object -First 1
+            if ($candidate) { $admissionPython = $candidate.Source; break }
+        }
+    }
+    if (-not $admissionPython) { throw 'Attributable runtime admission requires bootstrap Python.' }
+    $admissionArgs = @(
+        '-I', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
+        '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
+        '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource
+    )
+    if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+        & $admissionPython @admissionArgs --check-lifecycle
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } else {
+        $admissionForward = @()
+        foreach ($key in $PSBoundParameters.Keys) {
+            $value = $PSBoundParameters[$key]
+            if ($value -is [System.Management.Automation.SwitchParameter]) {
+                if ($value.IsPresent) { $admissionForward += "-$key" }
+            } else {
+                $admissionForward += "-$key"
+                $admissionForward += [string]$value
+            }
+        }
+        if ($Action -eq 'stamp') { $admissionArgs += '--deferred-runtime' }
+        elseif ($Action -eq 'uninstall') { $admissionArgs += '--teardown' }
+        & $admissionPython @admissionArgs --run-lifecycle -- `
+            (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
+            -File $PSCommandPath @admissionForward
+        exit $LASTEXITCODE
+    }
+}
+# === end command-lifecycle: admission before staging ===
 if ($ContextualInstall) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
@@ -3796,40 +3855,8 @@ function Invoke-Stamp {
 }
 
 if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall')) {
-    $lifecyclePython = if ($Action -eq 'uninstall') {
-        Get-BootstrapPython -ExcludeRuntimeRoot
-    } else { Get-BootstrapPython -ExcludeVenvDir }
-    if (-not $lifecyclePython) { throw 'Attributable runtime admission requires bootstrap Python.' }
-    $lifecycleSource = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
-        $env:COPILOT_PLUGIN_STAGED_FROM
-    } else { $PluginDir }
-    $lifecycleArgs = @(
-        '-B', '-E', '-X', 'utf8', (Join-Path $PluginDir 'scripts\command_binding.py'),
-        '--payload-root', $PluginDir, '--plugin-id', 'agent-worktrees',
-        '--legacy-root', $InstallDir, '--source-payload-root', $lifecycleSource
-    )
-    if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
-        & $lifecyclePython @lifecycleArgs --check-lifecycle
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } else {
-        $lifecycleForward = @()
-        foreach ($key in $PSBoundParameters.Keys) {
-            $value = $PSBoundParameters[$key]
-            if ($value -is [System.Management.Automation.SwitchParameter]) {
-                if ($value.IsPresent) { $lifecycleForward += "-$key" }
-            } else {
-                $lifecycleForward += "-$key"
-                $lifecycleForward += [string]$value
-            }
-        }
-        $lifecycleShell = (Get-Process -Id $PID).Path
-        if ($Action -eq 'stamp') { $lifecycleArgs += '--deferred-runtime' }
-        elseif ($Action -eq 'uninstall') { $lifecycleArgs += '--teardown' }
-        & $lifecyclePython @lifecycleArgs --run-lifecycle -- `
-            $lifecycleShell -NoLogo -NoProfile -ExecutionPolicy Bypass `
-            -File $PSCommandPath @lifecycleForward
-        exit $LASTEXITCODE
-    }
+    & $admissionPython @admissionArgs --check-lifecycle
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 switch ($Action) {

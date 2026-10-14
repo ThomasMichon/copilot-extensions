@@ -53,6 +53,9 @@ blocked.
 the first adopter. Other manifests retain byte-identical catalogs. The optional
 `catalogBindingModule` vendors the same pure ownership code into the runtime
 package for its existing deploy-manifest publisher.
+The POSIX binding emitter uses isolated Python: neither the project working
+directory nor inherited Python import paths can supply its standard-library
+imports. Only the explicitly addressed payload helper supplies binding code.
 
 The binding contains normalized source identity/fingerprint, plugin identity,
 and a selected installation only when its ownership has been validated.
@@ -64,7 +67,11 @@ without that record is not ownership. Publication refuses a conflicting
 incumbent. Validation and atomic manifest replacement share the installation
 primitive's token-owned lifecycle lock. Legacy `stamp`, `provision`, `install`,
 and `update` acquire that lock and validate the incumbent before any shared
-runtime writes and hold it through activation and publication. Runtime-building
+runtime writes and hold it through activation and publication. Native admission
+precedes self-staging, including stage creation and sibling-stage reclamation.
+The admitting parent holds the same lease through the staged child, which
+revalidates the inherited ticket before its own staging decision; an inherited
+stage flag does not waive ownership. Runtime-building
 actions reserve a
 `pending` lifecycle owner in the existing manifest. Partial failures retain
 the reservation and cannot produce a selected binding. Native children borrow

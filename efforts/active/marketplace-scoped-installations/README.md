@@ -495,6 +495,32 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Admit native self-staging and isolate catalog imports
+
+- Current-head review found two pre-admission mutation paths: both native
+  installers could create or reap legacy runtime staging directories before
+  refusing foreign ownership. Admission now precedes all self-staging. Its
+  parent holds the existing token-owned lease through the staged child; the
+  child revalidates that lease before staging and again before dispatch.
+  The shared self-stage blocks and their watchdog/CWD contract are unchanged.
+- The POSIX catalog binding emitter now uses isolated Python, excluding the
+  repository working directory and inherited Python import paths. A real
+  isolated-interpreter regression places executable shadow modules in both
+  locations, invokes the unchanged generated emitter twice, and proves source
+  selection and complete profile snapshots remain unchanged.
+- Actual native installer regressions cover all five legacy mutation actions
+  with foreign ownership and retained sibling staging evidence. Refusal
+  preserves the complete profile, including directories and modification
+  times; a separately admitted invocation proves the real self-stage block
+  still executes and releases its lease. The two shared binding/lifecycle
+  files passed 61 cases locally. The complete shared suite, both bootstrap
+  files, and payload CWD contracts passed 209 cases with 18 platform skips.
+- The preceding head's native Windows job
+  [115677711112](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38509342997/job/115677711112)
+  succeeded, but cannot validate these new changes. Fresh current-head review
+  and native execution remain necessary. No broader diagnostic prerequisite,
+  Phase 8, installed-copy, release, or rollout gate is closed.
+
 ### 2026-10-13 — Native teardown accepted; cleanup assertions and coupled guard correction
 
 - Native job

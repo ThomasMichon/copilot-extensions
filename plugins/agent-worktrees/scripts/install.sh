@@ -47,6 +47,55 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
         __aw_install_dir_arg="${__aw_args[$((__aw_i + 1))]}"
     fi
 done
+# === command-lifecycle: admission before staging ===
+if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    case "$__aw_action" in
+        install|update|provision|stamp|uninstall)
+            __aw_admission_root="${__aw_install_dir_arg:-$HOME/.agent-worktrees}"
+            [[ "$__aw_admission_root" == /* ]] || {
+                printf '%s\n' "ERROR: --install-dir must be absolute" >&2
+                exit 1
+            }
+            __aw_admission_python=""
+            for __aw_candidate in python3 python; do
+                __aw_candidate_path="$(type -P -- "$__aw_candidate" 2>/dev/null || true)"
+                [[ -f "$__aw_candidate_path" && -x "$__aw_candidate_path" ]] || continue
+                __aw_admission_python="$(cd "$(dirname "$__aw_candidate_path")" && pwd -P)/$(basename "$__aw_candidate_path")"
+                break
+            done
+            [[ -n "$__aw_admission_python" ]] || {
+                printf '%s\n' "ERROR: Attributable runtime admission requires bootstrap Python." >&2
+                exit 1
+            }
+            __aw_admission_source="$PLUGIN_DIR"
+            if [[ "$PLUGIN_DIR" != */.copilot/installed-plugins/* &&
+                  -n "${COPILOT_PLUGIN_STAGED_FROM:-}" ]]; then
+                __aw_admission_source="$COPILOT_PLUGIN_STAGED_FROM"
+            fi
+            __aw_admission_args=(
+                -I -B -X utf8 "$PLUGIN_DIR/scripts/command_binding.py"
+                --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees
+                --legacy-root "$__aw_admission_root"
+                --source-payload-root "$__aw_admission_source"
+            )
+            if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+                "$__aw_admission_python" "${__aw_admission_args[@]}" --check-lifecycle || exit $?
+            else
+                __aw_admission_bash="$(type -P -- bash)" || exit 1
+                __aw_admission_bash="$(cd "$(dirname "$__aw_admission_bash")" && pwd -P)/$(basename "$__aw_admission_bash")"
+                if [[ "$__aw_action" == stamp ]]; then
+                    __aw_admission_args+=(--deferred-runtime)
+                elif [[ "$__aw_action" == uninstall ]]; then
+                    __aw_admission_args+=(--teardown)
+                fi
+                "$__aw_admission_python" "${__aw_admission_args[@]}" --run-lifecycle -- \
+                    "$__aw_admission_bash" "$SCRIPT_DIR/install.sh" "${__aw_args[@]}"
+                exit $?
+            fi
+            ;;
+    esac
+fi
+# === end command-lifecycle: admission before staging ===
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     case "${OSTYPE:-}:$PWD" in
         msys*:*/.copilot/installed-plugins/*|cygwin*:*/.copilot/installed-plugins/*)
@@ -2835,31 +2884,7 @@ except Exception as e:
 if ! $CONTEXTUAL_INSTALL; then
     case "$ACTION" in
         install|update|provision|stamp|uninstall)
-            __aw_lifecycle_exclusion=exclude-venv-dir
-            [[ "$ACTION" == uninstall ]] && __aw_lifecycle_exclusion=exclude-runtime-root
-            __aw_lifecycle_python="$(_bootstrap_python "$__aw_lifecycle_exclusion")" || {
-                err "Attributable runtime admission requires bootstrap Python."
-                exit 1
-            }
-            __aw_lifecycle_args=(
-                -B -E -X utf8 "$PLUGIN_DIR/scripts/command_binding.py"
-                --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees
-                --legacy-root "$INSTALL_DIR"
-                --source-payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-            )
-            if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
-                "$__aw_lifecycle_python" "${__aw_lifecycle_args[@]}" --check-lifecycle || exit $?
-            else
-                __aw_lifecycle_bash="$(resolve_executable_command_path bash)" || exit 1
-                if [[ "$ACTION" == stamp ]]; then
-                    __aw_lifecycle_args+=(--deferred-runtime)
-                elif [[ "$ACTION" == uninstall ]]; then
-                    __aw_lifecycle_args+=(--teardown)
-                fi
-                "$__aw_lifecycle_python" "${__aw_lifecycle_args[@]}" --run-lifecycle -- \
-                    "$__aw_lifecycle_bash" "$SCRIPT_DIR/install.sh" "${__aw_args[@]}"
-                exit $?
-            fi
+            "$__aw_admission_python" "${__aw_admission_args[@]}" --check-lifecycle || exit $?
             ;;
     esac
 fi
