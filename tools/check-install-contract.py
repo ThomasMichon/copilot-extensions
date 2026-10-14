@@ -333,6 +333,11 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
             if not line.lstrip().startswith("#")
         ):
             violations.append(f"{rel}: the completion-marker helper swallows a failed mark-complete")
+        elif helper and not _helper_propagates_writer_status(helper.group(1), path.suffix):
+            violations.append(
+                f"{rel}: the completion-marker helper does not fail when the mark-complete "
+                "writer fails"
+            )
         lines = text.split("\n")
         for lineno, line in enumerate(lines, 1):
             if _MARK_COMPLETE_CALL.match(line):
@@ -360,6 +365,36 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
 _PS1_HELPER = "Invoke-VersionedMarkComplete"
 _MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMarkComplete\b")
 _STOPS = re.compile(r"\b(?:exit|return|throw)\b")
+# The writer invocation inside each helper, and how its status must be handled.
+_SH_WRITER = re.compile(r'"\$py"\s+"\$\{args\[@\]\}"')
+_SH_STATUS_KEPT = re.compile(r"\brc=\$\?|\b(?:return|exit)\b")
+_PS1_WRITER = re.compile(r"&\s*\$py\b")
+_PS1_STATUS_CHECK = re.compile(r"\bif\s*\(\s*\$(?:LASTEXITCODE|\w+\.ExitCode)\s+-ne\s+0\s*\)\s*\{")
+_PS1_FAILS = re.compile(r"\breturn\s+\$false\b|\bthrow\b|\bexit\b")
+
+
+def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
+    """Whether the helper fails when its ``mark-complete`` writer fails.
+
+    PowerShell must branch on the writer's exit code (``$LASTEXITCODE`` or a
+    captured ``.ExitCode``) and return ``$false``/throw/exit there. Shell runs
+    under ``set -o pipefail``; a writer line may not end in an ``||`` fallback
+    that neither keeps the status (``rc=$?``) nor stops. Behavior is exercised
+    end to end by ``tools/test_check_install_contract.py``.
+    """
+    code = "\n".join(
+        line for line in _LINE_CONTINUATION.sub(" ", body).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    if suffix == ".ps1":
+        writer = _PS1_WRITER.search(code)
+        check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
+        return bool(check) and bool(_PS1_FAILS.search(_braced_body(code[check.end() - 1:])))
+    writers = [line for line in code.splitlines() if _SH_WRITER.search(line)]
+    return bool(writers) and all(
+        not sep or bool(_SH_STATUS_KEPT.search(tail))
+        for _, sep, tail in (line.partition("||") for line in writers)
+    )
 _MARK_COMPLETE_SH_IF = re.compile(r"^\s*(?:el)?if\s+(!\s*)?_versioned_mark_complete\b")
 _SH_KEYWORD = re.compile(r"(?<![\w$/.-])(then|if|fi|else|elif)(?![\w-])")
 

@@ -3,6 +3,10 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 import pytest
 
@@ -221,6 +225,21 @@ def test_grouped_exec_redirect_is_accepted(tmp_path, line) -> None:
 def test_repo_installers_do_not_swallow_stderr_with_exec() -> None:
     assert checker._exec_stderr_swallow_violations(REPO / "plugins") == []
 
+
+# Realistic helpers that propagate the writer's status, so a case exercises
+# only its call site.
+_SH_HELPER = (
+    "_versioned_mark_complete() {\n    local out rc=0\n"
+    "    out=\"$(\"$py\" \"${args[@]}\" 2>&1)\" || rc=$?\n    return \"$rc\"\n}\n"
+)
+_PS1_HELPER = (
+    "function Invoke-VersionedMarkComplete {\n"
+    "    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host $_ }\n"
+    "    if ($LASTEXITCODE -ne 0) {\n        Write-Fail 'x'\n        return $false\n    }\n"
+    "    return $true\n}\n"
+)
+
+
 def _scripts(tmp_path: Path, name: str, text: str) -> Path:
     path = tmp_path / "plugins" / "demo" / "scripts" / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,8 +251,8 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
     ("name", "text"),
     [
         ("install.sh", "_versioned_mark_complete() {\n    \"$py\" \"${args[@]}\" 2>&1 | sed 's/^/  /' || true\n}\n"),
-        ("install.sh", "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n    _versioned_mark_complete\n}\n"),
-        ("install.ps1", "function Invoke-VersionedMarkComplete {\n    return $true\n}\n    Invoke-VersionedMarkComplete\n"),
+        ("install.sh", _SH_HELPER + "main() {\n    _versioned_mark_complete\n}\n"),
+        ("install.ps1", _PS1_HELPER + "    Invoke-VersionedMarkComplete\n"),
         (
             "install.sh",
             "_versioned_mark_complete() {\n    \"$py\" \"${args[@]}\" 2>&1 | sed 's/^/  /' \\\n"
@@ -241,41 +260,63 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         ),
         (
             "install.ps1",
-            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
-            "    Invoke-VersionedMarkComplete -PayloadHash $payloadHash\n",
+            _PS1_HELPER
+            + "    Invoke-VersionedMarkComplete -PayloadHash $payloadHash\n",
         ),
         (
             "install.ps1",
-            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
-            "    Invoke-VersionedMarkComplete `\n        -PayloadHash $payloadHash\n",
+            _PS1_HELPER
+            + "    Invoke-VersionedMarkComplete `\n        -PayloadHash $payloadHash\n",
         ),
-        ("install.sh", "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n    _versioned_mark_complete || true\n}\n"),
-        ("install.sh", "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n    _versioned_mark_complete || _warn 'x'\n}\n"),
+        ("install.sh", _SH_HELPER + "main() {\n    _versioned_mark_complete || true\n}\n"),
+        ("install.sh", _SH_HELPER + "main() {\n    _versioned_mark_complete || _warn 'x'\n}\n"),
         (
             "install.ps1",
-            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
-            "    if (-not (Invoke-VersionedMarkComplete)) {\n        Write-Warn 'marker not published'\n    }\n",
+            _PS1_HELPER
+            + "    if (-not (Invoke-VersionedMarkComplete)) {\n        Write-Warn 'marker not published'\n    }\n",
         ),
         (
             "install.sh",
-            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            _SH_HELPER + "main() {\n"
             "    if ! _versioned_mark_complete; then\n        _warn 'marker not published'\n    fi\n"
             "    activate\n}\n",
         ),
         (
             "install.sh",
-            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            _SH_HELPER + "main() {\n"
             "    if ! _versioned_mark_complete; then _warn 'exit skipped'; fi\n    activate\n}\n",
         ),
         (
             "install.sh",
-            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            _SH_HELPER + "main() {\n"
             "    if _versioned_mark_complete; then\n        activate\n    else\n        _warn 'x'\n    fi\n}\n",
         ),
         (
             "install.sh",
-            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            _SH_HELPER + "main() {\n"
             "    if ! _versioned_mark_complete; then\n        _warn 'x'\n    else\n        return 0\n    fi\n}\n",
+        ),
+        (
+            "install.ps1",
+            "function Invoke-VersionedMarkComplete {\n"
+            "    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host $_ }\n    return $true\n}\n"
+            "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+        ),
+        (
+            "install.ps1",
+            _PS1_HELPER.replace("return $false\n    }", "Write-Warn 'x'\n    }")
+            + "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n"
+            "    \"$py\" \"${args[@]}\" 2>&1 || _warn 'marker not published'\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
+        (
+            "install.ps1",
+            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
+            "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
         ),
     ],
     ids=[
@@ -283,7 +324,8 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         "sh-multiline-swallow", "ps1-ignored-call-with-arguments", "ps1-continued-ignored-call",
         "sh-or-true", "sh-or-warn-only", "ps1-warn-only-body",
         "sh-if-not-warn-only", "sh-if-not-one-line-quoted-stop", "sh-if-else-warn-only",
-        "sh-if-not-stop-only-on-success",
+        "sh-if-not-stop-only-on-success", "ps1-writer-status-ignored",
+        "ps1-status-check-only-warns", "sh-writer-fallback-warns", "ps1-no-writer",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:
@@ -301,22 +343,39 @@ def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text)
         ),
         (
             "install.ps1",
-            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
-            "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+            _PS1_HELPER + "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+        ),
+        (
+            "install.ps1",
+            _PS1_HELPER.replace(
+                "& $py @mcArgs 2>&1 | ForEach-Object { Write-Host $_ }\n"
+                "    if ($LASTEXITCODE -ne 0) {",
+                "$result = Invoke-NativeCapture { & $py @mcArgs }\n"
+                "    if ($result.ExitCode -ne 0) {",
+            ) + "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
         ),
         (
             "install.sh",
-            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            _SH_HELPER + "main() {\n"
             "    if ! _versioned_mark_complete; then\n        if [[ -n x ]]; then _warn 'x'; fi\n"
             "        return 1\n    fi\n}\n",
         ),
         (
             "install.sh",
-            "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n"
+            _SH_HELPER + "main() {\n"
             "    if _versioned_mark_complete; then\n        activate\n    else\n        exit 1\n    fi\n}\n",
         ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n"
+            "    \"$py\" \"${args[@]}\" 2>&1 | sed 's/^/  /'\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
     ],
-    ids=["sh-checked", "ps1-checked", "sh-if-not-checked-nested", "sh-if-else-checked"],
+    ids=[
+        "sh-checked", "ps1-checked", "ps1-captured-exit-code", "sh-if-not-checked-nested",
+        "sh-if-else-checked", "sh-pipefail-tail",
+    ],
 )
 def test_checked_completion_marker_publication_passes(tmp_path, name, text) -> None:
     assert checker._mark_complete_result_violations(_scripts(tmp_path, name, text)) == []
@@ -324,3 +383,76 @@ def test_checked_completion_marker_publication_passes(tmp_path, name, text) -> N
 
 def test_every_shipped_installer_checks_its_completion_marker() -> None:
     assert checker._mark_complete_result_violations(checker.PLUGINS_DIR) == []
+
+def _working_bash() -> str | None:
+    candidates = [os.environ.get("CE_TEST_BASH"), shutil.which("bash")]
+    if os.name == "nt":
+        candidates.append(r"C:\Program Files\Git\bin\bash.exe")
+    for candidate in filter(None, candidates):
+        try:
+            probe = subprocess.run(
+                [candidate, "-c", "echo ok"], capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+            return candidate
+    return None
+
+
+_SH_HELPER_DEF = re.compile(r"^_versioned_mark_complete\(\) \{\n.*?^\}\n", re.M | re.S)
+_SH_GLOBAL_REF = re.compile(r"\$\{?([A-Z][A-Z0-9_]*)")
+_SH_HARNESS = """set -euo pipefail
+{globals}
+_fail() {{ :; }}; err() {{ :; }}; warn() {{ :; }}; ok() {{ :; }}; info() {{ :; }}
+_warn() {{ :; }}; _ok() {{ :; }}; _info() {{ :; }}
+_bootstrap_python() {{ echo "$STUB_PY"; }}
+_payload_hash() {{ echo deadbeef; }}
+{helper}
+if _versioned_mark_complete >/dev/null; then echo RC=0; else echo "RC=$?"; fi
+"""
+
+
+@pytest.mark.parametrize("writer_rc", [0, 3])
+def test_every_shipped_shell_helper_reports_its_writer_status(tmp_path, writer_rc) -> None:
+    """Run each shipped ``_versioned_mark_complete`` against a stub writer.
+
+    A writer exit must fail the helper and a clean write must pass it. Only
+    the globals the installer itself assigns are defined, so a helper reading
+    a variable its script never sets fails under ``set -u`` instead of passing.
+    """
+    bash = _working_bash()
+    if bash is None:
+        pytest.skip("no working bash")
+    stub = tmp_path / "stub-python"
+    stub.write_text('#!/usr/bin/env bash\nexit "${STUB_RC:-0}"\n', encoding="utf-8", newline="\n")
+    stub.chmod(0o755)
+    env = {**os.environ, "STUB_PY": stub.as_posix(), "STUB_RC": str(writer_rc)}
+    values = {"VERSIONED_RUNTIME": "1", "SRC_VERSION": "1.2.3", "PAYLOAD_HASH": "deadbeef"}
+    failures = []
+    helpers = []
+    for path in sorted(checker.PLUGINS_DIR.glob("*/scripts/*.sh")):
+        text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        helper = _SH_HELPER_DEF.search(text)
+        if helper is None:
+            continue
+        helpers.append(path)
+        assigned = sorted(
+            name for name in set(_SH_GLOBAL_REF.findall(helper.group(0)))
+            if re.search(rf"^\s*(?:export\s+|readonly\s+)?{name}=", text, re.M)
+        )
+        script = _SH_HARNESS.format(
+            globals="\n".join(
+                f'{name}="{values.get(name, (tmp_path / "absent" / name).as_posix())}"'
+                for name in assigned
+            ),
+            helper=helper.group(0),
+        )
+        result = subprocess.run(
+            [bash, "-c", script], capture_output=True, text=True, env=env, timeout=60,
+        )
+        status = result.stdout.strip().rpartition("RC=")[2]
+        if (status == "0") != (writer_rc == 0):
+            failures.append(f"{path.relative_to(REPO).as_posix()}: RC={status} {result.stderr.strip()}")
+    assert len(helpers) >= 10
+    assert failures == []

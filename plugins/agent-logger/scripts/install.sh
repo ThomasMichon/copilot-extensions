@@ -376,7 +376,7 @@ _versioned_mark_complete() {
     local py
     # The freshly built slot's own interpreter: it already passed the health
     # gate, and an ambient one may be absent or unusable.
-    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
+    if [[ -x "${VENV:-}/bin/python" ]]; then py="$VENV/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
     if [[ -z "$py" ]]; then
         _fail "Cannot publish the completion marker for versions/$SRC_VERSION without a bootstrap Python interpreter -- not activating"
         return 1
