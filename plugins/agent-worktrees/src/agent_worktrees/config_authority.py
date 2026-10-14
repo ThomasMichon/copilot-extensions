@@ -64,9 +64,12 @@ def _load_state_root_authority(
                 "ls-tree", "-r", "--name-only", candidate_ref, "--",
                 *(candidate.as_posix() for candidate in candidates),
             )
-            if candidate_listing.returncode == 0:
-                ref, listing = candidate_ref, candidate_listing
-                break
+            if candidate_listing.returncode != 0:
+                raise ValueError(
+                    f"cannot list committed authority config at {candidate_ref!r}"
+                )
+            ref, listing = candidate_ref, candidate_listing
+            break
         if listing is None:
             if required:
                 raise ValueError(

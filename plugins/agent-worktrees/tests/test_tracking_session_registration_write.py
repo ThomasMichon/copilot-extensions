@@ -399,6 +399,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         ("remote_error", "cannot verify committed authority ref"),
         ("head_error", "cannot resolve committed authority HEAD"),
         ("head_malformed", "committed authority HEAD is malformed"),
+        ("tree_error", "cannot list committed authority config"),
     ],
 )
 def test_registration_authority_fails_closed_when_committed_config_is_unreadable(
@@ -451,8 +452,17 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
                 return SimpleNamespace(
                     returncode=0, stdout="refs/remotes/origin/main\n",
                 )
+            if failure == "tree_error":
+                return SimpleNamespace(
+                    returncode=0, stdout="refs/remotes/origin/main\n",
+                )
         if failure == "remote_error" and _args[0] == "show-ref":
             return SimpleNamespace(returncode=2, stdout="")
+        if failure == "tree_error":
+            if _args[0] == "show-ref":
+                return SimpleNamespace(returncode=0, stdout="")
+            if _args[0] == "ls-tree":
+                return SimpleNamespace(returncode=2, stdout="")
         if failure == "absent":
             return SimpleNamespace(returncode=0, stdout="")
         return SimpleNamespace(returncode=1, stdout="")
