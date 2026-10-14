@@ -178,19 +178,23 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
 @pytest.mark.parametrize(
     (
         "default_branch", "remote_name", "remote_ref_available",
-        "expected_ref", "expected_probes",
+        "declared_branch", "expected_refs", "expected_probes",
     ),
     [
-        ("main", "origin", True, "refs/remotes/origin/main", 2),
-        ("", "origin", True, "refs/remotes/origin/main", 3),
-        ("main", "upstream", True, "refs/remotes/upstream/main", 2),
-        ("main", "origin", False, "refs/heads/main", 3),
-        ("main", "", False, "refs/heads/main", 2),
+        ("main", "origin", True, "", ("refs/remotes/origin/main",), 3),
+        ("", "origin", True, "", ("refs/remotes/origin/main",), 3),
+        ("main", "upstream", True, "", ("refs/remotes/upstream/main",), 3),
+        ("main", "origin", False, "", ("refs/heads/main",), 4),
+        ("main", "", False, "", ("refs/heads/main",), 3),
+        (
+            "registry", "origin", True, "dev",
+            ("refs/remotes/origin/main", "refs/remotes/origin/dev"), 5,
+        ),
     ],
 )
 def test_session_register_uses_knowledge_backed_receiving_authority(
     tmp_path: Path, monkeypatch, default_branch, remote_name,
-    remote_ref_available, expected_ref, expected_probes,
+    remote_ref_available, declared_branch, expected_refs, expected_probes,
 ):
     """Registration skips full project policy while preserving its authority."""
     from agent_worktrees import git_ops, repos as repos_mod
@@ -241,10 +245,13 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         timeouts.append(kwargs["timeout"])
         assert kwargs["isolated_repository"] is True
         if args[0] == "symbolic-ref":
-            remote = remote_name or "origin"
+            ref = (
+                f"refs/remotes/{remote_name}/main"
+                if remote_name else "refs/heads/main"
+            )
             return SimpleNamespace(
                 returncode=0,
-                stdout=f"refs/remotes/{remote}/main\n",
+                stdout=f"{ref}\n",
             )
         if args[0] == "ls-tree":
             ref = args[3]
@@ -252,7 +259,17 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
                 return SimpleNamespace(returncode=1, stdout="")
             return SimpleNamespace(returncode=0, stdout=f"{committed_path}\n")
         if args[0] == "show":
-            shown_refs.append(args[1].split(":", 1)[0])
+            ref = args[1].split(":", 1)[0]
+            shown_refs.append(ref)
+            if declared_branch and ref.endswith("/main"):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        f"default_branch: {declared_branch}\n"
+                        "stateless: false\n"
+                        "requires_external_state_root: false\n"
+                    ),
+                )
             return SimpleNamespace(
                 returncode=0,
                 stdout="stateless: true\nrequires_external_state_root: true\n",
@@ -322,7 +339,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     assert timeouts == [
         config_authority._GIT_PROBE_TIMEOUT_S
     ] * expected_probes
-    assert shown_refs == [expected_ref]
+    assert shown_refs == list(expected_refs)
     assert tracking.load_record(local_path).session_entry("sess-local") is not None
 
     before = foreign_path.read_bytes()

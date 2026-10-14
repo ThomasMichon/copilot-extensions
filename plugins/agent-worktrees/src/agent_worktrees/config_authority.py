@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-_GIT_PROBE_TIMEOUT_S = 0.3
+_GIT_PROBE_TIMEOUT_S = 0.25
 
 
 def _load_state_root_authority(
@@ -20,8 +20,79 @@ def _load_state_root_authority(
         cfg.legacy_inrepo_config_path(Path()),
         Path(cfg.INREPO_CONFIG_FILENAME),
     )
-    entry = repos.read_registry().repos.get(name)
-    branch = entry.default_branch if entry is not None else ""
+
+    def _refs(branch: str) -> list[str]:
+        return (
+            [
+                f"refs/remotes/{remote_name}/{branch}",
+                f"refs/heads/{branch}",
+            ]
+            if remote_name else [f"refs/heads/{branch}"]
+        )
+
+    def _read_branch(branch: str, *, required: bool) -> dict | None:
+        ref = ""
+        listing = None
+        for candidate_ref in _refs(branch):
+            candidate_listing = git_ops.git(
+                "ls-tree", "-r", "--name-only", candidate_ref, "--",
+                *(candidate.as_posix() for candidate in candidates),
+                cwd=root, check=False, capture=True,
+                timeout=_GIT_PROBE_TIMEOUT_S, isolated_repository=True,
+            )
+            if candidate_listing.returncode == 0:
+                ref, listing = candidate_ref, candidate_listing
+                break
+        if listing is None:
+            if required:
+                raise ValueError(
+                    f"cannot read committed authority config for {name!r}"
+                )
+            return None
+        available = set(listing.stdout.splitlines())
+        selected = next(
+            (
+                candidate for candidate in candidates
+                if candidate.as_posix() in available
+            ),
+            None,
+        )
+        if selected is None:
+            return {}
+        content = git_ops.git(
+            "show", f"{ref}:{selected.as_posix()}",
+            cwd=root, check=False, capture=True,
+            timeout=_GIT_PROBE_TIMEOUT_S, isolated_repository=True,
+        )
+        if content.returncode != 0:
+            raise ValueError(
+                f"cannot read committed authority config for {name!r}"
+            )
+        raw = cfg.yaml.safe_load(content.stdout)
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"committed authority config for {name!r} is malformed"
+            )
+        return raw
+
+    head_ref = (
+        f"refs/remotes/{remote_name}/HEAD"
+        if remote_name else "HEAD"
+    )
+    head = git_ops.git(
+        "symbolic-ref", "-q", head_ref,
+        cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
+        isolated_repository=True,
+    )
+    prefix = (
+        f"refs/remotes/{remote_name}/"
+        if remote_name else "refs/heads/"
+    )
+    ref = head.stdout.strip() if head.returncode == 0 else ""
+    branch = ref[len(prefix):] if ref.startswith(prefix) else ""
+    if not branch:
+        entry = repos.read_registry().repos.get(name)
+        branch = entry.default_branch if entry is not None else ""
     if not branch:
         branch = str(
             cfg._resolve_adoption_defaults_from_registry(
@@ -29,62 +100,15 @@ def _load_state_root_authority(
             ).get("default_branch", "")
         )
     if not branch:
-        head_ref = (
-            f"refs/remotes/{remote_name}/HEAD"
-            if remote_name else "HEAD"
-        )
-        head = git_ops.git(
-            "symbolic-ref", "-q", head_ref,
-            cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
-            isolated_repository=True,
-        )
-        prefix = (
-            f"refs/remotes/{remote_name}/"
-            if remote_name else "refs/heads/"
-        )
-        ref = head.stdout.strip() if head.returncode == 0 else ""
-        branch = ref[len(prefix):] if ref.startswith(prefix) else ""
-    if not branch:
         raise ValueError(f"cannot resolve committed branch for project {name!r}")
-    refs = (
-        [
-            f"refs/remotes/{remote_name}/{branch}",
-            f"refs/heads/{branch}",
-        ]
-        if remote_name else [f"refs/heads/{branch}"]
-    )
-    ref = ""
-    listing = None
-    for candidate_ref in refs:
-        candidate_listing = git_ops.git(
-            "ls-tree", "-r", "--name-only", candidate_ref, "--",
-            *(candidate.as_posix() for candidate in candidates),
-            cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
-            isolated_repository=True,
-        )
-        if candidate_listing.returncode == 0:
-            ref, listing = candidate_ref, candidate_listing
-            break
-    if listing is None:
-        raise ValueError(f"cannot read committed authority config for {name!r}")
-    available = set(listing.stdout.splitlines())
-    selected = next(
-        (candidate for candidate in candidates if candidate.as_posix() in available),
-        None,
-    )
-    if selected is None:
-        return {}
-    content = git_ops.git(
-        "show", f"{ref}:{selected.as_posix()}",
-        cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
-        isolated_repository=True,
-    )
-    if content.returncode != 0:
-        raise ValueError(f"cannot read committed authority config for {name!r}")
-    raw = cfg.yaml.safe_load(content.stdout)
-    if not isinstance(raw, dict):
-        raise ValueError(f"committed authority config for {name!r} is malformed")
-    return raw
+
+    data = _read_branch(branch, required=True)
+    declared = data.get("default_branch") if data is not None else None
+    if isinstance(declared, str) and declared and declared != branch:
+        hopped = _read_branch(declared, required=False)
+        if hopped is not None:
+            data = hopped
+    return data or {}
 
 
 def load_project_authority_config(
