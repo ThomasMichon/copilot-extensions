@@ -350,6 +350,20 @@ recorded against each open fork._
   Added the distinct legacy asyncio exception, used `wait_for` for the barrier,
   added portable regressions for both, and exercised the built candidate on
   actual Python 3.10.20. The CI failure was fixed, not waived or retried away.
+- Cutover self-check found an actual lifecycle gap, not just a missing PR
+  statement: outbound intake was neither route-gated nor counted by drain.
+  Federation now admits directory/intake work only for the active, non-
+  draining generation and tracks admitted work through the synchronous spawn
+  boundary. Self-retirement closes admission first; demoted teardown does not
+  withdraw the successor's stable directory identity. `/claim` rechecks drain
+  inside its counted boundary, eliminating the same check/enter race.
+- Native assignment/federation/lifecycle/self-retirement selection: 131
+  passed, including real routing-table passive/promotion/demotion and a real
+  HTTP drain staying busy during an admitted blocking launch. The TCP
+  read-timeout test uses a 500ms bound (under 2s observed), avoiding a 50ms
+  first-response scheduling race on Windows while still proving quiet reads
+  terminate. Earlier 61/59 counts identify the native/Linux delivery-only
+  snapshots above; they are not the enlarged cutover selection.
 
 ### 2026-10-14 -- Corrective task-authority PR merged; assignment push next
 - PR #6665 merged as `b8d3ec6a710beb376ef655e5a715e7055b783b93` after

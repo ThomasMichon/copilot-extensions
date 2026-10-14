@@ -56,6 +56,7 @@ class AssignmentIntake:
         machine: str,
         repo: str | None = None,
         enabled: Callable[[], bool],
+        reconcile: Callable[[], dict] | None = None,
         poll_seconds: float = POLL_SECONDS,
         min_reconcile_seconds: float = MIN_RECONCILE_SECONDS,
         ready_timeout: float = READY_TIMEOUT_SECONDS,
@@ -64,7 +65,7 @@ class AssignmentIntake:
         if any(value <= 0 or not math.isfinite(value) for value in timings):
             raise ValueError("assignment intake timing must be positive")
         self._client = client
-        self._intake = intake
+        self._reconcile = reconcile or intake.tick
         self._machine = machine
         self._repo = repo
         self._enabled = enabled
@@ -111,7 +112,7 @@ class AssignmentIntake:
                 if self._stop.is_set() or not self._enabled():
                     break
                 try:
-                    result = self._intake.tick()
+                    result = self._reconcile()
                     with self._lock:
                         self._health["reconciles"] += 1
                         self._health["intake_error"] = result.get("error")

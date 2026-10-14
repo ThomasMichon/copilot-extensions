@@ -394,8 +394,6 @@ def register_task_routes(
     @app.post("/claim")
     def claim(request: Request, body: ClaimBody) -> dict | None:
         gate: DrainGate = request.app.state.drain_gate
-        if gate.draining:
-            return None
         owner = body.worker_id
         if owner is None and body.machine and body.worktree:
             owner = worker_id_for(body.machine, body.worktree)
@@ -420,6 +418,8 @@ def register_task_routes(
                 },
             )
         with gate.track_claim():
+            if gate.draining:
+                return None
             outcome = queue.claim_outcome(
                 owner,
                 body.capabilities,

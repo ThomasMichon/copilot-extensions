@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import queue
 import threading
 import time
 
 import pytest
+from fastapi import Request
 
 from agent_dispatch.assignment_intake import AssignmentIntake, assignment_event_matches
 from agent_dispatch.client import DispatchClient
+from agent_dispatch.coordinator_loops import DrainGate
 from agent_dispatch.federation_runner import FederationRunner
 from agent_dispatch.satellite_work_intake import SatelliteWorkIntake
 from agent_dispatch.satellites import FleetDirectory
-from fastapi import Request
-from tests._helpers import TEST_REPO, OTHER_REPO
 from tests import test_coordinator as coordinator_fixtures
+from tests._helpers import OTHER_REPO, TEST_REPO
 
 app = coordinator_fixtures.app
 server_url = coordinator_fixtures.server_url
@@ -104,6 +106,97 @@ def build_loop(client, intake, **kwargs):
         client, intake, machine="host-a", repo=TEST_REPO,
         enabled=lambda: True, min_reconcile_seconds=0.02, **kwargs,
     )
+
+
+@pytest.mark.parametrize("role", ["satellite", "peer", "coordinator"])
+def test_assignment_runner_passive_promotion_and_demotion(monkeypatch, tmp_path, role):
+    from zdd import routing
+
+    from agent_dispatch import config, server
+
+    monkeypatch.setattr(server, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr(server, "_wake_route_owned", False)
+    monkeypatch.setattr(config, "satellite_gate_open", lambda: True)
+    monkeypatch.setattr(config, "shared_url", lambda: None)
+    directory = FleetDirectory()
+    gate = DrainGate()
+    runner = FederationRunner(
+        directory, "host-a", role=role,
+        is_active=server._owns_active_route, drain_gate=gate,
+    )
+    monkeypatch.setattr(runner, "_satellite_kwargs", lambda: {})
+    runner.tick()
+    assert directory.list() == []
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid())
+    runner.tick()
+    assert len(directory.list()) == 1
+    gate.set_draining(True)
+    monkeypatch.setattr(runner, "_tick", lambda: pytest.fail("draining generation admitted"))
+    runner.tick()
+    gate.set_draining(False)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9998, pid=os.getpid() + 1)
+    runner.tick()
+    runner.stop()
+    assert len(directory.list()) == 1  # Do not withdraw the successor's stable identity.
+    assert gate.claims == 0
+
+
+def test_assignment_launch_keeps_http_drain_busy(monkeypatch, app, server_url):
+    from agent_dispatch import config, satellite_work_intake
+
+    monkeypatch.setattr(config, "satellite_gate_open", lambda: True)
+    monkeypatch.setattr(config, "shared_url", lambda: server_url)
+    monkeypatch.setattr(config, "shared_token", lambda: None)
+    intake = CountingIntake()
+    intake.block.clear()
+    monkeypatch.setattr(satellite_work_intake, "SatelliteWorkIntake", lambda *a, **kw: intake)
+    gate = app.state.drain_gate
+    runner = FederationRunner(
+        FleetDirectory(), "host-a", role="satellite", drain_gate=gate,
+    )
+    monkeypatch.setattr(runner, "_satellite_kwargs", lambda: {})
+    runner.start(interval=0.02)
+    with DispatchClient(server_url) as client:
+        try:
+            assert intake.entered.wait(1)
+            result = client.drain(timeout=0.02, poll=0.05, force=False)
+            assert result["drained"] is False
+            assert result["busy_claims"] >= 1
+            count = intake.count
+            intake.block.set()
+            result = client.drain(timeout=2, poll=0.05, force=False)
+            assert result["clean"] is True
+            time.sleep(0.1)
+            assert intake.count == count
+            assert runner._reconcile_work_intake() == {}
+            assert intake.count == count
+        finally:
+            intake.block.set()
+            runner.stop(timeout=2)
+            client.undrain()
+
+
+def test_assignment_admission_rechecks_drain_inside_tracked_boundary(app, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    class RacingGate(DrainGate):
+        def track_claim(self):
+            self.set_draining(True)
+            return super().track_claim()
+
+    runner = FederationRunner(FleetDirectory(), "host-a", drain_gate=RacingGate())
+    runner._work_intake = CountingIntake()
+    assert runner._reconcile_work_intake() == {}
+    assert runner._work_intake.count == 0
+    app.state.drain_gate = RacingGate()
+    monkeypatch.setattr(
+        app.state.queue, "claim_outcome",
+        lambda *a, **kw: pytest.fail("claim admitted after draining"),
+    )
+    with TestClient(app) as client:
+        response = client.post("/claim", json={"worker_id": "host-a:worker", "repo": TEST_REPO})
+        assert response.status_code == 200
+        assert response.json() is None
 
 
 def settled_count(loop, intake):
@@ -392,8 +485,7 @@ def test_assignment_health_reports_local_subscription_without_directory_read(
 
 
 def test_assignment_runner_presence_not_blocked_by_spawn(monkeypatch, server_url):
-    from agent_dispatch import config
-    from agent_dispatch import satellite_work_intake
+    from agent_dispatch import config, satellite_work_intake
 
     monkeypatch.setattr(config, "satellite_gate_open", lambda: True)
     monkeypatch.setattr(config, "shared_url", lambda: server_url)
@@ -443,13 +535,13 @@ def test_assignment_tcp_read_timeout_is_bounded(quiet_server_url):
     import httpx
 
     async def scenario(client):
-        stream = client.async_stream_events(read_timeout=0.05)
+        stream = client.async_stream_events(read_timeout=0.5)
         try:
             assert await anext(stream) == {"type": "ready"}
             before = time.monotonic()
             with pytest.raises(httpx.ReadTimeout):
                 await anext(stream)
-            assert time.monotonic() - before < 1
+            assert time.monotonic() - before < 2
         finally:
             await stream.aclose()
 
@@ -489,8 +581,7 @@ def test_assignment_stream_refuses_unbounded_timing(timeout):
 def test_assignment_runner_retires_config_change_without_closing_inuse_client(
     monkeypatch, server_url, change,
 ):
-    from agent_dispatch import config
-    from agent_dispatch import satellite_work_intake
+    from agent_dispatch import config, satellite_work_intake
 
     settings = {"gate": True, "url": server_url, "token": None}
     monkeypatch.setattr(config, "satellite_gate_open", lambda: settings["gate"])

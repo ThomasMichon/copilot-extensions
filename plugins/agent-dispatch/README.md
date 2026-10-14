@@ -2566,6 +2566,14 @@ at most one reconcile per second; a 60-second poll recovers dropped events
 even while disconnected. Presence heartbeats run independently of discovery
 and spawn. Direct, one-shot federation ticks retain their synchronous read.
 
+Federation hosted by the local coordinator follows its active routing entry.
+Passive, draining and demoted generations admit neither directory mutations
+nor new intake. The existing drain gate counts an admitted reconciliation
+through its synchronous claim/discovery/spawn boundary; `/drain` stays busy
+until that unit finishes. Demoted teardown does not deregister the stable
+identity a successor may already own. Installer-driven `install.ps1` /
+`install.sh` update activation retains the shared zdd flip/drain/retire flow.
+
 The stream emits comment keepalives every 10 quiet seconds. Intake bounds
 reads at 20 seconds, the initial ready barrier at 5 seconds, and reconnect
 backoff at 1-30 seconds. Old coordinators without ready/keepalive support

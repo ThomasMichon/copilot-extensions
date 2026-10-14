@@ -220,8 +220,10 @@ now?*:
 1. **Safe cutover point (never drop in-flight work).** Exit is gated on the same
    drain boundary the cutover uses (§ consumer contract, point 1): agent-bridge
    waits for no active session; the agent-dispatch coordinator waits for the
-   `DrainGate` to report no in-flight `/claim` (a claimed task is already durable
-   in the queue DB). A busy demoted daemon keeps serving and only exits once it
+   `DrainGate` to report no in-flight `/claim` or outbound satellite intake
+   through its synchronous claim/discovery/spawn boundary. Passive/draining/
+   demoted generations stop admitting federation work. A busy demoted daemon
+   keeps serving and only exits once it
    has drained to that boundary — clients have already followed the flipped route,
    so it trends to idle on its own.
 2. **K-confirmation (honor "confirm the precondition, don't act on one transient

@@ -20,12 +20,14 @@ runner above the factory is unchanged.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
-import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from . import config
+from .coordinator_loops import DrainGate
 from .federation import CoordinatorRendezvous
 from .lease import CoordinatorLease
 from .satellites import ROLE_SATELLITE
@@ -111,6 +113,8 @@ class FederationRunner:
         capabilities: list[str] | None = None,
         lease_ttl: float | None = None,
         clock=time.time,
+        is_active: Callable[[], bool] = lambda: True,
+        drain_gate: DrainGate | None = None,
     ) -> None:
         if not instance:
             raise ValueError("instance is required")
@@ -132,6 +136,8 @@ class FederationRunner:
         self._assignment_intake: AssignmentIntake | None = None
         self._work_intake_token: str | None = None
         self._running = False
+        self._is_active = is_active
+        self._drain_gate = drain_gate if drain_gate is not None else DrainGate()
         if role in config.FEDERATION_LEASE_ROLES:
             lease_kwargs = {} if lease_ttl is None else {"lease_ttl": lease_ttl}
             self._lease = CoordinatorLease(
@@ -152,6 +158,20 @@ class FederationRunner:
 
     def tick(self) -> dict:
         """Advance federation one step; return a small status dict."""
+        with self._drain_gate.track_claim():
+            if not self._admitting():
+                self._close_work_intake_client()
+                return {"instance": self._instance, "role": self._role, "is_active": False}
+            return self._tick()
+
+    def _admitting(self) -> bool:
+        return (
+            not self._stop.is_set()
+            and not self._drain_gate.draining
+            and self._is_active()
+        )
+
+    def _tick(self) -> dict:
         if self._lease is not None:
             state = self._lease.tick()
             return {
@@ -278,19 +298,27 @@ class FederationRunner:
                         self._work_intake_client, self._work_intake,
                         machine=self._machine or self._instance,
                         enabled=lambda: (
-                            not self._stop.is_set()
+                            self._admitting()
                             and config.satellite_gate_open()
                             and config.shared_url() == url
                             and config.shared_token() == token
                         ),
+                        reconcile=self._reconcile_work_intake,
                     )
                     self._assignment_intake.start()
             else:
-                self._work_intake.tick()
+                self._reconcile_work_intake()
         except Exception as exc:
             logging.getLogger(__name__).warning(
                 "Satellite intake unavailable (%s)", type(exc).__name__
             )
+
+    def _reconcile_work_intake(self) -> dict:
+        with self._drain_gate.track_claim():
+            if not self._admitting() or not config.satellite_gate_open():
+                return {}
+            intake = self._work_intake
+            return intake.tick() if intake is not None else {}
 
     def _close_work_intake_client(self, timeout: float = 0.0) -> bool:
         """Retire owned threads before transport; False defers in-use cleanup."""
@@ -403,6 +431,8 @@ class FederationRunner:
     def resign(self) -> None:
         """Give up this node's standing: release the lease (eligible) or deregister
         the presence entry."""
+        if not self._is_active():
+            return
         if self._lease is not None:
             self._lease.resign()
         else:
@@ -423,7 +453,12 @@ def satellite_self_status(role: str | None, instance: str | None) -> dict:
     return info
 
 
-def runner_from_config(rendezvous: Rendezvous | None = None) -> FederationRunner | None:
+def runner_from_config(
+    rendezvous: Rendezvous | None = None,
+    *,
+    is_active: Callable[[], bool] = lambda: True,
+    drain_gate: DrainGate | None = None,
+) -> FederationRunner | None:
     """Build a :class:`FederationRunner` from the environment, or ``None`` when
     federation is not enabled (no valid ``AGENT_DISPATCH_FEDERATION_ROLE``).
 
@@ -447,4 +482,7 @@ def runner_from_config(rendezvous: Rendezvous | None = None) -> FederationRunner
             else f"backend {backend!r} could not be constructed"
         )
         raise RuntimeError(f"federation enabled but {reason}")
-    return FederationRunner(rv, instance, role=role, machine=instance)
+    return FederationRunner(
+        rv, instance, role=role, machine=instance,
+        is_active=is_active, drain_gate=drain_gate,
+    )

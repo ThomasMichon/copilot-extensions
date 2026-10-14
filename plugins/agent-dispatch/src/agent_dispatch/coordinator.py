@@ -509,8 +509,8 @@ def create_app(
                         superseded = await asyncio.to_thread(
                             is_superseded, routing_dir(), my_pid, my_gen
                         )
-                        # Safe cutover point: no claim in flight (a claimed task is
-                        # already durable in the queue). Absent a gate, treat as safe.
+                        if superseded and gate is not None:
+                            gate.set_draining(True)
                         at_safe_point = superseded and (
                             gate is None or gate.claims == 0
                         )
