@@ -465,3 +465,12 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   own five-minute required lane, preserving every selection and child deadline.
   Runner/Fleet work retains its existing seven-minute limit. The aggregate must
   observe both jobs; no test, budget or required check is waived.
+- The subsequent native first-use failure reached package installation but
+  timed out before activation. The source fingerprint's growing shell-string
+  concatenation made completion revalidation quadratic in materialized source
+  size. An unchanged full-source fingerprint exceeded 90 seconds in a real
+  Git-owned Bash probe; streaming the identical bytes completed in 78.14
+  seconds on that host without changing the deadline or digest format.
+  Exact legacy-byte regressions cover plugin, vendored and external source
+  inputs. The native Windows source/first-use contracts passed 35 cases with
+  four platform skips; Linux first-use remains owed by required CI.

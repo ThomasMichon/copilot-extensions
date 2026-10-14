@@ -999,12 +999,27 @@ _payload_hash() {
     # and content-based. Fails with no output on any hashing error, which the
     # completion-marker check treats as "unknown, force a rebuild" and the
     # marker writer as "do not publish".
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
+    # Stream the identical byte sequence; repeated string concatenation makes
+    # completion revalidation quadratic in the full materialized source size.
+    local -a __hash
+    if command -v sha256sum >/dev/null 2>&1; then
+        __hash=(sha256sum)
+    elif command -v shasum >/dev/null 2>&1; then
+        __hash=(shasum -a 256)
+    elif command -v openssl >/dev/null 2>&1; then
+        __hash=(openssl dgst -sha256 -r)
+    else
+        return 1
+    fi
+    local __d
+    __d="$(
+    set -o pipefail
+    {
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then printf '%s' "$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
         local __f
         while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
+            printf '\n%s' "$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
     local __src_roots=("$PLUGIN_DIR/src")
@@ -1018,7 +1033,7 @@ _payload_hash() {
     for __root in "${__src_roots[@]}"; do
         [[ -d "$__root" ]] || continue
         while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"${__f#"$PLUGIN_DIR"}"$'\n'"$(cat "$__f" 2>/dev/null)"
+            printf '\n%s\n%s' "${__f#"$PLUGIN_DIR"}" "$(cat "$__f" 2>/dev/null)"
         done < <(find "$__root" -type d \( -name '*.egg-info' -o -name '*.dist-info' \) -prune -o -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' -print 2>/dev/null | sort)
     done
     # #5472: [tool.uv.sources] `path = "../../libs/<lib>"` dev-checkout
@@ -1036,10 +1051,10 @@ _payload_hash() {
             __resolved="$(cd "$PLUGIN_DIR" 2>/dev/null && cd "$__rel" 2>/dev/null && pwd)"
             [[ -n "$__resolved" ]] || continue
             [[ "$__resolved" == "$PLUGIN_DIR/libs"/* ]] && continue
-            [[ -f "$__resolved/pyproject.toml" ]] && __parts="$__parts"$'\n'"$(cat "$__resolved/pyproject.toml")"
+            [[ -f "$__resolved/pyproject.toml" ]] && printf '\n%s' "$(cat "$__resolved/pyproject.toml")"
             [[ -d "$__resolved/src" ]] || continue
             while IFS= read -r __f; do
-                __parts="$__parts"$'\n'"${__f#"$__resolved"}"$'\n'"$(cat "$__f" 2>/dev/null)"
+                printf '\n%s\n%s' "${__f#"$__resolved"}" "$(cat "$__f" 2>/dev/null)"
             done < <(find "$__resolved/src" -type d \( -name '*.egg-info' -o -name '*.dist-info' \) -prune -o -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' -print 2>/dev/null | sort)
         done < <(
             sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$PLUGIN_DIR/pyproject.toml" |
@@ -1048,18 +1063,8 @@ _payload_hash() {
             sort
         )
     fi
-    # Fails (no output) when no SHA-256 implementation works: the caller must
-    # then refuse to publish a slot without its fingerprint.
-    local __d
-    if command -v sha256sum >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
-    elif command -v shasum >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
-    elif command -v openssl >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
-    else
-        return 1
-    fi
+    } | "${__hash[@]}" 2>/dev/null
+    )" || return 1
     __d="${__d%% *}"
     [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
     printf '%s\n' "$__d"
