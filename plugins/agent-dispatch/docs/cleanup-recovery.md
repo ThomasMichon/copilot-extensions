@@ -65,6 +65,14 @@ worktree path, originating reservation, logical creation key/revision, inherited
 worktree and exclusive key. Drifting any of them after acceptance cannot redirect
 the leased retry or change which allocation fence applies.
 The pre-existing release obligation is retained in that immutable fence too.
+Recovery lease claim, validation and conclusion publication carry the
+supervisor's resolved `claimant_machine`. Each must match the retained creating
+host before granting or using a lease, including session-ending side effects.
+Unknown/empty or foreign claimants reject without changing progress or stealing
+another host's lease; the coordinator never guesses a local hostname. Ordinary
+conclusion rows without recovery history retain their compatible optional-host
+behavior. Recovery outcomes use the host-carrying conclusion endpoint; generic
+fail/settle aliases cannot publish an unbound recovery outcome.
 At lease claim, unchanged task generation and provenance are checked first. A
 newer reservation carrying the worktree then uses the ordinary durable
 `held`/`worktree-carried-by-newer-reservation` transition, even if the newer
@@ -109,6 +117,10 @@ An abrupt process interruption may leave sidecar teardown partially complete;
 it does not remove YAML authority before that teardown finishes. Retry addresses
 only that exact record, never a newer worktree identity or foreign artifact.
 This is owned-artifact teardown, not a retention sweep or record-writer repair.
+The authoritative `launch_seed_remove` verb advertises and requires version 4
+for this teardown behavior. A known pre-v4 monitor is refused before dispatch
+or direct fallback, preserving YAML/seed/receipt state during rolling upgrade.
+The caller does not substitute manual unlink or restart/take over that monitor.
 
 ## API
 
@@ -120,3 +132,6 @@ configured aliases rather than substituting the OS hostname. It is not a livenes
 attestation. `GET /spawn-reservations/{key}/conclusion/recoveries` reads retained
 failure history. Both require control authority; unknown routes on older peers
 fail rather than silently performing another kind of recovery.
+The existing conclusion claim/validate/record endpoints accept optional
+`claimant_machine` for legacy compatibility, but require a known retained-host
+match for every recovery allocation.

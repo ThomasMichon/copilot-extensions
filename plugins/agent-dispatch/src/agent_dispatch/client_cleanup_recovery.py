@@ -2,6 +2,31 @@
 
 
 class CleanupRecoveryClientMixin:
+    def record_spawn_conclusion(
+        self, key: str, *, conclusion_state: str, conclusion_detail: str,
+        detail: str | None = None, claim_token: str | None = None,
+        claimant_machine: str | None = None,
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/conclusion",
+            json={"conclusion_state": conclusion_state, "conclusion_detail": conclusion_detail,
+                  "detail": detail, "claim_token": claim_token, "claimant_machine": claimant_machine},
+        ))
+
+    def claim_spawn_conclusion_retry(self, key: str, *, claimant_machine: str | None = None) -> dict:
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/conclusion/claim",
+            json={"claimant_machine": claimant_machine},
+        ))
+
+    def validate_spawn_conclusion_claim(
+        self, key: str, claim_token: str, *, claimant_machine: str | None = None,
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/conclusion/validate",
+            json={"claim_token": claim_token, "claimant_machine": claimant_machine},
+        ))
+
     def recover_held_cleanup(
         self, key: str, *, expected_generation: int, current_host: str,
         apply: bool = False, expected_preview: str | None = None,
@@ -20,3 +45,25 @@ class CleanupRecoveryClientMixin:
             f"/spawn-reservations/{key}/conclusion/recoveries",
             headers=self._control_headers(),
         ))
+
+
+class HostBoundConclusionClient:
+    """Carry the supervisor's resolved identity, never guess an execution host."""
+
+    def __init__(self, client, machine):
+        self._client = client
+        self._machine = machine
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def claim_spawn_conclusion_retry(self, key, **kwargs):
+        return self._client.claim_spawn_conclusion_retry(key, claimant_machine=self._machine, **kwargs)
+
+    def validate_spawn_conclusion_claim(self, key, token, **kwargs):
+        return self._client.validate_spawn_conclusion_claim(
+            key, token, claimant_machine=self._machine, **kwargs,
+        )
+
+    def record_spawn_conclusion(self, key, **kwargs):
+        return self._client.record_spawn_conclusion(key, claimant_machine=self._machine, **kwargs)

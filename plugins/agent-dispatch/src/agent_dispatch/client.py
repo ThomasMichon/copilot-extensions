@@ -774,46 +774,6 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
             )
         )
 
-    def record_spawn_conclusion(
-        self,
-        key: str,
-        *,
-        conclusion_state: str,
-        conclusion_detail: str,
-        detail: str | None = None,
-        claim_token: str | None = None,
-    ) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/conclusion",
-                json={
-                    "conclusion_state": conclusion_state,
-                    "conclusion_detail": conclusion_detail,
-                    "detail": detail,
-                    "claim_token": claim_token,
-                },
-            )
-        )
-
-    def claim_spawn_conclusion_retry(self, key: str) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/conclusion/claim",
-            )
-        )
-
-    def validate_spawn_conclusion_claim(
-        self,
-        key: str,
-        claim_token: str,
-    ) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/conclusion/validate",
-                json={"claim_token": claim_token},
-            )
-        )
-
     def rearm_spawn(
         self,
         task_id: str,

@@ -108,6 +108,15 @@ class RetireSpawnBody(ReservationDetailBody):
 
 class ValidateConclusionClaimBody(BaseModel):
     claim_token: str
+    claimant_machine: str | None = None
+
+
+class ClaimConclusionBody(BaseModel):
+    claimant_machine: str | None = None
+
+
+class RecordConclusionBody(ReservationDetailBody):
+    claimant_machine: str | None = None
 
 
 class RearmSpawnBody(BaseModel):
@@ -449,7 +458,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion")
-    def record_spawn_conclusion(key: str, body: ReservationDetailBody) -> dict:
+    def record_spawn_conclusion(key: str, body: RecordConclusionBody) -> dict:
         if not body.conclusion_state or body.conclusion_detail is None:
             raise HTTPException(
                 status_code=400,
@@ -462,16 +471,17 @@ def register_spawn_routes(
                 conclusion_detail=body.conclusion_detail or "",
                 detail=body.detail,
                 claim_token=body.claim_token,
+                claimant_machine=body.claimant_machine,
             )
         )
         bus.publish({"type": "spawn.conclusion", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion/claim")
-    def claim_spawn_conclusion_retry(key: str) -> dict:
+    def claim_spawn_conclusion_retry(key: str, body: ClaimConclusionBody = ClaimConclusionBody()) -> dict:
         try:
             reservation, claimed, claim_token = (
-                queue.claim_spawn_conclusion_retry(key)
+                queue.claim_spawn_conclusion_retry(key, claimant_machine=body.claimant_machine)
             )
         except TaskError as exc:
             msg = str(exc)
@@ -494,6 +504,7 @@ def register_spawn_routes(
             lambda: queue.validate_spawn_conclusion_claim(
                 key,
                 body.claim_token,
+                claimant_machine=body.claimant_machine,
             )
         )
         return result

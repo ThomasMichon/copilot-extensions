@@ -43,7 +43,7 @@ def _allocation_guard(conn, row):
             raise TaskError("cleanup exclusive allocation remains active")
 
 
-def validate_recovery(queue, conn, row, *, check_allocation=True):
+def validate_recovery(queue, conn, row, *, check_allocation=True, claimant_machine=None):
     """Apply the recovery generation fence again under the cleanup lease."""
     if not _has_history(conn):
         return
@@ -53,6 +53,11 @@ def validate_recovery(queue, conn, row, *, check_allocation=True):
     ).fetchone()
     if history is None:
         return
+    expected_host = json.loads(history["identity"]).get("creating_host")
+    if (not isinstance(claimant_machine, str) or not claimant_machine.strip()
+            or not isinstance(expected_host, str) or not expected_host
+            or claimant_machine.casefold() != expected_host.casefold()):
+        raise TaskError("cleanup recovery claimant machine is unknown or differs from retained creating host")
     task = queue._fetch(conn, row["task_id"])
     if task is None or task.generation != history["generation"] or task.status not in Status.TERMINAL:
         raise TaskError("cleanup recovery task generation changed")

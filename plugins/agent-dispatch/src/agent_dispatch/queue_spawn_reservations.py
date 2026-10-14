@@ -466,6 +466,8 @@ class SpawnReservationMixin:
                 or conclusion_detail is not None
                 or claim_token is not None
             ):
+                from .cleanup_recovery import validate_recovery
+                validate_recovery(self, conn, row)
                 _validate_conclusion_claim(
                     row["cleanup_claim_token"],
                     row["cleanup_claim_expires_at"],

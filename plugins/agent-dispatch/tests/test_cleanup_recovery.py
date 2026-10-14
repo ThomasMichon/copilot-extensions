@@ -75,9 +75,9 @@ def test_held_cleanup_preview_and_idempotent_apply_preserve_task(held):
     assert detail["worktree_cleanup"]["state"] == "pending"
     assert detail["worktree_cleanup"]["attempts"] == 0
     assert detail["session_end"]["state"] == "complete"
-    _, claimed, token = queue.claim_spawn_conclusion_retry(key)
+    _, claimed, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
     assert claimed and token
-    queue.validate_spawn_conclusion_claim(key, token)
+    queue.validate_spawn_conclusion_claim(key, token, claimant_machine="host")
     with queue._connect() as conn:
         history = conn.execute("SELECT prior_detail FROM cleanup_recoveries").fetchone()
     assert history["prior_detail"] == prior["conclusion_detail"]
@@ -171,9 +171,9 @@ def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held, monkeyp
         claims = []
         original = client.claim_spawn_conclusion_retry
 
-        def claim(exact_key):
+        def claim(exact_key, **kwargs):
             claims.append(exact_key)
-            return original(exact_key)
+            return original(exact_key, **kwargs)
 
         monkeypatch.setattr(client, "claim_spawn_conclusion_retry", claim)
 
@@ -199,12 +199,12 @@ def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held, monkeyp
 def test_recovery_revalidates_generation_after_cleanup_lease(held):
     queue, task_id, key = held
     apply(held, preview(held))
-    _, claimed, token = queue.claim_spawn_conclusion_retry(key)
+    _, claimed, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
     assert claimed
     with queue._connect() as conn:
         conn.execute("UPDATE tasks SET generation=generation+1 WHERE id=?", (task_id,))
     with pytest.raises(TaskError, match="generation"):
-        queue.validate_spawn_conclusion_claim(key, token)
+        queue.validate_spawn_conclusion_claim(key, token, claimant_machine="host")
 
 
 @pytest.mark.parametrize("column,value", [
@@ -228,20 +228,20 @@ def test_recovery_fences_complete_allocation_identity(held, column, value, bound
     apply(held, preview(held))
     token = None
     if boundary != "claim":
-        _, claimed, token = queue.claim_spawn_conclusion_retry(key)
+        _, claimed, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
         assert claimed
     with queue._connect() as conn:
         conn.execute(f"UPDATE spawn_reservations SET {column}=? WHERE key=?", (value, key))
     detail = queue.get_reservation(key).conclusion_detail
     with pytest.raises(TaskError, match="provenance changed"):
         if boundary == "claim":
-            queue.claim_spawn_conclusion_retry(key)
+            queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
         elif boundary == "validate":
-            queue.validate_spawn_conclusion_claim(key, token)
+            queue.validate_spawn_conclusion_claim(key, token, claimant_machine="host")
         else:
             queue.record_spawn_conclusion(
                 key, conclusion_state="complete", conclusion_detail='{"action":"primed"}',
-                claim_token=token,
+                claim_token=token, claimant_machine="host",
             )
     assert queue.get_reservation(key).conclusion_detail == detail
     assert asdict(queue.get(task_id)) == before
@@ -343,13 +343,13 @@ def test_session_retry_with_producer_worktree_component_is_leased(held, monkeypa
         claim = client.claim_spawn_conclusion_retry
         validate = client.validate_spawn_conclusion_claim
 
-        def claimed(exact_key):
+        def claimed(exact_key, **kwargs):
             stages.append("claim")
-            return claim(exact_key)
+            return claim(exact_key, **kwargs)
 
-        def validated(exact_key, token):
+        def validated(exact_key, token, **kwargs):
             stages.append("validate")
-            return validate(exact_key, token)
+            return validate(exact_key, token, **kwargs)
 
         monkeypatch.setattr(client, "claim_spawn_conclusion_retry", claimed)
         monkeypatch.setattr(client, "validate_spawn_conclusion_claim", validated)
@@ -359,7 +359,7 @@ def test_session_retry_with_producer_worktree_component_is_leased(held, monkeypa
             assert session == "native-session"
             token = queue.get_reservation(key).cleanup_claim_token
             assert token
-            queue.validate_spawn_conclusion_claim(key, token)
+            queue.validate_spawn_conclusion_claim(key, token, claimant_machine="host")
             return True
 
         def forbidden(*args, **kwargs):
@@ -446,9 +446,10 @@ def test_recovery_history_survives_later_success(held):
     queue, _, key = held
     prior = queue.get_reservation(key).conclusion_detail
     apply(held, preview(held))
-    _, _, token = queue.claim_spawn_conclusion_retry(key)
+    _, _, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
     queue.record_spawn_conclusion(
-        key, conclusion_state="complete", conclusion_detail='{"action":"primed"}', claim_token=token,
+        key, conclusion_state="complete", conclusion_detail='{"action":"primed"}',
+        claim_token=token, claimant_machine="host",
     )
     history = queue.cleanup_recovery_history(key)
     assert history[0]["prior_detail"] == prior
@@ -502,7 +503,133 @@ def test_recovery_rpc_requires_control_authority_and_strict_fences(held):
         assert control.cleanup_recovery_history(key) == []
 
 
-def test_native_cli_first_touch_preview_apply_and_history(held):
+@pytest.mark.parametrize("claimant", ["other-host", None, ""])
+@pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
+def test_recovery_rpc_fences_claimant_host_at_every_boundary(held, claimant, boundary):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.coordinator import create_app
+
+    queue, _, key = held
+    apply(held, preview(held))
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    with TestClient(app) as client:
+        token = None
+        if boundary != "claim":
+            accepted = client.post(
+                f"/spawn-reservations/{key}/conclusion/claim",
+                json={"claimant_machine": "host"},
+            )
+            assert accepted.status_code == 200
+            token = accepted.json()["claim_token"]
+        before = asdict(queue.get_reservation(key))
+        if boundary == "claim":
+            response = client.post(
+                f"/spawn-reservations/{key}/conclusion/claim",
+                json={"claimant_machine": claimant},
+            )
+        elif boundary == "validate":
+            response = client.post(
+                f"/spawn-reservations/{key}/conclusion/validate",
+                json={"claim_token": token, "claimant_machine": claimant},
+            )
+        else:
+            response = client.post(
+                f"/spawn-reservations/{key}/conclusion",
+                json={"claim_token": token, "claimant_machine": claimant,
+                      "conclusion_state": "complete", "conclusion_detail": '{"action":"primed"}'},
+            )
+        assert response.status_code == 409
+        assert asdict(queue.get_reservation(key)) == before
+
+
+@pytest.mark.parametrize("component", ["session", "worktree"])
+def test_foreign_supervisor_cannot_consume_recovery_or_steal_lease(held, component):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    queue, _, key = held
+    if component == "session":
+        payload = {
+            "cleanup_kind": "attempt",
+            "session_end": {"state": "held", "session_id": "native-session"},
+            "worktree_cleanup": {"state": "complete", "outcome": {"action": "already-primed"}},
+        }
+        queue.record_spawn_conclusion(key, conclusion_state="held", conclusion_detail=json.dumps(payload))
+    apply(held, preview(held))
+    before = asdict(queue.get_reservation(key))
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    with DispatchClient("http://testserver") as client:
+        client._http.close()
+        client._http = TestClient(app)
+        ended = []
+        worktrees = []
+        foreign = Supervisor(
+            client, spawn_fn=lambda *a: pytest.fail("business spawn forbidden"),
+            local_end_fn=lambda sid: ended.append(sid) or True,
+            attempt_conclusion_fn=lambda *a: worktrees.append(a) or {"action": "primed"},
+            repo=TEST_REPO, machine="other-host", nudge=False,
+        )
+        foreign.release_requested_bodies()
+        assert ended == [] and worktrees == []
+        assert asdict(queue.get_reservation(key)) == before
+        local = Supervisor(
+            client, spawn_fn=lambda *a: pytest.fail("business spawn forbidden"),
+            local_end_fn=lambda sid: ended.append(sid) or True,
+            attempt_conclusion_fn=lambda *a: worktrees.append(a) or {"action": "primed"},
+            repo=TEST_REPO, machine="host", nudge=False,
+        )
+        local.release_requested_bodies()
+        assert queue.get_reservation(key).conclusion_state == "complete"
+        assert len(ended if component == "session" else worktrees) == 1
+
+
+def test_legacy_conclusion_rpc_without_recovery_keeps_optional_host_behavior(held):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.coordinator import create_app
+
+    queue, _, _ = held
+    task = queue.create("legacy pending cleanup")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.fail_spawn(reservation.key, conclusion_state="pending", conclusion_detail='{"action":"failed"}')
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    with TestClient(app) as client:
+        claim = client.post(f"/spawn-reservations/{reservation.key}/conclusion/claim")
+        assert claim.status_code == 200
+        token = claim.json()["claim_token"]
+        assert client.post(
+            f"/spawn-reservations/{reservation.key}/conclusion/validate", json={"claim_token": token},
+        ).status_code == 200
+        assert client.post(
+            f"/spawn-reservations/{reservation.key}/conclusion",
+            json={"claim_token": token, "conclusion_state": "complete",
+                  "conclusion_detail": '{"action":"removed"}'},
+        ).status_code == 200
+
+
+@pytest.mark.parametrize("operation", ["settle", "fail"])
+def test_unbound_terminal_alias_cannot_publish_recovery_outcome(held, operation):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.coordinator import create_app
+
+    queue, _, key = held
+    apply(held, preview(held))
+    _, _, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
+    before = asdict(queue.get_reservation(key))
+    with TestClient(create_app(queue, enable_mcp=False, verification_interval=0)) as client:
+        result = client.post(
+            f"/spawn-reservations/{key}/{operation}",
+            json={"claim_token": token, "conclusion_state": "complete",
+                  "conclusion_detail": '{"action":"primed"}'},
+        )
+        assert result.status_code == 409
+    assert asdict(queue.get_reservation(key)) == before
+
+
+@pytest.mark.parametrize("native_operation", ["preview", "apply", "replay", "history", "completed-replay"])
+def test_native_cli_first_touch_preview_apply_and_history(held, native_operation):
     """Actual CLI -> loopback HTTP -> supervisor consumer -> fixture database."""
     import socket
     import os
@@ -539,7 +666,10 @@ def test_native_cli_first_touch_preview_apply_and_history(held):
             "reservations",
         ]
 
+        native_calls = []
+
         def run(*argv):
+            native_calls.append(argv)
             result = subprocess.run(
                 [*base, *argv], capture_output=True, text=True, timeout=15,
                 env={**os.environ, "AGENT_DISPATCH_SUPERVISE_MACHINE": "fixture-host"},
@@ -549,18 +679,6 @@ def test_native_cli_first_touch_preview_apply_and_history(held):
             return json.loads(result.stdout)
 
         args = ("retry-cleanup", key, "--expected-generation", str(before["generation"]))
-        plan = run(*args)
-        assert plan["scheduled"] is False
-        applied = run(
-            *args, "--apply", "--expected-preview", plan["preview_token"],
-            "--request-id", "native-request", "--reason", "fixture fault corrected",
-        )
-        assert applied["scheduled"] is True
-        assert run(
-            *args, "--apply", "--expected-preview", plan["preview_token"],
-            "--request-id", "native-request", "--reason", "fixture fault corrected",
-        ) == applied
-        assert run("cleanup-history", key)[0]["request_id"] == "native-request"
         conclusions = []
 
         def conclude(*args):
@@ -573,6 +691,27 @@ def test_native_cli_first_touch_preview_apply_and_history(held):
         with DispatchClient(
             f"http://127.0.0.1:{sock.getsockname()[1]}", control_token="fixture-control",
         ) as client:
+            plan = run(*args) if native_operation == "preview" else client.recover_held_cleanup(
+                key, expected_generation=before["generation"], current_host="fixture-host",
+            )
+            assert plan["scheduled"] is False
+            apply_args = (
+                *args, "--apply", "--expected-preview", plan["preview_token"],
+                "--request-id", "native-request", "--reason", "fixture fault corrected",
+            )
+
+            def apply_http():
+                return client.recover_held_cleanup(
+                    key, expected_generation=before["generation"], current_host="fixture-host",
+                    apply=True, expected_preview=plan["preview_token"],
+                    request_id="native-request", reason="fixture fault corrected",
+                )
+
+            applied = run(*apply_args) if native_operation == "apply" else apply_http()
+            assert applied["scheduled"] is True
+            assert (run(*apply_args) if native_operation == "replay" else apply_http()) == applied
+            history = run("cleanup-history", key) if native_operation == "history" else client.cleanup_recovery_history(key)
+            assert history[0]["request_id"] == "native-request"
             supervisor = Supervisor(
                 client, spawn_fn=forbidden, attempt_conclusion_fn=conclude,
                 repo=TEST_REPO, machine="fixture-host", nudge=False,
@@ -582,10 +721,8 @@ def test_native_cli_first_touch_preview_apply_and_history(held):
             assert conclusions == [("worker-exact", "session-exact", key, "supervisor")]
             assert supervisor.release_requested_bodies() == 0
             assert len(conclusions) == 1
-        assert run(
-            *args, "--apply", "--expected-preview", plan["preview_token"],
-            "--request-id", "native-request", "--reason", "fixture fault corrected",
-        ) == applied
+            assert (run(*apply_args) if native_operation == "completed-replay" else apply_http()) == applied
+        assert len(native_calls) == 1
         assert queue.get_reservation(key).conclusion_state == "complete"
         assert asdict(queue.get(task_id)) == before
     finally:

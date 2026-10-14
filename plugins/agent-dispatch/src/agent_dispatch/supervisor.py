@@ -43,6 +43,7 @@ import httpx
 
 from .bridge_events import BridgeSubscription, SupervisorEventWake
 from .client import DispatchClient, DispatchError
+from .client_cleanup_recovery import HostBoundConclusionClient
 from .loop_governance import LoopGovernance
 from .queue import SpawnState, Status
 from .spawn_factories import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -206,7 +207,7 @@ class Supervisor:
         reserving_timeout: float = _MIN_RESERVING_TIMEOUT_SECONDS,
         consistency_sweep: bool = True,
     ):
-        self.client = client
+        self.client = HostBoundConclusionClient(client, machine)
         self.spawn_fn = spawn_fn
         self.repo = repo
         self.labels = set(labels) if labels else None

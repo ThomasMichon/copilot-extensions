@@ -38,7 +38,7 @@ def _record(tmp_path):
 
 
 @pytest.mark.parametrize(("name", "old_version"), [
-    ("stage", 1), ("take", 1), ("restore", 1), ("finish", 1), ("remove", 2),
+    ("stage", 1), ("take", 1), ("restore", 1), ("finish", 1), ("remove", 2), ("remove", 3),
 ])
 def test_seed_client_never_dials_pre_authority_daemon(tmp_path, monkeypatch, name, old_version):
     from agent_worktrees import locks, status_monitor_runtime
@@ -67,7 +67,38 @@ def test_seed_client_never_dials_pre_authority_daemon(tmp_path, monkeypatch, nam
         "finish": lambda: state.finish(path, receipt),
         "remove": lambda: state.remove(path, remove_record=True),
     }
-    assert operations[name]() is not None
+    if name == "remove":
+        before = path.read_bytes(), state.state_path(path).read_bytes()
+        with pytest.raises(ValueError, match="verb version 4"):
+            operations[name]()
+        assert (path.read_bytes(), state.state_path(path).read_bytes()) == before
+    else:
+        assert operations[name]() is not None
+
+
+def test_remove_rejects_real_v3_daemon_without_direct_unlink_fallback(tmp_path, monkeypatch):
+    from agent_worktrees import locks, status_monitor_runtime
+
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="preserve on mixed-version refusal")
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    before = {file: file.read_bytes() for file in (path, state.state_path(path), pair_receipt)}
+    called = []
+    server = tracking_write.start_server(lambda *args: called.append(args) or {"record_removed": True})
+    server.start()
+    old = tracking_write.rendezvous_fields(server)
+    old["tracking_write_verb_versions"] = {**old["tracking_write_verb_versions"], "launch_seed_remove": 3}
+    monkeypatch.setattr(locks, "read_lock", lambda *a: old)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(tracking_write, "run_direct", lambda *a, **k: pytest.fail("direct unlink fallback forbidden"))
+    try:
+        with pytest.raises(ValueError, match="verb version 4"):
+            state.remove(path, remove_record=True)
+        assert called == []
+        assert {file: file.read_bytes() for file in before} == before
+    finally:
+        server.close()
 
 
 @pytest.mark.parametrize("kind", ["new", "resume"])

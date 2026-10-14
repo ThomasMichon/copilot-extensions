@@ -130,12 +130,12 @@ No private host, checkout, task or session identifiers are needed upstream.
 
 ### Phase 4 - Resolve repository resources from one registry
 
-- [ ] Define an explicit registered-repository binding for script resources,
+- [x] Define an explicit registered-repository binding for script resources,
   execution cwd and effort state-root identity.
-- [ ] Resolve roots through the owning global registry at use time; reject missing,
+- [x] Resolve roots through the owning global registry at use time; reject missing,
   ambiguous or incompatible registrations without PATH/ancestor guessing.
-- [ ] Separate local repository identity from forge/task-lane coordinates.
-- [ ] Avoid persisting a second authoritative checkout root in repo discovery
+- [x] Separate local repository identity from forge/task-lane coordinates.
+- [x] Avoid persisting a second authoritative checkout root in repo discovery
   pointers or repository-owned declarations.
 - [ ] Preserve standalone queue use and stage adopter migration deliberately;
   old peers must fail explicitly when required resolution support is unavailable.
@@ -165,7 +165,7 @@ No private host, checkout, task or session identifiers are needed upstream.
   bound cycle latency and prove unrelated units continue progressing.
 - [ ] Restart/lost-response tests preserve one operation and exact generation
   ownership; watchdog recovery does not duplicate active or cold workers.
-- [ ] The same named-repository declaration resolves under two distinct registered
+- [x] The same named-repository declaration resolves under two distinct registered
   roots; missing and ambiguous registrations fail explicitly.
 - [ ] Scalar repair remains with its existing PR and is exercised after release.
 - [ ] Held-cleanup retry never restarts business work or bypasses newer ownership.
@@ -501,3 +501,31 @@ requested contract.
 - No teardown marker, actor takeover, schema change, timeout increase or process
   killing is introduced. Review, CI, integration and release remain coordinator
   custody.
+
+### 2026-10-13 - Reviewed source integration and host/protocol correction
+
+- #6531 source binding merged at `c88d004c`; #6543 category source merged at
+  `e452`. #6580's follow-through merged at `f0bb92bed` after actual approval,
+  required CI and zero unresolved threads. Its external source witness exercised
+  90 owner and eight admission checks with unchanged fixture state.
+- Marked only the first four Phase 4 source-binding items and the two-root source
+  validation complete. Standalone/adopter migration, release/live evidence,
+  native master custody and selected schema recovery remain open.
+- The independently owned obligation fixture #6588 merged at `117476aa6`.
+  Those fixtures and the promotion/release lane are not reimplemented here.
+- Reproduced recovery leases accepted by foreign/unknown hosts through actual
+  claim/validate/outcome RPC and foreign supervisor session/worktree consumers.
+  Carry the existing resolved supervisor machine and require the retained-host
+  match, without hostname guessing or changing ordinary legacy conclusions.
+- Required/advertised removal protocol version 4. Known pre-v4 monitors refuse
+  before dialing or direct fallback; real old-daemon tests preserve all owned
+  state. No monitor restart, actor takeover or manual unlink is added.
+- The prior Git/pipe timeout remains causally unproven, tracked separately in
+  #6471, and is not declared an accepted flake. Review, CI, migration, promotion
+  and authorized rollout remain coordinator-owned.
+- A separate native-CLI observation captured cold import-file waits before any
+  recovery RPC. The former single item performed five cold CLI startups inside
+  one 30-second item budget. Those five real CLI boundaries now have independent
+  items with the original 15-second child / 30-second item limits; HTTP and
+  actual supervisor consumption remain real in every case. No timeout is raised
+  and no cached fake transport or in-process CLI substitute is introduced.
