@@ -47,7 +47,10 @@ def _load_state_root_authority(
     if not branch:
         raise ValueError(f"cannot resolve committed branch for project {name!r}")
     refs = (
-        [f"{remote_name}/{branch}", f"refs/heads/{branch}"]
+        [
+            f"refs/remotes/{remote_name}/{branch}",
+            f"refs/heads/{branch}",
+        ]
         if remote_name else [f"refs/heads/{branch}"]
     )
     ref = ""

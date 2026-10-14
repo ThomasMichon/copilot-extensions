@@ -181,9 +181,9 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
         "expected_ref", "expected_probes",
     ),
     [
-        ("main", "origin", True, "origin/main", 2),
-        ("", "origin", True, "origin/main", 3),
-        ("main", "upstream", True, "upstream/main", 2),
+        ("main", "origin", True, "refs/remotes/origin/main", 2),
+        ("", "origin", True, "refs/remotes/origin/main", 3),
+        ("main", "upstream", True, "refs/remotes/upstream/main", 2),
         ("main", "origin", False, "refs/heads/main", 3),
         ("main", "", False, "refs/heads/main", 2),
     ],
@@ -248,7 +248,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
             )
         if args[0] == "ls-tree":
             ref = args[3]
-            if "/" in ref and not ref.startswith("refs/") and not remote_ref_available:
+            if ref.startswith("refs/remotes/") and not remote_ref_available:
                 return SimpleNamespace(returncode=1, stdout="")
             return SimpleNamespace(returncode=0, stdout=f"{committed_path}\n")
         if args[0] == "show":
