@@ -1018,12 +1018,7 @@ def _serve_ssh(
     except ModuleNotFoundError as exc:
         if exc.name != "paramiko":
             raise
-        raise RuntimeError(
-            "Provider-exec SSH support is unavailable in this runtime. Select the "
-            "persistent provider-exec profile with the owning payload's init installer "
-            "(PowerShell: provision -Profile provider-exec; "
-            "POSIX: provision --profile provider-exec). Direct restricted exec remains available."
-        ) from exc
+        raise RuntimeError("SSH needs provider-exec profile; see README provisioning") from exc
 
     proxy_socket, server_socket = socket.socketpair()
     input_thread = threading.Thread(
