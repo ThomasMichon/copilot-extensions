@@ -524,7 +524,14 @@ def _daemon_problems(problems):
     ("from agent_procutil import windowless_daemon_kwargs\ndef start():\n"
      "    import subprocess as _subprocess\n"
      "    _subprocess.Popen(['svc'], **windowless_daemon_kwargs(breakaway=True))\n"),
-], ids=["kwargs-update", "attribute-helper-in-method", "imported-popen-alias", "module-alias"])
+    ("from agent_procutil import detached_kwargs\ndef start():\n"
+     "    sp.Popen(['svc'], **detached_kwargs())\nimport subprocess as sp\n"),
+    ("from agent_procutil import detached_kwargs\ndef start():\n"
+     "    P(['svc'], **detached_kwargs())\nfrom subprocess import Popen as P\n"),
+], ids=[
+    "kwargs-update", "attribute-helper-in-method", "imported-popen-alias", "module-alias",
+    "module-alias-imported-after-use", "popen-alias-imported-after-use",
+])
 def test_hand_rolled_detached_popen_is_flagged(repo, body):
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
     problems = _daemon_problems(guard.verify())
@@ -538,7 +545,11 @@ def test_hand_rolled_detached_popen_is_flagged(repo, body):
      "    return spawn_daemon(['svc'], cwd=root, log_path=root / 'svc.log')\n"),
     "import subprocess\ndef run():\n    return subprocess.Popen(['svc'], creationflags=0)\n",
     _UPDATE_SHAPE.format(comment="  # daemon-spawn: allow one-shot waiter, exits with its task"),
-], ids=["spawn-daemon", "no-detach-helper", "inline-allow-with-reason"])
+    ("import subprocess\nfrom agent_procutil import detached_kwargs\ndef outer():\n"
+     "    def helper():\n        return detached_kwargs()\n"
+     "    class Box:\n        kwargs = detached_kwargs()\n"
+     "    return subprocess.Popen(['tool'], creationflags=0)\n"),
+], ids=["spawn-daemon", "no-detach-helper", "inline-allow-with-reason", "helper-only-in-nested-scope"])
 def test_daemon_launches_that_pass(repo, body):
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
     assert _daemon_problems(guard.verify()) == []

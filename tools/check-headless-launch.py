@@ -290,35 +290,45 @@ def _find_unsuppressed_spawns(f: Path) -> tuple[str, list[tuple[int, str]]]:
 
 
 def _calls_detach_helper(node: ast.AST) -> bool:
-    for sub in ast.walk(node):
+    """Whether ``node``'s own scope calls a detach helper.
+
+    Nested function and class bodies are separate scopes and are not searched,
+    so a helper inside an inner function never marks an outer launch.
+    """
+    pending = list(ast.iter_child_nodes(node))
+    while pending:
+        sub = pending.pop()
+        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
         if isinstance(sub, ast.Call):
             func = sub.func
             name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
             if name in _DETACH_HELPERS:
                 return True
+        pending.extend(ast.iter_child_nodes(sub))
     return False
 
 
 class _DetachedSpawnFinder(ast.NodeVisitor):
     """Collect (lineno, qualname) for a raw ``Popen`` that detaches itself."""
 
-    def __init__(self) -> None:
+    def __init__(self, tree: ast.AST) -> None:
         self.hits: list[tuple[int, str]] = []
         self._names: list[str] = []
         self._funcs: list[ast.AST] = []
+        # Indexed up front: a function may be defined before the import it uses.
         self._popen_aliases: set[str] = set()
         self._subprocess_aliases: set[str] = {"subprocess"}
-
-    def visit_Import(self, node: ast.Import) -> None:
-        self._subprocess_aliases.update(
-            alias.asname for alias in node.names if alias.name == "subprocess" and alias.asname
-        )
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module == "subprocess":
-            self._popen_aliases.update(
-                alias.asname or alias.name for alias in node.names if alias.name == "Popen"
-            )
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                self._subprocess_aliases.update(
+                    alias.asname for alias in node.names
+                    if alias.name == "subprocess" and alias.asname
+                )
+            elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+                self._popen_aliases.update(
+                    alias.asname or alias.name for alias in node.names if alias.name == "Popen"
+                )
 
     def _scoped(self, node: ast.AST, *, func: bool) -> None:
         self._names.append(node.name)  # type: ignore[attr-defined]
@@ -346,8 +356,10 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
              and func.value.id in self._subprocess_aliases)
             or (isinstance(func, ast.Name) and func.id in self._popen_aliases)
         )
-        scope = self._funcs[-1] if self._funcs else node
-        if is_popen and _calls_detach_helper(scope):
+        scope = self._funcs[-1] if self._funcs else None
+        if is_popen and (
+            _calls_detach_helper(node) or (scope is not None and _calls_detach_helper(scope))
+        ):
             self.hits.append((node.lineno, ".".join(self._names) or "<module>"))
         self.generic_visit(node)
 
@@ -599,7 +611,7 @@ def verify() -> list[str]:
             flags.visit(tree)
             spawns = _SpawnFinder(text)
             spawns.visit(tree)
-            daemons = _DetachedSpawnFinder()
+            daemons = _DetachedSpawnFinder(tree)
             daemons.visit(tree)
             detached[f] = sorted(set(daemons.hits))
             result = (text, sorted(set(flags.hits)), sorted(set(spawns.hits)))
