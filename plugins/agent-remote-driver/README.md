@@ -261,6 +261,9 @@ directory this process can create and write to.
   the dependency-free HTTP server (health/events/send/steer/abort, with a
   bounded `MAX_SSE_CLIENTS`), decoupled from the SDK so it is directly
   unit-testable with a fake driver.
+- [`extensions/agent-remote-driver/session-driver.mjs`](extensions/agent-remote-driver/session-driver.mjs) --
+  the SDK-free adapter preserving the HTTP `{content, mode}` interface while
+  constructing SDK `{prompt, mode}` sends and forwarding aborts.
 - [`extensions/agent-remote-driver/discovery.mjs`](extensions/agent-remote-driver/discovery.mjs) --
   pure helpers: descriptor path/shape, token generation, bearer-token
   verification, and the atomic (temp file + rename) descriptor writer.

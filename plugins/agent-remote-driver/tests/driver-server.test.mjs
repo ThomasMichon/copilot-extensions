@@ -1,24 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createDriverServer, MAX_SSE_CLIENTS } from "../extensions/agent-remote-driver/driver-server.mjs";
+import { createSessionDriver } from "../extensions/agent-remote-driver/session-driver.mjs";
 
 const TOKEN = "test-token-123";
 
 async function withServer(fn, extraOpts = {}) {
-  const calls = { send: [], abort: 0 };
+  const calls = { send: [], abort: 0, order: [] };
   const listeners = new Set();
-  const driverServer = createDriverServer({
-    getSessionId: () => "session-1",
-    getPid: () => 4242,
-    token: TOKEN,
-    send: async ({ content, mode }) => {
-      calls.send.push({ content, mode });
+  const session = {
+    send: async (options) => {
+      assert.equal(typeof options.prompt, "string", "SDK send requires prompt");
+      assert.equal(Object.hasOwn(options, "content"), false);
+      calls.send.push(options);
+      calls.order.push("send");
       return { accepted: true };
     },
     abort: async () => {
       calls.abort += 1;
+      calls.order.push("abort");
       return { aborted: true };
     },
+  };
+  const driverServer = createDriverServer({
+    getSessionId: () => "session-1",
+    getPid: () => 4242,
+    token: TOKEN,
+    ...createSessionDriver(session),
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -55,7 +63,7 @@ test("GET /health requires auth and reports session id/pid", async () => {
   });
 });
 
-test("POST /send forwards content/mode to the driver and requires content", async () => {
+test("POST /send maps HTTP content/mode to SDK prompt/mode and requires content", async () => {
   await withServer(async ({ base, calls }) => {
     const missing = await authed(`${base}/send`, {
       method: "POST",
@@ -67,12 +75,25 @@ test("POST /send forwards content/mode to the driver and requires content", asyn
     const res = await authed(`${base}/send`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content: "hello", mode: "queue" }),
+      body: JSON.stringify({ content: "hello", mode: "enqueue" }),
     });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.ok, true);
-    assert.deepEqual(calls.send, [{ content: "hello", mode: "queue" }]);
+    assert.deepEqual(body.result, { accepted: true });
+    assert.deepEqual(calls.send, [{ prompt: "hello", mode: "enqueue" }]);
+  });
+});
+
+test("POST /send preserves the SDK default when HTTP mode is omitted", async () => {
+  await withServer(async ({ base, calls }) => {
+    const res = await authed(`${base}/send`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "use the default mode" }),
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(calls.send, [{ prompt: "use the default mode", mode: undefined }]);
   });
 });
 
@@ -84,7 +105,7 @@ test("POST /abort calls the driver's abort", async () => {
   });
 });
 
-test("POST /steer aborts then sends in immediate mode", async () => {
+test("POST /steer aborts then maps HTTP content to SDK prompt in immediate mode", async () => {
   await withServer(async ({ base, calls }) => {
     const res = await authed(`${base}/steer`, {
       method: "POST",
@@ -92,8 +113,10 @@ test("POST /steer aborts then sends in immediate mode", async () => {
       body: JSON.stringify({ content: "stop and do this instead" }),
     });
     assert.equal(res.status, 200);
+    assert.deepEqual((await res.json()).result, { accepted: true });
     assert.equal(calls.abort, 1);
-    assert.deepEqual(calls.send, [{ content: "stop and do this instead", mode: "immediate" }]);
+    assert.deepEqual(calls.order, ["abort", "send"]);
+    assert.deepEqual(calls.send, [{ prompt: "stop and do this instead", mode: "immediate" }]);
   });
 });
 

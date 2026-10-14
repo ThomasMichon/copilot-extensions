@@ -51,6 +51,7 @@ import { mkdirSync, unlinkSync } from "node:fs";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { createDriverServer, MAX_SSE_CLIENTS } from "./driver-server.mjs";
+import { createSessionDriver } from "./session-driver.mjs";
 import { discoveryDir, descriptorPath, generateToken, buildDescriptor, writeDescriptorAtomic } from "./discovery.mjs";
 import { sweepStale } from "./registry.mjs";
 import { boundedRetry, installSignalCleanup, createIntervalTimer } from "./lifecycle.mjs";
@@ -184,8 +185,7 @@ const driverServer = createDriverServer({
   getSessionId: () => state.sessionId,
   getPid: () => process.pid,
   token,
-  send: ({ content, mode }) => session.send({ content, mode }),
-  abort: () => session.abort(),
+  ...createSessionDriver(session),
   subscribe,
 });
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Map remote-driver HTTP content to SDK prompt for send and steer; preserve mode and abort ordering.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}
