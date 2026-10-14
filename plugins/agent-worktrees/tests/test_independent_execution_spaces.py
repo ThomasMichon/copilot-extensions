@@ -1484,7 +1484,7 @@ def test_resume_reports_raced_authority_rejection_as_structured_error(
     fresh = tracking.load_record(record.yaml_path)
     fresh.owner_ref = "workstation-wsl/project/wt-new-parent"
     module = resolve_cli if json_mode else resolve_launch_cli
-    monkeypatch.setattr(module, "seed_for_attempt", lambda *args: None)
+    monkeypatch.setattr(module, "seed_for_attempt", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         module, "_preflight_launch", lambda *args: SimpleNamespace(error=None),
     )

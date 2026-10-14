@@ -2669,6 +2669,7 @@ class TestOwningTrackingDirResolution:
         assert rec.yaml_path == knowledge_dir / "wt-k.yaml"
         assert rec.yaml_path != harness_dir / "wt-k.yaml"
 
+    @pytest.mark.guard
     def test_bare_id_lookup_falls_back_to_owning_project_without_duplicating(
         self, tmp_path: Path, monkeypatch
     ):
@@ -2686,6 +2687,7 @@ class TestOwningTrackingDirResolution:
         updated = load_record(knowledge_dir / "wt-k.yaml")
         assert updated.sessions and updated.sessions[-1].session_id == "session-1"
 
+    @pytest.mark.guard
     def test_bare_id_lookup_prefers_ambient_when_present_there(
         self, tmp_path: Path, monkeypatch
     ):
@@ -4524,5 +4526,4 @@ class TestFollowUpLedgerConcurrencyMerge:
         save_record(writer_a, path)
         reloaded = load_record(path)
         assert {fu.summary for fu in reloaded.follow_ups} == {"from A", "from B"}
-
 

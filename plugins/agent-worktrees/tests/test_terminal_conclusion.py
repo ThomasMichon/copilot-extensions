@@ -813,6 +813,7 @@ def test_repeated_conclusion_is_idempotent(tmp_path, monkeypatch):
     assert second["session"]["action"] == "already-concluded"
 
 
+@pytest.mark.guard
 def test_terminal_managed_record_rejects_new_session_activation(
     tmp_path,
     monkeypatch,
