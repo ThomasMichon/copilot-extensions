@@ -195,6 +195,9 @@ locked-down hosts without themselves proving the package-source contract.
       configuration without exposing credentials in argv, logs or receipts.
       Bind download locations and redirect chains to explicit feed trust;
       a trusted index URL alone does not authorize arbitrary linked hosts.
+      Preserve each file's feed admission metadata and exclude yanked or
+      withdrawn files before exposing the local set to resolution, including
+      exact pins. Copying a wheel locally never erases a feed's refusal.
 - [ ] Inspect each candidate's actual wheel metadata before traversing its
       dependencies or exposing it to the resolver. Reject direct URL,
       VCS and external-path requirements before their targets are acquired.
@@ -220,7 +223,10 @@ locked-down hosts without themselves proving the package-source contract.
       identity and effective policy. This consumer-specific closure is not
       written into a globally promoted manifest that cannot know the
       consumer's private feed. Cached reuse must revalidate that binding;
-      successful resolution alone never activates a slot.
+      also recheck current per-file feed admission before selection or reuse.
+      Unavailable admission evidence fails closed rather than trusting an
+      old receipt or cached wheel. Successful resolution alone never
+      activates a slot.
 - [ ] Refuse an unavailable compatible wheel or inadmissible closure with a
       specific diagnostic. This first lane does not execute third-party
       source backends or silently reinterpret refusal as permission to use
@@ -391,6 +397,11 @@ verified answer against its actual repository or machine configuration:
 - [ ] Feed-lag tests prove the consumer-side admission check blocks
       consumption of a closure not yet available on the local governed
       feed, and never silently substitutes a public-index candidate.
+- [ ] Feed-admission fixtures present a compatible newer yanked wheel,
+      an exact pin to it, and a previously admitted cached wheel subsequently
+      withdrawn. Selection, exact-pin resolution and receipt reuse all
+      exclude refused files; an older admissible compatible version remains
+      selectable. Missing current admission evidence refuses activation.
 - [ ] Controlled feed/redirect tests admit only explicitly trusted download
       chains and reject untrusted hosts or insecure redirects before their
       endpoints receive a request. Named-index authentication and OS trust
