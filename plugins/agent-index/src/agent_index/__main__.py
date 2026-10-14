@@ -1374,38 +1374,19 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         start_command = "__cell-start" if expected_installation else "start"
         python = str(host_runtime_python())
         cmd = [
-            windowless_python(python),
-            "-I",
-            "-X",
-            "utf8",
-            "-m",
-            "agent_index",
-            start_command,
-            "--host",
-            cfg.host,
-            "--port",
-            str(port),
-            "--passive",
+            windowless_python(python), "-I", "-X", "utf8", "-m", "agent_index",
+            start_command, "--host", cfg.host, "--port", str(port), "--passive",
         ]
         root = install_dir().resolve()
         root.mkdir(parents=True, exist_ok=True)
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key not in {"PYTHONPATH", "PYTHONHOME"}
-        }
+        env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
         overrides = dict(windowless_python_env(python))
-        # The daemon log is append-only for the generation's whole life: keep
-        # uvicorn's per-request access lines out of it unless the operator
-        # asked for a level explicitly.
+        # The generation's log is append-only: keep uvicorn's per-request lines
+        # out of it unless the operator set a level.
         if "AGENT_INDEX_LOG_LEVEL" not in env:
             overrides["AGENT_INDEX_LOG_LEVEL"] = "warning"
         handle = spawn_daemon(
-            cmd,
-            cwd=root,
-            log_path=root / "service-stdio.log",
-            env=env,
-            env_overrides=overrides,
+            cmd, cwd=root, log_path=root / "service-stdio.log", env=env, env_overrides=overrides,
             display=f"agent_index {start_command} --passive --port {port}",
         )
         passive_instance.update({"port": port, "pid": handle.pid})
