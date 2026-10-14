@@ -138,3 +138,14 @@ derived from the measured sub-half-millisecond direct baseline; both tested RPC
 lanes fail it. It is not a general service-front SLA or an accepted migration
 threshold. A real front's thresholds must derive from its own workload.
 No reuse implementation item is closed or transferred by this partial probe.
+
+## Installed closure and reference-lifetime continuation - 2026-10-14
+
+The [two-consumer closure evidence](helper-closure-evidence.md) now preserves
+the artifact/source comparison, hardlink-aware allocation controls, full
+dependency-extra parity, actual CLI processes and first-consumer/cache
+retirement. It favors immutable helper artifacts in separate owned runtimes,
+not a reusable mutable venv or routing-read broker. The scripts reproduce a
+disposable experiment, not the artifact authority's production admission path.
+The decision table and compatibility/lifecycle boundary require review before
+any reuse implementation. Existing #4876 / #6697 custody remains unchanged.

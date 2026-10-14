@@ -110,7 +110,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   _(agent-recommended)_
 - [x] Replace full-table pandas statistics materialization with projected
   bounded aggregation. _(agent-recommended)_
-- [ ] Decide syntax grammar extras and unseeded installer profiles from measured
+- [x] Decide syntax grammar extras and unseeded installer profiles from measured
   benefit; retain supported fallback installation. _(agent-recommended)_
 
 ### Phase 5 - Installer de-vendoring and shared helpers
@@ -458,3 +458,25 @@ shared mutable venv is presumed acceptable.
   source-profile observations, not production storage reclaim or rollout.
 - Focused lint, install contract and module ceilings pass. Linux/native
   platform coverage, publication and review remain assigned to the next gate.
+
+### 2026-10-14 - Unseeded slice merged and helper decision prepared
+- #6766 merged to `dev` as `5d08c74d7` after Copilot's exact-head approving
+  review and complete successful required CI run `38641865532`. Native Windows
+  and Linux runner checks, Containers and the owning harness suite passed.
+  The first review wait expired without a verdict; an explicit re-request
+  produced the approval. No gate was bypassed.
+- Resolved the remaining syntax/seed decision: retain the five existing host
+  syntax-grammar defaults (5,390,318 logical / 5,639,720 allocated file-stream
+  bytes, about one percent of the measured host closure). Another profile is
+  not justified by that cost; no parsing-quality claim is made. Windows
+  unseeded construction is now conditional on uv, preserving signed copies,
+  ordinary-pip fallback and completed immutable slots.
+- Prepared the [helper closure evidence](helper-closure-evidence.md), its
+  reproducible probes and the compatibility/lifecycle decision table for
+  review. Preserve independent venvs/processes; prefer immutable artifact/file
+  reuse under #4876 rather than a new helper-runtime owner or ZDD broker.
+  This does not approve a production fast path or transfer an unresolved item.
+- The campaign remains Active. Next secure review of this evidence/design,
+  reconcile the remaining engine/standalone-service acceptance with their
+  existing owners and publish the final profile/validation matrix. No
+  production runtime update or warm-engine/corpus mutation occurred.
