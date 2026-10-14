@@ -117,6 +117,18 @@ def test_wait_and_close_remain_bound_to_captured_reference():
         reference.wait(0)
 
 
+def test_wait_never_passes_more_than_the_requested_budget(monkeypatch):
+    # A clock that has not advanced makes `(now + t) - now` round above t
+    # (0.10000000000582077 here).
+    monkeypatch.setattr(process_exit.time, "monotonic", lambda: 98765.4321)
+    budgets = []
+    reference = process_exit.ProcessExitReference(
+        123, "456", lambda timeout: budgets.append(timeout) or True, lambda: None,
+    )
+    assert reference.wait(0.1) is True
+    assert len(budgets) == 1 and 0 <= budgets[0] <= 0.1
+
+
 @pytest.mark.parametrize("timeout", [-1, 31, True, None, "1", float("inf"), float("nan")])
 def test_invalid_wait_budget_never_touches_reference(timeout):
     with process_exit.ProcessExitReference(

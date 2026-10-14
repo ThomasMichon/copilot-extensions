@@ -50,7 +50,9 @@ class ProcessExitReference:
         try:
             if self._closed:
                 raise RuntimeError("process exit reference is closed")
-            return self._wait(max(0.0, deadline - time.monotonic()))
+            # Clamped: `deadline - now` can exceed the request by float rounding
+            # when the monotonic clock has not advanced (coarse on Windows).
+            return self._wait(min(float(timeout), max(0.0, deadline - time.monotonic())))
         finally:
             self._lock.release()
 
