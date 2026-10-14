@@ -326,6 +326,19 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-14 -- Renewal PR blocked by a measured CI job timeout
+- PR #6722's post-description run 38610631180 passed all bridge test
+  batches and the shared SSH contract tests, but the job exceeded its
+  eight-minute wall-clock limit during teardown and was cancelled. The
+  required aggregate correctly refused merge.
+- Tracked the fix as #6733: preserve the full bridge smoke selection and
+  required timeout failure semantics, with a bounded ten-minute allowance
+  for setup, the measured seven-minute-plus test run and teardown.
+  Dispatch retains twelve minutes and other smoke plugins retain eight.
+  Three native workflow contract checks and touched-code lint passed;
+  the real repaired CI run must still prove completion before merge.
+- No retry, CI bypass or manual promotion substitutes for that proof.
+
 ### 2026-10-14 -- Trusted renewal and private credential-file boundary
 - Added control-only `POST /tasks/{id}/task-grant` and
   `DispatchClient.task_grant()`. Every request must identify the current held

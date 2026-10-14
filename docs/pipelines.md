@@ -767,6 +767,11 @@ accumulated on `dev` so far. Treat a red `dev` build as the first
 priority: land a forward fix immediately, or revert the breaking merge,
 rather than leaving it red at leisure.
 
+The per-plugin smoke jobs retain bounded wall-clock limits, including setup and
+teardown: ten minutes for `agent-bridge`, twelve for `agent-dispatch`, and eight
+for the other smoke plugins. A timeout remains a failure of the required PR
+aggregate even if the test runner finished successfully before teardown.
+
 ### Expect roughly 10-20 minutes, and know what to watch
 
 Budget on the order of **10-20 minutes** from a green `dev` merge to a real
