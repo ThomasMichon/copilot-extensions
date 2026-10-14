@@ -51,6 +51,8 @@ def _repos_usage() -> None:
     print("                                      named repos only, else every registered one")
     print("                                      (names, if any, must come first)")
     print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
+    print("  configuration catalog|preview|apply --context-project NAME")
+    print("                                      Native Configuration inspection and local preference API")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
     print("  account-for [owner|owner/name|name] Print the resolved gh login (exit 1 if none)")
@@ -159,6 +161,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
     sub = argv[0]
     rest = argv[1:]
+
+    if sub == "configuration":
+        from .repos_configuration import command
+
+        return command(rest)
 
     if "--help" in rest or "-h" in rest:
         _repos_usage()

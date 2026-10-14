@@ -1,0 +1,183 @@
+"""Read-only native registration, route, binding and tracked-pair projections."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import config as cfg, installer, related, repos, state_root
+from .repos_configuration import FUTURE_ONLY, compose_preference, target
+from .repos_configuration_sources import ConfigurationError, defaults, fingerprint, identity, mapping
+from .repos_registry_reader import RepositoryResolutionError
+
+
+@dataclass
+class Inspection:
+    routes: dict = field(default_factory=dict)
+    projects: dict = field(default_factory=dict)
+    binding: dict = field(default_factory=lambda: {"status": "unknown"})
+    pair: dict = field(default_factory=lambda: {
+        "status": "unsupported", "reason": "No explicit tracked workspace was supplied.",
+    })
+    findings: list = field(default_factory=list)
+
+
+def inspect_project(project: str, workspace: str) -> Inspection:
+    result = Inspection()
+    previous = cfg.active_project()
+    cfg.set_active_project(project)
+    try:
+        result.projects = installer.read_projects_registry(strict=True).get("projects", {})
+        config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+        anchor = config.default_repo.anchor
+        checkout = workspace or anchor
+        if workspace and not Path(workspace).is_absolute():
+            raise ConfigurationError("invalid-workspace", "The workspace must be an explicit absolute path.")
+        sources = state_root.config_source_anchors(config, base_anchor=anchor, cwd=checkout)
+        anchors = [
+            *related.installed_plugin_related_anchors(),
+            *[related.config_contribution_anchor(s.anchor, s.origin) for s in sources],
+        ]
+        for source in anchors:
+            for path in (related.related_path(source), related.legacy_related_path(source)):
+                raw = mapping(path)
+                entries = raw.get("related", {})
+                if not isinstance(entries, dict) or any(
+                    not isinstance(entry, dict) for entry in entries.values()
+                ):
+                    raise ConfigurationError("invalid-route-source", "A route source needs owner repair.")
+        result.routes = related.read_related_grafted(anchors).related
+        root = state_root.resolve_state_root(config, cwd=checkout)
+        result.binding = {
+            "status": "present" if root.bound and not root.error else "absent",
+            "identity": identity(config.knowledge_repo, allow_empty=True),
+            "state_repo": identity(root.repo, allow_empty=True),
+            "source": root.source,
+            "anchor": root.path,
+            "writable_workspace": False,
+            "reason": "A resolved state anchor is not permission to edit it.",
+        }
+        if workspace:
+            pair = state_root.resolve_pair(config, cwd=workspace)
+            if pair.current is not None and pair.current.repo != project:
+                result.pair = {"status": "error", "reason": "Workspace belongs to a different project."}
+            else:
+                sibling = pair.sibling
+                retired = any(
+                    checkout is not None and checkout.status in ("finalized", "archived", "abandoned")
+                    for checkout in (pair.current, sibling)
+                )
+                result.pair = {
+                    "status": "stale" if pair.error and pair.paired else
+                    "present" if pair.paired else "absent",
+                    "workspace": sibling.path if sibling else None,
+                    "role": sibling.role if sibling else None,
+                    "workspace_status": sibling.status if sibling else None,
+                    "writable_workspace": bool(
+                        pair.paired and not pair.error and not retired
+                        and sibling and sibling.kind == "worktree"
+                    ),
+                    "reason": "Inspect the native tracked pair before writing personal state.",
+                }
+    except (ValueError, KeyError, OSError, RuntimeError, RepositoryResolutionError):
+        result.findings.append({
+            "code": "native-inspection-unavailable", "severity": "error",
+            "message": "Project composition or native inspection needs owner repair.",
+        })
+    finally:
+        cfg.set_active_project(previous)
+    return result
+
+
+def catalog(project: str, *, workspace: str = "") -> dict:
+    registry = repos.read_registry(strict=True)
+    inspection = inspect_project(project, workspace)
+    composition_error = None
+    try:
+        fingerprint([repos._repos_yaml_path()])
+        inherited = defaults(project)
+    except (ValueError, OSError) as exc:
+        composition_error = exc
+        inherited = None
+    names = sorted({project, *registry.repos, *inspection.routes})
+    rows = []
+    for name in names:
+        identity(name)
+        entry = registry.repos.get(name)
+        local_path = entry.local_path() if entry else None
+        registration = (
+            "absent" if entry is None else "unsupported" if not local_path else
+            "present" if Path(local_path).is_dir() else "stale"
+        )
+        findings = list(inspection.findings)
+        try:
+            if composition_error is not None:
+                raise composition_error
+            if inherited is None:
+                raise ConfigurationError("invalid-composition", "Native preference sources are unavailable.")
+            state = compose_preference(project, name, registry, inherited)
+            editable = True
+        except (ValueError, OSError) as exc:
+            state = {"target": target(project, name), "effective": "unknown", "sources": []}
+            editable = False
+            findings.append({
+                "code": exc.code if isinstance(exc, ConfigurationError) else "invalid-composition",
+                "severity": "error",
+                "message": str(exc) if isinstance(exc, ConfigurationError) else
+                "Native composition is unavailable; repair it with its owner.",
+            })
+        route_entry = inspection.routes.get(name)
+        route = {"status": "absent", "editable": False}
+        if inspection.findings:
+            route["status"] = "unknown"
+        elif route_entry:
+            resolved = related.build_resolution(
+                route_entry, current_machine=cfg.detect_machine(),
+                repo_class=entry.repo_class if entry else None,
+                repo_path=local_path, adopted=name in inspection.projects,
+                base_repo=bool(inspection.projects.get(name, {}).get("base_repo", False)),
+            )
+            route.update(
+                status="present", preferred=resolved.locus_kind,
+                available_here=resolved.available_here,
+                delegate=resolved.delegate_via, source=route_entry.origin_layer,
+            )
+        state.update(
+            registration={"status": registration, "class": entry.repo_class if entry else None},
+            participation="related" if route_entry else "not-declared",
+            same_machine_agent="enabled" if entry and entry.agent else "disabled",
+            plugin_enablement="unsupported: owned by the plugin activation provider",
+            route=route, binding=inspection.binding, pair=inspection.pair, findings=findings,
+            unsupported_operations={
+                "route": "No revisioned local route writer is exposed by the owner.",
+                "pair": "Binding and pairing require their canonical owner workflow.",
+                "plugin_enablement": "No plugin enablement writer is exposed by this section.",
+            },
+        )
+        body = "\n".join([
+            f"Repository: {name}; selected project: {project}",
+            f"Registration: {registration}; participation: {state['participation']}",
+            f"Same-machine agent: {state['same_machine_agent']}; plugin enablement: owner-specific",
+            f"Copilot preference: {state['effective']}; observed running identity: unknown",
+            f"Identity-switch policy: {state.get('switch_enabled', 'unknown')} (separate from preference/auth)",
+            f"Route: {route}; editing unsupported",
+            f"Bound state identity: {inspection.binding}",
+            f"Actual tracked pair: {inspection.pair}",
+            "Sources (higher precedence last): " + str(state["sources"]),
+            "Findings: " + str(findings),
+            FUTURE_ONLY,
+            "All repository/knowledge/plugin/preset sources are read-only.",
+        ])
+        rows.append({
+            "id": name, "title": name, "context_project": project, "repository": name,
+            "registration": registration, "participation": state["participation"],
+            "effective": state["effective"], "provenance": "local override" if state.get("override") else "inherited",
+            "editable": str(editable).lower(), "resettable": str(editable and bool(state.get("override"))).lower(),
+            "configuration": state, "card": {"title": f"{name} configuration", "body": body},
+            "fields": [{
+                "name": "login", "type": "text", "label": "Non-secret Copilot login",
+                "default": state.get("override", ""), "required": True,
+            }] if editable else [],
+            "reset_fields": [],
+        })
+    return {"entries": rows, "summary": {"repositories": len(rows)}}

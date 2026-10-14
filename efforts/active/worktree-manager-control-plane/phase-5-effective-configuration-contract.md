@@ -1,6 +1,7 @@
 # Phase 5 Wave 0 - Effective Configuration Consumer Contract
 
-- **Status:** Reviewed through #6713; implementation is tracked by #6717.
+- **Status:** Reviewed through #6713; shared interaction landed through #6719.
+  Native Repositories integration and installed acceptance remain open.
   Not yet an implemented interface.
 - **Parent:** [Configuration workbench plan](phase-5-configuration-workbench.md)
   in the [Manager control-plane effort](README.md).
@@ -176,13 +177,13 @@ separately authorized maintenance flow. Do not close #543 as implemented.
 Claim each implementation through its owning issue before editing. The design
 merge closes only #6711, not #357 or the parent Configuration acceptance gate.
 
-1. **Shared interaction.** Implement the optional preview on the existing
+1. **Shared interaction (Done — #6719).** Implement the optional preview on the existing
    Configuration form path, with a synthetic owner CLI and isolated local
    override store. Prove real UI-to-subprocess browse/preview/cancel/set/reset,
    invalid/stale proposals, concurrent edits, output failures, late results,
    reserved-token isolation and old-host refusal. No production domain is
    migrated merely to exercise the host.
-2. **Repositories consumer.** Add the native owner adapter and contributed
+2. **Repositories consumer (In progress - #6721).** Add the native owner adapter and contributed
    section. Prove actual `copilot_account_for` changes after set and restores
    inheritance after reset in redirected roots, including a concurrent ordinary
    registry CLI write and invalid composition. Exercise registration, route and
@@ -212,7 +213,7 @@ compare source bytes. Record explicit reasons for unavailable/inapplicable
 tiers; a fixture screenshot or design review is not installed proof.
 
 The design review through #6713 ran documentation/effort/link guards. The shared
-interaction candidate under #6717 now exercises the production Textual editor,
+interaction landed through #6719 now exercises the production Textual editor,
 preview, consent, receipt and refresh against a real isolated owner CLI on
 Windows. Focused contract/backstage/action/runtime compatibility checks pass,
 including source-tree comparisons, reset after inherited-source change,
@@ -222,7 +223,8 @@ round-trips remain opt-in and are not evidence for this new interaction.
 
 The synthetic first-touch lane creates no override while browsing or previewing;
 only explicit Apply changes the allowlisted local file. No installer/bootstrap
-path changes, so another installer clean-room run is inapplicable. Linux coverage
-belongs to required CI. Production Repositories integration, promoted/installed
+path changes, so another installer clean-room run is inapplicable. Required CI
+on Ubuntu 24.04 passed the Manager suite (2,229 passed, 25 skipped) in run
+`38592321480` before merge. Production Repositories integration, promoted/installed
 build identification, authorized live UI acceptance and documentation journeys
 remain open; fixture UI does not close them.
