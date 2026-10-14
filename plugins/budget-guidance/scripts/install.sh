@@ -36,12 +36,8 @@ _install_budget_guidance_package() {
     _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
     if [[ "$HAVE_UV" -eq 1 ]]; then
         local uv_rc=0
-        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
-            --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "$procutil" "$PLUGIN_DIR" --quiet; then
-            uv_rc=0
-        else
-            uv_rc=$?
-        fi
+        "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
+            --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "$procutil" "$PLUGIN_DIR" --quiet || uv_rc=$?
         _remove_budget_build_artifacts "$procutil" || return 1
         _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
         return "$uv_rc"

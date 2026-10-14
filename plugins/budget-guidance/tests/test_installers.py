@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from types import SimpleNamespace
 
 import pytest
 
@@ -178,9 +179,12 @@ raise SystemExit(2)
     return fake_bin, env
 
 
-@pytest.mark.skipif(os.name != "nt" or PWSH is None, reason="native Windows installer")
-@pytest.mark.parametrize("previous", [False, True])
-def test_native_failed_install_preserves_selection_and_retry(tmp_path, previous):
+@pytest.fixture(scope="module", params=[False, True], ids=["fresh", "retained"])
+def native_failed_install_state(tmp_path_factory, request):
+    if os.name != "nt" or PWSH is None:
+        pytest.skip("native Windows installer")
+    tmp_path = tmp_path_factory.mktemp("budget-failure")
+    previous = request.param
     fake_bin, env = _fake_uv_environment(tmp_path)
     (fake_bin / "uv").unlink()
     for name in ("python", "python3", "py"):
@@ -236,22 +240,44 @@ def test_native_failed_install_preserves_selection_and_retry(tmp_path, previous)
         capture_output=True, text=True, timeout=45,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    assert failed.returncode != 0, failed.stdout + failed.stderr
-    assert "Canonical dependency installation exited 29" in failed.stdout, failed.stdout + failed.stderr
-    assert not (root / "versions" / VERSION).exists()
-    assert not (root / "deploy-manifest.json").exists()
-    if previous:
-        assert (root / "current-version").read_bytes() == before
-        assert (old / "live").read_text() == "untouched"
-    else:
-        assert not (root / "current-version").exists()
+    selected = root / "current-version"
+    return SimpleNamespace(
+        root=root, old=old, command=command, env=env, tmp_path=tmp_path,
+        previous=previous, before=before, failed=failed,
+        failed_slot_exists=(root / "versions" / VERSION).exists(),
+        failed_manifest_exists=(root / "deploy-manifest.json").exists(),
+        selected_after_failure=selected.read_bytes() if selected.exists() else None,
+        retained_after_failure=(old / "live").read_text() if previous else None,
+    )
+
+
+def _assert_failed_install(state):
+    assert state.failed.returncode != 0, state.failed.stdout + state.failed.stderr
+    assert "Canonical dependency installation exited 29" in state.failed.stdout, (
+        state.failed.stdout + state.failed.stderr
+    )
+    assert not state.failed_slot_exists and not state.failed_manifest_exists
+    assert state.selected_after_failure == state.before
+    if state.previous:
+        assert state.retained_after_failure == "untouched"
+
+
+def test_native_failed_install_preserves_selection(native_failed_install_state):
+    _assert_failed_install(native_failed_install_state)
+
+
+def test_native_retry_after_failure_publishes_clean_slot(native_failed_install_state):
+    state = native_failed_install_state
+    _assert_failed_install(state)
     retried = subprocess.run(
-        command, env=env, cwd=tmp_path, capture_output=True, text=True,
+        state.command, env=state.env, cwd=state.tmp_path, capture_output=True, text=True,
         timeout=45, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert retried.returncode == 0, retried.stdout + retried.stderr
-    assert not (root / "versions" / VERSION / "partial-install").exists()
-    assert (root / "current-version").read_text().strip() == VERSION
+    assert not (state.root / "versions" / VERSION / "partial-install").exists()
+    assert (state.root / "current-version").read_text().strip() == VERSION
+    if state.previous:
+        assert (state.old / "live").read_text() == "untouched"
 
 
 def test_posix_installer_is_uv_first_when_ambient_python_is_absent():

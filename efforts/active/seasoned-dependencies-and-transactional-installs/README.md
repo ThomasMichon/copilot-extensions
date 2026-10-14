@@ -410,3 +410,14 @@ This is a proposal, not a claim that those mechanisms are already deployed.
 - The contribution base advanced during the native CI queue. Reconcile its
   actual content before the next publish; a conflicted PR does not receive a
   new CI run and cannot stand in for verified release readiness.
+- Preserved the complete implementation on a backup, collapsed the owned
+  private branch and rebased onto the advanced contribution base. Kept its
+  stable install-lock recovery, shared daemon changes and trusted promoter
+  adapter rather than discarding concurrent work.
+- Budget's new `agent-procutil` dependency now joins the same seasoned source
+  batch. Retained before/after artifact cleanup while refusing unrestricted
+  pip fallback, included canonical dependency metadata in admission identity,
+  and made development snapshots own their local library paths. Failure and
+  clean retry are separate real native contracts under the unchanged item
+  limits. The focused integration passed 11 cases with 12 platform skips;
+  delivery and trusted publication/policy contracts passed 204 tests.
