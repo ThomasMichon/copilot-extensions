@@ -370,6 +370,215 @@ def test_configured_canonical_gc_retains_cached_and_defers_unknown(cold, tmp_pat
     assert store.distinct_sources() == {"git:cached", "git:cached:commits"}
 
 
+@pytest.fixture
+def queued_source(tmp_path, monkeypatch):
+    from agent_index.engine.client import EngineClient
+    from agent_index.indexing.task_store import TaskStore
+    from agent_index.indexing.worker import run_worker
+
+    def repository(name):
+        repo = tmp_path / name
+        repo.mkdir()
+        run_git(repo, "init", "--quiet")
+        run_git(repo, "config", "user.name", "Synthetic Fixture")
+        run_git(repo, "config", "user.email", "fixture@example.invalid")
+        for file in ("one.md", "two.md"):
+            (repo / file).write_text(f"# Needle\n\n{name} autonomous {file}\n", encoding="utf-8")
+        run_git(repo, "add", "--", "one.md", "two.md")
+        run_git(repo, "commit", "--quiet", "-m", "fixture")
+        return repo
+
+    def configure(repo):
+        inline = {"role": "host", "corpus": {"sources": [
+            {"name": "git:alias", "type": "git", "_repo_path": str(repo)},
+        ]}}
+        monkeypatch.setenv("AGENT_INDEX_CONFIG_DATA_B64",
+                           base64.urlsafe_b64encode(json.dumps(inline).encode()).decode())
+
+    data = tmp_path / "data"
+    for key, value in {
+        "AGENT_INDEX_STORE_LAYOUT": LAYOUT, "AGENT_INDEX_DATA_DIR": str(data),
+        "AGENT_INDEX_HOME": str(tmp_path / "home"), "AGENT_INDEX_SOURCE_MODE": "explicit",
+        "AGENT_INDEX_INDEX_ENSURE_ENGINES": "0", "AGENT_INDEX_INDEXER_NICE": "0",
+        "AGENT_INDEX_CLUSTER_ENABLED": "0", "AGENT_INDEX_GIT_FETCH": "0",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    def inference(self, texts):
+        vectors = np.zeros((len(texts), 768), dtype=np.float32)
+        vectors[:, 0] = 1
+        return vectors
+
+    monkeypatch.setattr(EngineClient, "embed_texts", inference)
+    configure(repository("old"))
+    queue = TaskStore(data / "tasks.db")
+
+    def run(full=False):
+        task = queue.enqueue("all", full=full, trigger_source="fixture")
+        assert queue.dequeue_next().id == task.id
+        code = run_worker(task.id)
+        return code, queue.get_task(task.id)
+
+    return repository, configure, run, IndexConfig()
+
+
+@pytest.mark.timeout(180)
+def test_queued_source_identity_publishes_only_after_success(queued_source, monkeypatch):
+    from agent_index import sources
+    from agent_index.engine.client import EngineClient
+    from agent_index.indexing.state import IndexState
+
+    repository, configure, run, config = queued_source
+    assert run(full=True)[1].status == "complete"
+    configure(repository("new"))
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("fixture source failure")
+
+    for failure in ("current_commit", "discover_changed", "chunk", "embed", "reconcile"):
+        with monkeypatch.context() as patch:
+            if failure in ("current_commit", "discover_changed"):
+                original = sources.get_connector
+
+                def connector(*args, **kwargs):
+                    result = original(*args, **kwargs)
+                    patch.setattr(result, failure, fail)
+                    return result
+
+                patch.setattr(sources, "get_connector", connector)
+            elif failure == "chunk":
+                from agent_index import chunking
+
+                class FailingChunker:
+                    chunk = staticmethod(fail)
+
+                patch.setattr(chunking, "get_chunker", lambda path: (FailingChunker(), "markdown"))
+            elif failure == "embed":
+                patch.setattr(EngineClient, "embed_texts", fail)
+            else:
+                patch.setattr(MultiModelStore, "delete_stale_by_file", fail)
+            code, task = run()
+            assert code == 0 and task.status == "partial", failure
+        assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:old"}
+        store = initialize_source_store(config)
+        assert "git:old" in store.distinct_sources()
+        assert store.get_document("git:old", "one.md") is not None
+    assert run()[1].status == "complete"
+    assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:new"}
+    assert "git:old" not in store.distinct_sources()
+    assert "git:new" in store.distinct_sources()
+    # Empty/unchanged incremental success preserves the published canonical identity.
+    assert run()[1].status == "complete"
+    assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:new"}
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    "target", ["cluster", "content-compact", "vector-compact", "configured-gc", "stale-gc"],
+)
+def test_queued_maintenance_effect_failure_never_completes(
+    queued_source, monkeypatch, capsys, target,
+):
+    _repository, _configure, run, config = queued_source
+    store = initialize_source_store(config)
+    effects = []
+    if target == "cluster":
+        from agent_index.store.cluster_store import ClusterStore
+
+        monkeypatch.setenv("AGENT_INDEX_CLUSTER_ENABLED", "1")
+        original = ClusterStore._connect
+
+        class Connection:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def __getattr__(self, name):
+                return getattr(self.conn, name)
+
+            def commit(self):
+                self.conn.commit()
+                effects.append("commit")
+                if len(effects) == 2:  # Schema commit succeeds, actual replacement commits then fails.
+                    raise RuntimeError("fixture cluster committed then failed")
+
+        monkeypatch.setattr(ClusterStore, "_connect", lambda self: Connection(original(self)))
+    elif target.endswith("-gc"):
+        # Fault-only retirement row, not ingestion evidence.
+        vector = np.zeros((1, 768), dtype=np.float32)
+        vector[:, 0] = 1
+        store.upsert("code", [chunk("monorepo", "retirement fixture")], vector)
+        table = store.content_store._get_or_create_table()
+        original = type(table).delete
+
+        def delete(table, predicate):
+            result = original(table, predicate)
+            if table.name == "chunks" and "monorepo" in predicate:
+                effects.append(table.name)
+                raise RuntimeError("fixture GC deletion effected then failed")
+            return result
+
+        monkeypatch.setattr(type(table), "delete", delete)
+        if target == "stale-gc":
+            from agent_index.indexing import gc
+
+            monkeypatch.setattr(gc, "gc_configured_snapshot", lambda *a, **kw: {
+                "purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False,
+            })
+    else:
+        table = store.content_store._get_or_create_table()
+        original = type(table).optimize
+        expected = "chunks" if target == "content-compact" else "vectors_code"
+
+        def optimize(table, *args, **kwargs):
+            result = original(table, *args, **kwargs)
+            if table.name == expected:
+                receipt = store._source_domain.receipt()
+                assert receipt["uncertain_effect"] is True
+                assert receipt["operation"] == f"{target}:{expected}"
+                if target == "content-compact":
+                    assert "chunks" not in receipt.get("fts_coverage", {})
+                table.update(values={"indexed_at": 123.0})
+                effects.append(table.name)
+                raise RuntimeError("fixture optimize effected then failed")
+            return result
+
+        monkeypatch.setattr(type(table), "optimize", optimize)
+    code, task = run(full=True)
+    assert effects and code == 1 and task.status == "failed"
+    assert "\nIndexing complete:" not in capsys.readouterr().out
+    receipt = store._source_domain.receipt()
+    assert receipt["state"] == "dirty" and receipt["uncertain_effect"] is True
+    assert receipt["operation"].startswith(
+        "canonical-delete" if target.endswith("-gc") else target,
+    )
+    with pytest.raises(SourceLayoutError, match="uncertain effect"):
+        validate_source_store(store)
+    with pytest.raises(SourceLayoutError):
+        store.stats()
+
+
+def test_compact_success_empty_and_legacy_optional_failure(cold, tmp_path, monkeypatch):
+    _config, store = cold
+    store.compact()
+    store.upsert("small", [chunk()], np.array([[1, 0]], dtype=np.float32))
+    assert store.ensure_fts_index()
+    store.compact()
+    assert "chunks" not in store._source_domain.receipt().get("fts_coverage", {})
+    assert store.ensure_fts_index()
+    store.compact()
+    assert store.ensure_fts_index()
+    assert store._source_domain.receipt()["state"] == "clean"
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT")
+    legacy = MultiModelStore(tmp_path / "legacy")
+    table = legacy.content_store._get_or_create_table()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("fixture legacy optimize failure")
+
+    monkeypatch.setattr(type(table), "optimize", fail)
+    assert "content" in legacy.compact()
+
+
 def test_selected_fts_failed_rebuild_is_not_old_index_availability(cold, monkeypatch):
     from agent_index.store import content_store as content_module
 

@@ -10,6 +10,7 @@ import threading
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 LAYOUT = "source-aware-v1"
 MARKER = ".source-layout.json"
@@ -18,6 +19,60 @@ FTS_LOCK = ".source-fts.lock"
 _domains: dict[tuple[int, int], SourceDomain] = {}
 _registry = threading.Lock()
 _child_guards = []
+
+def _open_receipt(path: Path) -> BinaryIO:
+    """Keep an atomic snapshot readable without preventing its replacement."""
+    if os.name != "nt":
+        return path.open("rb")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = (
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    )
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = (wintypes.HANDLE,)
+    close.restype = wintypes.BOOL
+    # GENERIC_READ; FILE_SHARE_READ | FILE_SHARE_DELETE; OPEN_EXISTING.
+    handle = create(str(path), 0x80000000, 0x1 | 0x4, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        code = ctypes.get_last_error()
+        raise OSError(0, ctypes.FormatError(code), str(path), code)
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+    except OSError:
+        close(handle)
+        raise
+    try:
+        return os.fdopen(descriptor, "rb")
+    except OSError:
+        os.close(descriptor)
+        raise
+
+
+def _replace_receipt(source: Path, target: Path) -> None:
+    if os.name != "nt" or not target.exists():
+        os.replace(source, target)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    # MoveFileExW (os.replace) rejects an open destination even with delete sharing.
+    # ReplaceFileW preserves the old snapshot handles and the destination's ACL.
+    replace = ctypes.WinDLL("kernel32", use_last_error=True).ReplaceFileW
+    replace.argtypes = (
+        wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
+        wintypes.DWORD, wintypes.LPVOID, wintypes.LPVOID,
+    )
+    replace.restype = wintypes.BOOL
+    if not replace(str(target), str(source), None, 0, None, None):
+        code = ctypes.get_last_error()
+        raise OSError(0, ctypes.FormatError(code), str(source), code, str(target))
 
 
 def kernel_lock(path: Path):
@@ -94,12 +149,13 @@ class SourceDomain:
 
     def receipt(self) -> dict:
         try:
-            raw = (self.path / MARKER).read_bytes()
+            with _open_receipt(self.path / MARKER) as stream:
+                raw = stream.read(65537)
             if len(raw) > 65536:
                 raise SourceLayoutError("invalid source-layout receipt")
             value = json.loads(raw)
-        except (OSError, ValueError):
-            raise SourceLayoutError("source-aware layout not initialized") from None
+        except (OSError, ValueError) as exc:
+            raise SourceLayoutError("source-aware layout not initialized") from exc
         if (not isinstance(value, dict) or value.get("layout") != LAYOUT
                 or type(value.get("protocol")) is not int or value["protocol"] != 1
                 or value.get("state") not in ("clean", "dirty")
@@ -114,7 +170,7 @@ class SourceDomain:
                 json.dump(value, stream, sort_keys=True)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, self.path / MARKER)
+            _replace_receipt(temporary, self.path / MARKER)
         finally:
             temporary.unlink(missing_ok=True)
 

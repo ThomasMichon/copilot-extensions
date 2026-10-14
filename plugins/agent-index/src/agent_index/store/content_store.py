@@ -456,12 +456,16 @@ class ContentStore(_ContentFtsWorkerMixin):
 
         try:
             cutoff = datetime.timedelta(days=older_than_days)
+            if self._source_domain is not None:
+                self._source_domain.effect(f"content-compact:{self._table_name}")
             table.optimize(cleanup_older_than=cutoff)
             logger.info(
                 "Optimized table %s (cleanup older than %d days)",
                 self._table_name, older_than_days,
             )
         except Exception:
+            if self._source_domain is not None:
+                raise
             logger.warning(
                 "optimize failed for %s", self._table_name, exc_info=True,
             )
@@ -781,6 +785,8 @@ class ContentStore(_ContentFtsWorkerMixin):
                     _mark_rebuilt(via_full=full, reason=full_reason)
                     return FtsBuildOutcome.SUCCESS
                 except Exception as e:
+                    if self._source_domain is not None and isinstance(e, OSError):
+                        raise
                     last_err = e
                     err_msg = str(e).lower()
                     retryable = "retryable" in err_msg or "commit conflict" in err_msg
@@ -810,6 +816,8 @@ class ContentStore(_ContentFtsWorkerMixin):
                     _mark_rebuilt(via_full=True, reason=reason)
                     return FtsBuildOutcome.SUCCESS
                 except Exception as full_err:
+                    if self._source_domain is not None and isinstance(full_err, OSError):
+                        raise
                     last_err = full_err
 
         # Failed - arm a capped exponential backoff so the maintainer stops

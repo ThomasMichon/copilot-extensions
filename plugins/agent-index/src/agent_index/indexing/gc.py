@@ -39,6 +39,8 @@ import logging
 import os
 from typing import TYPE_CHECKING, TypedDict
 
+from agent_index.store.source_layout import selected_layout
+
 if TYPE_CHECKING:
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.state import IndexState
@@ -208,6 +210,8 @@ def gc_unconfigured_sources(
                     "GC: purged unconfigured source %s (%d chunks)", source, removed,
                 )
             except Exception:
+                if selected_layout():
+                    raise
                 log.warning(
                     "GC: failed to purge unconfigured source %s", source, exc_info=True,
                 )
@@ -264,6 +268,8 @@ def gc_stale_sources(
                     "GC: purged stale source %s (%d chunks)", source, removed,
                 )
             except Exception:
+                if selected_layout():
+                    raise
                 log.warning(
                     "GC: failed to purge stale source %s", source, exc_info=True,
                 )

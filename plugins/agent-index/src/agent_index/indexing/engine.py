@@ -23,6 +23,8 @@ import time
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from agent_index.store.source_layout import selected_layout
+
 # UTF-8 stdio so human-facing status glyphs render safely (Rule B, #769).
 _utf8_sys = __import__("sys")
 _utf8_sys.stdout.reconfigure(encoding="utf-8")
@@ -296,7 +298,7 @@ def run_reindex(
     path_index = PathIndex(config.data_dir / "path_index.db")
 
     # Multi-model store + clients
-    from agent_index.store.source_layout import initialize_source_store, selected_layout
+    from agent_index.store.source_layout import initialize_source_store
 
     multi_store = (
         initialize_source_store(config) if selected_layout() else
@@ -427,6 +429,8 @@ def run_reindex(
                 total_deleted += gc_summary["chunks_deleted"]
                 sources_purged = sorted(purged)
         except Exception:
+            if selected_layout():
+                raise
             logger.warning("Unconfigured-source GC failed", exc_info=True)
             print("  WARNING: unconfigured-source GC failed (see logs)")
 
@@ -455,6 +459,8 @@ def run_reindex(
                 else:
                     print("  No stale sources found")
             except Exception:
+                if selected_layout():
+                    raise
                 logger.warning("Source GC failed", exc_info=True)
                 print("  WARNING: source GC failed (see logs)")
 
@@ -468,6 +474,8 @@ def run_reindex(
                 if fb > 0:
                     print(f"  {table_name}: {fb} -> {fa} fragments")
         except Exception:
+            if selected_layout():
+                raise
             logger.warning("Post-reindex compaction failed", exc_info=True)
             print("  WARNING: compaction failed (see logs)")
 
@@ -477,7 +485,6 @@ def run_reindex(
     state.save(config.state_file)
 
     elapsed = time.monotonic() - start
-    print(f"\nIndexing complete: {total_chunks} chunks in {elapsed:.1f}s")
 
     result: dict[str, object] = {
         "chunks_total": total_chunks,
@@ -494,23 +501,26 @@ def run_reindex(
 
     # Refresh the similarity-cluster artifact from the just-updated vectors.
     # Reuses stored embeddings (no re-embedding), so it runs post-index in the
-    # same pipeline (covering both the service task runner and the CLI). Must
-    # never fail a reindex, so it is best-effort and guarded by config.
+    # same pipeline. Legacy clustering remains optional; selected failures propagate.
     cluster_stats = _refresh_clusters(multi_store, config)
     if cluster_stats is not None:
         result["clusters"] = cluster_stats["clusters"]
 
+    if selected_layout():
+        with multi_store._source_domain.read(multi_store.content_store.db):
+            pass
+    print(f"\nIndexing complete: {total_chunks} chunks in {elapsed:.1f}s")
     return result
 
 
 def _refresh_clusters(
     multi_store: MultiModelStore, config: IndexConfig
 ) -> dict[str, int | float] | None:
-    """Recompute the similarity-cluster artifact after indexing (best-effort).
+    """Recompute clusters; selected-domain failures must fail the indexing task.
 
     Sweeps stored centroids and replaces ``clusters.db``; never re-embeds.
     Returns the pass stats dict, or ``None`` when clustering is disabled or
-    fails (a clustering failure must never fail the reindex it follows).
+    fails in legacy mode. Selected mode propagates failures without recovery.
     """
     if not config.cluster_enabled:
         return None
@@ -527,6 +537,8 @@ def _refresh_clusters(
         )
         return stats
     except Exception:
+        if selected_layout():
+            raise
         logger.warning("Clustering pass failed", exc_info=True)
         print("  WARNING: clustering pass failed (see logs)")
         return None
@@ -582,6 +594,8 @@ def _index_source(
                 manifest.commit,
                 src_state.chunk_count if src_state else 0,
             )
+        if manifest.stored_family is not None:
+            state.stored_families[source_name] = manifest.stored_family
         return (0, 0, 0)
 
     stats = manifest.stats
@@ -629,6 +643,8 @@ def _index_source(
             path_index.remove(deleted.source, deleted.path)
             total_deleted += 1
         except Exception:
+            if selected_layout():
+                raise
             logger.warning(
                 "Failed to delete %s:%s", deleted.source, deleted.path,
                 exc_info=True,
@@ -644,6 +660,8 @@ def _index_source(
             removed = multi_store.delete_stale_by_file(src, path, before=run_start)
             stale_cleaned += removed
         except Exception:
+            if selected_layout():
+                raise
             logger.debug("Stale cleanup failed for %s:%s", src, path, exc_info=True)
 
     if total_deleted or stale_cleaned:
@@ -651,6 +669,8 @@ def _index_source(
 
     # ── Phase 4: Commit state ───────────────────────────────
     state.mark_source_indexed(source_name, manifest.commit, total_stored)
+    if manifest.stored_family is not None:
+        state.stored_families[source_name] = manifest.stored_family
 
     total_removed = total_deleted + stale_cleaned
     print(f"  Total: {total_stored} chunks stored, {total_removed} removed")
@@ -677,13 +697,9 @@ def _crawl_source(
     from agent_index.sources import get_connector
 
     connector = get_connector(source_name, **(connector_kwargs or {}))
-    from agent_index.store.source_layout import selected_layout
-
-    if selected_layout():
-        canonical = connector.source_name
-        if not isinstance(canonical, str) or not canonical:
-            raise RuntimeError("connector has no canonical stored family")
-        state.stored_families[source_name] = canonical
+    canonical = connector.source_name if selected_layout() else None
+    if selected_layout() and (not isinstance(canonical, str) or not canonical):
+        raise RuntimeError("connector has no canonical stored family")
     commit = connector.current_commit()
 
     # Build a cancel checker from the progress callback
@@ -714,6 +730,8 @@ def _crawl_source(
         # Get changed files for upserts
         src_state = state.sources.get(source_name)
         last_commit = src_state.last_commit if src_state else None
+        if canonical is not None and state.stored_families.get(source_name) != canonical:
+            last_commit = None
         upserts = connector.discover_changed(last_commit, cancel_check=cancel_check)
 
         if progress_cb:
@@ -746,6 +764,7 @@ def _crawl_source(
         deletions=deletions,
         commit=commit,
         stats=stats,
+        stored_family=canonical,
     )
 
 
@@ -825,6 +844,8 @@ def _embed_and_store_files(
         try:
             chunks = chunker.chunk(entry.content, entry.path, source=entry.source)
         except Exception:
+            if selected_layout():
+                raise
             logger.warning("Failed to chunk %s, skipping", entry.path)
             continue
 

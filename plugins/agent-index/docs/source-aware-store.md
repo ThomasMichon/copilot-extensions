@@ -65,6 +65,22 @@ after parent death. The parent cannot publish clean completion until the child
 exits and ownership is reclaimed. Missing or unsettled handoff evidence never
 becomes success. Children remain contained/headless; no daemon escape is used.
 
+On Windows, receipt readers use non-inheritable `GENERIC_READ` handles with
+`FILE_SHARE_READ | FILE_SHARE_DELETE`, and replacement of an existing receipt
+uses `ReplaceFileW`. A held reader retains its complete old JSON snapshot while
+the owning writer publishes a new one. Delete sharing alone is not sufficient
+with `os.replace`/`MoveFileExW`, which can return WinError 5 for an open target.
+First publication into an absent path still uses `os.replace`; other platforms
+retain their normal atomic-replace path. Neither path unlinks the destination
+first, changes permissions, or falls back after a failed publication.
+
+There is no receipt permission-error retry. An incompatible reader or permanent
+denial fails immediately; selected parent-side FTS I/O errors propagate rather
+than triggering full-build escalation or availability-shaped success. Existing
+dirty/effect/nonce evidence stays closed, and read failures retain their OS
+exception cause. The kernel locks and child nonce remain the authority for
+ownership, not receipt-handle sharing.
+
 FTS completion is separate from availability of an older index. Internally a
 rebuild reports success, an empty-table no-op, or failure, including failed
 incremental/escalated attempts. Selected mode raises on failure even if the
@@ -119,9 +135,14 @@ directory. No automated data rollback/old-writer restoration is provided.
 
 ## Canonical ingestion families and garbage collection
 
-Selected queued ingestion records each constructed connector's actual
-`source_name` in `IndexState.stored_families`, keyed by the configured crawl
-name. A configured alias such as `git:fixture` can therefore retain its actual
+Selected queued ingestion stages each constructed connector's actual
+`source_name` in its crawl manifest. Only successful embedding and
+reconciliation (or a successful no-change crawl) publishes that identity in
+`IndexState.stored_families`, keyed by the configured crawl name. A failed source
+retains its previous mapping, so an alias changing to a new repository cannot
+cause configured GC to discard the previous dataset on a partial run.
+An identity transition starts incremental discovery without the old family's
+commit cursor. A configured alias such as `git:fixture` can therefore retain its actual
 `git:repo` family and exact colon descendants such as `git:repo:commits`.
 Neither aliases nor arbitrary string prefixes are guessed into canonical
 identities: `git:repository` is not a descendant of `git:repo`.
@@ -134,6 +155,16 @@ GC is explicitly deferred (warning plus `source_gc_deferred` in the indexing
 result), rather than risking a configured but unindexed family. Unselected
 legacy GC behavior is unchanged. Full stale-generation GC and compaction still
 precede the final owning FTS refresh.
+
+Selected maintenance does not inherit legacy best-effort success semantics.
+Content and vector compaction persist an uncertain effect before optimization;
+content compaction also invalidates FTS coverage. An optimizer failure propagates
+and leaves the domain dirty, even if part of its work already committed.
+Selected reconciliation, GC and cluster replacement failures likewise propagate
+instead of being logged as optional success. A final clean-domain read guard
+must pass after post-index callbacks before the queued task can report complete.
+No validation silently clears an attempted uncertain effect. Unselected legacy
+clustering/optimization retain their optional behavior.
 
 ## Scoped reads
 
