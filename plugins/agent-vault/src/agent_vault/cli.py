@@ -1605,7 +1605,12 @@ def cmd_vault_list(args):
 
 
 def cmd_vault_add(args):
-    config.add_vault(args.name, args.kpdb, group=args.group, port=args.port)
+    # A relative database path names the caller's directory, but the global
+    # settings resolve relative paths against their own directory: anchor it.
+    kpdb = args.kpdb
+    if kpdb and not os.path.isabs(os.path.expandvars(os.path.expanduser(kpdb))):
+        kpdb = os.path.abspath(kpdb)
+    config.add_vault(args.name, kpdb, group=args.group, port=args.port)
     print(f"Vault added: {args.name}")
     return 0
 

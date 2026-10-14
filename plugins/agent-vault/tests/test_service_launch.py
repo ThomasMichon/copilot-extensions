@@ -177,3 +177,28 @@ def test_global_config_relative_database_survives_the_service_cwd(monkeypatch, t
         (tmp_path / cwd).mkdir()
         monkeypatch.chdir(tmp_path / cwd)
         assert config.resolve_kpdb(required=False) == expected
+
+
+@pytest.mark.parametrize("given", ["vault.kdbx", "~/vault.kdbx"])
+def test_vault_add_keeps_a_relative_database_at_the_callers_directory(
+    monkeypatch, tmp_path, given
+):
+    # Settings resolve relative paths against their own directory, so `vault
+    # add` anchors a relative path at the caller's cwd before saving it; a
+    # home-relative path is stored as given and expanded on read.
+    settings = tmp_path / "settings" / "config.json"
+    settings.parent.mkdir()
+    (tmp_path / "caller").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    for name in ("KPDB", "AGENT_VAULT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(config.CONFIG_ENV, str(settings))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setattr(config, "_ext_config", lambda cwd: {})
+    monkeypatch.chdir(tmp_path / "caller")
+    args = type("Args", (), {"name": "example", "kpdb": given, "group": None, "port": None})()
+    assert cli.cmd_vault_add(args) == 0
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    expected = tmp_path / ("caller" if given == "vault.kdbx" else "home") / "vault.kdbx"
+    assert config.resolve_kpdb(required=False) == str(expected)
