@@ -203,8 +203,15 @@ async def test_legacy_terminal_reconciles_only_unstarted_original_allocation(
 
 
 @pytest.mark.asyncio
-async def test_allocation_identity_change_during_revalidation_prevents_native_start(
-    creation_rig, monkeypatch,
+@pytest.mark.parametrize(
+    ("field", "changed", "code"),
+    [
+        ("creation_nonce", "replacement-allocation", "creation_conflict"),
+        ("status", None, "live_holder"),
+    ],
+)
+async def test_allocation_change_during_revalidation_prevents_native_start(
+    creation_rig, monkeypatch, field, changed, code,
 ):
     rig = creation_rig
     command = workspace_creation.worktree_command
@@ -215,13 +222,13 @@ async def test_allocation_identity_change_during_revalidation_prevents_native_st
         if args[0] == "list":
             reads += 1
             if reads == 2:
-                rig.row["creation_nonce"] = "replacement-allocation"
+                rig.row[field] = changed
         return await command(args, project)
 
     monkeypatch.setattr(workspace_creation, "worktree_command", changed_owner)
     with pytest.raises(AcquisitionRefused) as refused:
         await workspace_creation.start(rig.manager, rig.target, key="logical-work")
-    assert refused.value.code == "creation_conflict"
+    assert refused.value.code == code
     assert not rig.manager.list_sessions()
     assert not rig.db.execute_read("SELECT * FROM turns")
     assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")

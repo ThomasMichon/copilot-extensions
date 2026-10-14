@@ -107,7 +107,8 @@ def _sessionless(
     manager: SessionManager, row: dict[str, Any], head: str | None, worktree_id: str,
 ) -> bool:
     return not (
-        row.get("session_count") != 0 or row.get("last_session_id") or head
+        row.get("status") != "active"
+        or row.get("session_count") != 0 or row.get("last_session_id") or head
         or row.get("execution_leg") or row.get("execution_leg_live")
         or manager.db.list_fresh_live_sessions(worktree_id, now=time.time())
         or manager.db.get_worktree_ownership(worktree_id)
@@ -201,8 +202,7 @@ async def start(
                     raise AcquisitionRefused("creation_conflict", "original workspace identity changed")
                 if operation["state"] == "terminal":
                     if (
-                        row.get("status") != "active"
-                        or operation["native_session_id"] is not None
+                        operation["native_session_id"] is not None
                         or operation["turn_index"] is not None
                         or db.get_session(operation["session_id"]) is not None
                         or db.execute_read(
