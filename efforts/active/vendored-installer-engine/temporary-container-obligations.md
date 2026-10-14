@@ -29,6 +29,20 @@ close-out, or transfer ownership through an explicitly accepted handoff, before
 it may finalize. Do not retrofit disposable deletion requirements onto fleet
 borrow/return semantics.
 
+**2026-10-13 operator-selected storage/cleanup choice, verbatim:**
+
+> retain-volumes
+
+**Choice summary:** keep separately named temporary volumes owned and held.
+Do not replace them with container-scoped tmpfs as a workaround, and do not
+automatically delete a volume by name after a birth-identity inspection.
+Docker's current CLI/client removal interface exposes a name and force option,
+not a birth-conditional deletion primitive. A separate identity-safe volume
+cleanup mechanism must be reviewed before automated volume deletion is enabled.
+Container-ID lifecycle work and read-only volume verification can proceed;
+volume retention does not satisfy the full close-out or parent completion gate.
+This choice authorizes source design, not live allocation, cleanup or rollout.
+
 Cover `tools/clean-room/run.sh`, both Linux and Windows arms of `run.ps1`,
 their authentication/identity/result-permission helper containers, and
 `tools/run_tests_in_devcontainer.py` with its temporary workspace volume.
@@ -111,6 +125,12 @@ cross-owner lifecycle contract, not merely a call-site-only fix.
    A volume has no container-style immutable ID: bind its daemon, unique name,
    creation evidence and reservation label, rejecting replacement instances.
    Names are display/selection aids only, never destructive authority.
+   **Operator-selected clarification, 2026-10-13:** named volumes remain
+   owned and held. Since the current Docker volume-removal interface cannot
+   condition deletion on that birth evidence, automated volume removal is
+   refused before mutation. Read-only identity/absence proof and explicitly
+   accepted responsibility transfer remain supported; a separate cleanup
+   mechanism must clear review before changing this restriction.
 5. **Standalone runs are explicit, not fictitiously tracked.** Receive the exact
    ownership-tool argv and owner context through the producer interface; preserve
    child CWD/environment identity. An explicit valid owner can use an anchor's
@@ -153,6 +173,12 @@ to bypass its invariants or the live cleanup confirmation gate.
   in the authoritative ledger afterward. Nonzero cleanup or verification exits
   fail visibly and leave the claim active. Never infer absence from an arbitrary
   inspect error, process exit, Docker name reuse or daemon mismatch.
+- Named-volume retention is an explicit outcome, not successful full cleanup.
+  Report the retained volume and active creator obligation when container
+  cleanup completes; keep its finalize gate in force. No `down`, `prune`,
+  disconnect, test-success or generic settlement path may turn that held
+  volume into a released claim. A volume already absent may close only through
+  the registered exact-subject, pinned-daemon proof, never a caller assertion.
 - `down`, error cleanup and `prune` enumerate owned receipts, not broad name
   prefixes. No preemptive removal of another run's name, broad Docker prune,
   silently successful cleanup or label-only destructive selection.
@@ -185,6 +211,11 @@ to bypass its invariants or the live cleanup confirmation gate.
 - [ ] Prove rename does not change identity, reused names/recreated resources
       cannot be removed, owner/label mismatch refuses and endpoint changes
       cannot create a false absence verdict.
+- [ ] Prove named volumes remain owned and held after container/test completion;
+      automatic deletion refuses before a name-based mutation, retained status
+      is visible, and finalize remains blocked. Review an identity-safe volume
+      cleanup mechanism separately before enabling automated deletion; this
+      open requirement is not discharged by container-only lifecycle proof.
 - [ ] Prove no generic settle/release/sweep/disconnect path fabricates safe
       temporary-container state; explicit accepted transfer preserves ownership.
 - [ ] Prove fleet lease return remains valid without deleting its reusable

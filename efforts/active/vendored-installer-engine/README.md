@@ -578,6 +578,59 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-13 — Qualified Docker callback prerequisite merged
+
+- PR #6614 merged to `dev` as
+  `1c960f88564f2187ed5fc64ad09f2a420d066577` at 20:23 Pacific.
+  Its exact head `4c2f0a070d5795ee8c0d827009f23e1f1914607f` received a
+  Balanced approval with zero open findings. All 23 visible checks completed
+  successfully or intentionally skipped, including both required gates.
+  The exact head and gates were rechecked immediately before the exclusive
+  serial merge slot was used.
+- Registered status and reclaim prefixes now survive same-cell primary-module
+  routing; unsupported command substitutions refuse rather than silently
+  selecting another callback. Provider-declared legacy provisioning suppression
+  stays in the child environment. Native batch routing now preserves quoted
+  payload paths with spaces while rejecting shell-significant command prefixes.
+  Fleet borrowing and the generic ownership ledger are unchanged.
+- The published snapshot passed 582 contained callback/consumer regressions
+  with two intentional skips and 110 exact-snapshot native Windows callback,
+  registry and adapter cases with two intentional skips. The preceding
+  structural selection passed 847 guards with 14 intentional skips before the
+  final Windows quoting correction; it is not a native Docker lifecycle proof.
+- Post-merge reconciliation retained recovery evidence and advanced the
+  continuing source workspace onto the verified squash. The foreign PR
+  obligation was settled using provider merge evidence.
+- **Next source stretch:** implement the independent shared Docker identity
+  helper and separate raw-resource callbacks, then wire the clean-room and
+  devcontainer producers under
+  [the reviewed scoped plan](temporary-container-obligations.md).
+  The combined Docker implementation/validation item and all live, native
+  lifecycle, remaining-adopter and serving-convergence gates remain open.
+  No Docker allocation/removal, service change or runtime rollout occurred.
+  The effort remains Active.
+
+### 2026-10-13 — Volume deletion identity boundary discovered
+
+- The independent Docker identity primitive is under source implementation;
+  it does not allocate resources or replace the authoritative worktree ledger.
+  Container mutation can address the full immutable ID. Volume probes can
+  verify unique name, creation evidence and born-at-creation labels.
+- Docker's current volume-removal client exposes only a name and `Force`
+  option, not an immutable birth identity or a conditional-delete parameter
+  ([API source](https://github.com/moby/moby/blob/master/client/volume_remove.go)).
+  A replacement between inspection and name-based deletion therefore cannot
+  be excluded by the proposed identity check alone. Automatic volume deletion
+  is blocked in the draft primitive rather than presented as exact-ID cleanup.
+- **Operator-selected decision:** the form value was `retain-volumes`.
+  Keep named volumes owned and held; automatic name-based deletion remains
+  blocked until a separate identity-safe cleanup mechanism is reviewed.
+  The proposed container-scoped tmpfs alternative was not selected.
+  [The scoped plan](temporary-container-obligations.md) records the exact
+  selection and its retained-obligation validation requirement. This source
+  amendment precedes producer enablement; it does not authorize live mutation
+  or resolve the combined temporary-resource validation item.
+
 ### 2026-10-13 — Generic disposable ownership slice merged; Docker integration next
 
 - PR #6391 merged to `dev` as `b78c23aa05c74079f9724cfcfff9c4de14e5f37a`
