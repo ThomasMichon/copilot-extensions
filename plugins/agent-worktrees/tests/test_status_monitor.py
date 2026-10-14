@@ -4779,18 +4779,16 @@ def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "other-secret")
     monkeypatch.setenv("AGENT_WORKTREES_AHP_AUTH_TOKEN", "handoff-secret")
     monkeypatch.setenv("SAFE_VALUE", "kept")
-    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen)
-    monkeypatch.setattr(
-        m,
-        "windowless_daemon_kwargs",
-        lambda **_kw: {"windowless_daemon": True},
-    )
+    from agent_worktrees import status_monitor_cutover as smc
+
+    monkeypatch.setattr(smc, "spawn_daemon", _fake_popen)
     assert m._spawn_detached([m.sys.executable, "-m", "agent_worktrees", "status-monitor"]) is True
     expected_python, expected_env = direct_monitor_python(m.sys.executable)
     assert seen["argv"][0] == expected_python
     assert all(seen["env"][key] == value for key, value in expected_env.items())
     assert seen["argv"][1:] == ["-m", "agent_worktrees", "status-monitor"]
-    assert seen["kwargs"]["windowless_daemon"] is True
+    # Windows: periodic console children inherit one hidden console tree.
+    assert seen["kwargs"]["console_children"] is True
     assert seen["env"]["SAFE_VALUE"] == "kept"
     assert "GH_TOKEN" not in seen["env"]
     assert "GITHUB_TOKEN" not in seen["env"]
@@ -4823,8 +4821,9 @@ def test_spawn_detached_scrubs_session_id_and_roots_cwd_at_install_dir(
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/some/installed-plugin/path")
     monkeypatch.setenv("copilot_agent_session_id", "mixed-case-should-also-be-scrubbed")
     monkeypatch.setenv("SAFE_VALUE", "kept")
-    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen)
-    monkeypatch.setattr(m, "windowless_daemon_kwargs", lambda **_kw: {})
+    from agent_worktrees import status_monitor_cutover as smc
+
+    monkeypatch.setattr(smc, "spawn_daemon", _fake_popen)
 
     install_root = tmp_path / "cell-root"
     install_root.mkdir(parents=True)

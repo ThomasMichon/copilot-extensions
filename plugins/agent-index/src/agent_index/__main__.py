@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import (
-    detached_kwargs,
     no_window_kwargs,
+    spawn_daemon,
     windowless_python,
     windowless_python_env,
 )
@@ -1387,20 +1387,27 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             str(port),
             "--passive",
         ]
-        kwargs: dict[str, Any] = {
-            "cwd": str(install_dir().resolve()),
-            "env": {
-                key: value
-                for key, value in os.environ.items()
-                if key not in {"PYTHONPATH", "PYTHONHOME"}
-            },
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
+        root = install_dir().resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"PYTHONPATH", "PYTHONHOME"}
         }
-        kwargs["env"].update(windowless_python_env(python))
-        kwargs.update(detached_kwargs(breakaway=True))
-        handle = subprocess.Popen(cmd, **kwargs)  # noqa: S603
+        overrides = dict(windowless_python_env(python))
+        # The daemon log is append-only for the generation's whole life: keep
+        # uvicorn's per-request access lines out of it unless the operator
+        # asked for a level explicitly.
+        if "AGENT_INDEX_LOG_LEVEL" not in env:
+            overrides["AGENT_INDEX_LOG_LEVEL"] = "warning"
+        handle = spawn_daemon(
+            cmd,
+            cwd=root,
+            log_path=root / "service-stdio.log",
+            env=env,
+            env_overrides=overrides,
+            display=f"agent_index {start_command} --passive --port {port}",
+        )
         passive_instance.update({"port": port, "pid": handle.pid})
         return handle
 

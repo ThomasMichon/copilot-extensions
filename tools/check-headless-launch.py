@@ -70,6 +70,20 @@ production/script roots, unless the source line carries a comment containing
 ``relative/path.yaml:7  reason`` entry per line; JSON has no comment syntax,
 so this is its only escape hatch -- YAML may use either).
 
+**A fifth rule: a resident daemon launches through ``spawn_daemon``.** In an
+agent-procutil-adopting plugin's ``src``, a ``subprocess.Popen`` (or the bare
+imported ``Popen``) that detaches with ``detached_kwargs`` /
+``windowless_daemon_kwargs`` -- in the call itself or anywhere in its
+enclosing function -- is reported: a hand-rolled detached launch skips
+``agent_procutil.spawn_daemon``'s explicit cwd outside the payload, its log,
+and its Job breakaway handling. A detached child that is not a resident
+daemon (a waiter, a one-shot helper, a deliberately contained child) carries
+an inline ``# daemon-spawn: allow <why>`` comment on the ``Popen`` line, or a
+``relative/path.py::qualified.function  reason`` entry in
+``tools/daemon-spawn.allow``. That file is a shrink-only baseline: an entry
+whose function no longer matches is itself reported, and every entry needs a
+reason.
+
 Usage::
 
     python tools/check-headless-launch.py          # verify (CI / pre-push)
@@ -90,8 +104,11 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
 HEADLESS_GUARD_ALLOWLIST = REPO / "tools" / "headless-guard.allow"
+DAEMON_SPAWN_ALLOWLIST = "tools/daemon-spawn.allow"  # relative to REPO
 
 _ALLOW = "headless-guard: allow"
+_DAEMON_ALLOW = "daemon-spawn: allow"
+_DETACH_HELPERS = frozenset({"detached_kwargs", "windowless_daemon_kwargs"})
 _UNSAFE_FLAG = "CREATE_NEW_CONSOLE"
 _CREATE_NEW_CONSOLE_VALUE = 0x00000010
 _FLAG_NAMES = frozenset({
@@ -270,6 +287,82 @@ def _find_unsuppressed_spawns(f: Path) -> tuple[str, list[tuple[int, str]]]:
     finder = _SpawnFinder(text)
     finder.visit(tree)
     return text, sorted(set(finder.hits))
+
+
+def _calls_detach_helper(node: ast.AST) -> bool:
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            func = sub.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name in _DETACH_HELPERS:
+                return True
+    return False
+
+
+class _DetachedSpawnFinder(ast.NodeVisitor):
+    """Collect (lineno, qualname) for a raw ``Popen`` that detaches itself."""
+
+    def __init__(self) -> None:
+        self.hits: list[tuple[int, str]] = []
+        self._names: list[str] = []
+        self._funcs: list[ast.AST] = []
+        self._popen_aliases: set[str] = set()
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "subprocess":
+            self._popen_aliases.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "Popen"
+            )
+
+    def _scoped(self, node: ast.AST, *, func: bool) -> None:
+        self._names.append(node.name)  # type: ignore[attr-defined]
+        if func:
+            self._funcs.append(node)
+        self.generic_visit(node)
+        if func:
+            self._funcs.pop()
+        self._names.pop()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._scoped(node, func=False)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._scoped(node, func=True)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._scoped(node, func=True)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        is_popen = (
+            (isinstance(func, ast.Attribute) and func.attr == "Popen"
+             and isinstance(func.value, ast.Name) and func.value.id == "subprocess")
+            or (isinstance(func, ast.Name) and func.id in self._popen_aliases)
+        )
+        scope = self._funcs[-1] if self._funcs else node
+        if is_popen and _calls_detach_helper(scope):
+            self.hits.append((node.lineno, ".".join(self._names) or "<module>"))
+        self.generic_visit(node)
+
+
+def _load_daemon_spawn_allowlist(problems: list[str]) -> set[str]:
+    allowlist = REPO / DAEMON_SPAWN_ALLOWLIST
+    if not allowlist.is_file():
+        return set()
+    entries: set[str] = set()
+    for lineno, line in enumerate(allowlist.read_text(encoding="utf-8").splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, _, reason = stripped.partition(" ")
+        if "::" not in key or not reason.strip():
+            problems.append(
+                f"{DAEMON_SPAWN_ALLOWLIST}:{lineno}: expected "
+                "'relative/path.py::qualified.function  <reason>'"
+            )
+            continue
+        entries.add(key)
+    return entries
 
 
 def _load_path_allowlist() -> set[str]:
@@ -463,7 +556,7 @@ def _find_flags(f: Path) -> tuple[str, list[tuple[int, str]]]:
     return text, sorted(set(finder.hits))
 
 
-def _allowed(lines: list[str], lineno: int) -> bool:
+def _allowed(lines: list[str], lineno: int, marker: str = _ALLOW) -> bool:
     line = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
     try:
         tokens = tokenize.generate_tokens(io.StringIO(line).readline)
@@ -472,9 +565,9 @@ def _allowed(lines: list[str], lineno: int) -> bool:
         return False
     for comment in comments:
         text = comment.removeprefix("#").strip()
-        if not text.startswith(_ALLOW):
+        if not text.startswith(marker):
             continue
-        suffix = text[len(_ALLOW):]
+        suffix = text[len(marker):]
         if not suffix or suffix[0] not in " :":
             continue
         reason = suffix.lstrip(" :").strip()
@@ -486,6 +579,7 @@ def _allowed(lines: list[str], lineno: int) -> bool:
 def verify() -> list[str]:
     problems: list[str] = []
     cache: dict[Path, tuple[str, list[tuple[int, str]], list[tuple[int, str]]]] = {}
+    detached: dict[Path, list[tuple[int, str]]] = {}
     parse_failures: set[Path] = set()
 
     def scan(f: Path) -> tuple[str, list[tuple[int, str]], list[tuple[int, str]]]:
@@ -498,6 +592,9 @@ def verify() -> list[str]:
             flags.visit(tree)
             spawns = _SpawnFinder(text)
             spawns.visit(tree)
+            daemons = _DetachedSpawnFinder()
+            daemons.visit(tree)
+            detached[f] = sorted(set(daemons.hits))
             result = (text, sorted(set(flags.hits)), sorted(set(spawns.hits)))
         except SyntaxError as exc:
             result = (text, [], [])
@@ -598,6 +695,36 @@ def verify() -> list[str]:
                     f"'{rel}:{lineno}  <why>' in "
                     "tools/headless-guard.allow (JSON)"
                 )
+
+    # Rule 5: a resident daemon launches through spawn_daemon (see module
+    # docstring); tools/daemon-spawn.allow is a shrink-only baseline.
+    daemon_allow = _load_daemon_spawn_allowlist(problems)
+    matched: set[str] = set()
+    for plugin in _adopting_plugins():
+        src = plugin / "src"
+        if not src.is_dir():
+            continue
+        for f in _iter_py(src):
+            text = scan(f)[0]
+            lines = text.splitlines()
+            rel = f.relative_to(REPO).as_posix()
+            for lineno, qualname in detached.get(f, []):
+                key = f"{rel}::{qualname}"
+                if key in daemon_allow:
+                    matched.add(key)
+                    continue
+                if _allowed(lines, lineno, _DAEMON_ALLOW):
+                    continue
+                problems.append(
+                    f"{rel}:{lineno}: hand-rolled detached Popen in {qualname} -- launch a "
+                    "resident daemon with agent_procutil.spawn_daemon() (explicit cwd, "
+                    f"log, Job breakaway); mark a non-daemon child '# {_DAEMON_ALLOW} <why>'"
+                )
+    for key in sorted(daemon_allow - matched):
+        problems.append(
+            f"tools/daemon-spawn.allow: stale entry {key} -- it no longer hand-rolls a "
+            "detached Popen; remove it"
+        )
     return problems
 
 

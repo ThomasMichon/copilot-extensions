@@ -110,13 +110,13 @@ def test_deploy_propagates_native_recovery_refusal(monkeypatch, tmp_path, capsys
 def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> None:
     captured = {}
     spawned = {}
-    detached = __main__.detached_kwargs
+    real_spawn_daemon = __main__.spawn_daemon
 
-    def detach(**kwargs):
-        spawned["detach_kwargs"] = kwargs
-        return detached(**kwargs)
+    def record_spawn_daemon(argv, **kwargs):
+        spawned["spawn_daemon"] = kwargs
+        return real_spawn_daemon(argv, **kwargs)
 
-    monkeypatch.setattr(__main__, "detached_kwargs", detach)
+    monkeypatch.setattr(__main__, "spawn_daemon", record_spawn_daemon)
 
     class FakeResult:
         def __init__(self) -> None:
@@ -204,7 +204,55 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
     assert spawned["kwargs"]["cwd"] == str((tmp_path / "home").resolve())
     assert "PYTHONPATH" not in spawned["kwargs"]["env"]
     assert "PYTHONHOME" not in spawned["kwargs"]["env"]
-    assert spawned["detach_kwargs"] == {"breakaway": True}
+    # A resident daemon: launched through the shared primitive, breaking away
+    # from the deploying process's Job (never falling back into it), from the
+    # runtime root, with an append-only log kept free of per-request lines.
+    home = (tmp_path / "home").resolve()
+    launch = spawned["spawn_daemon"]
+    assert launch["cwd"] == home
+    assert launch["log_path"] == home / "service-stdio.log"
+    assert launch.get("breakaway", True) is True
+    assert not launch.get("contained_fallback", False)
+    assert launch["env_overrides"]["AGENT_INDEX_LOG_LEVEL"] == "warning"
+    assert spawned["kwargs"]["env"]["AGENT_INDEX_LOG_LEVEL"] == "warning"
+    assert spawned["kwargs"]["stdin"] is __main__.subprocess.DEVNULL
+    assert (home / "service-stdio.log").read_text(encoding="utf-8").startswith(
+        tuple("0123456789")
+    )
+
+
+def test_passive_spawn_keeps_an_explicit_log_level(monkeypatch, tmp_path) -> None:
+    captured = {}
+    seen = {}
+
+    class FakeOrchestrator:
+        def __init__(self, _config_dir, **kwargs):
+            captured.update(kwargs)
+
+        def run(self, **_kwargs):
+            captured["spawn_passive"](4555)
+            return SimpleNamespace(
+                ok=False, steps=[], new_port=4555, rolled_back=True, error="captured",
+                to_dict=lambda: {"ok": False},
+            )
+
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+    monkeypatch.setenv("AGENT_INDEX_LOG_LEVEL", "debug")
+    monkeypatch.setattr(
+        "zdd.breadcrumb.recover_stale_cutover", lambda *a, **k: {"recovered": False}
+    )
+    monkeypatch.setattr("zdd.cutover.CutoverOrchestrator", FakeOrchestrator)
+    monkeypatch.setattr(__main__, "_routing_endpoint", lambda: None)
+    monkeypatch.setattr(
+        __main__, "spawn_daemon",
+        lambda argv, **kwargs: seen.update(kwargs) or SimpleNamespace(pid=1),
+    )
+    __main__.cmd_deploy(SimpleNamespace(
+        json=True, health_timeout=1.0, drain_timeout=1.0, force=True, recover=False,
+    ))
+    assert "AGENT_INDEX_LOG_LEVEL" not in seen["env_overrides"]
+    assert seen["env"]["AGENT_INDEX_LOG_LEVEL"] == "debug"
 
 
 def test_namespaced_deploy_spawns_private_cell_entrypoint(

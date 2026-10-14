@@ -609,25 +609,21 @@ def _daemon_cwd() -> str:
     return os.path.expanduser("~")
 
 def _spawn_detached(argv: list[str]) -> bool:
-    """Spawn in the install dir; never raises. Windows uses direct console
-    Python under ``CREATE_NO_WINDOW``: PID ownership is unambiguous and periodic
-    children inherit one hidden console tree."""
+    """Spawn via ``status_monitor_cutover.spawn_monitor``; never raises.
+    Windows uses direct console Python under ``CREATE_NO_WINDOW``: PID
+    ownership is unambiguous and periodic children inherit one hidden console
+    tree."""
     override = _core_helper("_spawn_detached", _spawn_detached)
     if override is not _spawn_detached:
         return override(argv)
     argv = list(argv)
-    kwargs: dict = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "cwd": _daemon_cwd(),
-        "env": _daemon_environment(),
-    }
-    kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
+    env = _daemon_environment()
     try:
+        from .status_monitor_cutover import spawn_monitor
+
         argv[0], extra_env = direct_monitor_python(argv[0])
-        kwargs["env"].update(extra_env)
-        subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
+        env.update(extra_env)
+        spawn_monitor(argv, env, console_children=True)  # fixed, trusted argv
         return True
     except Exception as exc:
         logging.getLogger(__name__).warning("Cannot spawn status-monitor: %s", exc)

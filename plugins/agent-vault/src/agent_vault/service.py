@@ -8,13 +8,10 @@ import json
 import logging.handlers
 import os
 import signal
-import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-
-from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 
 from .cache import get_cache
 from .config import (
@@ -1221,22 +1218,14 @@ def daemonize_unix() -> bool:
 
 
 def daemonize_windows(argv: list[str]) -> None:
-    """Start a detached background process (Windows)."""
-    python = sys.executable
-    cmd = [windowless_python(python), *argv, "--foreground"]
-    env = os.environ.copy()
-    env.update(windowless_python_env(python))
-    subprocess.Popen(
-        cmd,
-        # Neutral cwd: the detached daemon must not inherit (and pin) the
-        # caller's directory, which may be a worktree or the plugin payload.
-        cwd=str(Path.home()),
-        env=env,
-        **detached_kwargs(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    """Start a detached background process (Windows).
+
+    ``argv`` is ``["-m", "agent_vault.service", *options]``; the service
+    relaunches itself in the foreground through the shared daemon launch.
+    """
+    from .launch import spawn_service
+
+    spawn_service([*argv[2:], "--foreground"])
 
 
 def main() -> None:
