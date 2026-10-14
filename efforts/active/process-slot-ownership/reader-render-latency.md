@@ -49,7 +49,13 @@ and #1919's catalog contract, not another catalog or store of record.
    named coalescing-pattern exception, not removal of ordinary CLI/action
    fallback. An unavailable Worktree Manager must degrade the projection
    explicitly without making Agent Bridge require a sibling service.
-6. Add focused route/cache tests and source-owner regressions where integration
+6. Version the detectable HTTP refresh/metadata behavior through the existing
+   Agent Bridge protocol contract. New clients use `daemon_supports()` before
+   sending refresh controls or relying on the metadata. Legacy daemons retain
+   their supported request shape; missing metadata means freshness/completeness
+   unknown, never proof of current complete evidence. Do not silently claim the
+   new render latency contract for a legacy daemon.
+7. Add focused route/cache tests and source-owner regressions where integration
    changes them. Update existing reader/API reality docs and the required
    changefile for each changed plugin. Land the plan first, then serial
    implementation and canonical closure deltas.
@@ -76,6 +82,10 @@ and #1919's catalog contract, not another catalog or store of record.
       unchanged native execution timeout.
 - [ ] Provider/generation replacement and bounded shutdown fence old
       publication while retaining actual holder accounting.
+- [ ] Protocol/capability gating handles old-client/new-daemon and
+      new-client/old-daemon combinations. Unsupported refresh controls are not
+      sent; metadata-free legacy responses remain explicitly unknown without
+      breaking the prior supported request/response shape.
 - [ ] Exact-action detail/resume/lineage, optional-sibling fallback, ownership,
       namespace circuit and privacy regressions remain green on supported
       platforms; existing test containment and portfolio limits are preserved.
