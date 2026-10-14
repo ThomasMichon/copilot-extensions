@@ -1471,6 +1471,7 @@ def test_run_reservation_and_settlement_fence_fresh_owner(
 
 
 @pytest.mark.parametrize("json_mode", [False, True])
+@pytest.mark.guard
 def test_resume_reports_raced_authority_rejection_as_structured_error(
     json_mode, tmp_path, scoped_config, monkeypatch, capfd,
 ):

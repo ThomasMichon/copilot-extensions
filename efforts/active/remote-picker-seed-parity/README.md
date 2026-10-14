@@ -588,3 +588,6 @@ hiding the problem or silently dropping text.
   remaining negative-Resume mock contract and fast-guard coverage, with its
   own refreshed review and checks required after rebasing. The unrelated
   #6696 feature and its open review remain intact.
+  The narrowed current-base selection passes all five fast guard cases,
+  including both real late-owner refusal branches; canonical fixture data
+  and comments from #6726 are retained unchanged.
