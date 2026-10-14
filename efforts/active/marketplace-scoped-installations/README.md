@@ -495,6 +495,40 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-14 — Native diagnostic slice merged; wrapper acceptance continues
+
+- [#6645](https://github.com/ThomasMichon/copilot-extensions/pull/6645)
+  merged as `9506007202d1447646535551b6656c2634bd3e99` after exact-head
+  approval with zero findings and successful required PR, workflow-lockdown,
+  and source-attribution checks. Native Windows
+  [job 115746049797](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38532070063/job/115746049797)
+  executed the representative derived CLI and transport cases alongside the
+  existing source, Manager, and reconciliation selections.
+- No Phase 8 or original Validation Plan item closes at this boundary.
+  All-copy Windows CLI acceptance still needs the promoted manual workflow.
+  Promotion's six profile-assignment registration failures were already
+  corrected by merged
+  [#6667](https://github.com/ThomasMichon/copilot-extensions/pull/6667).
+  All six passed independently against current source; duplicate
+  [#6671](https://github.com/ThomasMichon/copilot-extensions/issues/6671)
+  is closed. Containing full release proof and existing release custody
+  remain unchanged. Historical host/guest claim
+  settlement is separately tracked by
+  [#5674](https://github.com/ThomasMichon/copilot-extensions/issues/5674).
+  Neither release waits nor claim refusal authorize an ownership rewrite or
+  validation bypass.
+- Continue the real Manager legacy/refusal and reconciliation refusal
+  no-write evidence while the existing owners drive those prerequisites.
+  Manager now checks nine legacy, active, policy, and transition scenarios
+  with absent and retained pointers, mutation-attempt witnesses, and full
+  snapshots after each wrapper in two cycles. Reconciliation checks six
+  policy, maintenance, and orphaned-transfer scenarios through its real
+  helper and selected-runtime wrapper, preserving explicit refusal.
+  The 30 bounded local cases passed; fresh native Windows execution remains
+  required.
+  Persistent diagnostic inspection, activation, release-content proof, and
+  managed rollout remain gated.
+
 ### 2026-10-14 — Correct native diagnostic argument transport and matrix admission
 
 - [#6645](https://github.com/ThomasMichon/copilot-extensions/pull/6645)'s

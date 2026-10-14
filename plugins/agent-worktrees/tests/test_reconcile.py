@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -29,7 +30,25 @@ INSTALLATION_CONTEXT_PS1 = (
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("pointer_exists", [False, True])
-def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exists):
+@pytest.mark.parametrize(
+    ("scenario", "policy_state", "status"),
+    [
+        ("missing-policy", "missing", "ready"),
+        ("disabled-policy", "valid", "ready"),
+        ("invalid-policy", "invalid", "invalid"),
+        ("unsupported-policy", "unsupported", "invalid"),
+        ("maintenance", "missing", "maintenance-blocked"),
+        ("orphaned-transfer", "missing", "orphaned-transfer"),
+    ],
+)
+def test_runtime_resolution_real_helper_read_only(
+    env,
+    monkeypatch: pytest.MonkeyPatch,
+    pointer_exists: bool,
+    scenario: str,
+    policy_state: str,
+    status: str,
+) -> None:
     payload = env.install_payload("agent-worktrees", "2.0.0", scope="universal")
     helper = reconcile._installation_context_helper("agent-worktrees", payload)
     assert helper is not None
@@ -49,6 +68,24 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
     legacy = env.home / ".agent-worktrees"
     legacy.mkdir()
     (legacy / "retained-state.json").write_text('{"retained":true}\n', encoding="utf-8")
+    policy = env.home / ".copilot-extensions" / "installation-mode.json"
+    if scenario in {"disabled-policy", "invalid-policy", "unsupported-policy"}:
+        policy.parent.mkdir(parents=True)
+        policy.write_text(
+            "not valid json\n" if scenario == "invalid-policy" else json.dumps({
+                "schema": "copilot-extensions.installation-mode",
+                "version": 2 if scenario == "unsupported-policy" else 1,
+                "installationMode": {"enabled": False},
+            }),
+            encoding="utf-8",
+        )
+    elif scenario == "maintenance":
+        policy.parent.mkdir(parents=True)
+        (policy.parent / "maintenance").write_text("", encoding="utf-8")
+    elif scenario == "orphaned-transfer":
+        (legacy / ".installation-ownership.json").write_text(
+            "{}\n", encoding="utf-8",
+        )
     if pointer_exists:
         pointer = env.home / ".copilot-extensions" / "agent-worktrees" / "runtime-root"
         pointer.parent.mkdir(parents=True)
@@ -57,7 +94,9 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
     calls = []
     real_run = subprocess.run
 
-    def run_fixture_helper(command, **kwargs):
+    def run_fixture_helper(
+        command: list[str], **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
         helper_index = command.index(str(helper))
         assert command[helper_index + 1] == "probe-legacy"
         calls.append(command)
@@ -68,10 +107,8 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
         bootstrap = (
             "import pwd,runpy,sys\n"
             "home=sys.argv[1]\n"
-            "original=pwd.getpwuid\n"
             "def getpwuid(uid):\n"
-            "    record=original(uid)\n"
-            "    return pwd.struct_passwd((*record[:5],home,record.pw_shell))\n"
+            "    return pwd.struct_passwd(('fixture','x',uid,uid,'fixture',home,'/bin/sh'))\n"
             "pwd.getpwuid=getpwuid\n"
             "sys.argv=sys.argv[2:]\n"
             "runpy.run_path(sys.argv[0],run_name='__main__')\n"
@@ -83,7 +120,7 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
 
     monkeypatch.setattr(reconcile.subprocess, "run", run_fixture_helper)
 
-    def snapshot():
+    def snapshot() -> dict[str, tuple[bool, int, str | None]]:
         return {
             path.relative_to(env.home).as_posix(): (
                 path.is_dir(), path.stat().st_mtime_ns,
@@ -100,17 +137,25 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
     assert result["actualMode"] == "legacy"
     assert result["runtimeRoot"] == str(legacy)
     assert result["context"] is None
-    assert result["policy"]["path"] == str(
-        env.home / ".copilot-extensions" / "installation-mode.json"
-    )
+    assert result["status"] == status
+    assert result["allowMutation"] is (status == "ready")
+    assert result["policy"]["path"] == str(policy)
     assert result["policy"]["authoritative"] is True
-    assert result["policy"]["state"] == "missing"
-    selected = reconcile.resolve_runtime_installation(
-        "agent-worktrees", payload, home=env.home,
-    )
-    assert selected.actual_mode == "legacy"
-    assert selected.runtime_root == legacy
-    assert selected.context is None
+    assert result["policy"]["state"] == policy_state
+    assert snapshot() == before
+    if status == "ready":
+        selected = reconcile.resolve_runtime_installation(
+            "agent-worktrees", payload, home=env.home,
+        )
+        assert selected.actual_mode == "legacy"
+        assert selected.runtime_root == legacy
+        assert selected.context is None
+        assert selected.status == status
+    else:
+        with pytest.raises(ValueError, match=f"status={status}, reason="):
+            reconcile.resolve_runtime_installation(
+                "agent-worktrees", payload, home=env.home,
+            )
     assert len(calls) == 2
     assert snapshot() == before
 
