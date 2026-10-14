@@ -455,7 +455,11 @@ running daemon untouched (there is no `--force` override). An absent or
 incomplete slot is built as before, unless the shared primitive refuses to prepare
 it (for example, it is the selected runtime or still in use), in which case the
 install fails instead of building over it. A refused completion-marker
-publication fails the install rather than being ignored.
+publication fails the install rather than being ignored. Every mutation of a
+newly built slot, including provider pruning, happens before its final health
+check, payload verification, completion-marker publication and activation, so
+a failure there publishes nothing and (for `update`) rolls back; nothing
+rewrites a slot once it is published.
 
 The payload hash compared by admission fingerprints everything the installer
 installs into the slot: the plugin's `pyproject.toml` and its declared `README.md`

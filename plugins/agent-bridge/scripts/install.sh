@@ -1259,15 +1259,20 @@ _install_sibling_plugins() {
 
 # Prune any stale venue-provider package from EVERY agent-bridge venv and fail if
 # one is still importable afterward (the #1643 guard). Two venvs can carry a stale
-# copy: the ACTIVE versioned runtime slot ($VENV_DIR) and the retired legacy
-# top-level ~/.agent-bridge/venv (the install-contract-v3 leftover that
-# agent-codespaces' old installer vendored into). We prune both: uv-uninstall
-# first (clean dist-info removal), then belt-and-suspenders remove any raw-copied
-# dirs, then probe importability from each venv's OWN interpreter.
+# copy: the runtime slot being built ($VENV_DIR, still unpublished) and the
+# retired legacy top-level ~/.agent-bridge/venv (the install-contract-v3
+# leftover that agent-codespaces' old installer vendored into). We prune both:
+# uv-uninstall first (clean dist-info removal), then belt-and-suspenders remove
+# any raw-copied dirs, then probe importability from each venv's OWN interpreter.
+# A `venv` SYMLINK is not a legacy venv: it targets an already-published slot,
+# which is create-once (#5472) and must never be rewritten; activation removes
+# the stale link instead.
 _remove_vendored_providers() {
     local pys=() py pkg mod purelib leak
     [[ -x "$VENV_DIR/bin/python" ]] && pys+=("$VENV_DIR/bin/python")
-    [[ -x "$INSTALL_DIR/venv/bin/python" ]] && pys+=("$INSTALL_DIR/venv/bin/python")  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
+    if [[ ! -L "$INSTALL_DIR/venv" && -x "$INSTALL_DIR/venv/bin/python" ]]; then  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
+        pys+=("$INSTALL_DIR/venv/bin/python")  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
+    fi
     if [[ ${#pys[@]} -eq 0 ]]; then
         _step "No bridge venv yet -- nothing to prune (#1643)"
         return 0
@@ -1678,6 +1683,11 @@ _install_slot_build() {
         exit 1
     fi
     _ok "Package installed"
+
+    # Prune any stale vendored provider copy + guard (#1643) while the slot is
+    # still unpublished: a completed slot is create-once (#5472), so nothing
+    # may rewrite it after its marker is published or it is activated.
+    _install_sibling_plugins || exit 1
 }
 
 do_install() {
@@ -1750,13 +1760,6 @@ do_install() {
         :
     else
         _step "Config migration skipped"
-    fi
-
-    # Prune any stale vendored provider copy from the bridge venv(s) + guard
-    # (#1643): pure providers.d, no in-venv provider packages. A reused
-    # completed slot is left untouched (#5472).
-    if [[ "${SLOT_ADMISSION:-}" != reuse ]]; then
-        _install_sibling_plugins
     fi
 
     # Create binstub
@@ -2310,6 +2313,11 @@ _update_core() {
         return 1
     fi
 
+    # Prune any stale vendored provider copy + guard (#1643) before the final
+    # verification, publication and activation: the slot is create-once
+    # (#5472), and a failure here still rolls back to the previous runtime.
+    _install_sibling_plugins reinstall || return 1
+
     # Verify the freshly-installed runtime imports before declaring success --
     # catches a half-installed venv (e.g. a wheel/dependency gap) while we can
     # still roll back, rather than starting a broken service.
@@ -2490,12 +2498,6 @@ do_update() {
 
     # Success: discard the rollback snapshot.
     _remove_venv_backup
-
-    # Update sibling plugins (e.g. agent-codespaces for codespace: namespace).
-    # A reused completed slot is left untouched (#5472).
-    if [[ "${SLOT_ADMISSION:-}" != reuse ]]; then
-        _install_sibling_plugins reinstall
-    fi
 
     # Update binstub
     deploy_binstub

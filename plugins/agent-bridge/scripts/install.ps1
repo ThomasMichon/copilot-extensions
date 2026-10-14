@@ -1228,11 +1228,14 @@ function Install-SiblingPlugins {
 
 # Prune any stale venue-provider package from EVERY agent-bridge venv and fail if
 # one is still importable afterward (the #1643 guard). Two venvs can carry a stale
-# copy: the ACTIVE versioned runtime slot (``$VenvPython`` = versions/<v>) and the
-# retired legacy top-level ``~/.agent-bridge/venv`` (the install-contract-v3
-# leftover that agent-codespaces' old installer vendored into). We prune both:
-# uv-uninstall first (clean dist-info removal), then belt-and-suspenders remove any
-# raw-copied dirs, then probe importability from each venv's OWN interpreter.
+# copy: the runtime slot being built (``$VenvPython`` = versions/<v>, still
+# unpublished) and the retired legacy top-level ``~/.agent-bridge/venv`` (the
+# install-contract-v3 leftover that agent-codespaces' old installer vendored
+# into). We prune both: uv-uninstall first (clean dist-info removal), then
+# belt-and-suspenders remove any raw-copied dirs, then probe importability from
+# each venv's OWN interpreter. A ``venv`` junction/symlink is not a legacy venv:
+# it targets an already-published slot, which is create-once (#5472) and must
+# never be rewritten; activation removes the stale link instead.
 function Remove-VendoredProviders {
     $modules = @('agent_codespaces', 'agent_containers')
     $pkgs    = @('agent-codespaces', 'agent-containers')
@@ -1240,6 +1243,10 @@ function Remove-VendoredProviders {
         Join-Path $InstallDir 'venv\Scripts\python.exe'  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
     } else {
         Join-Path $InstallDir 'venv/bin/python'  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
+    }
+    $legacyItem = Get-Item -LiteralPath (Join-Path $InstallDir 'venv') -Force -ErrorAction SilentlyContinue
+    if ($legacyItem -and ($legacyItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        $legacyPython = $null
     }
     $targets = @($VenvPython, $legacyPython) |
         Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
@@ -3073,6 +3080,15 @@ function Invoke-UpdateSlotBuild {
         if ($bridgeOut) { Write-Host ($bridgeOut | Out-String) }
         throw "Package update failed (exit $updateResult)"
     }
+
+    # Update sibling plugins (e.g. agent-codespaces for codespace: namespace),
+    # then strip the uv-regenerated console-script trampoline(s) (SAC-blocked,
+    # unused; also clears sibling agent-*.exe pulled into this venv). Both
+    # mutate the slot, so they run here -- before the caller's final health
+    # check, payload verification, publication and activation, and inside its
+    # rollback -- never on an already-published slot (#5472).
+    Install-SiblingPlugins -Reinstall
+    Remove-ConsoleTrampolines -VenvDir $VenvDir
 }
 
 function Invoke-Update {
@@ -3269,15 +3285,6 @@ function Invoke-Update {
 
     # Success: discard the rollback snapshot.
     Remove-VenvBackup
-
-    # Update sibling plugins (e.g. agent-codespaces for codespace: namespace),
-    # then strip the uv-regenerated console-script trampoline(s) (SAC-blocked,
-    # unused; also clears sibling agent-*.exe pulled into this venv). Both
-    # mutate the slot, so a reused completed slot is left untouched (#5472).
-    if ($admission -ne 'reuse') {
-        Install-SiblingPlugins -Reinstall
-        Remove-ConsoleTrampolines -VenvDir $VenvDir
-    }
 
     # Versioned layout (#581): the new slot is built + verified; now atomically
     # swap the stable `venv` junction onto it. In cutover mode this makes `venv`

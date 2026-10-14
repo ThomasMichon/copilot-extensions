@@ -948,12 +948,163 @@ def test_reused_slot_skips_every_slot_mutation_in_both_installers() -> None:
     assert "New-SignedVenv" not in install and "Install-SiblingPlugins" not in install
     update = _extract_ps("Invoke-Update", ps)
     assert "if ($admission -eq 'reuse') {" in update
-    assert "New-SignedVenv" not in update
-    assert "if ($admission -ne 'reuse') {\n        Install-SiblingPlugins -Reinstall" in update
+    assert "New-SignedVenv" not in update and "Install-SiblingPlugins" not in update
+    assert "Install-SiblingPlugins -Reinstall" in _extract_ps("Invoke-UpdateSlotBuild", ps)
     sh = _INSTALL_SH.read_text(encoding="utf-8")
     sh_install = _extract_sh("do_install", sh)
     assert '[[ "${SLOT_ADMISSION:-}" == reuse ]]' in sh_install
     assert "_uv_venv_resilient" not in sh_install
+    assert "_install_sibling_plugins" not in sh_install
+    assert "_install_sibling_plugins" not in _extract_sh("do_update", sh)
     core = _extract_sh("_update_core", sh)
-    assert core.index('[[ "${SLOT_ADMISSION:-}" == reuse ]]') < core.index("_uv_venv_resilient")
-    assert '[[ "${SLOT_ADMISSION:-}" != reuse ]]; then\n        _install_sibling_plugins reinstall' in sh
+    reuse = core.index('[[ "${SLOT_ADMISSION:-}" == reuse ]]')
+    assert reuse < core.index("_uv_venv_resilient")
+    assert reuse < core.index("_install_sibling_plugins reinstall || return 1")
+
+
+# --------------------------------------------------------------------------
+# Create-once: every slot mutation precedes verification and publication
+# --------------------------------------------------------------------------
+
+_SH_BUILD_STUBS = """_versioned_slot_clean() { :; }
+_uv_venv_resilient() { rec BUILT; return 0; }
+_uv_pip_install_resilient() { return 0; }
+_resolve_ssh_manager() { echo lib; }
+_resolve_credential_relay() { echo lib; }
+_resolve_zdd() { echo lib; }
+_resolve_single_instance_lease() { echo lib; }
+_resolve_config_migrate() { echo lib; }
+_runtime_healthy() { rec HEALTH; return 0; }
+_install_sibling_plugins() {
+    [[ -e "$VENV_DIR/.install-complete.json" ]] && rec PUBLISHED_BEFORE_PRUNE
+    rec PRUNED
+    return __PRUNE_RC__
+}
+"""
+
+_PS_BUILD_STUBS = """function New-SignedVenv { Rec 'BUILT'; return $true }
+function Invoke-UvPipInstallResilient { return [pscustomobject]@{ ExitCode = 0; Output = '' } }
+function Resolve-SshManager { return 'lib' }
+function Resolve-CredentialRelay { return 'lib' }
+function Resolve-Zdd { return 'lib' }
+function Resolve-SingleInstanceLease { return 'lib' }
+function Resolve-ConfigMigrate { return 'lib' }
+function Remove-ConsoleTrampolines { param([string]$VenvDir) }
+function Install-SiblingPlugins {
+    param([switch]$Reinstall)
+    if (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json')) { Rec 'PUBLISHED_BEFORE_PRUNE' }
+    Rec 'PRUNED'
+    if (__PRUNE_FAILS__) { throw 'provider still importable after prune' }
+}
+"""
+
+
+def _assert_mutation_precedes_publication(
+    tmp_path: Path, result: subprocess.CompletedProcess, *, prune_fails: bool, update: bool
+) -> None:
+    events = _events(tmp_path)
+    detail = f"rc={result.returncode}\nevents={events}\nstdout={result.stdout}\nstderr={result.stderr}"
+    slot = tmp_path / "install" / "versions" / _VERSION
+    assert "PRUNED" in events and "PUBLISHED_BEFORE_PRUNE" not in events, detail
+    if prune_fails:
+        # A failed prune publishes nothing and activates nothing; an update
+        # also rolls back by discarding the never-published slot.
+        assert result.returncode == 1, detail
+        for sentinel in ("HEALTH", "ACTIVATED"):
+            assert sentinel not in events, detail
+        assert not _slot_marker(tmp_path).exists(), detail
+        if update:
+            assert not slot.exists(), detail
+        return
+    assert result.returncode == 50, detail
+    assert events.index("BUILT") < events.index("PRUNED") < events.index("HEALTH"), detail
+    assert events.index("HEALTH") < events.index("ACTIVATED"), detail
+    assert _slot_marker(tmp_path).exists(), detail
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize("prune_fails", [False, True], ids=["prune-ok", "prune-fails"])
+@pytest.mark.parametrize("action", ["do_install", "do_update"])
+def test_sh_slot_is_pruned_before_verification_publication_and_activation(
+    tmp_path: Path, action: str, prune_fails: bool
+) -> None:
+    """Provider pruning mutates the slot, so it must run inside the build --
+    never after the completion marker is published or the slot activated."""
+    stubs = _SH_BUILD_STUBS.replace("__PRUNE_RC__", "1" if prune_fails else "0")
+    result = _run_sh(_sh_harness(tmp_path, "incomplete", stubs + action))
+    _assert_mutation_precedes_publication(
+        tmp_path, result, prune_fails=prune_fails, update=action == "do_update"
+    )
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+@pytest.mark.parametrize("prune_fails", [False, True], ids=["prune-ok", "prune-fails"])
+@pytest.mark.parametrize("action", ["Invoke-Install", "Invoke-Update"])
+def test_ps1_slot_is_pruned_before_verification_publication_and_activation(
+    tmp_path: Path, action: str, prune_fails: bool
+) -> None:
+    stubs = _PS_BUILD_STUBS.replace("__PRUNE_FAILS__", "$true" if prune_fails else "$false")
+    # Invoke-UpdateSlotBuild checks the slot interpreter exists; the harness's
+    # interpreter is a function, so give its name a file to find.
+    (tmp_path / "FakeSlotPython").write_text("", encoding="utf-8")
+    prefix = f"Set-Location -LiteralPath {_ps_quote(tmp_path)}\n"
+    harness = _ps_harness(tmp_path, "incomplete", prefix + stubs + action)
+    result = _run_ps(harness)
+    _assert_mutation_precedes_publication(
+        tmp_path, result, prune_fails=prune_fails, update=action == "Invoke-Update"
+    )
+
+
+_SH_FAKE_VENV = r"""fake_venv() {
+    mkdir -p "$1/bin" "$1/lib/agent_codespaces"
+    echo stale > "$1/lib/agent_codespaces/__init__.py"
+    cat > "$1/bin/python" <<'EOF'
+#!/bin/sh
+here="$(cd "$(dirname "$0")/.." && pwd)"
+case "$*" in
+    *sysconfig*) echo "$here/lib" ;;
+    *find_spec*) if [ -d "$here/lib/agent_codespaces" ]; then printf agent_codespaces; exit 1; fi ;;
+esac
+exit 0
+EOF
+    chmod +x "$1/bin/python"
+}
+uv() { rec "UV:$*"; }
+"""
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize("legacy", ["link", "real"])
+def test_sh_provider_prune_never_rewrites_a_published_slot_through_the_venv_link(
+    tmp_path: Path, legacy: str
+) -> None:
+    """Pruning runs before activation, while a stale `venv` symlink may still
+    target the previously published slot: only a real legacy venv is pruned."""
+    published = '"$INSTALL_DIR/versions/0.9.0"'
+    setup = (
+        f"fake_venv {published}\n"
+        'MSYS=winsymlinks:nativestrict ln -s ' + published + ' "$INSTALL_DIR/venv"\n'
+        '[[ -L "$INSTALL_DIR/venv" ]] || { echo NOSYMLINK; exit 0; }\n'
+        if legacy == "link"
+        else 'fake_venv "$INSTALL_DIR/venv"\n'
+    )
+    action = (
+        _SH_FAKE_VENV
+        + 'fake_venv "$VENV_DIR"\n'
+        + setup
+        + 'if _remove_vendored_providers; then echo "RC=0"; else echo "RC=1"; fi\n'
+    )
+    harness = _sh_harness(tmp_path, "incomplete", action, extra=("_remove_vendored_providers",))
+    result = _run_sh(harness)
+    detail = f"rc={result.returncode}\nevents={_events(tmp_path)}\n{result.stdout}{result.stderr}"
+    if "NOSYMLINK" in result.stdout:
+        pytest.skip("this bash cannot create a native symlink")
+    assert result.returncode == 0 and "RC=0" in result.stdout, detail
+    install = tmp_path / "install"
+    assert not (install / "versions" / _VERSION / "lib" / "agent_codespaces").exists(), detail
+    if legacy == "link":
+        stale = install / "versions" / "0.9.0" / "lib" / "agent_codespaces" / "__init__.py"
+        assert stale.exists(), "pruning rewrote a published slot through the venv link"
+        assert not any("/venv/bin/python" in e for e in _events(tmp_path)), detail
+    else:
+        assert not (install / "venv" / "lib" / "agent_codespaces").exists(), detail
