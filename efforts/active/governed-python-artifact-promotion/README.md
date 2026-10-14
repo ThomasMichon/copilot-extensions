@@ -92,7 +92,37 @@ private consumer feed. Consumer-side admission still checks the actual feed.
 The operator delegated the implementation choice, rather than prescribing a
 particular resolver or authorizing a governance exception. The
 agent-recommended first consumer lane below uses inspected governed-feed
-wheels and offline resolution; it does not relax the original feed-only rule.
+wheels and offline assembly; it does not relax the original feed-only rule.
+
+**2026-10-14 lock-authority clarification:**
+
+> authority-locks
+
+The operator selected **"Keep exact locks; design authority-approved
+feed-compatible lock profiles"** after reviewing the conflict between local
+re-resolution and the active
+[Runtime Assembly vision](../../../visions/plugin-services/runtime-assembly/README.md).
+This supersedes the agent's proposed host-side dependency re-resolution.
+Profile approval and selection belong to the designated release/installation
+authority; host admission realizes that exact selection. It does not relax a
+pin to accommodate feed lag.
+
+**Client fallback and release-availability clarification:**
+
+> We do need to have a fallback client-side, if the artifacts don't resolve or their dependencies get blocked, though, to having the client assemble the venv locally
+>
+> It also looks like dev-to-main had artifact publication fail, so we've introduced a new point of failure
+
+The client-side source-build path is required, not a future optional
+enhancement. The normal artifact path retains its exact authority-owned
+lock. When that path is unavailable, the same installation authority may
+select the verified-source fallback and establish its own explicit exact
+installation lock within the release's declared constraints and machine
+policy. That is a different, attributable assembly decision, not silent
+mutation of the artifact lock. Neither mode can bypass a package block,
+seasoning requirement, source-integrity failure or governed-feed routing.
+Artifact infrastructure must not become a prerequisite for an otherwise
+validated source release or local source installation.
 
 ## Plan
 
@@ -169,6 +199,13 @@ wheels and offline resolution; it does not relax the original feed-only rule.
       candidate composition before push and actual merge composition before
       immutable GitHub Release publication. Live signing/release proof remains
       a named Validation Plan gate, not an implementation gap.
+- [ ] Design and publish authority-approved exact dependency-lock profiles
+      for the third-party portion, bound to the selected first-party release
+      and its existing provenance identity. Define who approves/selects a
+      profile and which approved source supplies its feed-compatibility
+      evidence before enabling it. Public CI cannot certify a private feed;
+      this does not extend the public build-tooling exception to runtime
+      dependencies, add another trust root or distribute third-party bytes.
 
 
 
@@ -176,67 +213,90 @@ wheels and offline resolution; it does not relax the original feed-only rule.
 
 - [ ] Teach installers (via the shared installer engine, not a parallel
       mechanism) to locate, verify, and consume a matching artifact set,
-      falling back safely to the existing from-source path when no
-      verified match exists, and failing closed (never falling back) when
-      a located artifact fails verification. Preserve existing
+      falling back explicitly to the existing client-side source-build/venv
+      path when artifact discovery/acquisition fails or its dependency set
+      cannot be admitted. An artifact-integrity/provenance failure remains
+      a security refusal, not an ordinary fallback trigger. Preserve existing
       immutable-slot assembly, health gates, activation, and rollback.
 - [ ] Validate across supported platform/architecture/Python-ABI
       combinations, including a clean-room first install.
 
-#### First consumer lane _(agent-recommended; review before implementation)_
+#### First consumer lane _(authority-lock direction; review before implementation)_
 
 Prefer a portable, invocation-local acquisition boundary over a new proxy,
 resident service, administrator-installed egress rule or unrestricted source
 build. These additional machine facilities would reduce deployability on
 locked-down hosts without themselves proving the package-source contract.
 
-- [ ] Acquire candidate wheels only through the affirmatively trusted
-      governed feed. Preserve named-index authentication and OS trust
+- [ ] Accept only the release/installation authority's selected exact lock
+      profile, bound to the verified first-party release. A lag-tolerant
+      choice among approved profiles happens at that authority, not inside
+      artifact admission. If the artifact path is unavailable, report its
+      reason and request the same authority's verified-source fallback;
+      admission never invents a closure or silently chooses another release.
+- [ ] Preserve a client-local source-build path independent of release-asset
+      availability. Build from the independently verified selected source
+      payload, using the existing shared engine's staging, health and rollback
+      path. The installation authority may resolve an admissible fallback
+      closure from the machine's governed feed within declared constraints,
+      lock it before assembly, and record source-build mode and the trigger.
+      Do not claim the resulting generation realizes the unavailable artifact
+      lock. If every permitted dependency choice is blocked, defer explicitly
+      rather than bypassing governance or reporting a successful install.
+- [ ] Acquire the selected lock's exact wheels only through affirmatively
+      approved sources. Preserve named-index authentication and OS trust
       configuration without exposing credentials in argv, logs or receipts.
       Bind download locations and redirect chains to explicit feed trust;
       a trusted index URL alone does not authorize arbitrary linked hosts.
       Preserve each file's feed admission metadata and exclude yanked or
       withdrawn files before exposing the local set to resolution, including
       exact pins. Copying a wheel locally never erases a feed's refusal.
-- [ ] Inspect each candidate's actual wheel metadata before traversing its
-      dependencies or exposing it to the resolver. Reject direct URL,
-      VCS and external-path requirements before their targets are acquired.
-      Require intact distribution identity, wheel tags and file hashes;
+- [ ] Inspect each selected wheel's actual metadata before assembly. Reject
+      direct URL, VCS and external-path requirements before their targets are
+      acquired, and require a closed dependency set matching the selected
+      lock. Require intact distribution identity, wheel tags and file hashes;
       metadata-sidecar hints do not replace verification of actual bytes.
-- [ ] Declare finite per-package and total candidate counts, streamed
+- [ ] Declare finite per-package and total acquisition counts, streamed
       metadata/wheel byte limits, total temporary-storage limits and one
-      inclusive acquisition/resolution deadline before fetching. Bound
-      recursion and concurrent work by those same budgets. Exhaustion fails
+      inclusive acquisition/assembly deadline before fetching. Bound
+      concurrent work by those same budgets. Exhaustion fails
       closed without activation; success, failure and cancellation all clean
       up invocation-owned partial inputs. Select measured defaults before
-      enabling the lane rather than assuming unlimited feed histories.
-- [ ] Resolve and install solely from the inspected local wheel set, with
+      enabling the lane; admission does not enumerate feed version histories.
+- [ ] Assemble solely from the inspected, exact locked wheel set, with
       network disabled for those operations and no ambient cache, index,
-      override or build-backend escape. Retain the standard resolver's
-      backtracking, extras, markers, interpreter/tag compatibility and version
-      constraints rather than substituting a greedy newest-version walk.
-      Admission selects among versions the feed actually carries and honors
-      any applicable machine seasoning policy; no universal age constant
-      stands in for feed availability.
-- [ ] Persist the selected versions and wheel hashes in a local admission
-      receipt binding manifest digest, target interpreter/platform, feed
-      identity and effective policy. This consumer-specific closure is not
-      written into a globally promoted manifest that cannot know the
-      consumer's private feed. Cached reuse must revalidate that binding;
-      also recheck current per-file feed admission before selection or reuse.
-      Unavailable admission evidence fails closed rather than trusting an
-      old receipt or cached wheel. Successful resolution alone never
-      activates a slot.
-- [ ] Refuse an unavailable compatible wheel or inadmissible closure with a
-      specific diagnostic. This first lane does not execute third-party
-      source backends or silently reinterpret refusal as permission to use
-      public packages or a source build. Safe source-only support remains a
-      separately reviewed extension, not a claim of this lane's coverage.
+      override, dependency re-resolution or build-backend escape. Validate
+      the selected lock's extras, markers and interpreter/tag compatibility,
+      rather than resolving a substitute closure. Feed availability and any
+      applicable machine seasoning policy remain admission conditions, not
+      permission to replace a pin.
+- [ ] Persist an assembly receipt recording the exact lock/profile identity,
+      signed manifest digest, selected versions/wheel hashes, target and
+      applicable policy; it is evidence of the existing provenance, not a
+      second lock or trust root. Reuse admitted unchanged dependencies without
+      requiring feed access, as the Runtime Assembly vision requires.
+      Re-evaluate when explicit policy or supplied revocation evidence
+      invalidates admission. An unadmitted cache entry is not reusable proof.
+      Missing bytes or necessary admission evidence defer without activation.
+- [ ] Distinguish artifact-path unavailability from source-build failure.
+      A missing compatible artifact wheel or blocked artifact closure may
+      invoke the authorized local fallback; source and build dependencies
+      still require approved acquisition and applicable policy. Define and
+      test build-backend isolation before admitting source-only third-party
+      inputs. An unsafe or unavailable fallback leaves the prior generation
+      intact with the actual cause, never a public-index escape.
 - [ ] Integrate only through the existing shared installer engine after
       acquisition/admission contracts pass. Preserve source fallback for an
-      absent matching first-party artifact and fail closed for a present
-      invalid artifact. Native release verification and Windows/POSIX
+      unavailable artifact path and fail closed for a present invalid
+      artifact. Native release verification and Windows/POSIX
       first-touch evidence remain prerequisites to enabling consumption.
+- [ ] Coordinate source-release availability with the existing workflow
+      owner: failures confined to optional artifact production/publication
+      must not block independently validated source promotion or local
+      installation. Keep source validation, signer/source binding and
+      immutable-asset checks strict. Report artifact failure separately and
+      make retry idempotent for the exact promoted candidate; never mark
+      publication successful because source promotion succeeded.
 
 ### Phase 4 - Retention, provenance, and documentation
 
@@ -257,18 +317,17 @@ verified answer against its actual repository or machine configuration:
   installability from any one consumer's private governed feed - the
   governed-feed check is necessarily a consumer-side, install-time concern,
   not a promotion-time one.
-- **Lag-tolerant version selection:** resolving "newest compatible" would
-  routinely pin versions a real governed feed doesn't carry yet; the
-  resolver needs a seasoning/age constraint (or equivalent), tuned from
-  Phase 1's measured lag. **Phase 1 evidence (2026-10-02) revises this: lag
+- **Lag-tolerant version selection:** a public version or age floor does not
+  establish availability on a particular governed feed.
+  **Phase 1 evidence (2026-10-02): lag
   is not a fixed ~1-week constant** - measured at 0 days (pydantic,
   uvicorn) to 65+ days (fastapi) across just 3 real dependencies of one
-  plugin. A static per-package age window would be wrong in one direction
-  or the other depending on the package. The consumer-side admission check
-  (per the Feed model question above) should instead directly **query the
-  governed feed's own currently-available versions at install time** and
-  select the newest one the feed actually carries, rather than applying any
-  assumed universal age constant. See Proposal for the full measurement.
+  plugin. The designated installation authority queries actual feed
+  availability when choosing an approved exact profile or establishing an
+  authorized source-fallback lock within declared constraints. Admission
+  realizes that exact selection; it never silently relaxes an existing lock.
+  Required seasoning remains an additional eligibility floor, not an
+  estimate of feed propagation. See Proposal for the full measurement.
 - **Trust root -- resolved (2026-10-01):** `.github/workflows/validate-and-promote.yml`'s
   `promote` job confirms "branch-protected committed metadata" does **not**
   hold as a trust root here: `main` carries a zero-bypass PR-required
@@ -395,13 +454,18 @@ verified answer against its actual repository or machine configuration:
       governed feed; verify the effective `uv`/`pip` configuration
       independently and never log credentials.
 - [ ] Feed-lag tests prove the consumer-side admission check blocks
-      consumption of a closure not yet available on the local governed
-      feed, and never silently substitutes a public-index candidate.
+      consumption when an exact selected artifact is unavailable on the local
+      governed feed, names the missing artifact, and retains the previous
+      generation until the authorized fallback succeeds. Authority tests
+      select/lock an admissible source-build closure without mutating the
+      artifact lock or using a public index; the consumer cannot invent or
+      silently switch a profile. If both paths are blocked, no activation occurs.
 - [ ] Feed-admission fixtures present a compatible newer yanked wheel,
       an exact pin to it, and a previously admitted cached wheel subsequently
-      withdrawn. Selection, exact-pin resolution and receipt reuse all
-      exclude refused files; an older admissible compatible version remains
-      selectable. Missing current admission evidence refuses activation.
+      invalidated by supplied withdrawal evidence. New acquisition and
+      explicitly invalidated reuse exclude refused files; they never select
+      an older substitute locally. Unchanged admitted dependencies remain
+      reusable without a feed request when no policy/evidence invalidates them.
 - [ ] Controlled feed/redirect tests admit only explicitly trusted download
       chains and reject untrusted hosts or insecure redirects before their
       endpoints receive a request. Named-index authentication and OS trust
@@ -412,17 +476,19 @@ verified answer against its actual repository or machine configuration:
       forged sidecar hints fail against the actual wheel bytes.
 - [ ] Offline subprocess tests poison ambient indexes, caches, overrides and
       backend discovery, and observe zero network requests or source-backend
-      execution during resolution/installation. A backtracking closure with
-      extras, markers and target-tag differences proves the standard resolver
-      still selects a compatible feed-carried set. A source-only dependency
-      produces a specific refusal with no public or source-build fallback.
+      execution during assembly. Exact locked closures with extras, markers
+      and target-tag differences prove validation cannot invoke a resolver,
+      fetch an unlisted dependency or substitute another version inside the
+      selected artifact lock. Source-build tests separately prove permitted
+      local assembly, governed build-dependency acquisition and refusal of
+      unsafe source backends, with no public fallback.
 - [ ] Receipt-reuse tests change manifest digest, wheel bytes, target
-      interpreter/platform, feed identity and effective policy independently;
+      interpreter/platform, lock/profile identity and effective policy independently;
       each mismatch refuses reuse before slot activation. Matching reuse
       preserves the selected pins and hashes without trusting ambient caches.
 - [ ] Acquisition stress tests independently reach the per-package/total
-      candidate, metadata/wheel byte, temporary-storage and inclusive-time
-      limits, including recursive/cyclic histories and cancellation. Each
+      acquisition, metadata/wheel byte, temporary-storage and inclusive-time
+      limits, including oversized/cyclic lock records and cancellation. Each
       refuses without activation and cleans up partial inputs; completed
       reuse and caller-owned inputs remain intact. Cold/warm measurements
       justify finite default budgets before consumer enablement.
@@ -432,6 +498,17 @@ verified answer against its actual repository or machine configuration:
 - [ ] A test distinguishes "no artifact published" (safe from-source
       fallback) from "published artifact fails verification" (fail closed
       with diagnostics, never fall back).
+- [ ] Native client tests cover missing assets, discovery/download outage and
+      blocked artifact dependencies while source inputs and an admissible
+      governed closure remain available: each explicitly falls back, builds
+      and health-checks a local venv, records the actual fallback lock/mode,
+      and activates atomically. Tampered artifacts, blocked fallback choices
+      and fallback build failures cannot activate or alter the prior slot.
+- [ ] Release tests inject an optional artifact build/sign/upload failure
+      while independent source validation passes. Source promotion and the
+      client source path remain usable, artifact publication reports failure
+      distinctly, and an exact-candidate retry cannot overwrite immutable
+      assets. A source-validation/provenance failure still blocks its release.
 - [ ] Cold/warm source-build and artifact paths report comparable wall
       time, network, and physical storage, measured against Phase 1's
       baseline.
@@ -484,8 +561,10 @@ third-party dependency against PyPI's actual release history
 Lag varies from 0 to 65+ days across just 3 real dependencies of one
 plugin - it is not a fixed constant tunable with a single universal age
 window. This revises the Lag-tolerant version selection Open Design
-Question above: Phase 3 should query the governed feed's own currently
-available versions at install time, not apply an assumed age constant.
+Question above: Phase 3's installation authority needs actual governed-feed
+availability for profile selection or an authorized source-fallback lock;
+an assumed age constant cannot substitute for that evidence. Admission
+does not re-resolve the selected lock.
 
 **3. Timing and storage - wheel-based install is faster, markedly so
 warm.**
@@ -513,6 +592,29 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-14 - Explicit local fallback; artifact publication remains incomplete
+
+- The operator retained exact authority-owned locks, then explicitly required
+  a client-side local-venv fallback for artifact/dependency unavailability.
+  The proposal now separates the normal artifact lock from an authorized,
+  independently recorded source-build lock and revises the Runtime Assembly
+  intent before implementation. Neither path may bypass package policy.
+- Promotion `38508930963` actually merged source through #6631 to main
+  `f5e4e30353a076aec74781e6ef5cfe5df474e939`, then its asset publisher failed
+  while filtering a temporary Git index against a different checkout.
+  Canonical repair #6633 merged as
+  `871dd56f430ee787ff60fa5395992729192fa383`; source-identity hardening
+  #6628 is separately owned. No competing repair or manual retry was created.
+- The earlier queued `38517616929` was cancelled without jobs. Subsequent
+  normal promotions remain owned by the release steward; successful
+  post-repair artifact publication and immutable retry are not yet verified.
+  Source promotion, artifact publication and installed-runtime rollout are
+  separate outcomes, not interchangeable completion claims.
+- The plan now requires optional artifact failures to be reported/retried
+  independently of validated source-release availability, without weakening
+  source, artifact, attestation or immutable-publication checks. This is
+  reviewed intent, not a deployed workflow or installer behavior change.
 
 ### 2026-10-13 - Native signing reached; publication and consumer admission remain open
 

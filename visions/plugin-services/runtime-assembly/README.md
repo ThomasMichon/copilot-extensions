@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-14
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -36,7 +36,10 @@ source.
 - **Release lock** — the exact, closed set of first-party artifacts and
   third-party dependency pins a release or standalone installation resolves
   to, partitioned into a core and optional heavy environments. It is the
-  input to assembly, not something a host re-resolves.
+  input to assembly, not something admission silently re-resolves. A
+  source-build fallback selected by the same installation authority carries
+  its own explicit exact installation lock; it never masquerades as the
+  unavailable artifact lock.
 - **Artifact identity and attestation** — the content-bound identity and
   promotion attestation the release pipeline assigns to first-party
   artifacts. Admission verifies against this identity rather than against a
@@ -61,7 +64,8 @@ interactive install, unattended update, session-triggered detached update,
 repair, cache or seed miss, filling a missing artifact, and container image
 construction. Each verifies the content identity of every first-party
 artifact and every third-party dependency against the release lock before it
-contributes to a generation. A cache, seed, or accelerant speeds up
+contributes to a generation (or against the authority's exact installation
+lock for a selected source fallback). A cache, seed, or accelerant speeds up
 acquisition. It is never a separate trust root. While another approved
 source for the same artifact is reachable, losing it changes only how long
 acquisition takes; when none is, the outcome is deferred (see
@@ -86,7 +90,39 @@ governed source has mirrored it. When the governed source
 lags the lock, the outcome is **deferred**. It names the missing artifact and
 the action that would unblock it, and leaves the current generation serving.
 It never falls back to a public runtime index, relaxes a pin, or substitutes
-another version.
+another version within that lock. The installation authority may instead
+select the governed local-source fallback below; if that cannot satisfy
+policy either, the prior healthy generation remains serving.
+
+### governed-client-source-fallback
+
+Prebuilt first-party artifacts accelerate installation; their availability
+is not a prerequisite for a working client. When artifact discovery,
+acquisition or dependency admission is unavailable, the same installation
+authority can select local assembly from independently verified source for
+the selected release. Clients use that permitted fallback rather than
+treating artifact unavailability as a terminal installation failure.
+The installation authority establishes an exact fallback installation lock
+within declared dependency constraints and approved-source policy before
+assembly, and records the mode and reason rather than claiming to have
+realized the unavailable artifact lock.
+
+Fallback uses the same immutable staging, health, activation and rollback
+contract. It never bypasses a blocked package, seasoning requirement or
+governed feed, and an artifact-integrity or source-provenance failure is not
+an ordinary availability fallback. If no permitted dependency closure can
+be assembled, the outcome is explicit and the current generation survives.
+
+### artifact-availability-is-not-release-authority
+
+Failure confined to optional artifact production or publication does not
+block an independently validated source release or the client's governed
+source-build path. Source validation and provenance requirements remain
+blocking for the source they protect. Artifact failure is visible and
+retryable for the exact release, without weakening signer, digest or
+immutable-publication checks. Source promotion, asset publication and runtime
+activation have distinct outcomes; success in one never impersonates the
+others.
 
 ### complete-or-rejected-generations
 
@@ -110,10 +146,11 @@ installation configuration and mounted state.
 
 ### deferred-not-degraded
 
-An unavailable approved source, a lagging governed feed, or a missing
-artifact produces an explicit deferred or refused outcome and leaves the last
-healthy generation in service. It never produces a half-assembled runtime, an
-unverified substitute, or a silently downgraded capability.
+When neither the artifact path nor an authorized governed-source fallback can
+satisfy admission, the outcome is explicitly deferred or refused and the last
+healthy generation remains in service. An unavailable source or lagging feed
+never produces a half-assembled runtime, an unverified substitute, a policy
+bypass or a silently downgraded capability.
 
 ### no-parallel-provenance
 
