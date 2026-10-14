@@ -2598,7 +2598,7 @@ def test_named_bootstrap_check_with_json_only_stdout_is_output_free(
     ('print(print("leak"), file=sys.stderr)', False),
     ('print(\n    "diagnostic",\n    file=sys.stderr,\n)', True),
     ('emit = print\nemit("leak")', False),
-    ('print("x", **{"file": sys.stdout})', False),
+    ('print("x", file=sys.stderr, **opts)', False),
     ('import builtins\nbuiltins.print("leak")', False),
     ('print("unterminated', False),
     ('x = 1\x00', False),
