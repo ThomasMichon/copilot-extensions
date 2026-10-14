@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import platform
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -14,7 +13,7 @@ def _legacy_root() -> Path:
     override = os.environ.get("AGENT_HOME", "").strip()
     if override:
         return Path(override) / ".agent-worktrees"  # marketplace-isolation: allow legacy-default registry root
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         home = Path(os.environ.get("USERPROFILE") or Path.home())
     else:
         home = Path.home()

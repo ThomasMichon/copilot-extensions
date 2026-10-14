@@ -12,9 +12,9 @@ or an explicit ``--project``; it is threaded in-process, not read from
 from __future__ import annotations
 
 import os
-import platform
 import re
 import socket
+import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -773,7 +773,7 @@ def render_copilot_instructions(
 
 def detect_platform() -> str:
     """Detect the current platform: 'windows', 'wsl', or 'linux'."""
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         return "windows"
     # WSL detection
     try:
@@ -800,7 +800,7 @@ def _home() -> Path:
     override = os.environ.get("AGENT_HOME", "").strip()
     if override:
         return Path(override)
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         return Path(os.environ.get("USERPROFILE", str(Path.home())))
     return Path.home()
 
@@ -2066,7 +2066,7 @@ def venv_python() -> Path:
     link is retired (#1106).
     """
     root = install_dir()
-    win = platform.system() == "Windows"
+    win = sys.platform == "win32"
     sub = ("Scripts", "python.exe") if win else ("bin", "python")
     try:
         ver = (root / "current-version").read_text("utf-8").strip()

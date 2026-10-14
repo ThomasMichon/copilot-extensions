@@ -87,6 +87,11 @@ the same launchers and ownership ledger. This does not isolate the native
 installers or Windows Terminal profile refresh performed by `register`; use
 `register-project-entry` for registry and project-launcher publication only.
 
+Configuration/home discovery, front-door OS routing and Git path comparison
+use interpreter platform identity rather than `platform.system()`/`uname`.
+These OS-only checks do not require Windows WMI; home overrides, installation
+context selection and WSL detection keep their existing precedence.
+
 The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
