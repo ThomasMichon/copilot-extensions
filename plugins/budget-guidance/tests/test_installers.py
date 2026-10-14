@@ -60,6 +60,7 @@ import shutil
 import site
 import subprocess
 import sys
+import json
 
 args = sys.argv[1:]
 base = os.environ["TEST_BASE_PYTHON"]
@@ -69,13 +70,47 @@ if args and args[0] == "venv":
     if log:
         with Path(log).open("a", encoding="utf-8") as stream:
             stream.write(str(target) + "\\n")
-    raise SystemExit(subprocess.run(
+    rc = subprocess.run(
         [base, "-m", "venv", "--without-pip", str(target)],
         check=False,
-    ).returncode)
+    ).returncode
+    if rc == 0 and os.environ.get("TEST_BUILD_ARTIFACT_PROBE"):
+        python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        site_dir = subprocess.check_output(
+            [str(python), "-c", "import site; print(site.getsitepackages()[0])"], text=True,
+        ).strip()
+        pip = Path(site_dir) / "pip"
+        pip.mkdir()
+        (pip / "__init__.py").write_text("", encoding="utf-8")
+        (pip / "__main__.py").write_text(
+            "import os, runpy\\n"
+            "runpy.run_path(os.environ['TEST_UV_DRIVER'], run_name='__main__')\\n",
+            encoding="utf-8",
+        )
+    raise SystemExit(rc)
+is_pip = args[:1] == ["install"]
+if is_pip:
+    args = ["pip", "install", "--python", sys.executable, *args[1:]]
 if args[:2] == ["pip", "install"]:
     python = args[args.index("--python") + 1]
     plugin = Path(args[-2] if args[-1] == "--quiet" else args[-1])
+    if os.environ.get("TEST_BUILD_ARTIFACT_PROBE"):
+        sources = [Path(arg) for arg in args if (Path(arg) / "pyproject.toml").is_file()]
+        artifacts = []
+        for source in sources:
+            artifacts.extend(source.glob("*.egg-info"))
+            artifacts.extend((source / "src").glob("*.egg-info"))
+            if (source / "build").exists():
+                artifacts.append(source / "build")
+        assert not artifacts, f"stale artifacts reached build: {artifacts}"
+        with Path(os.environ["TEST_INSTALL_ATTEMPTS_LOG"]).open("a", encoding="utf-8") as log:
+            log.write(json.dumps({"engine": "pip" if is_pip else "uv", "sources": len(sources)}) + "\\n")
+        for source in sources:
+            (source / "build" / "lib").mkdir(parents=True)
+            (source / "stale.egg-info").mkdir()
+            (source / "src" / "stale.egg-info").mkdir()
+        if not is_pip:
+            raise SystemExit(9)
     site_dir = subprocess.check_output(
         [python, "-c", "import site; print(site.getsitepackages()[0])"],
         text=True,
@@ -112,6 +147,7 @@ raise SystemExit(2)
         "USERPROFILE": str(tmp_path / "home"),
         "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
         "TEST_BASE_PYTHON": sys.executable,
+        "TEST_UV_DRIVER": str(driver),
         "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
         "COMPUTERNAME": "TEST-HOST",
     }
@@ -119,6 +155,44 @@ raise SystemExit(2)
     env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
     Path(env["HOME"]).mkdir()
     return fake_bin, env
+
+
+@pytest.mark.parametrize("platform", ["posix", "powershell"])
+def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tmp_path, platform):
+    if platform == "posix" and (BASH is None or os.name == "nt"):
+        pytest.skip("POSIX installer coverage")
+    if platform == "powershell" and PWSH is None:
+        pytest.skip("PowerShell is unavailable")
+    _, env = _fake_uv_environment(tmp_path)
+    payload = tmp_path / "budget-guidance"
+    _copy_payload(payload)
+    procutil = payload / "libs" / "agent-procutil"
+    for source in (payload, procutil):
+        (source / "build" / "lib").mkdir(parents=True, exist_ok=True)
+        (source / "seed.egg-info").mkdir()
+        (source / "src" / "seed.egg-info").mkdir()
+    env["TEST_BUILD_ARTIFACT_PROBE"] = "1"
+    attempts = tmp_path / "attempts.jsonl"
+    env["TEST_INSTALL_ATTEMPTS_LOG"] = str(attempts)
+    install_dir = Path(env["HOME"]) / ".budget-guidance"
+    command = (
+        [BASH, str(payload / "scripts" / "install.sh"), "install", "--install-dir", str(install_dir)]
+        if platform == "posix" else
+        [PWSH, "-NoProfile", "-File", str(payload / "scripts" / "install.ps1"),
+         "-Action", "install", "-InstallDir", str(install_dir)]
+    )
+    result = subprocess.run(
+        command, cwd=tmp_path, env=env, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, timeout=120, check=False,
+    )
+    assert result.returncode == 0, result.stdout
+    assert [json.loads(line) for line in attempts.read_text().splitlines()] == [
+        {"engine": "uv", "sources": 2}, {"engine": "pip", "sources": 2},
+    ]
+    for source in (payload, procutil):
+        assert not (source / "build").exists()
+        assert not list(source.glob("*.egg-info"))
+        assert not list((source / "src").glob("*.egg-info"))
 
 
 def test_posix_installer_is_uv_first_when_ambient_python_is_absent():

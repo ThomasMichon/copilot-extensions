@@ -32,6 +32,9 @@ Python, so an older valid runtime cannot suppress reconciliation to a newer
 owning payload on a Python-less host.
 Snapshots also materialize the owning `agent-procutil` dependency; both installer
 paths pass its local source explicitly rather than resolving an index package.
+Both package build roots clear setuptools `build/` and root/src `*.egg-info`
+artifacts before and after every uv or pip attempt, including the fallback, so
+partial build residue cannot shadow current source.
 The bootstrap hook is declared output-free and emits only `{}`. Command-catalog
 rendering remains a plugin-owned emitter for explicit use and a future native
 host-composition seam; no custom cross-plugin authority invokes it.
