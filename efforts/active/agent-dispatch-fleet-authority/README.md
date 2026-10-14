@@ -5,12 +5,11 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase PRs against `dev`
 - **Created:** 2026-10-13
-- **Status:** Draft -- operator reviewed 2026-10-13: scope confirmed with one
-  addition (push notification with a long-interval poll backstop, not
-  poll-only); Phase 2 (projected relay) starts with direct scoped-token
-  calls; container/DevBox-aware fleet host selection is in scope now, not
-  deferred. **Phase 1 landed** (task-scoped capability tokens + fencing
-  guard wiring, PR pending). Proceeding to Phase 2.
+- **Status:** Active. Design merged in #6618; initial task grants merged in
+  #6630. Check-in found missing deny-by-default route authorization and
+  transactional incarnation fences; fixing those before assignment push.
+  Push-first delivery, direct restricted-worker calls, container placement
+  and explicit local/central authority remain the completion gate.
 - **Vision:** [`machine-fleet`](../../../visions/machine-fleet/README.md):
   `authenticated-scoped-and-revocable` (routing/control authorized per
   principal, service, operation, fleet scope, target), `one-owner-per-kind-
@@ -208,6 +207,12 @@ inventing new durable state.
   passed) to confirm no regression to the unchanged full-bearer path.
 
 ### Phase 2 -- Push assignment notification with poll backstop
+**Implementation correction:** the coordinator already has `/events`, a
+thread-safe `EventBus`, and a subscription-ready frame. Reuse that outbound SSE
+push contract with ready-then-reconcile, bounded reconnect and slower periodic
+reconciliation. The new long-poll endpoint sketched below is superseded; it is
+not needed to satisfy the operator's push-first requirement.
+
 Operator decision: try push for throughput, keep poll as a long-interval
 backstop (not poll-only). Builds on the `queue_run_waiters.py` durable-
 waiter + wake-on-commit idiom already in this codebase (used today for
@@ -270,6 +275,14 @@ detached-run resume), applied to a new predicate.
   bearer-only routes.
 
 ### Phase 4 -- Centralization deployment pattern (configuration, not new code)
+**Authority correction:** discovery and a standby role do not replicate queue
+data or fence independent database writers. This phase requires implementation
+and tests, not just configuration documentation. Centrally owned tasks retain
+one central write authority; a local projection cannot claim them offline or
+promote its independent database. Explicitly separate local-only tasks and
+central task references. Any ownership migration must be acknowledged and
+fenced at the durable state owner before activation.
+
 - [ ] Document (in `services/dispatch/README.md` and/or
   `docs/patterns/`) the recommended fleet-centralization shape: one
   `services/dispatch` instance (container or native) as the pinned
@@ -334,6 +347,48 @@ _Reviewed by the operator 2026-10-13 -- see Journal for the decisions
 recorded against each open fork._
 
 ## Journal
+
+### 2026-10-13 -- Check-in and corrective authorization slice
+- Operator requested a check-in before continuing. The campaign remains
+  active; merged token helpers are not completion of fleet federation.
+- A regression test proved a narrow task token could list `/tasks` globally
+  (200 instead of 403): global authentication accepted it while unrelated
+  routes had no scoped authorization. Added a deny-by-default route table,
+  with own-task reads and four owned lifecycle verbs only. Scoped headers
+  never downgrade to ambient bearer or unauthenticated local authority.
+- Added task generation to the signed grant and generation/session comparisons
+  inside progress, heartbeat, completion and abandonment write transactions.
+  Token parsing rejects malformed signed shapes, non-finite expiry and invalid
+  encoding explicitly. Restricted workers cannot call start to renew a grant.
+- HTTP tests cover every unlisted coordinator route, cross-task reads,
+  mixed credentials, no-token local configuration and replacement-session
+  races. Queue progress/heartbeat methods moved into `queue_progress.py` to
+  preserve the 1000-line source cap without changing trusted-call behavior.
+- Corrected earlier overclaims: directory discovery does not supply replicated
+  task data or durable writer fencing. Local standby against an independent
+  SQLite database is not a safe central-authority migration.
+- Found existing SSE, EventBus and ready-frame support while preparing the next
+  slice. Phase 2 will reuse that real push transport, with slower reconciliation
+  as a backstop, rather than introduce another long-poll protocol.
+- Earlier proxy `status` exercises did not prove plugin first-use provision
+  or offline fallback; that bootstrap validation remains open despite the
+  sibling effort's earlier checkbox claim.
+- Validation: 39 focused native tests pass, including a real loopback HTTP
+  supervisor/worker round-trip. A fresh Linux container passed 37 scoped-token
+  tests with an explicit governed-feed fixture after the default dependency
+  fetch failed on TLS. The two additional mounted/documentation-surface checks
+  added after that snapshot pass natively. Full affected native selection:
+  389 passed, one platform skip. No live fleet enrollment, data migration or
+  operator service change was exercised or authorized by this slice.
+- Two earlier broad native runs timed out in the Windows reconcile completion
+  fixture; its focused run and subsequent diagnostic broad run passed. Root
+  cause remains unestablished, tracked in #6662. Added bounded synthetic
+  failure evidence without increasing waits or skipping the test. Required CI
+  remains a gate, not a waived check.
+- Documentation impact: `plugins/agent-dispatch/docs/task-authority.md` records
+  exact routes, authenticated-ingress prerequisites, transactional fences and
+  deployment limitations. This is a below-altitude correction to the reviewed
+  task-authority boundary, not new standing intent.
 
 ### 2026-10-13 -- Kickoff + research pass
 - Operator directive: build containerization support for agent-dispatch

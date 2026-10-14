@@ -144,8 +144,16 @@ exit 9
 
 def test_completion_records_worker_failure_and_clears_inherited_staging(reconcile):
     runtime, run_hook, read, _ = reconcile
-    run_hook()
-    status = wait_for(lambda: read("reconcile-status.json"), lambda s: "completed_at" in s)
+    hook = run_hook()
+    try:
+        status = wait_for(lambda: read("reconcile-status.json"), lambda s: "completed_at" in s)
+    except AssertionError as exc:
+        log = runtime / "reconcile.log"
+        detail = log.read_text(encoding="utf-8-sig")[-4000:] if log.exists() else "<no log>"
+        raise AssertionError(
+            f"{exc}; hook stderr={hook.stderr!r}; status={read('reconcile-status.json')!r}; "
+            f"stub={read('stub.json')!r}; log={detail!r}"
+        ) from exc
     stub = read("stub.json")
     assert status["launched_pid"] == stub["pid"] != status["wrapper_pid"]
     assert status["worker_started_at"] and status["attempt_id"]

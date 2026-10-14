@@ -137,8 +137,9 @@ def register_task_routes(
             request, queue, fencing_guard, task_id, worker_id, owner_session_id
         )
 
-    def _mint_task_token(task_id: str, worker_id: str, owner_session_id: str | None) -> str | None:
-        return mint_task_token(control_token, fencing_guard, task_id, worker_id, owner_session_id)
+    def _scoped_generation(request: Request, fallback: int | None = None) -> int | None:
+        scope = getattr(request.state, "task_scope", None)
+        return scope.generation if scope is not None else fallback
 
     def _emit(event_type: str, task: dict) -> None:
         event_task = _event_task_dict(task)
@@ -482,7 +483,10 @@ def register_task_routes(
             lambda: queue.start(task_id, worker_id, owner_session_id=owner_session_id),
             "task.started",
         )
-        token = _mint_task_token(task_id, worker_id, result.get("owner_session_id"))
+        token = mint_task_token(
+            control_token, fencing_guard, task_id, worker_id,
+            result.get("owner_session_id"), result["generation"],
+        )
         if token is not None:
             result["task_token"] = token
         return result
@@ -584,7 +588,7 @@ def register_task_routes(
                 result=body.result,
                 expected_status=body.expected_status,
                 expected_owner_session_id=owner_session_id,
-                expected_generation=body.expected_generation,
+                expected_generation=_scoped_generation(request, body.expected_generation),
             )
         )
 
@@ -600,7 +604,7 @@ def register_task_routes(
                 permitted=body.permitted,
                 reason=body.reason,
                 expected_status=body.expected_status,
-                expected_generation=body.expected_generation,
+                expected_generation=_scoped_generation(request, body.expected_generation),
                 expected_owner_session_id=owner_session_id,
             )
         )
@@ -681,8 +685,14 @@ def register_task_routes(
 
     @app.post("/tasks/{task_id}/heartbeat")
     def heartbeat(task_id: str, body: WorkerBody, request: Request) -> dict:
-        worker_id, _ = _resolve_task_authority(request, task_id, body.worker_id)
-        return _guard(lambda: queue.heartbeat(task_id, worker_id), "task.heartbeat")
+        worker_id, session_id = _resolve_task_authority(request, task_id, body.worker_id)
+        return _guard(
+            lambda: queue.heartbeat(
+                task_id, worker_id,
+                expected_owner_session_id=session_id,
+                expected_generation=_scoped_generation(request),
+            ), "task.heartbeat",
+        )
 
     @app.post("/tasks/{task_id}/activity")
     def activity(task_id: str, body: ActivityBody) -> dict:
@@ -709,7 +719,7 @@ def register_task_routes(
 
     @app.post("/tasks/{task_id}/progress")
     def progress(task_id: str, body: ProgressBody, request: Request) -> dict:
-        worker_id, _ = _resolve_task_authority(request, task_id, body.worker_id)
+        worker_id, session_id = _resolve_task_authority(request, task_id, body.worker_id)
         return _guard(
             lambda: queue.record_progress(
                 task_id,
@@ -718,6 +728,8 @@ def register_task_routes(
                 summary=body.summary,
                 blocker=body.blocker,
                 pr=body.pr,
+                expected_owner_session_id=session_id,
+                expected_generation=_scoped_generation(request),
             ),
             "task.progress",
         )

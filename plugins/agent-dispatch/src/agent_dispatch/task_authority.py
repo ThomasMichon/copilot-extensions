@@ -12,7 +12,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 
 from .lease import FencingGuard
-from .queue import TaskQueue
+from .queue import Status, TaskQueue
 from .task_scope import mint_task_scope_token
 
 
@@ -50,7 +50,12 @@ def resolve_task_authority(
     task = queue.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="no such task")
-    if task.owner != scope.worker_id or task.owner_session_id != scope.owner_session_id:
+    if (
+        task.status not in Status.HELD
+        or task.owner != scope.worker_id
+        or task.owner_session_id != scope.owner_session_id
+        or task.generation != scope.generation
+    ):
         raise HTTPException(
             status_code=403,
             detail="task-scoped token no longer matches the task's current state",
@@ -69,6 +74,7 @@ def mint_task_token(
     task_id: str,
     worker_id: str,
     owner_session_id: str | None,
+    generation: int = 0,
 ) -> str | None:
     """Mint a task-scoped token for a just-established ownership, or
     ``None`` when no ``control_token`` is configured (task-scoped tokens are
@@ -83,4 +89,5 @@ def mint_task_token(
         worker_id=worker_id,
         owner_session_id=owner_session_id,
         epoch=epoch,
+        generation=generation,
     )

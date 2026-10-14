@@ -64,6 +64,7 @@ from .run_waiter_recovery import (
 )
 from .satellites import FleetDirectory
 from .worktree_status_relay import WorktreeStatusRelayStore
+from .task_scope import TASK_SCOPE_HEADER
 
 log = logging.getLogger("agent-dispatch.coordinator")
 
@@ -869,12 +870,27 @@ def create_app(
     )
     app.state.bus = bus
     app.state.directory = directory
+    app.state.task_fencing_guard = fencing_guard
     app.state.queue = queue
     # Back-compat alias for the pre-generalization attribute name.
     app.state.satellites = directory
     app.state.worktree_status_relay = relay
     # Graceful-cutover drain gate (docs/patterns/graceful-daemon-cutover.md).
     app.state.drain_gate = DrainGate()
+
+    @app.middleware("http")
+    async def deny_scoped_non_task_surfaces(request: Request, call_next):
+        # Mounted MCP and FastAPI's generated documentation bypass APIRoute
+        # dependencies, including the coordinator's narrow-credential gate.
+        path = request.url.path
+        if TASK_SCOPE_HEADER in request.headers and (
+            path == "/mcp" or path.startswith("/mcp/")
+            or path in {app.docs_url, app.redoc_url, app.openapi_url, "/docs/oauth2-redirect"}
+        ):
+            return JSONResponse(
+                status_code=403, content={"detail": "route does not accept task authority"},
+            )
+        return await call_next(request)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):

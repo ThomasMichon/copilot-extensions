@@ -12,6 +12,15 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .task_scope import TASK_SCOPE_HEADER, TaskScopeTokenError, verify_task_scope_token
 
+TASK_SCOPE_ROUTES = frozenset({
+    ("GET", "/tasks/{task_id}"),
+    ("GET", "/tasks/{task_id}/payload"),
+    ("POST", "/tasks/{task_id}/progress"),
+    ("POST", "/tasks/{task_id}/heartbeat"),
+    ("POST", "/tasks/{task_id}/complete"),
+    ("POST", "/tasks/{task_id}/abandon"),
+})
+
 
 def scoped_control_token(control_token: str, scope: str) -> str:
     """Derive a bearer scoped to one producer-owned operation."""
@@ -30,28 +39,31 @@ def _make_auth(token: str | None, control_token: str | None):
         request: Request,
         creds: HTTPAuthorizationCredentials | None = Depends(bearer),  # noqa: B008
     ) -> None:
+        raw = request.headers.get(TASK_SCOPE_HEADER)
+        if raw is not None:
+            if not control_token:
+                raise HTTPException(status_code=401, detail="task-scoped authority unavailable")
+            try:
+                scope = verify_task_scope_token(control_token, raw)
+            except TaskScopeTokenError as exc:
+                raise HTTPException(status_code=401, detail=str(exc)) from exc
+            route = request.scope.get("route")
+            if (request.method, getattr(route, "path", None)) not in TASK_SCOPE_ROUTES:
+                raise HTTPException(status_code=403, detail="route does not accept task authority")
+            request.state.task_scope = scope
+            from .task_authority import resolve_task_authority
+
+            resolve_task_authority(
+                request, request.app.state.queue, request.app.state.task_fencing_guard,
+                request.path_params["task_id"], None,
+            )
+            return
         if token is None:
             return
         if creds is not None and any(
             secrets.compare_digest(creds.credentials, value) for value in accepted
         ):
             return
-        # Not a full-bearer match -- a task-scoped token (see .task_scope) is
-        # a narrower, ALTERNATE credential: it authenticates the request here
-        # (so a projected relay never has to hand a container the shared/
-        # control bearer at all), but authorizes nothing by itself. Every
-        # task-lifecycle route that accepts it re-checks the claims against
-        # that one task's CURRENT state (coordinator_tasks._resolve_task_
-        # authority) and any route that does NOT opt into that recheck
-        # treats request.state.task_scope as absent, i.e. plain unauthenticated.
-        if control_token is not None:
-            raw = request.headers.get(TASK_SCOPE_HEADER)
-            if raw:
-                try:
-                    request.state.task_scope = verify_task_scope_token(control_token, raw)
-                    return
-                except TaskScopeTokenError:
-                    pass
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
     return check
