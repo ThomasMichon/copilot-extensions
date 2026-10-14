@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-13
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -241,6 +241,12 @@ worktree that no longer exists on disk, without pretending that worktree is
 still live, resumable, or a member of the ordinary active set. It is the
 natural terminus of the lifecycle — reap discards the checkout, never the
 record of what the checkout was.
+
+### Continuous worktree reclamation
+
+The [continuous reclamation](continuous-reclamation/README.md) child governs
+ongoing, host-wide collection of safely disposable workspaces, with bounded
+resident maintenance, preserved responsibility and observable performance.
 
 ### Derived status
 
@@ -860,6 +866,7 @@ manager, or session-host implementation.
 
 - Child vision: [Pull requests](pull-requests/README.md) - provider-neutral publication and review capability.
 - Child vision: [Status-monitor singleton](status-monitor-singleton/README.md) - lifecycle exclusivity and bounded serving coverage.
+- Child vision: [Continuous reclamation](continuous-reclamation/README.md) - safe cross-repository collection without accumulating manual recovery work.
 - Parent vision: [agent-fabric](../../agent-fabric/README.md)
 - Cross-cutting sibling:
   [session-hosting](../../session-hosting/README.md) — pluggable ownership of
