@@ -29,7 +29,9 @@ budget-guidance status --config ./budget.json --json \
 All budget-guidance options must precede `--reader-command`; subsequent tokens
 are literal reader arguments. The executable and working directory must be
 absolute. Batch executables (`.cmd` and `.bat`) are rejected to avoid implicit
-shell execution; select a trusted interpreter explicitly when necessary.
+shell execution, including case variants and trailing-space/period aliases.
+Windows executable alternate streams are refused as well; select a trusted
+interpreter explicitly when necessary.
 The CLI authorizes exactly one adapter. There is no environment-variable,
 configuration-file, or session-start grant path.
 Explicit reader options require the complete grant even when they equal their

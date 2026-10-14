@@ -97,6 +97,21 @@ def test_grants_require_absolute_paths_and_refuse_batch(tmp_path):
         acquire_config(_config(), {"other": _reader(tmp_path, "pass")})
 
 
+@pytest.mark.parametrize("name", [
+    "reader.cmd.", "reader.bat ", "reader.CMD.. ", "reader.BaT. .",
+])
+def test_batch_rejection_covers_windows_trailing_name_normalization(tmp_path, name):
+    with pytest.raises(ModelError, match="batch executables"):
+        CommandReader((str(tmp_path / name),), tmp_path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows executable stream semantics")
+def test_windows_executable_streams_cannot_alias_batch_entrypoints(tmp_path):
+    with pytest.raises(ModelError, match="executable streams"):
+        CommandReader((str(tmp_path / "reader.cmd::$DATA"),), tmp_path)
+
+
+
 @pytest.mark.guard
 def test_real_reader_reuses_posture_and_keeps_capture(tmp_path):
     body = json.dumps(_reading())

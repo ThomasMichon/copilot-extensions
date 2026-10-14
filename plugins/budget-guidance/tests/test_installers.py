@@ -161,8 +161,8 @@ raise SystemExit(2)
 def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tmp_path, platform):
     if platform == "posix" and (BASH is None or os.name == "nt"):
         pytest.skip("POSIX installer coverage")
-    if platform == "powershell" and PWSH is None:
-        pytest.skip("PowerShell is unavailable")
+    if platform == "powershell" and (PWSH is None or os.name == "nt"):
+        pytest.skip("portable PowerShell fixture uses a POSIX fake uv executable")
     _, env = _fake_uv_environment(tmp_path)
     payload = tmp_path / "budget-guidance"
     _copy_payload(payload)

@@ -44,7 +44,10 @@ class CommandReader:
             raise ModelError("reader argv requires an absolute executable and literal arguments")
         if not isinstance(self.cwd, Path) or not self.cwd.is_absolute():
             raise ModelError("reader cwd must be an explicit absolute path")
-        if Path(self.argv[0]).suffix.lower() in {".cmd", ".bat"}:
+        executable_name = Path(self.argv[0]).name.rstrip(" .")
+        if os.name == "nt" and ":" in executable_name:
+            raise ModelError("reader executable streams are unsupported")
+        if executable_name.lower().endswith((".cmd", ".bat")):
             raise ModelError("reader batch executables are unsupported; use an explicit interpreter")
         if (
             isinstance(self.timeout_seconds, bool)
