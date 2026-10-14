@@ -87,6 +87,15 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    registry preserves last-known state rather than masquerading as empty.
    Cleanup belongs to the consumer's report-first doctor command, never a
    destructive startup sweep.
+9. **Make safeguards earn their cost.** Serve the service-model vision's
+   `proportionate-cooperation-safeguards` and the agent-fabric vision's
+   `trusted-cooperation-with-economical-evidence`: prefer the simplest reliable
+   cooperation contract within established OS/identity and endpoint boundaries.
+   Extra hardening needs a concrete threat or failure and proportionate benefit,
+   not a hypothetical equally privileged hostile local peer. Keep useful
+   freshness, ownership and integrity checks; do not turn routine authorized
+   IPC into a redundant attestation chain. This principle does not waive any
+   binding invariant or authorize removal of an existing safeguard.
 
 ## Design invariants (binding contracts)
 

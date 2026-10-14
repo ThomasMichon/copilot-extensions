@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-11
+- **Last revised:** 2026-10-14
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -523,6 +523,19 @@ separate identity / account per agent and without agents racing each other
 through a shared default branch.
 
 ## Behaviors
+
+### trusted-cooperation-with-economical-evidence
+Authorized agents should have latitude to make reasonable decisions within
+their delegated scope, without repeatedly proving authority already established
+by the operating-system, identity and transport boundaries. Coordination should
+retain the cheap revision identifiers, ownership checks and acknowledgements
+needed to avoid stale work, wrong-target actions, lost delivery and races.
+Routine already-authorized communication should not demand exact-head or
+cryptographic receipt chains without a concrete failure they prevent and a
+proportionate benefit. Evidence should make cooperation reliable and
+diagnosable, not become a parallel workflow that blocks it. This latitude
+should preserve explicit consent, privacy, destructive-action safeguards,
+single-owner responsibility and required review, test and release gates.
 
 ### compose-by-awareness
 Capability scales with which layers a participant knows about. An agent aware of

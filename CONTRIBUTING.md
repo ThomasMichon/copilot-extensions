@@ -466,6 +466,32 @@ which turn a bounded review loop into an unbounded one:
   neither this repo's contribution flow nor the automated reviewer's own
   directives actually require.
 
+### Proportionate safeguards and reliable cooperation
+
+Keep this marketplace lean: prioritize reliable working cooperation and the
+simplest contract that satisfies the relevant vision and binding patterns.
+Operating-system permissions, identity/access controls, closed or private
+endpoints, and trusted sources and destinations are the primary security
+boundary; local reachability alone is not authorization. Trust authorized agents
+to make reasonable decisions within their delegated scope.
+
+For additional hardening, name the concrete threat or failure, the affected
+boundary or operation, and why the benefit outweighs complexity, latency, recovery and
+interoperability costs. An imagined equally privileged hostile local agent is
+not sufficient justification by itself. Keep economical evidence: cheap revision
+identifiers can prevent stale actions, and hashes or receipts can detect real
+corruption or establish reliable ownership. Do not add exact-hash/exact-head
+attestation or chained receipts to routine already-authorized IPC without a
+specific need that simpler checks cannot meet.
+
+This is a design and review criterion, not permission to remove existing checks.
+Preserve authorization, consent, privacy, destructive/data-loss safeguards,
+wrong-owner and stale-process protection, corruption/race prevention, test
+correctness, and release/review/CI gates. Any proposed safeguard change needs
+its own scoped rationale and validation under the existing contribution rules.
+Explain tradeoffs with public-safe reasoning and reproducible test flows, not
+mandatory public execution artifacts.
+
 ### Give the reviewer your context, not just your diff
 
 Self-reviewing against REVIEW.md (above) closes the gap where both roles
