@@ -223,12 +223,12 @@ def pair_pending_path(root: Path) -> Path:
 def publication_lock(root: Path, *, deadline: float | None = None):
     from .tracking import _RecordLock
 
-    digest = hashlib.sha256(os.fsencode(os.path.normcase(str(root)))).hexdigest()
+    digest = hashlib.sha256(os.fsencode(str(root).casefold())).hexdigest()
     lock = Path(tempfile.gettempdir()) / "agent-worktrees" / "static-instructions" / digest
     return _RecordLock(lock, timeout=_remaining(deadline, 30.0), require_sidecar=True)
 
 
-def _safe_path(root: Path, path: Path) -> None:
+def _safe_path(root: Path, path: Path, *, removable_files: set[Path] | None = None) -> None:
     path.relative_to(root)
     for candidate in reversed((path, *path.parents)):
         if candidate == root or not candidate.is_relative_to(root):
@@ -240,6 +240,8 @@ def _safe_path(root: Path, path: Path) -> None:
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError(f"instruction output redirects through a link: {candidate}")
         if candidate != path and not stat.S_ISDIR(info.st_mode):
+            if removable_files and candidate in removable_files and stat.S_ISREG(info.st_mode):
+                return
             raise ValueError(f"instruction output parent is not a directory: {candidate}")
 
 
@@ -256,6 +258,7 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
         output = root / NAMESPACE
         _safe_path(root, output)
         existing: set[str] = set()
+        existing_directories: set[Path] = set()
         if output.exists():
             for parent, directories, files in os.walk(output, followlinks=False, onerror=_walk_error):
                 _remaining(deadline)
@@ -266,6 +269,10 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                         if not path.is_file():
                             raise ValueError(f"instruction output is not a regular file: {path}")
                         existing.add(path.relative_to(output).as_posix())
+                    else:
+                        existing_directories.add(path)
+        stale = existing - desired.keys()
+        removable_files = {output / relative for relative in stale}
         # Include staged removals, even when Git could classify one as a rename.
         tracked = (
             _git(root, "ls-files", "-z", "--", ".github", deadline=deadline)
@@ -278,8 +285,8 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                 raise ValueError(f"tracked instruction output is protected: {os.fsdecode(raw)}")
         for relative in desired:
             path = output / relative
-            _safe_path(root, path)
-            if path.exists() and not path.is_file():
+            _safe_path(root, path, removable_files=removable_files)
+            if path.exists() and not path.is_file() and not path.is_dir():
                 raise ValueError(f"instruction destination is not a regular file: {path}")
         if desired != _snapshot(root, home, deadline=deadline):
             raise ValueError("instruction sources changed during preparation; retry publication")
@@ -301,6 +308,18 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
             )
             if paths - set(ignored.split(b"\0")):
                 raise ValueError("instruction output namespace is not completely ignored by Git")
+        for relative in sorted(stale):
+            _remaining(deadline)
+            (output / relative).unlink()
+        retained_parents = {
+            parent
+            for relative in existing & desired.keys()
+            for parent in (output / relative).parents
+        }
+        for directory in sorted(existing_directories, key=lambda path: len(path.parts), reverse=True):
+            if directory not in retained_parents:
+                _remaining(deadline)
+                directory.rmdir()
         changed = unchanged = 0
         for relative, content in desired.items():
             _remaining(deadline)
@@ -320,9 +339,5 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                 if temporary is not None:
                     temporary.unlink(missing_ok=True)
             changed += 1
-        stale = existing - desired.keys()
-        for relative in sorted(stale):
-            _remaining(deadline)
-            (output / relative).unlink()
         _remaining(deadline)
         return changed, unchanged, len(stale)

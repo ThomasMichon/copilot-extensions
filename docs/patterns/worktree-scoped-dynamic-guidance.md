@@ -143,6 +143,12 @@ Foreground preparation has no overall deadline. Explicitly bounded callers,
 including the backup, share their remaining budget across discovery and Git
 preflights and check it before publication mutations; operation-specific Git
 and lock limits remain separate from a broad startup ceiling.
+The publication key is casefolded so case-insensitive macOS checkout aliases
+cannot acquire different locks. After the complete batch preflight, stale
+untracked files and unused empty generated directories are removed before
+installing replacements, allowing file/directory destination migrations in
+either direction without manual cleanup. Tracked blockers still fail the batch
+before any of those removals.
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
 purely checked-in: a gitignored, locally re-rendered cache of auto-discovered

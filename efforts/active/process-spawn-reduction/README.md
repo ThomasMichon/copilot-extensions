@@ -351,6 +351,17 @@ single-final-batch contract.
   windows or foreground transitions. Final expanded contained source/native/
   Git/deadline selection: 380 passed / 1 unavailable-symlink skip in 162.93s.
   Headless, lint, install and documentation guards pass without budget changes.
+- Follow-up review found two retained filesystem-contract gaps. Casefolded the
+  publication key so macOS case aliases share the same gate. Complete preflight
+  now permits known untracked stale file/directory blockers, then removes stale
+  files and unused empty generated directories before installing replacements.
+  Active declaration collisions and tracked blockers still fail before any
+  cleanup. Both migration directions are exercised with untracked and
+  force-staged blockers; a case-insensitive alias simulation verifies equal lock
+  identity. Final focused source/native selection: 219 passed / 1 unavailable-
+  symlink skip in 72.40s, under unchanged limits. No native macOS venue or remote
+  rollout was authorized; the portable key behavior is unit-proven, not claimed
+  as a live macOS test.
 
 ### 2026-10-14 - Declarations decide static publication
 

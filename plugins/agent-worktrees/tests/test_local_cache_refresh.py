@@ -264,6 +264,57 @@ def test_repository_ignore_negation_cannot_publish_unignored_files(copy_workspac
     assert not output.exists()
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("tracked", [False, True])
+def test_generated_file_directory_migrations_preflight_before_cleanup(copy_workspace, reverse, tracked):
+    root, home = copy_workspace
+    template, _ = provider(root, home)
+    declaration = template.parents[1] / "instruction-projections.json"
+    data = json.loads(declaration.read_text())
+    destinations = [
+        ".github/instructions/demo/topic.instructions.md",
+        ".github/instructions/demo/topic.local.instructions.md/body.instructions.md",
+    ]
+    if reverse:
+        destinations.reverse()
+
+    def select(destination):
+        data["projections"][0]["destination"] = destination
+        write_json(declaration, data)
+        relative = destination.removeprefix(".github/instructions/").removesuffix(".instructions.md")
+        return root / static.NAMESPACE / "market" / (relative + ".local.instructions.md")
+
+    before = select(destinations[0])
+    assert lcr.refresh_local_cache(root).status == "ready"
+    previous = before.read_bytes()
+    if tracked:
+        subprocess.run(["git", "-C", str(root), "add", "-f", str(before)], check=True, capture_output=True)
+    template.write_bytes(b"new declaration")
+    after = select(destinations[1])
+    result = lcr.refresh_local_cache(root)
+    if tracked:
+        assert result.status == "failed"
+        assert before.read_bytes() == previous
+        assert not after.is_file()
+    else:
+        assert result.status == "ready", result.diagnostic
+        assert (result.changed, result.removed) == (1, 1)
+        assert after.read_bytes() == template.read_bytes()
+        assert not before.is_file()
+
+
+@pytest.mark.guard
+def test_publication_lock_coalesces_case_insensitive_checkout_aliases(tmp_path, monkeypatch):
+    from agent_worktrees import tracking
+
+    paths = []
+    monkeypatch.setattr(static.os.path, "normcase", lambda value: value)
+    monkeypatch.setattr(tracking, "_RecordLock", lambda path, **kwargs: paths.append(path))
+    static.publication_lock(tmp_path / "Checkout")
+    static.publication_lock(tmp_path / "checkout")
+    assert len(paths) == 2 and paths[0] == paths[1]
+
+
 def test_recursive_json_errors_remain_failed_diagnostics(copy_workspace, monkeypatch):
     root, home = copy_workspace
     provider(root, home)
