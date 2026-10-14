@@ -134,7 +134,7 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
                 runtime.slot(root, version, clean_incomplete=True, link_name=link_name)
             else:
                 discard()
-                cell_module.provision_runtime_slot(**cell_arguments, environment={})
+                cell_module.provision_runtime_slot(**cleanup_arguments, environment={})
                 ownership_digest = hashlib.sha256(ownership_file.read_bytes()).hexdigest()
         try:
             reply(admission=admission)

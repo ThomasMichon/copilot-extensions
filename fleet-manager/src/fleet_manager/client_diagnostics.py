@@ -28,7 +28,7 @@ def diagnose_client():
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     )
-    resource_digest = None
+    resource_digests = {}
     package = Path(__file__).absolute().parent
     for name in required:
         member = f"fleet_manager/{name}"
@@ -61,12 +61,12 @@ def diagnose_client():
         encoded = base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
         if encoded != entry.hash.value or entry.size != len(data):
             raise PlanError("fleet client resource differs from its installed RECORD")
-        if name == "_versioned_runtime.py":
-            resource_digest = value.hex()
+        resource_digests[name] = value.hex()
     return {
         "schema": "fleet-manager.client-diagnostics", "version": 1,
         "role": "client", "package_version": __version__,
         "status": "installed", "evidence": "local-installed-resource-record",
-        "runtime_resource_sha256": resource_digest,
+        "runtime_resource_sha256": resource_digests["_versioned_runtime.py"],
+        "runtime_resource_sha256s": resource_digests,
         "controller_readiness_verified": False, "mutations_performed": False,
     }

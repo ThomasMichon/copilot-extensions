@@ -140,6 +140,39 @@ def test_failed_construction_requires_actual_owner(tmp_path):
     assert slot.is_dir()
 
 
+def test_cell_construction_rejects_new_receipt_between_cleanup_and_provision(tmp_path, monkeypatch):
+    tests = Path(__file__).resolve().parents[3] / "libs" / "installation-context" / "tests"
+    monkeypatch.syspath_prepend(str(tests))
+    spec = importlib.util.spec_from_file_location("construction_generation_fixtures", tests / "test_snapshot_provenance.py")
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    layout = fixtures._receipt_layout(tmp_path)
+    fixtures._stamp_with_python(layout)
+    owned = fixtures._provision_slot_with_python(layout)
+    slot = Path(owned["slotRoot"])
+    (slot / "partial").write_text("failed older build")
+    original = vr.discard_failed_candidate
+    changed = []
+
+    def concurrent_publication(*args, **kwargs):
+        result = original(*args, **kwargs)
+        assert result
+        receipt = Path(layout["install"])
+        value = json.loads(receipt.read_bytes())
+        value["generation"] += 1
+        fixtures._write_json(receipt, value)
+        changed.append(receipt.read_bytes())
+        return result
+
+    monkeypatch.setattr(vr, "discard_failed_candidate", concurrent_publication)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(layout["install"]))
+    with pytest.raises(ValueError, match="receipt generations changed before runtime slot provisioning"):
+        vr.construction_session(slot.parent.parent, slot.name, payload_hash="a" * 64)
+    assert len(changed) == 1
+    assert Path(layout["install"]).read_bytes() == changed[0]
+    assert not slot.exists()
+
+
 @pytest.mark.parametrize("refusal", [None, "digest", "cell-complete", "build-complete", "selected", "generation"])
 def test_failed_construction_cell_receipt_cleanup(tmp_path, monkeypatch, refusal):
     tests = Path(__file__).resolve().parents[3] / "libs" / "installation-context" / "tests"

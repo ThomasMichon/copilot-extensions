@@ -248,6 +248,13 @@ marker must still match the immutable snapshot sidecar and stable current cell
 identity, while the current namespace and install generations may advance but
 may not regress below the pinned values.
 
+Failed construction pins both receipt generations and the payload root/version
+across candidate cleanup and reprovisioning. The Python provisioning API accepts
+the paired `expected_namespace_generation` and `expected_install_generation`
+arguments and rechecks them under the receipt locks before reusing or creating
+ownership. A concurrent receipt publication invalidates the older constructor;
+it cannot adopt the newer receipt's candidate.
+
 Python and PowerShell publication prepare a hidden
 `<versionsRoot-parent>/.runtime-slot-<slot-digest>-<nonce>/` sibling outside
 `versionsRoot`, write `.runtime-slot-reservation.json` before ownership, and

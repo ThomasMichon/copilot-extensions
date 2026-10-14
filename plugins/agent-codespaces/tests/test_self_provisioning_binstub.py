@@ -56,19 +56,21 @@ def test_posix_activation_requires_completion_marker() -> None:
     deploy = text.split("deploy_venv() {", 1)[1].split("\n}", 1)[0]
 
     assert "_versioned_mark_complete || return 1" in activate
-    assert "Failed to mark runtime slot complete" in marker
-    assert '"$py" "${args[@]}"' in marker
+    assert '_runtime_construction_complete "$actual_hash"' in marker
+    assert "Payload changed during construction; completion refused" in marker
     assert "|| true" not in marker
     assert "_versioned_slot_clean || return 1" in deploy
 
 
-def test_posix_cleanup_is_vacuous_without_slot_and_bootstraps_with_uv() -> None:
+def test_posix_cleanup_requires_attached_construction_and_bootstraps_with_uv() -> None:
     text = INSTALL_SH.read_text(encoding="utf-8")
     bootstrap = text.split("_bootstrap_python() {", 1)[1].split("\n}", 1)[0]
     runner = text.split("_run_versioned_runtime() {", 1)[1].split("\n}", 1)[0]
     clean = text.split("_versioned_slot_clean() {", 1)[1].split("\n}", 1)[0]
 
-    assert '[[ -d "$VENV_DIR" ]] || return 0' in clean
+    assert '_runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION"' in clean
+    assert 'py="$(_bootstrap_python)"' in clean
+    assert '"$(_payload_hash)"' in clean
     assert "command -v uv" in runner
     assert "uv run --no-project --python 3.11" in runner
     assert runner.index("_bootstrap_python") < runner.index("command -v uv")

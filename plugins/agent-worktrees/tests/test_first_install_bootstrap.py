@@ -628,7 +628,6 @@ esac
         ["bash", str(payload / "scripts" / "install.sh"), "provision"],
         cwd=home,
         env=env,
-        capture_output=True,
         text=True,
     )
     assert provision.returncode == 0, provision.stdout + provision.stderr

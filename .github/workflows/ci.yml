@@ -1055,10 +1055,9 @@ jobs:
         timeout-minutes: 2
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
-        run: >-
-          uv run --with pytest python -m pytest -q
-          -m "not derived_diagnostic_full"
-          libs/payload-invocation/tests/test_derived_diagnostic_cli.py
+        run: |
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python -m pytest -q -m "not derived_diagnostic_full" libs/payload-invocation/tests/test_derived_diagnostic_cli.py
       - name: Manager read-only wrapper (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2

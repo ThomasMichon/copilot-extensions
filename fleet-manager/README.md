@@ -120,7 +120,7 @@ fleet-manager doctor --role client
 ```
 
 `doctor` checks the imported package/version against its installed distribution
-and the package initializer/runtime resource against their SHA-256 wheel RECORD
+and the package initializer/runtime resource and executable companions against their SHA-256 wheel RECORD
 entries. It returns local installed-resource evidence, not a trusted release
 attestation, whole-package integrity proof or controller/service health. A
 missing, unreadable, linked, oversized or mismatched resource is an error,
@@ -129,6 +129,11 @@ there is no source-checkout, plugin or PATH fallback. No remote endpoint is
 queried, no credentials are acquired and no hosting role is accepted.
 Exit 0 means that local resource evidence passed; exit 1 means invalid or
 unavailable evidence. The command creates no configuration, service or runtime.
+
+Artifact staging rechecks every executable resource against those admitted
+digests before execution and loads the primitive and its companions from
+retained bytes. Later filesystem replacement cannot change a lazy component
+import during the staging lifetime.
 
 Ordinary explicit package-manager installation/removal remains supported.
 Native first-touch tests install the built wheel into a fresh package-manager

@@ -421,3 +421,23 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   clean retry are separate real native contracts under the unchanged item
   limits. The focused integration passed 11 cases with 12 platform skips;
   delivery and trusted publication/policy contracts passed 204 tests.
+- Published the reconciled owned head through the supported exact-lease flow,
+  then preserved a one-to-one replay against the newer contribution base.
+  Its only conflict retained both lifecycle admission and construction cleanup;
+  the focused native Worktrees integration passed 63 cases with four skips.
+- Subsequent real review identified two additional races. Fleet artifact
+  staging now retains and executes all RECORD-admitted companion bytes, rather
+  than reopening them after admission. Failed cell construction now carries
+  both receipt generations and payload identity into lock-protected
+  reprovisioning, so an intervening publisher invalidates the older builder.
+  The actual construction race suite passed 24 cases with nine platform skips,
+  paired provisioning passed nine checks, and installed-wheel Fleet validation
+  passed 591 cases with six skips. Selected verification dependencies were
+  restored only through the configured feed and canonical seven-day cutoff.
+- Required CI on the reconciled head still failed. New upstream diagnostic
+  workflow steps require canonical seasoning, and two native fixture groups
+  still asserted the retired completion/cleanup and raw snapshot contracts.
+  Correct those without weakening admission. The native Worktrees first-use
+  timeout remains under investigation; expose its real subprocess output
+  under the unchanged item deadline. No implementation merge, release or
+  runtime rollout is complete.

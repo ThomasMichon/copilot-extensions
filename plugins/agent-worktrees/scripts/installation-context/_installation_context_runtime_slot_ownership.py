@@ -372,6 +372,8 @@ def provision_runtime_slot(
     runtime_version: str,
     expected_payload_root: str | os.PathLike[str] | None = None,
     expected_payload_version: str | None = None,
+    expected_namespace_generation: int | None = None,
+    expected_install_generation: int | None = None,
     durable_home: str | os.PathLike[str] | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -381,6 +383,11 @@ def provision_runtime_slot(
     _assert_plugin_id(expected_plugin_id)
     _assert_snapshot_id(snapshot_id)
     _assert_runtime_version(runtime_version)
+    if (expected_namespace_generation is None) != (expected_install_generation is None):
+        _fail("Runtime slot provisioning requires both expected receipt generations.")
+    if expected_namespace_generation is not None:
+        _assert_nonnegative_generation(expected_namespace_generation, "expected namespace generation")
+        _assert_nonnegative_generation(expected_install_generation, "expected install generation")
     caller_environment = environment if environment is not None else os.environ
     if durable_home is not None and not _path_is_fully_qualified(durable_home):
         _fail("--durable-home must be absolute.")
@@ -424,6 +431,10 @@ def provision_runtime_slot(
             expected_plugin_id=expected_plugin_id,
             environment={},
         )
+        if expected_namespace_generation is not None and (
+            validated["namespaceGeneration"], validated["generation"]
+        ) != (expected_namespace_generation, expected_install_generation):
+            _fail("Installation receipt generations changed before runtime slot provisioning.")
         versions_root, slot_root, _ = _runtime_slot_paths(
             validated,
             runtime_version,

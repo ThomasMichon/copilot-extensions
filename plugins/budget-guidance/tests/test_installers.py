@@ -449,7 +449,13 @@ def test_posix_stamp_uses_owned_versioned_snapshot_without_marketplace_fallback(
     assert snapshot != PLUGIN
     assert (snapshot / "scripts" / "install.sh").is_file()
     assert (snapshot / "libs" / "agent-procutil" / "pyproject.toml").is_file()
-    assert (snapshot / "pyproject.toml").read_bytes() == (PLUGIN / "pyproject.toml").read_bytes()
+    original_manifest = (PLUGIN / "pyproject.toml").read_bytes()
+    expected_manifest = original_manifest.replace(
+        b'agent-procutil = { path = "../../libs/agent-procutil", editable = true }',
+        b'agent-procutil = { path = "libs/agent-procutil" }',
+    )
+    assert expected_manifest != original_manifest
+    assert (snapshot / "pyproject.toml").read_bytes() == expected_manifest
     assert (snapshot / ".payload-source").read_text(encoding="utf-8").strip() == str(
         PLUGIN
     )

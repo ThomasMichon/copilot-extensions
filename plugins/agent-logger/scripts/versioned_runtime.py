@@ -83,7 +83,7 @@ from pathlib import Path
 from contextlib import contextmanager
 
 
-_runtime_components = {}
+_runtime_components = globals().get("_retained_runtime_components", {})
 
 
 def _runtime_component(name: str):
