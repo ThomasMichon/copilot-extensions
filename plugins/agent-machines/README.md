@@ -750,6 +750,17 @@ modules. `provenance_hash` hashes the complete resolved package union, including
 package authority. A change only to a losing enforce value therefore leaves the
 drift key stable but changes provenance.
 
+Plan JSON (also nested under `plan` in restore JSON) exposes `managed_keys`.
+Its `copilot.settings` list contains the sorted, unique top-level settings keys
+declared by applicable `ensure-present` and `enforce` contributions, including
+grouped declarations and per-machine overrides. Nonempty `ensure-absent`
+activation requests contribute `enabledPlugins`; other dispositions do not.
+The list is empty when no settings operations apply. It contains key names only,
+never desired values, and describes the selected repository/project scope, not
+live state or an `--only` restore filter. Compare it with surface `applied_keys`
+to check coverage; a removal-only key is reported as applied only when a live
+entry was actually removed.
+
 The top-level `resources:` list declares typed, identity-bearing machine state
 -- package-manager packages, canonical config files (whole-file or a marked
 `managed-block`), Windows registry values, OS features (Windows optional
