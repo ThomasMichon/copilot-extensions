@@ -8,7 +8,7 @@
   "plugins/agent-bridge/src/agent_bridge/client.py": 1600,
   "plugins/agent-bridge/src/agent_bridge/remote_operations.py": 1206,
   "plugins/agent-bridge/src/agent_bridge/routes/sessions.py": 1589,
-  "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py": 1579,
+  "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py": 1534,
   "plugins/agent-bridge/src/agent_bridge/session_host/spawner.py": 1026,
   "plugins/agent-bridge/src/agent_bridge/transport.py": 1304,
   "plugins/agent-codespaces/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
