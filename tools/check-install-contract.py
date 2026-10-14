@@ -346,10 +346,14 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
                 while re.search(r"(?:\\|`)[ \t]*$", statement) and index < len(lines):
                     statement = statement.rstrip()[:-1] + " " + lines[index]
                     index += 1
-                stops = "||" in statement and _STOPS.search(statement.split("||", 1)[1])
+                tail = statement.split("||", 1)[1] if "||" in statement else None
+                # `|| return $?` right after the call returns the helper's own status.
+                stops = tail is not None and bool(
+                    _IMMEDIATE_STATUS.match(tail) or _FAILS.search(tail)
+                )
             elif _MARK_COMPLETE_IF_NOT.search(line):
                 tail = "\n".join(lines[lineno - 1:lineno + 20])
-                stops = bool(_STOPS.search(_braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):])))
+                stops = bool(_FAILS.search(_braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):])))
             elif match := _MARK_COMPLETE_SH_IF.match(line):
                 stops = _sh_failure_branch_stops(lines[lineno - 1:], negated=bool(match.group(1)))
             else:
@@ -364,13 +368,18 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
 
 _PS1_HELPER = "Invoke-VersionedMarkComplete"
 _MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMarkComplete\b")
-_STOPS = re.compile(r"\b(?:exit|return|throw)\b")
+# A failure branch must report failure: a non-zero or status-variable
+# exit/return, ``return $false`` or ``throw`` -- never ``return 0``/``exit 0``
+# or a bare ``return`` (which reports the previous command's success).
+_IMMEDIATE_STATUS = re.compile(r"\s*(?:return|exit)\s+\"?\$\?\"?(?![\w-])")
+_FAILS = re.compile(
+    r"\bthrow\b|\breturn\s+\$false\b"
+    r"|\b(?:exit|return)\s+(?:[1-9]\d*|\"?\$\{?(?!(?:true|null)\b)[A-Za-z_]\w*\}?\"?)(?![\w-])"
+)
 # The writer invocation inside each helper, and how its status must be handled.
 _SH_WRITER = re.compile(r'"\$py"\s+"\$\{args\[@\]\}"')
-_SH_STATUS_KEPT = re.compile(r"\brc=\$\?|\b(?:return|exit)\b")
 _PS1_WRITER = re.compile(r"&\s*\$py\b")
 _PS1_STATUS_CHECK = re.compile(r"\bif\s*\(\s*\$(?:LASTEXITCODE|\w+\.ExitCode)\s+-ne\s+0\s*\)\s*\{")
-_PS1_FAILS = re.compile(r"\breturn\s+\$false\b|\bthrow\b|\bexit\b")
 
 
 def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
@@ -389,12 +398,14 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
     if suffix == ".ps1":
         writer = _PS1_WRITER.search(code)
         check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
-        return bool(check) and bool(_PS1_FAILS.search(_braced_body(code[check.end() - 1:])))
+        return bool(check) and bool(_FAILS.search(_braced_body(code[check.end() - 1:])))
     writers = [line for line in code.splitlines() if _SH_WRITER.search(line)]
     return bool(writers) and all(
-        not sep or bool(_SH_STATUS_KEPT.search(tail))
+        not sep or bool(re.search(r"\brc=\$\?", tail) or _FAILS.search(tail))
         for _, sep, tail in (line.partition("||") for line in writers)
     )
+
+
 _MARK_COMPLETE_SH_IF = re.compile(r"^\s*(?:el)?if\s+(!\s*)?_versioned_mark_complete\b")
 _SH_KEYWORD = re.compile(r"(?<![\w$/.-])(then|if|fi|else|elif)(?![\w-])")
 
@@ -410,7 +421,8 @@ def _sh_failure_branch_stops(lines: list[str], *, negated: bool) -> bool:
     )
     keywords = list(_SH_KEYWORD.finditer(code))
     start = next((k for k in keywords if k.group(1) == "then"), None)
-    if start is None:
+    # `if helper || true; then` (or `&&`) no longer tests the helper alone.
+    if start is None or re.search(r"\|\||&&", code[:start.start()]):
         return False
     depth, branch, bodies, begin = 0, "then", {}, start.end()
     for keyword in (k for k in keywords if k.start() >= start.end()):
@@ -425,7 +437,7 @@ def _sh_failure_branch_stops(lines: list[str], *, negated: bool) -> bool:
                 break
             branch, begin = word, keyword.end()
     failure = bodies.get("then" if negated else "else")
-    return failure is not None and bool(_STOPS.search(failure))
+    return failure is not None and bool(_FAILS.search(failure))
 
 
 def _braced_body(text: str) -> str:

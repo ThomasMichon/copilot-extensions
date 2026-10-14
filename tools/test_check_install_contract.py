@@ -318,6 +318,24 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
             "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
             "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
         ),
+        ("install.sh", _SH_HELPER + "main() {\n    _versioned_mark_complete || return 0\n}\n"),
+        (
+            "install.sh",
+            _SH_HELPER + "main() {\n"
+            "    if ! _versioned_mark_complete; then\n        _warn 'x'\n        return\n    fi\n}\n",
+        ),
+        (
+            "install.sh",
+            _SH_HELPER + "main() {\n"
+            "    if _versioned_mark_complete || true; then\n        activate\n"
+            "    else\n        exit 1\n    fi\n}\n",
+        ),
+        ("install.ps1", _PS1_HELPER + "    if (-not (Invoke-VersionedMarkComplete)) { exit 0 }\n"),
+        (
+            "install.ps1",
+            _PS1_HELPER.replace("return $false\n    }", "return $true\n    }")
+            + "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+        ),
     ],
     ids=[
         "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
@@ -326,6 +344,8 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         "sh-if-not-warn-only", "sh-if-not-one-line-quoted-stop", "sh-if-else-warn-only",
         "sh-if-not-stop-only-on-success", "ps1-writer-status-ignored",
         "ps1-status-check-only-warns", "sh-writer-fallback-warns", "ps1-no-writer",
+        "sh-or-return-0", "sh-if-not-bare-return", "sh-if-condition-or-true",
+        "ps1-exit-0", "ps1-helper-failure-returns-true",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:
