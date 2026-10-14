@@ -124,6 +124,18 @@ Operator clarified the Gateway target:
 
 > Contribute to the new fleet-manager Gateway; leave the older Gateway untouched
 
+Subsequent completion direction, with the private host substrate generalized:
+
+> Is this running yet in a container? If not, set your goal to be having this be
+> running in the [selected Linux environment] container, deployed via Komodo,
+> accessed via the Gateway, with the same indexed sources and equivalent chunks.
+
+This is actual managed serving and corpus parity, not a synthetic image proof.
+The authorized-store proposal below is an **agent-recommended** response to a
+measured serving blocker. It does not authorize modifying an incumbent store or
+premature Gateway retirement; concrete adoption and prototype reconciliation
+remain downstream.
+
 ## Plan
 
 ### Phase 1 - Existing recovery and reviewed proposal
@@ -177,6 +189,16 @@ Operator clarified the Gateway target:
   declaring a second Copilot plugin.
 - [ ] Prove native-host and optional-container parity before any downstream
   placement/routing migration.
+- [ ] Deliver the authorized Komodo-managed container deployment through the
+  new Gateway with the same indexed sources and equivalent chunk coverage.
+  The two-chunk synthetic proof does not satisfy this completion gate.
+
+### Phase 3a - Authorized-store migration and serving eligibility
+
+- [ ] Review and implement the [authorized-store migration](authorized-store-migration.md)
+  under #6383 with #6240/#6030 lifecycle coordination. Bounded legacy ID
+  partitions are not eligible for full-corpus Gateway serving within its
+  existing transport deadline. _(agent-recommended measured blocker closure)_
 
 ## Validation Plan
 
@@ -209,6 +231,18 @@ Operator clarified the Gateway target:
   outage, repeated poll idempotence and concurrent-updater exclusion.
 - [ ] Live target deployment belongs to a separately authorized downstream slice;
   no private venue provisioning in the portable proposal.
+- [ ] Record incumbent and container source identities and per-source chunk
+  coverage, then exercise actual CLI retrieval through the new Gateway.
+  Explain any count differences; a healthy empty service or synthetic fixture
+  is not corpus equivalence.
+- [ ] Verify persistent deployment and restart through Komodo while retaining
+  the incumbent as the rollback target until parity is demonstrated.
+  _(agent-recommended migration safety gate; destructive retirement is separate)_
+- [ ] Prove repeatable writer-owned source projection/migration and rollback
+  compatibility, then measure actual authorized vector/FTS/hybrid requests
+  against the existing Gateway deadline with real inference/transport headroom.
+  Do not replace this gate with a larger timeout or a raised candidate cap.
+  _(agent-recommended acceptance detail)_
 
 ## Proposal
 
