@@ -174,6 +174,11 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-14 - Released repair and shared prerequisite publication
+
+- The normal authorized update deployed the released Worktrees repair surface. The operator-selected single-record dry-run passed; an active publication initially held the native authority guard, so the repair waited for that publisher to exit rather than overriding it. The supported targeted repair then succeeded with its immutable backup. Independent read-only comparison confirms the exact agent text and every surrounding field were preserved; a subsequent public integrity check reports the record valid.
+- Published the reconciled shared-prerequisite head through the supported exact saved-lease rewrite. Fresh current-head review and required CI remain merge gates. This unblocks publication only: watch-owner adoption, installation transactions, dispatch integration, service-health evidence and parent close-out remain open.
+
 ### 2026-10-13 - Shared foundation integration
 
 - Closed the previously recorded Python 3.14 Windows fixture failure rather than carrying it as an untracked exception: the singleton-manager exec test now supplies a host-native absolute temporary executable and asserts the exact forwarded argv. Production absolute-path admission is unchanged. The full canonical suite passes on the existing Python 3.14.7 environment (406 tests, 24 platform skips), and the focused regression also passes on Python 3.11.
