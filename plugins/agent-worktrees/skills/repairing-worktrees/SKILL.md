@@ -119,8 +119,18 @@ repair scopes and GC cannot be combined with it.
 
 Reports do not render guidance (`projection_status: not_checked`). Fix verifies
 the parent and companion permissions, rechecking cold state under their native
-lifecycle locks. A missing Copilot configuration or unusable knowledge binding
-fails closed instead of reporting a partial setup as ready.
+lifecycle locks. A kernel-owned admission lease excludes prompt mutation and
+handoff throughout recovery; normal launch planning refuses a held lease too.
+The kernel releases it after process exit, without guessing that a PID is stale.
+Direct seed-mutating clients require receiving verb version 4; structured request
+staging requires version 3, so an older daemon cannot silently omit this fence.
+A companion that disappears before its lifecycle lock is acquired refuses
+instead of receiving a stale pair stamp.
+
+Every permission mutator shares user-wide per-file locks, including first
+creation; concurrent projects cannot overwrite each other's trust or approvals.
+Lock failures warn and do not write. A missing Copilot configuration or unusable
+knowledge binding fails closed instead of reporting a partial setup as ready.
 
 Only `prepared: true` with all checks true and `projection_status: ready`
 confirms complete setup. Failures retain the intent and name the missing step.

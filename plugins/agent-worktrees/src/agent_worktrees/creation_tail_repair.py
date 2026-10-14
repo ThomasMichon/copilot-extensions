@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from . import config as cfg, execution_spaces, finalize as fin, git_ops
-from . import installer, knowledge_plugins, launch_seed_state, local_cache_refresh
+from . import installer, knowledge_plugins, launch_admission, launch_seed_state, local_cache_refresh
 from . import output, permissions, repos, sessions, state_root, tracking
 from . import worktree_creation
 from .launch_progress import step
@@ -234,6 +234,12 @@ def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) ->
             if stamp is None:
                 raise ValueError("paired creation did not establish its required companion")
     knowledge_config = cfg.load_config(project=root.repo)
+    entry = repos.find_repo(root.repo)
+    if entry is None:
+        raise ValueError("knowledge repository registration is missing")
+    requires_child = repos.normalize_class(entry.repo_class) in {
+        "worktree", "knowledge",
+    }
     with fin.FinalizeLock(
         Path(knowledge_config.default_repo.worktree_root) / ".finalize.lock",
         timeout=300, stale_after=3600,
@@ -243,6 +249,8 @@ def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) ->
         current_root, existing, _, child = _pair_plan(fresh, current)
         if (current_root.repo, current_root.path) != (root.repo, root.path):
             raise ValueError("knowledge binding changed during creation recovery")
+        if requires_child and child is None:
+            raise ValueError("original companion disappeared before locked creation recovery")
         if child is not None:
             _prepare_permissions(root.path, child.worktree_path)
             stamp = {
@@ -255,19 +263,18 @@ def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) ->
             if result.get("pair_error"):
                 raise ValueError(result["pair_error"])
             return
-        with tracking._RecordLock(path, require_sidecar=True):
-            fresh = cfg.load_config()
-            current, _ = _validate(fresh, path, seed_id)
-            current_root = state_root.resolve_state_root(fresh)
-            if (current_root.repo, current_root.path) != (root.repo, root.path):
-                raise ValueError("knowledge binding changed during creation recovery")
-            if any((current.pair_id, current.pair_ref, current.pair_role, current.pair_kind)):
-                raise ValueError("pair metadata changed during creation recovery")
-            result = worktree_creation._stamp_and_compose_paired_knowledge(
-                fresh, current, current.worktree_path, stamp,
-            )
-            if result and result.get("action") == "error":
-                raise ValueError(result["error"])
+        fresh = cfg.load_config()
+        current, _ = _validate(fresh, path, seed_id)
+        current_root = state_root.resolve_state_root(fresh)
+        if (current_root.repo, current_root.path) != (root.repo, root.path):
+            raise ValueError("knowledge binding changed during creation recovery")
+        if any((current.pair_id, current.pair_ref, current.pair_role, current.pair_kind)):
+            raise ValueError("pair metadata changed during creation recovery")
+        result = worktree_creation._stamp_and_compose_paired_knowledge(
+            fresh, current, current.worktree_path, stamp,
+        )
+        if result and result.get("action") == "error":
+            raise ValueError(result["error"])
 
 
 def _checks(record, plan) -> dict:
@@ -316,7 +323,7 @@ def targeted_doctor(args) -> int:
             with fin.FinalizeLock(
                 Path(config.default_repo.worktree_root) / ".finalize.lock",
                 timeout=300, stale_after=3600,
-            ):
+            ), launch_admission.guard(path):
                 config = cfg.load_config()
                 record, seed = _validate(config, path, expected)
                 plan = _pair_plan(config, record)

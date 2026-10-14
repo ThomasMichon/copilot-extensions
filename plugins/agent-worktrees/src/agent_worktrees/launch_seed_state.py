@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from . import locks, status_monitor_runtime, tracking, tracking_write
+from . import launch_admission, locks, status_monitor_runtime, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 from .worktree_status_daemon import _is_safe_identity_token
 
@@ -209,7 +209,7 @@ def _apply_remove(args: dict) -> dict:
     return {"removed": True, "record_removed": bool(args.get("remove_record"))}
 
 
-def _dispatch(verb: str, args: dict, *, min_version: int = 2) -> dict:
+def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
     enabled = status_monitor_runtime._status_monitor_enabled()
     result = tracking_write.dispatch(
         verb, args,
@@ -218,7 +218,7 @@ def _dispatch(verb: str, args: dict, *, min_version: int = 2) -> dict:
         boot_wait_s=tracking_write.BOOT_WAIT_S if enabled else 0.0,
         min_version=min_version,
     )
-    if result.get("error") == "execution_space":
+    if result.get("error") in {"execution_space", "launch_admission"}:
         raise ValueError(result["message"])
     return result
 
@@ -260,7 +260,7 @@ def remove(yaml_path: Path, *, remove_record: bool = False) -> dict:
     return _dispatch("launch_seed_remove", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "remove_record": remove_record,
-    }, min_version=3)
+    }, min_version=4)
 
 
 def pending(yaml_path: Path, record=None) -> LaunchSeed | None:
@@ -309,7 +309,13 @@ def settle_creation(yaml_path: Path, receipt: dict, result: dict) -> dict:
 def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict]:
     def apply(args: dict) -> dict:
         try:
-            return handler(args)
+            with launch_admission.guard(Path(args["yaml_path"]), timeout=2.0):
+                return handler(args)
+        except launch_admission.LaunchAdmissionBusy as exc:
+            logging.getLogger(__name__).warning(
+                "Rejecting launch-seed mutation for %s: %s", args.get("worktree_id"), exc,
+            )
+            return {"error": "launch_admission", "message": str(exc)}
         except ExecutionSpaceError as exc:
             logging.getLogger(__name__).warning(
                 "Rejecting launch-seed mutation for %s: %s", args.get("worktree_id"), exc,
@@ -318,8 +324,8 @@ def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict
     return apply
 
 
-tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=2)
-tracking_write.register_verb("launch_seed_take", _authority_checked(_apply_take), version=2)
-tracking_write.register_verb("launch_seed_restore", _authority_checked(_apply_restore), version=2)
-tracking_write.register_verb("launch_seed_finish", _authority_checked(_apply_finish), version=2)
-tracking_write.register_verb("launch_seed_remove", _authority_checked(_apply_remove), version=3)
+tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=4)
+tracking_write.register_verb("launch_seed_take", _authority_checked(_apply_take), version=4)
+tracking_write.register_verb("launch_seed_restore", _authority_checked(_apply_restore), version=4)
+tracking_write.register_verb("launch_seed_finish", _authority_checked(_apply_finish), version=4)
+tracking_write.register_verb("launch_seed_remove", _authority_checked(_apply_remove), version=4)

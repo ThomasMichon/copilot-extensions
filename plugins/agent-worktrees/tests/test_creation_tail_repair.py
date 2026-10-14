@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,7 +15,7 @@ import pytest
 
 from agent_worktrees import config as cfg, creation_tail_repair as repair
 from agent_worktrees import git_ops, installer, launch_seed_state, local_cache_refresh
-from agent_worktrees import maintenance_cli, permissions, repos, sessions, state_root
+from agent_worktrees import launch_admission, maintenance_cli, permissions, repos, sessions, state_root
 from agent_worktrees import status_monitor_runtime, tracking, worktree_creation
 
 
@@ -345,6 +346,180 @@ def test_creation_refuses_changed_identity_during_setup(creation, monkeypatch, c
     )
     code, report = _run(creation, capsys, fix=True)
     assert code == 1 and report["error"] and not report["repaired"]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("retained", [True, False])
+def test_creation_refuses_companion_removed_before_knowledge_lock(
+    creation, monkeypatch, capsys, retained,
+):
+    child_id = creation.record.worktree_id + "-k"
+    checkout = creation.roots["knowledge"] / child_id
+
+    def carve(*args, **kwargs):
+        checkout.mkdir(parents=True)
+        child = tracking.create_new_record(
+            child_id, f"worktree/{child_id}", str(checkout), "knowledge", "host",
+            cfg.detect_platform(), creation.projects["knowledge"] / "worktrees",
+            pair_id="20261013-100000-abcd", pair_role="knowledge",
+            pair_ref=tracking.format_claim_ref("host", "harness", creation.record.worktree_id),
+            pair_kind="worktree",
+        )
+        return {
+            "pair_id": child.pair_id, "pair_role": "harness", "pair_kind": "worktree",
+            "pair_ref": tracking.format_claim_ref("host", "knowledge", child_id),
+        }
+
+    if retained:
+        carve()
+    monkeypatch.setattr(worktree_creation, "_carve_paired_knowledge", carve)
+    real_lock = repair.fin.FinalizeLock
+
+    @contextmanager
+    def lock(path, **kwargs):
+        with real_lock(path, **kwargs):
+            if path.parent == creation.roots["knowledge"]:
+                (creation.projects["knowledge"] / "worktrees" / f"{child_id}.yaml").unlink()
+                checkout.rmdir()
+            yield
+
+    monkeypatch.setattr(repair.fin, "FinalizeLock", lock)
+    monkeypatch.setattr(
+        worktree_creation, "_stamp_and_compose_paired_knowledge",
+        lambda *a, **kw: pytest.fail("stale companion was stamped"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and "companion disappeared" in report["error"]
+    assert not tracking.load_record(creation.record.yaml_path).is_paired
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.guard
+def test_creation_fences_final_seed_handoff_during_repair(creation, monkeypatch, capsys):
+    from agent_worktrees import launch_seed_exec
+
+    original = repair._prepare_permissions
+    monkeypatch.setattr(
+        state_root, "resolve_state_root",
+        lambda *a, **kw: state_root.StateRoot("", "", "", False, False, False),
+    )
+    monkeypatch.setattr(launch_seed_exec, "_final_cold_error", lambda record: None)
+    monkeypatch.setattr(
+        launch_seed_exec.subprocess, "Popen",
+        lambda *a, **kw: pytest.fail("Copilot entered during creation repair"),
+    )
+
+    def prepare(*args):
+        with pytest.raises(ValueError, match="launch admission is busy"):
+            launch_seed_exec.launch(
+                creation.record.yaml_path, ["copilot"], invoke=True,
+                seed_id=creation.seed.seed_id,
+            )
+        assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+        original(*args)
+
+    monkeypatch.setattr(repair, "_prepare_permissions", prepare)
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0 and report["prepared"]
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+    with launch_admission.guard(creation.record.yaml_path):
+        pass
+
+
+@pytest.mark.guard
+def test_creation_lease_refuses_existing_launch_planning(creation):
+    from agent_worktrees.resume_seed import seed_for_attempt
+
+    with launch_admission.guard(creation.record.yaml_path):
+        with pytest.raises(ValueError, match="launch admission is busy"):
+            seed_for_attempt(creation.record.yaml_path, creation.record, SimpleNamespace())
+        assert seed_for_attempt(
+            creation.record.yaml_path, creation.record, SimpleNamespace(dry_run=True),
+        ) == creation.seed
+    assert seed_for_attempt(
+        creation.record.yaml_path, creation.record, SimpleNamespace(),
+    ) == creation.seed
+
+
+@pytest.mark.guard
+def test_creation_lease_refuses_structured_request_seed_replacement(creation, monkeypatch):
+    from agent_worktrees import launch_request
+
+    receipt = {
+        "worktree_id": creation.record.worktree_id, "fingerprint": "fixture",
+        "seed_id": "b" * 32, "kind": "resume", "accepted": False,
+        "prior_revision": creation.seed.revision,
+    }
+    monkeypatch.setattr(launch_request, "_read_admission", lambda *a: receipt)
+    with launch_admission.guard(creation.record.yaml_path):
+        with pytest.raises(ValueError, match="launch admission is busy"):
+            launch_request._apply_stage({
+                "tracking_dir": str(creation.record.yaml_path.parent),
+                "request_id": "a" * 32, "fingerprint": "fixture", "text": "another intent",
+            })
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+def test_creation_lease_excludes_real_process_seed_take(creation):
+    home = creation.projects["harness"].parent
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("COPILOT_", "AGENT_WORKTREES_"))
+    }
+    env.update({
+        "AGENT_HOME": str(home), "HOME": str(home), "USERPROFILE": str(home),
+        "AGENT_WORKTREES_STATUS_MONITOR": "0",
+        "PYTHONPATH": str(Path(repair.__file__).resolve().parents[1]),
+    })
+    script = (
+        "import sys; from pathlib import Path; from agent_worktrees import launch_seed_state;"
+        "launch_seed_state.take(Path(sys.argv[1]), seed_id=sys.argv[2]); print('taken')"
+    )
+    command = [sys.executable, "-c", script, str(creation.record.yaml_path), creation.seed.seed_id]
+    options = {
+        "env": env, "capture_output": True, "text": True, "timeout": 15,
+        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    }
+    with launch_admission.guard(creation.record.yaml_path):
+        blocked = subprocess.run(command, **options)
+        assert blocked.returncode != 0 and "launch admission is busy" in blocked.stderr
+        assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+    admitted = subprocess.run(command, **options)
+    assert admitted.returncode == 0, admitted.stderr
+    assert launch_seed_state.peek(creation.record.yaml_path).handoff_id
+    assert creation.seed.text not in blocked.stdout + blocked.stderr + admitted.stdout + admitted.stderr
+
+
+def test_creation_lease_is_released_by_kernel_after_process_exit(creation):
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(repair.__file__).resolve().parents[1])
+    script = (
+        "import os,sys; from pathlib import Path; from agent_worktrees import launch_admission;"
+        "lease=launch_admission._lease(Path(sys.argv[1])); lease.acquire();"
+        "print('ready',flush=True); input(); os._exit(7)"
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(creation.record.yaml_path)],
+        env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    try:
+        assert process.stdout.readline().strip() == "ready"
+        with pytest.raises(ValueError, match="launch admission is busy"):
+            with launch_admission.guard(creation.record.yaml_path):
+                pytest.fail("another process's lease was ignored")
+        process.stdin.write("\n")
+        process.stdin.flush()
+        assert process.wait(timeout=10) == 7
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
+    with launch_admission.guard(creation.record.yaml_path):
+        pass
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 
 @pytest.mark.guard

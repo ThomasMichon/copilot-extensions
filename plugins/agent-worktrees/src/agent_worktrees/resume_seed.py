@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from .sessions import LiveVerdict
-from . import launch_seed_state
+from . import launch_admission, launch_seed_state
 from pathlib import Path
 
 
 def seed_for_attempt(path: Path, record, args) -> launch_seed_state.LaunchSeed | None:
+    if not getattr(args, "dry_run", False):
+        launch_admission.check(path)
     explicit = getattr(args, "seed", None)
     expected_id = getattr(args, "seed_id", None)
     if explicit and expected_id:
