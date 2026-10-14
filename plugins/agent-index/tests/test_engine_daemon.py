@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from agent_index.engine import daemon
@@ -219,6 +221,8 @@ def test_spawn_launches_through_spawn_daemon(monkeypatch, tmp_path):
     )
 
     kwargs = captured["kwargs"]
+    # Launched through the log-level bootstrap, not `-m` directly.
+    assert captured["cmd"][:2] == ["pythonw.exe", "-c"]
     # Never the caller's ambient cwd -- this is a long-lived, detached
     # daemon rooted at its own durable engine home instead.
     assert kwargs["cwd"] == tmp_path
@@ -238,6 +242,54 @@ def test_spawn_keeps_an_explicit_engine_log_level(monkeypatch, tmp_path):
     )
     daemon._spawn(["pythonw.exe"], python="python.exe", home=tmp_path)
     assert captured["env"][daemon.ENGINE_LOG_LEVEL_ENV] == "debug"
+
+
+_OLD_ENGINE_APP = """\
+import sys
+
+def main():
+    import uvicorn
+    # An engine app from before AGENT_INDEX_ENGINE_LOG_LEVEL: hard-coded info.
+    uvicorn.run("app", host=sys.argv[sys.argv.index("--host") + 1], log_level="info")
+
+if __name__ == "__main__":
+    main()
+"""
+_FAKE_UVICORN = """\
+import sys
+
+def run(app, **kwargs):
+    print("LEVEL=" + kwargs["log_level"])
+    print("ARGS=" + " ".join(sys.argv[1:]))
+"""
+
+
+@pytest.mark.parametrize(("level", "expected"), [("warning", "warning"), (None, "info")])
+def test_bootstrap_applies_the_log_level_to_a_preserved_older_engine(
+    monkeypatch, tmp_path, level, expected
+):
+    """The durable engine venv survives service updates, so its app may hard-code
+    ``info``; the launch bootstrap still applies the level without a rebuild."""
+    import subprocess
+    import sys
+
+    pkg = tmp_path / "agent_index_engine"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "app.py").write_text(_OLD_ENGINE_APP, encoding="utf-8")
+    (tmp_path / "uvicorn.py").write_text(_FAKE_UVICORN, encoding="utf-8")
+    cmd = daemon._with_log_level_bootstrap(
+        [sys.executable, "-m", "agent_index_engine.app", "--host", "127.0.0.1", "--port", "1"]
+    )
+    assert cmd[1] == "-c"
+    env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+    env.pop(daemon.ENGINE_LOG_LEVEL_ENV, None)
+    if level:
+        env[daemon.ENGINE_LOG_LEVEL_ENV] = level
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert f"LEVEL={expected}" in result.stdout
+    assert "ARGS=--host 127.0.0.1 --port 1" in result.stdout
 
 
 def test_start_raises_on_early_exit(monkeypatch, tmp_path):

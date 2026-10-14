@@ -1,5 +1,5 @@
 {
-  "comment": "The persistent and per-reindex embedding engines launch through the shared spawn_daemon primitive with an append-only stdio log; spawned engines default to AGENT_INDEX_ENGINE_LOG_LEVEL=warning so the log does not record every request.",
+  "comment": "The persistent and per-reindex embedding engines launch through the shared spawn_daemon primitive with an append-only stdio log; spawned engines default to AGENT_INDEX_ENGINE_LOG_LEVEL=warning so the log does not record every request; the persistent engine applies it through a launch bootstrap, so a preserved older engine install honors it too.",
   "changes": [
     {
       "plugin": "agent-index",

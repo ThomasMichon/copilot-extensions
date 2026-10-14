@@ -137,13 +137,36 @@ def engine_log_path(home: Path | None = None) -> Path:
     return Path(os.path.abspath(home or engine_home())) / "logs" / "engine-stdio.log"
 
 
+#: Runs ``agent_index_engine.app`` as ``__main__`` with ``uvicorn.run`` taking
+#: its level from :data:`ENGINE_LOG_LEVEL_ENV`. The durable engine venv is
+#: preserved across service updates, so its installed app may predate that
+#: variable and hard-code ``info``; this keeps its access lines out of the
+#: append-only log without rebuilding the engine.
+_LOG_LEVEL_BOOTSTRAP = (
+    "import os, runpy, uvicorn\n"
+    "_run = uvicorn.run\n"
+    "def _run_at_level(*args, **kwargs):\n"
+    f"    kwargs['log_level'] = os.environ.get({ENGINE_LOG_LEVEL_ENV!r}) or kwargs.get('log_level', 'info')\n"
+    "    return _run(*args, **kwargs)\n"
+    "uvicorn.run = _run_at_level\n"
+    "runpy.run_module('agent_index_engine.app', run_name='__main__', alter_sys=True)\n"
+)
+
+
+def _with_log_level_bootstrap(cmd: list[str]) -> list[str]:
+    if cmd[1:3] == ["-m", "agent_index_engine.app"]:
+        return [cmd[0], "-c", _LOG_LEVEL_BOOTSTRAP, *cmd[3:]]
+    return list(cmd)
+
+
 def _spawn(cmd: list[str], *, python: str, home: Path) -> subprocess.Popen:
     """Launch the persistent engine through ``spawn_daemon``.
 
     Runs from its durable engine home, never the caller's cwd (a checkout that
     may be deleted, or the plugin payload), breaks away from a kill-on-close
     Job around the caller where allowed (otherwise it starts inside it, as it
-    always did), and appends stdout/stderr to :func:`engine_log_path`.
+    always did), and appends stdout/stderr to :func:`engine_log_path` at the
+    :data:`ENGINE_LOG_LEVEL_ENV` level, whatever engine app version is installed.
     """
     root = Path(os.path.abspath(home))
     root.mkdir(parents=True, exist_ok=True)
@@ -151,7 +174,7 @@ def _spawn(cmd: list[str], *, python: str, home: Path) -> subprocess.Popen:
     env.update(windowless_python_env(python))
     env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
     return spawn_daemon(
-        cmd,
+        _with_log_level_bootstrap(cmd),
         cwd=root,
         log_path=engine_log_path(root),
         env=env,
