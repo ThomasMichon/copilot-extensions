@@ -62,6 +62,9 @@ the existing asserted-head fallback; an explicit null head transition clears it.
 preserving an unrecognized explicit leg as opaque data.
 An unrecognized legacy backend likewise remains visible as raw data with its
 opaque flag; a null derived leg does not prove absence of a provider binding.
+YAML timestamp scalars, including those nested in opaque bindings or provider
+blobs, are represented as ISO-8601 strings in JSON without rewriting the record.
+Other values must be JSON-compatible; unsupported scalar types are malformed.
 Recognized legacy backends use the existing parsed version-1 representation.
 
 The stored ID must match the requested ID, the repository must belong to the

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import get_args
 
@@ -20,6 +21,12 @@ class RecordReadError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def _json_scalar(value: object) -> str:
+    if isinstance(value, date):
+        return value.isoformat()
+    raise TypeError(f"Record contains a non-JSON value: {type(value).__name__}")
 
 
 def _validate_head_ledger(data: dict) -> None:
@@ -154,8 +161,7 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
             "checkout_managed",
         ):
             worktree[key] = data.get(key)
-        json.dumps(worktree, allow_nan=False)
-        return worktree
+        return json.loads(json.dumps(worktree, default=_json_scalar, allow_nan=False))
     except RecordReadError:
         raise
     except (yaml.YAMLError, ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:

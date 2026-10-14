@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-from datetime import datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -354,6 +354,38 @@ def test_record_read_opaque_legacy_backend_is_not_sessionless(record_fixture):
     assert result["worktree"]["execution_leg"] is None
     assert result["worktree"]["session_backend"] == data["session_backend"]
     assert result["worktree"]["session_backend_opaque"] is True
+
+
+@pytest.mark.parametrize(
+    ("field", "binding"),
+    [
+        ("execution_leg", {"version": 99, "provider": "future-provider"}),
+        ("session_backend", {"version": 99, "kind": "future-backend"}),
+        (
+            "execution_leg",
+            {"version": 1, "provider": "example-provider", "state": "unknown",
+             "binding_revision": 1, "blob": {}},
+        ),
+    ],
+)
+def test_record_read_normalizes_nested_yaml_timestamps_without_writes(
+    record_fixture, field, binding,
+):
+    data, path = record_fixture
+    timestamp = datetime(2026, 1, 1, 12, 30, tzinfo=timezone.utc)
+    calendar_day = date(2026, 1, 2)
+    content = binding.get("blob", binding)
+    content["future_metadata"] = {"values": [timestamp, {"day": calendar_day}]}
+    data[field] = binding
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    normalized = result["worktree"][field]
+    metadata = normalized.get("blob", normalized)["future_metadata"]
+    assert metadata == {"values": [timestamp.isoformat(), {"day": calendar_day.isoformat()}]}
+    assert result["worktree"][f"{field}_opaque"] is (binding["version"] != 1)
+    assert path.read_bytes() == before
 
 
 def test_record_read_legacy_backend_translation_is_not_written(record_fixture):
