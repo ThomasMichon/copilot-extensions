@@ -62,14 +62,12 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    git checkout of this repo, and a bare plugin name never selects mutable state.
 4. **Right-size the surface.** Payload-only < runtime CLI < runtime service.
    Don't add a daemon, a port, or a resolver a plugin doesn't need.
-   **Reuse must fit the operation, not merely a related subject.** Compare the
-   integration, packaging, process, lifecycle and failure costs of reuse against
-   a direct implementation. A small local file-copy operation should not inherit
-   a review/sync framework, packaged engine or service just to share nearby code.
-   Reuse a small helper when its contract actually matches; keep correctness and
-   safety checks proportionate rather than importing unrelated machinery.
-   This is not permission to duplicate an existing authority or discard required
-   behavior: choose the simplest complete design, not the shortest happy path.
+   Prefer a simple direct implementation over importing a larger related
+   framework. Reuse code when it reduces total complexity, not merely because
+   its subject is similar. This guides implementation design; it is not a
+   runtime admission policy. For static instruction publication, the resolved
+   plugins' declarations decide what is copied. Content and harness-composition
+   decisions belong in authoring and review, not an on-the-fly evaluator.
    If you add a long-lived resident daemon under any shape, you have taken on the
    [`graceful-daemon-cutover`](graceful-daemon-cutover.md) obligation at design
    time and must justify any claimed exemption explicitly.

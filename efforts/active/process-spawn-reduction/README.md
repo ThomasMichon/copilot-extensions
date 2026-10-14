@@ -105,6 +105,15 @@ local-instruction suffix. Do not require a separately packaged projection
 engine for this operation. Overwrite untracked files within the dedicated
 ignored generated namespace; never overwrite tracked repository content.
 
+Operator's clarification of declaration-driven delivery, verbatim:
+
+> What is this "fit-for-purpose reuse" business? If a plugin declares an instruction file to be projected, we project it. Done. We'll review our harness holistically, and make adjustments to what plugins provide, but we won't judge/guard on the fly
+
+Simplicity governs the implementation, not admission of instruction content.
+Every declared static instruction file from the resolved plugin set is copied;
+content review and adjustments belong to the plugins and harness as a whole.
+The tracked-file protection remains a filesystem safeguard, not a content gate.
+
 ## Plan
 
 ### Phase 1 - Reviewed scope and baseline
@@ -174,13 +183,14 @@ ignored generated namespace; never overwrite tracked repository content.
 - [ ] Replace the startup dependency on the packaged projection manager with
   a small in-process batch over declared static files. Force-replace untracked
   generated outputs; refuse tracked destinations before copying the batch.
-  Keep the separate checked-in authoring/review tools and reader guarantees.
+  Copy every declared file without content scoring, budget filtering or a
+  second runtime admission policy. Keep authoring/review tools separate.
 - [ ] _(Agent-recommended preservation of existing behavior)_ Keep lightweight
   per-worktree publication ordering and refresh the source set within it.
   Reconcile stale generated instructions for disabled/removed sources, with
   both overwrites and removals covered by the tracked-file preflight.
 - [x] Revise the owning vision and design pattern for simple local delivery
-  and fit-for-purpose reuse before the implementation changes behavior.
+  and simple implementation before the implementation changes behavior.
 - [ ] Keep maintenance separate from offline planning and final projection.
   Record allocation/retry behavior when maintenance or later preparation fails;
   do not invent rollback of shared plugin/runtime updates.
@@ -228,6 +238,8 @@ ignored generated namespace; never overwrite tracked repository content.
   runtime-assets manifest, sibling runtime or network access. Existing
   untracked generated files are replaced; tracked and staged-added
   destinations refuse the batch without modifying repository source.
+- [ ] Declared file bytes are copied unchanged and no content-quality,
+  suitability, budget or secondary admission evaluator is invoked.
 - [ ] Concurrent launch/backup publications cannot restore an older source
   selection; disabled/removed sources leave no stale generated instructions.
   Incomplete discovery cannot authorize cleanup, and tracked stale outputs
@@ -258,6 +270,17 @@ merely for code reuse. Do not add cross-file transaction machinery for this
 single-final-batch contract.
 
 ## Journal
+
+### 2026-10-14 - Declarations decide static publication
+
+- Clarified that simplicity is an implementation-design principle, not a
+  runtime judgment of whether a plugin's declared instructions deserve delivery.
+- The publication contract copies every declared file from the resolved plugin
+  set unchanged. Content-quality, suitability, budget and secondary admission
+  checks do not belong in this copy path; holistic review changes contributions
+  at their plugin/harness source.
+- Tracked-file and path protections remain filesystem safeguards. This intent
+  clarification does not claim that the runtime publisher is implemented.
 
 ### 2026-10-13 - Simple static startup publication contract
 
