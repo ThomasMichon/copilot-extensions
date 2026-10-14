@@ -2557,6 +2557,26 @@ node's own heartbeats indefinitely; default `30`), and
 queued-task discovery pagination for one tick, independent of any single
 request's own HTTP timeout; default `10`).
 
+The running satellite subscribes outbound to the shared coordinator's existing
+`/events` SSE stream. Subscription-ready frames trigger authoritative queue
+reconciliation at startup and reconnect; relevant task/capacity events wake
+that same intake, filtered by machine (and repository for scoped embedders).
+An event never assigns ownership. A bounded dirty bit coalesces bursts, with
+at most one reconcile per second; a 60-second poll recovers dropped events
+even while disconnected. Presence heartbeats run independently of discovery
+and spawn. Direct, one-shot federation ticks retain their synchronous read.
+
+The stream emits comment keepalives every 10 quiet seconds. Intake bounds
+reads at 20 seconds, the initial ready barrier at 5 seconds, and reconnect
+backoff at 1-30 seconds. Old coordinators without ready/keepalive support
+degrade to polling while reconnection is retried. Closing the satellite gate
+or changing/removing its shared URL or credential retires the subscription
+and waits for an in-flight intake before closing its client; replacement is
+deferred rather than racing two intakes. `GET /health` on the local serving
+coordinator reports `assignment_intake` connection state, sanitized failure
+type and reconciliation count (null when no intake exists). This is delivery
+health, not queue replication, offline authority or container enrollment.
+
 `agent-dispatch federation status` prints the discovered coordinator + live
 peers, plus a `self` section (`role` / `instance` / `gate_state`) reporting
 THIS node's own state. A gate-closed satellite never registers at all, so it

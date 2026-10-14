@@ -390,9 +390,9 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         write_running_version()
         fed_runner = _maybe_start_federation()
         app = build_app(cfg)
+        app.state.federation_runner = fed_runner
         server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
-        # Expose the uvicorn server so the app's /shutdown drain-seam can request a
-        # clean exit when the cutover orchestrator retires this daemon.
+        # /shutdown requests clean exit through the live server.
         app.state.uvicorn_server = server
         if start_lock is not None:
             # Publishing the route above is not the same moment as actually being

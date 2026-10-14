@@ -7,7 +7,8 @@
 - **Created:** 2026-10-13
 - **Status:** Active. Design merged in #6618; initial task grants merged in
   #6630. Check-in found missing deny-by-default route authorization and
-  transactional incarnation fences; fixing those before assignment push.
+  transactional incarnation fences; those corrections merged in #6665.
+  Phase 2 assignment push implemented and under validation/review.
   Push-first delivery, direct restricted-worker calls, container placement
   and explicit local/central authority remain the completion gate.
 - **Vision:** [`machine-fleet`](../../../visions/machine-fleet/README.md):
@@ -81,11 +82,11 @@ not a rewrite:
    (`fleet.py`) only knows SSH + `agent-worktrees`/`agent-bridge`-on-PATH
    liveness. A CDE/container or Dev Box with no SSH-reachable, pre-
    installed binstub has no existing route into fleet dispatch today.
-4. **No push/subscribe transport.** Today's only work-acquisition patterns
+4. **No subscribed assignment consumer.** Existing work-acquisition patterns
    are: spawn-locally, `FleetSpawner`-push-via-SSH-to-a-host-it-selects, or
-   satellite-polls-its-own-affinitied-work. There is no "the coordinator
-   pushes a task notification to a subscribed supervisor" channel --
-   everything is poll/heartbeat-driven. **Operator decision (2026-10-13):
+   satellite-polls-its-own-affinitied-work. The coordinator already exposes
+   SSE events with a subscription-ready barrier, but intake does not consume
+   them. **Operator decision (2026-10-13):
    build push, with the existing poll as a long-interval backstop** (not
    poll-only) -- throughput and avoiding over-polling matter. A **webhook**
    (coordinator calls back into the supervisor) is the wrong shape here: it
@@ -93,16 +94,11 @@ not a rewrite:
    inbound-listener** contract (`federation_runner.py:156-180`,
    `satellite_work_intake.py:1-24`) to grow an inbound port, contradicting
    that effort's own stated security posture. The right shape is an
-   **outbound long-poll** -- the supervisor still only ever makes outbound
-   HTTP requests, preserving the no-inbound-listener invariant -- that
-   blocks server-side until a new affinitied task appears or a bounded
-   timeout elapses, then is immediately re-issued. This mirrors an existing
-   architectural idiom already in this codebase: `queue_run_waiters.py`'s
-   durable waiter-row + wake-on-commit pattern (via
-   `queue_notifications.QueueNotificationMixin`, already used for detached-
-   run resume) -- a new "assignment waiter" is the same idiom applied to "a
-   queued task matching my affinity appeared" instead of "task X reached a
-   terminal state." See Phase 2.
+   **outbound SSE subscription** to the existing event bus. The consumer
+   reconciles the authoritative queue after each ready frame and relevant
+   notification; a slower periodic read recovers non-replayed event gaps.
+   This preserves the no-inbound-listener invariant without another durable
+   assignment waiter or claim transport. See Phase 2.
 5. **"Centralized ... with per-machine supervisors subscribed"** reads most
    naturally as a **deployment/configuration choice**, not new code: point
    every machine's `AGENT_DISPATCH_SHARED_URL` at one `services/dispatch`
@@ -211,18 +207,18 @@ Operator decision: push-first delivery with slower polling as a correctness
 backstop. Reuse the coordinator's existing `/events`, `EventBus`, and
 subscription-ready frame; no additional long-poll endpoint is needed.
 
-- [ ] Subscribe outbound to coordinator SSE and reconcile the authoritative
+- [x] Subscribe outbound to coordinator SSE and reconcile the authoritative
   queue after each ready frame, including reconnect, so pre-subscription work
   cannot fall into a gap.
-- [ ] Coalesce relevant enqueue, assignment and capacity-release notifications
+- [x] Coalesce relevant enqueue, assignment and capacity-release notifications
   by machine/repository affinity; wake the existing intake/supervision loop
   without making the event stream another claim authority.
-- [ ] Keep slower periodic reconciliation for missed events and disconnected
+- [x] Keep slower periodic reconciliation for missed events and disconnected
   streams. Bound reconnect/backoff and report degraded subscription health.
   Presence heartbeats remain independent of work-intake blocking.
-- [ ] Bound each subscription's queue, read/keepalive timing and shutdown.
+- [x] Bound each subscription's queue, read/keepalive timing and shutdown.
   Disable or repoint subscriptions with their owning role/configuration.
-- [ ] Test actual enqueue-to-wake latency, pre-ready and reconnect gaps, event
+- [x] Test actual enqueue-to-wake latency, pre-ready and reconnect gaps, event
   coalescing, cross-affinity isolation, missed-event poll recovery and teardown.
 
 ### Phase 3 -- Projected relay component
@@ -297,7 +293,7 @@ deferred.
 - [x] Phase 1: unit tests for token mint/verify/invalidation + fencing-guard
   rejection, run against the real `coordinator_tasks.py` routes (not just
   the token/fencing library functions in isolation). Done -- see Journal.
-- [ ] Phase 2: real SSE enqueue-to-wake timing, ready/reconnect reconciliation,
+- [x] Phase 2: real SSE enqueue-to-wake timing, ready/reconnect reconciliation,
   cross-affinity isolation and missed-event recovery through slower polling.
 - [ ] Phase 3: a real clean-room container holding only a task-scoped
   token can only touch its own task; cross-task/cross-worker attempts are
@@ -319,6 +315,43 @@ _Reviewed by the operator 2026-10-13 -- see Journal for the decisions
 recorded against each open fork._
 
 ## Journal
+
+### 2026-10-14 -- Phase 2 push-first intake implemented
+- Reused `/events` and its ready barrier; added a cancelable async reader with
+  bounded reads and comment keepalives. Its bounded dirty bit wakes a single
+  existing intake, never another claim authority. Ready/reconnect always
+  reconciles; 60-second polling remains the missed-event/disconnect backstop.
+- Presence runs independently of intake discovery/spawn. Gate, shared URL and
+  credential changes retire both owned threads before releasing the client;
+  a still-running bounded intake defers replacement instead of racing it.
+  Local serving-coordinator health reports connection and intake failure state.
+- Native delivery selection: 189 passed; broader coordinator, board relay,
+  MCP, client transport and intake selection: 340 passed. Final focused
+  delivery/event run: 58 passed, including case-insensitive affinity,
+  credential forwarding, finite timing, exponential backoff across repeated
+  ready/EOF failures and partial thread-start cleanup. Fresh Linux container:
+  50 delivery/event tests passed, including real TCP, before those final
+  incremental assertions; required CI covers the published head.
+- Validation tiers: unit contracts plus simple end-to-end TCP enqueue, capacity
+  release, startup/reconnect gaps, cancellation and latency below 1.5 seconds.
+  The fresh Linux run used an explicit governed dependency-feed fixture and
+  the contained test runner; it does not claim plugin first-use installation,
+  independent-database migration or live fleet/container enrollment. Those
+  acceptance proofs remain in later phases. No operator service was changed.
+- Documentation impact: the plugin README documents polling/stream timings,
+  compatibility fallback, independent presence, health and retiring ownership.
+  This closes the reviewed delivery slice of the existing fleet vision;
+  it does not extend standing intent or complete the fleet-authority effort.
+
+### 2026-10-14 -- Corrective task-authority PR merged; assignment push next
+- PR #6665 merged as `b8d3ec6a710beb376ef655e5a715e7055b783b93` after
+  current-head Copilot approval and required CI. Both review findings were
+  fixed and resolved, including the reproduced terminal-result backfill race.
+  Its worktree was finalized; Phase 2 uses a new isolated worktree.
+- The campaign remains Active. Next is outbound coordinator SSE assignment
+  notification, ready/reconnect reconciliation and slower poll recovery;
+  restricted credential delivery, local projections and container placement
+  still require their own implementation and end-to-end proof.
 
 ### 2026-10-13 -- Check-in and corrective authorization slice
 - Operator requested a check-in before continuing. The campaign remains
