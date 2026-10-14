@@ -237,9 +237,10 @@ visible but refuses automatic resubmission, avoiding a duplicate turn.
 A later explicitly supplied prompt replaces the pending intent; a stale
 handoff acknowledgement cannot discard that replacement.
 
-For SSH machine sources, the host renders the same composer and sends a bounded
-structured request to the target engine before opening its interactive SSH
-launch. The target daemon admits the request, allocates at most one New
+The engine's structured SSH launch-request boundary is separate from the
+Manager's local-native prompt composer. A caller sends a bounded structured
+request to the target engine before opening its interactive SSH launch.
+The target daemon admits the request, allocates at most one New
 worktree, and stages the prompt in that target's worktree state. The launch then
 carries only the target worktree and seed identity. Arbitrary prompt text is
 encoded, not interpolated into the remote shell. Requests are limited to an
