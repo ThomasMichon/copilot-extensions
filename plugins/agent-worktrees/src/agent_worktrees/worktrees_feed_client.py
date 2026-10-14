@@ -15,6 +15,15 @@ MAX_FRAME_BYTES = MAX_ROW_BYTES + 16384
 IDLE_TIMEOUT = 5.0
 
 
+class FeedFailure(ProjectionUnavailable):
+    """Carry reconnect policy across the CLI boundary without message matching."""
+
+    def __init__(self, message: str, *, code: str, retry: bool = False) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retry = retry
+
+
 def transport(client, payload: dict):
     """The initial/each update barrier has a total deadline, not a trickle lease."""
     deadline = time.monotonic() + client.timeout
@@ -33,9 +42,12 @@ def transport(client, payload: dict):
             chunk = sock.recv(65536)
             if not chunk:
                 if pending:
-                    raise ProjectionUnavailable("resident feed disconnected inside a frame")
-                raise ProjectionUnavailable(
-                    "resident feed disconnected without a going-away notice"
+                    raise FeedFailure(
+                        "resident feed disconnected inside a frame", code="disconnected", retry=True,
+                    )
+                raise FeedFailure(
+                    "resident feed disconnected without a going-away notice",
+                    code="disconnected", retry=True,
                 )
             pending.extend(chunk)
             while b"\n" in pending:
@@ -76,12 +88,23 @@ class FeedReceiver:
         self._ordered: set[str] = set()
 
     def receive(self, frame: dict) -> list[dict] | None:
+        if not isinstance(frame, dict):
+            raise ProjectionUnavailable("resident feed emitted a non-object frame")
         kind = frame.get("type")
         if kind == "error":
             error = frame.get("error")
-            raise ProjectionUnavailable(
-                error.get("message", "resident feed unavailable") if isinstance(error, dict)
-                else "resident feed unavailable"
+            if (
+                not isinstance(error, dict)
+                or not isinstance(error.get("message"), str) or not error["message"]
+                or not isinstance(error.get("code"), str) or not error["code"]
+                or ("retry" in error and type(error["retry"]) is not bool)
+            ):
+                raise ProjectionUnavailable("resident feed emitted an invalid error")
+            retry = error.get("retry", error["code"] in {
+                "unready", "unavailable", "draining", "superseded", "subscriber-limit",
+            })
+            raise FeedFailure(
+                error["message"], code=error["code"], retry=retry,
             )
         if kind in {"begin", "update"}:
             if self._begin is not None:
@@ -228,14 +251,18 @@ def _client(request: dict):
     if endpoint is None:
         restored = read_current(request)
         if restored["projection"]["quality"] != "current":
-            raise ProjectionUnavailable(restored["availability"]["reason"])
+            raise FeedFailure(
+                restored["availability"]["reason"], code="unready", retry=True,
+            )
         endpoint = routing.read_active_endpoint(control.routing_dir(), verify_listener=False)
         if endpoint is None:
-            raise ProjectionUnavailable("resident feed endpoint disappeared after recovery")
+            raise FeedFailure(
+                "resident feed endpoint disappeared after recovery", code="disconnected", retry=True,
+            )
     with control.control_token_path().open(encoding="utf-8") as token_file:
         token = token_file.read(4097).strip()
     if not token or len(token) > 4096:
-        raise ProjectionUnavailable("resident feed authentication is unavailable")
+        raise FeedFailure("resident feed authentication is unavailable", code="authentication")
     client = control.ControlClient(endpoint.base_url, token=token, timeout=READ_TIMEOUT)
     try:
         health = client._request("health", max_response_bytes=16384, total_timeout=client.timeout)
@@ -244,16 +271,20 @@ def _client(request: dict):
         # is a crash/recovery case. A slow, malformed or old live peer is not.
         restored = read_current(request)
         if restored["projection"]["quality"] != "current":
-            raise ProjectionUnavailable(restored["availability"]["reason"]) from exc
+            raise FeedFailure(
+                restored["availability"]["reason"], code="unready", retry=True,
+            ) from exc
         endpoint = routing.read_active_endpoint(control.routing_dir(), verify_listener=False)
         if endpoint is None:
-            raise ProjectionUnavailable(
-                "resident feed endpoint disappeared after recovery"
+            raise FeedFailure(
+                "resident feed endpoint disappeared after recovery", code="disconnected", retry=True,
             ) from exc
         client = control.ControlClient(endpoint.base_url, token=token, timeout=READ_TIMEOUT)
         health = client._request("health", max_response_bytes=16384, total_timeout=client.timeout)
     if FEED_CAPABILITY not in health.get("capabilities", []):
-        raise ProjectionUnavailable("resident lacks worktrees-feed-v1; update the engine")
+        raise FeedFailure(
+            "resident lacks worktrees-feed-v1; update the engine", code="incompatible",
+        )
     return client
 
 

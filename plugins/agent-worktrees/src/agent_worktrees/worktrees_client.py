@@ -193,17 +193,27 @@ def emit_current(args) -> int:
         key, args, project=request["project"], tracking_status=args.tracking_status
     )
     if getattr(args, "follow", False):
-        from .worktrees_feed_client import relay
+        from .worktrees_feed_client import FeedFailure, relay
 
         try:
             return relay(request)
         except BrokenPipeError:
             return 0
         except (OSError, ValueError, RecursionError, ProjectionError, ProjectionUnavailable) as exc:
+            if isinstance(exc, FeedFailure):
+                code, retry = exc.code, exc.retry
+            elif isinstance(exc, TimeoutError):
+                code, retry = "timeout", False
+            elif isinstance(exc, ConnectionError):
+                code, retry = "disconnected", True
+            elif isinstance(exc, (ValueError, RecursionError, ProjectionUnavailable)):
+                code, retry = "malformed-peer", False
+            else:
+                code, retry = "unavailable", False
             print(json.dumps({
                 "type": "error",
                 "contract_version": CONTRACT_VERSION,
-                "error": {"code": "unavailable", "message": str(exc)},
+                "error": {"code": code, "message": str(exc), "retry": retry},
             }), flush=True)
             return 1
     try:

@@ -126,6 +126,14 @@ cannot extend an unfinished publication. Idle heartbeats do not re-read or
 decode an unchanged roster. Producer failure emits an explicit availability
 change while preserving the last complete rows.
 
+Relay error frames carry `error.code`, `error.message` and Boolean
+`error.retry`. Disconnect and unready responses permit reconnect; live-peer
+timeouts, malformed transactions, incompatible capabilities and authentication
+failures are terminal for that load. The Manager retains labeled last-good
+rows but stops automatic CLI respawn for terminal errors until an explicit
+reload. Its own publication/heartbeat watchdog is terminal too. Neither
+classification authorizes daemon restart or caller-side fact computation.
+
 Held projects remain demanded for the subscription lifetime; cancellation
 releases the subscription and resumes the ordinary bounded linger. Planned
 drain, update, shutdown or supersession sends `going-away` with reason,

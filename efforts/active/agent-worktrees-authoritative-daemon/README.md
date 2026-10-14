@@ -1071,6 +1071,16 @@ controlled-clock regression covers reused and changed rows without full
 renormalization of the former; 175 current-feed/source/pulse/recency cases pass
 with one platform skip.
 
+The relay now preserves structured reconnect policy across its CLI error
+boundary. Disconnect/unready failures remain retryable; live-peer timeout,
+malformed transaction, incompatible capability and authentication errors stop
+automatic Manager child respawn. The Manager validates the Boolean policy and
+treats its own watchdog as terminal. Real child tests assert a single launch,
+visible failure and complete owned-process cleanup for terminal frames;
+existing graceful/crash reconnect cases still pass. The relay/client selection
+passes 55 cases and the Manager current-roster/feed/source selection passes
+178 with one platform skip. No daemon-recovery or deadline policy was relaxed.
+
 ### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
 
 The existing authenticated status-monitor control endpoint now offers the

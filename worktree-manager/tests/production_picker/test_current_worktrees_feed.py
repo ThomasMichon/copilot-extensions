@@ -330,3 +330,44 @@ def test_current_feed_error_retry_policy():
     with pytest.raises(FeedUnavailable) as error:
         receiver.receive({"type": "error", "error": {"code": "unready", "message": "not published"}})
     assert error.value.retry is True
+
+
+@pytest.mark.parametrize(
+    ("code", "retry"), [("timeout", True), ("malformed-peer", False), ("unavailable", False)],
+)
+def test_current_feed_terminal_errors_stop_actual_child_respawn(monkeypatch, code, retry):
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    error = {
+        "type": "error", "error": {"code": code, "message": "fixture terminal peer", "retry": retry},
+    }
+    script = f"import json,time; print(json.dumps({error!r}),flush=True); time.sleep(10)"
+    calls = []
+
+    def argv(source):
+        calls.append(source.source_id)
+        return [sys.executable, "-u", "-c", script]
+
+    monkeypatch.setattr(loader_feed, "feed_argv", argv)
+    worker = threading.Thread(target=loader._load_one, args=(source, 0))
+    worker.start()
+    try:
+        wait_until(lambda: bool(loader.error_for_source(source.source_id)))
+        worker.join(timeout=1)
+        assert not worker.is_alive()
+        assert calls == [source.source_id]
+        assert loader._state[source.cache_key] == "failed"
+        assert "fixture terminal peer" in loader.error_for_source(source.source_id)
+        assert loader._procs == [] and loader._held_sources == set()
+    finally:
+        loader.cancel()
+        worker.join(timeout=3)
+    assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("retry", [None, 0, "false"])
+def test_current_feed_rejects_non_boolean_retry_policy(retry):
+    with pytest.raises(ValueError, match="retry policy"):
+        CurrentFeed().receive({
+            "type": "error", "error": {"code": "unready", "message": "fixture", "retry": retry},
+        })

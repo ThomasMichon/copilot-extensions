@@ -166,7 +166,9 @@ class CurrentFeedMixin:
             if not self._feed_current(source, gen):
                 return "cancelled"
             if watchdog.expired:
-                raise FeedUnavailable("current-roster feed missed its publication/heartbeat deadline")
+                raise FeedUnavailable(
+                    "current-roster feed missed its publication/heartbeat deadline", retry=False,
+                )
             errors.join(timeout=0.1)
             error = "".join(stderr).strip()
             if "unrecognized arguments" in error or "update the engine" in error:

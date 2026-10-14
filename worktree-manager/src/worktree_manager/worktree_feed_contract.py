@@ -41,12 +41,16 @@ class CurrentFeed:
             message = error.get("message") if isinstance(error, dict) else None
             if not isinstance(message, str) or not message:
                 raise ValueError("current-roster feed omitted its error")
+            if "retry" in error and type(error["retry"]) is not bool:
+                raise ValueError("current-roster feed returned an invalid retry policy")
             fatal = (
-                error.get("code") == "invalid-request"
+                error.get("code") in {
+                    "invalid-request", "timeout", "malformed-peer", "incompatible", "authentication",
+                }
                 or "update the engine" in message
                 or "unrecognized arguments" in message
             )
-            raise FeedUnavailable(message, retry=not fatal)
+            raise FeedUnavailable(message, retry=not fatal and error.get("retry", True))
         if kind == "going-away":
             generation, cursor = frame.get("generation"), frame.get("cursor")
             if (

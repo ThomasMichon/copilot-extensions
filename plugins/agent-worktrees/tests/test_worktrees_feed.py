@@ -52,6 +52,41 @@ def apply(receiver, frames):
     return receiver.current
 
 
+@pytest.mark.parametrize(
+    ("failure", "code", "retry"),
+    [
+        (TimeoutError("slow live peer"), "timeout", False),
+        (ValueError("malformed live peer"), "malformed-peer", False),
+        (ProjectionUnavailable("invalid live transaction"), "malformed-peer", False),
+        (ConnectionResetError("peer crashed"), "disconnected", True),
+        (client.FeedFailure("not published", code="unready", retry=True), "unready", True),
+        (client.FeedFailure("update needed", code="incompatible"), "incompatible", False),
+    ],
+)
+def test_worktrees_feed_cli_preserves_structured_retry_policy(
+    monkeypatch, capsys, failure, code, retry,
+):
+    from agent_worktrees import __main__ as core
+    from agent_worktrees import config as cfg
+    from agent_worktrees import list_cache, worktrees_client
+
+    monkeypatch.setattr(cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cache, "cache_key", lambda *args, **kwargs: "fixture")
+    monkeypatch.setattr(list_cache, "note_demand", lambda *args, **kwargs: None)
+
+    def fail(request):
+        raise failure
+
+    monkeypatch.setattr(client, "relay", fail)
+    monkeypatch.setattr(
+        worktrees_client, "read_current", lambda _: pytest.fail("feed failure recomputed a read"),
+    )
+    args = core.build_parser().parse_args(["list", "--current", "--follow", "--all"])
+    assert worktrees_client.emit_current(args) == 1
+    frame = json.loads(capsys.readouterr().out)
+    assert frame["error"] == {"code": code, "message": str(failure), "retry": retry}
+
+
 def test_worktrees_feed_barrier_replays_mutation_during_initial_snapshot(owner):
     stream = owner.feed.stream(request(), lambda: False)
     receiver = client.FeedReceiver(request())
