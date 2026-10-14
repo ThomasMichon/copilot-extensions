@@ -692,3 +692,26 @@ requested contract.
   are still owed, with no budget expansion or assertion weakened. Existing
   plugin patch changefiles remain. Publication, fresh review/CI and authorized
   release remain coordinator custody; no deployed state is changed.
+
+- **Explicit-file post-integration validation (PR #6542):** All 73 launch-seed
+  cases passed, including the real v5 receipt-removal daemon, unchanged v4
+  admission guards, mixed-version refusal, rollback and GC provenance checks.
+  Complete cleanup/ordinary-Bridge files passed 151 cases, complete queue and
+  supervisor conclusion files passed 24, the legacy supervisor selector passed
+  77, complete thin-client/task-scope/category files passed 84, and nine additional
+  audited supervisor-selector cases passed. These 418 passes include actual
+  uninstrumented native first touches under unchanged budgets; they are fresh
+  source evidence, not retroactive clearance of the original UNKNOWN timeout.
+  Fatal lint, module ceilings, install contracts, documentation, whitespace,
+  large-file and existing changefile gates passed.
+  The terminal-conclusion file collected 64 cases but exceeded its unchanged
+  300-second runner limit. An exhaustive disjoint plan identified 42 module
+  cases and two complementary 11-case reciprocal slices. The first 42-case
+  slice again exceeded the runner deadline and containment reported
+  user-environment drift during execution, returning exit 125 without rollback.
+  Attribution is UNKNOWN; no key exemption, host repair, budget expansion or passing-shaped
+  inference is made. The reciprocal slices did not execute, and this 64-case
+  gate remains open. No further base chase, publication, review request or
+  deployed-state change was attempted. The additive source ancestors and
+  backups remain intact; coordinator disposition of the concrete containment
+  blocker and unfinished coverage is still required.
