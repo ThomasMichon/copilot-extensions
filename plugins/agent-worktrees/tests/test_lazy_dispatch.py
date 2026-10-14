@@ -52,7 +52,7 @@ _ADD_PARSERS_MODULES = [
     "worktree_ops_cli", "picker_profiles_cli", "maintenance_cli",
     "installation_cli", "update_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "session_binding_cli",
-    "session_inspection_cli", "session_tracking_cli", "worktree_status_audit",
+    "session_inspection_cli", "session_tracking_cli", "record_cli", "worktree_status_audit",
     "picker_reconcile_cli", "launch_registry",
 ]
 

@@ -5236,6 +5236,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
     from . import handoff_successor_repair_cli
+    from . import record_cli
 
     resolve_cli.add_parsers(sub)
 
@@ -5332,6 +5333,7 @@ def build_parser() -> argparse.ArgumentParser:
     handoff_cancel_cli.add_parsers(sub)
 
     session_tracking_cli.add_parsers(sub)
+    record_cli.add_parsers(sub)
     worktree_status_audit.add_parsers(sub)
 
     activity.add_parsers(sub)
@@ -5494,7 +5496,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
     'reap-shells': ('reap_cli', 'cmd_reap_shells'), 'sweep-finished-sessions': ('cleanup_gc_cli', 'cmd_sweep_finished_sessions'), 'sweep-managed': ('cleanup_gc_cli', 'cmd_sweep_managed'),
     'recent-messages': ('session_tracking_cli', 'cmd_recent_messages'),
-    'record': ('session_tracking_cli', 'cmd_record'),
+    'record': ('record_cli', 'cmd_record'),
     'reclaim': ('reclaim_cli', 'cmd_reclaim'),
     'reconcile-binstubs': ('maintenance_cli', 'cmd_reconcile_binstubs'),
     'reconcile-plugins': ('update_cli', 'cmd_reconcile_plugins'),
@@ -5592,6 +5594,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "pr_state_cli",
     "reap_cli",
     "reclaim_cli",
+    "record_cli",
     "resource_producer_cli",
     "session_binding_cli",
     "session_inspection_cli",
@@ -6143,6 +6146,8 @@ def _load_full_command_surface() -> None:
         return handoff_diagnostics.cmd_handoff_trace(
             args, json_output=output._json_output, json_error=output._json_error
         )
+    from .record_cli import cmd_record
+
     COMMAND_MAP = {
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
@@ -6242,7 +6247,7 @@ def _load_full_command_surface() -> None:
         "hygiene": cmd_hygiene,
         "list-sessions": cmd_list_sessions,
         "head-session": cmd_head_session,
-        "record": session_tracking_cli.cmd_record,
+        "record": cmd_record,
         "worktree-lineage": cmd_worktree_lineage,
         "worktree-status-bundle": cmd_worktree_status_bundle,
         "worktree-status-audit": cmd_worktree_status_audit,

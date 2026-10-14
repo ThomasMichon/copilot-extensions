@@ -11,6 +11,7 @@ import yaml
 
 from . import config as cfg
 from . import tracking
+from .record_io import read_record_mapping
 
 
 class RecordReadError(ValueError):
@@ -38,18 +39,17 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
         raise RecordReadError("project-unavailable", str(exc)) from exc
 
     try:
-        raw = record_path.read_text(encoding="utf-8")
+        data = read_record_mapping(record_path)
     except FileNotFoundError as exc:
         raise RecordReadError("record-missing", "Exact worktree record does not exist") from exc
     except OSError as exc:
         raise RecordReadError("record-unreadable", str(exc)) from exc
     except UnicodeError as exc:
         raise RecordReadError("record-malformed", "Record is not UTF-8") from exc
+    except yaml.YAMLError as exc:
+        raise RecordReadError("record-malformed", str(exc)) from exc
 
     try:
-        data = tracking._yaml_safe_load(raw)
-        if not isinstance(data, dict):
-            raise ValueError("Record must be a YAML mapping")
         for key in ("worktree_id", "repo", "worktree_path", "branch", "status"):
             if not isinstance(data.get(key), str) or not data[key].strip():
                 raise ValueError(f"Record requires a nonempty string: {key}")

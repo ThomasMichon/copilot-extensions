@@ -13,7 +13,7 @@ import yaml
 
 from agent_worktrees import __main__ as main
 from agent_worktrees import config as cfg
-from agent_worktrees import list_cli, output, session_tracking_cli, sessions, tracking
+from agent_worktrees import list_cli, output, record_cli, session_tracking_cli, sessions, tracking
 from agent_worktrees import worktrees_client as client
 
 
@@ -109,13 +109,13 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         monkeypatch.setattr(module, name, forbidden)
     before = path.read_bytes()
     reads = []
-    read_text = Path.read_text
+    read_text = tracking._read_text_with_retry
 
     def read_spy(self, *args, **kwargs):
         reads.append(self)
         return read_text(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read_spy)
+    monkeypatch.setattr(tracking, "_read_text_with_retry", read_spy)
     monkeypatch.setattr(Path, "write_text", forbidden)
     monkeypatch.setattr(Path, "mkdir", forbidden)
     rc, result = invoke(data["worktree_id"])
@@ -207,7 +207,7 @@ def test_record_read_unreadable_explicit(record_fixture, monkeypatch):
     def unreadable(*args, **kwargs):
         raise PermissionError("synthetic permission refusal")
 
-    monkeypatch.setattr(Path, "read_text", unreadable)
+    monkeypatch.setattr(tracking, "_read_text_with_retry", unreadable)
     rc, result = invoke(data["worktree_id"])
     assert rc == 1 and result["error"]["code"] == "record-unreadable"
 
@@ -224,6 +224,18 @@ def test_record_read_terminal_and_historical_paths_are_metadata(record_fixture, 
     assert rc == 0 and result["worktree"]["status"] == status
     assert result["worktree"]["path"] == data["worktree_path"]
     assert result["worktree"]["platform"] == "windows"
+
+
+def test_record_read_repairs_control_characters_in_memory_only(record_fixture):
+    data, path = record_fixture
+    raw = path.read_text(encoding="utf-8") + "title: stray\x07character\n"
+    path.write_text(raw, encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["id"] == data["worktree_id"]
+    assert tracking.load_record(path).title == "straycharacter"
+    assert path.read_bytes() == before
 
 
 def test_record_read_unindexed_sessions_are_unknown(record_fixture):
@@ -327,4 +339,4 @@ def test_record_read_help_matches_full_lazy_parser(record_fixture, capsys):
         main.build_parser().parse_args(["record", "--help"])
     assert full.value.code == 0
     assert capsys.readouterr().out == fast_help
-    assert main.COMMAND_MAP["record"] is session_tracking_cli.cmd_record
+    assert main.COMMAND_MAP["record"] is record_cli.cmd_record
