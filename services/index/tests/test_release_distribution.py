@@ -15,7 +15,7 @@ from agent_procutil import no_window_kwargs
 from agent_index_service.release import ReleaseError, build_descriptor, verify_descriptor
 
 
-def test_real_wheels_verify_and_reject_frozen_pre_seam_core(tmp_path):
+def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
     repo = Path(__file__).resolve().parents[3]
     sources = (
         repo / "services" / "index",
@@ -24,18 +24,18 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(tmp_path):
         repo / "libs" / "agent-procutil",
         repo / "plugins" / "agent-index" / "libs" / "dropin-registry",
     )
-    bundle = tmp_path / "bundle"
+    bundle = distribution_root / "bundle"
     bundle.mkdir()
     core_build = None
     for index, source in enumerate(sources):
-        build = tmp_path / f"source-{index}"
+        build = distribution_root / f"source-{index}"
         build.mkdir()
         for filename in ("pyproject.toml", "README.md"):
             shutil.copy2(source / filename, build / filename)
         if source.name == "index":
             for filename in ("setup.py", "_build_runtime_resource.py", "MANIFEST.in"):
                 shutil.copy2(source / filename, build / filename)
-            primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"
+            primitive = distribution_root / "libs" / "versioned-runtime" / "versioned_runtime.py"
             primitive.parent.mkdir(parents=True)
             shutil.copy2(repo / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
             shutil.copy2(

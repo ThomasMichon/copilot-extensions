@@ -14,19 +14,19 @@ from packaging.version import Version
 from agent_index_service import __version__
 
 
-def test_normal_wheel_metadata_and_console_program(tmp_path):
+def test_normal_wheel_metadata_and_console_program(distribution_root):
     source = Path(__file__).resolve().parents[1]
-    build = tmp_path / "build-source"
+    build = distribution_root / "build-source"
     build.mkdir()
     for name in ("pyproject.toml", "README.md", "setup.py", "_build_runtime_resource.py", "MANIFEST.in"):
         shutil.copy2(source / name, build / name)
     canonical = source.parent.parent / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    primitive = distribution_root / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive.parent.mkdir(parents=True)
     shutil.copy2(canonical, primitive)
     shutil.copy2(canonical.with_name("standalone_build.py"), primitive.with_name("standalone_build.py"))
     shutil.copytree(source / "src", build / "src", ignore=shutil.ignore_patterns("__pycache__"))
-    output = tmp_path / "wheel"
+    output = distribution_root / "wheel"
     output.mkdir()
     result = subprocess.run(
         [sys.executable, "-c",

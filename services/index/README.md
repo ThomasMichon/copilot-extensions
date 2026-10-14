@@ -422,6 +422,9 @@ adopts a live **synthetic** worker PID across cutover. An assertion-failure test
 verifies owned-tree teardown; Windows tests use direct windowless worker identity
 and kill-on-close Job containment rather than trusting venv supervisor PIDs.
 The wheel test requires the declared `test` extra's setuptools/wheel dependencies.
+Distribution tests use short, unique build roots inside the contained runner's
+sandbox to leave room for nested wheel/sdist paths on Windows. Metadata and
+missing/conflicting runtime-resource checks remain unchanged.
 Actual source-ingestion/embedding workers, first-touch installation, updater-Job
 breakaway and release-slot lifecycle remain separate validation requirements;
 synthetic-worker adoption does not prove all of those contracts.
