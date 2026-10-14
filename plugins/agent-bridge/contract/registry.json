@@ -96,13 +96,21 @@
         "owner_qualified_acquisition": 34,
         "workspace_creation": 34,
         "qualified_live_peer": 35,
+<<<<<<< HEAD
         "provider_creation": 36
+=======
+        "worktree_render_cache": 36
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+<<<<<<< HEAD
           "sha256": "c35e3becec7ad678a5cc574f220d71df8dfd4ff5e9f4b1d24f504ac2a068173a",
+=======
+          "sha256": "09c1861ce7ca9dbb964c71e39f0562dbeb98775edaebd585abb46104a6a674b1",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -173,26 +181,46 @@
           "non_semantic_reason": null
         },
         {
+<<<<<<< HEAD
           "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
           "sha256": "f92a052889feda87ce29dd63b4e3f2fa42b8a21fc1dbae699a4f6a24ecbd0a8e",
+=======
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "sha256": "9d9371c837980b23d6f8753423e208105e75d9198144954d97dcd4242ddd1656",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "semantic": true,
           "non_semantic_reason": null
         },
         {
+<<<<<<< HEAD
           "path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
           "sha256": "a85d7ef19f9afa05d6c40f06fb6a5e6a5956b18c260be6cd4666f0c01623880e",
+=======
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "sha256": "f9f6d1d01c155760ce2658ed6272b75ebf170ed648349915bd607fe8bc28d822",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "semantic": true,
           "non_semantic_reason": null
         },
         {
+<<<<<<< HEAD
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
           "sha256": "42244351a7410e153e87077d9e25f04b7521fa2de4ebbb58dce376312fc669c8",
+=======
+          "path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "sha256": "d8d7d928eabde20e76e10582430c3ade8e2fc451c04f1c5668629bca560a22d9",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "semantic": true,
           "non_semantic_reason": null
         },
         {
+<<<<<<< HEAD
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
           "sha256": "df76e1cf1f4e7d13ef937f939b1008f0c443abb9f567bb75be88387fd5bd35bb",
+=======
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "sha256": "8c07a9783129cccd9ba2e19d7de84e89b4c4b9e49f8d0f4febb84be5bea5a68e",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -523,31 +551,53 @@
           "generation": 35
         },
         {
+<<<<<<< HEAD
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-36.json",
           "sha256": "9f1c7f98d582460bca1009792204e00ab2bd1d3136c8e8702fb7a633173a4d0f",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+=======
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-36.json",
+          "sha256": "d22d1edf7433e2594dae8932fdfc6fec2d4da74313090d723df4763102095954",
+          "role": "Generation-36 worktree render opt-in and live-refresh evidence; earlier capability floors and fixtures retained",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-36.json",
+<<<<<<< HEAD
           "sha256": "271cea4715f17018ee5d71b9266b70a9a71bc249d69a1e7e7a9b5362a3d158ea",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+=======
+          "sha256": "d12636b4ef52fa911fdcf0c59e2c4bd4ae3399b48c6beb8b200ee4d7fe2d8ede",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-36.json",
+<<<<<<< HEAD
           "sha256": "7e2956bff9d4a143966bcba848baa08b5079f8ae54642d27c56301a270980040",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+=======
+          "sha256": "676829dbd40633fa9786aee2d42a354085062593cfed6a54d4c531e2e6101ca7",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-36.json",
+<<<<<<< HEAD
           "sha256": "3811285342608356602eba9ed8f7edec711e5af86113950a93d8c6296587014e",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+=======
+          "sha256": "99ae7a8a8ee499bd83adc4c514340f47450d43b4a66fa00bf5597f66fcff2f7f",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-36.json",
+<<<<<<< HEAD
           "sha256": "1fcfb666530a7c4a5f6883d4764815aaecdbeba381dcfc0f991f7f1666d94892",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
@@ -556,16 +606,32 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-36.json",
           "sha256": "6c6659d7458b28a226d4f40b354f02194e9c5e93421f0350e463654943b3bd5c",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+=======
+          "sha256": "c69320fcf95cd9cc593a562d009254be96ca92852a975686f5ca413d7dff3605",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-36.json",
+          "sha256": "f0f5f097970d8b935d74e218e090eca688eb0154daa1d0b4dcdbd1237677d88e",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-36.json",
+<<<<<<< HEAD
           "sha256": "9cd342636129145c786781d08b33e3bbd8444ba62f387334d33153666d6bb59e",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+=======
+          "sha256": "a3286c6759a6651099f9b85f57dcb4ef08b48e87a7a92676a572f0db6a09f2a3",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-36.json",
+<<<<<<< HEAD
           "sha256": "c8c64c794fd5f9f40700541fd92e33ae1acf553a60597110b1bb2fd45f373ff2",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
@@ -592,6 +658,34 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-36.json",
           "sha256": "267072cac9433d04b3d4632c09555a4ca8ce3aa0dd364b6ff948ec5b50be9fa8",
           "role": "Generation-36 provider cold-resume placement and native continuity evidence",
+=======
+          "sha256": "255466f3ac005bdc3e3d9dabb1acc45d7dfec0aa9e5dc2731b640e75c414a5f4",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-36.json",
+          "sha256": "e0915313e689ed7a7fbcb327a50a244821cec40aac45c47b24e5555246dca710",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-36.json",
+          "sha256": "0a98b52ee32eaccd2cd420cd9bad84fd8b6cee870250f247d76b0e8c29b95755",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-36.json",
+          "sha256": "904e02cf32113bc3f97d588478e443832e15e4a0fe75f423ad686d1209942380",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-36.json",
+          "sha256": "475bd3fdeb815f191109cc593e1593e0d566070f140e0d806eb1aea24b3e7513",
+          "role": "Generation-36 stable worktree row schema and rendering evidence",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "generation": 36
         }
       ],
@@ -1525,6 +1619,7 @@
           "capture_method": "Exact rebased producer source; independent peer round-trip, native prompt and workspace fixture assertions retain prior capability floors."
         },
         {
+<<<<<<< HEAD
           "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
           "plugin_version": "0.4.1-dev3",
           "generation": 36,
@@ -1534,34 +1629,91 @@
         },
         {
           "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+=======
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "51db9415f157a2f0eb4e78f75e5b0d2b18e717ed",
+          "capture_method": "Exact committed producer/client source; independent route serialization, measured wall waits, retained-holder and version-skew regressions exercise cache-only rendering and live refresh."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "1ff7df726ed780d28b58276582bf73004b1fa394",
+          "capture_method": "Exact committed producer/client source; independent route serialization, measured wall waits, retained-holder and version-skew regressions exercise cache-only rendering and live refresh."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "186b50375f9e83c05e3cbf60606177efbf22cf7c",
+          "capture_method": "Exact committed producer/client source; independent route serialization, measured wall waits, retained-holder and version-skew regressions exercise cache-only rendering and live refresh."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "d6f86bc69365e357468af2c4da180b20c56c5d01",
+          "capture_method": "Exact committed producer/client source; independent route serialization, measured wall waits, retained-holder and version-skew regressions exercise cache-only rendering and live refresh."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "plugin_version": "0.4.1-dev3",
           "generation": 36,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+<<<<<<< HEAD
           "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
         },
         {
           "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+=======
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "plugin_version": "0.4.1-dev3",
           "generation": 36,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
           "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+<<<<<<< HEAD
           "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
         },
         {
           "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+=======
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "plugin_version": "0.4.1-dev3",
           "generation": 36,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
           "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+<<<<<<< HEAD
           "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
         },
         {
           "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+=======
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "plugin_version": "0.4.1-dev3",
           "generation": 36,
           "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
           "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+<<<<<<< HEAD
           "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
         },
         {
@@ -1574,18 +1726,40 @@
         },
         {
           "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+=======
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "90f2a01f70488a96e6f5160bfbf12cbfe66d65b6",
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "plugin_version": "0.4.1-dev3",
           "generation": 36,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
           "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+<<<<<<< HEAD
           "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
         },
         {
           "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+=======
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
           "plugin_version": "0.4.1-dev3",
           "generation": 36,
           "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+<<<<<<< HEAD
           "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
         },
         {
@@ -1707,9 +1881,76 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
           "source_git_blob": "1b251b41ec48c41d47ff4026edce83f29b0db97f",
           "capture_method": "Freeze keyed provider cold-resume corrections: effective placement drift refuses before persistence/spawn, ACP load retains the guest workspace without changing host cwd. Real offline ACP stop/load and native provider/ordinary refresh compatibility tests exercise these boundaries."
+=======
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "49e45d4df4ae9d330ea6d2fc42df7283cbfbe3a7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "837bf94cc1e5f8dc2b6eb8dbbba07b1d00af1e8f",
+          "capture_method": "Exact committed captured-epoch refresh owner and stable row extraction; independent swap-before-start, shutdown retention and compatible serialization assertions exercise this generation."
+        },
+        {
+          "commit": "49e45d4df4ae9d330ea6d2fc42df7283cbfbe3a7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "945f9d76a8c86bd18fccd480d52c5ec9444779d7",
+          "capture_method": "Exact committed captured-epoch refresh owner and stable row extraction; independent swap-before-start, shutdown retention and compatible serialization assertions exercise this generation."
+        },
+        {
+          "commit": "49e45d4df4ae9d330ea6d2fc42df7283cbfbe3a7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "09087b6a323c6535fc103b5c24d60829cd46eac9",
+          "capture_method": "Exact committed captured-epoch refresh owner and stable row extraction; independent swap-before-start, shutdown retention and compatible serialization assertions exercise this generation."
+        },
+        {
+          "commit": "a7ba72882c2e4e2bc30f545bea308b2155e1dde1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "92d75056fc0709d767355f454ec60e4de0c0e854",
+          "capture_method": "Committed source-fresh live continuation, source/metadata validation and preserved row serialization; independent cached-versus-live, queued single-flight, routing/shutdown fences and skew assertions exercise the wire contract."
+        },
+        {
+          "commit": "a7ba72882c2e4e2bc30f545bea308b2155e1dde1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "1d99700144d7ba0f144b454be7865e0082ce32ac",
+          "capture_method": "Committed source-fresh live continuation, source/metadata validation and preserved row serialization; independent cached-versus-live, queued single-flight, routing/shutdown fences and skew assertions exercise the wire contract."
+        },
+        {
+          "commit": "a7ba72882c2e4e2bc30f545bea308b2155e1dde1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Committed source-fresh live continuation, source/metadata validation and preserved row serialization; independent cached-versus-live, queued single-flight, routing/shutdown fences and skew assertions exercise the wire contract."
+        },
+        {
+          "commit": "a7ba72882c2e4e2bc30f545bea308b2155e1dde1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "bb841c4b584411eead3a318c35a7c6c3de1524d1",
+          "capture_method": "Committed source-fresh live continuation, source/metadata validation and preserved row serialization; independent cached-versus-live, queued single-flight, routing/shutdown fences and skew assertions exercise the wire contract."
+        },
+        {
+          "commit": "43ee83ac739350f1884af16b1cb4938aff740e14",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "9e12ba761c8980ea1af740d95f88b9c1e41e23d3",
+          "capture_method": "Exact source with native project capture and generation-fenced option verdicts; independent old-provider fallback and replacement capability assertions prevent cache poisoning."
+>>>>>>> dbd599a639 (Cache worktree rendering and retain source-fresh refresh ownership)
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
+      "support_window": "The daemon declares HTTP generations 1 through 36 supported; the retained evidence corpus exercises generations 9 through 36. Rendering opt-in and explicit refresh controls require generation 36; older peers retain the plain cold-request shape and unknown freshness/completeness.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",

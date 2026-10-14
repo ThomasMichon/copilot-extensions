@@ -31,6 +31,9 @@ _INSTALL_SH = _SCRIPTS / "install.sh"
 _PWSH = shutil.which("pwsh")
 _VERSION = "1.2.3"
 _MARKER = ".install-complete.json"
+# Real Git Bash/Python boundaries can exceed the runner's 30s default.
+# Keep the item's observation bound aligned with its subprocess bound.
+_SH_TIMEOUT_SECONDS = 120
 
 _PROCEED = "proceed"  # admission let the installer continue to build
 _NOOP = "noop"  # unchanged, published and active slot: nothing touched
@@ -757,11 +760,12 @@ def _run_sh(harness: Path) -> subprocess.CompletedProcess:
         [_bash(), str(harness)],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=_SH_TIMEOUT_SECONDS,
         check=False,
     )
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 @pytest.mark.parametrize("action", ["do_update", "do_install"])
 @pytest.mark.parametrize(("scenario", "expected"), _ADMISSION_CASES)
@@ -779,6 +783,7 @@ _SH_NO_HASH_ENTRIES = [
 ]
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 @pytest.mark.parametrize("action", ["do_update", "do_install"])
 @pytest.mark.parametrize(("scenario", "lock"), _SH_NO_HASH_ENTRIES, ids=["pre-lock", "post-lock"])
@@ -790,6 +795,7 @@ def test_sh_unhashable_payload_refuses_active_completed_slot(
     assert "(unverified)" in result.stderr, result.stdout + result.stderr
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 @pytest.mark.parametrize(
     ("scenario", "expected"),
@@ -839,6 +845,7 @@ def test_sh_call_sites_fail_on_refused_completion_and_guard_precedes_mutation() 
         )
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 def test_sh_payload_hash_does_not_depend_on_locale(tmp_path: Path) -> None:
     """Identical-content files tie on their digest and are ordered by path;
@@ -856,6 +863,7 @@ def test_sh_payload_hash_does_not_depend_on_locale(tmp_path: Path) -> None:
     assert len(hashes) == 1 and "" not in hashes, hashes
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 def test_sh_shared_lib_only_change_is_not_reused(tmp_path: Path) -> None:
     change = f"echo 'VALUE = 2' >> {_sh_quote(_posix(_lib_source(tmp_path, 'ssh-manager')))}\n"
@@ -864,6 +872,7 @@ def test_sh_shared_lib_only_change_is_not_reused(tmp_path: Path) -> None:
     assert "different payload content" in result.stderr, result.stdout + result.stderr
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 def test_sh_readme_only_change_is_not_reused(tmp_path: Path) -> None:
     readme = _plugin_source(tmp_path).parents[2] / "README.md"
@@ -873,6 +882,7 @@ def test_sh_readme_only_change_is_not_reused(tmp_path: Path) -> None:
     assert "different payload content" in result.stderr, result.stdout + result.stderr
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 def test_sh_payload_hash_covers_every_shared_lib_but_not_artifacts(tmp_path: Path) -> None:
     lib_dir = tmp_path / "repo" / "libs" / "ssh-manager"
@@ -889,6 +899,7 @@ def test_sh_payload_hash_covers_every_shared_lib_but_not_artifacts(tmp_path: Pat
     _assert_hash_steps(_run_sh(_sh_harness(tmp_path, "absent", action)))
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 @pytest.mark.parametrize(
     ("action", "edited"),
@@ -916,6 +927,7 @@ def test_sh_marker_is_published_only_for_the_bytes_admission_hashed(
     _assert_mid_build_outcome(tmp_path, result, edited=edited, update=action == "do_update")
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 def test_sh_manifest_hash_is_the_admitted_hash(tmp_path: Path) -> None:
     """installer-engine's write_deploy_manifest reads `_payload_hash`; after
@@ -963,6 +975,7 @@ def test_ps1_refused_slot_preparation_never_builds_over_the_slot(
     assert (tmp_path / "install" / "versions" / _VERSION / "partial.txt").exists() is not built
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 @pytest.mark.parametrize(
     ("scenario", "built"), [("incomplete", True), ("incomplete-active", False)]
@@ -1079,6 +1092,7 @@ def _assert_mutation_precedes_publication(
     assert _slot_marker(tmp_path).exists(), detail
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 @pytest.mark.parametrize("prune_fails", [False, True], ids=["prune-ok", "prune-fails"])
 @pytest.mark.parametrize("action", ["do_install", "do_update"])
@@ -1130,6 +1144,7 @@ uv() { rec "UV:$*"; }
 """
 
 
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 @pytest.mark.parametrize("legacy", ["link", "real"])
 def test_sh_provider_prune_never_rewrites_a_published_slot_through_the_venv_link(
@@ -1140,7 +1155,8 @@ def test_sh_provider_prune_never_rewrites_a_published_slot_through_the_venv_link
     published = '"$INSTALL_DIR/versions/0.9.0"'
     setup = (
         f"fake_venv {published}\n"
-        'MSYS=winsymlinks:nativestrict ln -s ' + published + ' "$INSTALL_DIR/venv"\n'
+        'MSYS=winsymlinks:nativestrict ln -s ' + published
+        + ' "$INSTALL_DIR/venv" || { echo NOSYMLINK; exit 0; }\n'
         '[[ -L "$INSTALL_DIR/venv" ]] || { echo NOSYMLINK; exit 0; }\n'
         if legacy == "link"
         else 'fake_venv "$INSTALL_DIR/venv"\n'

@@ -670,6 +670,16 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         errors = [str(e) for e in resp.get("topology_errors", [])]
         return resp.get("machines", []), errors
 
+    def list_worktrees_for_render(self) -> dict[str, Any]:
+        """Read the prompt snapshot; legacy daemons retain their blocking path."""
+        from .client_worktrees import worktree_inventory
+        return worktree_inventory(self, refresh=False)
+
+    def refresh_worktrees(self) -> dict[str, Any]:
+        """Join the owned live refresh with a bounded daemon-side wall wait."""
+        from .client_worktrees import worktree_inventory
+        return worktree_inventory(self, refresh=True)
+
     def list_sessions(self, *, status: str | None = None) -> list[dict[str, Any]]:
         """GET /api/v1/sessions"""
         params = {"status": status} if status else None

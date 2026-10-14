@@ -232,6 +232,51 @@ outreach.
 All endpoints require `Authorization: Bearer <token>` (except `/health`).
 The token is generated on first run and stored in `~/.agent-bridge/auth.yaml`.
 
+### Worktree discovery
+
+`GET /api/v1/worktrees?render=true` (HTTP protocol 36) reads Agent Bridge's
+published in-memory projection of Worktree Manager's existing list/DB/cache
+owner. It does not run a foreground fleet crawl, SSH, Git, session-history
+scan, or mux probe. Cold and stale reads schedule one owned refresh and return
+promptly; the rendering target is under two wall seconds including
+serialization. Existing group/row and in-memory Bridge session linkage shapes
+are preserved. Unversioned cold requests still await the first unclassified
+crawl, preserving old clients' inventory semantics.
+
+The additive `discovery` envelope distinguishes freshness (`fresh`, `stale`,
+`unknown`, `unavailable`), completeness (`complete`, `incomplete`, `unknown`),
+warming and pending refreshes. It carries projection epoch/generation and
+per-source generation, age and bounded diagnostic codes. Valid complete empty
+inventories replace prior rows; failed, malformed, incomplete or incompatible
+source reads retain their last good rows without erasing healthy peers.
+Freshness expires after 30 seconds or the configured discovery interval,
+whichever is greater; automatic failed/stale retries have a 10-second minimum
+spacing. Source replacement and shutdown fence late publication.
+
+`GET /api/v1/worktrees?refresh=true` joins that same shielded refresh holder
+with at most a 10-second caller wall wait. It requests Worktree Manager's
+existing `list --fresh` behavior, bypassing that owner's result cache. If a
+cache-allowed warm-up is still running, one retained live-refresh continuation
+waits for actual completion before admitting the fresh read; concurrent live
+callers join that continuation, never an overlapping native scan. A source
+rejecting `--fresh` retains its cached rendering rows and reports
+`source-refresh-unsupported`, not a fabricated live success.
+Its `refresh` evidence reports
+complete/partial/failed, superseded, unavailable or timed-out outcomes and
+whether work remains pending. The holder's completion duration and goal result
+are separate from a caller's wait. Cancellation, wait expiry and the bounded
+shutdown observation never release an unfinished holder. Existing 30-second
+native list and 60-second classification execution policies are unchanged;
+classification still backfills an unclassified warm-up. No sibling service
+becomes mandatory and no new registry, persistent store or resident is added.
+
+`BridgeClient.list_worktrees_for_render()` and `refresh_worktrees()` gate the
+controls on `daemon_supports(WORKTREE_RENDER_CACHE_PROTOCOL_VERSION)`. Against
+an older daemon they send only the prior plain request, label missing
+freshness/completeness unknown and do not promise prompt rendering or live
+refresh. External rendering consumers must adopt this versioned opt-in;
+their deployment is not implied by the server capability.
+
 ### Session Management
 
 ```

@@ -115,22 +115,35 @@ def test_live_registration_fixture_preserves_opt_in_wire_shape_and_default() -> 
     assert fixture["compatibility"]["ordinary_null_heartbeat_retains_metadata"] is True
 
 
+@pytest.mark.parametrize("generation", [35, 36])
 @pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
-def test_native_bound_wire_is_preserved_at_the_new_peer_generation(owner) -> None:
+def test_native_bound_wire_is_preserved_at_later_generations(owner, generation) -> None:
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
 
     previous = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-33.json")
-    current = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-36.json")
+    current = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-{generation}.json")
     assert current["request"] == previous["request"]
     assert current["response"] == previous["response"]
     assert current["capability"] == previous["capability"]
-    assert current["health"]["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
+    assert current["health"]["protocol_version"] == generation
+    assert current["health"]["protocol_version"] <= bridge_protocol.HTTP_PROTOCOL_VERSION
     assert SubmitPromptRequest.model_validate(current["request"]["json"]).model_dump(
         mode="json", exclude_unset=True,
     ) == current["request"]["json"]
     assert SubmitPromptResponse.model_validate(current["response"]).model_dump(
         mode="json",
     ) == current["response"]
+
+
+def test_worktree_render_contract_declares_versioned_opt_in_and_retained_holder() -> None:
+    from agent_bridge.routes.worktree_refresh import LIVE_WAIT_SECONDS
+
+    fixture = _fixture("fixtures/http/current/worktree-render-generation-36.json")
+    capability = fixture["capability"]
+    assert capability["required_protocol_version"] == bridge_protocol.WORKTREE_RENDER_CACHE_PROTOCOL_VERSION
+    assert capability["live_wall_wait_seconds"] == LIVE_WAIT_SECONDS
+    assert capability["caller_expiry_releases_holder"] is False
+    assert capability["legacy_cold_request_blocks"] is True
 
 
 def test_retirement_recovery_capability_matches_current_fixture() -> None:

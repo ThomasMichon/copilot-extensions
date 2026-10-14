@@ -58,7 +58,7 @@ Existing mechanisms already satisfy substantial portions of the contract:
 | Existing seam | Evidence and remaining boundary |
 |---------------|---------------------------------|
 | OS-exclusive daemon role leases | `libs/single-instance-lease`; reuse rather than introduce a rival lease |
-| Worktree discovery crawls | `WorktreeDiscoveryCache.crawl` in `plugins/agent-bridge/src/agent_bridge/routes/worktrees.py` serializes with `_crawl_lock` |
+| Worktree discovery crawls | `WorktreeDiscoveryCache` delegates retained single-flight refresh ownership to `routes/worktree_refresh.py`; caller wait and publication eligibility are separate from holder completion |
 | Live/archived single-target probes | The same cache retains and shields per-worktree tasks until completion |
 | Namespace roster readers | `plugins/agent-bridge/src/agent_bridge/agent_registry_cache.py` retains `_inflight` tasks and provider references; caller join budgets do not cancel shared work |
 | Registry presentation | #5559's existing reviewed proposal owns current process membership and owner-scoped queries |
@@ -82,7 +82,7 @@ Existing cost limits are not substitutes for measured process-tree CPU budgets.
 | `agent-worktrees/src/agent_worktrees/list_cli.py:417-505`, `list_cache.py:77-130` | Project/status/args-keyed result cache; cache-only path avoids enrichment; ordinary cache miss preserves inline computation | Cross-process cache-miss single-flight and CPU/wall admission are not established by result caching |
 | `agent-worktrees/src/agent_worktrees/list_cli.py:386-413`, `status_monitor_cli.py:746-765` | Resident monitor refreshes demanded list shapes rather than every possible project | Bound per-shape work and measure aggregate role cost |
 | `agent-worktrees/src/agent_worktrees/worktree_status_cache.py:34-96` | 180s status TTL and four refreshes per sweep cap costly recomputation | Time/CPU overruns and exact-owner release need independent proof |
-| `agent-bridge/src/agent_bridge/routes/worktrees.py:158-242`, `routes/worktree_probe.py:188-286` | Crawl lock; shielded per-ID probe holders; per-agent fanout; list/classify timeouts | Prove native worker/tree completion, not just cancellation of probe tasks |
+| `agent-bridge/src/agent_bridge/routes/worktrees.py`, `routes/worktree_refresh.py`, `routes/worktree_probe.py` | Retained refresh and shielded per-ID probe holders; versioned cache-only render projection; per-agent fanout; unchanged list/classify timeouts | Prove native worker/tree completion, not just cancellation of probe tasks; authorized external rendering adoption remains separate |
 | `agent-bridge/src/agent_bridge/agent_registry_namespace.py:110-190` | CLI namespace result TTL; thread-offloaded subprocess with a 90s default timeout; incomplete results are distinct from empty | Cancellation of the awaiter does not prove thread/subprocess completion; retain actual worker ownership |
 | `agent-bridge/src/agent_bridge/agent_registry_discovery.py:47-129` | Provider report generation fencing and transactional reconciliation | Bound synchronous scan admission and preserve real worker lifetime independently of publication |
 | `agent-dispatch/src/agent_dispatch/client.py:44-66`, `client_worktree_status.py:8-37` | 10s HTTP timeout and batched status relay reads | Remote reader-holder accounting and fanout/CPU circuits remain unverified |
@@ -600,3 +600,46 @@ Cold/warming/stale/unknown evidence and retained good snapshots on refresh
 failure are _(agent-recommended)_ correctness refinements. Exact-action
 lookups, namespace budgets, process-registry ownership and the parent
 effort's remaining acceptance gates stay unchanged.
+
+### 2026-10-13 - Rendering latency plan reviewed and merged
+
+Merged #6622 as `f6985323f` after exact-head approval with zero open
+findings on `932f0e6d1` and green required CI. Review clarified that
+bounded shutdown wait expiry cannot release an incomplete holder, added
+HTTP capability/version-skew validation, and required a versioned render
+opt-in so legacy cold requests keep their existing blocking semantics.
+
+The plan gate is closed; implementation and all eight focused validation
+items in [reader rendering latency](reader-render-latency.md) are next.
+No runtime change or authorized adoption has been performed. The parent
+effort remains Active, with numeric CPU policy, broader reader ownership
+and release/running-state acceptance still unresolved.
+
+### 2026-10-14 - Cache rendering and source-fresh refresh prepared
+
+The reviewed latency slice is implemented with a retained refresh owner,
+versioned render opt-in, source-specific freshness/completeness evidence and
+last-good preservation. Explicit refresh uses the existing Worktree Manager
+`--fresh` control; one live continuation waits behind cache-allowed work
+without overlapping its native holder. Captured source epochs, routing changes,
+shutdown and capability verdicts are fenced independently from actual release.
+Legacy cold requests, exact-ID actions and native list/classify deadlines remain
+unchanged. Unknown metadata generations cannot establish current evidence.
+
+Focused route/cache, governance and legacy discovery regressions pass
+(45 tests), including actual cold and 10,000-row published warm response
+serialization under two seconds and a real ten-second pending-holder wait.
+The isolated Windows portfolio passed nine bounded non-Bash source groups and
+all separately bounded Bash selections. The selectors overlap some file-name
+prefixes, so their counts are not claimed as a unique total.
+
+Two existing Windows Bash fixture gates were corrected while validating:
+per-item observation now matches the existing 120-second child bound, and the
+intended unavailable-native-symlink prerequisite is emitted before shell
+`set -e` can terminate setup. Assertions, portfolio tiers, production deadlines
+and the absolute ten-minute job limit are unchanged. Current HTTP generation
+36 owners are re-attested; historical contract evidence is retained.
+
+Implementation review, required CI and the canonical merged closure remain
+pending. The parent effort stays Active; this is not release, external rendering
+adoption, CPU enforcement or native process-tree reclamation proof.

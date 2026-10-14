@@ -197,6 +197,7 @@ WORKSPACE_CREATION_PROTOCOL_VERSION = 34
 QUALIFIED_LIVE_PEER_PROTOCOL_VERSION = 35
 # Explicit no-worktree native creation for an exact provider-exec instance.
 PROVIDER_CREATION_PROTOCOL_VERSION = 36
+WORKTREE_RENDER_CACHE_PROTOCOL_VERSION = 36
 HTTP_PROTOCOL_VERSION = 36
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
