@@ -336,6 +336,34 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
             _PS1_HELPER.replace("return $false\n    }", "return $true\n    }")
             + "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
         ),
+        (
+            "install.ps1",
+            _PS1_HELPER.replace(
+                "        Write-Fail 'x'\n        return $false\n    }\n    return $true",
+                "        if ($optional) { return $false }\n    }\n    return $true",
+            ) + "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+        ),
+        (
+            "install.ps1",
+            _PS1_HELPER + "    if (-not (Invoke-VersionedMarkComplete)) {\n"
+            "        if ($strict) { exit 1 }\n    }\n",
+        ),
+        (
+            "install.sh",
+            _SH_HELPER + "main() {\n    _versioned_mark_complete || { [[ -n \"$strict\" ]] && exit 1; }\n}\n",
+        ),
+        (
+            "install.sh",
+            _SH_HELPER + "main() {\n"
+            "    if ! _versioned_mark_complete; then\n        if [[ -n x ]]; then return 1; fi\n"
+            "    fi\n    activate\n}\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n"
+            "    \"$py\" \"${args[@]}\" 2>&1 || { [[ -n \"$strict\" ]] && return 1; }\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
     ],
     ids=[
         "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
@@ -346,6 +374,9 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         "ps1-status-check-only-warns", "sh-writer-fallback-warns", "ps1-no-writer",
         "sh-or-return-0", "sh-if-not-bare-return", "sh-if-condition-or-true",
         "ps1-exit-0", "ps1-helper-failure-returns-true",
+        "ps1-helper-conditional-failure", "ps1-call-conditional-exit",
+        "sh-or-conditional-exit", "sh-if-not-nested-conditional-return",
+        "sh-helper-conditional-return",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:

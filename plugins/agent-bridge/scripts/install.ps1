@@ -1013,11 +1013,19 @@ function Enter-InstallLock {
             return $true
         } catch [System.IO.IOException] {
             # Only a sharing/lock violation means "another install holds it" ->
-            # retry until the deadline. Any OTHER IOException (disk full, FS
+            # retry until the deadline: ERROR_SHARING_VIOLATION/ERROR_LOCK_VIOLATION
+            # (32/33) on Windows, EWOULDBLOCK from the FileShare.None lock on
+            # Linux (11) and macOS (35). Any OTHER IOException (disk full, FS
             # error) is a real fault: fail closed (exit 1) rather than masking it
             # as contention and spinning silently, and never install unlocked.
-            $win32 = $_.Exception.HResult -band 0xFFFF
-            if ($win32 -eq 32 -or $win32 -eq 33) {   # ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+            $code = $_.Exception.HResult -band 0xFFFF
+            $runtimeInfo = [System.Runtime.InteropServices.RuntimeInformation]
+            $osPlatform = [System.Runtime.InteropServices.OSPlatform]
+            $contention = if ($env:OS -eq 'Windows_NT') { $code -eq 32 -or $code -eq 33 } else {
+                ($runtimeInfo::IsOSPlatform($osPlatform::Linux) -and $code -eq 11) -or
+                ($runtimeInfo::IsOSPlatform($osPlatform::OSX) -and $code -eq 35)
+            }
+            if ($contention) {
                 if ((Get-Date) -ge $deadline) { return $false }
                 Start-Sleep -Milliseconds 750
             } else {

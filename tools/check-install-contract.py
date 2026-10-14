@@ -349,11 +349,13 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
                 tail = statement.split("||", 1)[1] if "||" in statement else None
                 # `|| return $?` right after the call returns the helper's own status.
                 stops = tail is not None and bool(
-                    _IMMEDIATE_STATUS.match(tail) or _FAILS.search(tail)
+                    _IMMEDIATE_STATUS.match(tail) or _fails_unconditionally(tail)
                 )
             elif _MARK_COMPLETE_IF_NOT.search(line):
                 tail = "\n".join(lines[lineno - 1:lineno + 20])
-                stops = bool(_FAILS.search(_braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):])))
+                stops = _fails_unconditionally(
+                    _braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):])
+                )
             elif match := _MARK_COMPLETE_SH_IF.match(line):
                 stops = _sh_failure_branch_stops(lines[lineno - 1:], negated=bool(match.group(1)))
             else:
@@ -376,6 +378,40 @@ _FAILS = re.compile(
     r"\bthrow\b|\breturn\s+\$false\b"
     r"|\b(?:exit|return)\s+(?:[1-9]\d*|\"?\$\{?(?!(?:true|null)\b)[A-Za-z_]\w*\}?\"?)(?![\w-])"
 )
+_QUOTED_STATUS = re.compile(r'"(\$(?:\{?[A-Za-z_]\w*\}?|\?))"')
+_PARAM_EXPANSION = re.compile(r"\$\{(\w+)[^}]*\}")
+
+
+def _fails_unconditionally(body: str) -> bool:
+    """Whether ``body`` reports failure on every path through it.
+
+    Only a top-level statement counts: a stop nested in a conditional
+    (``if (...) { return $false }``, ``[[ ... ]] && exit 1``, an inner
+    ``if ... fi`` or ``{ ... }`` block) can be skipped, letting the failure
+    fall through to activation.
+    """
+    code = _PARAM_EXPANSION.sub(r"$\1", _QUOTED_STATUS.sub(r"\1", body))
+    code = _strip_quoted_strings(code).strip()
+    if code.startswith("{") and code.endswith("}"):
+        code = code[1:-1]
+    flat, depth = [], 0
+    for char in code:
+        depth += {"{": 1}.get(char, 0)
+        if depth == 0:
+            flat.append(char)
+        depth -= {"}": 1}.get(char, 0) if depth else 0
+    statements = re.split(r"[;\n]", "".join(flat))
+    nested = 0
+    for statement in (s.strip() for s in statements):
+        if re.match(r"(?:if|while|until|for|case)\b", statement):
+            nested += 1
+        if nested == 0 and _FAILS.match(statement):
+            return True
+        if re.match(r"(?:fi|done|esac)\b", statement) and nested:
+            nested -= 1
+    return False
+
+
 # The writer invocation inside each helper, and how its status must be handled.
 _SH_WRITER = re.compile(r'"\$py"\s+"\$\{args\[@\]\}"')
 _PS1_WRITER = re.compile(r"&\s*\$py\b")
@@ -398,10 +434,10 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
     if suffix == ".ps1":
         writer = _PS1_WRITER.search(code)
         check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
-        return bool(check) and bool(_FAILS.search(_braced_body(code[check.end() - 1:])))
+        return bool(check) and _fails_unconditionally(_braced_body(code[check.end() - 1:]))
     writers = [line for line in code.splitlines() if _SH_WRITER.search(line)]
     return bool(writers) and all(
-        not sep or bool(re.search(r"\brc=\$\?", tail) or _FAILS.search(tail))
+        not sep or bool(re.match(r"\s*rc=\$\?", tail)) or _fails_unconditionally(tail)
         for _, sep, tail in (line.partition("||") for line in writers)
     )
 
@@ -437,7 +473,7 @@ def _sh_failure_branch_stops(lines: list[str], *, negated: bool) -> bool:
                 break
             branch, begin = word, keyword.end()
     failure = bodies.get("then" if negated else "else")
-    return failure is not None and bool(_FAILS.search(failure))
+    return failure is not None and _fails_unconditionally(failure)
 
 
 def _braced_body(text: str) -> str:

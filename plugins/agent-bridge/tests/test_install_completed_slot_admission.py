@@ -1212,6 +1212,43 @@ def test_ps1_lock_fault_fails_closed(tmp_path: Path) -> None:
     assert "RESULT=" not in result.stdout, detail
     assert "refusing to proceed unlocked" in result.stdout + result.stderr, detail
 
+
+_LOCK_HOLDER = """
+import os, sys, time
+path = sys.argv[1]
+handle = open(path, "a+b")
+if os.name != "nt":
+    import fcntl
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+print("HELD", flush=True)
+time.sleep(60)
+"""
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_lock_held_by_another_process_is_contention(tmp_path: Path) -> None:
+    """A lock genuinely held by another process is contention on every OS:
+    Windows reports a sharing violation, Linux/macOS report EWOULDBLOCK (11/35).
+    The installer waits out its deadline and reports busy (exit 75 upstream),
+    never a lock fault (exit 1)."""
+    lock = tmp_path / "install" / ".install.lock"
+    lock.parent.mkdir(parents=True)
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER, str(lock)], stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "HELD"
+        action = "$r = Enter-InstallLock -TimeoutSec 1\nWrite-Host \"RESULT=$r\"\nexit 0"
+        result = _run_ps(_ps_harness(tmp_path, "incomplete", action, extra=("Enter-InstallLock",)))
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+    detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
+    assert result.returncode == 0, detail
+    assert "RESULT=False" in result.stdout, detail
+    assert "refusing to proceed unlocked" not in result.stdout + result.stderr, detail
+
+
 def _sh_real_lock_harness(tmp_path: Path, action: str) -> Path:
     harness = _sh_harness(tmp_path, "incomplete", action, extra=("_enter_install_lock",))
     text = harness.read_text(encoding="utf-8").replace("_enter_install_lock() { return 0; }\n", "")
