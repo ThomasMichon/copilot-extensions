@@ -349,7 +349,12 @@ The Owner usually runs headless, so it logs to
 `~/.agent-codespaces/logs/owner.log` (rotated when an Owner starts; under
 `AGENT_CODESPACES_HOME` when set): its start and stop, every relay or forward
 re-establish, and every failed cycle. Read it first when a worker's credential
-relay or a forward drops. For how often a CodeSpace is being dialed, and how
+relay or a forward drops. An on-demand start waits up to 30 seconds for a live,
+process-identity-checked beacon, including cold imports and configuration
+loading; it stops waiting early if the launched child exits without a live
+Owner. A timeout is not proof the child died: it may still finish starting.
+The caller reports the readiness failure without killing the child, changing
+holds, or replacing a worker. For how often a CodeSpace is being dialed, and how
 each attempt ended (config fetch, connect, direct exec, reconnect -- timeouts,
 transient tunnel resets, errors), run
 `<agent-codespaces catalog argv[0]> dial-log <name> [--json]`: counts per outcome

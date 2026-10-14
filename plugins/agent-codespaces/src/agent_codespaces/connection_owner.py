@@ -959,16 +959,20 @@ async def run_owner_daemon(
         await owner.shutdown()
 
 
+DEFAULT_OWNER_STARTUP_TIMEOUT = 30.0
+
+
 def ensure_owner_running(
-    config: Any, *, spawn_timeout: float = 5.0, poll: float = 0.2
+    config: Any, *, spawn_timeout: float = DEFAULT_OWNER_STARTUP_TIMEOUT, poll: float = 0.2
 ) -> bool:
     """Best-effort on-demand start of the Connection Owner daemon.
 
     Returns ``True`` once the Owner is live -- already running, or freshly
     spawned (detached, surviving this caller's own exit) and observed to become
-    live within ``spawn_timeout``. Returns ``False`` (never raises) on any
-    spawn failure or timeout, so a caller always has a safe fallback: keep
-    owning its own relay exactly as if the Owner did not exist. This is the
+    live within ``spawn_timeout`` (30 seconds by default, including cold imports
+    and configuration loading). Returns ``False`` on spawn failure, child exit
+    before readiness, or timeout. Callers retain their existing refusal or
+    direct-relay fallback rather than treating a spawned process as ready. This is the
     on-demand half of "spins up when needed, exits when idle" -- the daemon is
     never assumed to already be running as a permanent background service.
     """
@@ -988,7 +992,7 @@ def ensure_owner_running(
             "cwd": os.path.expanduser("~"),  # never the caller's cwd
             **windowless_daemon_kwargs(breakaway=True),
         }
-        subprocess.Popen(argv, **popen_kwargs)
+        child = subprocess.Popen(argv, **popen_kwargs)
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False
@@ -996,5 +1000,24 @@ def ensure_owner_running(
     while time.monotonic() < deadline:
         if is_owner_live():
             return True
-        time.sleep(poll)
-    return is_owner_live()
+        returncode = child.poll()
+        if returncode is not None:
+            # A losing singleton contender can exit while the winner goes live.
+            if is_owner_live():
+                return True
+            log.warning(
+                "Connection Owner exited before readiness (exit code %s); "
+                "see %s", returncode, RUNTIME_DIR / "logs" / "owner.log",
+            )
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(poll, remaining))
+    if is_owner_live():
+        return True
+    log.warning(
+        "Connection Owner did not become live within %.1f seconds; "
+        "startup may still be in progress; see %s",
+        spawn_timeout, RUNTIME_DIR / "logs" / "owner.log",
+    )
+    return False
