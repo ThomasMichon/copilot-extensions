@@ -961,7 +961,7 @@ function Invoke-VersionedMarkComplete {
        so "marker present" == "healthy, complete build". A crashed / watchdog-
        killed install never reaches here, leaving its slot markerless and thus
        tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
     if (-not $py) {
@@ -973,6 +973,7 @@ function Invoke-VersionedMarkComplete {
     if ($LASTEXITCODE -ne 0) {
         throw "Runtime completion marker writer failed with exit code $LASTEXITCODE"
     }
+    return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -1591,7 +1592,7 @@ function Install-Runtime {
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
             exit 1
         }
-        Invoke-VersionedMarkComplete
+        if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
         & $VenvPython (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"

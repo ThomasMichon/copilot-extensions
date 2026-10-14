@@ -1510,7 +1510,7 @@ _ensure_runtime() {
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
-        _versioned_mark_complete
+        _versioned_mark_complete || exit 1
         if ! "$VENV_PYTHON" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
             _fail "Runtime completion marker was not published for versions/$SRC_VERSION -- not activating"
             exit 1

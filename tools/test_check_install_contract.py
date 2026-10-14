@@ -220,3 +220,47 @@ def test_grouped_exec_redirect_is_accepted(tmp_path, line) -> None:
 
 def test_repo_installers_do_not_swallow_stderr_with_exec() -> None:
     assert checker._exec_stderr_swallow_violations(REPO / "plugins") == []
+
+def _scripts(tmp_path: Path, name: str, text: str) -> Path:
+    path = tmp_path / "plugins" / "demo" / "scripts" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return tmp_path / "plugins"
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("install.sh", "_versioned_mark_complete() {\n    \"$py\" \"${args[@]}\" 2>&1 | sed 's/^/  /' || true\n}\n"),
+        ("install.sh", "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n    _versioned_mark_complete\n}\n"),
+        ("install.ps1", "function Invoke-VersionedMarkComplete {\n    return $true\n}\n    Invoke-VersionedMarkComplete\n"),
+    ],
+    ids=["sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call"],
+)
+def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:
+    assert checker._mark_complete_result_violations(_scripts(tmp_path, name, text))
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    local out rc=0\n"
+            "    out=\"$(\"$py\" \"${args[@]}\" 2>&1)\" || rc=$?\n    return \"$rc\"\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
+        (
+            "install.ps1",
+            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
+            "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+        ),
+    ],
+    ids=["sh-checked", "ps1-checked"],
+)
+def test_checked_completion_marker_publication_passes(tmp_path, name, text) -> None:
+    assert checker._mark_complete_result_violations(_scripts(tmp_path, name, text)) == []
+
+
+def test_every_shipped_installer_checks_its_completion_marker() -> None:
+    assert checker._mark_complete_result_violations(checker.PLUGINS_DIR) == []

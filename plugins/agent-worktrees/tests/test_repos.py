@@ -1705,3 +1705,16 @@ def test_repos_cli_sync_combines_leading_names_with_a_multi_word_tag(
     assert captured["tag"] == "multi-machine system"
 
 
+
+
+def test_repo_git_ignores_an_inherited_git_dir(tmp_path: Path, monkeypatch) -> None:
+    # A hook or parent git process can export GIT_DIR/GIT_WORK_TREE; registry
+    # status and sync must still act on the registered checkout.
+    target = tmp_path / "target"
+    other = tmp_path / "other"
+    _init_repo(target, branch="main")
+    _init_repo(other, branch="elsewhere")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+    assert repos._git(str(target), "branch", "--show-current").stdout.strip() == "main"

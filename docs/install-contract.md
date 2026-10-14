@@ -1702,6 +1702,12 @@ gate + marker**, a
 watchdog-killed build never becomes the live version — the old daemon keeps serving,
 and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 
+A refused or failed `mark-complete` (conflicting evidence, a storage failure, or no
+bootstrap interpreter to run it) **stops activation**: the installer reports why
+and exits non-zero instead of activating a slot whose completion was never
+published. `tools/check-install-contract.py` rejects a completion-marker helper
+that swallows the writer's exit status and any call site that ignores its result.
+
 > **Test it:** `tools/test-install-flow.ps1 -Plugin <name>` (Windows) and
 > `bash tools/test-install-flow.sh --plugin <name>` (Linux/WSL) are the turn-key
 > mini end-to-ends that assert all of the above in an isolated sandbox (STAGED,
@@ -1755,6 +1761,11 @@ install transaction lock and exits non-zero — it never proceeds unlocked.
 Read-only actions (`status`), service controls, and `uninstall` do not take it.
 `agent-logger` differs only in also locking `uninstall` (everything except
 `status`).
+`agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
+`flock` on fd 8, or the same pid-symlink fallback; default wait 150s). It
+distinguishes the two non-success outcomes: another install holding the lock for
+the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
+success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call.
 

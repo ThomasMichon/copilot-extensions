@@ -994,8 +994,9 @@ function Enter-InstallLock {
        is NO stale-lock class (no PID reaping). Retries up to $TimeoutSec; returns
        $true when acquired (handle in $script:InstallLockHandle), $false when
        another install held it the whole window -- the caller then DEFERS (the
-       in-flight install lands the version). A non-contention error degrades to
-       "proceed WITHOUT the lock" so a lock fault can never wedge the installer. #>
+       in-flight install may land the version, but this run reports "blocked by
+       lock" (exit 75), never success). A non-contention fault fails closed: it
+       exits 1 rather than ever installing without the lock. #>
     param([int]$TimeoutSec = 300)
     if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
     $lockPath = Join-Path $InstallDir '.install.lock'
@@ -1020,12 +1021,12 @@ function Enter-InstallLock {
                 if ((Get-Date) -ge $deadline) { return $false }
                 Start-Sleep -Milliseconds 750
             } else {
-                Write-Warn "Install-lock IO error (not contention): $($_.Exception.Message) -- proceeding WITHOUT the lock."
-                return $true
+                Write-Fail "Install-lock IO error (not contention): $($_.Exception.Message) -- refusing to proceed unlocked."
+                exit 1
             }
         } catch {
-            Write-Warn "Install-lock error: $($_.Exception.Message) -- proceeding WITHOUT the lock."
-            return $true   # non-contention fault -> degrade to today's lock-free behavior
+            Write-Fail "Install-lock error: $($_.Exception.Message) -- refusing to proceed unlocked."
+            exit 1   # a lock fault fails closed: never install unlocked
         }
     }
 }
@@ -2404,8 +2405,8 @@ function Invoke-Install {
     # (the racing-rebuild that yields a DOA slot). Wait for any in-flight install;
     # on timeout DEFER -- it will land the version.
     if (-not (Enter-InstallLock)) {
-        Write-Warn 'Another agent-bridge install is in progress -- deferring this run (the in-flight install lands the version). No-op.'
-        return
+        Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
+        exit 75
     }
     # The transaction's single payload fingerprint (#5472): computed once under
     # the lock, BEFORE admission, and carried unchanged through admission, the
@@ -3122,8 +3123,8 @@ function Invoke-Update {
     # overlapping install/update rebuild the venv over an in-flight one. Defer on
     # timeout; re-check the no-op after acquiring in case it just landed.
     if (-not (Enter-InstallLock)) {
-        Write-Warn 'Another agent-bridge install/update is in progress -- deferring this run. No-op.'
-        return
+        Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
+        exit 75
     }
     # The transaction's single payload fingerprint (see Invoke-Install).
     $payloadHash = Get-PayloadHash
@@ -3261,9 +3262,10 @@ function Invoke-Update {
         if ($VersionedRuntime) {
             # The `venv` link was never swapped (activate runs only after a healthy
             # build), so the previous slot is still active. Discard the half-built
-            # new slot (unless it IS the active one -- a same-version refresh) and
+            # new slot -- only one this run constructed: a reused slot was already
+            # published (create-once, #5472) and is never deleted here -- and
             # restart the previous version if the classic path stopped it.
-            if ($SrcVersion -and $SrcVersion -ne $prevVersion) {
+            if ($SrcVersion -and $SrcVersion -ne $prevVersion -and $admission -ne 'reuse') {
                 $failedSlot = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
                 if (Test-Path $failedSlot) { Remove-Item -Recurse -Force $failedSlot -ErrorAction SilentlyContinue }
             }

@@ -106,7 +106,7 @@ function Remove-ConsoleTrampolines {{ param($VenvDir) }}
 function Get-VersionedCurrent {{ return '' }}
 function Invoke-VersionedSlotClean {{ }}
 function Invoke-VersionedGc {{ param($KeepPrev) }}
-function Invoke-VersionedMarkComplete {{ Add-Content '{tmp_path / "events"}' "health-$Actor" }}
+function Invoke-VersionedMarkComplete {{ Add-Content '{tmp_path / "events"}' "health-$Actor"; return $true }}
 function New-IndexVenv {{
     param($Dir, $Python, $PythonCmd)
     New-Item -ItemType Directory -Path $Dir -Force | Out-Null

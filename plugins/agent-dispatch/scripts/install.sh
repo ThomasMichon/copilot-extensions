@@ -683,13 +683,22 @@ _versioned_mark_complete() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
+    py="$(_bootstrap_python)" || py=""
+    if [[ -z "$py" ]]; then
+        _fail "Cannot publish the completion marker for versions/$SRC_VERSION without a bootstrap Python interpreter -- not activating"
+        return 1
+    fi
     local ph
     ph="$(_payload_hash)"
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    local out rc=0
+    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
+    [[ -z "$out" ]] || printf '%s\n' "$out" | sed 's/^/  ...    /'
+    if [[ "$rc" -ne 0 ]]; then
+        _fail "Failed to publish the completion marker for versions/$SRC_VERSION (exit $rc) -- not activating"
+        return "$rc"
+    fi
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -1214,7 +1223,7 @@ _ensure_runtime() {
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
-        _versioned_mark_complete
+        _versioned_mark_complete || exit 1
         _supervisor_audit runtime-ready import-health-gate "" "" ok
         _versioned_activate || exit 1
         # The supersession check and the shared publication it protects

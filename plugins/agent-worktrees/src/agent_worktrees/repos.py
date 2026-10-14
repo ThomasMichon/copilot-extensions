@@ -1290,12 +1290,11 @@ class RepoStatus:
 
 
 def _git(path: str, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", path, *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
+    # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (e.g. from a hook or a
+    # parent git process) must never redirect a registry repo's status or
+    # sync to another repository: always act on `path`.
+    return git_ops.git(
+        "-C", path, *args, check=False, timeout=timeout, isolated_repository=True,
     )
 
 
