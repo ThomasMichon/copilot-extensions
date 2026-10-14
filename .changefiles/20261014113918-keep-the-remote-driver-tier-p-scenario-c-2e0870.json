@@ -1,0 +1,9 @@
+{
+  "comment": "Keep the remote-driver Tier-P scenario credit-free with a shared authenticated empty-body rejection probe and zero-SDK-send regression coverage.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

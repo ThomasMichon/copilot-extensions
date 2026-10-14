@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createDriverServer, MAX_SSE_CLIENTS } from "../extensions/agent-remote-driver/driver-server.mjs";
 import { createSessionDriver } from "../extensions/agent-remote-driver/session-driver.mjs";
+import { readFile } from "node:fs/promises";
+import { probeSendRejection } from "../../../tools/clean-room/scenarios/agent-remote-driver-solo/fixtures/send-rejection-probe.mjs";
 
 const TOKEN = "test-token-123";
 
@@ -36,7 +38,7 @@ async function withServer(fn, extraOpts = {}) {
   const port = await driverServer.listen();
   const base = `http://127.0.0.1:${port}`;
   try {
-    await fn({ base, calls, emit: (event) => listeners.forEach((l) => l(event)) });
+    await fn({ base, calls, server: driverServer.server, emit: (event) => listeners.forEach((l) => l(event)) });
   } finally {
     await driverServer.close();
   }
@@ -61,6 +63,42 @@ test("GET /health requires auth and reports session id/pid", async () => {
     assert.equal(body.sessionId, "session-1");
     assert.equal(body.pid, 4242);
   });
+});
+
+test("Tier-P scenario /send probe authenticates and rejects content before any SDK send", async () => {
+  await withServer(async ({ base, calls, server }) => {
+    const requestDone = new Promise((resolve) => {
+      server.once("request", (request) => {
+        let body = "";
+        request.on("data", (chunk) => { body += chunk; });
+        request.on("end", () => resolve({ method: request.method, path: request.url, body }));
+      });
+    });
+    const descriptor = { host: "127.0.0.1", port: Number(new URL(base).port), token: TOKEN };
+    const result = await probeSendRejection(descriptor);
+    assert.deepEqual(await requestDone, { method: "POST", path: "/send", body: "{}" });
+    assert.deepEqual(result, { status: 400, error: "content (string) is required" });
+    assert.deepEqual(calls.send, []);
+    assert.equal(calls.abort, 0);
+    assert.deepEqual(calls.order, []);
+  });
+});
+
+test("Tier-P scenario /send probe does not mistake authentication failure for content rejection", async () => {
+  await withServer(async ({ base, calls }) => {
+    const descriptor = { host: "127.0.0.1", port: Number(new URL(base).port), token: "wrong-test-token" };
+    await assert.rejects(probeSendRejection(descriptor), /expected HTTP 400 content-validation rejection/);
+    assert.deepEqual(calls.send, []);
+  });
+});
+
+test("Tier-P scenario invokes the shared rejection probe and matches its manifest stage", async () => {
+  const root = new URL("../../../tools/clean-room/scenarios/agent-remote-driver-solo/", import.meta.url);
+  const scenario = await readFile(new URL("scenario.sh", root), "utf8");
+  const manifest = JSON.parse(await readFile(new URL("manifest.json", root), "utf8"));
+  assert.ok(scenario.includes('capture send-rejection -- node "$_SELF_DIR/fixtures/send-rejection-probe.mjs" "$DESCRIPTOR"'));
+  assert.ok(scenario.includes(`phase 3 "${manifest.stages.find((stage) => stage.n === 3).title}"`));
+  assert.equal(scenario.includes("clean-room probe, no reply needed"), false);
 });
 
 test("POST /send maps HTTP content/mode to SDK prompt/mode and requires content", async () => {

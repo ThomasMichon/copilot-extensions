@@ -2,7 +2,7 @@
 # agent-remote-driver-solo/scenario.sh -- Tier-P (programmatic) F1 solo scenario.
 #
 # Installs ONLY agent-remote-driver on a fresh box and proves its launch-time
-# baseline-drivability contract end-to-end: a live `copilot` session writes a
+# discovery and HTTP admission contract: a live `copilot` session writes a
 # discovery descriptor, the driver's dependency-free HTTP surface answers over
 # loopback with the descriptor's bearer token, the one aggregation CLI
 # (bin/list-sessions.mjs) reflects the live session, and SIGTERM cleanly
@@ -18,7 +18,9 @@
 # descriptor. This is a deterministic filesystem/network assertion, not a
 # judged eval: it never needs a model turn or inspects any reply content, only
 # the extension's observable side effects (descriptor file, HTTP responses,
-# aggregation CLI output, signal-cleanup behavior).
+# aggregation CLI output, signal-cleanup behavior). The /send check submits
+# only {} and requires HTTP 400 missing-content rejection before SDK send;
+# real prompt delivery is deliberately NOT exercised in this Tier-P lane.
 #
 # Name-free / public F1. Env: CR_MARKETPLACE_REPO / CR_MARKETPLACE_NAME + the
 # lib's vars. CR_MARKETPLACE_REPO may be a container-local directory (e.g.
@@ -208,7 +210,7 @@ else
 fi
 
 # =========================================================================
-phase 3 "drive the session over its HTTP surface (/health, /events, /send)"
+phase 3 "observe HTTP surface and reject empty /send (/health, /events, HTTP 400)"
 if [ -n "$DESCRIPTOR" ]; then
     read -r D_HOST D_PORT D_TOKEN D_PID D_SID <<EOF2
 $(python3 -c '
@@ -252,12 +254,11 @@ EOF2
         fi
     fi
 
-    if _http_capture send "POST $BASE_URL/send" -- curl -fsS -m 5 -H "$AUTHZ" -H 'content-type: application/json' \
-        -d '{"content":"(clean-room probe, no reply needed)"}' "$BASE_URL/send"; then
-        pass "/send accepted a message (no model turn is expected to result -- the session has none pending)"
+    if capture send-rejection -- node "$_SELF_DIR/fixtures/send-rejection-probe.mjs" "$DESCRIPTOR"; then
+        pass "/send authenticated empty-body probe received HTTP 400 content-validation rejection (no prompt delivery exercised)"
     else
-        jam "network" "/send request failed (see cr-logs/send.log)" \
-            "confirm the /send handler accepts a message"
+        jam "network" "/send empty-body rejection proof failed (see cr-logs/send-rejection.log)" \
+            "the authenticated /send handler must reject {} with HTTP 400 and content (string) is required before SDK send"
     fi
 else
     info "skipping phase 3 HTTP checks -- no descriptor from phase 2"
