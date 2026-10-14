@@ -150,8 +150,8 @@ Generated instructions live under the ignored
 `.github/instructions/agent-worktrees-generated/` namespace; tracked and staged
 paths are protected before any batch copy or cleanup.
 
-A failed paired allocation retains a small pending marker in this worktree's
-existing Git-administrative guidance metadata. Both the final preflight and hook
+Failed paired allocation or composition retains a small pending marker in this
+worktree's existing Git-administrative guidance metadata. Both the final preflight and hook
 backup refuse partial publication until successful paired composition clears
 that marker. Explicit no-pair creation does not set it. Existing worktree
 identities and checked-in guidance remain usable; pair repair is separate from

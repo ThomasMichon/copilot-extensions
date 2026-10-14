@@ -362,6 +362,19 @@ single-final-batch contract.
   symlink skip in 72.40s, under unchanged limits. No native macOS venue or remote
   rollout was authorized; the portable key behavior is unit-proven, not claimed
   as a live macOS test.
+- Follow-up overview identified composition failure after a previous success.
+  Paired composition now marks pending before its existing serialized overlay
+  operation, and clears readiness inside that same boundary only on success.
+  Known paired configuration/validation failures retain pending state before
+  degraded return; paired opt-out follows the same preparation ordering.
+  Casefolded the overlay gate as well, keeping readiness ordering consistent
+  for case-insensitive aliases. No new coordination service or transaction
+  framework is introduced.
+- Real post-success cases cover malformed paired settings and unreadable
+  configuration through direct preparation and final CLI preflight, then prove
+  backup refusal, unchanged prior output, successful repair and eventual fresh
+  output. Final focused source/native selection: 223 passed / 1 unavailable-
+  symlink skip in 85.03s, unchanged budgets; lint passes.
 
 ### 2026-10-14 - Declarations decide static publication
 

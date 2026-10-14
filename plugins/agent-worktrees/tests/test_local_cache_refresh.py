@@ -345,6 +345,52 @@ def test_pending_pair_blocks_final_noop_and_backup_without_cleanup(copy_workspac
     assert static.pair_pending_path(root).exists()
 
 
+@pytest.mark.parametrize("entrypoint", ["direct", "final"])
+@pytest.mark.parametrize("fault", ["settings", "config"])
+def test_post_success_pair_failure_blocks_backup_until_repaired(
+    copy_workspace, tmp_path, monkeypatch, capsys, entrypoint, fault,
+):
+    from test_knowledge_plugins import _pair_resolution
+
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    settings = knowledge / ".github" / "copilot" / "settings.json"
+    write_json(settings, {})
+    resolution = _pair_resolution(root, knowledge)
+    config = SimpleNamespace(knowledge_repo="private")
+    monkeypatch.setattr(knowledge_plugins, "_resolve_pair_state", lambda **kw: (resolution, config, None))
+    knowledge_plugins.compose_from_pair(cwd=root, config=config)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    previous = output.read_bytes()
+    template.write_bytes(b"new source awaiting repaired composition")
+    if fault == "settings":
+        settings.write_text("{", encoding="utf-8")
+    else:
+        monkeypatch.setattr(
+            knowledge_plugins, "_resolve_pair_state",
+            lambda **kw: (resolution, config, "configuration unreadable"),
+        )
+    if entrypoint == "direct":
+        assert lcr.prepare_for_launch(root, compose_pair=True, config=config).status == "failed"
+    else:
+        monkeypatch.setattr(context_cli, "_core_helper", lambda *a: lambda path: None)
+        assert context_cli.cmd_knowledge_dispatch([
+            "compose-plugins", "--cwd", str(root), "--prepare-projections", "--json",
+        ]) == 3
+        assert json.loads(capsys.readouterr().out)["action"] == "error"
+    assert static.pair_pending_path(root).exists()
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert output.read_bytes() == previous
+    write_json(settings, {})
+    monkeypatch.setattr(knowledge_plugins, "_resolve_pair_state", lambda **kw: (resolution, config, None))
+    knowledge_plugins.compose_from_pair(cwd=root, config=config)
+    assert not static.pair_pending_path(root).exists()
+    assert lcr.refresh_local_cache(root).status == "ready"
+    assert output.read_bytes() == template.read_bytes()
+
+
 def test_portable_unicode_and_internal_space_destinations_are_not_filtered(copy_workspace):
     root, home = copy_workspace
     template, _ = provider(root, home)

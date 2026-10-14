@@ -139,6 +139,10 @@ worktree's existing Git-administrative guidance metadata. Both final preparation
 and the backup refuse publication while it remains. Successful paired
 composition clears it under the same publication gate; an unpaired no-op cannot
 clear a failed allocation. Explicit no-pair creation does not create the marker.
+Previously healthy pairs also become pending before composition, so a later
+settings/configuration failure cannot let the backup publish a partial surface.
+Pending-state writes and successful clearing stay inside the existing serialized
+overlay-preparation boundary; older successes cannot clear newer failed work.
 Foreground preparation has no overall deadline. Explicitly bounded callers,
 including the backup, share their remaining budget across discovery and Git
 preflights and check it before publication mutations; operation-specific Git

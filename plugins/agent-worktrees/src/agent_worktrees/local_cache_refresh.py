@@ -14,6 +14,7 @@ from .launch_progress import step
 
 if TYPE_CHECKING:
     from .config import Config
+    from .state_root import StatePair
 
 _LOG = logging.getLogger(__name__)
 RefreshStatus = Literal["ready", "partial", "unavailable", "failed", "timeout", "skipped", "queued"]
@@ -56,11 +57,36 @@ def _checkout_root(path: str | Path) -> Path:
 def mark_pair_pending(repo_root: str | Path) -> None:
     from .static_instructions import pair_pending_path, publication_lock
 
-    root = _checkout_root(repo_root).resolve()
-    with publication_lock(root):
-        marker = pair_pending_path(root)
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch()
+    root = Path(repo_root).resolve()
+    try:
+        try:
+            (root / ".git").lstat()
+        except FileNotFoundError:
+            return
+        with publication_lock(root):
+            marker = pair_pending_path(root)
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
+    except (OSError, ValueError, RuntimeError) as exc:
+        from .knowledge_plugins import KnowledgePluginError
+
+        raise KnowledgePluginError(f"cannot retain incomplete paired preparation: {exc}") from exc
+
+
+def mark_failed_pair_composition(resolution: StatePair) -> None:
+    if not resolution.paired:
+        return
+    harness = next(
+        (entry for entry in (resolution.current, resolution.sibling) if entry and entry.role == "harness"),
+        None,
+    )
+    if harness is None:
+        return
+    from .knowledge_plugins import _overlay_transaction
+
+    root = Path(harness.path).resolve()
+    with _overlay_transaction(root / ".github" / "copilot" / "settings.local.json"):
+        mark_pair_pending(root)
 
 
 def complete_pair_composition(repo_root: str | Path, summary: dict) -> None:
