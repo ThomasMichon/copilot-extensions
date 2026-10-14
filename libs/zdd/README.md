@@ -127,6 +127,30 @@ exit_timeout=...)` exposes this optional
 native wait with a finite zero-to-30-second budget; existing signal-only callers
 retain their original result shape.
 
+### `zdd.process_exit` -- captured graceful-exit evidence
+
+`open_process(pid, expected_start_time)` captures a live, identity-matched
+native reference **before** an adopter requests graceful lifecycle control.
+`ProcessExitReference.wait(timeout)` confirms exit through that same reference,
+with a finite zero-to-30-second budget including reference-lock contention.
+It never samples the PID again, sends a signal, or opens a replacement handle
+after shutdown. Use its context manager or `close()` to release the reference;
+closed references reject waiting.
+
+Windows validates creation time through the captured query/synchronization
+handle, without requesting termination rights. Linux reuses canonical pidfd
+capture and validates the birth token while that reference remains live.
+The shared POSIX wait uses native polling, including descriptors above
+`FD_SETSIZE`; invalid-descriptor and native wait errors are not exit evidence.
+Missing native proof or mismatched/exited identity refuses explicitly. Other
+platforms, including macOS, raise `NotImplementedError`; there is no
+unverified PID-liveness or signaling fallback.
+
+This is only process-exit evidence. The adopter must independently revalidate
+exact installation, receipt, instance, route and governance authority before
+requesting shutdown or mutating writer custody. A matching process token alone
+does not authorize owner retirement, selection, or rollback.
+
 ### `zdd.cutover` -- the cutover orchestrator
 
 `CutoverOrchestrator` drives one active/passive cutover: spawn the new daemon on

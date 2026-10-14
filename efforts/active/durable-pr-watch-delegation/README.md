@@ -93,7 +93,7 @@ _Agent-recommended design and validation, explicitly selected for review._
 
 - [x] Review and merge the [watch-owner lifecycle plan](watch-owner-cutover.md) before implementing the service transaction (confirmed by #6291).
 - [x] Land the canonical pre-adoption drain, full-transaction borrowed authority and custody-preserving rollback prerequisite before the owner adapter (confirmed by #6396).
-- [ ] Land inactive watch-state construction, final read-ready reload and bounded complete quiescence as internal groundwork, without enabling a production service or installation-cell adapter.
+- [x] Land inactive watch-state construction, final read-ready reload and bounded complete quiescence as internal groundwork, without enabling a production service or installation-cell adapter (confirmed by #6714).
 - [ ] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery.
 - [ ] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery.
 - [ ] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and first upgrade from a lease-only owner on Windows and Linux before landing the cutover prerequisite.
@@ -175,6 +175,13 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-14 - Watch-state core merged; exact exit proof continues
+
+- #6714 merged into `dev` at `03c6fadd1507d5eca4297bf17add3c4839451ddc` after exact-head approval `5519958898` with zero open findings and successful current-head CI `38583871208`. The internal state-core milestone is complete; no production installation-cell or service adapter has been enabled.
+- The next owner boundary needs a native process reference captured before graceful control, then bounded exit confirmation through that same reference. Existing diagnostic termination opens and signals its own handle; it cannot confirm an already-requested graceful shutdown without a late PID lookup. Add the non-signaling shared reference prerequisite on Windows and Linux, refusing unsupported native identity proof, before wiring exact owner retirement. Receipt, governance, writer transfer, transaction recovery, adoption, dispatch and deployment remain open.
+- Implemented that shared reference without any service opt-in or signal capability. Native Windows tests retain the same query/synchronization handle across graceful test-child exit and reject a mismatched birth token without affecting the child. Linux uses canonical pidfd capture; its real graceful/high-descriptor cases remain current-head native CI gates. Unsupported platforms explicitly refuse. Reference-lock contention consumes the caller's finite wait budget; a controlled zero-budget case reproduced an overrun before correction.
+- The coupled shared POSIX wait now uses native polling rather than `select`'s descriptor limit and refuses native error flags as exit evidence. Four controlled cases failed before correction; the full contained Windows canonical suite passes 593 tests with 27 platform/stress skips. The actual materialized vendor plus new API/exit cases passes 154 with ten platform skips. Fatal lint, vendor parity, module-size, headless-launch and install-contract gates pass. Canonical generation is limited to ZDD, and this PR declares release impact for all ten generated consumers; no installed runtime or shared live owner was changed.
 
 ### 2026-10-14 - Inactive watch-state and bounded quiescence groundwork
 
