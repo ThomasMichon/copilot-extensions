@@ -276,9 +276,9 @@ same descendant-cleanup guarantee as the bridge's owned process-tree teardown.
 
 ### Concrete compatibility prerequisite
 
-The research also found a separate defect in the current remote-driver adapter,
+The research also found a separate defect in the baseline remote-driver adapter,
 tracked by [#6664](https://github.com/ThomasMichon/copilot-extensions/issues/6664):
-it calls `session.send({content, mode})`, while the inspected SDK constructs
+it called `session.send({content, mode})`, while the inspected SDK constructs
 the request from `MessageOptions.prompt`.
 
 A synthetic probe imported the actual bundled `CopilotSession` and used a
@@ -293,11 +293,13 @@ the boundary behavior:
 | Both content and prompt | Prompt wins; content is ignored |
 
 That is a confirmed request-construction defect for the inspected pair, not a
-reproduced native rejection. Repair the adapter while preserving its HTTP
-`content` input, and regression-test both send and steer before relying on
-further driving validation. An accepted HTTP request by itself does not prove
-that the SDK delivered its text. Historical launch-presence results remain
-historical results, not a compatibility guarantee for every SDK/native pair.
+reproduced native rejection. The adapter correction and send/steer regression
+coverage subsequently merged to `dev` in
+[#6669](https://github.com/ThomasMichon/copilot-extensions/pull/6669), preserving
+HTTP `content` input. This does not establish a release, rollout, or native
+version floor. An accepted HTTP request by itself does not prove that the SDK
+delivered its text. Historical launch-presence results remain historical
+results, not a compatibility guarantee for every SDK/native pair.
 
 ### Recommendation and separate-effort boundary
 

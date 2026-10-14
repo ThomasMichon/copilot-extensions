@@ -5,8 +5,8 @@
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-10-02
 - **Status:** Active
-- **Current work:** [#6664](https://github.com/ThomasMichon/copilot-extensions/issues/6664)
-  (SDK prompt prerequisite, followed by driver arbitration under #5930)
+- **Current work:** [#5930](https://github.com/ThomasMichon/copilot-extensions/issues/5930)
+  (driver arbitration; SDK prompt prerequisite merged to `dev` in #6669)
 - **Vision:** [`visions/cli-default-bridging`](../../../visions/cli-default-bridging/README.md)
   (leaf, cross-cutting; contests `remote-interactive-sessions`'
   `opt-in-not-ambient-default` stance pending this effort's validation) —
@@ -309,12 +309,13 @@ and ordering before Phase 0 work begins.)_
       **Still open: a CodeSpace venue** — `agent-codespaces`' own
       `codespacePlugins` injection seam remains untested. Left as the one
       remaining item before this checklist entry fully closes.
-- [ ] **Compatibility prerequisite (agent-recommended, #6664):** repair and
+- [x] **Compatibility prerequisite (agent-recommended, #6664):** repair and
       regression-test the remote driver's SDK prompt construction for send
       and steer. Phase 6's actual-SDK synthetic probe found that the inspected
       SDK drops a content-only send object. Preserve HTTP `content` input;
       do not treat HTTP admission or historical launch presence as proof of
-      prompt delivery on an untested SDK/native pair.
+      prompt delivery on an untested SDK/native pair. **Merged to `dev` in
+      #6669**; release/rollout and native-version-floor proof are not claimed.
 
 ### Phase 2 — Driver exclusivity arbitration for mux-hosted sessions
 
@@ -420,7 +421,7 @@ without unacceptable regression before Phase 5 can promote anything:
 ## Proposal
 
 The Phase 0-1 implementation and Phase 6 investigation follow the reviewed
-per-phase plans. Repair the concrete SDK prompt prerequisite (#6664), then
+per-phase plans. The SDK prompt prerequisite (#6664) merged to `dev` in #6669;
 continue Phase 2's driver arbitration (#5930). Phase 3-5 and the outstanding
 cross-venue/version-floor proofs remain open. An SDK transport migration is
 outside this effort's execution scope.
@@ -998,3 +999,27 @@ Phase 6's investigation is complete, not the parent effort. Repair #6664
 before continuing Phase 2 / #5930; Phase 1's remaining cross-venue/version-floor
 proof and Phase 3-5 stay open. The original 2026-10-05 entry above is retained
 as historical evidence, not a description of the current receiver.
+
+### 2026-10-14 — SDK prompt prerequisite merged; arbitration next
+
+PR #6669 squash-merged to `dev` as
+`80f3d86b8bf0aba6691c473f66925b0a5d6b0197` after a clean Copilot approval
+and passing required checks. Closed #6664 and resolved only its Phase 1
+compatibility checkbox; the parent Validation Plan remains unchanged.
+
+The production extension now uses a small SDK-free session adapter that maps
+HTTP `content` to SDK `prompt`, preserving mode and abort-before-steer order.
+All 75 existing/updated Node tests passed; an independent focused HTTP-to-SDK
+run passed all three send/default-mode/steer cases. The actual bundled SDK
+also accepted the adapter's constructed request in synthetic fake-RPC probes.
+No live native runtime, clean-room install, or external venue was exercised
+for this isolated mapping correction, and no deployment was performed.
+Normal promotion and adopter-authorized update remain separate from this
+verified `dev` merge.
+
+Re-read this effort after merging. Phase 2 / #5930 is the next design slice:
+generation-fenced remote mutations and independent observers, with explicit
+release/takeover and human ownership. An HTTP claim alone cannot fence direct
+human keyboard input to a mux pane; do not present the narrower guarantee as
+complete human/remote arbitration. The SDK migration remains outside this
+effort's execution scope.
