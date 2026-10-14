@@ -982,6 +982,37 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-10-14 - Phase 6d publication, ordering and adoption review corrections
+
+Review of #6595 exposed three availability/provenance gaps: the early mux
+failure path bypassed producer-failure notification, cold publication failure
+hid its actionable reason, and the Manager admitted contradictory advisory
+availability on current-quality rows. The corrected paths mark published and
+demanded projects explicitly unavailable/stale and enforce quality/status
+agreement. A later review found ordinary creation and yielded-head scalar
+fields missing from the bounded schema; both are now explicitly typed rather
+than dropping current identity or resumability semantics.
+
+Successor promotion now refuses adoption if current-roster activation fails;
+the unpublished successor retains retry state and cannot sweep before activation.
+Held updates carry committed identity order in bounded 128-ID frames. Both
+receivers require the exact final identity permutation at commit, preserving
+reorder-only publications and front insertion without resending unchanged rows.
+The real TCP relay covers 300-row reorder/insertion, while the actual local
+and SSH loader children assert the same committed ordering.
+
+Current evidence: 44 publication/producer/schema cases pass; the affected
+resident/feed matrix has 231 passes and one platform skip, with its strict
+1100-row CLI child missing the unchanged two-second first-load budget on two
+attempts and passing its isolated retry. Failure diagnostics now retain the
+bounded child error/exit state instead of reporting only an empty queue.
+The final held-feed/adoption rerun passes all 29 cases, including the unchanged
+strict load assertion. The activation/adoption subset passes 13 cases, and the Manager current-feed,
+current-roster and SSH-source subset passes 156 with one platform skip.
+The timing variability is not a live performance pass or a reason to raise
+the budget. Normal promotion, deployment, installed full-roster timing,
+rendering and CPU/preservation evidence remain required.
+
 ### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
 
 The existing authenticated status-monitor control endpoint now offers the

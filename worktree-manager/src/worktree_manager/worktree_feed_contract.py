@@ -22,6 +22,8 @@ class CurrentFeed:
         self._begin: dict | None = None
         self._pending: dict | None = None
         self._touched: set = set()
+        self._order: list[str] = []
+        self._ordered: set[str] = set()
 
     def _metadata(self, rows, frame) -> list[dict]:
         return [
@@ -105,6 +107,8 @@ class CurrentFeed:
                 self._pending = {row["id"]: row for row in self.rows}
             self._begin = frame
             self._touched = set()
+            self._order = []
+            self._ordered = set()
             return None
         if self._begin is None or frame.get("projection") != self._begin["projection"]:
             raise ValueError("current-roster feed mixed publication barriers")
@@ -112,6 +116,22 @@ class CurrentFeed:
             rows = self._snapshot.receive(frame)
             if rows is None:
                 return None
+        elif kind == "order":
+            identities = frame.get("ids")
+            if (
+                not isinstance(identities, list) or not 0 < len(identities) <= 128
+                or len(self._order) + len(identities) > self._begin["selected_count"]
+            ):
+                raise ValueError("current-roster feed has an invalid identity order")
+            for wid in identities:
+                if (
+                    not isinstance(wid, str) or not wid or len(wid.encode("utf-8")) > 256
+                    or wid in self._ordered
+                ):
+                    raise ValueError("current-roster feed duplicated or invalidated an ordered identity")
+                self._ordered.add(wid)
+                self._order.append(wid)
+            return None
         elif kind in {"worktree", "delete"}:
             row = frame.get("wt")
             wid = row.get("id") if isinstance(row, dict) else frame.get("id")
@@ -133,7 +153,9 @@ class CurrentFeed:
         else:
             if kind != "commit":
                 raise ValueError("current-roster feed omitted its commit barrier")
-            rows = self._metadata(self._pending.values(), self._begin)
+            if self._ordered != self._pending.keys():
+                raise ValueError("current-roster feed omitted its committed identity order")
+            rows = self._metadata([self._pending[wid] for wid in self._order], self._begin)
         if (
             kind not in {"done", "commit"}
             or frame.get("cursor") != self._begin["cursor"]
@@ -145,4 +167,6 @@ class CurrentFeed:
         self._begin = None
         self._pending = None
         self._touched = set()
+        self._order = []
+        self._ordered = set()
         return rows

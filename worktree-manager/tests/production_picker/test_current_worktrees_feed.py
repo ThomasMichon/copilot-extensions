@@ -32,7 +32,7 @@ def snapshot(rows, *, generation="a" * 32):
     ]
 
 
-def update(rows, *, deleted=(), revision=2, count=None):
+def update(rows, *, deleted=(), revision=2, count=None, order=None):
     projection = head(revision, count=len(rows) if count is None else count)
     return [
         {"type": "update", "contract_version": 1, "projection": projection,
@@ -40,6 +40,11 @@ def update(rows, *, deleted=(), revision=2, count=None):
          "base_cursor": revision - 1},
         *({"type": "worktree", "projection": projection, "wt": row} for row in rows),
         *({"type": "delete", "projection": projection, "id": wid} for wid in deleted),
+        *(
+            {"type": "order", "projection": projection, "ids": identities[start:start + 128]}
+            for identities in [[row["id"] for row in rows] if order is None else order]
+            for start in range(0, len(identities), 128)
+        ),
         {"type": "commit", "projection": projection, "cursor": revision},
     ]
 
@@ -70,6 +75,30 @@ def test_current_feed_initial_update_deletes_and_empty_are_atomic():
     assert receiver.receive(pending[-1])[0]["id"] == "two"
     assert receive(receiver, update([], deleted=["two"], revision=3)) == []
     assert receiver.head["revision"] == 3
+
+
+def test_current_feed_preserves_reorder_and_front_insertion_without_reemitting_unchanged_rows():
+    receiver = CurrentFeed()
+    initial = [{"id": f"row-{i}"} for i in range(300)]
+    receive(receiver, snapshot(initial))
+    reversed_ids = [row["id"] for row in reversed(initial)]
+    rows = receive(receiver, update([], count=300, order=reversed_ids))
+    assert [row["id"] for row in rows] == reversed_ids
+    front_ids = ["front", *reversed_ids]
+    rows = receive(
+        receiver, update([{"id": "front"}], revision=3, count=301, order=front_ids),
+    )
+    assert [row["id"] for row in rows] == front_ids
+
+
+@pytest.mark.parametrize("order", [[], ["unknown"], ["one", "one"], [False]])
+def test_current_feed_rejects_invalid_order_and_preserves_last_good_rows(order):
+    receiver = CurrentFeed()
+    before = receive(receiver, snapshot([{"id": "one"}]))
+    with pytest.raises(ValueError):
+        receive(receiver, update([{"id": "one", "title": "after"}], order=order))
+    assert receiver.rows == before
+    assert receiver.head["revision"] == 1
 
 
 @pytest.mark.parametrize("bad", ["base", "revision", "generation", "duplicate", "missing", "mixed", "history"])
@@ -117,8 +146,14 @@ def test_current_feed_availability_and_cutover_do_not_rederive_domain_state():
 @pytest.mark.parametrize("local", [True, False])
 def test_current_feed_actual_loader_subprocess_commits_both_sources_and_cancels(monkeypatch, local):
     monkeypatch.delenv("AGENT_WORKTREES_PICKER_STREAM", raising=False)
-    initial = snapshot([{"id": "one", "title": "before", "status": "active", "dirty": 0}])
-    changed = update([{"id": "two", "title": "after", "status": "active", "dirty": 3}], deleted=["one"])
+    initial = snapshot([
+        {"id": "one", "title": "before", "status": "active", "dirty": 0},
+        {"id": "other", "title": "unchanged", "status": "active", "dirty": 0},
+    ])
+    changed = update(
+        [{"id": "two", "title": "after", "status": "active", "dirty": 3}],
+        deleted=["one"], count=2, order=["two", "other"],
+    )
     script = (
         "import json,time\n"
         f"initial={initial!r}\nchanged={changed!r}\n"
@@ -135,6 +170,7 @@ def test_current_feed_actual_loader_subprocess_commits_both_sources_and_cancels(
     try:
         wait_until(lambda: bool(loader.records()) and loader.records()[0]["id"] == "two")
         row = loader.records()[0]
+        assert [record["id"] for record in loader.records()] == ["two", "other"]
         assert row["raw"]["dirty"] == 3
         assert row["raw"]["_projection"]["revision"] == 2
         assert source.source_id in loader.authoritative_source_ids()

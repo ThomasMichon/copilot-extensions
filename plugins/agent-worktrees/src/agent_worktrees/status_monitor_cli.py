@@ -448,15 +448,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     retired_classify_servers = []
     retired_tracking_write_servers = []
 
-    def _start_request_surfaces() -> None:
+    def _start_request_surfaces() -> bool:
         nonlocal hook_server, classify_server, tracking_write_server
         if admission_closed or not published_lock:
-            return
+            return False
         if status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None:
             try:
                 worktrees_runtime.activate()
             except (ProjectionError, ProjectionUnavailable, OSError) as exc:
                 print(f"current-roster authority unavailable: {exc}", file=sys.stderr)
+                return False
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(_decide)
@@ -482,6 +483,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 tracking_write_server = None
         elif tracking_write_server is not None:
             tracking_write_server.open_admission()
+        return True
 
     def _close_request_surfaces() -> None:
         nonlocal hook_server, classify_server, tracking_write_server
@@ -645,7 +647,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             with state_lock:
                 _cleanup_retired_request_surfaces()
                 published_lock = True
-                _start_request_surfaces()
+                published_lock = _start_request_surfaces()
+                if not published_lock:
+                    wake_event.set()
+                    return {"adopted": False, "error": "current-roster authority unavailable"}
                 _locks.write_lock(lock, extra=_lock_extra())
             wake_event.set()
             return {"adopted": True}
@@ -659,7 +664,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 admission_closed = False
                 _cleanup_retired_request_surfaces()
                 published_lock = True
-                _start_request_surfaces()
+                published_lock = _start_request_surfaces()
+                if not published_lock:
+                    wake_event.set()
+                    return {"draining": True, "error": "current-roster authority unavailable"}
                 _locks.write_lock(lock, extra=_lock_extra())
             wake_event.set()
             return {"draining": False}
@@ -693,7 +701,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     control_server.start()
     if not passive_mode:
         status_monitor_cutover.publish_route(control_server.port, pid=os.getpid(), version=None)
-    _start_request_surfaces()
+    published_lock = _start_request_surfaces()
     if published_lock:
         _locks.write_lock(lock, extra=_lock_extra())
 
@@ -705,8 +713,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 with state_lock:
                     if not published_lock:
                         published_lock = True
-                        _start_request_surfaces()
-                        _locks.write_lock(lock, extra=_lock_extra())
+                        published_lock = _start_request_surfaces()
+                        if published_lock:
+                            _locks.write_lock(lock, extra=_lock_extra())
                 wake_event.set()
             if self_retire_generation is None:
                 self_retire_generation = active_generation

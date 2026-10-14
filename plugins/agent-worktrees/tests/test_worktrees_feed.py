@@ -61,7 +61,7 @@ def test_worktrees_feed_barrier_replays_mutation_during_initial_snapshot(owner):
     assert apply(receiver, initial)["worktrees"] == [{"id": "one", "title": "before"}]
     update = transaction(stream)
     assert update[0]["base_cursor"] == 1 and update[0]["cursor"] == 2
-    assert [f["type"] for f in update] == ["update", "worktree", "delete", "commit"]
+    assert [f["type"] for f in update] == ["update", "worktree", "delete", "order", "commit"]
     assert apply(receiver, update)["worktrees"] == [{"id": "two", "title": "after"}]
     stream.close()
     assert owner.feed.active_count() == 0
@@ -75,7 +75,7 @@ def test_worktrees_feed_coalesces_burst_without_queued_row_copies(owner):
         owner.publish("project", [{"id": "one", "title": str(value)}], observed_at=value)
     update = transaction(stream)
     assert update[0]["cursor"] == 101
-    assert len(update) == 3
+    assert len(update) == 4
     assert apply(receiver, update)["worktrees"] == [{"id": "one", "title": "99"}]
     assert owner.feed._subscribers
     assert all(set(s) == {"project", "closed"} for s in owner.feed._subscribers.values())
@@ -220,6 +220,54 @@ def test_worktrees_feed_transport_preserves_snapshot_to_update_barrier(owner):
         owner.close_admission()
         owner.feed.wait_closed(1)
         server.close()
+
+
+def test_worktrees_feed_real_transport_preserves_reorder_and_front_insertion(owner):
+    server = control.ControlServer(
+        lambda action, payload: owner.health(), token="fixture",
+        stream_handle=lambda action, payload, disconnected: owner.feed.stream(payload, disconnected),
+    )
+    server.start()
+    reader = control.ControlClient(f"http://127.0.0.1:{server.port}", token="fixture", timeout=1)
+    initial = [{"id": f"row-{i}"} for i in range(300)]
+    owner.publish("project", initial, observed_at=2)
+    stream = client.transport(reader, request())
+    receiver = client.FeedReceiver(request())
+    try:
+        assert apply(receiver, transaction(stream))["worktrees"] == initial
+        for revision, rows in enumerate(
+            [list(reversed(initial)), [{"id": "front"}, *initial]], start=3,
+        ):
+            owner.publish("project", rows, observed_at=revision)
+            frames = transaction(stream)
+            assert all(len(f["ids"]) <= 128 for f in frames if f["type"] == "order")
+            assert sum(f["type"] == "worktree" for f in frames) == (revision == 4)
+            assert apply(receiver, frames)["worktrees"] == owner.handle(request())["worktrees"]
+    finally:
+        stream.close()
+        owner.close_admission()
+        owner.feed.wait_closed(1)
+        server.close()
+
+
+@pytest.mark.parametrize("bad", ["missing", "duplicate", "unknown", "oversized"])
+def test_worktrees_feed_rejects_invalid_identity_order_without_replacing_commit(owner, bad):
+    receiver = client.FeedReceiver(request())
+    before = owner.handle(request())
+    apply(receiver, list(feed.publication_frames(before)))
+    committed = receiver.current
+    owner.publish("project", [{"id": "one", "title": "after"}], observed_at=2)
+    frames = list(feed.publication_frames(owner.handle(request()), before))
+    order = next(frame for frame in frames if frame["type"] == "order")
+    if bad == "missing":
+        frames.remove(order)
+    else:
+        order["ids"] = {
+            "duplicate": ["one", "one"], "unknown": ["unknown"], "oversized": ["one"] * 129,
+        }[bad]
+    with pytest.raises(ProjectionUnavailable):
+        apply(receiver, frames)
+    assert receiver.current == committed
 
 
 @pytest.mark.parametrize("change", ["generation", "base", "revision", "missing", "duplicate"])
@@ -416,8 +464,18 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(tmp_path,
     reader.start()
     try:
         initial = []
-        while not initial or initial[-1]["type"] != "done":
-            initial.append(frames.get(timeout=max(0.001, 2 - (time.monotonic() - started))))
+        try:
+            while not initial or initial[-1]["type"] != "done":
+                initial.append(frames.get(timeout=max(0.001, 2 - (time.monotonic() - started))))
+        except queue.Empty:
+            exited = proc.poll()
+            if exited is None:
+                proc.terminate()
+                proc.wait(timeout=2)
+            pytest.fail(
+                f"CLI initial roster missed 2s: {len(initial)} frames, exit={exited}, "
+                f"stderr={proc.stderr.read(8192)!r}",
+            )
         elapsed = time.monotonic() - started
         assert elapsed < 2
         receiver = client.FeedReceiver(request())

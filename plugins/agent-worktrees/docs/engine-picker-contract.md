@@ -106,6 +106,10 @@ publication. Its `begin` includes the complete projection, `selected_count`,
 commits all initial `worktree` rows. A later `update` names the same generation,
 a strictly greater cursor and the prior committed `base_cursor`. Changed rows
 use `worktree`, removals use `delete`, and `commit` atomically admits the result.
+Each update also includes the complete committed identity order in `order`
+frames of at most 128 IDs. Receivers require an exact permutation of the final
+selected roster and rebuild in that order at commit, including reorder-only
+publications and front insertions without re-emitting unchanged row values.
 Selection changes caused by current facts are inserts/removals in that same
 transaction. A publication racing initial delivery remains signaled until the
 reader has incorporated it; readers never splice partial rows into a visible
@@ -130,6 +134,9 @@ and ordinary current-read handlers participate in monitor drain accounting,
 including ordinary response delivery. The existing status-monitor installer
 and activation/cutover path still own the daemon; no service, competing updater
 or cutover deadline increase is added.
+Successor promotion refuses adoption when current-roster authority activation
+fails. The unpublished successor retains retry state; it cannot sweep or
+acknowledge adoption until activation succeeds.
 
 The Manager retains explicitly stale last-good rows during reconnect, then
 replaces them only after a complete new-generation snapshot. Each retry starts

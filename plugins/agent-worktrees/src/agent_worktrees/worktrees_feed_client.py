@@ -8,7 +8,7 @@ import time
 
 from .worktrees_client import READ_TIMEOUT, validate_result
 from .worktrees_feed import FEED_ACTION, FEED_CAPABILITY
-from .worktrees_projection import MAX_ROW_BYTES
+from .worktrees_projection import MAX_COLLECTION_ITEMS, MAX_ROW_BYTES, _identity
 from .worktrees_projection_index import ProjectionUnavailable
 
 MAX_FRAME_BYTES = MAX_ROW_BYTES + 16384
@@ -72,6 +72,8 @@ class FeedReceiver:
         self._rows: dict = {}
         self._touched: set = set()
         self._frames: list = []
+        self._order: list[str] = []
+        self._ordered: set[str] = set()
 
     def receive(self, frame: dict) -> list[dict] | None:
         kind = frame.get("type")
@@ -114,6 +116,8 @@ class FeedReceiver:
             self._begin = frame
             self._frames = [frame]
             self._touched = set()
+            self._order = []
+            self._ordered = set()
             return None
         if kind in {"heartbeat", "availability", "going-away"}:
             if kind == "going-away" and self._begin is None and self.current is None:
@@ -148,6 +152,23 @@ class FeedReceiver:
             return [frame]
         if self._begin is None or frame.get("projection") != self._begin["projection"]:
             raise ProjectionUnavailable("resident feed mixed publication barriers")
+        if kind == "order":
+            identities = frame.get("ids")
+            if (
+                self._begin["type"] != "update"
+                or not isinstance(identities, list)
+                or not 0 < len(identities) <= MAX_COLLECTION_ITEMS
+                or len(self._order) + len(identities) > self._begin["selected_count"]
+            ):
+                raise ProjectionUnavailable("resident feed has an invalid identity order")
+            for wid in identities:
+                _identity(wid, name="ordered worktree id")
+                if wid in self._ordered:
+                    raise ProjectionUnavailable("resident feed duplicated an ordered identity")
+                self._ordered.add(wid)
+                self._order.append(wid)
+            self._frames.append(frame)
+            return None
         if kind in {"worktree", "delete"}:
             row = frame.get("wt")
             wid = row.get("id") if isinstance(row, dict) else frame.get("id")
@@ -175,8 +196,14 @@ class FeedReceiver:
         expected = "done" if self._begin["type"] == "begin" else "commit"
         if kind != expected or frame.get("cursor") != self._begin["cursor"]:
             raise ProjectionUnavailable("resident feed omitted its commit barrier")
+        if self._begin["type"] == "update":
+            if self._ordered != self._rows.keys():
+                raise ProjectionUnavailable("resident feed omitted its committed identity order")
+            rows = [self._rows[wid] for wid in self._order]
+        else:
+            rows = list(self._rows.values())
         result = {
-            **self._begin, "ok": True, "worktrees": list(self._rows.values()),
+            **self._begin, "ok": True, "worktrees": rows,
         }
         self.current = validate_result(result, self.request)
         if self._begin.get("selected_count") != len(self._rows):
@@ -186,6 +213,8 @@ class FeedReceiver:
         self._frames = []
         self._rows = {}
         self._touched = set()
+        self._order = []
+        self._ordered = set()
         return frames
 
 

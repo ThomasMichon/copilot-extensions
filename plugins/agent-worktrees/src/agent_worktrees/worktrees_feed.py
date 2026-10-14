@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections import Counter
 
+from .worktrees_projection import MAX_COLLECTION_ITEMS
 from .worktrees_projection_index import ProjectionError
 from .worktrees_runtime import CONTRACT_VERSION, request_selection
 
@@ -34,6 +35,13 @@ def publication_frames(result: dict, previous: dict | None = None):
             yield {"type": "worktree", "phase": "current", "wt": row, "projection": head}
     for wid in old.keys() - current.keys():
         yield {"type": "delete", "id": wid, "projection": head}
+    if previous is not None:
+        identities = list(current)
+        for start in range(0, len(identities), MAX_COLLECTION_ITEMS):
+            yield {
+                "type": "order", "ids": identities[start:start + MAX_COLLECTION_ITEMS],
+                "projection": head,
+            }
     yield {
         "type": "done" if previous is None else "commit",
         "projection": head,
