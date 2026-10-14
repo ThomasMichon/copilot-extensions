@@ -223,8 +223,11 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                         if not path.is_file():
                             raise ValueError(f"instruction output is not a regular file: {path}")
                         existing.add(path.relative_to(output).as_posix())
-        # The index includes force-added ignored files and staged additions.
-        tracked = _git(root, "ls-files", "-z", "--", ".github").split(b"\0")
+        # Include staged removals, even when Git could classify one as a rename.
+        tracked = (
+            _git(root, "ls-files", "-z", "--", ".github")
+            + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ".github")
+        ).split(b"\0")
         namespace = NAMESPACE.casefold()
         for raw in tracked:
             path = os.fsdecode(raw).casefold()

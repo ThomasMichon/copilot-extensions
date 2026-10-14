@@ -97,7 +97,7 @@ authoring renderer's legacy delivery described in section 4. It serves Vision
   old output should be removed. Limit cleanup to this generated namespace.
 - Before any copy or removal, check all replacement and stale-removal targets
   against Git's index in one batch. A **tracked** target, including a staged
-  addition, is a hard
+  addition or a staged deletion/rename out of the namespace, is a hard
   publication failure even if ignored or a forced refresh was requested. An
   inconclusive index check must not authorize an overwrite. Refusing an unsafe
   publication does not turn unrelated ambient-delivery failures into a new

@@ -310,6 +310,20 @@ single-final-batch contract.
   and actual installed-consumer proof remain outstanding. No remote rollout is
   authorized for this slice. The parent campaign remains Active.
 
+- #6706's first CI run required a separate Worktree Manager changefile; added
+  it without changing source behavior. The first current-head review found
+  staged deletions could escape an index-only check. The publication preflight
+  now also includes cached deletions with rename detection disabled; active
+  overwrites and stale cleanup both preserve staged deletion/rename intent.
+  Real Git regression covers staged additions, committed files, staged deletions
+  and renames out of the namespace. Review-fix/native/Manager selection:
+  83 passed / 1 unavailable-symlink skip under unchanged containment budgets.
+- Rebased over #6694's safe-path authoring fix. Its packaged-engine test
+  retirement conflicted mechanically; retained the relevant hostile-CWD and
+  `PYTHONSAFEPATH` false/true regression in the new standalone-copy test instead
+  of resurrecting the removed engine dependency. Canonical authoring changes
+  remain untouched.
+
 ### 2026-10-14 - Declarations decide static publication
 
 - Clarified that simplicity is an implementation-design principle, not a

@@ -97,20 +97,38 @@ def test_overwrite_untracked_and_reconcile_disabled_sources(copy_workspace):
 
 
 @pytest.mark.parametrize("stale", [False, True])
-def test_index_protects_staged_outputs_before_any_copy(copy_workspace, stale):
+@pytest.mark.parametrize("index_state", ["staged-add", "committed", "staged-delete", "staged-rename"])
+def test_index_protects_staged_outputs_before_any_copy(copy_workspace, stale, index_state):
     root, home = copy_workspace
     _, output = provider(root, home)
     _, second = provider(root, home, "second")
     assert lcr.refresh_local_cache(root).status == "ready"
     output.write_bytes(b"tracked edit")
     subprocess.run(["git", "-C", str(root), "add", "-f", str(output)], check=True, capture_output=True)
+    if index_state != "staged-add":
+        subprocess.run([
+            "git", "-C", str(root), "-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+            "commit", "--quiet", "-m", "Fixture",
+        ], check=True, capture_output=True)
+    if index_state == "staged-delete":
+        subprocess.run(["git", "-C", str(root), "rm", "-f", str(output)], check=True, capture_output=True)
+    if index_state == "staged-rename":
+        subprocess.run([
+            "git", "-C", str(root), "mv", "-f", str(output), str(root / "kept.md"),
+        ], check=True, capture_output=True)
     second.unlink()
     if stale:
         write_json(root / ".github" / "copilot" / "settings.json", {"enabledPlugins": {"second@market": True}})
     result = lcr.refresh_local_cache(root)
     assert result.status == "failed"
     assert "tracked instruction output" in result.detail
-    assert output.read_bytes() == b"tracked edit"
+    if index_state in ("staged-delete", "staged-rename"):
+        assert not output.exists()
+    else:
+        assert output.read_bytes() == b"tracked edit"
+    if index_state == "staged-rename":
+        assert (root / "kept.md").read_bytes() == b"tracked edit"
     assert not second.exists()
 
 
