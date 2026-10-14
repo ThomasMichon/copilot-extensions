@@ -495,6 +495,27 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Isolate both PowerShell discovery processes
+
+- The next current-head review identified the same import-isolation class in
+  the PowerShell emitter's launcher probe and selected helper process. Both
+  now use isolated Python. Their real interpreter selection and supported
+  command argument vectors remain unchanged.
+- A regression uses the actual base interpreter, not a test venv that already
+  disables user sites. It first proves a fixture-owned user-site startup hook
+  executes without isolation, then invokes each unchanged generated emitter
+  twice and proves correct binding with complete profile snapshots unchanged.
+  The PowerShell case executes the real launcher-probe arguments as well as
+  the selected helper. The fixture interpreter preserves the real isolation
+  flags when injecting its account-home lookup.
+- The complete binding/lifecycle selection passed 63 cases locally; the full
+  shared catalog suite passed 163 cases with 14 platform skips. The prior
+  head's native job
+  [115688713237](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38512760080/job/115688713237)
+  succeeded, but is not evidence for this subsequent correction. Current-head
+  review, native execution, and required aggregate/lockdown checks remain
+  necessary; the effort and all broader acceptance gates stay open.
+
 ### 2026-10-13 — Admit native self-staging and isolate catalog imports
 
 - Current-head review found two pre-admission mutation paths: both native

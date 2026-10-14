@@ -299,7 +299,8 @@ def _prepare_catalog(fixture: dict) -> None:
     generator.process_manifest(payload / "payload-invocation.json", check=False)
 
 
-def _catalog_environment(fixture: dict) -> dict[str, str]:
+def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[str, str]:
+    interpreter = interpreter or sys.executable
     environment = {
         **os.environ, **fixture["environment"],
         "COPILOT_PLUGIN_ROOT": str(fixture["payload"]),
@@ -327,14 +328,14 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
         "    return pwd.struct_passwd((*record[:5],os.environ['HOME'],record.pw_shell))\n"
         "pwd.getpwuid=getpwuid\n"
         "args=sys.argv[1:]\n"
+        "while args and args[0].startswith('-') and args[0] not in ('-c','-m'):\n"
+        "    option=args.pop(0)\n"
+        "    if option=='-X': args.pop(0)\n"
         "if args and args[0]=='-c':\n"
         "    code=args[1]\n"
         "    sys.argv=['-c',*args[2:]]\n"
         "    exec(compile(code,'<catalog-command>','exec'),{'__name__':'__main__'})\n"
         "    raise SystemExit(0)\n"
-        "while args and args[0].startswith('-'):\n"
-        "    option=args.pop(0)\n"
-        "    if option=='-X': args.pop(0)\n"
         "if args:\n"
         "    sys.argv=args\n"
         "    runpy.run_path(args[0],run_name='__main__')\n"
@@ -344,12 +345,14 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
     for name in ("python3", "python"):
         wrapper = wrapper_dir / name
         wrapper.write_text(
-            f"#!{sys.executable}\n"
+            f"#!{interpreter} -I\n"
             "import os,sys\n"
-            "if '-I' in sys.argv[1:]:\n"
-            "    os.execv(sys.executable,[sys.executable,'-I','-B','-X','utf8','-c',"
-            f"{bootstrap!r},*sys.argv[1:]])\n"
-            + bootstrap,
+            "args=sys.argv[1:]; flags=[]\n"
+            "while args and args[0].startswith('-') and args[0] not in ('-c','-m'):\n"
+            "    option=args.pop(0); flags.append(option)\n"
+            "    if option=='-X': flags.append(args.pop(0))\n"
+            "os.execv(sys.executable,[sys.executable,*flags,'-c',"
+            f"{bootstrap!r},*sys.argv[1:]])\n",
             encoding="utf-8",
         )
         wrapper.chmod(0o755)
@@ -389,6 +392,85 @@ def test_command_binding_catalog_isolates_project_and_pythonpath(
         assert catalog["binding"]["status"] == "selected", catalog
         assert catalog["binding"]["source"]["identity"]["canonical"] == "github:example/plugins"
         assert _snapshot(binding_fixture["home"]) == before
+
+
+@pytest.mark.parametrize("shell", [
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX emitter")),
+    pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
+])
+def test_command_binding_catalog_disables_user_site_startup(
+    binding_fixture: dict, shell: str, powershell_host,
+) -> None:
+    _prepare_catalog(binding_fixture)
+    _publish(binding_fixture)
+    home = binding_fixture["home"]
+    interpreter = sys._base_executable
+    environment = _catalog_environment(binding_fixture, interpreter)
+    if os.name == "nt":
+        environment["APPDATA"] = str(home / "AppData/Roaming")
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0}
+    query = subprocess.run(
+        [interpreter, "-I", "-B", "-c", "import site; print(site.getusersitepackages())"],
+        env=environment, cwd=home, capture_output=True, text=True, timeout=10,
+        check=True, **kwargs,
+    )
+    user_site = Path(query.stdout.strip())
+    assert user_site.is_relative_to(home), user_site
+    user_site.mkdir(parents=True, exist_ok=True)
+    sentinel = user_site / "ambient-startup"
+    (user_site / "catalog-fixture.pth").write_text(
+        f"import pathlib; pathlib.Path({str(sentinel)!r}).write_text('ambient-startup')\n",
+        encoding="utf-8",
+    )
+    control = subprocess.run(
+        [interpreter, "-B", "-E", "-c", "pass"], env=environment, cwd=home,
+        capture_output=True, text=True, timeout=10, **kwargs,
+    )
+    assert control.returncode == 0, control.stderr
+    assert sentinel.read_text() == "ambient-startup"
+    sentinel.unlink()
+    if shell == "powershell":
+        python = interpreter if os.name == "nt" else str(home / "test-bin/python")
+        launcher = home / "site-launcher.ps1"
+        launcher.write_text(
+            "if ($args[0] -ne '-3') { throw 'Expected Python 3 launcher' }\n"
+            "$probeArgs=@($args[1..($args.Count-1)])\n"
+            "$null=& $env:TEST_PYTHON @probeArgs\n"
+            "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
+            "Write-Output $env:TEST_PYTHON\n",
+            encoding="utf-8",
+        )
+        wrapper = home / "site-catalog.ps1"
+        wrapper.write_text(
+            "function Get-Command {\n"
+            "    param($Name,$CommandType,$ErrorAction)\n"
+            "    if ($Name -eq 'py') { return @{Source=$env:TEST_LAUNCHER_PATH} }\n"
+            "    return $null\n"
+            "}\n"
+            "& (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/emit-command-catalog.ps1')\n",
+            encoding="utf-8",
+        )
+        environment.update({"TEST_PYTHON": python, "TEST_LAUNCHER_PATH": str(launcher)})
+        host = powershell_host(binding_fixture, environment)
+        command = [POWERSHELL, "-File", str(wrapper)]
+    else:
+        host = None
+        command = ["bash", str(binding_fixture["payload"] / "scripts/emit-command-catalog.sh")]
+    before = _snapshot(home)
+    for _ in range(2):
+        completed = host.run(command) if host else subprocess.run(
+            command, env=environment, cwd=home, capture_output=True,
+            text=True, timeout=30, **kwargs,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        envelope = json.loads(completed.stdout)
+        match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
+        assert match, completed.stdout
+        assert json.loads(match[1])["binding"]["status"] == "selected"
+        assert _snapshot(home) == before
+    if host:
+        host.close()
+        assert _snapshot(home) == before
 
 
 class _PowerShellHost:
@@ -590,7 +672,7 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     launcher_path = binding_fixture["home"] / "py-launcher.ps1"
     launcher_path.write_text(
         "if ($args[0] -ne '-3') { throw 'Python launcher must select Python 3' }\n"
-        "if (($args[1..5] -join ' ') -ne '-B -E -X utf8 -c') { throw 'Unexpected probe flags' }\n"
+        "if (($args[1..6] -join ' ') -ne '-I -B -E -X utf8 -c') { throw 'Unexpected probe flags' }\n"
         "Write-Output $env:TEST_PYTHON\nexit 0\n",
         encoding="utf-8",
     )

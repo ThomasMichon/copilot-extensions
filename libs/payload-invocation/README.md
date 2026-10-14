@@ -53,9 +53,10 @@ blocked.
 the first adopter. Other manifests retain byte-identical catalogs. The optional
 `catalogBindingModule` vendors the same pure ownership code into the runtime
 package for its existing deploy-manifest publisher.
-The POSIX binding emitter uses isolated Python: neither the project working
-directory nor inherited Python import paths can supply its standard-library
-imports. Only the explicitly addressed payload helper supplies binding code.
+Binding emitters use isolated Python, including the PowerShell launcher probe
+and selected helper process: neither the project working directory, inherited
+Python import paths, nor user-site startup hooks supply discovery code.
+Only the explicitly addressed payload helper supplies binding code.
 
 The binding contains normalized source identity/fingerprint, plugin identity,
 and a selected installation only when its ownership has been validated.
