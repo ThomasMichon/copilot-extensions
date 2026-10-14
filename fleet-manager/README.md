@@ -2,7 +2,8 @@
 
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
 capacity planning, explicit release-snapshot inspection, installed-client
-resource diagnostics and explicitly authenticated artifact staging.** No
+resource diagnostics, explicitly authenticated artifact staging and an explicit
+local current-observation storage API.** No
 controller, provider invocation, credential lookup, managed install/update/uninstall,
 telemetry sink or managed-runtime/capacity mutation is delivered yet.
 Those remain the [canonical effort](../efforts/active/linux-role-fleet/README.md).
@@ -93,6 +94,13 @@ an independently trusted current owner decision to exact manifest content,
 sequence, scope and role closure. It does not choose or authenticate a decision,
 persist admission, execute artifacts or grant activation. Signed or
 higher-sequence releases are not automatically selected.
+
+The [current-observation storage API](docs/current-observations.md) provides
+separate explicit SQLite current slots, origin-generation comparison, atomic
+accepted-update positions and bounded scoped replay/queries. It is a trusted
+local prerequisite, not an authenticated push endpoint, complete fleet roster,
+resident subscription service or a new domain writer. Default CLI commands do
+not open the store, and no installed service or producer is enrolled by it.
 
 ## Thin client artifacts and local diagnostics
 

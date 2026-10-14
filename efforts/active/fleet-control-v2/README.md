@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; selected-release input landed, central push-backed state design; full lifecycle open
+- **Status:** Active; isolated observation storage implementation, authenticated integration gated; full lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -29,7 +29,7 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
-| Contract implementer | Release/role contract #6240; first operation/receipt shape slice #6241 | Managed implementation worktree; assigned sub-issues |
+| Contract implementer | Release/role #6240, operation/receipt #6241 and isolated observation-storage #5862 contracts | Managed implementation worktree; assigned sub-issues |
 | Gateway/index integrator | End-to-end new Gateway, index client and subscribed credential integration #6443 | Separate managed worktree; #6443 and index consumer #6383 |
 | Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
 | Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
@@ -142,6 +142,17 @@ The [central backing-store amendment](central-state-backing-store.md) is an
 **agent-recommended design** of the new push/query/subscription direction, not
 permission for an unreviewed runtime or authority migration.
 
+Asked to approve a first transport-neutral storage slice under #5862 in
+`fleet-manager` only, the operator selected verbatim:
+
+> approve-isolated-store
+
+The approved **agent-proposed boundary** is bounded current rows,
+origin-generation fences, idempotent updates and durable query/replay positions.
+It expressly excludes producer/auth code changes, another Gateway and live
+deployment changes. Authenticated transport and client integration still require
+agreement with their retained owners; this is not a transfer of those scopes.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -212,10 +223,12 @@ All detailed slices are **agent-recommended** and remain subject to review.
   persistent index state and scoped negative cases before any native offload.
 
 ### Phase 2b - Central push-backed current state
-- [ ] Review the [backing-store amendment](central-state-backing-store.md) under
+- [x] Review the [backing-store amendment](central-state-backing-store.md) under
   existing #5862, preserving #3761 origin authority and #352 client/mux ownership.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
+  The subsequent operator approval permits only an isolated transport-neutral
+  storage prerequisite; producer/auth/client integration remains behind this gate.
 - [ ] Persist fenced machine/container updates, indexed current projections and
   publication positions coherently, without a rival task/worktree/claim writer.
 - [ ] Serve UX, CLI and API requests through one scoped current-state contract,
@@ -886,3 +899,49 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   clean-room and live implementation proofs are specified, not claimed run or
   delivered. No runtime, deployment, data migration, capacity or lease
   mutation follows from the proposal. Full Phase 1-4/Validation gates stay open.
+- #6670 actually merged at `2026-10-14T08:13:38Z`, commit
+  `a5c71dfc912a6249a6fe61276619172a761ec886`. The exact head
+  `78e8a52007ecc3075b9ef7c04f2aa5f40818406b` received current Copilot
+  APPROVED review with zero findings (Balanced effort); every check completed
+  successfully or legitimately skipped before the normal merge. An initial
+  review timeout was followed by an explicit re-request. No CI gate was bypassed.
+- Re-read the full parent Plan/Validation after merge and synchronized the
+  continuing worktree. Only the Phase 2b design-review item closes; the shared
+  interface, runtime, lifecycle, migration and adoption gates remain open.
+- Next Phase 2b stretch consumes the existing origin-current-projection and
+  observation contracts, agrees the bounded storage/push/query/subscription
+  seams with their retained owners, then implements the first reviewed store
+  slice under #5862. The approved plan is not a deployed central backing store
+  or permission to replace an adopter's current serving/credential owner.
+
+### 2026-10-14 - Isolated current-observation storage boundary approved
+- Traced the committed origin projection and local held feed directly.
+  The origin's bounded current rows, per-project revision, resident generation,
+  demand enrollment and availability notifications are reusable seams;
+  the held feed is not durable central replay or a complete fleet subscription.
+- Retained origin/auth interface requests had no reply. Rather than infer
+  consent or take over their files, asked the operator about the first isolated
+  storage boundary and captured `approve-isolated-store` verbatim in Request.
+  Reserved that implementation under #5862. Source/auth/Manager and live
+  deployment ownership remain unchanged.
+- The Contract implementer transitions from Phase 1 to the isolated Phase 2b
+  storage prerequisite. This is not assignment of origin push, principal/
+  connector authentication, Manager UX or installer implementation.
+- Added explicit local SQLite current slots and bounded replay with distinct
+  admitted binding, producer, export sequence, source revision and central cursor.
+  Atomic update/slot/head persistence, content-bound retries and bounded point/
+  page reads implement only the approved storage prerequisite. Pages do not
+  assert complete roster coverage; typed internal cursors are not access tokens.
+- Installed contained storage selection passes 22 cases, including process
+  crash/retry, independent producer/query processes, exact replay/page/byte
+  bounds and measured point-read access independent of unrelated current rows.
+  The full native contained suite passes 604 with six platform skips in
+  65.32 seconds, within the existing 120-second aggregate deadline; touched
+  lint and the 13-plugin install-contract guard pass. Actual PR review and
+  hosted native platform gates remain pending.
+  Clean-room install/live deployment are not exercised by this unintegrated
+  storage-only slice; no service, transport or installer is changed.
+- Documentation impact covers the product README, storage contract and this
+  canonical plan/index. This realizes part of reviewed shared-state intent
+  without introducing a daemon or duplicating an authority. No full Phase 1-4
+  or Validation Plan item closes, and the effort remains Active.
