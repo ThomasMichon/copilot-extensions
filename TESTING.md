@@ -143,6 +143,11 @@ health gate and publication transaction. The remaining items keep the default
 A focused, change-scoped Windows CI job executes both native cases under the
 same two-minute suite limit and participates in the required PR aggregate;
 the existing POSIX plugin suite remains required independently.
+The off-PATH Windows bootstrap fixture creates a real stdlib virtualenv in a
+spaced directory and probes its exact executable and prefix with a restricted
+PATH before invoking the hook. Copying a base `python.exe` and writing
+`pyvenv.cfg` is not a runnable cold interpreter fixture: its DLL dependencies
+may be absent, independently of argument forwarding or installation policy.
 `tools/test_installer_finalizers.py` exercises production cleanup and exclusive
 lock reacquisition in the same still-live Windows PowerShell host.
 

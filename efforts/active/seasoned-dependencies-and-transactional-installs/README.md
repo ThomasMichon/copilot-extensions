@@ -585,3 +585,14 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   Current PR-scoped size checks, touched-code lint, all thirteen installer
   contracts and canonical engine synchronization passed. Fresh provider review
   and native CI still own the remaining merge gate.
+- The verified source-owned replay published successfully. Its fresh required
+  CI passed the new native Windows Vault first-use lane, every POSIX plugin
+  suite, both runner lanes and the macOS construction lane. Current-head
+  Copilot review reported zero open findings. One new upstream bootstrap
+  fixture still failed native Windows diagnostics: a copied base interpreter
+  could not load its DLLs with PATH restricted.
+- That fixture now constructs a real stdlib venv and verifies its exact
+  off-PATH executable and prefix before the unchanged native hook, staging
+  and lock-release assertions. The base-interpreter Windows regression passed
+  in 17.20 seconds and touched-code lint passed. No deadline was raised;
+  fresh-head provider CI and review remain required before merge or rollout.
