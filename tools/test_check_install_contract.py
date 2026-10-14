@@ -594,3 +594,52 @@ def test_every_shipped_shell_helper_reports_its_writer_status(
             failures.append(f"{path.relative_to(REPO).as_posix()}: RC={status} {result.stderr.strip()}")
     assert len(helpers) >= 10
     assert failures == []
+
+
+_SH_PAYLOAD_HASH_DEF = re.compile(r"^_payload_hash\(\) \{\n.*?^\}\n", re.M | re.S)
+
+
+@pytest.mark.parametrize("tools", ["working", "failing"])
+def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
+    """Run each shipped self-contained ``_payload_hash`` for real.
+
+    With a working SHA-256 tool it prints a 64-hex digest; when every tool
+    fails it must exit non-zero with no output, so a completion marker is
+    never published without its fingerprint (a ``|| true`` tail used to turn
+    a failed hash into a successful empty one).
+    """
+    bash = _working_bash()
+    if bash is None:
+        pytest.skip("no working bash")
+    payload = tmp_path / "payload"
+    (payload / "libs" / "lib").mkdir(parents=True)
+    (payload / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    (payload / "libs" / "lib" / "pyproject.toml").write_text("[project]\nname='l'\n", encoding="utf-8")
+    stubs = (
+        "sha256sum() { return 1; }; shasum() { return 1; }; openssl() { return 1; }\n"
+        if tools == "failing" else ""
+    )
+    checked, failures = [], []
+    for path in sorted(checker.PLUGINS_DIR.glob("*/scripts/*.sh")):
+        text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        helper = _SH_PAYLOAD_HASH_DEF.search(text)
+        # Only the self-contained helpers (fingerprint of PLUGIN_DIR alone).
+        if helper is None or '"$__parts"' not in helper.group(0):
+            continue
+        checked.append(path)
+        script = (
+            f"set -euo pipefail\nPLUGIN_DIR='{payload.as_posix()}'\n{stubs}{helper.group(0)}"
+            'if out="$(_payload_hash)"; then echo "RC=0 OUT=$out"; else echo "RC=$? OUT=$out"; fi\n'
+        )
+        result = subprocess.run(
+            [bash, "-c", script], capture_output=True, text=True, timeout=60,
+        )
+        line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+        rc, _, out = line.partition(" OUT=")
+        name = path.relative_to(REPO).as_posix()
+        if tools == "working" and (rc != "RC=0" or not re.fullmatch(r"[0-9a-f]{64}", out)):
+            failures.append(f"{name}: {line!r} {result.stderr.strip()}")
+        if tools == "failing" and (rc == "RC=0" or out):
+            failures.append(f"{name}: hashing failed but returned {line!r}")
+    assert len(checked) >= 8
+    assert failures == []

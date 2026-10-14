@@ -557,7 +557,11 @@ function Invoke-VersionedMarkComplete {
     }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
     $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
+    if (-not $ph) {
+        Write-ServiceErr "Runtime input fingerprint unavailable -- not publishing versions/$SrcVersion"
+        return $false
+    }
+    $mcArgs += @('--payload-hash', $ph)
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
     if ($LASTEXITCODE -ne 0) {
         Write-ServiceErr "Failed to mark runtime slot complete (versions/$SrcVersion)"

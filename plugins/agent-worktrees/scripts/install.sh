@@ -996,8 +996,9 @@ _payload_hash() {
     # even though the marketplace payload had genuinely changed. #5472 found
     # the same narrower-scope gap on another adopter for its OWN dev-checkout
     # path dependencies specifically. Deterministic (sorted relative paths)
-    # and content-based. Empty on any error, which the completion-marker
-    # check already treats as "unknown, force a rebuild".
+    # and content-based. Fails with no output on any hashing error, which the
+    # completion-marker check treats as "unknown, force a rebuild" and the
+    # marker writer as "do not publish".
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -1047,7 +1048,21 @@ _payload_hash() {
             sort
         )
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    # Fails (no output) when no SHA-256 implementation works: the caller must
+    # then refuse to publish a slot without its fingerprint.
+    local __d
+    if command -v sha256sum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
+    elif command -v openssl >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
+    else
+        return 1
+    fi
+    __d="${__d%% *}"
+    [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$__d"
 }
 
 # fd holding the exclusive build-lease lock for this process's lifetime (set
@@ -1660,7 +1675,7 @@ _test_slot_already_complete() {
     py="$(_bootstrap_python)" || return 1
     [[ -n "$py" ]] || return 1
     local ph
-    ph="$(_payload_hash)"
+    ph="$(_payload_hash)" || return 1
     [[ -n "$ph" ]] || return 1
     "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" is-complete "$SRC_VERSION" --expect-hash "$ph" >/dev/null 2>&1
 }
