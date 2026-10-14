@@ -137,7 +137,9 @@ def test_workflow_action_parsers_use_existing_npm_owner(workflow, job_name, step
 
 @pytest.fixture
 def isolated(monkeypatch):
-    monkeypatch.setattr(btl, "prepare_uv_install", lambda uv, args, **kwargs: args)
+    monkeypatch.setattr(btl, "run_uv_install", lambda uv, args, **kwargs: btl.subprocess.run(
+        [uv, "pip", "install", *args], **kwargs,
+    ))
     monkeypatch.setattr(
         public, "_opaque_index_identity",
         lambda value: hashlib.sha256(value.encode()).hexdigest(),

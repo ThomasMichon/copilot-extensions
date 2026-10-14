@@ -233,9 +233,17 @@ def main(argv: list[str] | None = None) -> int:
             retained = snapshot / "previous-node-modules"
             if installed.exists():
                 installed.rename(retained)
+            published = False
             try:
                 (snapshot / "node_modules").rename(installed)
-            except OSError:
+                published = True
+                if any(
+                    (project / name).read_bytes() != body for name, body in originals.items()
+                ) or (config_path.read_bytes() if config_path.exists() else None) != config:
+                    raise AdmissionError("package manifest, lock or configuration changed during publication")
+            except (AdmissionError, OSError):
+                if published:
+                    installed.rename(snapshot / "node_modules")
                 if retained.exists():
                     retained.rename(installed)
                 raise

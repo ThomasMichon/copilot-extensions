@@ -20,7 +20,9 @@ SPEC.loader.exec_module(runner)
 
 
 def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
-    monkeypatch.setattr(runner, "prepare_uv_install", lambda uv, args, **kwargs: args)
+    monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
+        [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key != "trusted_source_roots"},
+    ))
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     python = runner.default_python("fleet-manager")
@@ -43,7 +45,9 @@ def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_pat
 
 @pytest.mark.parametrize("smoke", [False, True])
 def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monkeypatch, smoke):
-    monkeypatch.setattr(runner, "prepare_uv_install", lambda uv, args, **kwargs: args)
+    monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
+        [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key != "trusted_source_roots"},
+    ))
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     metadata = tmp_path / "plugins" / "agent-index" / "pyproject.toml"
@@ -76,7 +80,9 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
 
 
 def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch):
-    monkeypatch.setattr(runner, "prepare_uv_install", lambda uv, args, **kwargs: args)
+    monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
+        [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key != "trusted_source_roots"},
+    ))
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs: calls.append(argv))
@@ -111,14 +117,18 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         project = tmp_path / relative
         project.mkdir(parents=True, exist_ok=True)
         (project / "pyproject.toml").write_text(
+            '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
             f'[project]\nname="{name}"\nversion="1.0"\n'
             '[project.optional-dependencies]\ndev=[]\nnative=[]\ntest=[]\nstore=[]\nserver=[]\n',
             encoding="utf-8",
         )
+        with (project / "pyproject.toml").open("a", encoding="utf-8") as manifest:
+            manifest.write('[tool.setuptools.packages.find]\nwhere=["src"]\n')
+        (project / "src").mkdir()
     monkeypatch.setattr(runner, "REPO", tmp_path)
     python = runner.default_python(component)
     python.parent.parent.mkdir(parents=True)
-    admitted = runner.prepare_uv_install
+    admitted = runner.run_uv_install
     probes = []
     installs = []
 
@@ -140,14 +150,13 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             installs.append(arguments)
         return subprocess.CompletedProcess(arguments, 0, "", "")
 
-    monkeypatch.setattr(runner, "prepare_uv_install", prepare)
+    monkeypatch.setattr(runner, "run_uv_install", prepare)
     monkeypatch.setattr(runner.subprocess, "run", command)
     runner.prepare(component, python, smoke=component == "services/index")
-    assert len(probes) == len(installs) == 1
+    assert len(probes) == 2 and len(installs) == 1
     assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
-    assert str(tmp_path / component) + (
-        "[test]" if component == "services/index" else "[dev]"
-    ) in installs[0]
+    extra = "[test]" if component == "services/index" else "[dev]"
+    assert any(argument.endswith(component.replace("/", os.sep) + extra) for argument in installs[0])
     if component in ("services/index", "services/dispatch"):
         assert "--override" in installs[0]
 

@@ -2177,6 +2177,23 @@ installer does not add an epsilon that could admit younger bytes.
 trusting a previously installed, potentially newer package. Skipping dependency
 or isolated-build resolution is not an age-enforcement fallback.
 
+`run_uv_install` owns admission and execution as one lifetime. UV consumes
+private retained source metadata, recursive requirements and configuration,
+with an explicitly captured environment, rather than reopening the caller's
+mutable inputs after preflight. The retained resolver must match the native
+configured resolver, including index order/authentication, TLS, workspace
+constraints and stricter package cutoffs; an unsupported merge or mismatch
+refuses installation. `prepare_uv_install` is only a preflight API, not an
+installation boundary.
+
+Editable source retention supports static `setuptools.build_meta` projects
+using the repository's `src` layout. Retained metadata selects compatibility
+editable mode and references the original live `src` through a same-volume
+relative package directory; installed imports survive snapshot cleanup and
+observe subsequent source edits. Dynamic metadata, other editable backends or
+layouts, competing editable-mode settings and mixed source volumes on Windows
+fail explicitly rather than installing references to disposable source trees.
+
 The policy does not replace the adopter's configured feed, disable TLS
 verification, or retry against a public index. A selected extra's dependency
 failure fails construction; retrying the base package in the same partially
@@ -2203,6 +2220,8 @@ snapshot with the project's npm configuration. Only its health-checked
 `node_modules` is published; admission, install, health or publication failure
 preserves the prior dependency tree. A concurrent manifest, lock or configuration
 change refuses publication rather than installing an unaudited closure.
+Inputs are rechecked after the candidate tree's rename, before retiring the
+previous tree; a mismatch at that linearization point rolls publication back.
 
 ### Shared engine delivery
 

@@ -8,16 +8,19 @@ Captured settings may contain credentials and must never be printed.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import types
 import zipimport
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
@@ -48,6 +51,16 @@ _VALUE_OPTIONS = _INDEX_OPTIONS | _FILE_OPTIONS | {
 
 class DependencyPolicyError(RuntimeError):
     """An installation could not establish the seasoning policy."""
+
+
+def _captured_environment(env):
+    result = {}
+    for key, value in (os.environ if env is None else env).items():
+        key = key.upper() if os.name == "nt" else key
+        if key in result and result[key] != value:
+            raise DependencyPolicyError("dependency installation environment has conflicting variable identities")
+        result[key] = value
+    return result
 
 
 def _toml_parser():
@@ -139,7 +152,7 @@ def _argument_pairs(arguments: list[str]):
 
 def _check_requirement(
     requirement: str, base: Path, roots: tuple[Path, ...], seen: set[Path],
-) -> None:
+) -> Path | None:
     if _REMOTE_REFERENCE.search(requirement):
         raise DependencyPolicyError("direct remote dependencies lack release-age evidence")
     requirement = requirement.strip()
@@ -169,6 +182,7 @@ def _check_requirement(
     if not candidate.is_dir():
         raise DependencyPolicyError("local artifacts cannot prove release age; only owned source directories are exempt")
     _check_project(candidate, roots, seen, expected)
+    return candidate
 
 
 def _check_project(
@@ -200,6 +214,11 @@ def _inspect_project(
     uv = data.get("tool", {}).get("uv", {})
     if not isinstance(uv, dict):
         raise DependencyPolicyError("source UV metadata is unsupported")
+    indexes = uv.get("index", [])
+    if not isinstance(indexes, list) or any(not isinstance(entry, dict) for entry in indexes):
+        raise DependencyPolicyError("source registry configuration is unsupported")
+    if any(entry.get("exclude-newer") is not None for entry in indexes):
+        raise DependencyPolicyError("index-specific exclude-newer cannot prove artifact upload age")
     mappings = uv.get("sources", {})
     if not isinstance(mappings, dict):
         raise DependencyPolicyError("local UV source graph is unsupported")
@@ -386,6 +405,9 @@ def cutoff_arguments(settings: str, *, now: datetime | None = None) -> list[str]
     if settings[projection_end:].strip():
         raise DependencyPolicyError("UV settings projection has unexpected trailing content")
     settings = settings[projections[0].start():projection_end]
+    if (re.search(r"(?m)^\s*dependency_mode:\s*(?!Transitive\b)\S+", settings)
+            or re.search(r"(?m)^\s*build_isolation:\s*(?!Isolate\b)\S+", settings)):
+        raise DependencyPolicyError("dependency or isolated-build resolution cannot bypass seasoning")
     indexes = list(re.finditer(r"(?m)^\s*index_locations: IndexLocations \{", settings))
     if len(indexes) != 1:
         raise DependencyPolicyError("UV registry source configuration is unsupported")
@@ -435,12 +457,9 @@ def cutoff_arguments(settings: str, *, now: datetime | None = None) -> list[str]
     return ["--exclude-newer", floor.isoformat().replace("+00:00", "Z"), "--reinstall"]
 
 
-def prepare_uv_install(
-    uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
-    cwd: Path | None = None, now: datetime | None = None,
-    trusted_source_roots: tuple[Path, ...] = (),
-) -> list[str]:
-    """Prepare seasoned resolution; local source trust is explicit for API callers."""
+def _source_inputs(arguments, environment, cwd, trusted_source_roots):
+    if "--" in arguments:
+        raise DependencyPolicyError("UV end-of-options markers cannot precede mandatory resolver policy")
     if any(arg.split("=", 1)[0] in ("--show-settings", "--dry-run") for arg in arguments):
         raise DependencyPolicyError("a settings-only invocation is not a dependency installation")
     if any(arg.split("=", 1)[0] in ("--no-deps", "--no-build-isolation", "--no-build-isolation-package")
@@ -453,7 +472,6 @@ def prepare_uv_install(
         raise DependencyPolicyError("trusted source roots must be absolute caller-attributed paths")
     if any(not root.is_dir() for root in roots):
         raise DependencyPolicyError("trusted source root is not an existing directory")
-    environment = os.environ if env is None else env
     base = Path(cwd or Path.cwd()).resolve()
     pairs = list(_argument_pairs(arguments))
     directory = environment.get("UV_WORKING_DIR")
@@ -466,6 +484,8 @@ def prepare_uv_install(
     if directory:
         base = (base / directory).resolve()
     seen: set[Path] = set()
+    files: set[Path] = set()
+    editables: set[Path] = set()
     for option, value in pairs:
         if option in _INDEX_OPTIONS:
             if re.search(r"\s|@", value) and _REMOTE_REFERENCE.search(value):
@@ -482,9 +502,11 @@ def prepare_uv_install(
                     raise DependencyPolicyError("dependency TOML input lacks attributable project identity")
                 _check_project(path.parent, roots, seen)
             else:
-                _check_requirements_sources(path, set(), roots, base)
+                _check_requirements_sources(path, set(), roots, base, seen, files, editables)
         elif option in ("", "-e", "--editable"):
-            _check_requirement(value, base, roots, seen)
+            source = _check_requirement(value, base, roots, seen)
+            if source is not None and option in ("-e", "--editable"):
+                editables.add(source)
         elif option in ("-f", "--find-links"):
             raise DependencyPolicyError("flat-index dependencies cannot prove artifact upload age")
         elif option == "--group":
@@ -497,13 +519,62 @@ def prepare_uv_install(
     if project_directory:
         manifest = base / project_directory / "pyproject.toml"
         if manifest.is_file():
-            data = _toml(manifest)
-            if data.get("tool", {}).get("uv", {}).get("sources"):
-                _check_project(manifest.parent, roots, seen)
-    for variable in ("UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE"):
+            _check_project(manifest.parent, roots, seen)
+    for path, is_project in _config_inputs(arguments, environment, base):
+        data = _toml(path)
+        if is_project:
+            data = data["tool"]["uv"]
+        if not isinstance(data, dict):
+            raise DependencyPolicyError("configured UV metadata is unsupported")
+        if data.get("sources"):
+            if not is_project:
+                raise DependencyPolicyError("local UV sources require attributable project metadata")
+            _check_project(path.parent, roots, seen)
+        sections = [data.get(key, []) for key in (
+            "constraint-dependencies", "override-dependencies", "build-constraint-dependencies",
+        )]
+        for entry in data.get("dependency-metadata", []):
+            if not isinstance(entry, dict):
+                raise DependencyPolicyError("configured dependency metadata is unsupported")
+            sections.append(entry.get("requires-dist", []))
+        extra_build = data.get("extra-build-dependencies", {})
+        if not isinstance(extra_build, dict):
+            raise DependencyPolicyError("configured build dependencies are unsupported")
+        for entries in extra_build.values():
+            if not isinstance(entries, list):
+                raise DependencyPolicyError("configured build dependencies are unsupported")
+            sections.append([
+                entry.get("requirement") if isinstance(entry, dict) else entry for entry in entries
+            ])
+        for section in sections:
+            if not isinstance(section, list):
+                raise DependencyPolicyError("configured dependency declarations are unsupported")
+            for requirement in section:
+                if not isinstance(requirement, str):
+                    raise DependencyPolicyError("configured dependency declaration is unsupported")
+                _check_requirement(requirement, base, roots, seen)
+    for variable in ("UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE"):
         if environment.get(variable):
             for path in environment[variable].split():
-                _check_requirements_sources(base / path, set(), roots, base)
+                _check_requirements_sources(base / path, set(), roots, base, seen, files, editables)
+    for project in seen:
+        mappings = _toml(project / "pyproject.toml").get("tool", {}).get("uv", {}).get("sources", {})
+        for entries in mappings.values():
+            for entry in entries if isinstance(entries, list) else [entries]:
+                if entry.get("editable") is True and "path" in entry:
+                    editables.add(_contained(project / entry["path"], roots))
+    return base, seen, files, editables
+
+
+def prepare_uv_install(
+    uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
+    cwd: Path | None = None, now: datetime | None = None,
+    trusted_source_roots: tuple[Path, ...] = (),
+    _projection: list[str] | None = None,
+) -> list[str]:
+    """Preflight only. Installations must use run_uv_install to retain inputs."""
+    env = _captured_environment(env)
+    _source_inputs(arguments, env, cwd, trusted_source_roots)
     probe_arguments = [
         argument for argument in arguments
         if argument != "--quiet" and not re.fullmatch(r"-q+", argument)
@@ -520,6 +591,8 @@ def prepare_uv_install(
         # Do not include UV's debug projection or credential-bearing arguments.
         raise DependencyPolicyError("UV seasoning configuration probe failed")
     admitted = cutoff_arguments(result.stdout, now=now)
+    if _projection is not None:
+        _projection.append(result.stdout)
     cleaned = []
     iterator = iter(arguments)
     for argument in iterator:
@@ -533,16 +606,21 @@ def prepare_uv_install(
 
 def _check_requirements_sources(
     path: Path, seen: set[Path], roots: tuple[Path, ...], base: Path,
+    projects: set[Path] | None = None, files: set[Path] | None = None,
+    editables: set[Path] | None = None,
 ) -> None:
+    projects = set() if projects is None else projects
     if path.suffix == ".toml":
         if path.name != "pyproject.toml":
             raise DependencyPolicyError("dependency TOML input lacks attributable project identity")
-        _check_project(path.parent, roots, set())
+        _check_project(path.parent, roots, projects)
         return
     path = path.resolve()
     if path in seen:
         raise DependencyPolicyError("cyclic requirement includes cannot prove dependency sources")
     seen = seen | {path}
+    if files is not None:
+        files.add(path)
     try:
         text = re.sub(r"\\\r?\n", " ", path.read_text(encoding="utf-8"))
     except OSError as exc:
@@ -553,15 +631,397 @@ def _check_requirements_sources(
             continue
         include = re.fullmatch(r"(?:-r|--requirements?|--constraints?|-c)\s+(.+)", line)
         if include:
-            _check_requirements_sources(path.parent / include[1], seen, roots, base)
+            _check_requirements_sources(
+                path.parent / include[1], seen, roots, base, projects, files, editables,
+            )
         elif line.startswith(("--index-url ", "--extra-index-url ", "--index-url=", "--extra-index-url=")):
             continue
         elif line.startswith(("-e ", "--editable ")):
-            _check_requirement(line.split(maxsplit=1)[1], base, roots, set())
+            source = _check_requirement(line.split(maxsplit=1)[1], base, roots, projects)
+            if source is not None and editables is not None:
+                editables.add(source)
         elif line.startswith("-"):
             raise DependencyPolicyError("unsupported dependency sources option")
         else:
-            _check_requirement(re.sub(r"\s+--hash=\S+", "", line), base, roots, set())
+            _check_requirement(re.sub(r"\s+--hash=\S+", "", line), base, roots, projects)
+
+
+def _toml_value(value):
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=True)
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(
+            json.dumps(key) + " = " + _toml_value(item) for key, item in value.items()
+        ) + "}"
+    raise DependencyPolicyError("dependency input TOML value cannot be retained")
+
+
+def _write_toml(path, data):
+    text = "\n".join(json.dumps(key) + " = " + _toml_value(value) for key, value in data.items())
+    # The private snapshot can contain credential-bearing index settings.
+    if path.exists():
+        os.chmod(path, 0o600)
+    with path.open("w", encoding="utf-8") as stream:
+        os.chmod(path, 0o600)
+        stream.write(text + "\n")
+
+
+def _private_retained_root(parent):
+    root = parent / "inputs"
+    if os.name != "nt":
+        root.mkdir(mode=0o700)
+        return root
+    import ctypes
+    from ctypes import wintypes
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [
+            ("length", wintypes.DWORD), ("descriptor", wintypes.LPVOID),
+            ("inherit", wintypes.BOOL),
+        ]
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
+    convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID), wintypes.LPVOID]
+    convert.restype = wintypes.BOOL
+    create = kernel.CreateDirectoryW
+    create.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(SecurityAttributes)]
+    create.restype = wintypes.BOOL
+    kernel.LocalFree.argtypes = [wintypes.LPVOID]
+    kernel.LocalFree.restype = wintypes.LPVOID
+    descriptor = wintypes.LPVOID()
+    # Protected, owner-only DACL propagates to both files and directories.
+    if not convert("D:P(A;OICI;FA;;;OW)", 1, ctypes.byref(descriptor), None):
+        raise DependencyPolicyError("private dependency-input permissions could not be constructed")
+    try:
+        attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+        if not create(str(root), ctypes.byref(attributes)):
+            raise DependencyPolicyError("private dependency-input directory could not be created")
+    finally:
+        kernel.LocalFree(descriptor)
+    return root
+
+
+def _config_inputs(arguments, environment, base):
+    pairs = dict(_argument_pairs(arguments))
+    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in ("1", "true"):
+        return []
+    explicit = pairs.get("--config-file") or environment.get("UV_CONFIG_FILE")
+    if explicit:
+        return [(base / explicit, False)]
+    candidates = []
+    project = base / (pairs.get("--project") or environment.get("UV_PROJECT") or ".")
+    if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in ("1", "true"):
+        for directory in (project, *project.parents):
+            uv = directory / "uv.toml"
+            manifest = directory / "pyproject.toml"
+            if uv.is_file():
+                candidates.append((uv, False))
+                break
+            if manifest.is_file():
+                tool = _toml(manifest).get("tool", {})
+                if not isinstance(tool, dict):
+                    raise DependencyPolicyError("configured project metadata is unsupported")
+                if "uv" in tool:
+                    if not isinstance(tool["uv"], dict):
+                        raise DependencyPolicyError("configured UV metadata is unsupported")
+                    candidates.append((manifest, True))
+                    break
+    if os.name == "nt":
+        if environment.get("APPDATA"):
+            candidates.append((Path(environment["APPDATA"]) / "uv" / "uv.toml", False))
+        if environment.get("SYSTEMDRIVE"):
+            candidates.append((
+                Path(environment["SYSTEMDRIVE"] + "\\") / "ProgramData" / "uv" / "uv.toml", False,
+            ))
+    else:
+        user = Path(environment.get("XDG_CONFIG_HOME") or (
+            Path(environment.get("HOME") or Path.home()) / ".config"
+        )) / "uv" / "uv.toml"
+        candidates.append((user, False))
+        system = Path("/etc/uv/uv.toml")
+        for directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
+            if not directory:
+                break
+            candidate = base / directory / "uv" / "uv.toml"
+            if candidate.is_file():
+                system = candidate
+                break
+        candidates.append((system, False))
+    return [(path, project) for path, project in candidates if path.is_file()]
+
+
+def _merge_config(high, low):
+    result = dict(low)
+    for key, value in high.items():
+        previous = result.get(key)
+        if isinstance(value, dict) and isinstance(previous, dict):
+            result[key] = _merge_config(value, previous)
+        elif isinstance(value, list) and isinstance(previous, list):
+            result[key] = [*value, *previous]
+        else:
+            result[key] = value
+    return result
+
+
+def _resolver_configuration(projection, remapper=None):
+    match = re.search(r"\bsettings: PipSettings \{", projection)
+    if match is None:
+        raise DependencyPolicyError("UV resolver configuration cannot be compared")
+    body, _ = _balanced(projection, projection.index("{", match.start()), "{", "}")
+    cutoff = re.search(r"(?m)^\s*exclude_newer: ExcludeNewer \{", body)
+    if cutoff is None:
+        raise DependencyPolicyError("UV resolver cutoff cannot be compared")
+    cutoff_body, end = _balanced(body, body.index("{", cutoff.start()), "{", "}")
+    package = re.search(r"\bpackage:\s*ExcludeNewerPackage\(", cutoff_body)
+    if package is None:
+        raise DependencyPolicyError("UV package cutoffs cannot be compared")
+    package_body, _ = _balanced(cutoff_body, package.end() - 1, "(", ")")
+    body = body[:cutoff.start()] + "package_cutoffs:" + package_body + "\n" + body[end:]
+    if remapper is not None:
+        for field in ("dependency_metadata", "extra_build_dependencies", "sources"):
+            match = re.search(r"(?m)^\s*" + field + r":\s*[^\n({\[]*([({\[])", body)
+            if match:
+                start = match.start(1)
+                opening = body[start]
+                _, end = _balanced(body, start, opening, {"(": ")", "{": "}", "[": "]"}[opening])
+                body = body[:start] + remapper(body[start:end]) + body[end:]
+    body = re.sub(r"(?m)^\s*reinstall: (?:None|All),", "", body)
+    # Discovery provenance changes to explicit-file provenance; index identity,
+    # order, authentication and every resolver option must remain identical.
+    while origin := re.search(r"(?m)^\s*origin: (?:None,|Some\()", body):
+        end = origin.end()
+        if body[end - 1] == "(":
+            _, end = _balanced(body, end - 1, "(", ")")
+            if body[end:end + 1] == ",":
+                end += 1
+        body = body[:origin.start()] + body[end:]
+    for field in (
+        "constraints_from_workspace", "overrides_from_workspace",
+        "excludes_from_workspace", "build_constraints_from_workspace",
+    ):
+        match = re.search(r"\b" + field + r":\s*\[", projection)
+        if match:
+            value, _ = _balanced(projection, projection.index("[", match.start()), "[", "]")
+            if remapper is not None:
+                value = remapper(value)
+            body += field + ":[" + value + "]"
+    global_settings = re.search(r"(?m)^GlobalSettings \{", projection)
+    if global_settings:
+        value, _ = _balanced(projection, projection.index("{", global_settings.start()), "{", "}")
+        body += value
+    return "\n".join(line.strip() for line in body.splitlines() if line.strip())
+
+
+def run_uv_install(
+    uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
+    cwd: Path | None = None, now: datetime | None = None,
+    trusted_source_roots: tuple[Path, ...] = (), **run_options,
+) -> subprocess.CompletedProcess:
+    """Audit and execute the same private source, requirements and configuration."""
+    environment = _captured_environment(env)
+    base, projects, files, editables = _source_inputs(arguments, environment, cwd, trusted_source_roots)
+    for variable in (
+        "UV_CACHE_DIR", "UV_CREDENTIALS_DIR", "UV_TARGET", "UV_PREFIX",
+        "VIRTUAL_ENV", "CONDA_PREFIX", "SSL_CERT_FILE",
+    ):
+        if environment.get(variable):
+            environment[variable] = os.path.abspath(base / environment[variable])
+    if environment.get("SSL_CERT_DIR"):
+        environment["SSL_CERT_DIR"] = os.pathsep.join(
+            os.path.abspath(base / directory) for directory in environment["SSL_CERT_DIR"].split(os.pathsep)
+        )
+    if environment.get("UV_PYTHON"):
+        value = environment["UV_PYTHON"]
+        if Path(value).is_absolute() or (base / value).exists() or re.search(r"[/\\]", value):
+            environment["UV_PYTHON"] = os.path.abspath(base / value)
+    normalized = []
+    for option, value in _argument_pairs(arguments):
+        if option in ("--target", "-t", "--prefix", "--cache-dir", "--cert"):
+            value = os.path.abspath(base / value)
+        elif option in ("-p", "--python"):
+            if Path(value).is_absolute() or (base / value).exists() or re.search(r"[/\\]", value):
+                value = os.path.abspath(base / value)
+        if option and value:
+            normalized.extend([option, value] if option in _VALUE_OPTIONS else [option + "=" + value])
+        else:
+            normalized.append(option or value)
+    arguments = normalized
+    original_projection = []
+    original = prepare_uv_install(
+        uv, arguments, env=environment, cwd=cwd, now=now,
+        trusted_source_roots=trusted_source_roots, _projection=original_projection,
+    )
+    if editables and re.search(r'"editable_mode"\s*:', _resolver_configuration(original_projection[0])):
+        raise DependencyPolicyError("retained editable metadata owns the setuptools editable mode")
+    temporary_parent = None
+    if os.name == "nt" and editables:
+        drives = {path.drive.lower() for path in editables}
+        if len(drives) != 1:
+            raise DependencyPolicyError("editable input retention requires one source volume")
+        project = next(iter(editables))
+        if project.drive.lower() != Path(tempfile.gettempdir()).drive.lower():
+            temporary_parent = project.parent
+    with tempfile.TemporaryDirectory(prefix="seasoned-uv-", dir=temporary_parent) as temporary:
+        root = _private_retained_root(Path(temporary))
+        context_project = dict(_argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
+        paths = [base, *projects, *files]
+        if context_project:
+            paths.append((base / context_project).resolve())
+        anchors = {}
+        for path in paths:
+            anchor = path.anchor.lower()
+            members = [str(member) for member in paths if member.anchor.lower() == anchor]
+            common = Path(os.path.commonpath(members))
+            anchors[anchor] = common.parent if common.is_file() else common
+
+        def mirror(path):
+            path = Path(path).resolve()
+            anchor = hashlib.sha256(path.anchor.encode()).hexdigest()[:12]
+            return root / anchor / path.relative_to(anchors[path.anchor.lower()])
+
+        def remap(value):
+            if isinstance(value, list):
+                return [remap(item) for item in value]
+            if isinstance(value, dict):
+                return {key: remap(item) for key, item in value.items()}
+            if not isinstance(value, str):
+                return value
+            replacements = {}
+            for path in sorted(projects | files, key=lambda item: len(str(item)), reverse=True):
+                for before, after in (
+                    (path.as_uri(), mirror(path).as_uri()),
+                    (str(path), str(mirror(path))),
+                    (path.as_posix(), mirror(path).as_posix()),
+                    (json.dumps(str(path))[1:-1], json.dumps(str(mirror(path)))[1:-1]),
+                ):
+                    replacements[before] = after
+            if not replacements:
+                return value
+            return re.sub(
+                "|".join(re.escape(before) for before in replacements),
+                lambda match: replacements[match[0]], value,
+            )
+
+        for project in sorted(projects, key=lambda path: len(path.parts)):
+            destination = mirror(project)
+            if not destination.is_dir():
+                shutil.copytree(
+                    project, destination,
+                    ignore=shutil.ignore_patterns(
+                        ".git", ".venv", "__pycache__", "*.egg-info",
+                        ".pytest_cache", ".ruff_cache", "node_modules", "build", "dist",
+                    ),
+                )
+        for project in projects:
+            manifest = mirror(project) / "pyproject.toml"
+            data = remap(_toml(manifest))
+            for entries in data.get("tool", {}).get("uv", {}).get("sources", {}).values():
+                for entry in entries if isinstance(entries, list) else [entries]:
+                    if entry.get("editable") is True and "path" in entry:
+                        child = (mirror(project) / entry["path"]).resolve()
+                        editables.update(path for path in projects if mirror(path) == child)
+            _write_toml(manifest, data)
+        for project in editables:
+            manifest = mirror(project) / "pyproject.toml"
+            data = _toml(manifest)
+            setuptools = data.get("tool", {}).get("setuptools", {})
+            packages = setuptools.get("packages", {}) if isinstance(setuptools, dict) else {}
+            find = packages.get("find", {}) if isinstance(packages, dict) else {}
+            if (data.get("build-system", {}).get("build-backend") != "setuptools.build_meta"
+                    or data.get("project", {}).get("dynamic")
+                    or not isinstance(setuptools, dict) or not isinstance(find, dict)
+                    or find.get("where") != ["src"]
+                    or setuptools.get("package-dir") not in (None, {"": "src"})):
+                raise DependencyPolicyError("editable retention requires static setuptools src-layout metadata")
+            source = _contained(project / "src", tuple(Path(path).resolve() for path in trusted_source_roots))
+            # Only live Python code is referenced outside the retained metadata.
+            # compat emits a .pth to this original src, not the temporary project.
+            relative = Path(os.path.relpath(source, mirror(project))).as_posix()
+            find["where"] = [relative]
+            setuptools["package-dir"] = {"": relative}
+            _write_toml(manifest, data)
+        for path in files:
+            destination = mirror(path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(remap(path.read_text(encoding="utf-8")), encoding="utf-8")
+        retained_config = {}
+        for path, is_project in reversed(_config_inputs(arguments, environment, base)):
+            data = _toml(path)
+            if is_project:
+                data = {
+                    key: value for key, value in data["tool"]["uv"].items()
+                    if key not in ("sources", "workspace")
+                }
+            retained_config = _merge_config(data, retained_config)
+        config = root / "uv.toml"
+        _write_toml(config, remap(retained_config))
+        retained_environment = dict(environment)
+        retained_environment["UV_CONFIG_FILE"] = str(config)
+        active = (
+            environment.get("VIRTUAL_ENV") and (Path(environment["VIRTUAL_ENV"]) / "pyvenv.cfg").is_file()
+        ) or (
+            environment.get("CONDA_PREFIX") and (Path(environment["CONDA_PREFIX"]) / "conda-meta").is_dir()
+        )
+        if not active:
+            for directory in (base, *base.parents):
+                if (directory / ".venv" / "pyvenv.cfg").is_file():
+                    retained_environment["VIRTUAL_ENV"] = str(directory / ".venv")
+                    break
+        for variable in ("UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE"):
+            if variable in retained_environment:
+                retained_environment[variable] = " ".join(
+                    str(mirror(base / path)) for path in environment[variable].split()
+                )
+        retained_base = mirror(base)
+        retained_base.mkdir(parents=True, exist_ok=True)
+        retained_environment.pop("UV_WORKING_DIR", None)
+        retained_environment.pop("UV_PROJECT", None)
+        retained = []
+        for option, value in _argument_pairs(original):
+            if option in ("--directory", "--config-file"):
+                continue
+            if option in _FILE_OPTIONS or option == "--project":
+                value = str(mirror(base / value))
+            elif option in ("-p", "--python", "--target", "-t", "--prefix", "--cache-dir", "--cert"):
+                if (base / value).exists() or Path(value).is_absolute():
+                    value = os.path.abspath(base / value)
+            else:
+                value = remap(value)
+            if option and value:
+                retained.extend([option, value] if option in _VALUE_OPTIONS else [option + "=" + value])
+            else:
+                retained.append(option or value)
+        # --config-file is exclusive: no mutable ambient file can be rediscovered.
+        retained.extend(["--config-file", str(config)])
+        if context_project and "--project" not in dict(_argument_pairs(original)):
+            retained.extend(["--project", str(mirror(base / context_project))])
+        retained_roots = tuple(mirror(path) for path in projects)
+        for path in retained_roots:
+            path.mkdir(parents=True, exist_ok=True)
+        retained_projection = []
+        admitted = prepare_uv_install(
+            uv, retained, env=retained_environment, cwd=retained_base, now=now,
+            trusted_source_roots=retained_roots, _projection=retained_projection,
+        )
+        if _resolver_configuration(original_projection[0], remap) != _resolver_configuration(retained_projection[0]):
+            raise DependencyPolicyError("retained UV configuration differs from the configured resolver")
+        if editables:
+            admitted.extend(["--config-setting", "editable_mode=compat"])
+        run_options.setdefault("creationflags", _HEADLESS)
+        return subprocess.run(
+            [uv, "pip", "install", *admitted], env=retained_environment,
+            cwd=retained_base, **run_options,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -573,11 +1033,10 @@ def main(argv: list[str] | None = None) -> int:
     arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
     try:
         roots = tuple(args.trusted_source_root) or _anchor_roots()
-        prepared = prepare_uv_install(args.uv, arguments, trusted_source_roots=roots)
-        return subprocess.call(
-            [args.uv, "pip", "install", *prepared],
-            stdout=sys.stdout, stderr=sys.stderr, creationflags=_HEADLESS,
-        )
+        return run_uv_install(
+            args.uv, arguments, trusted_source_roots=roots,
+            stdout=sys.stdout, stderr=sys.stderr,
+        ).returncode
     except (DependencyPolicyError, OSError) as exc:
         print(f"dependency-seasoning: {exc}", file=sys.stderr)
         return 1

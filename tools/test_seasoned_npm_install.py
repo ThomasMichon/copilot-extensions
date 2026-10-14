@@ -154,7 +154,10 @@ def test_default_registry_mapping_is_explicit_not_an_arbitrary_source_escape():
     for generic, legacy in [(False, False), (True, False), (True, True)]
 ] + [
     ("2020-01-01T00:00:00Z", False, False, mutation)
-    for mutation in ["package-lock.json", "package.json", ".npmrc", "install", "health", "publish"]
+    for mutation in [
+        "package-lock.json", "package.json", ".npmrc", "install", "health", "publish",
+        "publish-package-lock.json", "publish-package.json", "publish-.npmrc",
+    ]
 ])
 def test_real_npm_admission_before_locked_install(
     tmp_path, monkeypatch, capsys, timestamp, generic_project, legacy_metadata, mutation,
@@ -288,7 +291,12 @@ def test_real_npm_admission_before_locked_install(
     def publish(source, destination):
         if mutation == "publish" and source.name == "node_modules" and source.parent in snapshots:
             raise OSError("publication denied")
-        return rename(source, destination)
+        result = rename(source, destination)
+        if (mutation and mutation.startswith("publish-") and source.name == "node_modules"
+                and source.parent in snapshots):
+            target = tmp_path / mutation.removeprefix("publish-")
+            target.write_text("replaced during publication\n", encoding="utf-8")
+        return result
 
     if not generic_project:
         monkeypatch.setattr(installer.subprocess, "call", install_call)
@@ -320,6 +328,8 @@ def test_real_npm_admission_before_locked_install(
             assert not (tmp_path / "node_modules" / "@resvg").exists()
             if mutation in {"package-lock.json", "package.json", ".npmrc"}:
                 assert "changed during installation" in error
+            elif mutation.startswith("publish-"):
+                assert "changed during publication" in error
             elif mutation == "health":
                 assert "selected dependency health check failed" in error
             elif mutation == "publish":
@@ -329,7 +339,7 @@ def test_real_npm_admission_before_locked_install(
             assert "unseasoned release timestamp" in error
             assert downloads == []
             assert (previous / "healthy").is_file()
-        if mutation != "package-lock.json":
+        if mutation not in {"package-lock.json", "publish-package-lock.json"}:
             assert (tmp_path / "package-lock.json").read_text(encoding="utf-8") == original
         assert all(not path.exists() for path in snapshots)
     finally:

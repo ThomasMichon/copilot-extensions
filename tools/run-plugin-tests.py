@@ -55,7 +55,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from seasoned_uv import prepare_uv_install
+from seasoned_uv import run_uv_install
 from plugin_test_containment import (
     ContainmentError,
     Limits,
@@ -312,24 +312,17 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
             cmd.extend(RUNNER_DEPENDENCIES)
-            cmd = [uv, "pip", "install", *prepare_uv_install(
-                uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,),
-            )]
-            subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
+            run_uv_install(
+                uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+            )
         else:
             # A pyproject-less plugin (e.g. a skill-script plugin like
             # harness-knowledge): there is nothing to install editable -- its
             # tests import the scripts directly (importlib). Just ensure a
             # pytest runner is present in the venv.
-            subprocess.run(
-                [
-                    uv, "pip", "install",
-                    *prepare_uv_install(
-                        uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES],
-                        cwd=_plugin_dir(name), trusted_source_roots=(REPO,),
-                    ),
-                ],
-                cwd=str(_plugin_dir(name)), check=True,
+            run_uv_install(
+                uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES],
+                cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")
     return py

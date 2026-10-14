@@ -474,3 +474,37 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   Exact legacy-byte regressions cover plugin, vendored and external source
   inputs. The native Windows source/first-use contracts passed 35 cases with
   four platform skips; Linux first-use remains owed by required CI.
+- The streamed-fingerprint head passed every required provider job, including
+  native Linux first-use, both separated Windows lanes and stock macOS
+  construction. Fresh review nevertheless identified two further input-binding
+  gaps: UV resolution still reopens mutable admitted manifests/configuration,
+  and npm needed revalidation after its dependency-tree rename.
+- npm now revalidates at the publication linearization point and restores the
+  retained tree on input mismatch. Four actual controlled-registry publication
+  cases passed, including manifest, lock and configuration replacements after
+  the candidate rename. UV input binding and fresh-head validation remain open;
+  the implementation has not merged or deployed.
+- UV admission and execution now share a private input-retention lifetime.
+  Actual installation consumes retained source metadata, recursive requirements
+  and configuration with a captured environment, and verifies native resolver
+  equivalence instead of weakening configured-feed behavior. The Python tooling
+  consumers use this execution seam rather than reopening preflighted inputs.
+- Static setuptools `src` editables retain dependency metadata while referencing
+  the original live code. Actual configured-feed setuptools builds proved imports
+  survive input-snapshot cleanup and observe source edits, including separate
+  Windows source and environment volumes. The first absolute-path approach was
+  rejected by setuptools; relative package-directory mapping passed. Compact
+  common-root mirrors avoid Windows current-directory length failures.
+  Unknown editable shapes fail before installation. Controlled-registry
+  post-admission input mutations and native configuration-precedence coverage
+  are implemented; final combined validation, shipped-helper synchronization,
+  fresh review/CI, release and deployed rollout remain open.
+- Combined verification passed 542 cases with two platform skips: the complete
+  135-case UV policy suite, all consumer/artifact lifecycle contracts and all
+  38 real npm admission/publication cases. Three later argument/certificate
+  normalization regressions and the source/policy guards passed in a 300-case
+  focused run. Touched-code lint, installer contracts and all 13 shipped helper
+  copies passed. Native editable checks cover explicit, implicit, environment,
+  project and directory selection without resolving a venv interpreter symlink
+  to its base Python. Required fresh-head provider CI and genuine review remain
+  blocking; no merge, release or deployed-runtime claim is made.

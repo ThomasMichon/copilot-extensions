@@ -135,7 +135,9 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "provenance-key-dir")
     # Resolver admission has its own native/controlled-index suite; this
     # module's subprocess fixtures isolate artifact publication and provenance.
-    monkeypatch.setattr(btl, "prepare_uv_install", lambda uv, args, **kwargs: args)
+    monkeypatch.setattr(btl, "run_uv_install", lambda uv, args, **kwargs: btl.subprocess.run(
+        [uv, "pip", "install", *args], **kwargs,
+    ))
     monkeypatch.setattr(
         gft.subprocess, "run",
         lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),  # noqa: ARG005

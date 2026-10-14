@@ -165,6 +165,7 @@ def test_probe_preserves_arguments_environment_and_cwd(monkeypatch, tmp_path):
 
     monkeypatch.setattr(policy.subprocess, "run", run)
     args = ["--python", "candidate-python", "demo>=1"]
+    (tmp_path / "configured-feed.toml").write_text("", encoding="utf-8")
     environment = {"UV_CONFIG_FILE": "configured-feed.toml"}
     result = policy.prepare_uv_install("attributed-uv", args, env=environment, cwd=tmp_path, now=NOW)
     assert result[:len(args)] == args
@@ -323,6 +324,7 @@ def test_real_uv_settings_consumer_preserves_stricter_cutoff(tmp_path):
 @pytest.mark.parametrize("first_party_source", [False, True])
 def test_real_uv_registry_transitive_and_isolated_build_age(
     tmp_path, missing_timestamp, url_dependency, exact_boundary, first_party_source,
+    mutation=None, monkeypatch=None,
 ):
     import hashlib
     import io
@@ -470,12 +472,43 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                     )
                 assert downloads == []
                 return
-        prepared = policy.prepare_uv_install(
-            uv, ["--python", str(python), requirement], env=environment, cwd=tmp_path, now=NOW,
-            trusted_source_roots=roots,
+        arguments = ["--python", str(python), requirement]
+        included = tmp_path / "included.txt"
+        requirements = tmp_path / "requirements.txt"
+        if mutation == "requirements":
+            included.write_text(requirement + "\n", encoding="utf-8")
+            requirements.write_text("-r included.txt\n", encoding="utf-8")
+            arguments = ["--python", str(python), "-r", str(requirements)]
+        actual_run = subprocess.run
+        mutations = []
+
+        def run(command, **kwargs):
+            if mutation and "--show-settings" not in command and command[1:3] == ["pip", "install"]:
+                mutations.append(mutation)
+                remote = f"fixture-transitive @ http://127.0.0.1:{server.server_port}/files/fixture_transitive-2.0-py3-none-any.whl"
+                if mutation == "requirements":
+                    included.write_text(remote + "\n", encoding="utf-8")
+                elif mutation == "project":
+                    manifest = source / "pyproject.toml"
+                    manifest.write_text(
+                        manifest.read_text(encoding="utf-8").replace("fixture-transitive>=1", remote),
+                        encoding="utf-8",
+                    )
+                else:
+                    config.write_text(
+                        config.read_text(encoding="utf-8") + 'exclude-newer="2020-01-01T00:00:00Z"\n',
+                        encoding="utf-8",
+                    )
+                assert Path(kwargs["env"]["UV_CONFIG_FILE"]) != config
+                assert Path(kwargs["cwd"]) != tmp_path
+            return actual_run(command, **kwargs)
+
+        if mutation:
+            monkeypatch.setattr(policy.subprocess, "run", run)
+        installed = policy.run_uv_install(
+            uv, arguments, env=environment, cwd=tmp_path, now=NOW, trusted_source_roots=roots,
+            capture_output=True, text=True, timeout=30, **flags,
         )
-        installed = subprocess.run([uv, "pip", "install", *prepared], env=environment,
-                                   cwd=tmp_path, capture_output=True, text=True, timeout=30, **flags)
         if missing_timestamp or url_dependency or exact_boundary:
             assert installed.returncode != 0
             if url_dependency:
@@ -491,10 +524,273 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                 env=environment, check=True, capture_output=True, text=True, timeout=10, **flags,
             )
             assert versions.stdout.splitlines() == ["1.0", "backend-1.0"]
+            if mutation:
+                assert mutations == [mutation]
+                assert "fixture_transitive-2.0-py3-none-any.whl" not in downloads
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+@pytest.mark.parametrize("mutation", ["requirements", "project", "config"])
+def test_native_install_never_reopens_admitted_mutable_inputs(tmp_path, monkeypatch, mutation):
+    test_real_uv_registry_transitive_and_isolated_build_age(
+        tmp_path, False, False, False, True, mutation=mutation, monkeypatch=monkeypatch,
+    )
+
+
+@pytest.mark.parametrize("selection", ["explicit", "implicit", "env-relative", "project-env", "directory"])
+def test_native_editable_retains_metadata_but_imports_live_source_after_cleanup(tmp_path, monkeypatch, selection):
+    import os
+    import subprocess
+
+    source = tmp_path / "source"
+    backend = source / "backend" / "setuptools"
+    backend.mkdir(parents=True)
+    (backend / "__init__.py").write_text("", encoding="utf-8")
+    (backend / "build_meta.py").write_text(
+        """
+import pathlib, zipfile, json, re
+def build_editable(wheel_directory, config_settings=None, metadata_directory=None):
+    data = pathlib.Path('pyproject.toml').read_text()
+    assert '"dependencies" = []' in data
+    assert config_settings['editable_mode'] == 'compat'
+    directory = json.loads(re.search(r'"package-dir" = \\{"" = ("[^"]+")\\}', data)[1])
+    live = str(pathlib.Path(directory).resolve())
+    name = 'fixture_editable-1.0-py3-none-any.whl'
+    with zipfile.ZipFile(pathlib.Path(wheel_directory) / name, 'w') as wheel:
+        prefix = 'fixture_editable-1.0.dist-info/'
+        wheel.writestr(prefix + 'METADATA', 'Metadata-Version: 2.1\\nName: fixture-editable\\nVersion: 1.0\\n')
+        wheel.writestr(prefix + 'WHEEL', 'Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n')
+        wheel.writestr(prefix + 'RECORD', '')
+        wheel.writestr('fixture_editable.pth', live + '\\n')
+    return name
+""", encoding="utf-8",
+    )
+    manifest = source / "pyproject.toml"
+    manifest.write_text(
+        '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\nbackend-path=["backend"]\n'
+        '[project]\nname="fixture-editable"\nversion="1.0"\ndependencies=[]\n'
+        '[tool.setuptools.packages.find]\nwhere=["src"]\n', encoding="utf-8",
+    )
+    live = source / "src"
+    live.mkdir()
+    module = live / "fixture_editable.py"
+    module.write_text("value = 'original'\n", encoding="utf-8")
+    environment = offline_environment(tmp_path)
+    uv = shutil.which("uv")
+    target = tmp_path / (".venv" if selection in ("implicit", "env-relative") else "venv")
+    actual = subprocess.run
+    created = actual(
+        [uv, "venv", "--python", sys.executable, str(target)], env=environment,
+        capture_output=True, text=True, timeout=30, creationflags=policy._HEADLESS,
+    )
+    assert created.returncode == 0, created.stderr
+    python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    arguments = ["--no-config", "--no-index", "--python", str(python), "-e", str(source)]
+    cwd = tmp_path
+    if selection in ("implicit", "env-relative"):
+        arguments = ["--no-config", "--no-index", "-e", str(source)]
+        if selection == "env-relative":
+            environment["UV_PYTHON"] = str(python.relative_to(tmp_path))
+    elif selection == "project-env":
+        environment["UV_PROJECT"] = "source"
+    elif selection == "directory":
+        arguments = ["--directory", str(tmp_path), "--no-config", "--no-index", "--python", str(python), "-e", "source"]
+        cwd = source
+    retained = []
+
+    def run(command, **kwargs):
+        if "--show-settings" not in command:
+            retained.append(Path(kwargs["cwd"]))
+            manifest.write_text(
+                manifest.read_text().replace("dependencies=[]", 'dependencies=["bad @ https://unapproved.example/bad.whl"]'),
+                encoding="utf-8",
+            )
+        return actual(command, **kwargs)
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    installed = policy.run_uv_install(
+        uv, arguments,
+        env=environment, cwd=cwd, trusted_source_roots=(source,),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert installed.returncode == 0, installed.stderr
+    assert retained and not retained[0].exists()
+    for value in ("original", "changed"):
+        module.write_text(f"value = '{value}'\n", encoding="utf-8")
+        imported = actual(
+            [str(python), "-I", "-c", "import fixture_editable;print(fixture_editable.value)"],
+            env=environment, capture_output=True, text=True, timeout=10, creationflags=policy._HEADLESS,
+        )
+        assert imported.returncode == 0, imported.stderr
+        assert imported.stdout.strip() == value
+
+
+def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_path, monkeypatch):
+    import os
+    import subprocess
+
+    environment = offline_environment(tmp_path)
+    if os.name == "nt":
+        environment["APPDATA"] = str(tmp_path / "user")
+        environment["SYSTEMDRIVE"] = str(tmp_path / "system")
+        system_path = "system/ProgramData/uv/uv.toml"
+    else:
+        environment["XDG_CONFIG_HOME"] = str(tmp_path / "user")
+        environment["XDG_CONFIG_DIRS"] = str(tmp_path / "system")
+        system_path = "system/uv/uv.toml"
+    for name, body in {
+        "user/uv/uv.toml": 'exclude-newer-package={demo="11 days"}\n[[index]]\nname="retained-default"\nurl="https://user.example/simple"\ndefault=true\n',
+        system_path: '[[index]]\nname="system-extra"\nurl="https://system.example/simple"\nexplicit=true\n',
+        "project/uv.toml": 'exclude-newer="10 days"\n[[index]]\nname="project-extra"\nurl="https://project.example/simple"\nexplicit=true\n',
+    }.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    environment["UV_INDEX_RETAINED_DEFAULT_USERNAME"] = "fixture-user"
+    environment["UV_INDEX_RETAINED_DEFAULT_PASSWORD"] = "fixture-secret"
+    actual = subprocess.run
+    calls = []
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            return actual(command, **kwargs)
+        config = Path(kwargs["env"]["UV_CONFIG_FILE"])
+        calls.append(config)
+        data = policy._toml(config)
+        assert [entry["name"] for entry in data["index"]] == [
+            "project-extra", "retained-default", "system-extra",
+        ]
+        assert kwargs["env"]["UV_INDEX_RETAINED_DEFAULT_PASSWORD"] == "fixture-secret"
+        assert command[command.index("--exclude-newer") + 1] == "2026-10-03T00:00:00Z"
+        environment["UV_INDEX_RETAINED_DEFAULT_PASSWORD"] = "changed-secret"
+        (tmp_path / "project" / "uv.toml").write_text("no-index=true\n", encoding="utf-8")
+        assert data == policy._toml(config)
+        assert kwargs["env"]["UV_INDEX_RETAINED_DEFAULT_PASSWORD"] == "fixture-secret"
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    result = policy.run_uv_install(
+        shutil.which("uv"), ["--python", sys.executable, "demo"], env=environment,
+        cwd=tmp_path / "project", now=NOW, capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert len(calls) == 1 and not calls[0].exists()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("dependency_mode", "Direct"), ("build_isolation", "Shared"),
+])
+def test_environment_resolver_closure_bypass_refused(field, value):
+    projection = settings().replace("settings: PipSettings {", f"settings: PipSettings {{\n{field}: {value},")
+    with pytest.raises(policy.DependencyPolicyError, match="cannot bypass"):
+        policy.cutoff_arguments(projection, now=NOW)
+
+
+@pytest.mark.parametrize("unsupported", ["backend", "dynamic", "layout", "package-dir", "mode"])
+def test_unsupported_editable_retention_refuses_before_install(tmp_path, monkeypatch, unsupported):
+    source = source_project(tmp_path / "source")
+    manifest = source / "pyproject.toml"
+    data = manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
+    data += '[tool.setuptools.packages.find]\nwhere=["src"]\n'
+    (source / "src").mkdir()
+    if unsupported == "backend":
+        data = data.replace("setuptools.build_meta", "fixture_backend")
+    elif unsupported == "dynamic":
+        data = data.replace('version="1.0"', 'version="1.0"\ndynamic=["version"]')
+    elif unsupported == "layout":
+        data = data.replace('where=["src"]', 'where=["generated"]')
+    elif unsupported == "package-dir":
+        data += '[tool.setuptools.package-dir]\n""="custom-src"\n'
+    manifest.write_text(data, encoding="utf-8")
+    calls = []
+
+    def probe(command, **kwargs):
+        calls.append(command)
+        assert "--show-settings" in command
+        projection = settings()
+        if unsupported == "mode":
+            projection = projection.replace("settings: PipSettings {", 'settings: PipSettings {\nconfig_setting: {"editable_mode": "strict"},')
+        return CompletedProcess(command, 0, projection, "")
+
+    monkeypatch.setattr(policy.subprocess, "run", probe)
+    with pytest.raises(policy.DependencyPolicyError, match="editable"):
+        policy.run_uv_install(
+            "uv", ["--no-config", "-e", str(source)], cwd=tmp_path,
+            env=offline_environment(tmp_path), trusted_source_roots=(source,),
+        )
+    assert len(calls) == 1
+
+
+def test_retained_install_never_resolves_venv_python_to_its_base_interpreter(tmp_path, monkeypatch):
+    target = tmp_path / "venv" / "bin" / "python"
+    target.parent.mkdir(parents=True)
+    target.touch()
+    base_python = tmp_path / "base-python"
+    base_python.touch()
+    resolve = Path.resolve
+
+    def symlink_resolution(path, *args, **kwargs):
+        return base_python if path == target else resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", symlink_resolution)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    policy.run_uv_install(
+        "uv", ["--no-config", "--python", str(target), "demo"],
+        env=offline_environment(tmp_path), cwd=tmp_path,
+    )
+    assert len(calls) == 3
+    assert calls[-1][calls[-1].index("--python") + 1] == str(target)
+
+
+def test_retention_never_reinterprets_inline_unknown_flags_as_requirements(tmp_path, monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    policy.run_uv_install(
+        "uv", ["--no-config", "--break-system-packages=false", "demo"],
+        env=offline_environment(tmp_path), cwd=tmp_path,
+    )
+    assert len(calls) == 3
+    assert all("--break-system-packages=false" in command for command in calls)
+    assert all("false" not in command for command in calls)
+
+
+def test_uv_inner_end_marker_cannot_hide_the_mandatory_cutoff():
+    with pytest.raises(policy.DependencyPolicyError, match="end-of-options"):
+        policy.prepare_uv_install("uv", ["--", "demo"])
+
+
+def test_relative_certificate_directory_list_retains_original_cwd(tmp_path, monkeypatch):
+    import os
+
+    environment = offline_environment(tmp_path)
+    environment["SSL_CERT_DIR"] = os.pathsep.join(("first", "second"))
+    expected = os.pathsep.join(str(tmp_path / directory) for directory in ("first", "second"))
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        assert kwargs["env"]["SSL_CERT_DIR"] == expected
+        return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    policy.run_uv_install(
+        "uv", ["--no-config", "demo"], env=environment, cwd=tmp_path,
+    )
+    assert len(calls) == 3
 
 
 def source_project(path, name="fixture-source", sources="", dependencies=""):

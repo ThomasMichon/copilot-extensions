@@ -170,10 +170,13 @@ def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, 
     plugin.mkdir(parents=True)
     if has_project:
         (plugin / "pyproject.toml").write_text(
+            '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
             '[project]\nname="example"\nversion="1.0"\ndependencies=["owned-lib"]\n'
-            '[tool.uv.sources]\nowned-lib={path="../../libs/owned"}\n',
+            '[tool.uv.sources]\nowned-lib={path="../../libs/owned"}\n'
+            '[tool.setuptools.packages.find]\nwhere=["src"]\n',
             encoding="utf-8",
         )
+        (plugin / "src").mkdir()
         library = tmp_path / "libs" / "owned"
         library.mkdir(parents=True)
         (library / "pyproject.toml").write_text(
@@ -186,7 +189,7 @@ def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, 
     environment = runner.VENV_ROOT / "example"
     environment.mkdir(parents=True)
     python = runner._venv_python("example")
-    admitted = runner.prepare_uv_install
+    admitted = runner.run_uv_install
     installs = []
     probes = []
 
@@ -208,10 +211,10 @@ def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, 
             installs.append(arguments)
         return subprocess.CompletedProcess(arguments, 0, "", "")
 
-    monkeypatch.setattr(runner, "prepare_uv_install", prepare)
+    monkeypatch.setattr(runner, "run_uv_install", prepare)
     monkeypatch.setattr(runner.subprocess, "run", command)
     assert runner._ensure_venv("example", "uv", reinstall=False) == python
-    assert len(probes) == len(installs) == 1
+    assert len(probes) == 2 and len(installs) == 1
     assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
     assert ("-e" in installs[0]) is has_project
     assert (environment / ".dep-fingerprint").read_text() == "fixture"
