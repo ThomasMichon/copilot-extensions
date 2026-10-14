@@ -650,3 +650,23 @@ requested contract.
   Existing patch changefiles remain; original UNKNOWN diagnostics are not
   reclassified. Fresh source review, CI, merge and deployment remain coordinator
   custody.
+
+- **Default identity and full-poll component ownership (PR #6542):** Two
+  fail-first cases reproduced a housekeeping adapter bound before default local
+  identity resolution and legacy disposable reconciliation overwriting a pending
+  session component. Bind the existing lease-only adapter after resolution and
+  leave release-requested component envelopes to the component-aware consumer.
+  The actual constructor/full-poll and ordinary client/host-proof checks passed
+  five cases, without weakening unknown-host refusal or raw client identity.
+  Combined compatibility produced 257 passes and one real failure:
+  `test_native_cli_first_touch_preview_apply_and_history[apply]` exhausted its
+  unchanged 15-second subprocess budget. This uninstrumented run supplies no
+  process-tree or HTTP-stage evidence, so the cause remains UNKNOWN; no rerun,
+  waiver or passing-shaped inference clears that gate. The exact failed gate
+  and prior diagnostic evidence are retained separately. A previously aborted
+  supported upstream sync also has actual conflicts in `launch_seed_state.py`
+  and its tests; the original source and framework recovery references remain
+  preserved. This below-altitude correction uses the existing patch changefile.
+  Publication, conflict resolution and the outstanding native validation remain
+  blocked under coordinator custody; original timing/crash uncertainties, review,
+  merge and deployment obligations remain open.

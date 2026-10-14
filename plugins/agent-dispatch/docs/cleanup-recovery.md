@@ -67,6 +67,10 @@ omit `cleanup_kind`: without `worktree_cleanup`, the existing consumer cannot
 guarantee a lease before the session side effect. A complete worktree component
 with an incomplete session component is supported and claims/validates its
 cleanup lease before ending the exact session.
+Legacy reconciliation leaves release-requested component envelopes to this
+leased consumer, including disposable tasks whose worktree component already
+completed; task labels cannot replace a pending session component with flat
+success.
 
 The task generation, exact provenance and allocation fences are rechecked when
 the supervisor claims and validates its cleanup lease and records the outcome.
@@ -84,6 +88,9 @@ supervisor's resolved `claimant_machine`. Each must match the retained creating
 host before granting or using a lease, including session-ending side effects.
 The foreground supervise construction uses the same explicit/configured local
 alias resolution as registration scope; it does not omit that identity.
+Direct supervisor construction resolves its default local alias before binding
+the housekeeping adapter, so explicit and default identities carry the same
+lease proof.
 The host binding is confined to those housekeeping RPCs. Ordinary spawning and
 label-routed snapshots retain the supplied client's identity and lifetime;
 the supervisor does not globally substitute a proxy client.

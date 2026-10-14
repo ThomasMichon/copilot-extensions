@@ -209,7 +209,6 @@ class Supervisor:
         consistency_sweep: bool = True,
     ):
         self.client = client
-        self._conclusion_client = HostBoundConclusionClient(client, machine)
         self.spawn_fn = spawn_fn
         self.repo = repo
         self.labels = set(labels) if labels else None
@@ -227,6 +226,7 @@ class Supervisor:
             from . import remote_dispatch
 
             machine = remote_dispatch.local_machine()
+        self._conclusion_client = HostBoundConclusionClient(client, machine)
         lane_identity = json.dumps(
             {
                 "machine": machine,
@@ -2378,6 +2378,11 @@ class Supervisor:
         )
         now = time.time()
         for res in reservations:
+            if (
+                res.get("release_requested")
+                and isinstance(self._conclusion_retry_payload(res).get("worktree_cleanup"), dict)
+            ):
+                continue
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:

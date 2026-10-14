@@ -8,10 +8,9 @@ from agent_dispatch.queue import TaskError
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
-@pytest.fixture
-def held(tmp_path):
+def _held_cleanup(tmp_path, *, labels=None):
     queue = TaskQueue(tmp_path / "tasks.db")
-    task = queue.create("finished work", exclusive_key="logical-work")
+    task = queue.create("finished work", exclusive_key="logical-work", labels=labels)
     reservation, _ = queue.reserve_spawn(task.id, now=10)
     queue.record_spawn_worktree(
         reservation.key, "worker-exact", ownership="created",
@@ -36,6 +35,11 @@ def held(tmp_path):
         release_requested=True,
     )
     return queue, task.id, reservation.key
+
+
+@pytest.fixture
+def held(tmp_path):
+    return _held_cleanup(tmp_path)
 
 
 def preview(held, **over):
@@ -707,6 +711,7 @@ def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch,
     from agent_dispatch.spawn_factories import make_headless_spawn, make_label_routed_spawn
     from agent_dispatch.supervisor import Supervisor
     from agent_dispatch import embody
+    from agent_dispatch import remote_dispatch
     from tests._helpers import TEST_REPO
 
     queue, _, key = held
@@ -714,6 +719,8 @@ def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch,
     before = asdict(queue.get_reservation(key))
     app = create_app(queue, enable_mcp=False, verification_interval=0)
     rpc_hosts = []
+    if claimant is None:
+        monkeypatch.setattr(remote_dispatch, "local_machine", lambda: None)
 
     @app.middleware("http")
     async def observe_lease_host(request, call_next):
@@ -818,6 +825,76 @@ def test_actual_supervise_constructor_consumes_held_cleanup(held, monkeypatch, m
         assert asdict(queue.get_reservation(key)) == before
         assert worktrees == []
     assert constructed[0].machine == expected_machine
+
+
+def test_default_constructor_identity_reaches_recovery_rpc(held, monkeypatch):
+    from fastapi.testclient import TestClient
+    from agent_dispatch import remote_dispatch
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    queue, task_id, key = held
+    task_before = asdict(queue.get(task_id))
+    apply(held, preview(held))
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host")
+    worktrees = []
+    with DispatchClient("http://testserver") as client:
+        client._http.close()
+        client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
+        supervisor = Supervisor(
+            client, spawn_fn=lambda *a: pytest.fail("business spawn forbidden"),
+            attempt_conclusion_fn=lambda *a: worktrees.append(a) or {"action": "primed"},
+            repo=TEST_REPO, nudge=False,
+        )
+        assert supervisor.machine == "host"
+        assert supervisor.client is client
+        supervisor.release_requested_bodies()
+    assert queue.get_reservation(key).conclusion_state == "complete"
+    assert len(worktrees) == 1
+    assert asdict(queue.get(task_id)) == task_before
+
+
+def test_full_poll_preserves_session_component_before_legacy_reconcile(tmp_path):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    fixture = _held_cleanup(tmp_path, labels=["disposable"])
+    queue, task_id, key = fixture
+    task_before = asdict(queue.get(task_id))
+    queue.record_spawn_conclusion(key, conclusion_state="held", conclusion_detail=json.dumps({
+        "cleanup_kind": "terminal",
+        "session_end": {"state": "held", "session_id": "native-session", "attempts": 12},
+        "worktree_cleanup": {"state": "complete", "outcome": {"action": "primed"}},
+    }))
+    apply(fixture, preview(fixture))
+    ended, worktrees = [], []
+    with DispatchClient("http://testserver") as client:
+        client._http.close()
+        client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
+        supervisor = Supervisor(
+            client, spawn_fn=lambda *a: pytest.fail("business spawn forbidden"),
+            local_end_fn=lambda sid: ended.append(sid) or True,
+            conclusion_fn=lambda *a: worktrees.append(a) or {
+                "action": "primed", "managed_gc_eligible": True,
+            },
+            repo=TEST_REPO, machine="host", disposable_cli_labels=["disposable"],
+            heartbeat=False, nudge=False, recover=False, consistency_sweep=False,
+        )
+        assert supervisor.poll_once() == []
+    assert ended == ["native-session"]
+    assert worktrees == []
+    row = queue.get_reservation(key)
+    payload = json.loads(row.conclusion_detail)
+    assert row.conclusion_state == "complete"
+    assert payload["session_end"]["state"] == "complete"
+    assert payload["worktree_cleanup"]["state"] == "complete"
+    assert asdict(queue.get(task_id)) == task_before
+    assert len(queue.cleanup_recovery_history(key)) == 1
 
 
 def test_legacy_conclusion_rpc_without_recovery_keeps_optional_host_behavior(held):
