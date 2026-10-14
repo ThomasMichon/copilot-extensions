@@ -202,6 +202,8 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 if "token" in d:
     d["token"] = "REDACTED"
+if "controlToken" in d:
+    d["controlToken"] = "REDACTED"
 json.dump(d, open(sys.argv[2], "w"), indent=2)
 ' "$DESCRIPTOR" "$CR_LOGDIR/descriptor.json" 2>/dev/null || true
 else

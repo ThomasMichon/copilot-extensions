@@ -336,10 +336,12 @@ and ordering before Phase 0 work begins.)_
   revokes remote ownership; a deliberate re-hook obtains a fresh claim.
   Review this policy/mechanism plan before implementation, and do not equate
   HTTP fencing with exclusion of arbitrary native/keyboard input.
-- [ ] Design a generation/claim-style primitive for "exactly one driver at a
+- [x] Design a generation/claim-style primitive for "exactly one driver at a
       time" against an **already-running** mux session — the gap Session
       Host's `host_index.py` already closes for ACP, and raw mux does not
-      close by default (multi-attach is its normal behavior).
+      close by default (multi-attach is its normal behavior). Reviewed policy
+      and mechanism plan merged in #6728; implementation and native proof
+      remain separate, unfinished obligations.
 - [ ] Validate two concurrent driving attempts against the same live session
       cannot corrupt it (interleaved/garbled input, lost turns, or a split
       stream).
@@ -1081,3 +1083,48 @@ and takeover handling, deliberate fresh-claim re-hook, and bounded race/
 replay/recovery tests. Native source preservation and fencing remain proof
 obligations, not capabilities inferred from SDK type definitions. No Phase 2
 implementation or native-concurrency validation is claimed by this plan.
+
+### 2026-10-14 — Phase 2 plan merged; implementation and native proof next
+
+PR #6728 merged to `dev` as `8c7cb2da3b0d47dab764d2bc31e0d4832ce7cee6`,
+after clean current-head review and passing CI. Re-read the effort's open
+Plan/Validation Plan and policy journal, then pulled forward onto the reviewed
+plan before implementation. Resolved the design item only; the native
+concurrent-driver and parent validation items remain open.
+
+Preparing the native lane also exposed a coupled validation defect, tracked
+under #6731: the existing Tier-P solo scenario submits nonempty content to
+`/send` while claiming no model turn. An idle session is not a zero-credit
+guarantee, particularly after the SDK prompt mapping correction. Repair that
+probe to assert authenticated negative admission without invoking SDK send;
+do not infer previous billing or a native failure from this source finding.
+
+The readiness command including `docker info` did not complete and was
+cancelled as an owned probe. No healthy Docker/native lane is established by
+that attempt. Continue implementation and seek an isolated supported native
+proof path; do not relabel a synthetic HTTP/SDK test as live mux validation.
+
+### 2026-10-14 — Agent-free scenario repaired; controlled mutation implementation
+
+The coupled Tier-P correction merged to `dev` in #6738 as
+`c45b1430b53a387ddb588ab5c9708d35273393e5`, after clean current-head approval
+and passing CI. Its shared probe authenticates and submits `{}`, asserting
+HTTP 400 missing-content rejection and zero SDK sends/aborts. It preserves
+discovery, health, SSE, listing and signal cleanup without claiming native
+prompt delivery. No previous model billing is inferred.
+
+Re-read the effort after this merge and continued Phase 2 against the reviewed
+#6728 plan. The current candidate implements target-local instance/generation/
+credential/sequence fencing, observed root-input revocation, preserved
+observers, explicit administrative fresh-claim re-hook, bounded provenance
+tracking, partial-effect errors, and a standalone private-state helper.
+Production observation is installed before the endpoint is published, and
+unknown native-control outcomes disable further mutation.
+
+Synthetic tests exercise the real HTTP server, SDK adapter, helper, and
+production extension wiring with a strict SDK fake. The installed SDK's actual
+request constructor is also exercised without spawning a native runtime.
+These are not native event emission or live mux concurrency evidence. Docker
+readiness remains unestablished; no global setting, service, existing session,
+or default was changed to manufacture that lane. Phase 2's native checkbox
+and the parent Validation Plan remain open until that proof is obtained.

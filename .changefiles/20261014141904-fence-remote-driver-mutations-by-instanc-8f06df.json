@@ -1,0 +1,9 @@
+{
+  "comment": "Fence remote-driver mutations by instance, generation and claim; revoke on observed root input and allow deliberate fresh-claim re-hook with private pending-state control helper.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

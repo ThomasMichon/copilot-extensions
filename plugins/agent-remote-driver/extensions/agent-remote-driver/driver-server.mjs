@@ -11,11 +11,8 @@
 // session, so it can be unit tested with a fake driver and no SDK/runtime
 // dependency at all. extension.mjs supplies the real SDK-backed driver.
 //
-// NOTE on driver exclusivity: this server accepts /send, /steer, and /abort
-// from ANY holder of the bearer token with no arbitration between multiple
-// concurrent callers. That is Phase 2's job (mux-native-driver-exclusivity,
-// see efforts/active/cli-default-bridging/README.md) -- not a gap introduced
-// here, but one this module does not attempt to close on its own.
+// Mutation requires a generation-fenced claim. Observation and administrative
+// re-hook use distinct capabilities; root input revokes the mutation claim.
 //
 // RESOURCE BOUNDS (fleet hygiene): MAX_SSE_CLIENTS caps concurrent /events
 // subscribers per session so a reconnect-storming or misbehaving caller
@@ -34,6 +31,8 @@
 
 import { createServer } from "node:http";
 import { authorizes } from "./discovery.mjs";
+import { createDriverControl } from "./driver-control.mjs";
+import { DriverControlError } from "./driver-ownership.mjs";
 
 const MAX_BODY_BYTES = 1_000_000; // 1MB cap on a request body; avoids unbounded buffering
 export const MAX_SSE_CLIENTS = 16; // per-session cap on concurrent /events subscribers
@@ -72,7 +71,7 @@ async function readJsonBody(req) {
   try {
     return JSON.parse(raw);
   } catch {
-    throw new Error("request body must be valid JSON");
+    throw new DriverControlError("body_invalid", "request body must be valid JSON", 400);
   }
 }
 
@@ -81,7 +80,9 @@ async function readJsonBody(req) {
  * @param {() => string|null} opts.getSessionId -- current session id, if known
  * @param {() => number} opts.getPid
  * @param {string} opts.token -- the bearer token this server requires
- * @param {(opts: {content: string, mode?: string}) => Promise<unknown>} opts.send
+ * @param {string} opts.controlToken -- administrative grant/re-hook capability
+ * @param {(state: object) => void} [opts.onOwnershipChange] -- bounded, no-I/O notifier
+ * @param {(opts: {content: string, mode?: string, source?: string}) => Promise<unknown>} opts.send
  * @param {() => Promise<unknown>} opts.abort
  * @param {(listener: (event: unknown) => void) => () => void} opts.subscribe --
  *   registers a listener for forwarded events; returns an unsubscribe fn.
@@ -95,6 +96,9 @@ async function readJsonBody(req) {
 export function createDriverServer(opts) {
   const { getSessionId, getPid, token, send, abort, subscribe, maxSseBufferedBytes = MAX_SSE_BUFFERED_BYTES } = opts;
   const sseClients = new Set();
+  const control = createDriverControl({
+    getSessionId, send, abort, controlToken: opts.controlToken, onChange: opts.onOwnershipChange,
+  });
 
   function unauthorized(res) {
     sendJson(res, 401, { ok: false, error: "unauthorized" });
@@ -109,7 +113,7 @@ export function createDriverServer(opts) {
       }
 
       if (req.method === "GET" && url.pathname === "/health") {
-        sendJson(res, 200, { ok: true, sessionId: getSessionId(), pid: getPid() });
+        sendJson(res, 200, { ok: true, sessionId: getSessionId(), pid: getPid(), control: control.snapshot() });
         return;
       }
 
@@ -148,43 +152,39 @@ export function createDriverServer(opts) {
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/send") {
+      if (req.method === "POST" && ["/control/claim", "/control/re-hook", "/control/release"].includes(url.pathname)) {
         const body = await readJsonBody(req);
-        if (!body || typeof body.content !== "string" || !body.content) {
-          sendJson(res, 400, { ok: false, error: "content (string) is required" });
-          return;
+        if (url.pathname === "/control/release") {
+          control.release(body);
+          sendJson(res, 200, { ok: true, control: control.snapshot() });
+        } else {
+          const lease = url.pathname === "/control/claim" ? control.claim(body) : control.rehook(body);
+          sendJson(res, 200, { ok: true, lease, control: control.snapshot() });
         }
-        const result = await send({ content: body.content, mode: body.mode });
-        sendJson(res, 200, { ok: true, result: result ?? null });
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/steer") {
+      if (req.method === "POST" && ["/send", "/steer", "/abort"].includes(url.pathname)) {
         const body = await readJsonBody(req);
-        if (!body || typeof body.content !== "string" || !body.content) {
-          sendJson(res, 400, { ok: false, error: "content (string) is required" });
-          return;
-        }
-        await abort();
-        const result = await send({ content: body.content, mode: "immediate" });
-        sendJson(res, 200, { ok: true, result: result ?? null });
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/abort") {
-        const result = await abort();
-        sendJson(res, 200, { ok: true, result: result ?? null });
+        const result = await control.invoke(url.pathname.slice(1), body);
+        sendJson(res, 200, { ok: true, result, control: control.snapshot() });
         return;
       }
 
       sendJson(res, 404, { ok: false, error: "not found" });
     } catch (e) {
-      sendJson(res, 500, { ok: false, error: e?.message || "internal error" });
+      sendJson(res, e instanceof DriverControlError ? e.status : 500, {
+        ok: false,
+        error: e?.message || "internal error",
+        code: e instanceof DriverControlError ? e.code : "internal_error",
+        ...(e instanceof DriverControlError ? e.details : {}),
+      });
     }
   });
 
   return {
     server,
+    control,
     listen() {
       return new Promise((resolve, reject) => {
         server.once("error", reject);

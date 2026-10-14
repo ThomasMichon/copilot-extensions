@@ -35,11 +35,22 @@ export function generateToken() {
 // the session is alive, so registry.mjs's staleness check has a second
 // signal beyond raw pid liveness (needed because a dead pid can be reused by
 // an unrelated later process -- see registry.mjs's isStale).
-export function buildDescriptor({ sessionId, pid, port, token, cwd, startedAt, updatedAt, driverVersion }) {
+export function buildDescriptor({
+  sessionId, pid, port, token, cwd, startedAt, updatedAt, driverVersion,
+  controlProtocol, instanceId, controlToken,
+}) {
   if (!sessionId) throw new Error("buildDescriptor: sessionId is required");
   if (!Number.isInteger(pid) || pid <= 0) throw new Error("buildDescriptor: pid must be a positive integer");
   if (!Number.isInteger(port) || port <= 0) throw new Error("buildDescriptor: port must be a positive integer");
   if (!token) throw new Error("buildDescriptor: token is required");
+  const hasControl = [controlProtocol, instanceId, controlToken].some((value) => value !== undefined);
+  if (hasControl && (
+    !Number.isSafeInteger(controlProtocol) || controlProtocol < 1 ||
+    typeof instanceId !== "string" || !instanceId ||
+    typeof controlToken !== "string" || !controlToken
+  )) {
+    throw new Error("buildDescriptor: control protocol, instance identity and administrative credential are required together");
+  }
   const now = new Date().toISOString();
   return {
     version: 1,
@@ -49,6 +60,7 @@ export function buildDescriptor({ sessionId, pid, port, token, cwd, startedAt, u
     host: "127.0.0.1",
     port,
     token,
+    ...(hasControl ? { controlProtocol, instanceId, controlToken } : {}),
     cwd: cwd || null,
     startedAt: startedAt || now,
     updatedAt: updatedAt || now,
@@ -62,7 +74,12 @@ export function authorizes(authorizationHeader, expectedToken) {
   if (typeof authorizationHeader !== "string" || !expectedToken) return false;
   const m = authorizationHeader.match(/^Bearer\s+(.+)$/);
   if (!m) return false;
-  const given = Buffer.from(m[1], "utf-8");
+  return tokensMatch(m[1], expectedToken);
+}
+
+export function tokensMatch(candidate, expectedToken) {
+  if (typeof candidate !== "string" || typeof expectedToken !== "string" || !expectedToken) return false;
+  const given = Buffer.from(candidate, "utf-8");
   const expected = Buffer.from(expectedToken, "utf-8");
   if (given.length !== expected.length) return false;
   return timingSafeEqual(given, expected);
@@ -101,5 +118,3 @@ export function writeDescriptorAtomic(path, descriptor) {
     throw e;
   }
 }
-
-

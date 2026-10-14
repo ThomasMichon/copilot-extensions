@@ -23,14 +23,13 @@
 // HOT-POTATO DISCIPLINE (load-bearing, same rule agent-bridge's own
 // extension and context-handoff's extension both follow): the session.on(...)
 // handler below runs on the CLI's own event loop and must never block or
-// await slow work. It does only a bounded, synchronous enqueue; a decoupled
-// timer drains the queue and fans events out to SSE subscribers.
+// await slow work. It reduces input ownership and enqueues bounded events;
+// a decoupled timer drains the queue and fans events out to SSE subscribers.
 //
-// NO DRIVER-EXCLUSIVITY ARBITRATION YET: this extension accepts /send,
-// /steer, and /abort from any holder of the discovery token with no
-// generation/claim-style primitive preventing two concurrent drivers from
-// racing the same session. That is Phase 2's scope (mux-native-driver-
-// exclusivity) -- a real, open gap, not silently papered over here.
+// The driver API fences mutations by target instance, generation, credential
+// and operation sequence. Observed unowned root input revokes remote control;
+// explicit administrative re-hook grants fresh ownership, never the old key.
+// This is not interception of arbitrary native SDK clients or keyboard input.
 //
 // FLEET HYGIENE (a machine runs many of these in parallel -- agent-dispatch
 // workers, several worktrees, several CodeSpaces/containers): collisions are
@@ -103,7 +102,7 @@ function subscribe(listener) {
   return () => state.listeners.delete(listener);
 }
 
-function writeDescriptor(port, token) {
+function writeDescriptor(port, token, controlToken) {
   try {
     const dir = discoveryDir();
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -112,6 +111,9 @@ function writeDescriptor(port, token) {
       pid: process.pid,
       port,
       token,
+      controlToken,
+      controlProtocol: driverServer.control.snapshot().controlProtocol,
+      instanceId: driverServer.control.snapshot().instanceId,
       cwd: process.cwd(),
       startedAt: state.startedAt,
     });
@@ -129,9 +131,9 @@ function writeDescriptor(port, token) {
   }
 }
 
-function writeDescriptorIfReady(port, token) {
+function writeDescriptorIfReady(port, token, controlToken) {
   if (state.descriptorWritten || !state.sessionId) return;
-  writeDescriptor(port, token);
+  writeDescriptor(port, token, controlToken);
   if (state.descriptorWritten) extLog(`discovery descriptor written: ${descriptorPath(state.sessionId)}`);
 }
 
@@ -181,28 +183,58 @@ const session = await joinSession({
 });
 
 const token = generateToken();
+const controlToken = generateToken();
+let port = null;
 const driverServer = createDriverServer({
   getSessionId: () => state.sessionId,
   getPid: () => process.pid,
   token,
+  controlToken,
   ...createSessionDriver(session),
   subscribe,
+  onOwnershipChange: (control) => enqueue({
+    type: "agent_remote_driver.ownership",
+    timestamp: new Date().toISOString(),
+    data: control,
+  }),
 });
 
-let port = null;
+try {
+  session.on((event) => {
+    try {
+      if (!state.sessionId && event?.sessionId) {
+        state.sessionId = event.sessionId;
+        driverServer.control.markReady();
+      }
+      driverServer.control.observe(event);
+      enqueue(event);
+    } catch (error) {
+      driverServer.control.suspend("native_input_observation_failed");
+      extLog(`input observation failed; control disabled: ${error.message}`);
+    }
+  });
+  driverServer.control.markReady();
+} catch (error) {
+  driverServer.control.suspend("native_input_observation_unavailable");
+  extLog(`input observer unavailable; control disabled: ${error.message}`);
+}
+
 try {
   port = await listenWithBoundedRetry(driverServer);
-  writeDescriptorIfReady(port, token);
+  writeDescriptorIfReady(port, token, controlToken);
 } catch (e) {
   extLog(`giving up on the driver server after ${MAX_LISTEN_ATTEMPTS} attempts: ${e.message}`);
 }
 
 if (port !== null) {
-  const flusher = createIntervalTimer(flush, FLUSH_MS);
+  const flusher = createIntervalTimer(() => {
+    writeDescriptorIfReady(port, token, controlToken);
+    flush();
+  }, FLUSH_MS);
   flusher.start();
 
   const heartbeat = createIntervalTimer(() => {
-    if (state.descriptorWritten) writeDescriptor(port, token); // refresh updatedAt in place
+    if (state.descriptorWritten) writeDescriptor(port, token, controlToken);
   }, HEARTBEAT_MS);
   heartbeat.start();
 }
@@ -223,18 +255,3 @@ for (const event of ["uncaughtException", "unhandledRejection"]) {
     process.exit(1);
   });
 }
-
-// Observe-only, non-blocking (hot-potato): enqueue every event verbatim --
-// unlike agent-bridge's own REPRESENT_TYPES whitelist, a driving consumer
-// needs the full stream, not a curated subset. No I/O, no await here.
-session.on((event) => {
-  try {
-    if (!state.sessionId && event?.sessionId) {
-      state.sessionId = event.sessionId;
-      if (port !== null) writeDescriptorIfReady(port, token);
-    }
-    enqueue(event);
-  } catch {
-    /* never let an observe-only handler throw into the CLI */
-  }
-});
