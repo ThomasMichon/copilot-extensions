@@ -1260,3 +1260,44 @@ hosted checks, review and a containing full validation remain required.
 - Ordinary current-head review/required CI, merge and a containing release
   remain outstanding. This below-altitude compatibility repair does not
   complete #6729's separate scanner-improvement proposal or #6237.
+
+### 2026-10-14 - Producer-only break-fix merged through normal gates
+
+- #6741 merged at `20:20:21Z` as
+  `ee4e6b0063dff7eafed04942feec10974de4f52c`. Native Copilot review
+  `5524099241` approves its exact head with zero findings. CI
+  `38629746629`, all three same-head suites and the fresh source
+  required-check verifier pass before managed merge; no bypass was used.
+- The actual publication contains only the hook diagnostic, its existing
+  regression, reference documentation, required patch changefile and this
+  chronological journal. The scanner and #6729 remain unchanged.
+- Normal dev CI `38631216916` is queued on that merge. Continue through its
+  containing full validation and promotion, then the original #6661 main-PR
+  invocation proof. The effort stays Active; a source merge is not release
+  or runtime-rollout evidence.
+
+### 2026-10-14 - Dev contracts pass; next full gate exposes startup timeout
+
+- Normal dev CI `38631216916` passes all 36 jobs on #6741's merge, including
+  customizing-copilot job `116083334574`. Natural validation `38633055933`
+  then checks out that exact dev commit in guards job `116089425298`.
+- The full gate exposes two different failures. The late-owner Resume
+  test mock rejects the production `verdict` keyword in both modes; the
+  retained #6730 writer has already merged that correction afterward as
+  `3fc5f5b1812c3cab05d26e33eb8d3551be30437c`. Do not duplicate it.
+- Logger job `116089425533` times out after its unchanged 20-second
+  PowerShell classifier-child budget, before any stdout or stderr, with
+  475 cases passing and 29 skipped. Reserved the unowned exact signature
+  as #6747; the broader historical #5245 is not this failure's custody
+  or an acceptance of a flake.
+- The exact two shell cases pass unchanged on Windows, so the Linux timeout
+  cause is not established. The harness currently inherits ambient startup
+  state. Its bounded correction uses the existing isolated-home helper,
+  noninteractive startup, no telemetry/update checks and headless Windows
+  execution, preserving both classifier outcomes and every existing deadline.
+  An initial stderr marker makes any future pre-script stall distinguishable.
+- Both existing shell cases now join the fast guard lane. The complete
+  installer-binstub module passes 17 cases with one platform skip; Ruff,
+  docs and whitespace checks pass. No production installer changed.
+  Linux current-head guard/full validation remains outstanding, and #6747
+  remains an investigation rather than a claimed root cause or accepted flake.

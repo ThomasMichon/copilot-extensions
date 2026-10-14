@@ -9,6 +9,15 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+Agent Logger's PowerShell access-denied classifier guard executes the extracted
+installer functions under both installed PowerShell hosts. Each child uses fresh
+contained home/config/temp roots, noninteractive startup and disabled telemetry
+and update checks; its existing 20-second process deadline and all downgrade/
+rethrow assertions remain unchanged. An immediate stderr marker distinguishes
+entry into the harness from a pre-script startup timeout. The original hosted
+timeout's cause remains tracked under #6747; a passing native run alone is not
+flake acceptance.
+
 The POSIX lean-provision launcher test uses fake uv and excludes runtime `src`
 and `libs` trees from its temporary payload. It still exercises real lifecycle
 admission, self-staging, activation, resolver deployment and both generated

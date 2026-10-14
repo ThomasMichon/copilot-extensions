@@ -292,6 +292,7 @@ def _extract_ps1_functions(*names: str) -> str:
     return "\n\n".join(chunks)
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
 def test_windows_task_access_denied_classifier_downgrades_and_rethrows(
     tmp_path: Path, shell: str
@@ -304,9 +305,15 @@ def test_windows_task_access_denied_classifier_downgrades_and_rethrows(
     exe = shutil.which(shell)
     if not exe:
         pytest.skip(f"{shell} is not installed")
+    env = _isolated_install_env(tmp_path / "home")
+    env.update(
+        POWERSHELL_TELEMETRY_OPTOUT="1",
+        POWERSHELL_UPDATECHECK="Off",
+    )
     harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
-        _extract_ps1_functions("Test-IsAccessDenied", "Write-TaskAccessDeniedWarning")
+        "[Console]::Error.WriteLine('CLASSIFIER-HARNESS-STARTED')\n"
+        + _extract_ps1_functions("Test-IsAccessDenied", "Write-TaskAccessDeniedWarning")
         + """
 
 function Write-Warn2 { param([string]$m) Write-Host "WARN: $m" }
@@ -333,12 +340,15 @@ try {
         encoding="utf-8",
     )
     result = subprocess.run(
-        [exe, "-NoProfile", "-File", str(harness)],
+        [exe, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        env=env,
         check=True,
         capture_output=True,
         text=True,
         timeout=_HARNESS_TIMEOUT_SECONDS,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
+    assert result.stderr == "CLASSIFIER-HARNESS-STARTED\n"
     assert "WARN: could not update scheduled task 'Test Task' (Access is denied)" in result.stdout
     assert "DENIED-HANDLED-WITHOUT-THROW" in result.stdout
     assert "OTHER-RETHROWN: disk full" in result.stdout

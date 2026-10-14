@@ -1,0 +1,9 @@
+{
+  "comment": "Isolate the PowerShell classifier harness and expose startup progress without changing deadlines",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
