@@ -137,6 +137,7 @@ class FederationRunner:
         self._work_intake_token: str | None = None
         self._running = False
         self._is_active = is_active
+        self._route_owned = False
         self._drain_gate = drain_gate if drain_gate is not None else DrainGate()
         if role in config.FEDERATION_LEASE_ROLES:
             lease_kwargs = {} if lease_ttl is None else {"lease_ttl": lease_ttl}
@@ -165,10 +166,17 @@ class FederationRunner:
             return self._tick()
 
     def _admitting(self) -> bool:
+        self._route_owned = (
+            not self._stop.is_set() and not self._drain_gate.draining
+            and self._is_active()
+        )
+        return self._cached_admitting()
+
+    def _cached_admitting(self) -> bool:
         return (
             not self._stop.is_set()
             and not self._drain_gate.draining
-            and self._is_active()
+            and self._route_owned
         )
 
     def _tick(self) -> dict:
@@ -298,7 +306,7 @@ class FederationRunner:
                         self._work_intake_client, self._work_intake,
                         machine=self._machine or self._instance,
                         enabled=lambda: (
-                            self._admitting()
+                            self._cached_admitting()
                             and config.satellite_gate_open()
                             and config.shared_url() == url
                             and self._work_intake_token == token

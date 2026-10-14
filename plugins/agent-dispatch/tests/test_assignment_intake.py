@@ -199,9 +199,13 @@ def test_assignment_admission_rechecks_drain_inside_tracked_boundary(app, monkey
         assert response.json() is None
 
 
-def test_assignment_credential_command_runs_only_on_owner_tick(monkeypatch, server_url):
+def test_assignment_credential_command_runs_only_on_owner_tick(
+    monkeypatch, server_url, tmp_path,
+):
+    from zdd import routing
+
     from agent_dispatch import client as client_module
-    from agent_dispatch import config, satellite_work_intake
+    from agent_dispatch import config, satellite_work_intake, server
 
     monkeypatch.setattr(config, "satellite_gate_open", lambda: True)
     monkeypatch.setattr(config, "shared_url", lambda: server_url)
@@ -229,7 +233,20 @@ def test_assignment_credential_command_runs_only_on_owner_tick(monkeypatch, serv
     monkeypatch.setattr(
         satellite_work_intake, "SatelliteWorkIntake", lambda *a, **kw: CountingIntake(),
     )
-    runner = FederationRunner(FleetDirectory(), "host-a", role="satellite")
+    monkeypatch.setattr(server, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr(server, "_wake_route_owned", False)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid())
+    route_reads = []
+    read_table = routing.read_table
+
+    def read_route(path, **kwargs):
+        route_reads.append(threading.current_thread().name)
+        return read_table(path, **kwargs)
+
+    monkeypatch.setattr(routing, "read_table", read_route)
+    runner = FederationRunner(
+        FleetDirectory(), "host-a", role="satellite", is_active=server._owns_active_route,
+    )
     monkeypatch.setattr(runner, "_satellite_kwargs", lambda: {})
     runner._running = True
     try:
@@ -239,6 +256,8 @@ def test_assignment_credential_command_runs_only_on_owner_tick(monkeypatch, serv
             events.frames.put(task_event())
         wait_for(events.frames.empty)
         assert calls == [owner]
+        assert 1 <= len(route_reads) < 20
+        assert not any("_read" in name for name in route_reads)
         old = runner._assignment_intake
         credential[0] = "rotated"
         runner.tick()
@@ -248,6 +267,13 @@ def test_assignment_credential_command_runs_only_on_owner_tick(monkeypatch, serv
         assert clients[0]._http.is_closed
         assert runner._work_intake_token == "rotated"
         assert calls == [owner, owner, owner]
+        routing.publish_active(
+            tmp_path, bind="127.0.0.1", port=9998, pid=os.getpid() + 1,
+        )
+        before = runner._work_intake.count
+        assert runner._reconcile_work_intake() == {}
+        assert runner._work_intake.count == before
+        assert runner._cached_admitting() is False
     finally:
         runner.stop(timeout=2)
 

@@ -371,6 +371,15 @@ recorded against each open fork._
   rotation still retires both old threads before replacement. A 10,000-event
   burst regression asserts command fetches run only on that owner tick.
   Native final assignment/events/federation/cutover selection: 141 passed.
+- Linux credential/ready/retirement/events follow-up at `558df321a`: 12
+  passed. A further review found route-table reads in the same event
+  predicate. Readers now use cached route ownership; owner ticks and actual
+  intake admission still refresh the live route. The burst regression uses
+  the production server routing predicate and bounds filesystem reads while
+  proving a post-flip intake is rejected before its next owner tick.
+  Native production-route burst/admission/cutover regression: 6 passed;
+  the other 140 selection tests passed before the route-spy fixture's keyword
+  forwarding correction. Required CI gates the final published snapshot.
 
 ### 2026-10-14 -- Corrective task-authority PR merged; assignment push next
 - PR #6665 merged as `b8d3ec6a710beb376ef655e5a715e7055b783b93` after

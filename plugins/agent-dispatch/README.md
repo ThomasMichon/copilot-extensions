@@ -2581,7 +2581,10 @@ degrade to polling while reconnection is retried. Closing the satellite gate
 or changing/removing its shared URL or credential retires the subscription
 and waits for an in-flight intake before closing its client; replacement is
 deferred rather than racing two intakes. Credential-command resolution runs
-only on the owning federation tick, never in the per-event reader predicate;
+only on the owning federation tick, never in the per-event reader predicate.
+Route ownership is refreshed on owner ticks and actual reconciliation
+admission, not per frame; the reader only checks the cached snapshot.
+Actual intake rechecks the live route inside the counted drain boundary;
 rotation is observed at that presence cadence. `GET /health` on the local serving
 coordinator reports `assignment_intake` connection state, sanitized failure
 type and reconciliation count (null when no intake exists). This is delivery
