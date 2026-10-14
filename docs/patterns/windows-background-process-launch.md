@@ -81,14 +81,13 @@ output to a `log_path` instead of discarding it.
 Do not remove the caller's Job or make every child break away to repair one
 daemon. The containing Job must permit breakaway; a rejected spawn is an error
 to surface, not a reason to silently retry with caller-owned lifetime.
-`spawn_daemon` raises `DaemonSpawnError` in that case. A caller that opts in to
-`contained_fallback=True` instead gets a daemon started inside the caller's Job,
-with the fallback logged as a warning and in the daemon log. That daemon does
-not outlive the Job, so durable survival holds only where breakaway is
-permitted (and never in contained test mode).
-`spawn_daemon` raises `DaemonSpawnError` in that case; its explicit
-`contained_fallback=True` opt-in exists only for a daemon that already ran
-inside its caller's Job before migrating, and it logs the degraded lifetime.
+`spawn_daemon` raises `DaemonSpawnError` in that case. A caller whose daemon
+already ran inside its caller's Job before migrating, and for which that
+degraded lifetime is still better than no daemon, may opt in to
+`contained_fallback=True`: the daemon then starts inside the caller's Job, with
+the fallback logged as a warning and in the daemon log, and does not outlive the
+Job. Durable survival therefore holds only where breakaway is permitted (and
+never in contained test mode).
 Contained tests deliberately suppress escape and retain process-tree cleanup.
 
 PowerShell `Start-Process` and .NET `CreateNoWindow` provide no Job-escape

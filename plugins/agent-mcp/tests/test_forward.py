@@ -471,6 +471,39 @@ def test_unresolvable_serve_path_falls_back_to_the_direct_bridge(tmp_path, monke
     assert forward.run("echo", socket_arg) == 42
 
 
+def _handle_dereferences_to(monkeypatch, handle: str, target: str) -> None:
+    """Make ``Path.resolve`` follow ``handle`` to ``target``, as a POSIX
+    symlink handle does when cutover points it at one generation's socket."""
+    import pathlib
+
+    real_resolve = pathlib.Path.resolve
+
+    def resolve(self, *args, **kwargs):
+        if str(self) == handle:
+            return pathlib.Path(target)
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "resolve", resolve)
+
+
+def test_serve_handle_is_never_dereferenced_to_one_generation(tmp_path, monkeypatch):
+    """The fixed handle is repointed atomically by cutover: callers keep the
+    handle itself, so each poll follows the promoted generation."""
+    handle = str(tmp_path / "serve.sock")
+    _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
+
+    assert forward._serve_handle(handle) == handle
+
+
+def test_spawned_host_inherits_the_fixed_handle_not_its_target(tmp_path, monkeypatch):
+    handle = str(tmp_path / "serve.sock")
+    monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", handle)
+    _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
+
+    env = forward.sockio.daemon_env_overrides(tmp_path / "home")
+
+    assert env["AGENT_MCP_SERVE_SOCKET"] == handle
+
 def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
     """With no host up, _ensure_serve spawns a detached `agent-mcp serve`, waits
     for its socket, and returns it; the spawned host answers a ping."""

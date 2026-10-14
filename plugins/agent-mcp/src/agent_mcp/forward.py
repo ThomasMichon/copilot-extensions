@@ -102,7 +102,7 @@ def _serve_handle(socket_path: str | None) -> str:
     """
     raw = (socket_path or os.environ.get("AGENT_MCP_SERVE_SOCKET")
            or str(sockio.default_socket_path()))
-    return str(Path(raw).resolve())
+    return sockio.absolute_handle(raw)
 
 
 def _spawn_serve_host(handle: str) -> None:

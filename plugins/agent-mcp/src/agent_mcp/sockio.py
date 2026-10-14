@@ -60,6 +60,20 @@ def default_socket_path() -> Path:
     return default_home_dir() / "serve.sock"
 
 
+def absolute_handle(raw: str | Path) -> str:
+    """``raw`` as an absolute path that still names the fixed serve handle.
+
+    On POSIX the handle is a symlink that cutover atomically repoints at the
+    promoted generation's socket, so it is made absolute lexically, never
+    dereferenced: a dereferenced path would pin the caller (and anything it
+    spawns) to one generation. Resolution is still attempted so a symlink
+    loop raises here (``RuntimeError``/``OSError``) for the caller's fallback.
+    """
+    path = os.path.abspath(os.fspath(raw))
+    Path(path).resolve()
+    return path
+
+
 def daemon_env_overrides(home: Path) -> dict[str, str]:
     """Environment for a serve host spawned with the absolute ``home`` as cwd.
 
@@ -71,7 +85,7 @@ def daemon_env_overrides(home: Path) -> dict[str, str]:
     env = {"AGENT_MCP_HOME": str(home)}
     raw = os.environ.get("AGENT_MCP_SERVE_SOCKET")
     if raw:
-        env["AGENT_MCP_SERVE_SOCKET"] = str(Path(raw).resolve())
+        env["AGENT_MCP_SERVE_SOCKET"] = absolute_handle(raw)
     return env
 
 
