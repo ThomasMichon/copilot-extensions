@@ -93,6 +93,29 @@ def test_explicit_profile_switch_and_update_preserve_intent(
     assert updated["runtimeVersion"] == "1.0.1+provider-exec"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows uses signed stdlib copies")
+def test_windows_uv_profile_preserves_copies_without_seeding(
+    profiles, payload, commands, tmp_path,
+):
+    _provision(profiles, tmp_path / "runtime", payload, uv="fixture-uv")
+    create = next(call for call in commands if "venv" in call)
+    assert create[:5] == [sys.executable, "-m", "venv", "--copies", "--without-pip"]
+    assert all(call[:2] != ["fixture-uv", "venv"] for call in commands)
+    install = next(call for call in commands if "install" in call)
+    assert install[:3] == ["fixture-uv", "pip", "install"]
+
+
+def test_ordinary_pip_profile_keeps_seed_packages(
+    profiles, payload, commands, tmp_path,
+):
+    _provision(profiles, tmp_path / "runtime", payload)
+    create = next(call for call in commands if "venv" in call)
+    assert create[:4] == [sys.executable, "-m", "venv", "--copies"]
+    assert "--without-pip" not in create
+    install = next(call for call in commands if "install" in call)
+    assert install[1:4] == ["-m", "pip", "install"]
+
+
 def test_switch_back_to_base_reuses_unchanged_slot(profiles, payload, commands, tmp_path):
     root = tmp_path / "runtime"
     base = _provision(profiles, root, payload)

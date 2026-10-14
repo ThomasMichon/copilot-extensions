@@ -210,7 +210,8 @@ def provision(
                     root, runtime_version, clean_incomplete=True, link_name=".venv"
                 )
                 if os.name == "nt" or uv is None:
-                    _run([python, "-m", "venv", "--copies", str(slot)], cwd=payload)
+                    seed = ["--without-pip"] if uv else []
+                    _run([python, "-m", "venv", "--copies", *seed, str(slot)], cwd=payload)
                 else:
                     try:
                         _run([uv, "venv", "--python", python, str(slot)], cwd=payload)

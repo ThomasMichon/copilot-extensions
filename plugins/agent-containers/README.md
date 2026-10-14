@@ -71,6 +71,8 @@ The deploy manifest records package version separately from runtime slot/profile
 Profile changes start no service, SSH listener, Docker container or fleet.
 Helper packages are installed non-editably into that slot; health checks reject
 code resolved from a mutable source checkout outside it.
+Windows keeps signed stdlib interpreter copies but skips pip/setuptools seeding
+when uv installs packages. Without uv, the ordinary-pip fallback remains seeded.
 
 With an explicit installation-cell context, configuration loading validates the
 Containers owner before using config overrides. Its optional knowledge-repo

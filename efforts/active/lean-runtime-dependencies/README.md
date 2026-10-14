@@ -106,7 +106,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 - [ ] Govern explicit compatible CPU/GPU engine wheel profiles; eliminate
   accidental accelerator downloads and unsafe install-then-swap assumptions.
   _(agent-recommended; coordinate artifact ownership with #4876)_
-- [ ] Make restricted-SSH Paramiko provisioning genuinely opt-in.
+- [x] Make restricted-SSH Paramiko provisioning genuinely opt-in.
   _(agent-recommended)_
 - [x] Replace full-table pandas statistics materialization with projected
   bounded aggregation. _(agent-recommended)_
@@ -421,3 +421,40 @@ shared mutable venv is presumed acceptable.
 - Runner selection/admission and all directly dependent CI scope contracts:
   122 passed / one unavailable-symlink skip. Focused lint and source module
   ceilings pass. Fresh hosted CI and review remain required before merge.
+
+### 2026-10-14 - Persistent profile slice merged; next measured reduction
+- #6735 merged to `dev` as `b54361f6f` after an exact-head approving review and
+  complete successful required CI run `38637358082`, including both native
+  runner lanes, standalone services and all affected plugin suites. Restricted
+  SSH provisioning is now explicitly opt-in with durable compatibility.
+- Retained the continuing effort worktree and pulled forward to the merged
+  contribution branch. No production update, listener, model or corpus mutation
+  occurred. Promotion and an owner-authorized rollout remain separate.
+- Shared helper measurements were supplied to the existing artifact owner
+  (#4876 / #6697); standalone activation, schema/queue rollback, Darwin and warm
+  engine acceptance remain with #5768. No parallel artifact or service owner
+  was introduced.
+- Next implement the measured Windows Containers reduction: when uv performs
+  installation, create signed stdlib venv copies without pip/setuptools seeding.
+  Ordinary-pip fallback still receives its required seed packages. The isolated
+  signed-interpreter proof already preserves the real base CLI with nine
+  runtime distributions and 3,225,176 allocated file-stream bytes, versus
+  29,044,088 for the seeded profile.
+
+### 2026-10-14 - Conditional unseeded Windows construction
+- Implemented the narrow Containers continuation: signed Windows stdlib copies
+  receive `--without-pip` only when uv will install the admitted packages.
+  The ordinary-pip constructor remains seeded; no package is removed from a
+  completed runtime and no shared mutable environment is introduced.
+- Full contained Windows coverage passed 781 tests / 21 skips. Native fresh
+  base and provider-exec construction passed with 9 / 16 distributions, without
+  pip or setuptools; all copied `python.exe` and `pythonw.exe` signatures remain
+  valid. Both actual CLIs, retained provider intent and immutable base rollback
+  pass outside the checkout.
+- The candidate base records 2,265,172 logical package bytes / 3,248,664 allocated
+  runtime file-stream bytes; provider-exec records 15,903,843 / 20,141,176.
+  The real no-uv fallback also constructs and runs successfully with its 11
+  seeded distributions and functioning `python -m pip`. These are isolated
+  source-profile observations, not production storage reclaim or rollout.
+- Focused lint, install contract and module ceilings pass. Linux/native
+  platform coverage, publication and review remain assigned to the next gate.
