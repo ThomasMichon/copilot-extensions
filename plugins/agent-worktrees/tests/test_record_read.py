@@ -341,7 +341,7 @@ def test_record_read_without_project_uses_structured_error(record_fixture, monke
     assert result["worktree"] is None
 
 
-@pytest.mark.parametrize("selector", ["explicit", "anchor", "worktree"])
+@pytest.mark.parametrize("selector", ["explicit", "anchor", "worktree", "separate-git-dir"])
 def test_record_dispatch_selects_project_without_processes(
     record_fixture, monkeypatch, selector,
 ):
@@ -351,13 +351,16 @@ def test_record_dispatch_selects_project_without_processes(
     git_dir.mkdir(parents=True)
     cwd = anchor / "nested"
     cwd.mkdir()
-    if selector == "worktree":
+    if selector in {"worktree", "separate-git-dir"}:
         metadata = git_dir / "worktrees" / "example"
         metadata.mkdir(parents=True)
-        (metadata / "commondir").write_text("../..\n", encoding="utf-8")
+        if selector == "worktree":
+            (metadata / "commondir").write_text("../..\n", encoding="utf-8")
         cwd = path.parent.parent / "task-checkout"
         cwd.mkdir()
         (cwd / ".git").write_text(f"gitdir: {metadata}\n", encoding="utf-8")
+        if selector == "separate-git-dir":
+            anchor = cwd
     repos.write_registry(repos.ReposRegistry(repos={
         data["repo"]: repos.RepoEntry(
             name=data["repo"], repo_class="worktree",
@@ -380,6 +383,42 @@ def test_record_dispatch_selects_project_without_processes(
     assert rc == 0
     assert result["worktree"]["repo"] == data["repo"]
     assert Path.cwd() == cwd
+
+
+@pytest.mark.parametrize("failure", ["malformed", "unreadable-git", "unreadable-common"])
+def test_record_dispatch_metadata_errors_are_structured(
+    record_fixture, monkeypatch, failure,
+):
+    _data, record = record_fixture
+    root = record.parent.parent / "broken-checkout"
+    root.mkdir()
+    marker = root / ".git"
+    metadata = root / "git-metadata"
+    metadata.mkdir()
+    marker.write_text(
+        "not a Git marker" if failure == "malformed" else f"gitdir: {metadata}\n",
+        encoding="utf-8",
+    )
+    common = metadata / "commondir"
+    common.write_text("..\n", encoding="utf-8")
+    denied = marker if failure == "unreadable-git" else common
+    read_text = Path.read_text
+
+    def read(self, *args, **kwargs):
+        if failure != "malformed" and self == denied:
+            raise PermissionError("synthetic metadata access denied")
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.chdir(root)
+    with output.capture_json_output() as captured:
+        rc = main.main(["record", "--worktree-id", "example-worktree", "--json"])
+    result = json.loads(captured.getvalue())
+    assert rc == 1
+    assert result["error"]["code"] == "project-unavailable"
+    assert result["worktree"] is None
+    expected = "Invalid Git worktree marker" if failure == "malformed" else "synthetic metadata access denied"
+    assert expected in result["error"]["message"]
 
 
 def test_record_read_registered_project_ignores_other_global_default(

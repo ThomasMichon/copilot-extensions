@@ -6473,10 +6473,20 @@ def main(argv: list[str] | None = None) -> int:
     # after the sibling router (siblings return above).
     _guard_project_scope(_proj, args_list[0] if args_list else None)
 
-    has_project = front_door_cli.resolve_invocation_project(
-        args_list, _proj, _resolve_active_project, _cwd_is_inside_project,
-        _is_no_project_invocation,
-    )
+    try:
+        has_project = front_door_cli.resolve_invocation_project(
+            args_list, _proj, _resolve_active_project, _cwd_is_inside_project,
+            _is_no_project_invocation,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        if not args_list or args_list[0] != "record":
+            raise
+        cfg.set_active_project(None)
+        output._json_output({
+            "ok": False, "worktree": None,
+            "error": {"code": "project-unavailable", "message": str(exc)},
+        })
+        return 1
 
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
     # invocation is the human-facing path. The Manager now owns the transplanted

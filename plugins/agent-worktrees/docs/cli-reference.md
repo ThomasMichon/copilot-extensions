@@ -50,6 +50,10 @@ Git-backed repository policy. No plugin activation, policy overlays, or Git
 probes are needed to identify these metadata records.
 Project selection for this command reads Git marker and common-directory files
 without running Git or changing the caller's working directory.
+Git-file layouts without a common-directory marker (including submodules and
+separate Git directories) use the registered checkout root. Malformed or
+unreadable selection metadata returns `project-unavailable` JSON with the
+underlying diagnostic, not an unstructured traceback.
 
 Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
 The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,

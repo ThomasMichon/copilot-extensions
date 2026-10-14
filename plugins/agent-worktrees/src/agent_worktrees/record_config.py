@@ -41,7 +41,13 @@ def metadata_project(explicit: str | None) -> str | None:
                 raise ValueError("Invalid Git worktree marker")
             git_dir = (root / text.removeprefix("gitdir: ")).resolve()
             common_file = git_dir / "commondir"
-            common = (git_dir / common_file.read_text(encoding="utf-8").strip()).resolve()
+            try:
+                common_text = common_file.read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                return _reverse_lookup_project(root)
+            if not common_text:
+                raise ValueError("Empty Git common-directory marker")
+            common = (git_dir / common_text).resolve()
             return _reverse_lookup_project(common.parent)
     return None
 
