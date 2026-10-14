@@ -388,6 +388,7 @@ its exact CAS lease, not a silently refreshed saved lease. Both actions require
 confirmation and revalidate the plan immediately before taking effect.
 Malformed, unreadable or dangling historical checkpoints explicitly mark
 settlement evidence `unusable` and disable settlement, not the rewrite preview.
+Invalid ref arguments and failed optional Git probes receive the same treatment.
 The imperfect evidence snapshot is confirmation-bound and preserved unchanged;
 it is neither repaired nor accepted as authority.
 Ordinary `push-changes` and `--rewrite-pr` retain their saved-lease refusal.

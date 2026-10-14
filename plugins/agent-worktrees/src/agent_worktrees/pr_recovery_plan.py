@@ -50,16 +50,22 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
         points = data.get("checkpoints")
         point = points.get(pr.pr_id) if isinstance(points, dict) else data
     refs = {}
+    unusable = False
     if isinstance(point, dict):
         for field in ("local_ref", "published_ref", "lineage_ref"):
             ref = point.get(field)
             if isinstance(ref, str) and ref:
-                result = git_ops.git(
-                    "--no-replace-objects", "rev-parse", "--verify", "--end-of-options",
-                    ref, cwd=cwd, check=False, isolated_repository=True,
-                )
-                refs[field] = (result.returncode, result.stdout.strip())
-    return _fingerprint({"bytes": hashlib.sha256(raw).hexdigest(), "refs": refs}), False
+                try:
+                    result = git_ops.git(
+                        "--no-replace-objects", "rev-parse", "--verify", "--end-of-options",
+                        ref, cwd=cwd, check=False, isolated_repository=True,
+                    )
+                except (ValueError, OSError, git_ops.GitError) as exc:
+                    unusable = True
+                    refs[field] = {"probe_error": type(exc).__name__, "errno": getattr(exc, "errno", None)}
+                else:
+                    refs[field] = (result.returncode, result.stdout.strip())
+    return _fingerprint({"bytes": hashlib.sha256(raw).hexdigest(), "refs": refs}), unusable
 
 
 def build(
