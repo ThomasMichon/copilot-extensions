@@ -164,6 +164,15 @@ those bundles' attestations; unrelated or missing files fail closed.
 `promote_release.py --python-artifacts-dir <dir>`
 recomputes composition and refuses missing/corrupt/mis-targeted artifacts
 before pushing a candidate, including repeating the archive-content checks.
+Until the shared composed-index reader reaches trusted `main`, the workflow's
+temporary promoter adapter supplies the canonical checkout to the legacy
+validator. It runs with an isolated Python import path rooted in the pinned
+trusted checkout, preserves the promoter's arguments and error boundary, and
+does not wrap a CLI that already has the shared reader. The DEV workflow copy
+is preparation only: bootstrapping the trusted MAIN workflow still requires
+separate explicit authorization. Remove both temporary workflow adapters once
+the repaired CLI is released; neither permits executing candidate tools or
+relaxing artifact evidence.
 A no-content-change or paused run builds and
 publishes nothing.
 

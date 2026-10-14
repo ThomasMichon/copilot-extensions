@@ -700,7 +700,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py))$'; then
+            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -718,6 +718,7 @@ jobs:
           tools/test_public_toolchain_source.py tools/test_promote_release.py
           tools/test_promotion_control.py
           tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
+          tools/test_promotion_workflow_adapter.py
       - uses: astral-sh/setup-uv@v9.0.0
         if: steps.python-artifact-builder.outputs.run == 'true'
       - name: Fresh seasoned-public toolchain and shared real wheel builds
@@ -824,7 +825,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_build_python_artifacts\.py))$'; then
+            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_build_python_artifacts\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -843,6 +844,7 @@ jobs:
         run: >-
           uv run --with pytest --with pyyaml python -m pytest -q
           tools/test_promotion_control.py tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
+          tools/test_promotion_workflow_adapter.py
 
   windows-hooks:
     name: Git hooks (Windows)
