@@ -38,7 +38,7 @@ def test_native_jobs_preserve_dev_scope_budget_and_required_aggregate():
         budget = 7 if name == "test-runner-windows" else 5
         assert (
             "    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' "
-            f"&& 15 || {budget} }}}}\n"
+            f"&& inputs.promotion_run == '' && 15 || {budget} }}}}\n"
         ) in job
         assert "if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'" in job
         assert "if: steps.payload-cwd-contracts.outputs.run == 'true'" in job

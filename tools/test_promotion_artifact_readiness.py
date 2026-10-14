@@ -424,3 +424,56 @@ def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
         assert selected["if"] == "steps.python-artifact-builder.outputs.run == 'true'"
         if job_id != "checks":
             assert "-k 'native or binary_read'" in selected["run"]
+
+
+@pytest.mark.parametrize("job_id", ["checks", "windows-python-artifact-builder"])
+@pytest.mark.parametrize("promotion_run,changed,expected", [
+    ("123-1", "tools/promotion_artifact_readiness.py", "run=true"),
+    ("123-1", "plugins/demo-plugin/README.md", "run=false"),
+    ("", "tools/promotion_artifact_readiness.py", "run=false"),
+    ("123-1", "tools/promotion_artifact_readiness.py", None),
+])
+def test_native_artifact_detector_covers_promotion_dispatch_without_changing_manual_mode(
+    repo, tmp_path, job_id, promotion_run, changed, expected,
+):
+    bash, git = shutil.which("bash"), shutil.which("git")
+    if os.name == "nt" and git:
+        candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe"
+        bash = str(candidate) if candidate.is_file() else None
+    if not bash:
+        pytest.skip("native Bash is unavailable")
+    base = _git(["rev-parse", "HEAD"], repo)
+    target = repo / changed
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("changed input\n", encoding="utf-8")
+    _git(["add", "--", changed], repo)
+    _git(["commit", "-qm", "event-scoped input"], repo)
+    if expected is None:
+        _git(["checkout", "--orphan", "root-candidate"], repo)
+        _git(["commit", "-qm", "root candidate has no diff parent"], repo)
+    root = Path(__file__).resolve().parent.parent
+    job = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"][job_id]
+    assert next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")[
+        "with"
+    ]["fetch-depth"] == 0
+    step = next(step for step in job["steps"] if step.get("id") == "python-artifact-builder")
+    script = step["run"].replace("${{ github.event_name }}", "workflow_dispatch").replace(
+        "${{ github.event.pull_request.base.sha }}", base,
+    ).replace("${{ github.event.before }}", base)
+    output = tmp_path / "scope-output"
+    environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    environment.update({
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+        "CI_PROMOTION_RUN": promotion_run, "GITHUB_OUTPUT": output.as_posix(),
+    })
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail"], cwd=repo,
+        input=script, text=True, capture_output=True, env=environment, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if expected is None:
+        assert result.returncode != 0
+        assert not output.exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert output.read_text().strip() == expected
