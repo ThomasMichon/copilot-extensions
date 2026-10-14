@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .registrar import ProfileDeclaration, RegistrarError, load_declaration
 
@@ -23,6 +23,10 @@ def qualify_supplier_context(
             return value
         path = Path(value) if value is not None else root
         if not path.is_absolute():
+            if value is not None and (
+                PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute()
+            ):
+                return value
             if not implicit:
                 return value
             path = root / path

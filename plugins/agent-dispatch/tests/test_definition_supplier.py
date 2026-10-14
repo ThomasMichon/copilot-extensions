@@ -378,3 +378,39 @@ def test_supplier_managed_class_keeps_legacy_cwd_behavior(tmp_path, monkeypatch,
     assert "cwd" not in implicit.spec
     assert relative.spec["cwd"] == str(directory.resolve())
     assert "cwd" not in evaluator.spec["evaluator_spec"]
+
+
+@pytest.mark.parametrize("flavor", ["posix", "windows"])
+@pytest.mark.parametrize("kind", ["emitter", "evaluator"])
+def test_supplier_qualification_preserves_foreign_absolute_cwd(monkeypatch, flavor, kind):
+    import ntpath
+    import posixpath
+    from pathlib import PurePosixPath, PureWindowsPath
+    from types import SimpleNamespace
+
+    from agent_dispatch import registrar_document as document
+    from agent_dispatch.registrar import ProfileDeclaration
+
+    if flavor == "posix":
+        path_type, path_module = PurePosixPath, posixpath
+        root = path_type("/workspace/state-notes")
+        foreign = [r"C:\work\repo", r"\\server\share\repo", "C:/work/repo"]
+    else:
+        path_type, path_module = PureWindowsPath, ntpath
+        root = path_type(r"C:\workspace\state-notes")
+        foreign = ["/work/repo", "/workspace/state-notes"]
+    # Pure paths exercise both OS contracts without foreign filesystem access.
+    monkeypatch.setattr(document, "Path", path_type)
+    monkeypatch.setattr(document, "os", SimpleNamespace(path=path_module))
+
+    for cwd in [*foreign, "tools", str(root / "tools"), None]:
+        context = {"cwd": cwd} if cwd is not None else {}
+        spec = context if kind == "emitter" else {
+            "evaluator_spec": {"scripts": {"verify": ["python", "verify.py"]}, **context},
+        }
+        declaration = ProfileDeclaration(name="fixture", kind=kind, spec=spec)
+        qualified = document.qualify_supplier_context(declaration, "state-notes", root)
+        context = qualified.spec if kind == "emitter" else qualified.spec["evaluator_spec"]
+        expected = cwd if cwd in foreign else f"repo:state-notes:{'.' if cwd is None else 'tools'}"
+        assert context["cwd"] == expected
+        assert declaration.spec == spec
