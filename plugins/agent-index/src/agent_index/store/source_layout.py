@@ -139,8 +139,33 @@ class SourceDomain:
         if not self.writing:
             raise SourceLayoutError("effect requires participating writer ownership")
         value = self.receipt()
+        kind, _, table = operation.partition(":")
+        if kind in ("content-upsert", "canonical-delete", "content-compact"):
+            value.setdefault("fts_coverage", {}).pop(table, None)
         value.update(uncertain_effect=True, operation=operation)
         self.save(value)
+
+    def cover_fts(self, content) -> None:
+        if not self.writing:
+            raise SourceLayoutError("FTS coverage requires owning writer")
+        value = self.receipt()
+        if value.get("fts_pending"):
+            raise SourceLayoutError("FTS writer ownership is unsettled")
+        table = content._get_or_create_table()
+        value.setdefault("fts_coverage", {})[content._table_name] = table.version
+        self.save(value)
+
+    def require_fts(self, content) -> bool:
+        table = content._get_or_create_table()
+        version = self.receipt().get("fts_coverage", {}).get(content._table_name)
+        if version != table.version:
+            raise SourceLayoutError("source-aware FTS is stale; refresh through owning writer")
+        if table.count_rows() == 0:
+            return False
+        if not content._durable_fts_index_exists(table):
+            raise SourceLayoutError("covered source-aware FTS index is missing")
+        content._fts_available = True
+        return True
 
     @contextmanager
     def fts_handoff(self):
@@ -178,6 +203,7 @@ class SourceDomain:
                 yield
                 if self.receipt().get("fts_pending"):
                     raise SourceLayoutError("FTS writer ownership is unsettled")
+                value = self.receipt()
                 value["versions"] = _versions(db)
                 value["state"] = "clean"
                 value.pop("uncertain_effect", None)
@@ -362,4 +388,17 @@ def source_read(method):
     def call(self, *args, **kwargs):
         with owned(self):
             return method(self, *args, **kwargs)
+    return call
+
+
+def source_fts_read(method):
+    @source_read
+    @functools.wraps(method)
+    def call(self, *args, **kwargs):
+        store = getattr(self, "_store", self)
+        domain = getattr(store, "_source_domain", None)
+        if domain is not None:
+            content = store._content if hasattr(store, "_content") else store
+            domain.require_fts(content)
+        return method(self, *args, **kwargs)
     return call

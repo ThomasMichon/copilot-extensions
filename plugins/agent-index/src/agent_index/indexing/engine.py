@@ -383,6 +383,9 @@ def run_reindex(
                 progress_cb.source_complete(src_name, total_chunks)
 
             # Save state after each source so progress isn't lost
+            if selected_layout():
+                # Publish queued completion only after the owning FTS writer covers final content.
+                multi_store.ensure_fts_index()
             state.save(config.state_file)
     finally:
         for c in multi_clients.values():

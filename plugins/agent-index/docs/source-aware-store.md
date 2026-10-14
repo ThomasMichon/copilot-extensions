@@ -74,6 +74,21 @@ or leaving the domain dirty; subsequent queued ingestion can write normally.
 Unselected legacy callers retain the existing public availability-bool
 semantics, including true availability of an older index after rebuild failure.
 
+The receipt's `fts_coverage` mapping binds each prepared content table to its
+exact covered Lance version. Canonical upserts/deletes invalidate coverage
+before mutation. The owning writer publishes coverage only after actual FTS
+success (or an empty-table no-op) and settled child ownership. Queued full and
+incremental ingestion refresh FTS after final content changes/compaction and
+before publishing task completion. Writer completion preserves this newly
+recorded coverage rather than restoring an older receipt snapshot.
+
+Selected FTS and hybrid serving, including ordinary native retrieval, require
+current coverage plus a durable index for nonempty content. A durable but
+stale index is not readiness: these reads raise without index/schema mutation
+or silent vector-only hybrid fallback. Vector-only and document reads still
+use the normal clean-domain fence. Out-of-band changes, failed builders and
+parent-death uncertainty retain the existing fail-closed behavior.
+
 Before mutation the receipt becomes dirty; success records the resulting
 versions and clean state. Interruption or a write exception leaves scoped
 reads closed. Out-of-band table version changes close them too.
@@ -136,14 +151,29 @@ report; they are not proof of real model/credentials, Komodo placement,
 network/tunnel costs, production parity, or whole-fleet readiness. Existing-store
 migration, old-binary exclusion/cutover and rollback remain separate work.
 
+The small functional/source/selector/inference-count fixture remains in the
+required portfolio. The hardware-sensitive full 140k timing/memory proof lives
+in `test_source_aware_store_exhaustive.py`, marked explicit tier T3 with
+filesystem/process effects. It skips by default with
+`T3 requires --allow-explicit-tiers`; scheduled/manual callers opt in through
+the existing runner (no new workflow or host-state/auth exception):
+
+```powershell
+$env:PYTEST_ADDOPTS = '-s -ra'
+python tools\run-plugin-tests.py agent-index --allow-explicit-tiers -k native_140000_source_layout --test-timeout 180 --subsuite-timeout 300 --plugin-timeout 600
+```
+
+Setup, timing and memory checks remain separate in that fixture. Its measured
+five-second headroom is never enforced as a hardware-sensitive fast-PR budget.
+
 One local Windows installed-package run, after setup and without tracemalloc,
 measured the following individual requests (seconds):
 
 | Mode | Empty | Explicit family | Full 18 families | Language | Repository |
 |---|---:|---:|---:|---:|---:|
-| Vector | 0.052932 | 0.143852 | 0.321178 | 0.563307 | 0.769539 |
-| FTS | 0.081868 | 0.304133 | 0.153057 | 0.175598 | 0.409870 |
-| Hybrid | 0.029389 | 0.114190 | 0.431851 | 0.356395 | 0.686342 |
+| Vector | 0.013229 | 0.107194 | 0.190066 | 0.212433 | 0.397763 |
+| FTS | 0.023188 | 0.304637 | 0.225175 | 0.210804 | 0.448059 |
+| Hybrid | 0.012392 | 0.125227 | 0.315866 | 0.404940 | 0.699135 |
 
 Full vector/FTS requests issued two native queries including hydration; hybrid
 issued three. Empty scopes issued none. Nonempty vector/hybrid requests invoked

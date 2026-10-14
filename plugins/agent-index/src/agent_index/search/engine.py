@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from agent_index.store.source_layout import source_read
+from agent_index.store.source_layout import source_fts_read, source_read
 
 if TYPE_CHECKING:
     from agent_index_engine.query_embedder import InProcessQueryEmbedder
@@ -38,7 +38,7 @@ class SearchEngine:
         self._engine_clients = engine_clients
         self._store = store
 
-    @source_read
+    @source_fts_read
     def search(
         self,
         query: str,

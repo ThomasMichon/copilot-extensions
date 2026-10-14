@@ -135,8 +135,12 @@ def test_native_prefilter_selectors_deletes_and_no_read_mutation(cold):
     result = engine.search_authorized("needle", families=("git:alpha",), mode="vector")
     assert {r.source for r in result} == {"git:alpha", "git:alpha:commits"}
     assert engine.search_authorized("needle", families=(), mode="vector") == []
-    assert engine.search_authorized("needle", families=("git:alpha",), language="python") == []
-    assert engine.search_authorized("needle", families=("git:alpha",), repo="beta") == []
+    assert engine.search_authorized(
+        "needle", families=("git:alpha",), language="python", mode="vector",
+    ) == []
+    assert engine.search_authorized(
+        "needle", families=("git:alpha",), repo="beta", mode="vector",
+    ) == []
     assert store._source_domain.receipt() == before
     store.delete_by_file("git:alpha", "a.md")
     result = engine.search_authorized("needle", families=("git:alpha",), mode="vector")
@@ -222,6 +226,9 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(tmp_path, monk
     store = initialize_source_store(config)
     initial = store.content_store.get_chunks_for_file("git:repo", "guide.md")
     assert initial
+    assert store.content_store.fts_search(
+        "independently", source="git:repo", file_path_glob="guide.md",
+    )
     file.write_text("# Needle\n\nreplacement autonomous ingestion\n", encoding="utf-8")
     run_git(repo, "add", "--", "guide.md")
     run_git(repo, "commit", "--quiet", "-m", "fixture update")
@@ -230,6 +237,12 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(tmp_path, monk
     current = restarted.content_store.get_chunks_for_file("git:repo", "guide.md")
     assert current and any("replacement" in r.content for r in current)
     assert not any("first independently" in r.content for r in current)
+    assert restarted.content_store.fts_search(
+        "replacement", source="git:repo", file_path_glob="guide.md",
+    )
+    assert restarted.content_store.fts_search(
+        "independently", source="git:repo", file_path_glob="guide.md",
+    ) == []
     queued(False)
     assert {r.chunk_id for r in current} == {
         r.chunk_id for r in restarted.content_store.get_chunks_for_file("git:repo", "guide.md")
@@ -241,116 +254,11 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(tmp_path, monk
     assert initialize_source_store(config).content_store.get_chunks_for_file(
         "git:repo", "guide.md",
     ) == []
+    assert initialize_source_store(config).content_store.fts_search(
+        "replacement", source="git:repo", file_path_glob="guide.md",
+    ) == []
 
 
-@pytest.mark.timeout(180)
-def test_native_140000_source_layout_queries_and_latency(cold, monkeypatch):
-    """Benchmark-only bulk rows are separate from the real queued-ingestion proof."""
-    import hashlib
-    import tracemalloc
-
-    import pyarrow as pa
-
-    config, store = cold
-    vt = store.get_vector_table("small")
-    content = store.content_store._get_or_create_table()
-    vectors = vt._get_or_create_table()
-    total = 140_000
-    winners = {100_001, 120_000, 139_990, 139_999}
-
-    def batches(schema, vector):
-        for start in range(0, total + 32, 4096):
-            rows = []
-            for i in range(start, min(total + 32, start + 4096)):
-                source = f"git:family-{i % 18}" if i < total else "git:family-0lookalike"
-                if i < total and i % 37 == 0:
-                    source += ":commits"
-                language = "python" if i % 2 else "markdown"
-                row = {"chunk_id": f"{i:064x}", "source": source, "language": language,
-                       "indexed_at": 1.0}
-                if vector:
-                    row["vector"] = [1.0, 0.0] if i in winners or i >= total else [0.0, 1.0]
-                else:
-                    text = f"needle {i:06d}"
-                    row.update(
-                        file_path=f"docs/{i}.md", chunk_type="text", content=text,
-                        content_hash=hashlib.sha256(text.encode()).hexdigest(),
-                        line_start=1, line_end=1, metadata="",
-                    )
-                rows.append(row)
-            yield pa.RecordBatch.from_pylist(rows, schema=schema)
-
-    with store._source_domain.write(store.content_store.db):
-        content.add(pa.RecordBatchReader.from_batches(
-            content.schema, batches(content.schema, False),
-        ))
-        vectors.add(pa.RecordBatchReader.from_batches(
-            vectors.schema, batches(vectors.schema, True),
-        ))
-    assert store.ensure_fts_index()
-    content = store.content_store._get_or_create_table()
-    initial = store._source_domain.receipt()
-    embeddings = []
-
-    class Inference:
-        def embed_query(self, query):
-            embeddings.append(query)
-            return np.array([1, 0], dtype=np.float32)
-
-    engine = SearchEngine({"small": Inference()}, store)
-    families = tuple(f"git:family-{i}" for i in range(18))
-    counts = []
-    for table in (content, vectors):
-        original = table.search
-
-        def observed(*args, _original=original, **kwargs):
-            counts.append(True)
-            return _original(*args, **kwargs)
-
-        monkeypatch.setattr(table, "search", observed)
-    for mode in ("vector", "fts", "hybrid"):
-        for name, granted, selectors in (
-            ("empty", (), {}),
-            ("explicit", ("git:family-0",), {}),
-            ("full", families, {}),
-            ("lookalike", ("git:family-0missing",), {}),
-            ("language", families, {"language": "python"}),
-            ("repo", families, {"repo": "family-0"}),
-        ):
-            assert not tracemalloc.is_tracing()
-            before, queries = len(embeddings), len(counts)
-            start = time.perf_counter()
-            hits = engine.search_authorized("needle", families=granted, mode=mode,
-                                            limit=4, **selectors)
-            duration = time.perf_counter() - start
-            print("COLD_QUERY " + json.dumps({
-                "mode": mode, "grant": name, "seconds": round(duration, 6),
-                "embeddings": len(embeddings) - before, "native_queries": len(counts) - queries,
-            }, sort_keys=True))
-            assert duration < 3.5
-            assert len(counts) - queries <= 4
-            assert len(embeddings) - before == (0 if not granted or mode == "fts" else 1)
-            assert all(r.source != "git:family-0lookalike" for r in hits)
-            if name in ("empty", "lookalike"):
-                assert hits == []
-            else:
-                assert hits
-            if name == "language":
-                assert all(r.language == "python" for r in hits)
-            if name in ("explicit", "repo"):
-                assert all(r.source == "git:family-0" or
-                           r.source.startswith("git:family-0:") for r in hits)
-            if mode == "vector" and name == "full":
-                assert {int(r.chunk_id, 16) for r in hits} == winners
-    assert store._source_domain.receipt() == initial
-    tracemalloc.start()
-    try:
-        engine.search_authorized("needle", families=families, mode="hybrid", limit=4)
-        _current, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
-    assert peak < 12 * 1024 * 1024
-    assert initialize_source_store(config)._source_domain.receipt() == initial
 
 
 def test_orphan_out_of_band_and_unknown_layout_stay_closed(cold):
@@ -413,13 +321,75 @@ def test_empty_selected_fts_is_clean_noop_then_new_index_works(cold):
     config, store = cold
     before = store._source_domain.receipt()
     assert store.ensure_fts_index() is False
-    assert store._source_domain.receipt() == before
+    covered = store._source_domain.receipt()
+    assert covered["state"] == before["state"] == "clean"
+    assert covered["versions"] == before["versions"]
+    assert covered["fts_coverage"]["chunks"] == covered["versions"]["chunks"]
+    assert store.ensure_fts_index() is False
+    assert store._source_domain.receipt() == covered
     assert "fts_pending" not in before and "uncertain_effect" not in before
     item = chunk()
     store.upsert("small", [item], np.array([[1, 0]], dtype=np.float32))
     assert store.ensure_fts_index() is True
     assert store._source_domain.receipt()["state"] == "clean"
     assert initialize_source_store(config).get_document("git:alpha", "a.md") is not None
+
+
+def test_required_small_scoped_query_and_inference_contract(cold):
+    _config, store = cold
+    items = [
+        chunk("git:alpha", "needle alpha", path="a.md"),
+        chunk("git:alpha:commits", "needle commit", path="b.md"),
+        chunk("git:alphabet", "needle lookalike", path="c.md"),
+        chunk("git:beta", "needle beta", path="d.md"),
+    ]
+    store.upsert("small", items, np.array([[1, 0], [0.8, 0.2], [1, 0], [1, 0]],
+                                        dtype=np.float32))
+    assert store.ensure_fts_index()
+    calls = []
+
+    class Inference:
+        def embed_query(self, query):
+            calls.append(query)
+            return np.array([1, 0], dtype=np.float32)
+
+    engine = SearchEngine({"small": Inference()}, store)
+    for mode in ("vector", "fts", "hybrid"):
+        before = len(calls)
+        assert engine.search_authorized("needle", families=(), mode=mode) == []
+        assert len(calls) == before
+        hits = engine.search_authorized("needle", families=("git:alpha",), mode=mode)
+        assert {hit.source for hit in hits} == {"git:alpha", "git:alpha:commits"}
+        assert len(calls) - before == (0 if mode == "fts" else 1)
+
+
+def test_stale_fts_and_hybrid_refuse_without_read_mutation(cold):
+    _config, store = cold
+    item = chunk(text="oldterm")
+    store.upsert("small", [item], np.array([[1, 0]], dtype=np.float32))
+    assert store.ensure_fts_index()
+    store.upsert("small", [chunk(text="newterm")], np.array([[1, 0]], dtype=np.float32))
+    receipt = store._source_domain.receipt()
+    assert receipt["state"] == "clean" and "chunks" not in receipt.get("fts_coverage", {})
+    from agent_index.store.source_search import search_source_store
+
+    for vectors in ({}, {"small": np.array([1, 0], dtype=np.float32)}):
+        with pytest.raises(SourceLayoutError, match="FTS is stale"):
+            search_source_store(
+                store, vectors, "newterm", families=("git:alpha",),
+            )
+    for operation in (
+        lambda: store.fts_search("newterm"),
+        lambda: store.search_all({"small": np.array([1, 0], dtype=np.float32)}, "newterm"),
+        lambda: store.content_store.fts_search("newterm"),
+    ):
+        with pytest.raises(SourceLayoutError, match="FTS is stale"):
+            operation()
+    assert store._source_domain.receipt() == receipt
+    assert store.ensure_fts_index()
+    assert store._source_domain.receipt()["fts_coverage"]["chunks"] == (
+        store._source_domain.receipt()["versions"]["chunks"]
+    )
 
 
 @pytest.mark.parametrize("blocked", ["writer", "dirty", "drift"])

@@ -59,6 +59,7 @@ def search_source_store(store, vectors: dict, query: str, *, families: tuple[str
     window = max(50, limit * 5)
     with domain.read(store.content_store.db):
         content = store.content_store._get_or_create_table()
+        fts_ready = domain.require_fts(store.content_store) if include_fts else False
         branches = []
         for model, vector in vectors.items():
             table = store.get_vector_table(model)._get_or_create_table()
@@ -72,7 +73,7 @@ def search_source_store(store, vectors: dict, query: str, *, families: tuple[str
                 VectorHit(r["chunk_id"], 1.0 - r["_distance"]) for r in rows
             ], key=lambda hit: (-hit.score, hit.chunk_id)))
         lexical = []
-        if include_fts and store.content_store._durable_fts_index_exists(content):
+        if fts_ready:
             sanitized = sanitize_fts_query(query)
             if sanitized:
                 rows = (
