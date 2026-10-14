@@ -251,8 +251,12 @@ def test_explicit_host_ca_only_tls_omits_absent_client_identity(fixture: tuple) 
     certs = path.parent / "CA only material"
     certs.mkdir()
     (certs / "ca.pem").write_text("fixture CA", encoding="utf-8")
+    ambient = path.parent / "unrelated ambient material"
+    ambient.mkdir()
+    for name in ("ca.pem", "cert.pem", "key.pem"):
+        (ambient / name).write_text("unrelated fixture material", encoding="utf-8")
     env = {**client.environment, "DOCKER_HOST": "tcp://example.invalid:2376",
-           "DOCKER_CERT_PATH": str(certs), "DOCKER_TLS_VERIFY": "1"}
+           "DOCKER_CERT_PATH": str(certs), "DOCKER_CONFIG": str(ambient), "DOCKER_TLS_VERIFY": "1"}
     env.pop("DOCKER_CONTEXT", None)
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.tls_ca == str(certs / "ca.pem")
@@ -260,7 +264,37 @@ def test_explicit_host_ca_only_tls_omits_absent_client_identity(fixture: tuple) 
     assert pinned.probe(identity()) is True
     for call in logs(path):
         assert "--tlsverify=true" in call["args"]
-        assert "--tlscert" not in call["args"] and "--tlskey" not in call["args"]
+        assert call["tls_files"] == {"ca.pem": str(certs / "ca.pem"), "cert.pem": "", "key.pem": ""}
+
+
+@pytest.mark.parametrize("material,skip_verify", [([], True), (["cert.pem", "key.pem"], False)])
+def test_context_without_ca_preserves_tls_and_system_roots(fixture: tuple, material: list[str], skip_verify: bool) -> None:
+    client, path, state = fixture
+    state["context"]["Endpoints"]["docker"] = {
+        "Host": "tcp://example.invalid:2376", "SkipTLSVerify": skip_verify,
+    }
+    state["context"]["TLSMaterial"] = {"docker": material}
+    root = path.parent / "context material"
+    state["context"]["Storage"] = {"TLSPath": str(root)}
+    ambient = path.parent / "unrelated ambient material"
+    ambient.mkdir()
+    for name in ("ca.pem", "cert.pem", "key.pem"):
+        (ambient / name).write_text("unrelated fixture material", encoding="utf-8")
+    path.write_text(json.dumps(state), encoding="utf-8")
+    pinned = DockerClient.pin(
+        docker_argv=client.docker_argv,
+        environment={**client.environment, "DOCKER_CONTEXT": "fixture", "DOCKER_CONFIG": str(ambient)},
+    )
+    assert pinned.endpoint.tls is True and pinned.endpoint.tls_verify is not skip_verify
+    assert pinned.endpoint.tls_ca is None
+    assert pinned.probe(identity()) is True
+    for call in logs(path)[1:]:
+        assert "--tls=true" in call["args"]
+        assert f"--tlsverify={'false' if skip_verify else 'true'}" in call["args"]
+        assert call["tls_files"] == {
+            name: str(root / "docker" / name) if name in material else ""
+            for name in ("ca.pem", "cert.pem", "key.pem")
+        }
 
 
 def test_explicit_host_client_identity_files_are_retained(fixture: tuple) -> None:

@@ -78,8 +78,7 @@ class DockerClient:
                 ("--tlscacert", self.endpoint.tls_ca), ("--tlscert", self.endpoint.tls_cert),
                 ("--tlskey", self.endpoint.tls_key),
             ):
-                if value is not None:
-                    transport += [option, value]
+                transport += [option, value if value is not None else ""]
         kwargs: dict[str, int] = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # headless-guard: allow dependency-free Docker primitive
@@ -153,9 +152,9 @@ class DockerClient:
                 for name in names
             ):
                 raise VerificationError("Unsupported Docker TLS material")
-            tls = bool(names)
+            tls = bool(names) or docker["SkipTLSVerify"]
             verify = tls and not docker["SkipTLSVerify"]
-            if tls:
+            if names:
                 storage = entry.get("Storage")
                 root = storage.get("TLSPath") if isinstance(storage, dict) else None
                 text(root, "Docker TLS root")

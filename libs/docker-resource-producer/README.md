@@ -11,8 +11,11 @@ operations use explicit host and TLS flags rather than ambient context selection
 TLS paths, not certificate/key contents, travel in `Endpoint.to_json()`.
 Docker's `--tlsverify` flag enables TLS even when set to false, so non-TLS
 endpoints deliberately omit that flag.
-Explicit-host TLS retains the CA path and omits genuinely absent optional
-client certificate/key files, matching Docker's default-file behavior.
+Explicit-host TLS retains the CA path and records genuinely absent optional
+client certificate/key files. Replay passes explicit empty file options for
+absent material so ambient Docker configuration cannot supply another identity
+or replace system trust roots. A context's `SkipTLSVerify` enables TLS even
+without stored material.
 Inaccessible files remain a verification error, not a CA-only fallback.
 
 `Identity` binds a full container ID, or a unique volume name plus creation
@@ -53,6 +56,7 @@ Source tests and API inspection are not a live or native Docker lifecycle proof.
 Required PR CI runs this fixture-only suite on the declared minimum Python 3.10
 when the library or its CI selector changes. The selector uses the actual PR
 head, and minimum-runtime setup does not replace the guard job's Python.
+Inherited Git repository/config overrides cannot redirect the scope probe.
 
 Transport semantics: [Docker CLI options](https://github.com/docker/cli/blob/master/cli/flags/options.go).
 Volume deletion contract: [Moby client API](https://github.com/moby/moby/blob/master/client/volume_remove.go).

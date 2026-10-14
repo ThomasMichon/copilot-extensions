@@ -22,7 +22,8 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}  # headless-guard: allow dependency-free CI selector
     return subprocess.run(
         ["git", *args], capture_output=True, text=True, timeout=10,
-        env={**os.environ, "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}, **kwargs,
+        env={**{key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")},
+             "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}, **kwargs,
     )
 
 

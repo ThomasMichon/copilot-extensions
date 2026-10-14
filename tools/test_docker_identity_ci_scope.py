@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 
@@ -51,6 +52,42 @@ def test_diff_error_is_not_a_successful_unrelated_verdict(monkeypatch, capsys) -
     assert MODULE.main(["--base", "base", "--head", "bad"]) == 1
     output = capsys.readouterr()
     assert output.out == "" and "invalid head" in output.err
+
+
+def test_git_scope_ignores_ambient_repository_overrides(monkeypatch, tmp_path, capsys) -> None:
+    def git(root, *args):
+        kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}  # headless-guard: allow fixture Git commands
+        return subprocess.run(
+            ["git", "-C", str(root), *args], check=True, capture_output=True, text=True,
+            timeout=10, env={k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")},
+            **kwargs,
+        ).stdout.strip()
+
+    roots = [tmp_path / "selected", tmp_path / "unrelated"]
+    for root in roots:
+        root.mkdir()
+        git(root, "init", "--quiet")
+        (root / "initial.txt").write_text("initial\n")
+        git(root, "add", ".")
+        git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "initial")
+    selected, unrelated = roots
+    base = git(selected, "rev-parse", "HEAD")
+    library = selected / "libs/docker-resource-producer"
+    library.mkdir(parents=True)
+    (library / "changed.txt").write_text("selected\n")
+    git(selected, "add", ".")
+    git(selected, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "selected")
+    monkeypatch.chdir(selected)
+    for name, value in {
+        "GIT_DIR": str(unrelated / ".git"), "GIT_WORK_TREE": str(unrelated),
+        "GIT_INDEX_FILE": str(unrelated / ".git/index"), "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.bare", "GIT_CONFIG_VALUE_0": "true",
+        "GIT_OBJECT_DIRECTORY": str(unrelated / ".git/objects"),
+    }.items():
+        monkeypatch.setenv(name, value)
+    assert MODULE._git("rev-parse", "--show-toplevel").stdout.strip() == str(selected).replace("\\", "/")
+    assert MODULE.main(["--base", base, "--head", "HEAD"]) == 0
+    assert capsys.readouterr().out == "true\n"
 
 
 def test_workflow_runs_scoped_minimum_without_changing_guard_python() -> None:

@@ -11,9 +11,18 @@ def main() -> int:
     state_path = Path(os.environ["FAKE_DOCKER_STATE"])
     state = json.loads(state_path.read_text(encoding="utf-8"))
     args = sys.argv[1:]
+    tls_files = {}
+    defaults = Path(os.environ.get("DOCKER_CERT_PATH") or os.environ.get("DOCKER_CONFIG") or Path.home() / ".docker")
+    for option, name in (("--tlscacert", "ca.pem"), ("--tlscert", "cert.pem"), ("--tlskey", "key.pem")):
+        if option in args:
+            tls_files[name] = args[args.index(option) + 1]
+        else:
+            default = defaults / name
+            tls_files[name] = str(default) if name == "ca.pem" or default.exists() else ""
     with state_path.with_suffix(".log").open("a", encoding="utf-8") as log:
         log.write(json.dumps({
             "args": args,
+            "tls_files": tls_files,
             "routing": {name: os.environ.get(name) for name in (
                 "DOCKER_CONTEXT", "DOCKER_HOST", "DOCKER_TLS", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH",
             )},
