@@ -176,11 +176,21 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
 
 
 @pytest.mark.parametrize(
-    ("default_branch", "expected_probes"),
-    [("main", 2), ("", 3)],
+    (
+        "default_branch", "remote_name", "remote_ref_available",
+        "expected_ref", "expected_probes",
+    ),
+    [
+        ("main", "origin", True, "origin/main", 2),
+        ("", "origin", True, "origin/main", 3),
+        ("main", "upstream", True, "upstream/main", 2),
+        ("main", "origin", False, "refs/heads/main", 3),
+        ("main", "", False, "refs/heads/main", 2),
+    ],
 )
 def test_session_register_uses_knowledge_backed_receiving_authority(
-    tmp_path: Path, monkeypatch, default_branch, expected_probes,
+    tmp_path: Path, monkeypatch, default_branch, remote_name,
+    remote_ref_available, expected_ref, expected_probes,
 ):
     """Registration skips full project policy while preserving its authority."""
     from agent_worktrees import git_ops, repos as repos_mod
@@ -225,18 +235,24 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
     committed_path = cfg.inrepo_config_path(Path()).as_posix()
     timeouts = []
+    shown_refs = []
 
     def committed_config(*args, **kwargs):
         timeouts.append(kwargs["timeout"])
         assert kwargs["isolated_repository"] is True
         if args[0] == "symbolic-ref":
+            remote = remote_name or "origin"
             return SimpleNamespace(
                 returncode=0,
-                stdout="refs/remotes/origin/main\n",
+                stdout=f"refs/remotes/{remote}/main\n",
             )
         if args[0] == "ls-tree":
+            ref = args[3]
+            if "/" in ref and not ref.startswith("refs/") and not remote_ref_available:
+                return SimpleNamespace(returncode=1, stdout="")
             return SimpleNamespace(returncode=0, stdout=f"{committed_path}\n")
         if args[0] == "show":
+            shown_refs.append(args[1].split(":", 1)[0])
             return SimpleNamespace(
                 returncode=0,
                 stdout="stateless: true\nrequires_external_state_root: true\n",
@@ -251,7 +267,8 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         "machine: workstation-windows\n"
         "platform: windows\n"
         "knowledge_repo: knowledge\n"
-        f"repos:\n  harness:\n    anchor: {harness}\n",
+        f"repos:\n  harness:\n    anchor: {harness}\n"
+        f"    remote: '{remote_name}'\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_root)
@@ -305,6 +322,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     assert timeouts == [
         config_authority._GIT_PROBE_TIMEOUT_S
     ] * expected_probes
+    assert shown_refs == [expected_ref]
     assert tracking.load_record(local_path).session_entry("sess-local") is not None
 
     before = foreign_path.read_bytes()

@@ -9,7 +9,7 @@ _GIT_PROBE_TIMEOUT_S = 0.3
 
 
 def _load_state_root_authority(
-    name: str, anchor: str, platform_name: str,
+    name: str, anchor: str, platform_name: str, remote_name: str,
 ) -> dict:
     """Read only state-root gates from the registered committed config."""
     from . import config as cfg, git_ops, repos
@@ -29,24 +29,40 @@ def _load_state_root_authority(
             ).get("default_branch", "")
         )
     if not branch:
+        head_ref = (
+            f"refs/remotes/{remote_name}/HEAD"
+            if remote_name else "HEAD"
+        )
         head = git_ops.git(
-            "symbolic-ref", "-q", "refs/remotes/origin/HEAD",
+            "symbolic-ref", "-q", head_ref,
             cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
             isolated_repository=True,
         )
-        prefix = "refs/remotes/origin/"
+        prefix = (
+            f"refs/remotes/{remote_name}/"
+            if remote_name else "refs/heads/"
+        )
         ref = head.stdout.strip() if head.returncode == 0 else ""
         branch = ref[len(prefix):] if ref.startswith(prefix) else ""
     if not branch:
         raise ValueError(f"cannot resolve committed branch for project {name!r}")
-    ref = f"origin/{branch}"
-    listing = git_ops.git(
-        "ls-tree", "-r", "--name-only", ref, "--",
-        *(candidate.as_posix() for candidate in candidates),
-        cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
-        isolated_repository=True,
+    refs = (
+        [f"{remote_name}/{branch}", f"refs/heads/{branch}"]
+        if remote_name else [f"refs/heads/{branch}"]
     )
-    if listing.returncode != 0:
+    ref = ""
+    listing = None
+    for candidate_ref in refs:
+        candidate_listing = git_ops.git(
+            "ls-tree", "-r", "--name-only", candidate_ref, "--",
+            *(candidate.as_posix() for candidate in candidates),
+            cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
+            isolated_repository=True,
+        )
+        if candidate_listing.returncode == 0:
+            ref, listing = candidate_ref, candidate_listing
+            break
+    if listing is None:
         raise ValueError(f"cannot read committed authority config for {name!r}")
     available = set(listing.stdout.splitlines())
     selected = next(
@@ -106,6 +122,7 @@ def load_project_authority_config(
     )
     if not isinstance(machine_repo, dict):
         machine_repo = {}
+    remote_name = str(machine_repo.get("remote", "origin") or "")
     anchor = machine_repo.get("anchor") or cfg._resolve_anchor_from_registry(
         name, platform_name
     )
@@ -116,7 +133,7 @@ def load_project_authority_config(
         )
 
     inrepo_authority = _load_state_root_authority(
-        name, str(anchor), platform_name,
+        name, str(anchor), platform_name, remote_name,
     )
     stateless = bool(
         machine_repo.get("stateless", inrepo_authority.get("stateless", False))
@@ -145,6 +162,7 @@ def load_project_authority_config(
             name: cfg.RepoConfig(
                 anchor=str(anchor),
                 worktree_root=str(worktree_root),
+                remote=remote_name,
                 stateless=stateless,
                 requires_external_state_root=requires_external_state_root,
             ),
