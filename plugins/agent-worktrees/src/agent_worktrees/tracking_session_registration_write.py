@@ -53,10 +53,7 @@ from pathlib import Path
 
 from . import config_authority, obligations, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError
-from .tracking_session_registry import (
-    _SESSION_REGISTER_REQUEST_DEADLINE_S,
-    _start_session_activation,
-)
+from .tracking_session_registry import _start_session_activation
 
 
 def head_is_provably_dead(head_session: str | None) -> bool:
@@ -136,10 +133,7 @@ def _apply_session_register_locked(args: dict) -> dict:
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
         try:
-            config_authority.require_registration_record_mutation(
-                record,
-                request_deadline_s=_SESSION_REGISTER_REQUEST_DEADLINE_S,
-            )
+            config_authority.require_registration_record_mutation(record)
         except ExecutionSpaceError as exc:
             logging.getLogger(__name__).warning(
                 "Rejecting session registration for %s: %s", worktree_id, exc,

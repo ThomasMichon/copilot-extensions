@@ -3,28 +3,20 @@
 from __future__ import annotations
 
 import subprocess
-import time
 from pathlib import Path
+
 
 def _load_state_root_authority(
     name: str, anchor: str, platform_name: str, remote_name: str | None,
-    git_budget_s: float,
 ) -> tuple[dict, str]:
     """Read only state-root gates from the registered committed config."""
     from . import config as cfg, git_ops, repos
 
     root = Path(anchor)
-    deadline = time.monotonic() + git_budget_s
 
     def _git(*args: str):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise ValueError(
-                f"committed authority budget exhausted for project {name!r}"
-            )
         return git_ops.git(
             *args, cwd=root, check=False, capture=True,
-            timeout=remaining,
             isolated_repository=True,
         )
 
@@ -146,15 +138,9 @@ def _load_state_root_authority(
 
 def load_project_authority_config(
     name: str, *, path: Path | None = None,
-    git_budget_s: float | None = None,
 ):
     """Resolve only identity, registry, and state-root facts used by fences."""
     from . import config as cfg
-    if git_budget_s is None:
-        from .tracking_session_registry import (
-            _SESSION_REGISTER_REQUEST_DEADLINE_S,
-        )
-        git_budget_s = _SESSION_REGISTER_REQUEST_DEADLINE_S
 
     path = path or cfg.project_dir(name) / "config.yaml"
     global_raw = cfg.config_migrations.migrate_loaded(
@@ -202,7 +188,7 @@ def load_project_authority_config(
         )
 
     inrepo_authority, resolved_remote = _load_state_root_authority(
-        name, str(anchor), platform_name, remote_name, git_budget_s,
+        name, str(anchor), platform_name, remote_name,
     )
     stateless = bool(
         machine_repo.get("stateless", inrepo_authority.get("stateless", False))
@@ -242,17 +228,13 @@ def load_project_authority_config(
     return canonicalize_legacy_config(config)
 
 
-def require_registration_record_mutation(
-    record, *, request_deadline_s: float,
-) -> None:
+def require_registration_record_mutation(record) -> None:
     """Fence one session-registration record without full project policy."""
     from . import config as cfg
     from .execution_spaces import ExecutionSpaceError, require_record_mutation
 
     try:
-        config = load_project_authority_config(
-            record.repo, git_budget_s=request_deadline_s,
-        )
+        config = load_project_authority_config(record.repo)
         if record.repo not in config.repos:
             raise ValueError(
                 "requested project is not registered in receiving-side configuration"

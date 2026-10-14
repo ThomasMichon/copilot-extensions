@@ -249,7 +249,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     )
     monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
     committed_path = cfg.inrepo_config_path(Path()).as_posix()
-    timeouts = []
+    git_calls = []
     shown_refs = []
     selected_remote = (
         machine_remote
@@ -262,7 +262,8 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     )
 
     def committed_config(*args, **kwargs):
-        timeouts.append(kwargs["timeout"])
+        git_calls.append(args)
+        assert "timeout" not in kwargs
         assert kwargs["isolated_repository"] is True
         if args[0] == "remote":
             return SimpleNamespace(
@@ -375,14 +376,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     elapsed = time.monotonic() - started
     assert accepted == {"ok": True, "linked_handoff": None}
     assert elapsed < 1.0
-    assert len(timeouts) == expected_probes
-    request_deadline = (
-        tracking_session_registration_write._SESSION_REGISTER_REQUEST_DEADLINE_S
-    )
-    assert all(
-        0 < timeout <= request_deadline
-        for timeout in timeouts
-    )
+    assert len(git_calls) == expected_probes
     assert shown_refs == list(expected_refs)
     assert tracking.load_record(local_path).session_entry("sess-local") is not None
 
@@ -447,8 +441,9 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
     )
     def failed_git(*_args, **kwargs):
         assert kwargs["isolated_repository"] is True
+        assert "timeout" not in kwargs
         if failure == "timeout":
-            raise subprocess.TimeoutExpired("git", kwargs["timeout"])
+            raise subprocess.TimeoutExpired("git", 1.5)
         if failure == "remote_error" and _args[0] == "show-ref":
             return SimpleNamespace(returncode=2, stdout="")
         if failure == "absent":
@@ -457,13 +452,9 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
 
     monkeypatch.setattr(git_ops, "git", failed_git)
 
-    request_deadline = (
-        tracking_session_registration_write._SESSION_REGISTER_REQUEST_DEADLINE_S
-    )
     with pytest.raises(ExecutionSpaceError, match=message):
         config_authority.require_registration_record_mutation(
             SimpleNamespace(repo="harness"),
-            request_deadline_s=request_deadline,
         )
 
 
