@@ -7,8 +7,10 @@ import hmac
 import secrets
 from collections.abc import Callable
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from .task_scope import TASK_SCOPE_HEADER, TaskScopeTokenError, verify_task_scope_token
 
 
 def scoped_control_token(control_token: str, scope: str) -> str:
@@ -24,13 +26,33 @@ def _make_auth(token: str | None, control_token: str | None):
     bearer = HTTPBearer(auto_error=False)
     accepted = tuple(value for value in (token, control_token) if value)
 
-    def check(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:  # noqa: B008
+    def check(
+        request: Request,
+        creds: HTTPAuthorizationCredentials | None = Depends(bearer),  # noqa: B008
+    ) -> None:
         if token is None:
             return
-        if creds is None or not any(
+        if creds is not None and any(
             secrets.compare_digest(creds.credentials, value) for value in accepted
         ):
-            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+            return
+        # Not a full-bearer match -- a task-scoped token (see .task_scope) is
+        # a narrower, ALTERNATE credential: it authenticates the request here
+        # (so a projected relay never has to hand a container the shared/
+        # control bearer at all), but authorizes nothing by itself. Every
+        # task-lifecycle route that accepts it re-checks the claims against
+        # that one task's CURRENT state (coordinator_tasks._resolve_task_
+        # authority) and any route that does NOT opt into that recheck
+        # treats request.state.task_scope as absent, i.e. plain unauthenticated.
+        if control_token is not None:
+            raw = request.headers.get(TASK_SCOPE_HEADER)
+            if raw:
+                try:
+                    request.state.task_scope = verify_task_scope_token(control_token, raw)
+                    return
+                except TaskScopeTokenError:
+                    pass
+        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
     return check
 

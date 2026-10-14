@@ -55,6 +55,7 @@ from .coordinator_status import _slot_descriptor, register_status_routes
 from .coordinator_tasks import register_task_routes
 from .coordinator_worktree_status import register_worktree_status_routes
 from .events import EventBus
+from .lease import FencingGuard
 from .loop_governance import LoopGovernance
 from .queue import TaskQueue
 from .run_waiter_recovery import (
@@ -176,6 +177,13 @@ def create_app(
         )
     bus = EventBus()
     directory = FleetDirectory()
+    # FleetDirectory.discover_coordinator() already matches the shape the
+    # Rendezvous Protocol expects, so this in-process fencing guard needs no
+    # network hop even when nothing else federates -- an unregistered
+    # directory (no FederationRunner ticking) reports epoch 0 and every
+    # fencing check trivially passes, preserving today's non-federated
+    # behavior exactly (agent-dispatch-fleet-authority effort, Phase 1).
+    fencing_guard = FencingGuard(directory)
     relay = WorktreeStatusRelayStore(
         Path(queue.db_path).parent / "worktree-status-relay.sqlite3"
     )
@@ -907,6 +915,7 @@ def create_app(
         bus,
         control_token=control_token,
         resolve_owner_session_id=lambda worker_id: _resolve_owner_session_id(worker_id),
+        fencing_guard=fencing_guard,
     )
     register_spawn_routes(app, queue, bus, control_token=control_token)
     register_registry_routes(app, queue, control_token=control_token)

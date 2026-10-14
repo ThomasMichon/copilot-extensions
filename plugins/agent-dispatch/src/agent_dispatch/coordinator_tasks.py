@@ -3,57 +3,55 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
 from collections.abc import Callable
-from typing import Annotated, Any
+from dataclasses import asdict
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from pydantic import (
-    BaseModel,
-    BeforeValidator,
-    ConfigDict,
-    Field,
-    FiniteFloat,
-    StrictInt,
-)
-from pydantic_core import PydanticCustomError
 
 from . import telemetry
 from .coordinator_auth import _make_control_auth
-from .coordinator_categories import CategorySelection, TaskCategory, register_category_routes
+from .coordinator_categories import CategorySelection, register_category_routes
 from .coordinator_loops import DrainGate, DrainRequest
+from .coordinator_task_models import (
+    AbandonBody,
+    ActivityBody,
+    CardBody,
+    CardDraftBody,
+    ClaimBody,
+    CompleteBody,
+    ConfirmBody,
+    CreateBody,
+    HoldBody,
+    OwnerSessionBody,
+    ProducerScopeHandoffBody,
+    ProgressBody,
+    ReleaseBody,
+    ReopenBody,
+    ResetBody,
+    ResumeBody,
+    SteerBody,
+    SteerTakeBody,
+    SuspendBody,
+    UnexcludeBody,
+    UnholdBody,
+    WorkerBody,
+    YieldBody,
+)
 from .coordinator_verification import register_verification_routes
 from .events import EventBus
+from .lease import FencingGuard
 from .queue import (
     CompletionOutcome,
     ProducerFenceError,
     ProducerScopeValidationError,
     ResultTooLargeError,
     ResultValidationError,
-    StructuredResult,
     Task,
     TaskError,
     TaskQueue,
-    encode_result,
     worker_id_for,
 )
-
-
-def _strict_structured_result(value: Any) -> Any:
-    if value is None:
-        return value
-    try:
-        encode_result(value)
-    except ResultTooLargeError as exc:
-        raise PydanticCustomError("result_too_large", str(exc)) from exc
-    except ResultValidationError as exc:
-        raise ValueError(str(exc)) from exc
-    return value
-
-
-HttpStructuredResult = Annotated[
-    StructuredResult, BeforeValidator(_strict_structured_result)
-]
+from .task_authority import mint_task_token, resolve_task_authority
 
 #: Event types that run periodically for every live task without ever
 #: transitioning its state (a heartbeat lease extension, a routine activity
@@ -62,210 +60,6 @@ HttpStructuredResult = Annotated[
 #: `kind: state_transition` records for them. The bus publish (the actual
 #: wake every `--subscribe` relay/poller needs) still fires unconditionally.
 _NO_TELEMETRY_EVENT_TYPES = frozenset({"task.heartbeat", "task.activity_updated"})
-
-
-class ProducerScopeBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    repo: str
-    source: str
-
-
-class CreateBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str
-    repo: str | None = None
-    prompt: str = ""
-    category: TaskCategory = "work"
-    proposed: bool = False
-    requires: list[str] = Field(default_factory=list)
-    excludes: list[str] = Field(default_factory=list)
-    affinity: dict[str, str] = Field(default_factory=dict)
-    labels: list[str] = Field(default_factory=list)
-    payload_ref: str | None = None
-    payload_inline: str | None = None
-    target_machine: str | None = None
-    target_worktree: str | None = None
-    target_repo: str | None = None
-    exclusive_key: str | None = None
-    supersede_exclusive_key: bool = False
-    source: str | None = None
-    origin_ref: str | None = None
-    evaluator_ref: str | None = None
-    require_verification: bool = False
-    dedup_key: str | None = None
-    producer_scope: ProducerScopeBody | None = None
-    producer_id: str | None = None
-    producer_generation: StrictInt | None = None
-    producer_capability: str | None = None
-    producer_request_id: str | None = None
-    goal: str | None = None
-    done_criteria: str | None = None
-    not_before: FiniteFloat = 0.0
-    claim_as: str | None = None
-
-
-class ProducerScopeHandoffBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    repo: str
-    source: str
-    producer_id: str
-    expected_generation: StrictInt
-    required_label: str | None = None
-
-
-class ClaimBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    worker_id: str | None = None
-    repo: str | None = None
-    all_repos: bool = False
-    machine: str | None = None
-    worktree: str | None = None
-    capabilities: list[str] = Field(default_factory=list)
-    task_id: str | None = None
-    lease_seconds: int | None = None
-    evaluation: bool = False
-
-
-class WorkerBody(BaseModel):
-    worker_id: str
-    owner_session_id: str | None = None
-
-
-class ActivityBody(BaseModel):
-    activity: str | None = None
-    reservation_key: str
-    observed_at: float | None = None
-    admission_fence: dict | None = None
-
-
-class OwnerSessionBody(BaseModel):
-    worker_id: str
-    owner_session_id: str
-    expected_generation: int | None = None
-
-
-class YieldBody(BaseModel):
-    worker_id: str
-    note: str | None = None
-    exclude: str | None = None
-    release_spawn: bool = True
-
-
-class SuspendBody(BaseModel):
-    worker_id: str
-    reason: str
-    expected_status: str | None = None
-    expected_generation: int | None = None
-    expected_owner_session_id: str | None = None
-    reject_pending_steer: bool = True
-    cooldown_seconds: float | None = None
-
-
-class ResumeBody(BaseModel):
-    worker_id: str
-    wake: bool = True
-    message: str | None = None
-    adopt_session: bool = False
-    adopt_owner_session_id: str | None = None
-    reuse_session: bool = False
-    expected_owner_session_id: str | None = None
-    expected_generation: int | None = None
-
-
-class ReleaseBody(BaseModel):
-    worker_id: str
-    reason: str | None = None
-
-
-class CompleteBody(BaseModel):
-    worker_id: str
-    result_ref: str | None = None
-    result: HttpStructuredResult = None  # type: ignore[assignment]
-    expected_status: str | None = None
-    expected_owner_session_id: str | None = None
-    expected_generation: int | None = None
-
-
-class ProgressBody(BaseModel):
-    worker_id: str
-    phase: str = ""
-    summary: str
-    blocker: str | None = None
-    pr: str | None = None
-
-
-class CardBody(BaseModel):
-    worker_id: str
-    card: dict
-
-
-class SteerBody(BaseModel):
-    fields: dict = Field(default_factory=dict)
-    sender: str | None = None
-    wake: bool = True
-    message: str | None = None
-    expected_status: str | None = None
-    idempotency_key: str | None = None
-
-
-class CardDraftBody(BaseModel):
-    fields: dict = Field(default_factory=dict)
-
-
-class SteerTakeBody(BaseModel):
-    worker_id: str
-    all_pending: bool = False
-
-
-class AbandonBody(BaseModel):
-    worker_id: str | None = None
-    permitted: bool = False
-    reason: str | None = None
-    expected_status: str | None = None
-    expected_generation: int | None = None
-    expected_owner_session_id: str | None = None
-
-
-class ResetBody(BaseModel):
-    reason: str | None = None
-    expected_status: str | None = None
-    expected_generation: int | None = None
-    expected_owner_session_id: str | None = None
-
-
-class ConfirmBody(BaseModel):
-    actor: str | None = None
-    expected_status: str | None = None
-    expected_generation: int | None = None
-
-
-class ReopenBody(BaseModel):
-    reason: str | None = None
-    steer_fields: dict | None = None
-    sender: str | None = None
-    expected_status: str | None = None
-    expected_generation: int | None = None
-
-
-class HoldBody(BaseModel):
-    reason: str
-    actor: str
-    expected_status: str | None = None
-
-
-class UnholdBody(BaseModel):
-    actor: str | None = None
-    expected_status: str | None = None
-
-
-class UnexcludeBody(BaseModel):
-    exclude: str | None = None
-    actor: str | None = None
-    expected_status: str | None = None
 
 
 def _task_dict(task: Task) -> dict:
@@ -322,6 +116,7 @@ def register_task_routes(
     *,
     control_token: str | None,
     resolve_owner_session_id: Callable[[str | None], str | None],
+    fencing_guard: FencingGuard | None = None,
 ) -> None:
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
@@ -331,6 +126,19 @@ def register_task_routes(
         if task is None:
             raise HTTPException(status_code=404, detail="no such task")
         return task
+
+    def _resolve_task_authority(
+        request: Request,
+        task_id: str,
+        worker_id: str | None,
+        owner_session_id: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        return resolve_task_authority(
+            request, queue, fencing_guard, task_id, worker_id, owner_session_id
+        )
+
+    def _mint_task_token(task_id: str, worker_id: str, owner_session_id: str | None) -> str | None:
+        return mint_task_token(control_token, fencing_guard, task_id, worker_id, owner_session_id)
 
     def _emit(event_type: str, task: dict) -> None:
         event_task = _event_task_dict(task)
@@ -665,12 +473,19 @@ def register_task_routes(
         return {"adopted": False, "reason": "agent-dispatch has no relay"}
 
     @app.post("/tasks/{task_id}/start")
-    def start(task_id: str, body: WorkerBody) -> dict:
-        owner_session_id = body.owner_session_id or resolve_owner_session_id(body.worker_id)
-        return _guard(
-            lambda: queue.start(task_id, body.worker_id, owner_session_id=owner_session_id),
+    def start(task_id: str, body: WorkerBody, request: Request) -> dict:
+        worker_id, owner_session_id = _resolve_task_authority(
+            request, task_id, body.worker_id, body.owner_session_id
+        )
+        owner_session_id = owner_session_id or resolve_owner_session_id(worker_id)
+        result = _guard(
+            lambda: queue.start(task_id, worker_id, owner_session_id=owner_session_id),
             "task.started",
         )
+        token = _mint_task_token(task_id, worker_id, result.get("owner_session_id"))
+        if token is not None:
+            result["task_token"] = token
+        return result
 
     @app.post("/tasks/{task_id}/yield")
     def yield_task(task_id: str, body: YieldBody) -> dict:
@@ -757,30 +572,36 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/complete")
-    def complete(task_id: str, body: CompleteBody) -> dict:
+    def complete(task_id: str, body: CompleteBody, request: Request) -> dict:
+        worker_id, owner_session_id = _resolve_task_authority(
+            request, task_id, body.worker_id, body.expected_owner_session_id
+        )
         return _guard(
             lambda: queue.complete_with_outcome(
                 task_id,
-                body.worker_id,
+                worker_id,
                 result_ref=body.result_ref,
                 result=body.result,
                 expected_status=body.expected_status,
-                expected_owner_session_id=body.expected_owner_session_id,
+                expected_owner_session_id=owner_session_id,
                 expected_generation=body.expected_generation,
             )
         )
 
     @app.post("/tasks/{task_id}/abandon")
-    def abandon(task_id: str, body: AbandonBody) -> dict:
+    def abandon(task_id: str, body: AbandonBody, request: Request) -> dict:
+        worker_id, owner_session_id = _resolve_task_authority(
+            request, task_id, body.worker_id, body.expected_owner_session_id
+        )
         return _guard(
             lambda: queue.abandon_with_outcome(
                 task_id,
-                worker_id=body.worker_id,
+                worker_id=worker_id,
                 permitted=body.permitted,
                 reason=body.reason,
                 expected_status=body.expected_status,
                 expected_generation=body.expected_generation,
-                expected_owner_session_id=body.expected_owner_session_id,
+                expected_owner_session_id=owner_session_id,
             )
         )
 
@@ -859,8 +680,9 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/heartbeat")
-    def heartbeat(task_id: str, body: WorkerBody) -> dict:
-        return _guard(lambda: queue.heartbeat(task_id, body.worker_id), "task.heartbeat")
+    def heartbeat(task_id: str, body: WorkerBody, request: Request) -> dict:
+        worker_id, _ = _resolve_task_authority(request, task_id, body.worker_id)
+        return _guard(lambda: queue.heartbeat(task_id, worker_id), "task.heartbeat")
 
     @app.post("/tasks/{task_id}/activity")
     def activity(task_id: str, body: ActivityBody) -> dict:
@@ -886,11 +708,12 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/progress")
-    def progress(task_id: str, body: ProgressBody) -> dict:
+    def progress(task_id: str, body: ProgressBody, request: Request) -> dict:
+        worker_id, _ = _resolve_task_authority(request, task_id, body.worker_id)
         return _guard(
             lambda: queue.record_progress(
                 task_id,
-                body.worker_id,
+                worker_id,
                 phase=body.phase,
                 summary=body.summary,
                 blocker=body.blocker,

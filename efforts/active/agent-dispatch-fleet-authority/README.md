@@ -9,7 +9,8 @@
   addition (push notification with a long-interval poll backstop, not
   poll-only); Phase 2 (projected relay) starts with direct scoped-token
   calls; container/DevBox-aware fleet host selection is in scope now, not
-  deferred. Proceeding to Phase 1 implementation.
+  deferred. **Phase 1 landed** (task-scoped capability tokens + fencing
+  guard wiring, PR pending). Proceeding to Phase 2.
 - **Vision:** [`machine-fleet`](../../../visions/machine-fleet/README.md):
   `authenticated-scoped-and-revocable` (routing/control authorized per
   principal, service, operation, fleet scope, target), `one-owner-per-kind-
@@ -143,41 +144,68 @@ not a rewrite:
 - [x] Open the umbrella issue ([#6617](https://github.com/ThomasMichon/copilot-extensions/issues/6617)).
 
 ### Phase 1 -- Task-scoped capability tokens (the authorization gap)
-This is the security-critical core of the "projected relay": binding a
-caller's asserted `worker_id`/task identity to something the server
-actually verifies, reusing the existing CAS/epoch fields rather than
+**Landed.** This is the security-critical core of the "projected relay":
+binding a caller's asserted `worker_id`/task identity to something the
+server actually verifies, reusing the existing CAS/epoch fields rather than
 inventing new durable state.
 
-- [ ] Add a **task-scoped capability token**: an HMAC derived from the
+- [x] Add a **task-scoped capability token**: an HMAC derived from the
   coordinator's `control_token` (mirroring the existing
   `coordinator_auth.scoped_control_token` pattern) over
-  `(task_id, worker_id, owner_session_id, coordinator_epoch, exp)`. Minted
-  by the coordinator at the moment a task is assigned/claimed for a given
-  `worker_id` (claim-confirm and satellite/fleet-push assignment paths).
-  No new durable row: verification recomputes the HMAC from the task's
-  **current** DB state, so a token naturally invalidates the instant the
-  task's owner/session/epoch changes (reassignment, completion, fencing
-  takeover) -- no revocation list needed.
-- [ ] Add a FastAPI dependency (new module, `task_scope_auth.py`, or a
-  function alongside `coordinator_auth.py`) that, when a request presents
-  a task-scoped token (a distinct header, e.g.
-  `X-Agent-Dispatch-Task-Token`, rather than the shared bearer), derives
-  `worker_id`/`owner_session_id` **from the verified token** and ignores/
-  rejects any mismatching value in the request body -- closing the
-  caller-can-assert-any-worker_id gap named above. The shared bearer
-  remains valid for trusted callers (supervisors, the operator CLI); the
-  task-scoped token is the **narrower** credential a projected relay hands
-  to a container.
-- [ ] Wire `FencingGuard.check()` onto the task-mutation routes in
-  `coordinator_tasks.py` (claim-confirm, progress, complete, fail, resume)
-  using the epoch carried in the request's fencing context -- closing the
-  declared-but-unattached gap in `lease.py`. A write from a writer whose
-  epoch has been superseded is now actually rejected at the HTTP layer,
-  not just theoretically fenceable.
-- [ ] Unit tests: token mint/verify round-trip; token invalidated by
-  reassignment/completion/epoch bump; a caller-asserted `worker_id`
-  mismatching a presented token's bound identity is rejected; a stale-
-  epoch write is rejected post-fencing.
+  `(task_id, worker_id, owner_session_id, coordinator_epoch, exp)`. New
+  module `task_scope.py` (`mint_task_scope_token`/`verify_task_scope_token`/
+  `TaskScopeClaims`). Minted by the coordinator at `/tasks/{id}/start`
+  (claim-confirm, the point ownership is actually established) via a new
+  `task_token` field in its response. No new durable row: verification
+  recomputes the HMAC from the task's **current** DB state (via
+  `_resolve_task_authority` in `coordinator_tasks.py`), so a token
+  naturally invalidates the instant the task's owner/session/epoch changes
+  (reassignment, completion, fencing takeover) -- no revocation list
+  needed. **Scope note:** minting happens only at `start`; the fleet-push/
+  satellite assignment paths named in the original sketch don't yet mint
+  one -- a satellite pulls its own work today (`satellite_work_intake.py`)
+  and calls `start` itself with the full bearer, so this is not a gap for
+  the satellite role specifically, only for a not-yet-built push-
+  assignment path (see Phase 2).
+- [x] Add the authorization layer: `coordinator_auth._make_auth` now
+  accepts a task-scoped token presented via a distinct header
+  (`X-Agent-Dispatch-Task-Token`, `task_scope.TASK_SCOPE_HEADER`) as an
+  ALTERNATE credential to the shared/control bearer -- storing verified
+  (but not yet task-row-checked) claims on `request.state.task_scope`.
+  `coordinator_tasks._resolve_task_authority` is the actual authorization
+  step: when a request carries scoped claims, it derives the effective
+  `worker_id`/`owner_session_id` **from the verified token** (ignoring any
+  mismatching body value), confirms the claims still match the task's
+  CURRENT owner/`owner_session_id`, and checks the embedded epoch via
+  `FencingGuard`. Wired on `start`, `progress`, `complete`, `abandon`, and
+  `heartbeat`. **Scope note:** `yield`/`suspend`/`resume`/`release`/
+  `set_card`/etc. are not yet wired -- `resume` in particular has
+  non-trivial `adopt_session` branching that deserves its own careful pass
+  rather than a mechanical copy-paste; tracked as a Phase-1 follow-up, not
+  silently dropped.
+- [x] Wire `FencingGuard.check()`/`is_valid()` onto the task-scoped-token
+  path specifically (`_resolve_task_authority`'s epoch check) -- closing
+  the declared-but-unattached gap in `lease.py` for token-authenticated
+  callers. The guard is constructed directly from the coordinator's own
+  in-process `FleetDirectory` (`FencingGuard(directory)` in
+  `coordinator.py`'s `create_app`) -- no network hop, and an unregistered
+  directory (no `FederationRunner` ticking) reports epoch 0, so a non-
+  federated coordinator's behavior is unchanged. **Scope note:** full-
+  bearer (shared-token) callers do not yet carry/check an epoch -- that
+  would need an additive opt-in field for a federated local coordinator's
+  own forwarded writes, deferred to Phase 4 (centralization) since it's
+  only meaningful once a real federated deployment exists to test it
+  against.
+- [x] Unit tests: `tests/test_task_scope.py` (pure mint/verify/invalidation/
+  tamper/expiry, no FastAPI) + `tests/test_task_scope_auth.py` (real
+  coordinator routes: minting on `start`, scoped auth on `progress`/
+  `complete`/`abandon`/`heartbeat`, cross-task rejection, worker_id-
+  mismatch-in-body is overridden not trusted, reassignment invalidates the
+  old token, forged-signature rejection, no-control-token-means-no-mint,
+  and the fencing-guard rejecting a token from a superseded epoch) -- 18
+  new tests, all passing. Full existing `coordinator`/`lease`/
+  `federation`/`satellite`/`fencing`-related suites re-run clean (403 + 247
+  passed) to confirm no regression to the unchanged full-bearer path.
 
 ### Phase 2 -- Push assignment notification with poll backstop
 Operator decision: try push for throughput, keep poll as a long-interval
@@ -280,9 +308,9 @@ deferred.
   plane API as a follow-on slice once the container shape is proven.
 
 ## Validation Plan
-- [ ] Phase 1: unit tests for token mint/verify/invalidation + fencing-guard
+- [x] Phase 1: unit tests for token mint/verify/invalidation + fencing-guard
   rejection, run against the real `coordinator_tasks.py` routes (not just
-  the token/fencing library functions in isolation).
+  the token/fencing library functions in isolation). Done -- see Journal.
 - [ ] Phase 2: a long-poll waiter wakes promptly on a matching enqueue, and
   the poll backstop still finds work if the wake is missed -- proven with
   a real timing test, not just a mocked notifier call.
@@ -383,3 +411,70 @@ recorded against each open fork._
   capability tokens + wiring `FencingGuard`) -- the foundational
   authorization layer every later phase (push-waiter auth, the relay,
   centralization's fencing guarantee) builds on.
+
+### 2026-10-13 -- Phase 1 landed: task-scoped capability tokens + fencing guard
+- New module `plugins/agent-dispatch/src/agent_dispatch/task_scope.py`:
+  `mint_task_scope_token`/`verify_task_scope_token`/`TaskScopeClaims`/
+  `TaskScopeTokenError`, HMAC-signed (keyed off `control_token`, mirroring
+  `coordinator_auth.scoped_control_token`), self-contained (no durable
+  row), with a defense-in-depth expiry (`DEFAULT_TTL_SECONDS = 900`)
+  independent of the real invalidation mechanism (task-state recheck).
+- `coordinator_auth._make_auth` now accepts the token via a distinct
+  `X-Agent-Dispatch-Task-Token` header as an alternate credential to the
+  shared/control bearer, storing verified claims on `request.state.
+  task_scope` without itself deciding authorization -- that's
+  `coordinator_tasks._resolve_task_authority`'s job per-route: re-check the
+  claims against the task's CURRENT `owner`/`owner_session_id`, and the
+  embedded fencing epoch against a real `FencingGuard` (now constructed in
+  `create_app` directly from the coordinator's own in-process
+  `FleetDirectory` -- no network hop; an unregistered/non-federated
+  directory reports epoch 0, so this is a no-op for every coordinator that
+  isn't actually federating today).
+- Wired onto `start` (mints the token in its response once ownership +
+  `owner_session_id` are established), `progress`, `complete`, `abandon`,
+  `heartbeat`. Deliberately did NOT wire `yield`/`suspend`/`resume`/
+  `release`/`set_card` in this slice -- `resume` especially has
+  non-trivial `adopt_session`/`adopt_owner_session_id` branching that
+  deserves its own careful pass, not a mechanical copy-paste; recorded as
+  an explicit Phase-1 follow-up in the Plan above, not silently dropped.
+- Found and fixed one subtlety while implementing `start`'s minting: must
+  mint from the **post-mutation** `owner_session_id` (`result.get(
+  "owner_session_id")`), not the pre-computed local variable -- `queue.
+  start()` leaves the DB's `owner_session_id` unchanged when the caller
+  passes `None`, so minting from the stale local variable could bind a
+  token to a value the row never actually has.
+- Tests: `tests/test_task_scope.py` (9 pure unit tests: round-trip,
+  wrong-key rejection, tampered-payload rejection, malformed-token
+  rejection, expiry, distinct-task non-collision) + `tests/
+  test_task_scope_auth.py` (9 real-coordinator HTTP tests: mint-on-start,
+  scoped-token-authenticates-with-no-shared-bearer-at-all, no-credential-
+  rejected, cross-task rejection, body-worker_id-mismatch-is-overridden-
+  not-trusted, reassignment invalidates the old token, forged-signature
+  rejection, no-control-token-means-no-mint, fencing-guard rejects a token
+  minted under a since-superseded epoch) -- 18/18 passing. Re-ran the
+  existing `coordinator`-filtered suite (247 passed) and the broader
+  `lease`/`federation`/`satellite`/`fencing`-filtered suite (403 passed, 1
+  pre-existing unrelated skip) to confirm zero regression to the unchanged
+  full-bearer path. `ruff check` clean on every touched/new file (two
+  pre-existing `E501`s in `coordinator_tasks.py` untouched by this diff,
+  confirmed via `git diff` -- not this change's to fix).
+- `check-version-consistency.py` and `check-changefile-presence.py --base
+  origin/dev` both pass; changefile added (`agent-dispatch`, minor --
+  additive, backward-compatible: a caller presenting no task-scoped header
+  behaves exactly as before).
+- **CI's `check-module-size.py` caught `coordinator_tasks.py` exceeding its
+  1000-line cap** (it was already at 997/1000 on `dev` -- this change's
+  ~70 net new lines pushed it over). Split, not trimmed: extracted the
+  ~20 Pydantic request-body models (`WorkerBody`, `ClaimBody`,
+  `CompleteBody`, etc. -- pure data shapes, no route logic) into a new
+  `coordinator_task_models.py`, and the two new authorization helpers
+  (`resolve_task_authority`/`mint_task_token`) into `task_authority.py`
+  (both already designed as free functions taking `queue`/`fencing_guard`/
+  `control_token` explicitly, so the extraction needed no behavior change,
+  only updated imports). `coordinator_tasks.py` is now 822 lines -- comfortably
+  under cap with real margin for the Phase 2-5 routes still to come.
+  Re-ran the full test/lint/guard sweep after the split: 371 tests collect,
+  265 pass (247 coordinator + 18 task_scope), `ruff check` clean on every
+  touched file, `check-module-size.py` now OK.
+- Next: open a PR for Phase 1, then start Phase 2 (long-poll
+  `await-assignment` waiter with poll backstop).
