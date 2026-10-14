@@ -2961,7 +2961,7 @@ def test_suite_session_start_stack_is_output_free_without_authority():
 
     inventory = scan.scan_session_context(root, sources, report)
 
-    assert inventory["disposition"] == "output-free-stack"
+    assert inventory["disposition"] == "output-free-stack", inventory
     assert report.blocking == 0
     assert all(
         entry["possible_non_empty"] == "no"

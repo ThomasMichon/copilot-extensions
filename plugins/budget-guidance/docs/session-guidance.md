@@ -25,6 +25,9 @@ across asynchronous stdin delivery and the owned writer's exit.
 On Windows it resolves a virtual environment's bounded `pyvenv.cfg` to the
 base console interpreter and refuses `py.exe` launchers, so cancellation targets
 the actual one-shot writer rather than leaving a redirector's child running.
+The POSIX wrapper uses the suite's canonical EXIT trap to emit one empty JSON
+envelope on both success and failure, making its output-free behavior
+recognizable by the existing session-context contract scanner.
 The isolated POSIX writer arms its own five-second real-time process alarm
 before resolving or importing payload source;
 it does not depend solely on the host's outer hook timeout or a platform-specific

@@ -340,6 +340,7 @@ def test_shipped_inline_allowlist_is_explicit_and_substantive() -> None:
         ("agent-conduct-guidance", "scratch-space-fallback"),
         ("agent-conduct-guidance", "secret-masking-fallback"),
         ("ai-attribution", "publication-safety"),
+        ("budget-guidance", "posture-boundary"),
         ("copilot-extensions-harness", "contribution-boundary"),
         ("efforts", "completion-gate"),
         ("customizing-copilot", "local-cache-catchall"),

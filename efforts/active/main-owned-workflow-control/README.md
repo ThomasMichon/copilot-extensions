@@ -96,9 +96,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Actions concurrency from Copilot service limits; do not assume one shared quota.
 - [ ] Rank safe redundant trigger/check removals under existing gates ahead of
   ownership work that is not needed for those reductions.
-- [ ] Resolve the trusted-check publication limitation explicitly: the common
+- [x] Resolve the trusted-check publication limitation explicitly: the common
   Actions app and a check name cannot prevent deliberate Write-actor spoofing.
   Do not claim stronger guarantees than the selected enforceable boundary.
+  Operator accepted the existing trusted-collaborator boundary on October 13;
+  no cryptographic same-app spoofing guarantee or new publisher is claimed.
 
 ### Phase 1 - Earliest safe run and check reductions
 
@@ -127,8 +129,9 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [x] Reject unsafe/missing files, collisions and conflicting ownership; record
   control provenance and test intentional deletion (#6521).
 - [x] Land implementation, tests and related documentation via dev (#6521).
-- [ ] Verify a covering promotion releases inert support while no preservation
+- [x] Verify a covering promotion releases inert support while no preservation
   manifest is active; release is separate from source merge.
+  #6631 releases #6521's exact support blob without an activation manifest.
 
 ### Phase 3 - Trusted admission and composed validation
 
@@ -1032,3 +1035,103 @@ hosted checks, review and a containing full validation remain required.
 - The revised candidate passes 192 focused cases, Ruff F/E9, trusted-CI,
   documentation and whitespace checks. Parsed CI equality confirms only
   the stated base/activity changes and duplicate-gate deletion.
+
+### 2026-10-14 - Invocation cutover merged; containing release pending
+
+- #6661 merged at `08:37:50Z` as
+  `e82d8d94a11a7f4ab9d25544c73e6c321bdd397a`. Exact reviewed head
+  `fc979a4b4e7a` received native approval `5514884572` with zero open
+  findings. Both review threads were fixed and resolved.
+- The first merge attempt correctly failed while a later same-head CI
+  suite was still pending, despite the earlier suite's successful aggregate.
+  Waited for latest edited-event CI `38531058695` to succeed, then reran
+  complete integration-bound required-check verification and the managed
+  merge. No status check, policy or review gate was bypassed to resolve
+  that refusal.
+- Confirmed the provider's merged state and #6237's open state. The
+  published two-commit patch exactly matches the upstream squash patch.
+  After the ordinary pull-forward auto-aborted that multi-commit replay,
+  retained a backup and dropped only that proven-published history before
+  the supported sync succeeded.
+- Normal dev CI `38536473092` was created for the actual merge. Continue
+  through its containing promotion, verify the promoted workflow bytes,
+  and prove main-PR CI invocation absence alongside the retained trusted
+  admission/scanner and full main-push CI. The cutover checkbox and parent
+  effort remain open until those live outcomes are recorded.
+
+### 2026-10-14 - Containing release meets an already-owned fixture blocker
+
+- The cutover's first dev CI `38536473092` was superseded by natural
+  dev advance `834e7936ad20`; follow that normal flow rather than dispatch
+  another release.
+- Active full validation `38532443234` tests snapshot `80f3d86b8`.
+  Completed worktrees job `115754166934` fails only
+  `test_exact_session_fallback_scans_record_names_deterministically`:
+  its synthetic project has no receiving-side registration authority.
+  This is not evidence that the production authority fence should change.
+- Exact issue #6675 already reserves that fixture repair and names the
+  existing shared configuration fixture as its source. Do not build a
+  competing repair. #6671 separately tracks the earlier profile-assignment
+  fixture family; prior failures are not accepted flakes or a waiver.
+- Published the actual #6661 merge and pending-release gate on #6237 in
+  comment `6164474879`, retaining this slice's proof reservation. The
+  parent campaign remains active and no complete artifact release or
+  runtime rollout is claimed.
+
+### 2026-10-14 - Inert support publication gate resolved
+
+- Verified the already-confirmed #6631 main commit
+  `f5e4e30353a076aec74781e6ef5cfe5df474e939` carries #6521's exact
+  `tools/promotion_control.py` blob
+  `3c73e80e82a307c4c3a8ea359fa138f02a907a73`.
+- Its real composer imports and calls that support with the pinned main
+  input. The committed tree has no `.github/promotion-control.json`, and
+  the release-state receipt has no `control_preserved` entry.
+- This closes only Phase 2's previously open source-publication proof.
+  Preservation remains inactive; no allowlist, main-control rollout,
+  concurrent-repair behavior or rollback-under-activation is claimed.
+
+### 2026-10-14 - Retained registration-fixture repair merged
+
+- Normal validation `38534938481` checks out actual dev
+  `834e7936ad204f06bb7a5572e677707e21c173a2`, which includes #6661.
+  Worktrees job `115765163594` repeats the same #6675 exact-session
+  fixture failure, not a new post-repair failure.
+- The retained executor's #6682 merged at `09:24:13Z` as
+  `be910de4f60b4e24a0c77e4d8971c46baa0d9330`. Its shared-fixture repair
+  retains real registration and the original deterministic selection;
+  the owner's 186-case contained portfolio and cheap guard selection pass.
+- Normal dev CI `38542087880` now covers that repair. Follow the next
+  containing full validation and promotion; no retry, additional dispatch,
+  competing patch or authority-fence relaxation is needed.
+
+### 2026-10-14 - Coupled budget-hook contracts repaired locally
+
+- Normal dev CI `38539344925` on `0976e89aa0ed` fails only the
+  customizing-copilot suite: its explicit inline roster omits the reviewed
+  budget advisory boundary, and the output-free stack proof does not
+  recognize the new Bash wrapper. Reserved the unowned pair as #6699
+  after exact issue/open-PR deduplication; #6646's feature is already merged.
+- Reuse the existing suite-standard empty-JSON EXIT trap in that wrapper,
+  retaining its child-output suppression, redacted diagnostics and deadlines.
+  Reconcile the owned inline roster rather than weaken scanner classification
+  or introduce a new semantic policy. Stack assertion failures now show the
+  responsible inventory. The missing-writer regression requires exactly one
+  empty envelope.
+- Full native validation passes 493 customizing cases and 296 budget cases,
+  with 40 explicit platform/opt-in skips in the latter. Windows exposed an
+  oversized parametrized ID overflowing `PYTEST_CURRENT_TEST`; short case
+  labels fix it without shrinking the 65537-byte input or its assertions.
+  The full budget suite uses admitted Git Bash, not the unavailable WSL
+  launcher; no persistent host setting or test coverage was suppressed.
+- A separate actual-wrapper check on a fresh temporary home verifies startup
+  and resume cue creation, malformed input and missing-writer envelopes,
+  retention of previous cue bytes and no runtime provisioning. It explicitly
+  admits a working Python rather than accepting a WindowsApps alias's
+  success-shaped empty run. Scratch is removed afterward.
+- Ruff F/E9, docs, install-contract, headless and whitespace guards pass.
+  Both affected plugins have tool-generated patch changefiles. Linux
+  SIGALRM and the new POSIX regression remain hosted-CI obligations;
+  this is not the separate native-desktop acceptance deferred under #6644.
+  The repair still needs ordinary dev review/checks, merge and a containing
+  release before the original main-PR invocation proof can finish.
