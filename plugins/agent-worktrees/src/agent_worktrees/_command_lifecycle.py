@@ -6,7 +6,6 @@ import importlib.util
 import json
 import math
 import os
-import signal
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -213,6 +212,8 @@ def run_lifecycle(
         raise ValueError("A lifecycle child requires an exact absolute interpreter.")
     if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
         raise ValueError("A lifecycle deadline must be finite and positive.")
+    if timeout is not None and os.name != "nt":
+        raise ValueError("A lifecycle deadline requires Windows Job containment.")
     if teardown:
         root = Path(arguments["legacy_root"]).resolve()
         if any(Path(path).resolve().is_relative_to(root) for path in (sys.executable, command[0])):
@@ -229,11 +230,7 @@ def run_lifecycle(
                 env=environment, **no_window_kwargs(),
             )
         else:
-            child = subprocess.Popen(
-                command, env=environment,
-                **({"start_new_session": True} if timeout is not None else {}),
-                **no_window_kwargs(),
-            )
+            child = subprocess.Popen(command, env=environment, **no_window_kwargs())
         while True:
             try:
                 result = child.wait(timeout=timeout)
@@ -243,17 +240,13 @@ def run_lifecycle(
                     file=sys.stderr,
                 )
                 try:
-                    if os.name == "nt":
-                        job.terminate_and_wait(2)
-                    else:
-                        os.killpg(child.pid, signal.SIGKILL)
+                    job.terminate_and_wait(2)
                 except (OSError, RuntimeError, subprocess.SubprocessError) as error:
                     print(f"Runtime lifecycle cancellation failed: {error}", file=sys.stderr)
-                    if job is not None:
-                        # Without an empty-Job witness, preserve the durable
-                        # reservation even if this parent can no longer wait.
-                        lease.lock.acquired = False
-                        job.close()
+                    # Without an empty-Job witness, preserve the durable
+                    # reservation even if this parent can no longer wait.
+                    lease.lock.acquired = False
+                    job.close()
                     child.wait()
                     raise
                 child.wait()

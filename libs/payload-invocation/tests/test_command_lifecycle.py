@@ -24,8 +24,10 @@ def _lifecycle(fixture: dict):
     return _load(ROOT / "libs/payload-invocation/command_lifecycle.py", "lifecycle_reference")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows strict containment")
+@pytest.mark.parametrize("parent_exits", [False, True])
 def test_command_binding_deadline_stops_tree_before_releasing_admission(
-    binding_fixture: dict,
+    binding_fixture: dict, parent_exits: bool,
 ) -> None:
     helper = binding_fixture["payload"] / "libs/agent-procutil/src/agent_procutil/__init__.py"
     helper.parent.mkdir(parents=True)
@@ -39,15 +41,18 @@ def test_command_binding_deadline_stops_tree_before_releasing_admission(
         "time.sleep(30); p.write_text('escaped mutation')"
     )
     parent = (
-        "import subprocess,sys,time; "
-        f"subprocess.Popen([sys.executable,'-c',{worker!r}]); time.sleep(30)"
+        "import subprocess,sys,time; from pathlib import Path; "
+        f"subprocess.Popen([sys.executable,'-c',{worker!r}]); "
+        f"marker=Path({str(marker)!r})\n"
+        "while not marker.exists(): time.sleep(0.01)\n"
+        + ("" if parent_exits else "time.sleep(30)")
     )
     result = lifecycle.run_lifecycle(
         binding_fixture["binding"], binding_fixture["primitive"],
         [sys.executable, "-c", parent], deferred_runtime=True, timeout=3,
         **binding_fixture["arguments"],
     )
-    assert result == 124
+    assert result == (0 if parent_exits else 124)
     pid = json.loads(marker.read_text())["pid"]
     assert not binding_fixture["primitive"]._pid_is_live(pid)
     assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
@@ -71,6 +76,27 @@ def test_command_binding_invalid_deadline_never_acquires_admission(
             [sys.executable, "-c", "raise AssertionError('not admitted')"],
             timeout=timeout, **binding_fixture["arguments"],
         )
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+
+
+def test_command_binding_posix_deadline_refuses_before_admission_or_spawn(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = binding_fixture["binding"]._load_lifecycle()
+    before = _snapshot(binding_fixture["home"])
+    monkeypatch.setattr(lifecycle, "os", SimpleNamespace(name="posix"))
+
+    def not_spawned(*args, **kwargs):
+        pytest.fail("Unsupported bounded lifecycle spawned a child")
+
+    monkeypatch.setattr(lifecycle.subprocess, "Popen", not_spawned)
+    with pytest.raises(ValueError, match="Windows Job containment"):
+        lifecycle.run_lifecycle(
+            binding_fixture["binding"], binding_fixture["primitive"],
+            [sys.executable, "-c", "pass"], timeout=1,
+            **binding_fixture["arguments"],
+        )
+    assert _snapshot(binding_fixture["home"]) == before
     assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
 
 

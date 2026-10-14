@@ -91,6 +91,10 @@ def test_all_installers_deploy_every_py_hook():
             missing.append(
                 f"{name} deploys anchor_shell_parser.py after its importer"
             )
+        if text.find("hook_runtime.py") > text.find("hook_client.py"):
+            missing.append(
+                f"{name} deploys hook_runtime.py after its importer"
+            )
     assert not missing, (
         "python hook(s) wired in hooks.json but not deployed by an "
         "installer (they would silently no-op):\n  " + "\n  ".join(missing))
