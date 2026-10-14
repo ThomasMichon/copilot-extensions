@@ -560,9 +560,48 @@ instead of delivered.
 
 ### Dedup & scheduling
 
-- `dedup_key` (unique) makes `create` idempotent -- a duplicate returns the
-  existing task, so agents can browse/`find` before ideating.
+- `dedup_key` makes `create` idempotent within a repo while a task occupies
+  the logical live identity: proposed, queued, claimed, started, suspended, or
+  submitted with `require_verification: true`. A pending verification therefore
+  retains the original task through repeated discovery and evaluator rejection.
+  Unverified submitted, completed, abandoned, and legacy dead-letter rows release
+  the key.
 - `not_before` defers a task until a wall-clock time (scheduled creation).
+
+Use an exact read when another producer, such as a recipe emitter, already
+authors the task:
+
+```bash
+agent-dispatch lookup --repo github.com/example/project \
+  --dedup-key 'recipe:reviewer:target=github.com/example/project#42'
+```
+
+`GET /tasks?repo=<lane>&dedup_key=<key>` and
+`DispatchClient.lookup_dedup(key, repo=lane)` return `[]` or `[task]`, using
+the same exact repo/key and live-state selection as `create`. Keys are literal,
+including SQL wildcard characters. This is not a capped roster scan or a
+title/prompt search: `find`/`q` remain text search only. Lookup retains the full
+single-task detail shape, including result, hold, evaluator, session, and any
+existing spawn reservation/run waiter, without enrichment or lifecycle changes.
+It does not create, rearm, wake, or clear holds; the CLI does not autostart a
+coordinator. A missing task remains missing.
+
+The repo lane is required by the API/client; the CLI defaults to the calling
+repo when `--repo` is omitted. Other list selectors (including `q`, `sweep`,
+status/category filters, and `limit`) cannot accompany `dedup_key`. Clients
+require the coordinator's `exact_dedup_lookup: 1` health capability instead of
+letting an older coordinator ignore the selector and return unrelated tasks.
+Exact lookup does not perform the reviewer recipe's legacy-key alias matching;
+it reads the stored key, not an equivalent target encoded under another key.
+Recipe creation does apply legacy reviewer aliases with the same live-state rule.
+
+Creation checks and inserts under its existing `BEGIN IMMEDIATE` transaction.
+That serialized logical check protects verification-pending submissions even
+though the unchanged five-state physical unique index is only a supplementary
+constraint. No stronger index is rebuilt at startup. Historical multiple live
+candidates produce a local HTTP `409` / `dedup_conflict` naming the repo, key,
+and candidate task IDs, rather than selecting one or rewriting records; unrelated
+keys and coordinator startup remain usable.
 
 ## Producers
 
@@ -997,6 +1036,39 @@ A repository can compose its review source, lifecycle evaluator, and bounded
 worker pool in one `kind: reviewer-loop` declaration. The registrar expands it
 in memory to the same existing emitter/evaluator/supervised-lane units; the
 declaration remains the only source of truth.
+
+By default a loop named `project-review` expands to `project-review-source`,
+`project-review-evaluator`, and `project-review-workers`, with evaluator selector
+`project-review-lifecycle`. Optional `pool.name`, `evaluator.name`, and
+`evaluator.evaluator_ref` preserve an adopter's existing worker/evaluator
+registration names and task selector independently:
+
+```yaml
+name: project-review
+kind: reviewer-loop
+repo: github.com/example/project
+task_label: external-review
+emitter:
+  command: [python, tools/reviews.py, discover]
+  interval_seconds: 60
+evaluator:
+  name: existing-review-evaluator
+  evaluator_ref: existing-review-lifecycle
+  evaluator_spec: {rules: []}
+pool:
+  name: existing-review-workers
+  body: {type: headless, agent: reviewer}
+```
+
+The emitter and evaluator both use the selected `evaluator_ref`; inspect,
+status, doctor, and side-load consume these same expanded units. Registration
+names must use letters, digits, hyphens, or underscores and be unique across
+the declaration and trusted registry. The evaluator selector is a non-empty,
+non-whitespace string, not a registration name. Explicit empty or malformed
+values are rejected, not replaced with defaults. The emitter name/id remains
+derived; `emitter.evaluator_ref` cannot override the shared selector.
+Keeping names and selectors does not change declaration trust, task/session
+identity, or runtime claim authority, and does not rewrite stored tasks.
 
 The loop's `task_label` is always included in its worker pool. A repository
 that already shares one bounded reviewer fleet with another producer may add
@@ -2105,10 +2177,11 @@ agent-dispatch reattach <task-id> <session-id> --host <pool-host>
 agent-dispatch reattach <task-id> <session-id> --no-resume
 ```
 
-A task's `dedup_key` only releases from the create-dedup index once the task
-reaches a **terminal** status -- so `reattach` only works against a task
-that's already terminal, typically one just `abandon`ed for exactly this
-reason. It refuses (non-zero exit, no mutation) unless `session-id` is
+A task's `dedup_key` releases from logical create-dedup selection when it leaves
+proposed, queued, claimed, started, suspended, or verification-required submitted.
+`reattach` additionally requires a **terminal** source task,
+typically one just `abandon`ed for this purpose. It refuses (non-zero exit,
+no mutation) unless `session-id` is
 itself confirmed live, the source task is terminal, it carries a
 `dedup_key`, and it is **not** producer-managed (a `producer_fence` can't be
 safely replayed -- recover it through its owning producer instead). If the
@@ -2269,7 +2342,7 @@ oversized input returns HTTP 413, and both leave the task non-terminal. JSON
 null and scalars are rejected. MCP clients should send a decoded object or array;
 the MCP SDK may normalize a JSON-encoded object string before tool invocation.
 
-`show` keeps the decoded `result`. Bulk `list`/`find`/`sweep`/`inbox` rows omit
+`show` and exact `lookup` keep the decoded `result`. Bulk `list`/`find`/`sweep`/`inbox` rows omit
 the potentially large value and expose `has_result`; retrieve it with
 `result <id>`, `GET /tasks/<id>/result`, or MCP `dispatch_result`. SSE events
 also expose only `has_result`, never the result body. Initial completion emits

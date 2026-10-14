@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .task_categories import category_value
-from .client_errors import DispatchUpgradeRequired
+from .client_errors import DispatchError, DispatchUpgradeRequired
 
 
 def require_endpoint_categories(endpoint: str) -> None:
@@ -26,11 +26,36 @@ class CategoryClientMixin:
             )
 
     def list(self, **params: Any) -> list[dict]:
+        if params.get("dedup_key") is not None:
+            conflicts = [
+                key
+                for key, value in params.items()
+                if key not in {"repo", "dedup_key"}
+                and value is not None
+                and not (key == "sweep" and value is False)
+            ]
+            if conflicts:
+                raise DispatchError(
+                    400, f"dedup_key lookup cannot combine selectors: {conflicts}"
+                )
+            return self.lookup_dedup(params["dedup_key"], repo=params.get("repo"))
         if params.get("category") is not None:
             category_value(params["category"], selection=True)
             self.require_task_categories()
         clean = {k: v for k, v in params.items() if v is not None}
         return self._unwrap(self._http.get("/tasks", params=clean))
+
+    def lookup_dedup(self, dedup_key: str, *, repo: str | None) -> list[dict]:
+        """Read [] or the exact key's current create-dedup occupant in one repo."""
+        if not isinstance(repo, str) or not repo.strip():
+            raise DispatchError(400, "dedup lookup requires a non-empty repo lane")
+        if not isinstance(dedup_key, str) or not dedup_key.strip():
+            raise DispatchError(400, "dedup lookup requires a non-empty dedup_key")
+        if self.health().get("exact_dedup_lookup") != 1:
+            raise DispatchUpgradeRequired("coordinator lacks exact repo-scoped dedup lookup")
+        return self._unwrap(
+            self._http.get("/tasks", params={"repo": repo, "dedup_key": dedup_key})
+        )
 
     def find(
         self,

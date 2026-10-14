@@ -97,6 +97,7 @@ def register_status_routes(
             # client_steering.py's steer()).
             "steer_idempotency_key": True,
             "task_categories": 1,
+            "exact_dedup_lookup": 1,
         }
 
     @app.get("/events")

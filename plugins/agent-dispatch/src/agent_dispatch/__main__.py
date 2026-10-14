@@ -141,6 +141,7 @@ from .task_query_cli import (  # noqa: F401 -- re-exported for existing call sit
     _cmd_find,
     _cmd_inbox,
     _cmd_list,
+    _cmd_lookup,
     _cmd_mcp,
     _cmd_payload,
     _cmd_result,
@@ -753,9 +754,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=200)
     p.set_defaults(func=_cmd_inbox)
 
-    p = sub.add_parser(
-        "find", help="substring search over title/prompt (a quick dedup probe; calling repo)"
-    )
+    p = sub.add_parser("lookup", help="exact repo-scoped live task lookup by dedup key")
+    p.add_argument("--dedup-key", required=True)
+    p.add_argument("--repo", help="lane to look up; default: calling repo")
+    p.set_defaults(func=_cmd_lookup)
+
+    p = sub.add_parser("find", help="substring search over title/prompt, not a key lookup")
     p.add_argument("query")
     p.add_argument("--category", choices=("work", "maintenance", "all"), default="all")
     p.add_argument(

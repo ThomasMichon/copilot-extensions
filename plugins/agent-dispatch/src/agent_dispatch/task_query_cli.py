@@ -316,6 +316,14 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         inbox = [t for t in inbox if t.get("status") == "proposed" or t.get("awaiting_steer")]
     return _core()._emit(_core()._enrich(inbox))
 
+def _cmd_lookup(args: argparse.Namespace) -> int:
+    repo = _core()._scope_repo(args)
+    if not repo:
+        print(_core()._REPO_UNRESOLVED, file=sys.stderr)
+        return 2
+    with _core()._client(args, ensure=False) as client:
+        return _core()._emit(client.lookup_dedup(args.dedup_key, repo=repo))
+
 def _cmd_find(args: argparse.Namespace) -> int:
     repo = _core()._scope_repo(args)
     if not repo:

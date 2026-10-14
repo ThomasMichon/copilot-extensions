@@ -52,6 +52,7 @@ from .queue import (
     worker_id_for,
 )
 from .task_authority import mint_task_token, register_task_grant_route, resolve_task_authority
+from .queue_dedup import DedupConflictError
 
 #: Event types that run periodically for every live task without ever
 #: transitioning its state (a heartbeat lease extension, a routine activity
@@ -273,6 +274,8 @@ def register_task_routes(
             raise HTTPException(
                 status_code=status, detail=exc.detail(operation="create")
             ) from exc
+        except DedupConflictError as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if outcome.event_type is not None:
@@ -292,9 +295,40 @@ def register_task_routes(
         exclusive_key: str | None = None,
         category: CategorySelection | None = None,
         q: str | None = None,
+        dedup_key: str | None = None,
         sweep: bool = False,
-        limit: int = 200,
+        limit: int | None = None,
     ) -> list[dict]:
+        if dedup_key is not None:
+            selectors = {
+                "status": status,
+                "target_machine": target_machine,
+                "target_repo": target_repo,
+                "label": label,
+                "evaluator_ref": evaluator_ref,
+                "source": source,
+                "origin_ref": origin_ref,
+                "exclusive_key": exclusive_key,
+                "category": category,
+                "q": q,
+                "limit": limit,
+            }
+            conflicts = [key for key, value in selectors.items() if value is not None]
+            if sweep:
+                conflicts.append("sweep")
+            if conflicts:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"dedup_key lookup cannot combine selectors: {conflicts}",
+                )
+            try:
+                task = queue.lookup_dedup(dedup_key, repo=repo)
+            except DedupConflictError as exc:
+                raise HTTPException(status_code=409, detail=exc.detail()) from exc
+            except TaskError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return [] if task is None else [_task_with_spawn_dict(queue, task)]
+        limit = 200 if limit is None else limit
         if sweep:
             return [_bulk_task_dict(t) for t in queue.sweep(repo=repo, limit=limit, category=category)]
         if q is not None:
