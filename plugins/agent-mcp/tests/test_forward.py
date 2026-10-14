@@ -504,6 +504,50 @@ def test_spawned_host_inherits_the_fixed_handle_not_its_target(tmp_path, monkeyp
 
     assert env["AGENT_MCP_SERVE_SOCKET"] == handle
 
+def test_spawned_host_is_told_the_fixed_handle_not_its_target(tmp_path, monkeypatch):
+    import agent_procutil
+
+    handle = str(tmp_path / "serve.sock")
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("AGENT_MCP_SERVE_SOCKET", raising=False)
+    _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
+    spawned = []
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", lambda cmd, **_k: spawned.append(cmd))
+
+    forward._spawn_serve_host(handle)
+
+    (cmd,) = spawned
+    assert cmd[cmd.index("--socket") + 1] == handle
+
+
+def test_serve_binds_the_fixed_handle_not_its_target(tmp_path, monkeypatch):
+    import argparse
+
+    from agent_mcp import __main__ as cli
+    from agent_mcp import serve
+
+    handle = str(tmp_path / "serve.sock")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
+    bound = []
+
+    class _Stop(Exception):
+        pass
+
+    def _server(socket_path, **_kwargs):
+        bound.append(socket_path)
+        raise _Stop
+
+    monkeypatch.setattr(serve, "Server", _server)
+    args = argparse.Namespace(passive=False, socket=handle, idle_timeout=0.0,
+                              control_port=None)
+
+    with pytest.raises(_Stop):
+        cli._cmd_serve(args)
+
+    assert bound == [handle]
+
 def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
     """With no host up, _ensure_serve spawns a detached `agent-mcp serve`, waits
     for its socket, and returns it; the spawned host answers a ping."""

@@ -32,7 +32,7 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
             # doctor group them into one generation (and refuse repair
             # when it cannot, including when the census missed a live
             # parent that may be the worker's launcher).
-            ppid = procs.parent_pid(item["pid"])
+            ppid, image = _structure(item)
             parent_image, parent_gone = None, False
             if isinstance(ppid, int) and ppid > 1 and ppid not in census:
                 parent_image, parent_gone = _outside_parent(ppid, item["start_time"])
@@ -41,7 +41,7 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
                     pid=item["pid"],
                     start_time=item["start_time"],
                     ppid=ppid,
-                    image=procs.process_executable_path(item["pid"]),
+                    image=image,
                     parent_image=parent_image,
                     parent_gone=parent_gone,
                 )
@@ -67,6 +67,24 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
         for pid in sorted(status_monitor_cutover._iter_status_monitor_pids())
         if pid in scoped_pids
     ]
+
+
+def _structure(item: dict) -> tuple[int | None, str | None]:
+    """``(ppid, image)`` read while ``item``'s PID still names the snapshot's process.
+
+    The start token is re-read before and after the structural reads; on any
+    mismatch (the process exited, or its PID was reused) both are reported
+    unreadable, which keeps generation grouping uncertain rather than
+    describing a replacement process as half of this generation.
+    """
+    pid, start = item["pid"], item["start_time"]
+    if start is None or locks.process_start_time(pid) != start:
+        return None, None
+    ppid = procs.parent_pid(pid)
+    image = procs.process_executable_path(pid)
+    if locks.process_start_time(pid) != start:
+        return None, None
+    return ppid, image
 
 
 def _outside_parent(ppid: int, child_start: object) -> tuple[str | None, bool]:

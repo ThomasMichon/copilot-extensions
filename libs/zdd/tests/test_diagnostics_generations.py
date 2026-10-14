@@ -532,3 +532,51 @@ def test_outside_parent_reasons():
     )
     # Without structural grouping nothing changes.
     assert group_generations({2: worker(77)}, structural=False)[1] is None
+
+
+def test_uncertainty_in_only_the_final_census_is_reported_as_a_refusal(tmp_path: Path):
+    """The final census is held to the same fail-closed rule as every earlier
+    one: a refusal it reveals is reported, never summarized as a clean apply."""
+    import copy
+
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    _stale_breadcrumb(tmp_path, new_pid=303, start="passive")
+    base = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner", 303: "passive"},
+        "ppid": {303: 1},
+        "image": {},
+        "terminated": [],
+    }
+
+    def counted(state, *, uncertain_at=None):
+        ctx = _ctx(tmp_path, state)
+        census = ctx.list_candidates
+        calls = []
+
+        def list_candidates():
+            calls.append(True)
+            candidates = census()
+            if len(calls) == uncertain_at:
+                candidates = [
+                    diagnostics.DaemonCandidate(pid=c.pid, start_time=c.start_time, image=c.image)
+                    for c in candidates
+                ]
+            return candidates
+
+        return dataclasses.replace(ctx, list_candidates=list_candidates), calls
+
+    ctx, calls = counted(copy.deepcopy(base))
+    clean = diagnostics.apply_daemon_health(ctx)
+    assert clean["actions"] and clean["actions"][-1].get("kind") != "generation_grouping"
+    _stale_breadcrumb(tmp_path, new_pid=303, start="passive")
+
+    state = copy.deepcopy(base)
+    ctx, _ = counted(state, uncertain_at=len(calls))
+    result = diagnostics.apply_daemon_health(ctx)
+
+    assert result["actions"][-1] == {
+        "kind": "generation_grouping", "blocked": True,
+        "reason": "generation grouping uncertain",
+    }
+    assert result["after"]["grouping_uncertain"] is True

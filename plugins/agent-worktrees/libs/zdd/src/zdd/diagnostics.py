@@ -956,8 +956,11 @@ def _apply_daemon_health_locked(
             attempted.add(item["pid"])
 
         after = _audit_daemon_health(ctx, now=now, cutover_state="held")
-        if after.get("census_available") is False:
-            return blocked_census(after)
+        # The final census is held to the same fail-closed rule: a refusal it
+        # reveals is reported, never summarized as a clean apply.
+        refused = refuse_termination(after)
+        if refused is not None:
+            return refused
         return {
             "service": ctx.service,
             "mode": "apply",

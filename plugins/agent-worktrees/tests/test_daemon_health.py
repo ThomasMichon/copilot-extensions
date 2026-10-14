@@ -132,6 +132,7 @@ def test_windows_candidates_carry_ppid_and_image(tmp_path, monkeypatch):
     monkeypatch.setattr(daemon_health.sys, "platform", "win32")
     monkeypatch.setattr(daemon_health.status_monitor_runtime, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(windows_process_census, "snapshot", lambda: _pair_snapshot(tmp_path))
+    monkeypatch.setattr(daemon_health.locks, "process_start_time", str)
     monkeypatch.setattr(daemon_health.procs, "parent_pid", lambda pid: 101 if pid == 202 else 1)
     images = {101: str(launcher), 202: "C:/py/python.exe"}
     monkeypatch.setattr(daemon_health.procs, "process_executable_path", images.get)
@@ -142,6 +143,38 @@ def test_windows_candidates_carry_ppid_and_image(tmp_path, monkeypatch):
         (101, 1, str(launcher)), (202, 101, "C:/py/python.exe"),
     ]
 
+
+@pytest.mark.guard
+@pytest.mark.parametrize("changes_at", [0, 1], ids=["before-reads", "during-reads"])
+def test_windows_candidate_identity_change_makes_structure_unreadable(
+    tmp_path, monkeypatch, changes_at
+):
+    """ppid/image are only trusted while the PID still names the snapshot's
+    process: a PID that exits or is reused mid-read is reported unreadable,
+    so grouping stays uncertain instead of certifying a replacement."""
+    from agent_worktrees import windows_process_census
+
+    launcher = _monitor_venv(tmp_path)
+    monkeypatch.setattr(daemon_health.sys, "platform", "win32")
+    monkeypatch.setattr(daemon_health.status_monitor_runtime, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(windows_process_census, "snapshot", lambda: _pair_snapshot(tmp_path))
+    monkeypatch.setattr(daemon_health.procs, "parent_pid", lambda pid: 101 if pid == 202 else 1)
+    images = {101: str(launcher), 202: "C:/py/python.exe"}
+    monkeypatch.setattr(daemon_health.procs, "process_executable_path", images.get)
+    reads = {101: 0, 202: 0}
+
+    def start_time(pid):
+        reads[pid] += 1
+        if pid == 202 and reads[pid] > changes_at:
+            return "reused"
+        return str(pid)
+
+    monkeypatch.setattr(daemon_health.locks, "process_start_time", start_time)
+
+    candidates = {c.pid: c for c in daemon_health._candidates()}
+
+    assert (candidates[202].ppid, candidates[202].image) == (None, None)
+    assert (candidates[101].ppid, candidates[101].image) == (1, str(launcher))
 
 @pytest.mark.guard
 def test_windows_interpreter_pair_is_one_generation_not_a_duplicate(tmp_path, monkeypatch):
@@ -156,6 +189,7 @@ def test_windows_interpreter_pair_is_one_generation_not_a_duplicate(tmp_path, mo
     monkeypatch.setattr(daemon_health.sys, "platform", "win32")
     monkeypatch.setattr(daemon_health.status_monitor_runtime, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(windows_process_census, "snapshot", lambda: _pair_snapshot(tmp_path))
+    monkeypatch.setattr(daemon_health.locks, "process_start_time", str)
     monkeypatch.setattr(daemon_health.procs, "parent_pid", lambda pid: 101 if pid == 202 else 1)
     images = {101: str(launcher), 202: "C:/py/python.exe"}
     monkeypatch.setattr(daemon_health.procs, "process_executable_path", images.get)
@@ -241,10 +275,11 @@ def _windows_backstop(
         daemon_health.locks, "pid_alive",
         lambda pid: True if pid in outside else real_alive(pid),
     )
-    # An outside parent started before every census member (no PID reuse).
+    # An outside parent started before every census member (no PID reuse);
+    # census members keep the start token the snapshot recorded.
     monkeypatch.setattr(
         daemon_health.locks, "process_start_time",
-        lambda pid: "1" if pid in outside else real_start(pid),
+        lambda pid: "1" if pid in outside else live.get(pid) or real_start(pid),
     )
 
     def terminate(pid, expected_start_time, *, exit_timeout=None):

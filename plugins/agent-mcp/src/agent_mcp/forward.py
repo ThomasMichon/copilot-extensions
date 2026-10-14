@@ -129,7 +129,7 @@ def _spawn_serve_host(handle: str) -> None:
     from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
     python = sys.executable
-    handle = str(Path(handle).resolve())
+    handle = sockio.absolute_handle(handle)
     cmd = [windowless_python(python), "-m", "agent_mcp", "serve", "--socket", handle]
     home = sockio.default_home_dir().resolve()
     home.mkdir(parents=True, exist_ok=True)
