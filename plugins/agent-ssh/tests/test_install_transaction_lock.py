@@ -499,11 +499,11 @@ def test_pid_fallback_reaper_rechecks_liveness_under_the_mutex(tmp_path: Path) -
 def test_pid_fallback_reaper_never_unlinks_a_newer_holder_released_mid_check(
     tmp_path: Path,
 ) -> None:
-    """The owner is dead at the first check, but by the under-mutex re-read
-    another reaper has removed it and a live holder P has taken the lock. P
-    then releases and Q re-creates the lock before the reaper's liveness
-    probe. The reaper may only remove the owner it judged stale itself, so
-    Q's live lock must survive."""
+    """Guard against a re-read-then-probe unlink of a newer holder: the owner
+    is dead at the first check, but by the under-mutex re-read a live holder
+    P has taken the lock, and P releases while Q re-creates it before any
+    liveness probe of the re-read value. Only the owner judged stale in this
+    iteration may be removed, so Q's live lock must survive."""
     hooks = (
         'before_read() {\n'
         '    case "$1" in\n'
