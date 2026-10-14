@@ -31,7 +31,7 @@ from ssh_manager.locks import pid_alive
 
 from .config import LEASE_FILE, STATE_DIR, ContainersConfig, ensure_state_dir
 from .lifecycle import list_containers
-from .private_state import atomic_write_json
+from .private_state import atomic_write_json, private_file_lock
 
 log = logging.getLogger("agent-containers")
 
@@ -130,49 +130,10 @@ def _this_environment() -> str:
 
 @contextmanager
 def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
-    """Cross-platform exclusive lock via O_CREAT|O_EXCL lock file."""
+    """Serialize admission, lifecycle and binding writers with kernel ownership."""
     ensure_state_dir()
-    deadline = time.monotonic() + timeout
-    fd = None
-    owner_token = uuid.uuid4().hex
-    while True:
-        try:
-            fd = os.open(
-                str(_LOCK_FILE),
-                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                0o600,
-            )
-            try:
-                os.fchmod(fd, 0o600)
-            except (AttributeError, OSError):
-                pass
-            os.write(fd, owner_token.encode("ascii"))
-            os.fsync(fd)
-            break
-        except FileExistsError:
-            if time.monotonic() >= deadline:
-                # Stale lock recovery: if older than timeout*3, steal it.
-                try:
-                    age = time.time() - _LOCK_FILE.stat().st_mtime
-                    if age > timeout * 3:
-                        _LOCK_FILE.unlink(missing_ok=True)
-                        continue
-                except OSError:
-                    pass
-                raise RuntimeError(
-                    "Could not acquire lease lock (held by another process)"
-                ) from None
-            time.sleep(poll)
-    try:
+    with private_file_lock(_LOCK_FILE, timeout=timeout):
         yield
-    finally:
-        if fd is not None:
-            os.close(fd)
-        try:
-            if _LOCK_FILE.read_text(encoding="ascii") == owner_token:
-                _LOCK_FILE.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def _read_leases() -> dict[str, Lease]:

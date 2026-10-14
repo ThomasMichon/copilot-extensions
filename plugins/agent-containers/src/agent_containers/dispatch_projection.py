@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -21,15 +22,30 @@ from .private_state import atomic_write_json, write_json_exclusive
 from .restricted_exec import resolve_executable, sanitized_exec_prefix
 
 TOKEN_FILE = "/run/agent-dispatch/task-token"
+WORKER_LOCK = "/run/agent-dispatch/worker.lock"
 _STATE = STATE_DIR / "dispatch-bindings"
 _FACTS = {"task_id", "worker_id", "generation", "coordinator_epoch", "coordinator_url"}
 _ID = re.compile(r"[0-9a-f]{64}")
 _BINDING_ID = re.compile(r"[0-9a-f]{32}")
 
-# Runs only as root through an immutable Node executable; credentials use stdin.
-_WRITE_TOKEN = r"""
+_ROOT_DIRECTORY = r"""
 const fs = require('fs');
 const crypto = require('crypto');
+function rootDirectory() {
+  if (process.getuid() !== 0) throw Error();
+  const run = fs.lstatSync('/run');
+  if (!run.isDirectory() || run.uid !== 0 || ((run.mode & 0o22) && !(run.mode & 0o1000))) throw Error();
+  const dir = '/run/agent-dispatch';
+  try { fs.mkdirSync(dir, {mode: 0o755}); }
+  catch (err) { if (err.code !== 'EEXIST') throw err; }
+  const st = fs.lstatSync(dir);
+  if (!st.isDirectory() || st.uid !== 0 || (st.mode & 0o777) !== 0o755) throw Error();
+  return dir;
+}
+"""
+
+# Runs only as root through an immutable Node executable; credentials use stdin.
+_WRITE_TOKEN = _ROOT_DIRECTORY + r"""
 let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => {
@@ -39,14 +55,8 @@ process.stdin.on('data', chunk => {
 process.stdin.on('end', () => {
   let tmp;
   try {
-    if (process.getuid() !== 0 || !/^[\x21-\x7e]{1,8192}$/.test(input)) throw Error();
-    const run = fs.lstatSync('/run');
-    if (!run.isDirectory() || run.uid !== 0 || ((run.mode & 2) && !(run.mode & 512))) throw Error();
-    const dir = '/run/agent-dispatch';
-    try { fs.mkdirSync(dir, {mode: 0o755}); }
-    catch (err) { if (err.code !== 'EEXIST') throw err; }
-    const st = fs.lstatSync(dir);
-    if (!st.isDirectory() || st.uid !== 0 || (st.mode & 0o777) !== 0o755) throw Error();
+    if (!/^[\x21-\x7e]{1,8192}$/.test(input)) throw Error();
+    const dir = rootDirectory();
     const dest = dir + '/task-token';
     try {
       const old = fs.lstatSync(dest);
@@ -64,6 +74,23 @@ process.stdin.on('end', () => {
     process.exitCode = 1;
   }
 });
+"""
+
+_INITIALIZE_LOCK = _ROOT_DIRECTORY + r"""
+try {
+  const dest = rootDirectory() + '/worker.lock';
+  try {
+    const fd = fs.openSync(dest, fs.constants.O_CREAT | fs.constants.O_EXCL |
+                          fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o444);
+    try { fs.fchmodSync(fd, 0o444); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+  } catch (err) { if (err.code !== 'EEXIST') throw err; }
+  const st = fs.lstatSync(dest);
+  if (!st.isFile() || st.uid !== 0 || (st.mode & 0o777) !== 0o444) throw Error();
+} catch (_) {
+  process.stderr.write('Restricted worker lock initialization failed\n');
+  process.exitCode = 1;
+}
 """
 
 
@@ -305,15 +332,42 @@ def build_spawn_command(target, binding: dict, acp_command: str) -> list[str]:
         target.container_id, target.user, inspected, kind="bash",
         deadline=time.monotonic() + 30,
     )
+    flock, _ = resolve_executable(
+        target.container_id, target.user, inspected, kind="flock",
+        deadline=time.monotonic() + 30,
+    )
+    _initialize_worker_lock(target, inspected)
     prefix = sanitized_exec_prefix(target.container_id, target.user, home)
     projected = environment(binding)
     if target.fleet.native_inference is not None:
         projected.update(target.fleet.native_inference.environment())
     env_args = [part for key, value in projected.items() for part in ("-e", f"{key}={value}")]
+    fenced = (
+        f"exec 9<{shlex.quote(WORKER_LOCK)}; "
+        f"{shlex.quote(flock)} --nonblock 9 || exit 75; "
+        f"exec {shlex.quote(bash)} --noprofile --norc -c {shlex.quote(acp_command)}"
+    )
     return [
         *prefix[:2], "-i", *prefix[2:-1], *env_args, prefix[-1],
-        bash, "--noprofile", "--norc", "-c", acp_command,
+        bash, "--noprofile", "--norc", "-c", fenced,
     ]
+
+
+def _initialize_worker_lock(target, inspected: dict) -> None:
+    node, home = resolve_executable(
+        target.container_id, "0", inspected, kind="node",
+        deadline=time.monotonic() + 30,
+    )
+    try:
+        result = subprocess.run(
+            [*sanitized_exec_prefix(target.container_id, "0", home), node, "-e", _INITIALIZE_LOCK],
+            stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=30,
+            creationflags=no_window_flags(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Restricted worker lock initialization failed") from None
+    if result.returncode:
+        raise RuntimeError("Restricted worker lock initialization failed")
 
 
 def launch_task(args, run_stdio) -> int:

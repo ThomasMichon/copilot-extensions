@@ -144,6 +144,7 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
             creationflags=no_window_flags(),
         )
 
+    holder = None
     try:
         _image_run("dispatch-e2e", fleet, name, workspace_folder="/workspace", exec_user="node")
         inspected = lifecycle.inspect_container(name)
@@ -219,5 +220,53 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
             creationflags=no_window_flags(),
         )
         assert peer.returncode != 0 and "retained task binding" in peer.stderr
+        cli_fleet["acp_command"] = (
+            "/usr/local/bin/node -e 'require(\"fs\").writeFileSync(\"/workspace/worker-ready\","
+            "String(process.pid));setInterval(()=>{},1000)'"
+        )
+        config_path.write_text(
+            yaml.safe_dump({"fleets": {"dispatch-e2e": cli_fleet}}), encoding="utf-8",
+        )
+        launch_args = [
+            *cli, "exec", "--stdio", name, "--dispatch-binding-id", binding["binding_id"],
+            "--expected-container-id", physical_id,
+        ]
+        holder = subprocess.Popen(
+            launch_args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, env=env, creationflags=no_window_flags(),
+        )
+        worker_pid = None
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            ready = run(
+                "exec", "-u", "node", physical_id, "/usr/local/bin/node", "-e",
+                "const fs=require('fs');try{process.stdout.write(fs.readFileSync("
+                "'/workspace/worker-ready','utf8'))}catch(e){process.exit(1)}",
+            )
+            if ready.returncode == 0:
+                worker_pid = int(ready.stdout)
+                break
+            assert holder.poll() is None, "worker wrapper exited before guest readiness"
+            time.sleep(0.2)
+        assert worker_pid is not None
+        holder.kill()
+        holder.wait(timeout=10)
+        alive = run(
+            "exec", "-u", "node", physical_id, "/usr/local/bin/node", "-e",
+            f"process.kill({worker_pid},0)",
+        )
+        assert alive.returncode == 0, alive.stderr
+        duplicate = subprocess.run(
+            launch_args, stdin=subprocess.DEVNULL, capture_output=True,
+            text=True, timeout=45, env=env, creationflags=no_window_flags(),
+        )
+        assert duplicate.returncode == 75, duplicate.stderr
+        assert run(
+            "exec", "-u", "node", physical_id, "/usr/local/bin/node", "-e",
+            f"process.kill({worker_pid},0)",
+        ).returncode == 0
     finally:
+        if holder is not None and holder.poll() is None:
+            holder.kill()
+            holder.wait(timeout=10)
         run("rm", "-f", name)

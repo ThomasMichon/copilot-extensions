@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import threading
 import time
 from dataclasses import replace
 from types import SimpleNamespace
@@ -52,6 +53,7 @@ def target(monkeypatch, tmp_path):
         projection, "resolve_executable",
         lambda *args, kind, **kwargs: (f"/usr/bin/{kind}", "/home/worker"),
     )
+    monkeypatch.setattr(projection, "_initialize_worker_lock", lambda *args: None)
     return target
 
 
@@ -205,9 +207,10 @@ def test_worker_argv_contains_nonsecret_projection_and_immutable_bash(target):
     binding = projection.prepare("pool-1", PHYSICAL_ID, FACTS)
     argv = projection.build_spawn_command(target, binding, "copilot --acp --stdio")
     assert argv[:3] == ["docker", "exec", "-i"]
-    assert argv[-6:] == [
-        PHYSICAL_ID, "/usr/bin/bash", "--noprofile", "--norc", "-c", "copilot --acp --stdio",
-    ]
+    assert argv[-6:-1] == [PHYSICAL_ID, "/usr/bin/bash", "--noprofile", "--norc", "-c"]
+    assert f"exec 9<{projection.WORKER_LOCK}" in argv[-1]
+    assert "/usr/bin/flock --nonblock 9 || exit 75" in argv[-1]
+    assert "copilot --acp --stdio" in argv[-1]
     assert f"AGENT_DISPATCH_TASK_TOKEN_FILE={projection.TOKEN_FILE}" in argv
     assert "AGENT_DISPATCH_TASK_TOKEN" not in argv
     assert "GH_TOKEN" not in argv and "AGENT_DISPATCH_CONTROL_TOKEN" not in argv
@@ -279,3 +282,72 @@ async def test_task_only_venue_does_not_advertise_ordinary_launch_readiness(targ
     assert spec["venue"]["capabilities"]["task_projection"] is True
     with pytest.raises(RuntimeError, match="explicit task preparation"):
         await resolver.ContainerResolver().ensure_ready("pool-1")
+
+
+@pytest.mark.parametrize("operation", ["prepare", "native-binding", "rotation"])
+def test_delayed_binding_transactions_cannot_be_stolen(target, monkeypatch, operation):
+    entered, release = threading.Event(), threading.Event()
+    results = []
+    real_lock = lease._lease_lock
+    monkeypatch.setattr(lease, "_lease_lock", lambda **kwargs: real_lock(timeout=0.1))
+    monkeypatch.setattr(
+        projection.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", ""),
+    )
+
+    def delay():
+        if threading.current_thread().name == "holder":
+            entered.set()
+            assert release.wait(3)
+
+    if operation == "prepare":
+        inspect = lifecycle.inspect_container
+        monkeypatch.setattr(lifecycle, "inspect_container", lambda name: (delay(), inspect(name))[1])
+        requests = [FACTS, {**FACTS, "task_id": "task-other"}]
+        action = projection.prepare
+    else:
+        binding = projection.prepare("pool-1", PHYSICAL_ID, FACTS)
+        requests = [grant(binding), grant(binding, owner_session_id="native-other")]
+        if operation == "rotation":
+            current = projection.project("pool-1", PHYSICAL_ID, requests[0])
+            requests = [
+                grant(binding, expires_at=current["expires_at"] + 100),
+                grant(binding, expires_at=current["expires_at"] + 200),
+            ]
+        monkeypatch.setattr(
+            resolver, "resolve_live_exec_target", lambda *args, **kwargs: (delay(), target)[1],
+        )
+        action = projection.project
+
+    def call(index):
+        try:
+            action("pool-1", PHYSICAL_ID, requests[index])
+            results.append((index, "success"))
+        except RuntimeError:
+            results.append((index, "blocked"))
+
+    first = threading.Thread(target=call, args=(0,), name="holder")
+    second = threading.Thread(target=call, args=(1,), name="contender")
+    first.start()
+    try:
+        assert entered.wait(3)
+        import os
+
+        os.utime(lease._LOCK_FILE, (1, 1))
+        second.start()
+        second.join(timeout=2)
+        assert not second.is_alive()
+        assert results == [(1, "blocked")]
+    finally:
+        release.set()
+        first.join(timeout=3)
+    assert not first.is_alive()
+    assert results == [(1, "blocked"), (0, "success")]
+    state = projection._read(PHYSICAL_ID)
+    assert state["task_id"] == FACTS["task_id"]
+    if operation != "prepare":
+        assert state["owner_session_id"] == "native-1"
+    if operation == "rotation":
+        assert state["expires_at"] == requests[0]["expires_at"]
+        projection.project("pool-1", PHYSICAL_ID, requests[1])
+        assert projection._read(PHYSICAL_ID)["expires_at"] == requests[1]["expires_at"]

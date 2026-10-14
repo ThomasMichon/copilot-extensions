@@ -48,7 +48,11 @@ nonsecret binding and returns its explicit `spawn_command`; a different task,
 generation, epoch, worker or endpoint cannot reuse that physical container.
 Releasing a borrow or ending a session does not clear this fence: a different
 incarnation needs a new physical container. One provider worker is admitted at
-a time. The provider's creation-time binding identity is pinned in both an
+a time. Admission, lifecycle and projection writers share a kernel-owned
+host lock that is never stolen based on file age. Task execution additionally
+holds a guest `flock` on a stable root-owned file for the worker's lifetime:
+terminating only the host wrapper does not admit a duplicate surviving worker.
+The provider's creation-time binding identity is pinned in both an
 immutable Docker label and owner-private state. Missing, corrupt or mismatched
 birth state is not an unused slot: preparation refuses it and requires
 recreation instead of letting a surviving old worker consume a new task grant.
@@ -65,7 +69,7 @@ command output stores the token. Rotation preserves the same incarnation.
 
 The explicit launch projects only the pinned task/worker/endpoint and token-file
 path, using an immutable absolute Bash executable outside writable mounts and
-without shell startup files. The image must provide Bash and Node outside its
+without shell startup files. The image must provide Bash, Node and `flock` outside its
 writable surfaces, plus its own worker tools. No host signing key, shared bearer
 or credential relay is projected. This channel does not issue grants, extend
 task leases, schedule renewal, supply inference credentials or open a network:

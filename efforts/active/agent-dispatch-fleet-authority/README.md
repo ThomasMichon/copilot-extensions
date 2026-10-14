@@ -326,6 +326,26 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-14 -- Provider review: active locks and surviving guest workers
+- PR #6745's first review identified two real boundary gaps: the shared
+  lease mutex could steal an aged live lock while projection was still
+  performing Docker I/O, and host-wrapper PID admission could disappear
+  while its guest worker remained alive.
+- Admission, lifecycle and binding writers now share the existing
+  kernel-owned private file lock rather than age-based unlink/recovery.
+  Delayed concurrent preparation, native binding and rotation tests
+  age an actively held lock and prove a contender cannot enter or roll
+  back the incarnation/expiry.
+- Guest execution holds `flock` through an immutable absolute executable
+  and a stable root-owned read-only lock file. The actual Docker regression
+  kills only the host wrapper, confirms its long-running guest is still
+  alive, and observes a second explicit task launch refused with exit 75.
+  No resident daemon or new credential authority is introduced.
+- The contained lease/projection/helper selection passed 88 tests with
+  one platform/opt-in skip. The fresh Docker credential and wrapper-death
+  scenario passed; touched-code lint passed. These close the cited review
+  defects, not the parent fleet/supervisor/central-authority gates.
+
 ### 2026-10-14 -- Restricted provider delivery and birth authority
 - Added an explicit `dispatch_only` creation policy for restricted
   image-backed fleets. Provider creation pins a random, nonsecret birth
