@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .source_layout import SourceLayoutError, domain_for, source_read, source_write
+
 if TYPE_CHECKING:
     from agent_index.store.clustering import Cluster
 
@@ -91,9 +93,18 @@ class ClusterStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
-        self._init_db()
+        self._source_domain = domain_for(Path(db_path).parent / "lance")
+        if self._source_domain is None:
+            self._init_db()
+        else:
+            import lancedb
+
+            self._source_db = lancedb.connect(str(self._source_domain.path))
 
     def _connect(self) -> sqlite3.Connection:
+        if (self._source_domain is not None and not self._source_domain.writing
+                and not Path(self._db_path).is_file()):
+            raise SourceLayoutError("source-aware clusters are not prepared")
         conn = sqlite3.connect(self._db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -111,6 +122,7 @@ class ClusterStore:
 
     # -- write ---------------------------------------------------------------
 
+    @source_write
     def replace_all(self, clusters: list[Cluster]) -> int:
         """Atomically swap in a fresh full set of clusters.
 
@@ -119,6 +131,9 @@ class ClusterStore:
         clusters written.
         """
         now = time.time()
+        if self._source_domain is not None:
+            self._source_domain.effect("cluster-replace")
+            self._init_db()
         conn = self._connect()
         try:
             conn.execute("BEGIN")
@@ -205,6 +220,7 @@ class ClusterStore:
             members=self._members(conn, row["cluster_id"]),
         )
 
+    @source_read
     def list_clusters(
         self,
         *,
@@ -239,6 +255,7 @@ class ClusterStore:
         finally:
             conn.close()
 
+    @source_read
     def get_cluster(self, cluster_id: str) -> StoredCluster | None:
         conn = self._connect()
         try:
@@ -249,6 +266,7 @@ class ClusterStore:
         finally:
             conn.close()
 
+    @source_read
     def cluster_for_item(
         self, source: str, file_path: str,
     ) -> StoredCluster | None:
@@ -265,6 +283,7 @@ class ClusterStore:
         finally:
             conn.close()
 
+    @source_read
     def stats(self) -> dict[str, object]:
         conn = self._connect()
         try:

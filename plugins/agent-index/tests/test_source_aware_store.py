@@ -1,0 +1,615 @@
+"""Cold, isolated source-aware domain proofs. No legacy data or live services."""
+
+from __future__ import annotations
+
+import base64
+import json
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+import pytest
+from agent_procutil import no_window_kwargs
+
+from agent_index.chunking.base import Chunk
+from agent_index.index_config import IndexConfig, ModelProfile
+from agent_index.search.engine import SearchEngine
+from agent_index.store.multi_model_store import MultiModelStore
+from agent_index.store.source_layout import (
+    LAYOUT,
+    MARKER,
+    SourceLayoutError,
+    initialize_source_store,
+    validate_source_store,
+)
+
+
+@pytest.fixture
+def cold(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    config = IndexConfig(
+        data_dir=tmp_path / "isolated", model_profiles={
+            "small": ModelProfile("small", "fixture-inference-only", dim=2),
+        },
+    )
+    return config, initialize_source_store(config)
+
+
+def chunk(source="git:alpha", text="needle alpha", language="markdown", path="a.md"):
+    return Chunk(text, path, "text", language, 1, 1, source)
+
+
+def test_cold_projection_restart_and_unchanged_initialization(cold):
+    config, store = cold
+    item = chunk()
+    store.upsert("small", [item], np.array([[1, 0]], dtype=np.float32))
+    receipt = (config.lance_dir / MARKER).read_bytes()
+    again = initialize_source_store(config)
+    assert (config.lance_dir / MARKER).read_bytes() == receipt
+    row = again.get_vector_table("small")._get_or_create_table().search().limit(1).to_list()[0]
+    assert row["source"] == item.source and row["language"] == item.language
+    assert row["chunk_id"] == item.chunk_id and row["vector"] == [1.0, 0.0]
+
+
+def test_legacy_refused_without_mutation_and_unsafe_downgrade(cold, tmp_path, monkeypatch):
+    config, _store = cold
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT")
+    with pytest.raises(SourceLayoutError):
+        MultiModelStore(config.lance_dir)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    sentinel = legacy / "old-data"
+    sentinel.write_bytes(b"preserve")
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    from agent_index.store.source_layout import initialize_source_layout
+
+    with pytest.raises(SourceLayoutError):
+        initialize_source_layout(legacy)
+    assert list(legacy.iterdir()) == [sentinel] and sentinel.read_bytes() == b"preserve"
+
+
+def test_kernel_fence_excludes_other_participating_process(cold):
+    config, store = cold
+    code = (
+        "import sys; from agent_index.store.multi_model_store import MultiModelStore; "
+        "from agent_index.store.source_layout import SourceLayoutError; "
+        "s=MultiModelStore(sys.argv[1]); "
+        "\ntry:\n with s._source_domain.read(s.content_store.db): pass"
+        "\nexcept SourceLayoutError:\n raise SystemExit(23)"
+    )
+    with store._source_domain.exclusion():
+        result = subprocess.run(  # noqa: S603 -- fixed fixture code, owned store path
+            [sys.executable, "-I", "-c", code, str(config.lance_dir)], capture_output=True,
+            text=True, timeout=30, check=False, **no_window_kwargs(),
+        )
+        assert result.returncode == 23, result.stderr
+
+
+def test_interruption_latches_closed_then_explicit_validation(cold):
+    _config, store = cold
+    with pytest.raises(RuntimeError):
+        with store._source_domain.write(store.content_store.db):
+            raise RuntimeError("fixture interruption before effect")
+    with pytest.raises(SourceLayoutError):
+        with store._source_domain.read(store.content_store.db):
+            pass
+    assert validate_source_store(store)["state"] == "clean"
+    with store._source_domain.read(store.content_store.db):
+        pass
+
+
+def test_missing_provenance_and_source_changes_fail_closed(cold):
+    _config, store = cold
+    with pytest.raises(SourceLayoutError):
+        store.upsert_vectors("small", [chunk()], np.array([[1, 0]], dtype=np.float32))
+    assert validate_source_store(store)["state"] == "clean"
+    original = chunk()
+    store.upsert("small", [original], np.array([[1, 0]], dtype=np.float32))
+    changed = chunk(source="git:beta")
+    object.__setattr__(changed, "chunk_id", original.chunk_id)
+    with pytest.raises(SourceLayoutError):
+        store.upsert_content([changed])
+    validate_source_store(store)
+    assert store.get_document("git:alpha", "a.md").source == "git:alpha"
+
+
+def test_native_prefilter_selectors_deletes_and_no_read_mutation(cold):
+    _config, store = cold
+    items = [
+        chunk(), chunk("git:alpha:commits", "needle commit", path="b.md"),
+        chunk("git:alphabet", "needle forbidden prefix", path="c.md"),
+        chunk("git:beta", "needle forbidden beta", path="d.md"),
+    ]
+    store.upsert("small", items, np.array([[0, 1], [0.2, 0.8], [1, 0], [1, 0]],
+                                        dtype=np.float32))
+
+    class Inference:
+        def embed_query(self, query):
+            return np.array([1, 0], dtype=np.float32)
+
+    engine = SearchEngine({"small": Inference()}, store)
+    before = store._source_domain.receipt()
+    result = engine.search_authorized("needle", families=("git:alpha",), mode="vector")
+    assert {r.source for r in result} == {"git:alpha", "git:alpha:commits"}
+    assert engine.search_authorized("needle", families=(), mode="vector") == []
+    assert engine.search_authorized("needle", families=("git:alpha",), language="python") == []
+    assert engine.search_authorized("needle", families=("git:alpha",), repo="beta") == []
+    assert store._source_domain.receipt() == before
+    store.delete_by_file("git:alpha", "a.md")
+    result = engine.search_authorized("needle", families=("git:alpha",), mode="vector")
+    assert [r.source for r in result] == ["git:alpha:commits"]
+
+
+def test_canonical_language_update_preserves_vector_and_updates_selector(cold):
+    _config, store = cold
+    before = chunk()
+    store.upsert("small", [before], np.array([[1, 0]], dtype=np.float32))
+    after = chunk(language="python")
+    assert after.chunk_id == before.chunk_id
+    store.upsert_content([after])
+    row = store.get_vector_table("small")._get_or_create_table().search().limit(1).to_list()[0]
+    assert row["source"] == before.source and row["language"] == "python"
+    assert row["vector"] == [1.0, 0.0] and row["chunk_id"] == before.chunk_id
+    from agent_index.store.source_search import source_predicate
+
+    with pytest.raises(ValueError):
+        source_predicate(("git:alpha",), repo="x" * 257)
+
+
+def run_git(repo: Path, *args):
+    git = shutil.which("git")
+    assert git is not None
+    result = subprocess.run(  # noqa: S603 -- fixture-only Git verbs and owned repository
+        [git, "-C", str(repo), *args], capture_output=True, text=True,
+        timeout=10, check=False, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.timeout(120)
+def test_real_queued_git_ingestion_incremental_delete_and_restart(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_git(repo, "init", "--quiet")
+    run_git(repo, "config", "user.name", "Synthetic Fixture")
+    run_git(repo, "config", "user.email", "fixture@example.invalid")
+    file = repo / "guide.md"
+    file.write_text("# Needle\n\nfirst independently ingested document\n", encoding="utf-8")
+    run_git(repo, "add", "--", "guide.md")
+    run_git(repo, "commit", "--quiet", "-m", "fixture initial")
+    data = tmp_path / "data"
+    inline = {"role": "host", "corpus": {"sources": [
+        {"name": "git:fixture", "type": "git", "_repo_path": str(repo)},
+    ]}}
+    for key, value in {
+        "AGENT_INDEX_STORE_LAYOUT": LAYOUT, "AGENT_INDEX_DATA_DIR": str(data),
+        "AGENT_INDEX_HOME": str(tmp_path / "home"), "AGENT_INDEX_SOURCE_MODE": "explicit",
+        "AGENT_INDEX_INDEX_ENSURE_ENGINES": "0", "AGENT_INDEX_INDEXER_NICE": "0",
+        "AGENT_INDEX_CLUSTER_ENABLED": "0", "AGENT_INDEX_GIT_FETCH": "0",
+        "AGENT_INDEX_CONFIG_DATA_B64": (
+            base64.urlsafe_b64encode(json.dumps(inline).encode()).decode()
+        ),
+    }.items():
+        monkeypatch.setenv(key, value)
+    from agent_index.engine.client import EngineClient
+    from agent_index.indexing.task_store import TaskStore
+    from agent_index.indexing.worker import run_worker
+
+    def inference(self, texts):
+        vectors = np.zeros((len(texts), 768), dtype=np.float32)
+        vectors[:, 0] = 1
+        return vectors
+
+    monkeypatch.setattr(EngineClient, "embed_texts", inference)  # Inference only.
+    queue = TaskStore(data / "tasks.db")
+
+    def queued(full):
+        task = queue.enqueue("git:fixture", full=full, trigger_source="fixture")
+        claimed = queue.dequeue_next()
+        assert claimed.id == task.id
+        assert run_worker(task.id) == 0
+        assert queue.get_task(task.id).status == "complete"
+
+    # Empty standalone first-touch FTS preparation must not poison the queued writer.
+    empty = initialize_source_store(IndexConfig())
+    assert empty.ensure_fts_index() is False
+    assert empty._source_domain.receipt()["state"] == "clean"
+    queued(True)
+    config = IndexConfig()
+    store = initialize_source_store(config)
+    initial = store.content_store.get_chunks_for_file("git:repo", "guide.md")
+    assert initial
+    file.write_text("# Needle\n\nreplacement autonomous ingestion\n", encoding="utf-8")
+    run_git(repo, "add", "--", "guide.md")
+    run_git(repo, "commit", "--quiet", "-m", "fixture update")
+    queued(False)
+    restarted = initialize_source_store(config)
+    current = restarted.content_store.get_chunks_for_file("git:repo", "guide.md")
+    assert current and any("replacement" in r.content for r in current)
+    assert not any("first independently" in r.content for r in current)
+    queued(False)
+    assert {r.chunk_id for r in current} == {
+        r.chunk_id for r in restarted.content_store.get_chunks_for_file("git:repo", "guide.md")
+    }
+    file.unlink()
+    run_git(repo, "add", "-u")
+    run_git(repo, "commit", "--quiet", "-m", "fixture delete")
+    queued(False)
+    assert initialize_source_store(config).content_store.get_chunks_for_file(
+        "git:repo", "guide.md",
+    ) == []
+
+
+@pytest.mark.timeout(180)
+def test_native_140000_source_layout_queries_and_latency(cold, monkeypatch):
+    """Benchmark-only bulk rows are separate from the real queued-ingestion proof."""
+    import hashlib
+    import tracemalloc
+
+    import pyarrow as pa
+
+    config, store = cold
+    vt = store.get_vector_table("small")
+    content = store.content_store._get_or_create_table()
+    vectors = vt._get_or_create_table()
+    total = 140_000
+    winners = {100_001, 120_000, 139_990, 139_999}
+
+    def batches(schema, vector):
+        for start in range(0, total + 32, 4096):
+            rows = []
+            for i in range(start, min(total + 32, start + 4096)):
+                source = f"git:family-{i % 18}" if i < total else "git:family-0lookalike"
+                if i < total and i % 37 == 0:
+                    source += ":commits"
+                language = "python" if i % 2 else "markdown"
+                row = {"chunk_id": f"{i:064x}", "source": source, "language": language,
+                       "indexed_at": 1.0}
+                if vector:
+                    row["vector"] = [1.0, 0.0] if i in winners or i >= total else [0.0, 1.0]
+                else:
+                    text = f"needle {i:06d}"
+                    row.update(
+                        file_path=f"docs/{i}.md", chunk_type="text", content=text,
+                        content_hash=hashlib.sha256(text.encode()).hexdigest(),
+                        line_start=1, line_end=1, metadata="",
+                    )
+                rows.append(row)
+            yield pa.RecordBatch.from_pylist(rows, schema=schema)
+
+    with store._source_domain.write(store.content_store.db):
+        content.add(pa.RecordBatchReader.from_batches(
+            content.schema, batches(content.schema, False),
+        ))
+        vectors.add(pa.RecordBatchReader.from_batches(
+            vectors.schema, batches(vectors.schema, True),
+        ))
+    assert store.ensure_fts_index()
+    content = store.content_store._get_or_create_table()
+    initial = store._source_domain.receipt()
+    embeddings = []
+
+    class Inference:
+        def embed_query(self, query):
+            embeddings.append(query)
+            return np.array([1, 0], dtype=np.float32)
+
+    engine = SearchEngine({"small": Inference()}, store)
+    families = tuple(f"git:family-{i}" for i in range(18))
+    counts = []
+    for table in (content, vectors):
+        original = table.search
+
+        def observed(*args, _original=original, **kwargs):
+            counts.append(True)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(table, "search", observed)
+    for mode in ("vector", "fts", "hybrid"):
+        for name, granted, selectors in (
+            ("empty", (), {}),
+            ("explicit", ("git:family-0",), {}),
+            ("full", families, {}),
+            ("lookalike", ("git:family-0missing",), {}),
+            ("language", families, {"language": "python"}),
+            ("repo", families, {"repo": "family-0"}),
+        ):
+            assert not tracemalloc.is_tracing()
+            before, queries = len(embeddings), len(counts)
+            start = time.perf_counter()
+            hits = engine.search_authorized("needle", families=granted, mode=mode,
+                                            limit=4, **selectors)
+            duration = time.perf_counter() - start
+            print("COLD_QUERY " + json.dumps({
+                "mode": mode, "grant": name, "seconds": round(duration, 6),
+                "embeddings": len(embeddings) - before, "native_queries": len(counts) - queries,
+            }, sort_keys=True))
+            assert duration < 3.5
+            assert len(counts) - queries <= 4
+            assert len(embeddings) - before == (0 if not granted or mode == "fts" else 1)
+            assert all(r.source != "git:family-0lookalike" for r in hits)
+            if name in ("empty", "lookalike"):
+                assert hits == []
+            else:
+                assert hits
+            if name == "language":
+                assert all(r.language == "python" for r in hits)
+            if name in ("explicit", "repo"):
+                assert all(r.source == "git:family-0" or
+                           r.source.startswith("git:family-0:") for r in hits)
+            if mode == "vector" and name == "full":
+                assert {int(r.chunk_id, 16) for r in hits} == winners
+    assert store._source_domain.receipt() == initial
+    tracemalloc.start()
+    try:
+        engine.search_authorized("needle", families=families, mode="hybrid", limit=4)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 12 * 1024 * 1024
+    assert initialize_source_store(config)._source_domain.receipt() == initial
+
+
+def test_orphan_out_of_band_and_unknown_layout_stay_closed(cold):
+    config, store = cold
+    item = chunk()
+    store.upsert("small", [item], np.array([[1, 0]], dtype=np.float32))
+    table = store.get_vector_table("small")._get_or_create_table()
+    table.update(where=f"chunk_id = '{item.chunk_id}'", values={"source": "git:wrong"})
+    with pytest.raises(SourceLayoutError):
+        with store._source_domain.read(store.content_store.db):
+            pass
+    with pytest.raises(SourceLayoutError):
+        validate_source_store(store)
+    marker = config.lance_dir / MARKER
+    value = json.loads(marker.read_text(encoding="utf-8"))
+    value["protocol"] = 99
+    marker.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(SourceLayoutError):
+        MultiModelStore(config.lance_dir)
+
+
+def test_selected_fts_failed_rebuild_is_not_old_index_availability(cold, monkeypatch):
+    from agent_index.store import content_store as content_module
+
+    _config, store = cold
+    store.upsert("small", [chunk()], np.array([[1, 0]], dtype=np.float32))
+    assert store.ensure_fts_index() is True
+    content = store.content_store
+    assert content.fts_available is True
+    native_run = subprocess.run
+    attempts = []
+
+    def fail_real_child(argv, **kwargs):
+        args = list(argv)
+        assert "child_fts_owner" in args[4]
+        attempts.append(args[-1])
+        args[4] = (
+            "import sys; from agent_index.store.source_layout import child_fts_owner;"
+            "\nwith child_fts_owner(sys.argv[1],sys.argv[3]):"
+            "\n raise RuntimeError('synthetic builder failure')"
+        )
+        return native_run(args, **kwargs)
+
+    monkeypatch.setattr(content_module.subprocess, "run", fail_real_child)
+    content.mark_fts_dirty()
+    with pytest.raises(SourceLayoutError, match="FTS preparation failed"):
+        content.ensure_fts_index(max_retries=1)
+    assert attempts == ["0", "1"]  # Actual incremental and escalated child processes.
+    assert content.fts_available is True and content.fts_dirty is True
+    receipt = store._source_domain.receipt()
+    assert receipt["state"] == "dirty" and receipt["uncertain_effect"] is True
+    assert "fts_pending" not in receipt  # Children settled; failed effects remain uncertain.
+    with pytest.raises(SourceLayoutError):
+        validate_source_store(store)
+    with pytest.raises(SourceLayoutError):
+        store.stats()
+
+
+def test_empty_selected_fts_is_clean_noop_then_new_index_works(cold):
+    config, store = cold
+    before = store._source_domain.receipt()
+    assert store.ensure_fts_index() is False
+    assert store._source_domain.receipt() == before
+    assert "fts_pending" not in before and "uncertain_effect" not in before
+    item = chunk()
+    store.upsert("small", [item], np.array([[1, 0]], dtype=np.float32))
+    assert store.ensure_fts_index() is True
+    assert store._source_domain.receipt()["state"] == "clean"
+    assert initialize_source_store(config).get_document("git:alpha", "a.md") is not None
+
+
+@pytest.mark.parametrize("blocked", ["writer", "dirty", "drift"])
+def test_all_selected_public_reads_are_fenced(cold, blocked, monkeypatch):
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    from agent_index.server import build_app
+    from agent_index.store.cluster_store import ClusterStore
+
+    config, store = cold
+    item = chunk()
+    store.upsert("small", [item], np.array([[1, 0]], dtype=np.float32))
+    clusters = ClusterStore(config.clusters_db)
+    clusters.replace_all([])
+    vector = np.array([1, 0], dtype=np.float32)
+
+    class Inference:
+        def embed_query(self, query):
+            return vector
+
+    engine = SearchEngine({"small": Inference()}, store)
+    reads = [
+        lambda: engine.search("needle"),
+        lambda: store.search_all({"small": vector}, "needle"),
+        lambda: store.hybrid_search("small", vector, "needle"),
+        lambda: store.search("small", vector),
+        lambda: store.find_similar(item.chunk_id),
+        lambda: store.get_document("git:alpha", "a.md"),
+        lambda: store.content_store.get_by_ids([item.chunk_id]),
+        lambda: store.get_vector_table("small").search(vector),
+        lambda: store.stats(),
+        lambda: store.source_counts(),
+        lambda: list(store.iter_item_representations()),
+        lambda: clusters.list_clusters(),
+        lambda: clusters.stats(),
+    ]
+    held, release = threading.Event(), threading.Event()
+    thread = None
+    if blocked == "writer":
+        def writer():
+            with store._source_domain.write(store.content_store.db):
+                held.set()
+                assert release.wait(15)
+        thread = threading.Thread(target=writer)
+        thread.start()
+        assert held.wait(5)
+    elif blocked == "dirty":
+        with pytest.raises(RuntimeError):
+            with store._source_domain.write(store.content_store.db):
+                raise RuntimeError("fixture uncertain ownership")
+    else:
+        store.get_vector_table("small")._get_or_create_table().update(
+            where=f"chunk_id = '{item.chunk_id}'", values={"language": "python"},
+        )
+    try:
+        for read in reads:
+            with pytest.raises(SourceLayoutError):
+                read()
+        from agent_index.search import engine as engine_module
+
+        monkeypatch.setattr(engine_module, "create_search_engine", lambda: engine)
+        response = TestClient(build_app()).get("/search", params={"q": "needle"})
+        assert response.status_code == 200 and response.json()["available"] is False
+        assert response.json()["hits"] == []
+    finally:
+        release.set()
+        if thread is not None:
+            thread.join(10)
+            assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("fault", ["vector-add", "canonical-delete"])
+def test_uncertain_membership_loss_cannot_be_validated_clean(cold, monkeypatch, fault):
+    _config, store = cold
+    item = chunk()
+    store.upsert("small", [item], np.array([[1, 0]], dtype=np.float32))
+    vt = store.get_vector_table("small")._get_or_create_table()
+    canonical = store.content_store._get_or_create_table()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("fixture fault after destructive boundary")
+
+    if fault == "vector-add":
+        monkeypatch.setattr(vt, "add", fail)
+        with pytest.raises(RuntimeError):
+            store.upsert_vectors("small", [item], np.array([[0, 1]], dtype=np.float32))
+    else:
+        monkeypatch.setattr(canonical, "delete", fail)
+        with pytest.raises(RuntimeError):
+            store.delete_by_file("git:alpha", "a.md")
+    vt.checkout_latest()
+    canonical.checkout_latest()
+    assert vt.count_rows() == 0 and canonical.count_rows() == 1
+    assert store._source_domain.receipt()["uncertain_effect"] is True
+    with pytest.raises(SourceLayoutError, match="uncertain effect"):
+        validate_source_store(store)
+    with pytest.raises(SourceLayoutError):
+        store.get_document("git:alpha", "a.md")
+
+
+@pytest.mark.parametrize("weights", [None, (0.5, 4.0)])
+def test_full_scope_hybrid_ranking_matches_native_weights(cold, monkeypatch, weights):
+    from agent_index.store import multi_model_store as native
+
+    config, store = cold
+    semantic = chunk(text="authoritative semantic answer", path="semantic.md")
+    lexical = chunk(text="needle needle exact lexical answer", path="lexical.md")
+    store.upsert("small", [semantic, lexical], np.array([[1, 0], [0, 1]], dtype=np.float32))
+    assert store.ensure_fts_index()
+    if weights is not None:
+        monkeypatch.setenv("AGENT_INDEX_VECTOR_WEIGHT", str(weights[0]))
+        monkeypatch.setenv("AGENT_INDEX_FTS_WEIGHT", str(weights[1]))
+        import importlib
+
+        importlib.reload(native)
+        store = initialize_source_store(config)
+        assert store.ensure_fts_index()
+    try:
+        vector = np.array([1, 0], dtype=np.float32)
+        ordinary = store.search_all({"small": vector}, "needle", limit=10)
+        from agent_index.store.source_search import search_source_store
+
+        scoped = search_source_store(
+            store, {"small": vector}, "needle", families=("git:alpha",), limit=10,
+        )
+        assert [(h.chunk_id, h.score) for h in scoped] == [
+            (h.chunk_id, h.score) for h in ordinary
+        ]
+    finally:
+        if weights is not None:
+            monkeypatch.delenv("AGENT_INDEX_VECTOR_WEIGHT")
+            monkeypatch.delenv("AGENT_INDEX_FTS_WEIGHT")
+            importlib.reload(native)
+
+
+@pytest.mark.timeout(90)
+def test_fts_child_retains_actual_ownership_after_parent_death(cold):
+    config, store = cold
+    store.upsert("small", [chunk()], np.array([[1, 0]], dtype=np.float32))
+    path = config.lance_dir
+    parent = subprocess.Popen(  # noqa: S603 -- fixed owned process fixture
+        [sys.executable, "-I", str(Path(__file__).with_name("_source_fts_process.py")),
+         "parent", str(path)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, **no_window_kwargs(),
+    )
+
+    def wait_file(name):
+        deadline = time.monotonic() + 25
+        while not (path / name).exists() and time.monotonic() < deadline:
+            if parent.poll() is not None and not (path / "builder-ready").exists():
+                out, err = parent.communicate(timeout=2)
+                pytest.fail(f"owned parent exited before builder readiness: {out} {err}")
+            time.sleep(0.05)
+        assert (path / name).exists(), name
+
+    try:
+        wait_file("builder-ready")
+        parent.terminate()  # Only the specific fixture parent; builder stays runner-contained.
+        parent.wait(timeout=5)
+        for operation in (store.stats, lambda: validate_source_store(store)):
+            with pytest.raises(SourceLayoutError):
+                operation()
+        (path / "release-builder").touch()
+        wait_file("builder-finished")
+        # Builder no longer writes, but still lives: actual kernel guard remains owned.
+        for operation in (store.stats, lambda: validate_source_store(store)):
+            with pytest.raises(SourceLayoutError):
+                operation()
+        (path / "exit-builder").touch()
+        deadline = time.monotonic() + 8
+        from agent_index.store.source_layout import FTS_LOCK, kernel_lock
+
+        while True:
+            try:
+                guard = kernel_lock(path / FTS_LOCK)
+                guard.close()
+                break
+            except SourceLayoutError:
+                assert time.monotonic() < deadline
+                time.sleep(0.05)
+        # Parent-death uncertainty is retained, not silently reclassified as clean.
+        with pytest.raises(SourceLayoutError, match="uncertain effect"):
+            validate_source_store(store)
+    finally:
+        (path / "release-builder").touch()
+        (path / "exit-builder").touch()
+        if parent.poll() is None:
+            parent.terminate()
+        out, err = parent.communicate(timeout=5)
+        assert "Traceback" not in out + err or parent.returncode != 0

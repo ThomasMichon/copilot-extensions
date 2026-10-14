@@ -31,6 +31,22 @@ raising a candidate limit does not close this blocker.
 
 ## Proposed realization
 
+### Immediate cold-creation lane
+
+The operator subsequently selected fresh isolated reindexing and prioritized
+an independently indexing deployed service. Create canonical source-aware state
+from the start, maintain it during real queued ingestion, and serve it through
+native scoped predicates. Do not copy or backfill incumbent data. Prove ownership
+of the new isolated store and all participating new writers; this is not a claim
+that a new advisory lock excludes unknown legacy processes.
+
+Legacy layouts without a verified exclusion/migration capability remain
+unsupported for this opted-in serving lane and are left unchanged. Their
+backfill, transfer, revocation and downgrade requirements below remain later
+work; they are not prerequisites for a fresh isolated store.
+
+### Later existing-store lane
+
 Prefer an authoritative source projection on vector rows, or a supported
 store-native authorized join with equivalent guarantees. Choose the exact
 mechanism after reviewing the actual writer/store interfaces; do not create a

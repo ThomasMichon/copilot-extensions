@@ -1,0 +1,9 @@
+{
+  "comment": "Support explicit fresh source-aware store initialization and recovery in standalone host configuration",
+  "changes": [
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    }
+  ]
+}

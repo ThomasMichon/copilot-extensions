@@ -75,8 +75,8 @@ def _type_from_name(name: str) -> str:
 
 
 def _resolve_explicit_source_spec(
-    source: str, by_name: dict[str, "SourceSpec"]
-) -> "SourceSpec":
+    source: str, by_name: dict[str, SourceSpec]
+) -> SourceSpec:
     """Resolve one explicitly-named ``--source``/``{"source": ...}`` request.
 
     Prefers the matching configured spec so its repo/auth resolve correctly.
@@ -296,8 +296,11 @@ def run_reindex(
     path_index = PathIndex(config.data_dir / "path_index.db")
 
     # Multi-model store + clients
-    multi_store = MultiModelStore(
-        config.lance_dir, content_table=config.content_table
+    from agent_index.store.source_layout import initialize_source_store, selected_layout
+
+    multi_store = (
+        initialize_source_store(config) if selected_layout() else
+        MultiModelStore(config.lance_dir, content_table=config.content_table)
     )
     multi_clients: dict[str, EngineClient] = {}
     for profile in config.model_profiles.values():
@@ -672,7 +675,10 @@ def _crawl_source(
     cancel_check = progress_cb.check_cancelled if progress_cb else None
 
     # Get what's currently in our index for deletion detection
-    stored_by_source = path_index.get_paths_by_prefix(source_name)
+    from agent_index.store.source_layout import selected_layout
+
+    stored_family = connector.source_name if selected_layout() else source_name
+    stored_by_source = path_index.get_paths_by_prefix(stored_family)
 
     if full:
         # Full crawl: discover everything

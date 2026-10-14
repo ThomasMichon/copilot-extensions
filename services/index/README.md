@@ -1,5 +1,10 @@
 # agent-index-service
 
+For independently owned fresh state, the explicit host option
+`store: {layout: source-aware-v1}` enables the core's
+[cold source-aware layout](../../plugins/agent-index/docs/source-aware-store.md).
+This is not legacy store adoption, data transfer or deployment/migration proof.
+
 A separately installable Python API/master-controller program, **not a Copilot
 plugin and not `agent-index-engine`**. This first slice composes the existing
 `agent_index` library's hosted API, native persistence, query coordination,

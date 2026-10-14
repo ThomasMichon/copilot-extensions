@@ -34,6 +34,7 @@ from agent_index.store.item_repr import (
     pool_vectors,
 )
 from agent_index.store.repo_filter import repo_matches
+from agent_index.store.source_layout import source_read, source_write
 from agent_index.store.store import SearchResult
 from agent_index.store.vector_table import VectorHit, VectorTable
 
@@ -129,6 +130,7 @@ class MultiModelStore:
         content_table: str = "chunks",
     ) -> None:
         self._content = ContentStore(db_path, table_name=content_table)
+        self._source_domain = self._content._source_domain
         self._vector_tables: dict[str, VectorTable] = {}
         self._db_path = db_path
 
@@ -148,6 +150,8 @@ class MultiModelStore:
             self._content.db,
             table_name=profile.table_name,
             dim=profile.dim,
+            source_domain=self._source_domain,
+            content_table=self._content._table_name,
         )
         self._vector_tables[profile.model_id] = vt
         logger.info(
@@ -173,10 +177,12 @@ class MultiModelStore:
 
     # -- write ---------------------------------------------------------------
 
+    @source_write
     def upsert_content(self, chunks: list[Chunk]) -> int:
         """Store chunk content in the global content table."""
         return self._content.upsert(chunks)
 
+    @source_write
     def upsert_vectors(
         self,
         model_id: str,
@@ -187,6 +193,7 @@ class MultiModelStore:
         vt = self.get_vector_table(model_id)
         return vt.upsert(chunks, vectors)
 
+    @source_write
     def upsert(
         self,
         model_id: str,
@@ -197,8 +204,11 @@ class MultiModelStore:
         self.upsert_content(chunks)
         return self.upsert_vectors(model_id, chunks, vectors)
 
+    @source_write
     def delete_by_source(self, source: str) -> None:
         """Remove all data for a source from content and all vector tables."""
+        if self._source_domain is not None:
+            return self._content.delete_by_source(source)
         # Get chunk_ids before deleting content
         chunk_ids = self._get_chunk_ids_for_source(source)
         self._content.delete_by_source(source)
@@ -207,6 +217,7 @@ class MultiModelStore:
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
 
+    @source_write
     def delete_by_source_exact(self, source: str) -> int:
         """Remove data for an EXACT source value (no prefix matching).
 
@@ -216,6 +227,8 @@ class MultiModelStore:
         source name never touches a live per-repo source that shares its
         prefix.
         """
+        if self._source_domain is not None:
+            return self._content.delete_by_source_exact(source)
         chunk_ids = self._content.get_chunk_ids_by_source_exact(source)
         self._content.delete_by_source_exact(source)
         for vt in self._vector_tables.values():
@@ -223,18 +236,22 @@ class MultiModelStore:
                 vt.delete_by_chunk_ids(chunk_ids)
         return len(chunk_ids)
 
+    @source_read
     def distinct_sources(self) -> set[str]:
         """Return the set of distinct ``source`` values present in the store."""
         return self._content.distinct_sources()
 
+    @source_read
     def source_counts(self) -> dict[str, int]:
         """Return ``{source: chunk_count}`` actually stored (truthful status)."""
         return self._content.source_counts()
 
+    @source_read
     def get_document(self, source: str, file_path: str) -> ChunkRecord | None:
         """Reconstruct a file's full indexed text (delegates to ContentStore)."""
         return self._content.get_document(source, file_path)
 
+    @source_read
     def distinct_items(self) -> list[tuple[str, str]]:
         """Distinct ``(source, file_path)`` content items in the store.
 
@@ -243,6 +260,7 @@ class MultiModelStore:
         """
         return self._content.distinct_items()
 
+    @source_read
     def item_representation(
         self, source: str, file_path: str,
     ) -> ItemRepresentation | None:
@@ -293,6 +311,7 @@ class MultiModelStore:
             chunk_count=len(records),
         )
 
+    @source_read
     def iter_item_representations(self) -> Iterator[ItemRepresentation]:
         """Yield an ``ItemRepresentation`` for every distinct content item.
 
@@ -304,18 +323,22 @@ class MultiModelStore:
             if rep is not None and rep.centroids:
                 yield rep
 
+    @source_write
     def delete_by_file(self, source: str, file_path: str) -> list[str]:
         """Remove content + vectors for a file. Returns deleted chunk_ids.
 
         Queries ContentStore for chunk_ids first, then deletes from content
         and all VectorTables - no orphaned vectors.
         """
+        if self._source_domain is not None:
+            return self._content.delete_by_file(source, file_path)
         chunk_ids = self._content.delete_by_file(source, file_path)
         for vt in self._vector_tables.values():
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
         return chunk_ids
 
+    @source_write
     def delete_stale_by_file(
         self,
         source: str,
@@ -328,6 +351,8 @@ class MultiModelStore:
         Used after re-indexing a modified file: new chunks have a fresh
         ``indexed_at`` timestamp, old chunks are cleaned up here.
         """
+        if self._source_domain is not None:
+            return self._content.delete_stale_by_file(source, file_path, before=before)
         # Get stale chunk_ids from content store
         stale_ids = self._content.get_stale_chunk_ids_by_file(
             source, file_path, before=before,
@@ -341,8 +366,11 @@ class MultiModelStore:
             vt.delete_by_chunk_ids(stale_ids)
         return len(stale_ids)
 
+    @source_write
     def delete_stale(self, source: str, *, before: float) -> int:
         """Remove stale chunks from content store and all vector tables."""
+        if self._source_domain is not None:
+            return self._content.delete_stale(source, before=before)
         removed = self._content.delete_stale(source, before=before)
         for vt in self._vector_tables.values():
             vt.delete_stale(before=before)
@@ -350,6 +378,7 @@ class MultiModelStore:
 
     # -- maintenance ---------------------------------------------------------
 
+    @source_write
     def compact(self, *, older_than_days: int = 2) -> dict[str, Any]:
         """Compact all LanceDB tables (content + vector tables).
 
@@ -405,6 +434,7 @@ class MultiModelStore:
 
     # -- search --------------------------------------------------------------
 
+    @source_read
     def search(
         self,
         model_id: str,
@@ -453,6 +483,7 @@ class MultiModelStore:
                 return model_id, vt, vec
         return None
 
+    @source_read
     def find_similar(
         self,
         chunk_id: str,
@@ -513,6 +544,7 @@ class MultiModelStore:
         )
         return results[:limit]
 
+    @source_read
     def hybrid_search(
         self,
         model_id: str,
@@ -604,6 +636,7 @@ class MultiModelStore:
         normalized = _normalize_scores(deduped)
         return normalized[:limit]
 
+    @source_read
     def search_all(
         self,
         vectors_by_model: dict[str, np.ndarray],
@@ -682,6 +715,7 @@ class MultiModelStore:
         normalized = _normalize_scores(deduped)
         return normalized[:limit]
 
+    @source_read
     def fts_search(
         self,
         query_text: str,
@@ -711,6 +745,7 @@ class MultiModelStore:
             )
         return results
 
+    @source_read
     def compare_search(
         self,
         vectors_by_model: dict[str, np.ndarray],
@@ -740,6 +775,7 @@ class MultiModelStore:
 
     # -- stats ---------------------------------------------------------------
 
+    @source_read
     def stats(self) -> dict[str, Any]:
         """Combined statistics across content and vector tables."""
         content_stats = self._content.stats()
@@ -753,6 +789,7 @@ class MultiModelStore:
         content_stats["models"] = vector_stats
         return content_stats
 
+    @source_read
     def distinct_forge_repos(self) -> list[str]:
         """Return sorted distinct ``owner/repo`` names from indexed Forge sources.
 
@@ -769,6 +806,7 @@ class MultiModelStore:
 
     # -- internal helpers ----------------------------------------------------
 
+    @source_read
     def _hydrate_hits(
         self,
         hits: list[VectorHit],

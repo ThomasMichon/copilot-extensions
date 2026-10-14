@@ -136,6 +136,14 @@ measured serving blocker. It does not authorize modifying an incumbent store or
 premature Gateway retirement; concrete adoption and prototype reconciliation
 remain downstream.
 
+Later priority clarification, public-safe summary: the operator selected
+`fresh-isolated-reindex` and directed that the independently deployed indexer
+must index on its own. Existing data transfer and migration are explicitly later
+work. The first adoption uses fresh isolated state and authoritative source
+ingestion, not an incumbent database copy. This does not waive new-writer
+ownership, source authorization, persistence or the existing advanced upgrade
+and rollback gates; legacy backfill is not a blocker for cold creation.
+
 ## Plan
 
 ### Phase 1 - Existing recovery and reviewed proposal
@@ -195,10 +203,21 @@ remain downstream.
 
 ### Phase 3a - Authorized-store migration and serving eligibility
 
-- [ ] Review and implement the [authorized-store migration](authorized-store-migration.md)
-  under #6383 with #6240/#6030 lifecycle coordination. Bounded legacy ID
+- [x] Review the [authorized-store migration](authorized-store-migration.md)
+  contract (#6605).
+- [ ] Create source-aware fresh state, maintain new ingestion/deletion, and
+  provide native scoped retrieval under #6383. Bounded legacy ID
   partitions are not eligible for full-corpus Gateway serving within its
   existing transport deadline. _(agent-recommended measured blocker closure)_
+- [ ] Later: implement existing-store projection/backfill with verified legacy
+  writer exclusion and #6240/#6030 lifecycle coordination. Do not mutate an
+  incumbent store or treat this later capability as a cold-creation prerequisite.
+
+**Immediate implementation priority:** create source-aware fresh state and
+maintain canonical provenance during new ingestion/deletion, then prove
+store-native scoped retrieval and autonomous indexing. Existing-store backfill,
+legacy-writer exclusion and data transfer remain tracked for later realization;
+unsupported existing layouts fail explicitly without mutation.
 
 ## Validation Plan
 
@@ -250,6 +269,43 @@ remain downstream.
 boundaries from implementation decisions and deployment-specific policy.
 
 ## Journal
+
+### 2026-10-13 - Fresh autonomous store implementation prepared
+- Implemented explicit `source-aware-v1` cold initialization, canonical
+  source/language/repository projections maintained by new ingestion, and native
+  prefiltered vector/FTS/hybrid retrieval. Legacy/nonempty stores are rejected
+  for this mode, not migrated; old immutable writers are not claimed excluded.
+- Actual queued Git full/incremental ingestion, unchanged rerun, deletion and
+  reopen exercise fresh state. Only inference is a fixture. The large synthetic
+  store has 140,000 candidates across 18 families; final full-scope vector/FTS/
+  hybrid requests measure approximately 0.32/0.15/0.43 seconds without setup or
+  tracemalloc. Real model, credentials, Gateway and deployment evidence is open.
+- Independent review found serving-read exclusion, FTS child lifetime, uncertain
+  destructive membership and fusion-weight defects. All four were corrected and
+  independently verified. A further FTS completion-versus-availability defect
+  was corrected with explicit success/no-op/failure outcomes and empty-store
+  preparation before queued ingestion.
+- Coordinator independently reran the final contained installed selections:
+  19 cold/process/failure cases, 33 native search/FTS/worker/cluster cases, and
+  93 standalone config/CLI cases passed. Installation contracts pass. This is a
+  code/test slice awaiting publication, not a deployed indexer or corpus parity.
+
+### 2026-10-13 - Authorized-store migration intent reviewed
+- #6605 squash-merged into `dev` at `2026-10-14T01:14:28Z`, commit
+  `3a0099244aea17181139533342f5d81b08cb6aa4`. The owner-authored current-head
+  Comment review had no Medium/High findings; its Low documentation-impact
+  omission was corrected in the PR description and the thread resolved.
+  All checks, including the live required `workflow-lockdown-guard`, passed.
+- Re-read Phase 3a and its Validation Plan after advancing onto the merged
+  default. Start the writer/store implementation next; contract review does not
+  complete migration, serving eligibility, real-model transport or corpus parity.
+- #6383 remains open. No incumbent store, native runtime, Gateway enrollment or
+  deployment changed as a result of this proposal merge.
+- Subsequent interface inspection found no cross-process fence for all legacy
+  writers. The operator selected fresh isolated reindexing and explicitly
+  deferred transfer/migration. Redirect the next implementation to autonomous
+  fresh-store ingestion and serving rather than make legacy backfill a cold
+  deployment prerequisite.
 
 ### 2026-10-12 - Package relocated: agent-index-service/ -> services/index/
 - Driven from the sibling `agent-dispatch-standalone-container` effort as a

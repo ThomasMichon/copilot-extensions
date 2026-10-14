@@ -107,6 +107,11 @@ def main(argv: list[str] | None = None) -> int:
             if args.command in {"serve", "start"}:
                 from agent_index.config import Config
 
+                if config.store_layout is not None:
+                    from agent_index.index_config import IndexConfig
+                    from agent_index.store.source_layout import initialize_source_store
+
+                    initialize_source_store(IndexConfig())
                 core.serve(Config(host="127.0.0.1", port=config.port), passive=args.passive)
                 return 0
             if args.command == "deploy":
