@@ -1,5 +1,5 @@
 {
-  "comment": "Keep session registration authority checks within a safe request budget",
+  "comment": "Avoid full project configuration resolution during session registration",
   "changes": [
     {
       "plugin": "agent-worktrees",

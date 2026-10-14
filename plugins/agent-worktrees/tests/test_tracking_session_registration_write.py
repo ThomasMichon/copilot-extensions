@@ -22,7 +22,13 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import config as cfg, tracking, tracking_session_registration_write, tracking_write
+from agent_worktrees import (
+    config as cfg,
+    config_authority,
+    tracking,
+    tracking_session_registration_write,
+    tracking_write,
+)
 from agent_worktrees.tracking import WorktreeRecord, save_record
 
 
@@ -42,7 +48,9 @@ def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
+    monkeypatch.setattr(
+        config_authority, "load_project_authority_config", lambda name: config,
+    )
     path = tmp_tracking_dir / "wt-reg.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-reg", branch="worktree/wt-reg", worktree_path="/tmp/wt-reg",
@@ -145,7 +153,9 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
+    monkeypatch.setattr(
+        config_authority, "load_project_authority_config", lambda name: config,
+    )
     path = tmp_tracking_dir / "wt-terminal.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-terminal", branch="worktree/wt-terminal",
@@ -166,8 +176,7 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
 def test_session_register_uses_knowledge_backed_receiving_authority(
     tmp_path: Path, monkeypatch,
 ):
-    """The real bounded loader accepts the local registered space and rejects
-    a foreign one without mutating its worktree record."""
+    """Registration skips full project policy while preserving its authority."""
     from agent_worktrees import repos as repos_mod
 
     harness = tmp_path / "harness"
@@ -219,6 +228,13 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     monkeypatch.setattr(
         cfg, "global_config_path", lambda: tmp_path / "missing-global.yaml",
     )
+    monkeypatch.setattr(
+        cfg,
+        "load_project_config",
+        lambda *_args, **_kwargs: pytest.fail(
+            "registration must not resolve full project configuration"
+        ),
+    )
 
     local_path = tmp_path / "local.yaml"
     foreign_path = tmp_path / "foreign.yaml"
@@ -245,6 +261,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
             path,
         )
 
+    started = time.monotonic()
     accepted = tracking_session_registration_write.apply_session_register(
         {
             "worktree_id": "local",
@@ -252,7 +269,9 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
             "session_id": "sess-local",
         }
     )
+    elapsed = time.monotonic() - started
     assert accepted == {"ok": True, "linked_handoff": None}
+    assert elapsed < 1.0
     assert tracking.load_record(local_path).session_entry("sess-local") is not None
 
     before = foreign_path.read_bytes()
@@ -290,40 +309,6 @@ def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkey
     entry = record.session_entry("sess-daemon")
     assert entry is not None
     assert entry.pid == 123
-
-
-def test_register_session_allows_bounded_receiving_authority_resolution(
-    record_path, monkeypatch, monkeypatch_config,
-):
-    """A healthy owner compute may legitimately spend 1.7 seconds resolving
-    receiving-side authority. The caller must wait for that bounded transaction
-    instead of reporting an ambiguous write after registration was accepted."""
-    from agent_worktrees import locks as _locks
-    from agent_worktrees import status_monitor_runtime as _smr
-
-    load_project_config = cfg.load_project_config
-
-    def _slow_load_project_config(name, **kwargs):
-        time.sleep(1.7)
-        return load_project_config(name, **kwargs)
-
-    monkeypatch.setattr(cfg, "load_project_config", _slow_load_project_config)
-    server = tracking_write.start_server(tracking_write.compute)
-    server.start()
-    try:
-        lock_data = tracking_write.rendezvous_fields(server)
-        monkeypatch.setattr(_locks, "read_lock", lambda path: lock_data)
-        monkeypatch.setattr(_smr, "_status_monitor_enabled", lambda: False)
-
-        linked = tracking.register_session("wt-reg", "sess-authority", pid=321)
-    finally:
-        server.close()
-
-    assert linked is None
-    record = tracking.load_record(record_path)
-    entry = record.session_entry("sess-authority")
-    assert entry is not None
-    assert entry.pid == 321
 
 
 def test_register_session_never_waits_for_a_cold_daemon_boot(

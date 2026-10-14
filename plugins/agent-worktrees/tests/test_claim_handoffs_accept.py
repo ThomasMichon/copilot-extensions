@@ -70,18 +70,9 @@ def handoff_world(tmp_path, monkeypatch):
         claim_handoffs.cfg, "project_dir", lambda name=None: tmp_path / str(name)
     )
     load_config = claim_handoffs.cfg.load_config
-
-    def load_project_config(name, **kwargs):
-        path = tmp_path / name / "config.yaml"
-        if kwargs.pop("authority_only", False):
-            from agent_worktrees import config_authority
-
-            return config_authority.load_project_authority_config(name, path=path)
-        return load_config(path, project=name, **kwargs)
-
     monkeypatch.setattr(
         claim_handoffs.cfg, "load_project_config",
-        load_project_config,
+        lambda name, **kwargs: load_config(tmp_path / name / "config.yaml", project=name, **kwargs),
     )
     return {"tmp_path": tmp_path}
 

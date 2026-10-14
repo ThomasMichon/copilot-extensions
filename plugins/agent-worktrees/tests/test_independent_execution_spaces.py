@@ -147,6 +147,8 @@ def test_execution_space_registry_reuses_resolved_overlay_config(tmp_path, monke
 
 @pytest.fixture
 def scoped_config(tmp_path, monkeypatch):
+    from agent_worktrees import config_authority
+
     entries = {
         key: MachineEntry(
             key=key, display_name=key, hostname="workstation",
@@ -165,6 +167,10 @@ def scoped_config(tmp_path, monkeypatch):
         )},
     )
     monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
+    monkeypatch.setattr(
+        config_authority, "load_project_authority_config",
+        lambda project, **kwargs: config,
+    )
     return config
 
 
@@ -349,11 +355,8 @@ def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
 
     from agent_worktrees import config as _cfg
 
-    def fake_load_project_config(
-        name, *, include_control_plane_related_pr, authority_only,
-    ):
+    def fake_load_project_config(name, *, include_control_plane_related_pr):
         assert include_control_plane_related_pr is False
-        assert authority_only is True
         time.sleep(0.1)
         return _cfg.Config(
             machine="m", platform="wsl", repo_name=name,

@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from . import tracking
 
-#: A bounded deadline for the ``session_register`` verb's own daemon request.
-#: It remains well below the explicit-command default while allowing the
-#: receiving side to resolve execution-space authority and commit the record
-#: without reporting an ambiguous timeout after an accepted owner compute.
-_SESSION_REGISTER_REQUEST_DEADLINE_S = 3.0
+#: A short deadline for the ``session_register`` verb's own daemon request
+#: (default ``tracking_write.REQUEST_DEADLINE_S`` is 8s -- fine for an
+#: explicit CLI command, never for a sessionStart hook, which must bound
+#: worst-case added latency even when a resident daemon is technically
+#: reachable but stalled/wedged; see ``register_session``'s own docstring).
+_SESSION_REGISTER_REQUEST_DEADLINE_S = 1.5
 
 #: Same rationale, for the symmetric sessionEnd hook's own ``session_deregister``
 #: dispatch (see ``deregister_session``'s own docstring).
@@ -166,9 +167,9 @@ def register_session(
     bound a *reachable-but-stalled* daemon, which would otherwise still
     block for the module's default ``REQUEST_DEADLINE_S`` (8s, ~9s
     including the socket timeout) before raising. ``_SESSION_REGISTER_REQUEST_DEADLINE_S``
-    caps that same case at a small fraction of that while covering the
-    transaction's bounded receiving-side authority resolution and record I/O.
-    Re-raises ``tracking.SessionLifecycleError``
+    caps that same case at a small fraction of that, since this verb's own
+    work is simple file I/O expected to complete in milliseconds, not
+    seconds, on a healthy daemon. Re-raises ``tracking.SessionLifecycleError``
     for a lifecycle rejection, matching the pre-migration contract of
     letting it propagate synchronously to every existing caller's own
     broad exception handling; ``tracking_write.AmbiguousWriteOutcome`` is

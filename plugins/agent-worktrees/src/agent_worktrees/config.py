@@ -27,7 +27,7 @@ from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
-from . import config_authority, config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
+from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
 from .codename_config import CodenameConfig, parse_codename
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
@@ -1175,7 +1175,8 @@ def load_config(
     include_control_plane_related_pr: bool = True,
     project: str | None = None,
 ) -> Config:
-    """Load full layered project configuration."""
+    """Load config; memoized inside ``cached_load_config_scope()`` (see
+    :mod:`agent_worktrees.config_cache`), else identical to the unwrapped loader."""
     with inrepo_config_source.resolution_budget():  # one git-probe budget per whole load
         return memoize_in_scope(
             _load_config_uncached, path,
@@ -1185,8 +1186,7 @@ def load_config(
 
 
 def load_project_config(
-    name: str, *, include_control_plane_related_pr: bool = True,
-    authority_only: bool = False,
+    name: str, *, include_control_plane_related_pr: bool = True
 ) -> Config:
     """Load one project's layered config without inheriting caller identity.
     Args:
@@ -1199,10 +1199,7 @@ def load_project_config(
             itself as its own control plane), this recurses into
             ``_control_plane_related_pr_map`` -> ``load_project_config`` ->
             ``load_config`` -> ``_control_plane_related_pr_map`` without end.
-        authority_only: Resolve only identity and anchor facts needed by execution-space fencing.
     """
-    if authority_only:
-        return config_authority.load_project_authority_config(name)
     previous = active_project()
     set_active_project(name)
     try:

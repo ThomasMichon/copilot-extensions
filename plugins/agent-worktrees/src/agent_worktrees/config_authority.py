@@ -1,10 +1,8 @@
-"""Bounded receiving-side configuration for execution-space authority checks."""
+"""Registration-specific receiving-side authority configuration."""
 
 from __future__ import annotations
 
 from pathlib import Path
-
-_INREPO_AUTHORITY_BUDGET_S = 1.0
 
 
 def load_project_authority_config(
@@ -54,10 +52,15 @@ def load_project_authority_config(
             f"{path} or the repos registry"
         )
 
-    with cfg.inrepo_config_source.resolution_budget(
-        _INREPO_AUTHORITY_BUDGET_S, clamp=True,
+    inrepo_authority = {}
+    for candidate in (
+        cfg.inrepo_config_path(Path(anchor)),
+        cfg.legacy_inrepo_config_path(Path(anchor)),
+        Path(anchor) / cfg.INREPO_CONFIG_FILENAME,
     ):
-        inrepo_authority = cfg._load_inrepo_config(str(anchor))
+        if candidate.exists():
+            inrepo_authority = cfg._load_yaml_safe(candidate)
+            break
     stateless = bool(
         machine_repo.get("stateless", inrepo_authority.get("stateless", False))
     )
@@ -93,3 +96,21 @@ def load_project_authority_config(
     from .execution_spaces import canonicalize_legacy_config
 
     return canonicalize_legacy_config(config)
+
+
+def require_registration_record_mutation(record) -> None:
+    """Fence one session-registration record without full project policy."""
+    from . import config as cfg
+    from .execution_spaces import ExecutionSpaceError, require_record_mutation
+
+    try:
+        config = load_project_authority_config(record.repo)
+        if record.repo not in config.repos:
+            raise ValueError(
+                "requested project is not registered in receiving-side configuration"
+            )
+        require_record_mutation(record, config)
+    except (OSError, ValueError, KeyError, TypeError, cfg.yaml.YAMLError) as exc:
+        raise ExecutionSpaceError(
+            f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"
+        ) from exc

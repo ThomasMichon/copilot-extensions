@@ -222,9 +222,7 @@ def project_record_config(record: Any) -> Any:
     try:
         with _project_config_lock:
             config = cfg.load_project_config(
-                record.repo,
-                include_control_plane_related_pr=False,
-                authority_only=True,
+                record.repo, include_control_plane_related_pr=False,
             )
         if record.repo not in config.repos:
             raise ValueError("requested project is not registered in receiving-side configuration")

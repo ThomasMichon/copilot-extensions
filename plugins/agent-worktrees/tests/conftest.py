@@ -401,6 +401,10 @@ def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
         )
 
     monkeypatch.setattr(_cfg, "load_project_config", _fake_load_project_config)
+    monkeypatch.setattr(
+        "agent_worktrees.config_authority.load_project_authority_config",
+        lambda name, **_kwargs: _fake_load_project_config(name),
+    )
 
 
 @pytest.fixture
