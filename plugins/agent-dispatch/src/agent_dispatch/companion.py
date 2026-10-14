@@ -877,7 +877,8 @@ def _launch_gated(resolution: CompanionResolution) -> _GatedProcess:
         environment["COPILOT_COMPANION_GATE_FD"] = str(gate_read)
     try:
         process = subprocess.Popen(
-            [sys.executable, "-m", "agent_dispatch.companion_gate"],
+            # The stdlib-only gate must not initialize the coordinator package.
+            [sys.executable, str(Path(__file__).with_name("companion_gate.py"))],
             stdin=subprocess.DEVNULL,
             cwd=resolution.cwd,
             env=environment,

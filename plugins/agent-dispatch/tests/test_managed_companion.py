@@ -53,6 +53,9 @@ class Executor:
             self.finish(future, function, args)
         self.pending.clear()
 
+    def shutdown(self, *, wait=True, cancel_futures=False):
+        assert not self.pending
+
 
 class Process:
     def __init__(self, pid, resolution, events):
@@ -98,6 +101,7 @@ class Harness:
         self.indeterminate_health = set()
         self.time = 0.0
         self.executor = Executor()
+        self.daemons = []
         self.builder = FakeRunner()
         self.materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=self.build)
         self.state = tmp_path / "state"
@@ -147,7 +151,7 @@ class Harness:
         )
 
     def make_daemon(self):
-        return SupervisorDaemon(
+        daemon = SupervisorDaemon(
             self,
             "machine-a",
             companion_controller=self.controller,
@@ -157,6 +161,18 @@ class Harness:
             clock=lambda: self.time,
             sleep=self.advance,
         )
+        # These state-machine fixtures use a simulated clock and process table.
+        # Real concurrent receipt operations are covered by the bounded/native suites.
+        daemon._inventory_executor = Executor()
+        daemon._receipt_executor = Executor()
+        self.daemons.append(daemon)
+        return daemon
+
+    def shutdown(self):
+        self.executor.defer = False
+        self.executor.complete()
+        for daemon in reversed(self.daemons):
+            assert daemon.shutdown()
 
     def list_registrations(self, **kwargs):
         return self.registrations
@@ -205,7 +221,11 @@ class Harness:
 
 @pytest.fixture
 def harness(tmp_path, monkeypatch):
-    return Harness(tmp_path, monkeypatch)
+    instance = Harness(tmp_path, monkeypatch)
+    try:
+        yield instance
+    finally:
+        instance.shutdown()
 
 
 class TransitionGroupHarness(Harness):
@@ -318,7 +338,11 @@ class TransitionGroupHarness(Harness):
 
 @pytest.fixture
 def transition_group_harness(tmp_path, monkeypatch):
-    return TransitionGroupHarness(tmp_path, monkeypatch)
+    instance = TransitionGroupHarness(tmp_path, monkeypatch)
+    try:
+        yield instance
+    finally:
+        instance.shutdown()
 
 
 def test_first_launch_waits_for_materialization_and_records_ready_snapshot(harness):
@@ -1181,7 +1205,6 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
     script.write_text(
         "import json, os, subprocess, sys, time\n"
         "from pathlib import Path\n"
-        "from agent_procutil import no_window_kwargs\n"
         "state = Path(os.environ['EXAMPLE_STATE'])\n"
         "stop = state.with_suffix('.stop')\n"
         "mode = os.environ['MODE']\n"
@@ -1193,6 +1216,7 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
         "        'python': os.environ['EXAMPLE_MANAGED_PYTHON']}), encoding='utf-8')\n"
         "    while not stop.exists(): time.sleep(0.05)\n"
         "elif sys.argv[1] == 'health':\n"
+        "    from agent_procutil import no_window_kwargs\n"
         "    subprocess.run([sys.executable.replace('pythonw.exe', 'python.exe'), '-c', 'pass'],\n"
         "        check=True, **no_window_kwargs())\n"
         "    ready = state.exists() and json.loads(state.read_text(encoding='utf-8'))['mode'] == mode\n"
@@ -1214,6 +1238,7 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
     monkeypatch.setenv("EXAMPLE_STATE", str(marker))
     monkeypatch.setenv("MODE", "old")
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=FakeRunner())
+
     controller = DefaultCompanionController(
         tmp_path / "state", retention=ManagedRuntimeRetention(materializer.policy.root)
     )
@@ -1231,6 +1256,7 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
         overrides_source=lambda: {},
     )
     rid = registration["id"]
+    started = time.monotonic()
     try:
         assert daemon.reconcile_once().started == [rid]
         snapshot = daemon._units[rid].companion_resolution.managed_snapshot
@@ -1249,3 +1275,4 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
     finally:
         daemon.shutdown()
     assert not controller._receipt_path(rid).exists()
+    print(f"native readiness, repeated health, rollback and stop elapsed={time.monotonic() - started:.3f}s")

@@ -57,7 +57,13 @@ def test_receipt_integrity_pending_does_not_block_unrelated_units(tmp_path, monk
         started = time.monotonic()
         assert daemon.reconcile_once().started == ["unrelated"]
         assert time.monotonic() - started < 0.5
-        assert entered.wait(1)
+        scheduling_deadline = time.monotonic() + 1
+        while not entered.is_set() and time.monotonic() < scheduling_deadline:
+            cycle_started = time.monotonic()
+            daemon.reconcile_once()
+            assert time.monotonic() - cycle_started < 0.5
+            entered.wait(0.01)
+        assert entered.is_set()
         future = controller._receipt_operations["withdrawn"]
         time.sleep(0.06)
         started = time.monotonic()
@@ -210,7 +216,13 @@ def test_owner_identity_probe_uses_shared_deadline_and_shutdown_accounting(tmp_p
         elapsed = time.monotonic() - started
         print(f"owner identity shared-budget cycle elapsed={elapsed:.3f}s")
         assert elapsed < 0.5
-        assert entered.wait(1)
+        scheduling_deadline = time.monotonic() + 1
+        while not entered.is_set() and time.monotonic() < scheduling_deadline:
+            cycle_started = time.monotonic()
+            daemon.reconcile_once()
+            assert time.monotonic() - cycle_started < 0.5
+            entered.wait(0.01)
+        assert entered.is_set()
         deadline = time.monotonic() + 1
         while controller._receipt_owner_future is None and time.monotonic() < deadline:
             time.sleep(0.001)
@@ -884,9 +896,10 @@ def test_discovery_and_receipt_wait_share_one_cycle_budget():
 
     daemon = SupervisorDaemon(
         FakeClient([_reg("unrelated", machine="host")]), "host", launcher=FakeLauncher(),
-        companion_controller=controller, reconcile_call_budget=0.05,
+        companion_controller=controller, declared_source=lambda: [], reconcile_call_budget=0.05,
     )
     try:
+        assert daemon._store_registrations()
         assert daemon.reconcile_once().started == ["unrelated"]
         controller.reconcile_receipts = stuck
         daemon.declared_source = lambda: (gate.wait(3) and [])
@@ -901,6 +914,33 @@ def test_discovery_and_receipt_wait_share_one_cycle_budget():
         daemon.shutdown()
 
 
+def test_captured_timeout_includes_process_creation(tmp_path, monkeypatch):
+    import subprocess
+    from agent_dispatch import companion_capture
+
+    now = [100.0]
+    waits = []
+
+    class Process:
+        def communicate(self, input_text=None, *, timeout):
+            waits.append(timeout)
+            raise subprocess.TimeoutExpired("fixture", timeout)
+
+        def kill(self):
+            pass
+
+    def create(*args, **kwargs):
+        now[0] += 2.5
+        return Process()
+
+    monkeypatch.setattr(companion_capture, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(companion_capture.subprocess, "Popen", create)
+    monkeypatch.setattr(companion, "contained_test_mode", lambda: True)
+    with pytest.raises(CompanionIndeterminate, match="timed out"):
+        companion._run_captured(("fixture",), cwd=str(tmp_path), environment={}, timeout=4)
+    assert waits == [1.5, 1.0]
+
+
 def test_native_captured_timeout_bounds_inherited_descendant_pipes(tmp_path):
     # A first-touch subprocess, not a mocked communicate boundary.
     child_code = (
@@ -910,24 +950,32 @@ def test_native_captured_timeout_bounds_inherited_descendant_pipes(tmp_path):
         "open(sys.argv[2],'w').write('done')\n"
     )
     script = (
-        "import os,sys,subprocess,time;"
+        "import sys,time;"
+        "trace=open(sys.argv[4],'w',buffering=1);"
+        "trace.write(f'entered {time.monotonic()}\\n');"
+        "import os,subprocess;"
+        "trace.write(f'stdlib {time.monotonic()}\\n');"
         "from agent_procutil import no_window_kwargs;"
+        "trace.write(f'procutil {time.monotonic()}\\n');"
         f"child=subprocess.Popen([sys.executable,'-c',{child_code!r},sys.argv[2],sys.argv[3]],"
         "stdout=sys.stdout,stderr=sys.stderr,close_fds=False,"
         "**(no_window_kwargs() if os.name=='nt' else {}));"
+        "trace.write(f'spawned {time.monotonic()}\\n');"
         "open(sys.argv[1],'w').write(str(child.pid));time.sleep(10)"
     )
     ready = tmp_path / "descendant-ready"
     release = tmp_path / "descendant-release"
     exited = tmp_path / "descendant-exited"
+    trace = tmp_path / "descendant-trace"
     started = time.monotonic()
     try:
         with pytest.raises(CompanionIndeterminate, match="timed out"):
             companion._run_captured(
-                (sys.executable, "-c", script, str(ready), str(release), str(exited)), cwd=str(tmp_path),
+                (sys.executable, "-c", script, str(ready), str(release), str(exited), str(trace)),
+                cwd=str(tmp_path),
                 environment=dict(os.environ), timeout=4.0,
             )
-        assert ready.exists()
+        assert ready.exists(), trace.read_text() if trace.exists() else "interpreter not entered"
         assert companion._process_exists(int(ready.read_text()))
         elapsed = time.monotonic() - started
         print(f"ready inherited-pipe timeout elapsed={elapsed:.3f}s")

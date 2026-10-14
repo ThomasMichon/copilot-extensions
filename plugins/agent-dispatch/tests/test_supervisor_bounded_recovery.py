@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from agent_dispatch import supervisor_daemon
+from agent_dispatch.companion import CompanionIndeterminate
 from agent_dispatch.supervisor_daemon import SupervisorDaemon
 from agent_dispatch.supervisor_health import supervisor_progress_observation
 from tests.test_supervisor_daemon import FakeClient, FakeCompanionController, FakeLauncher, FakeLock, _reg
@@ -108,6 +109,7 @@ def test_declaration_publication_is_bounded_and_does_not_duplicate_pending_write
         reconcile_call_budget=0.05,
     )
     try:
+        assert daemon._store_registrations() == []
         started = time.monotonic()
         assert daemon.reconcile_once().started == ["declared:one"]
         assert time.monotonic() - started < 0.5
@@ -185,7 +187,8 @@ def test_slow_declaration_conversion_is_inside_shared_budget(monkeypatch):
     )
     try:
         started = time.monotonic()
-        daemon.reconcile_once()
+        with pytest.raises(CompanionIndeterminate, match="confirmed declaration snapshot"):
+            daemon.reconcile_once()
         assert time.monotonic() - started < 0.5
         assert entered.wait(1)
         assert any(not future.done() for future in daemon._probe_inflight)

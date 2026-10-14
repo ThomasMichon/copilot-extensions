@@ -202,8 +202,8 @@ class SupervisorDaemon(BoundedReconciliation):
         #: The declared set most recently read successfully -- returned when a later
         #: discovery read *errors*, so a transient filesystem/env blip never winds
         #: down live declared units (only a successful read that no longer lists a
-        #: unit does). Empty until the first successful read.
-        self._last_declared: list[dict] = []
+        #: unit does). Unconfirmed until the first successful read.
+        self._last_declared: list[dict] | None = None
         self._published_declared_ids: set[str] = set()
         self._last_merge_diagnostics: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
         self._companion_controller = companion_controller
@@ -344,32 +344,6 @@ class SupervisorDaemon(BoundedReconciliation):
     def _recheck_governance(self, checkpoint: str) -> dict[str, Any] | None:
         return self._governance.recheck(checkpoint)
 
-    def _declared(self) -> list[dict]:
-        """The declared profile set for this (machine, env), as registrations.
-
-        Re-read every reconcile (that is the *watch*): the daemon's existing
-        start/restart/wind-down logic turns a re-read into hot-reconcile. On a read
-        *error* the last successfully-read set is returned (not empty), so a transient
-        discovery failure never tears down live declared units; a successful read that
-        drops a unit still winds it down.
-        """
-        if self.declared_source is None:
-            return []
-        from .registrar_reconcile import declared_registrations
-        try:
-            registrations = self._bounded_read("declarations", lambda: declared_registrations(
-                list(self.declared_source()), machine=self.machine, env=self.env,
-            ))
-        except _FUTURE_TIMEOUT:
-            log.warning("declaration discovery remains pending; retaining confirmed declarations")
-            return self._last_declared
-        except Exception:  # pragma: no cover - discovery is environment-dependent
-            log.exception("failed to read declared profile set; keeping the last known set")
-            return self._last_declared
-        self._last_declared = registrations
-        self._published_declared_ids = self._publish_declarations(self._last_declared)
-        return self._last_declared
-
     def _overridden_off(self) -> set[str]:
         """Registration ids an operator has disabled via the override store.
 
@@ -471,8 +445,8 @@ class SupervisorDaemon(BoundedReconciliation):
                 ):
                     raise CompanionError("resolved companion changed declaration authority")
             except CompanionIndeterminate as exc:
+                self._managed_uncertain.add(rid)
                 if registration.get("spec", {}).get("managed_runtime"):
-                    self._managed_uncertain.add(rid)
                     unit = self._units.get(rid)
                     snapshot = (
                         unit.companion_resolution.managed_snapshot
@@ -1666,6 +1640,7 @@ class SupervisorDaemon(BoundedReconciliation):
         changed; revive crashed units (after a backoff, up to ``max_restarts``);
         start newly-registered units. Returns a summary of what changed.
         """
+        self._prune_probe_inflight()
         summary = ReconcileSummary()
         reconcile_deadline = time.monotonic() + self._reconcile_call_budget
         self._reconcile_deadline = reconcile_deadline

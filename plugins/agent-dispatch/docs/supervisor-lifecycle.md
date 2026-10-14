@@ -10,8 +10,9 @@ watchdog or a claim that an earlier outage's requester has been identified.
 The master establishes its shared wait budget before declaration discovery,
 registration reads and companion provider resolution. Pending reads retain the
 last confirmed desired state; unfinished providers cannot supply new launch
-authority. Before the first successful store snapshot, a pending read is
-explicitly indeterminate, not a confirmed empty registry: reconciliation defers
+authority. Before the first successful store snapshot or configured declaration
+snapshot, a pending read is explicitly indeterminate, not a confirmed empty
+registry: reconciliation defers
 before stopping units or scheduling receipt withdrawal. Receipt integrity runs
 in a separate two-worker pool, so a contended
 root lock or slow tree hash cannot occupy every health/runtime worker.
@@ -24,6 +25,8 @@ Unknown orphan operations are fences, not newly adopted units.
 Companion providers have a separate four-worker pool from authoritative
 declaration/registration discovery, so four long-running valid providers cannot
 hide unrelated additions or removals.
+An unresolved unmanaged provider also retains its receipt fence while its
+declaration remains present; lack of a confirmed launch is not withdrawal.
 Declaration conversion runs inside the discovery future. Coordinator mirroring
 uses one tracked publication batch on a separate single-worker pool: a slow
 register/remove cannot hold the master, and the batch checks its deadline
@@ -39,6 +42,9 @@ preserve prior operation generations; this slice does not prune that history.
 A new supervisor reads back the same generation;
 it never repeats an unconfirmed retirement or withdrawal. Completion requires
 absent receipts **and** confirmed retirement of the recorded process generation.
+Unmanaged receipts require the same exit confirmation as managed receipts.
+Completed operations are reaped before scheduling, and admission rotates through
+receipt identities so two unknown readbacks cannot starve a later withdrawal.
 Matching durable root selection pins must also be absent, including matching
 pins from another process-identity domain. Pin readback is non-mutating metadata
 inspection under the root lock and its deadline; a surviving pin keeps the
@@ -74,7 +80,12 @@ retirement. Final pin withdrawal and absence verification share a separate
 one-second bookkeeping budget, so retirement exhausting the execution budget
 does not itself strand an otherwise valid selection. Metadata changes, lock
 contention or write failures still retain unknown authority.
-Captured command execution and post-timeout pipe draining both have deadlines.
+Captured command execution charges process-creation elapsed time against its
+timeout; post-timeout pipe draining has its own one-second deadline. The OS
+process-creation call itself cannot be interrupted by this subprocess API.
+The containment gate runs its pinned, standard-library-only script directly,
+without initializing the coordinator package or resolving it through the
+contributed command's working directory.
 
 Runtime status records the master's PID/start token, cycle, phase and receipt
 operation states. `supervisor_health.supervisor_progress_observation` is a
@@ -98,6 +109,8 @@ of accumulating a backlog behind a blocked status volume. Final summaries use
 completed cached observations or an explicit pending/unknown marker. Cycle-start
 and final-status I/O share this worker, and completion timestamps are captured by
 the master rather than refreshed by delayed publication.
+Completed probe futures are removed from cycle accounting; unfinished futures
+remain tracked through shutdown.
 The idle-worker handoff is atomic with producer admission, so a frame arriving
 as the worker finishes is not lost. A coalesced final summary from a superseded
 cycle cannot be written under the newer cycle's start marker. An inline update

@@ -28,6 +28,7 @@ class ReceiptReconciliation:
         self._receipt_inventory_future: Future | None = None
         self._receipt_inventory_blocked: set[str] = set()
         self._receipt_inventory_tag = None
+        self._receipt_last_scheduled: str | None = None
 
     def receipt_futures(self) -> tuple[Future, ...]:
         return tuple(self._receipt_operations.values()) + (
@@ -218,6 +219,16 @@ class ReceiptReconciliation:
             self._receipt_adopted = set(adopted_registration_ids)
         if not self.receipt_dir.exists():
             return set()
+        for rid, future in tuple(self._receipt_operations.items()):
+            if future.done():
+                self._receipt_operations.pop(rid)
+                try:
+                    future.result()
+                except (
+                    lifecycle.CompanionError, lifecycle.CompanionIndeterminate,
+                    ManagedRuntimeError, OSError,
+                ) as exc:
+                    logging.getLogger(__name__).warning("receipt operation incomplete for %s: %s", rid, exc)
         ids: set[str] = set()
         for pattern, path_for in (
             ("*.companion.json", self._receipt_path),
@@ -231,17 +242,13 @@ class ReceiptReconciliation:
                     raise lifecycle.CompanionIndeterminate("receipt path does not match its identity")
                 ids.add(rid)
         blocked: set[str] = set()
-        for rid in sorted(ids):
-            future = self._receipt_operations.get(rid)
-            if future is not None and future.done():
-                self._receipt_operations.pop(rid)
-                try:
-                    future.result()
-                except (
-                    lifecycle.CompanionError, lifecycle.CompanionIndeterminate,
-                    ManagedRuntimeError, OSError,
-                ) as exc:
-                    logging.getLogger(__name__).warning("receipt operation incomplete for %s: %s", rid, exc)
+        ordered = sorted(ids)
+        if self._receipt_last_scheduled is not None:
+            ordered = (
+                [rid for rid in ordered if rid > self._receipt_last_scheduled]
+                + [rid for rid in ordered if rid <= self._receipt_last_scheduled]
+            )
+        for rid in ordered:
             record = self._operation_record(rid)
             if record is not None and record["state"] in {"pending", "timeout", "unknown"}:
                 blocked.add(rid)
@@ -254,6 +261,7 @@ class ReceiptReconciliation:
                         self._receipt_operations[rid] = executor.submit(
                             self._readback_receipt_operation, rid, record, deadline,
                         )
+                        self._receipt_last_scheduled = rid
                 elif self.monotonic() >= record["deadline"]:
                     with self._receipt_state_lock:
                         latest = self._operation_record(rid)
@@ -280,6 +288,7 @@ class ReceiptReconciliation:
             }
             self._write_operation(rid, record)
             self._receipt_operations[rid] = executor.submit(self._reconcile_receipt_generation, rid, record)
+            self._receipt_last_scheduled = rid
             blocked.add(rid)
         return blocked
 
@@ -312,7 +321,7 @@ class ReceiptReconciliation:
                     state = "superseded"
                     return
                 if generation["receipt"] is not None:
-                    self._retire_receipt(generation["receipt"], confirm_exit=snapshot is not None)
+                    self._retire_receipt(generation["receipt"], confirm_exit=True)
                     if self._read_receipt(rid) != generation["receipt"]:
                         raise lifecycle.CompanionIndeterminate("receipt changed during retirement")
                     self._delete_receipt(rid)

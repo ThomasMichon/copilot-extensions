@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from collections.abc import Mapping
 
 from . import companion as lifecycle
@@ -13,6 +14,7 @@ def _run_captured(
     command: tuple[str, ...], *, cwd: str, environment: Mapping[str, str],
     timeout: float, input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    deadline = time.monotonic() + timeout
     kwargs = lifecycle.no_window_kwargs() if os.name == "nt" else lifecycle.detached_kwargs()
     try:
         process = subprocess.Popen(  # noqa: S603 -- attributed fixed argv
@@ -22,7 +24,9 @@ def _run_captured(
             text=True, cwd=cwd, env=dict(environment), **kwargs,
         )
         try:
-            stdout, stderr = process.communicate(input_text, timeout=timeout)
+            stdout, stderr = process.communicate(
+                input_text, timeout=max(0.0, deadline - time.monotonic()),
+            )
         except subprocess.TimeoutExpired as exc:
             if lifecycle.contained_test_mode():
                 process.kill()

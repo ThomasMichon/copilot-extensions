@@ -2,7 +2,7 @@
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import pytest
 
@@ -368,4 +368,136 @@ def test_cold_registry_timeout_preserves_receipts_until_first_confirmed_snapshot
         assert controller._receipt_path("persisted").read_bytes() == before
     finally:
         release.set()
+        daemon.shutdown()
+
+
+def test_cold_declaration_timeout_preserves_declared_receipt(tmp_path, monkeypatch):
+    from agent_dispatch import registrar_reconcile
+    from tests.test_bounded_receipt_reconcile import _receipt
+
+    entered, release = threading.Event(), threading.Event()
+    rid = "declared:persisted"
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    _receipt(controller, rid)
+    before = controller._receipt_path(rid).read_bytes()
+    registration = _companion_reg(rid)
+    registration["machine"] = "host"
+    processes = FakeCompanionController()
+    for method in ("resolve", "launch", "stop", "health"):
+        monkeypatch.setattr(controller, method, getattr(processes, method))
+    inventories = []
+    original_inventory = controller.request_receipt_inventory
+
+    def inventory(adopted, **kwargs):
+        inventories.append(set(adopted))
+        return original_inventory(adopted, **kwargs)
+
+    def declarations():
+        entered.set()
+        assert release.wait(3)
+        return [registration]
+
+    monkeypatch.setattr(controller, "request_receipt_inventory", inventory)
+    monkeypatch.setattr(registrar_reconcile, "declared_registrations", lambda data, **kwargs: data)
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", launcher=FakeLauncher(), companion_controller=controller,
+        declared_source=declarations, reconcile_call_budget=0.05,
+    )
+    try:
+        assert daemon._store_registrations() == []
+        with pytest.raises(CompanionIndeterminate, match="confirmed declaration snapshot"):
+            daemon.reconcile_once()
+        assert entered.is_set()
+        future = daemon._discovery_futures["declarations"]
+        with pytest.raises(CompanionIndeterminate, match="confirmed declaration snapshot"):
+            daemon.reconcile_once()
+        assert daemon._discovery_futures["declarations"] is future
+        assert inventories == []
+        assert controller._receipt_path(rid).read_bytes() == before
+        release.set()
+        future.result(1)
+        assert daemon.reconcile_once().started == [rid]
+        assert inventories and all(rid in adopted for adopted in inventories)
+        assert controller._receipt_path(rid).read_bytes() == before
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_indeterminate_unmanaged_provider_preserves_receipt_without_stale_authority(tmp_path, monkeypatch, existing):
+    from tests.test_bounded_receipt_reconcile import _receipt
+
+    entered, release = threading.Event(), threading.Event()
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    _receipt(controller, "persisted")
+    before = controller._receipt_path("persisted").read_bytes()
+    processes = FakeCompanionController()
+    for method in ("resolve", "launch", "stop", "health"):
+        monkeypatch.setattr(controller, method, getattr(processes, method))
+    registration = _companion_reg("persisted")
+    registration["machine"] = "host"
+    client = FakeClient([registration])
+    daemon = SupervisorDaemon(
+        client, "host", launcher=FakeLauncher(), companion_controller=controller,
+        reconcile_call_budget=0.05,
+    )
+    inventories = []
+    original_inventory = controller.request_receipt_inventory
+
+    def inventory(adopted, **kwargs):
+        inventories.append(set(adopted))
+        return original_inventory(adopted, **kwargs)
+
+    def resolve(*args, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        return processes.resolve(*args, **kwargs)
+
+    try:
+        if existing:
+            assert daemon.reconcile_once().started == ["persisted"]
+            process = processes.launched[-1][1]
+            registration = _companion_reg("persisted")
+            registration["machine"] = "host"
+            registration["spec"]["config_provider"] = ["bin/changed.py"]
+            client.set_regs([registration])
+        monkeypatch.setattr(controller, "resolve", resolve)
+        monkeypatch.setattr(controller, "request_receipt_inventory", inventory)
+        summary = daemon.reconcile_once()
+        assert entered.is_set()
+        assert inventories and all("persisted" in adopted for adopted in inventories)
+        assert controller._receipt_path("persisted").read_bytes() == before
+        assert summary.started == summary.restarted == []
+        assert summary.stopped == (["persisted"] if existing else [])
+        if existing:
+            assert process.terminated
+            assert summary.running == []
+        release.set()
+        daemon._resolution_futures["persisted"][1].result(1)
+        summary = daemon.reconcile_once()
+        assert summary.started == ["persisted"]
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
+def test_companionless_cycles_prune_completed_probe_futures_and_retain_pending():
+    pending = Future()
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unit", machine="host")]), "host", launcher=FakeLauncher(),
+        companion_controller=FakeCompanionController(),
+    )
+    daemon._probe_inflight.add(pending)
+    try:
+        for _ in range(8):
+            daemon.reconcile_once()
+            daemon._progress_future.result(1)
+            for future in tuple(daemon._probe_inflight):
+                if future is not pending:
+                    future.result(1)
+            assert pending in daemon._probe_inflight
+        assert len(daemon._probe_inflight) <= 9
+    finally:
+        pending.set_result(None)
         daemon.shutdown()

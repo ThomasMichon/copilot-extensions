@@ -262,6 +262,33 @@ class BoundedReconciliation:
         self._last_store_registrations = copy.deepcopy(registrations)
         return registrations
 
+    def _declared(self) -> list[dict]:
+        if self.declared_source is None:
+            return []
+        from .registrar_reconcile import declared_registrations
+
+        try:
+            registrations = self._bounded_read("declarations", lambda: declared_registrations(
+                list(self.declared_source()), machine=self.machine, env=self.env,
+            ))
+        except TimeoutError as exc:
+            if self._last_declared is None:
+                raise CompanionIndeterminate(
+                    "declaration discovery pending; no confirmed declaration snapshot"
+                ) from exc
+            log.warning("declaration discovery remains pending; retaining confirmed declarations")
+            return self._last_declared
+        except Exception as exc:
+            log.exception("failed to read declared profile set; retaining confirmed declarations")
+            if self._last_declared is None:
+                raise CompanionIndeterminate(
+                    "declaration discovery unavailable; no confirmed declaration snapshot"
+                ) from exc
+            return self._last_declared
+        self._last_declared = registrations
+        self._published_declared_ids = self._publish_declarations(registrations)
+        return registrations
+
     def _receipt_pool(self) -> Executor:
         if self._receipt_executor is None:
             self._receipt_executor = ThreadPoolExecutor(

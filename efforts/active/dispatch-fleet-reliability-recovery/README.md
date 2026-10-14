@@ -467,3 +467,31 @@ requested contract.
   passes 176 tests. Fatal lint, module ceilings, documentation, headless-launch,
   install-contract and changefile-presence gates pass with unchanged budgets.
   These are source/consumer results, not rollout or independent keeper proof.
+
+### 2026-10-14 - Receipt fairness, cold declarations and native startup
+
+- Five fresh review findings reproduced starvation behind unknown receipt
+  readbacks, missing unmanaged exit confirmation, cold configured declarations
+  being treated as empty, an unresolved unmanaged provider losing its receipt
+  fence, and accumulated completed probe references. The local corrections
+  retain unknown operations, rotate admission without destructive replay, and
+  preserve unfinished work in shutdown accounting.
+- Actual contained startup profiling found that invoking the stdlib-only gate
+  with `-m` initialized the coordinator package first. A native shadow-package
+  regression failed before switching to the gate's pinned script path. The
+  real readiness/repeated-health/rollback/stop path subsequently completed in
+  24.297 seconds within its unchanged 30-second test limit.
+- A separate fail-first regression showed that process creation was not charged
+  against captured execution time. The command now computes the remaining wait
+  from a deadline established before creation, preserving the one-second pipe
+  drain limit. The actual inherited-descendant-pipe test completed in 5.047
+  seconds against its unchanged 4.8-to-5.8-second assertion.
+- State-machine fixtures now drain owned work before restoring mocked process
+  identities and use controlled receipt executors with their simulated clock.
+  Real concurrent receipt and native tests retain their actual executors.
+- **Validation remains incomplete.** The latest exact subset passed six cases
+  before the existing transition-group rollback test exceeded its unchanged
+  30-second limit inside retention validation/publication. That timeout is not
+  waived or classified as a proven flake. Full combined coverage, remaining
+  gates, publication, fresh review and required CI remain open. No deployment,
+  independent keeper custody or fleet processing proof is claimed.
