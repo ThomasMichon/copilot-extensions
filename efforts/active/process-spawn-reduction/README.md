@@ -415,6 +415,12 @@ single-final-batch contract.
   truthiness, now distinguishes absent from malformed resolution; the new
   regression preserves previously published bytes. The settings/built-in
   selection passes all 9 cases, unchanged budgets.
+- Declared the new real-process filesystem contracts as T2 and the native
+  PowerShell/Git Bash consumer cases as explicit T3, so native fixtures are not
+  prepared in the ordinary lane. Admission proof: default standalone selection
+  2 passed / 2 native skips; explicit selection all 4 passed; the 3 structural/
+  environment guards pass separately. No runtime behavior changed in this
+  classification follow-up.
 
 ### 2026-10-14 - Declarations decide static publication
 

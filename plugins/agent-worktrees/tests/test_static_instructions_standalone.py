@@ -41,6 +41,9 @@ def standalone_workspace(tmp_path):
 
 
 @pytest.mark.parametrize("safe_path", [False, True])
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 def test_standalone_module_copies_without_projection_engine(standalone_workspace, safe_path):
     from agent_worktrees import static_instructions
 
@@ -76,6 +79,9 @@ def test_standalone_module_copies_without_projection_engine(standalone_workspace
 
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 def test_native_final_preflight_copies_knowledge_only_provider(
     standalone_workspace, tmp_path, request, shell,
 ):

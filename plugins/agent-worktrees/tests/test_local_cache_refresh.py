@@ -14,6 +14,12 @@ import pytest
 from agent_worktrees import context_cli, knowledge_plugins, local_cache_refresh as lcr
 from agent_worktrees import resolve_cli, static_instructions as static
 
+pytestmark = [
+    pytest.mark.portfolio_tier("T2"),
+    pytest.mark.effect("process"),
+    pytest.mark.effect("filesystem"),
+]
+
 
 def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
