@@ -698,3 +698,159 @@ credential changes, broad policy weakening or unreviewed releases.
   a CLI stdin-body transport failure; the full PR description was restored from
   an explicit file and read back, including Documentation impact and attribution.
   Review must evaluate that complete description and the filename fix together.
+
+### 2026-10-13 - Shared scanner staging merged; release proof next
+
+- #6577 merged at `22:43:02Z` as `5d229af2eca8`. Final head `1ad14bfff2aa`
+  received native review `5510850988`: a clean owner-authored Comment with zero
+  open findings under the repository's documented contract. The real filename
+  finding was fixed and resolved; the generic recommendation for human security
+  review did not identify another defect or introduce a new merge requirement.
+- Current-head CI `38477671946` and lockdown passed. Before the managed merge,
+  the actual source preflight verified all configured requirements, complete
+  policy/evidence pages, bound integration identities and the unchanged head.
+  No CI or required-check bypass was used.
+- The final local workflow/scanner/policy selection passed 124 cases, including
+  the real Git filename boundary. Current-head native Windows and Linux lanes
+  passed; #6581's telemetry fixture repair is merged and that issue is closed.
+- Admission and scanner migration are source-landed, not yet proven on default
+  main. Keep the legacy gate and completion caller until a covering promotion
+  exercises both replacement producers; then remove main-PR CI allocation while
+  retaining full main-push, contributor and deep/platform coverage.
+- Release run `38479483177` is queued behind failed full-suite attempts. Existing
+  artifact/configuration repair owners retain their blockers. The campaign
+  remains Active; this source merge closes neither cutover nor observation.
+
+### 2026-10-13 - Full suites green; coverage evidence still blocks release
+
+- Containing run `38479483177` passed all nine full plugin suites, including
+  Agent Worktrees and Agent Bridge. The canonical #6587/#6588 fixture repair is
+  merged; do not reopen or replace that completed source correction.
+- Promotion job `115586929142` then refused because enrolled Agent Bridge
+  coverage had not been collected/transferred into that run. This is a distinct
+  evidence blocker, not another unit-test failure. The explicit evidence gate
+  remains intact.
+- Relayed the exact run/job/signature to the existing #6535/#4876 release-repair
+  owner in #6535 comment `6157132946`, without a competing implementation or
+  manual rerun. Run `38480618519` was already pending; its result alone cannot
+  be predicted from the prior source merges.
+- Default main still records validated dev `ca7b3e563067` from `07:32:25Z`, not
+  the new admission/scanner source. The next consolidation step remains blocked
+  on normal covering release and live producer proof. Legacy CI stays enabled.
+
+### 2026-10-13 - Review lifecycle measurement and canonical collector repair
+
+- Extended the existing complete three-hour event windows with review-workflow
+timing, using all Actions API pages rather than the latest-run sample.
+The earlier window contains 45 successful Copilot review runs; the later
+contains 79. Median recorded lifecycle increased from 227 to 262 seconds,
+and p90 from 389 to 446 seconds. These are `updated_at - run_started_at`
+workflow metadata durations, not measured inference or review-engine latency.
+- Every review run in both windows reports `run_started_at == created_at`.
+That field therefore provides no independent queue-delay observation here;
+zero recorded delay is not proof of an unqueued service. No causal latency,
+throughput or quota improvement follows from the invocation reduction.
+- The missing Bridge evidence is now traced by the existing release-repair
+drivers to repository-root collection of `test_workspace_creation.py`:
+`tests.test_acquisition_runtime` cannot be imported. #6597 owns the bounded
+test-import correction and retains the full evidence requirement. Another
+driver's proposed transfer was withdrawn after that ownership was confirmed.
+- Run `38481804293` independently reproduces the collection failure in Bridge
+job `115587540155`; an apparently successful optional baseline step alone
+does not prove an artifact was produced. Await the canonical repair's normal
+covering promotion. No competing patch, extra rerun or CI removal is made.
+
+### 2026-10-13 - Canonical repair merged; containing validation pinned
+
+- #6597 merged at `23:27:55Z` as `41615b8c601f`. Normal validation run
+`38484939290` selects that exact source: completed full-suite job
+`115596669721` records both checkout ref and actual HEAD as the merge SHA.
+A dispatch's triggering commit or run-level default-main SHA is not the
+selected validation input; authoritative job evidence resolves it.
+- Older run `38481804293` failed the unchanged evidence gate in promotion job
+`115596045700`. The containing run is still executing; complete baseline
+collection, artifact validation and actual main publication remain gates.
+- Shared the pinned run/job/SHA with the existing release owners in #6535
+comment `6157573705`, including explicit pending stages. Main still records
+the older `ca7b3e563067` release. The legacy CI producer remains untouched.
+
+### 2026-10-14 - Collector proof clears; residual artifact mismatch blocks release
+
+- Containing run `38484939290` completed all nine full plugin suites and
+produced all nine enrolled baseline artifacts, including Bridge artifact
+`11858944868`. Promotion's explicit collected-baseline requirement passed.
+This is the hosted proof of #6597's collector repair, not merely local
+validation or an optional step's reported success.
+- Unsigned Python artifact build `115605421711` and validation/attestation
+`115605705366` both passed. Promotion job `115605893690` then refused with
+`promote-release: manifest payload hash differs from candidate` while
+composing against exact dev `41615b8c601f`, with both baseline and signed
+Python artifact directories supplied. No candidate merge or publication
+occurred; successful attestation alone does not prove final composition.
+- Relayed the residual contract mismatch and the now-passing collection gate
+to the existing #6535/#4876 artifact owners in comment `6157878020`.
+Normal run `38487345996` was already active; no extra dispatch, parallel
+artifact implementation or evidence bypass was introduced.
+- Default-main admission/scanner proof and CI cutover remain outstanding.
+Keep every legacy producer until a genuine covering release clears them.
+
+### 2026-10-14 - Repeated composition refusal; original publisher reached
+
+- Normal run `38487345996`, on exact dev `d97acffbeab7`, passed its other
+jobs but promotion `115613853426` repeated the payload-hash refusal at
+`00:29:43Z`. There is still no covering release or replacement-producer proof.
+- Resolved the original #6332 publisher's actual source-attribution root and
+verified its live session before sending the exact two-run evidence directly.
+The existing Fleet Control V2 consumer's #6596 released-only rollout blocker
+was included. Delivery succeeded; repair acceptance or a canonical fix is
+not yet confirmed. The newer bootstrap-repair root had no live session, so
+no replacement session or service restart was attempted.
+- A peer's LF/CRLF scratch-canonicalization trace is a candidate diagnosis,
+not reproduced proof or permission to waive source/hash/wheel binding.
+Await the retained artifact owner's acknowledgement and normal repair.
+- The exact final-consumer repair is now reserved on #6535 as
+`battered-toolbox-promotion-candidate` (comment `6158147260`). Relayed that
+reservation to the original publisher and the Fleet Control V2 consumer
+to prevent overlap; broader #4876 custody remains unchanged.
+- A third normal run, `38492036670` on dev `f790097ec762`, repeated only the
+same promotion refusal in job `115627083122` at `01:14:31Z`. Requested the
+reserved worker's concrete reproduction/PR/next gate in comment `6158761173`;
+quiet time does not expire the reservation or authorize another repair.
+- Refreshed the eventual cutover's live required-context inventory: main has
+no classic required-status-check protection, and its complete effective
+rules include only `main source gate` as a required context, with strict
+freshness false. No required-workflow rule was present. The existing trusted
+host preserves that context name; no policy mutation or orphaned main PR
+aggregate is needed for this slice. Release and live producer proof still
+precede any removal of the old CI invocation.
+
+### 2026-10-14 - Source repair confirmed; independent clock fixture repaired
+
+- Provider evidence confirms #6604 merged at `00:54:06Z` as `1097e7f401de`.
+An open-PR-only progress lookup missed that completed publication; the earlier
+"no repair PR yet" status is corrected. The shared canonical artifact reader
+is source-landed, not released. #6611 separately prepares its dev workflow
+mirror; neither change authorizes this campaign to perform the distinct
+trusted-main bootstrap. Main still carries the older #6558 workflow.
+- Later validation `38495860924` instead fails the full worktrees suite at
+`test_identity_lookup_shares_overall_budget_without_two_second_cutoff`.
+Existing issue #6610 had no exact repair reservation or PR; reserved only
+this fixture family as `spry-cog-local-cache-clock`.
+- The actual contained native test reproduced the hosted StopIteration
+failure. Its three-value clock was patched onto the shared standard-library
+time module, so real launch-stage instrumentation exhausted those values.
+Bind the fake clock only to the module under test, including the three
+neighboring deadline fixtures of the same class. The regression explicitly
+verifies the standard-library monotonic clock is unchanged.
+- The complete local-cache/launch-progress selection now passes 71 tests,
+with two explicit platform skips. Exact ten-second overall, ten-second
+lookup and seven-second remaining-render assertions are retained; no
+production deadline, renderer, authority or fallback code changes.
+- The existing finite-clock regression joins the cheap deterministic guard
+selection, so required PR CI executes it rather than only collecting it.
+No new test case, matrix, workflow or subprocess is introduced.
+- This is a test-only, below-altitude release repair with the required
+agent-worktrees patch changefile. The real refresh and launch instrumentation
+supply the simple integration contract. Fresh-install/runtime rollout lanes
+do not apply because no install or runtime behavior changes. Current-head
+hosted checks, review and a containing full validation remain required.

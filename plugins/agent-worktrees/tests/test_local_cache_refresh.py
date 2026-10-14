@@ -45,12 +45,15 @@ def _renderer_json(*, changed=None, unchanged=None, warnings=0, blocking=0):
 
 
 
+@pytest.mark.guard
 def test_identity_lookup_shares_overall_budget_without_two_second_cutoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_worktrees import push_timeout
     clock = iter([100.0, 100.0, 103.0])
-    monkeypatch.setattr(lcr.time, "monotonic", lambda: next(clock))
+    real_monotonic = time.monotonic
+    monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    assert time.monotonic is real_monotonic
     lookup_timeouts: list[float] = []
     render_timeouts: list[float] = []
 
@@ -459,7 +462,7 @@ class TestRefreshLocalCache:
         from agent_worktrees import push_timeout
 
         clock = [100.0]
-        monkeypatch.setattr(lcr.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: clock[0]))
         script = tmp_path / "renderer.py"
 
         def resolve(home, **kwargs):
@@ -484,7 +487,7 @@ class TestRefreshLocalCache:
         from agent_worktrees import push_timeout
 
         clock = [100.0]
-        monkeypatch.setattr(lcr.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
         def resolve(home, **kwargs):
             clock[0] += kwargs["timeout"]
@@ -504,7 +507,7 @@ class TestRefreshLocalCache:
         from agent_worktrees import push_timeout
 
         clock = [100.0]
-        monkeypatch.setattr(lcr.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: clock[0]))
         monkeypatch.setattr(lcr, "_resolve_cli_script", lambda *a, **k: tmp_path / "renderer.py")
 
         def command():
