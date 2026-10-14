@@ -129,6 +129,14 @@ process itself — carries forward unchanged into this effort's Phase 1 work.
 > sessions end-to-end right now; it's just missing some pieces. We're going
 > to fill those in. In a handoff, let's plan out an effort to get started.
 
+Follow-up ownership policy:
+
+> Human input can automatically revoke, but we'll need a way to be able to "hook it back up".
+
+Both automatic human takeover and a usable return to remote driving belong
+to Phase 2. The deliberate fresh-claim re-hook mechanism is an
+agent-recommended design, not additional verbatim operator instruction.
+
 ## Plan
 
 _(The phases below are agent-recommended, derived directly from the
@@ -323,6 +331,11 @@ and ordering before Phase 0 work begins.)_
   The prototype's target bearer token authenticates access but is not an
   exclusive driver claim; keep read-only observers independent of mutation
   ownership. This linkage does not complete either Phase 2 item.
+- Detailed implementation and validation plan:
+  [`phase-2-driver-arbitration.md`](phase-2-driver-arbitration.md). Human input
+  revokes remote ownership; a deliberate re-hook obtains a fresh claim.
+  Review this policy/mechanism plan before implementation, and do not equate
+  HTTP fencing with exclusion of arbitrary native/keyboard input.
 - [ ] Design a generation/claim-style primitive for "exactly one driver at a
       time" against an **already-running** mux session — the gap Session
       Host's `host_index.py` already closes for ACP, and raw mux does not
@@ -1030,3 +1043,41 @@ release/takeover and human ownership. An HTTP claim alone cannot fence direct
 human keyboard input to a mux pane; do not present the narrower guarantee as
 complete human/remote arbitration. The SDK migration remains outside this
 effort's execution scope.
+
+### 2026-10-14 — Phase 6 findings merged; Phase 2 ownership decision
+
+PR #6668 squash-merged to `dev` as
+`64f4f6b0b66bc7be6dbd4c8f71710ebb2c0b47e6`, after a clean review on its final
+head and passing CI, including the aggregate PR gate. Closed only the bounded
+research tracker #6647. The independently merged SDK prompt fix is recorded
+above; neither merge changes a default or establishes a host rollout.
+
+Re-read the Plan, Validation Plan, and latest Journal after merging, then
+advanced effort-focus to Phase 2 / #5930. The parent effort remains Active;
+the cross-venue/version-floor, arbitration, interaction, and side-by-side
+validation items remain open.
+
+**Agent-identified design decision before arbitration implementation:** when
+a human supplies input to a remotely driven mux session, should that input
+automatically revoke the remote driver's claim, or should ownership change
+only through an explicit handoff? The inspected SDK exposes message-source
+metadata, but that is attribution, not an ownership credential; its
+user-prompt-submitted hook does not expose a denial decision. Neither
+automatic input detection/fencing nor complete keyboard exclusion has been
+proven. Do not silently pick one policy or describe an HTTP-only lease as
+full human/remote ownership arbitration.
+
+### 2026-10-14 — Human takeover and re-hook policy selected
+
+Operator decision, captured verbatim in Request: permit human-triggered
+revocation and preserve a way to restore remote driving. Agent recommendation:
+do not silently restore the revoked credential or auto-reclaim ownership
+after ordinary reconnection; use a deliberate fresh-claim re-hook.
+
+The agent-recommended plan is
+[`phase-2-driver-arbitration.md`](phase-2-driver-arbitration.md): target-local
+generation-fenced controls, independent observers, native input provenance
+and takeover handling, deliberate fresh-claim re-hook, and bounded race/
+replay/recovery tests. Native source preservation and fencing remain proof
+obligations, not capabilities inferred from SDK type definitions. No Phase 2
+implementation or native-concurrency validation is claimed by this plan.
