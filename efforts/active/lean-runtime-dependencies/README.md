@@ -49,6 +49,9 @@ reuse is a first-class investigation, not a preselected mandatory global broker.
 source evidence, recommended reductions and limits of the measurements.
 [Shared-runtime investigation](shared-runtime.md) defines the decision gate for
 installer de-vendoring and candidate shared ZDD fronts.
+[Profile results and remaining acceptance](profile-results.md) consolidates the
+delivered source changes, fresh-install measurements, validation limits and
+explicit unresolved owner boundaries.
 
 Promotion already expands canonical shared-library references into independently
 shippable payloads. That source-sharing mechanism does not itself avoid repeated
@@ -480,3 +483,10 @@ shared mutable venv is presumed acceptable.
   reconcile the remaining engine/standalone-service acceptance with their
   existing owners and publish the final profile/validation matrix. No
   production runtime update or warm-engine/corpus mutation occurred.
+- Consolidated the [profile/validation matrix](profile-results.md) for that
+  same evidence review. Measurement and retirement guards remain effective
+  under optimized Python; all eight retained-probe controls pass with `-O`.
+  The artifact owner has been asked to acknowledge the existing acceptance
+  boundary and name the exact approved profile contract needed by #6737.
+  Pending replies and native/service gates remain open, not completed by
+  relabeling them as another owner's work.
