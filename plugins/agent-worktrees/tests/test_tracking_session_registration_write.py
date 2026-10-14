@@ -177,24 +177,33 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
 
 @pytest.mark.parametrize(
     (
-        "default_branch", "remote_name", "remote_ref_available",
-        "declared_branch", "expected_refs", "expected_probes",
+        "default_branch", "machine_remote", "available_remotes",
+        "remote_ref_available", "declared_branch", "committed_remote",
+        "expected_refs", "expected_probes",
     ),
     [
-        ("main", "origin", True, "", ("refs/remotes/origin/main",), 3),
-        ("", "origin", True, "", ("refs/remotes/origin/main",), 3),
-        ("main", "upstream", True, "", ("refs/remotes/upstream/main",), 3),
-        ("main", "origin", False, "", ("refs/heads/main",), 4),
-        ("main", "", False, "", ("refs/heads/main",), 3),
+        ("main", "origin", (), True, "", "", ("refs/remotes/origin/main",), 3),
+        ("", "origin", (), True, "", "", ("refs/remotes/origin/main",), 3),
         (
-            "registry", "origin", True, "dev",
+            "main", "upstream", (), True, "", "",
+            ("refs/remotes/upstream/main",), 3,
+        ),
+        ("main", "origin", (), False, "", "", ("refs/heads/main",), 4),
+        ("main", None, (), False, "", "", ("refs/heads/main",), 4),
+        (
+            "main", None, ("upstream",), True, "", "upstream",
+            ("refs/remotes/upstream/main",), 4,
+        ),
+        (
+            "registry", "origin", (), True, "dev", "",
             ("refs/remotes/origin/main", "refs/remotes/origin/dev"), 5,
         ),
     ],
 )
 def test_session_register_uses_knowledge_backed_receiving_authority(
-    tmp_path: Path, monkeypatch, default_branch, remote_name,
-    remote_ref_available, declared_branch, expected_refs, expected_probes,
+    tmp_path: Path, monkeypatch, default_branch, machine_remote,
+    available_remotes, remote_ref_available, declared_branch,
+    committed_remote, expected_refs, expected_probes,
 ):
     """Registration skips full project policy while preserving its authority."""
     from agent_worktrees import git_ops, repos as repos_mod
@@ -240,14 +249,28 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     committed_path = cfg.inrepo_config_path(Path()).as_posix()
     timeouts = []
     shown_refs = []
+    selected_remote = (
+        machine_remote
+        if machine_remote is not None
+        else (
+            "origin" if "origin" in available_remotes
+            else available_remotes[0] if len(available_remotes) == 1
+            else ""
+        )
+    )
 
     def committed_config(*args, **kwargs):
         timeouts.append(kwargs["timeout"])
         assert kwargs["isolated_repository"] is True
+        if args[0] == "remote":
+            return SimpleNamespace(
+                returncode=0,
+                stdout="".join(f"{name}\n" for name in available_remotes),
+            )
         if args[0] == "symbolic-ref":
             ref = (
-                f"refs/remotes/{remote_name}/main"
-                if remote_name else "refs/heads/main"
+                f"refs/remotes/{selected_remote}/main"
+                if selected_remote else "refs/heads/main"
             )
             return SimpleNamespace(
                 returncode=0,
@@ -266,13 +289,17 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
                     returncode=0,
                     stdout=(
                         f"default_branch: {declared_branch}\n"
-                        "stateless: false\n"
+                        + (f"remote: {committed_remote}\n" if committed_remote else "")
+                        + "stateless: false\n"
                         "requires_external_state_root: false\n"
                     ),
                 )
             return SimpleNamespace(
                 returncode=0,
-                stdout="stateless: true\nrequires_external_state_root: true\n",
+                stdout=(
+                    (f"remote: {committed_remote}\n" if committed_remote else "")
+                    + "stateless: true\nrequires_external_state_root: true\n"
+                ),
             )
         raise AssertionError(args)
 
@@ -285,7 +312,10 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         "platform: windows\n"
         "knowledge_repo: knowledge\n"
         f"repos:\n  harness:\n    anchor: {harness}\n"
-        f"    remote: '{remote_name}'\n",
+        + (
+            f"    remote: '{machine_remote}'\n"
+            if machine_remote is not None else ""
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_root)
@@ -359,6 +389,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     [
         ("nonzero", "cannot read committed authority"),
         ("timeout", "timed out"),
+        ("absent", "committed authority config is absent"),
     ],
 )
 def test_registration_authority_fails_closed_when_committed_config_is_unreadable(
@@ -387,7 +418,12 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
     project_root = tmp_path / ".harness"
     project_root.mkdir()
     (project_root / "config.yaml").write_text(
-        "machine: workstation-windows\nplatform: windows\n",
+        "machine: workstation-windows\n"
+        "platform: windows\n"
+        "repos:\n"
+        "  harness:\n"
+        f"    anchor: {anchor}\n"
+        "    remote: origin\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_root)
@@ -398,6 +434,8 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
         assert kwargs["isolated_repository"] is True
         if failure == "timeout":
             raise subprocess.TimeoutExpired("git", kwargs["timeout"])
+        if failure == "absent":
+            return SimpleNamespace(returncode=0, stdout="")
         return SimpleNamespace(returncode=1, stdout="")
 
     monkeypatch.setattr(git_ops, "git", failed_git)

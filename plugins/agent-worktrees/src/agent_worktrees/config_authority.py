@@ -5,12 +5,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-_GIT_PROBE_TIMEOUT_S = 0.25
+_GIT_PROBE_TIMEOUT_S = 0.2
 
 
 def _load_state_root_authority(
-    name: str, anchor: str, platform_name: str, remote_name: str,
-) -> dict:
+    name: str, anchor: str, platform_name: str, remote_name: str | None,
+) -> tuple[dict, str]:
     """Read only state-root gates from the registered committed config."""
     from . import config as cfg, git_ops, repos
 
@@ -20,6 +20,22 @@ def _load_state_root_authority(
         cfg.legacy_inrepo_config_path(Path()),
         Path(cfg.INREPO_CONFIG_FILENAME),
     )
+    if remote_name is None:
+        remotes = git_ops.git(
+            "remote", cwd=root, check=False, capture=True,
+            timeout=_GIT_PROBE_TIMEOUT_S, isolated_repository=True,
+        )
+        if remotes.returncode != 0:
+            raise ValueError(f"cannot resolve local remote for project {name!r}")
+        names = [line.strip() for line in remotes.stdout.splitlines() if line.strip()]
+        if "origin" in names:
+            remote_name = "origin"
+        elif len(names) == 1:
+            remote_name = names[0]
+        elif not names:
+            remote_name = ""
+        else:
+            raise ValueError(f"local remote is ambiguous for project {name!r}")
 
     def _refs(branch: str) -> list[str]:
         return (
@@ -58,7 +74,11 @@ def _load_state_root_authority(
             None,
         )
         if selected is None:
-            return {}
+            if required:
+                raise ValueError(
+                    f"committed authority config is absent for project {name!r}"
+                )
+            return None
         content = git_ops.git(
             "show", f"{ref}:{selected.as_posix()}",
             cwd=root, check=False, capture=True,
@@ -108,7 +128,7 @@ def _load_state_root_authority(
         hopped = _read_branch(declared, required=False)
         if hopped is not None:
             data = hopped
-    return data or {}
+    return data or {}, remote_name
 
 
 def load_project_authority_config(
@@ -149,7 +169,10 @@ def load_project_authority_config(
     )
     if not isinstance(machine_repo, dict):
         machine_repo = {}
-    remote_name = str(machine_repo.get("remote", "origin") or "")
+    remote_name = (
+        str(machine_repo.get("remote") or "")
+        if "remote" in machine_repo else None
+    )
     anchor = machine_repo.get("anchor") or cfg._resolve_anchor_from_registry(
         name, platform_name
     )
@@ -159,7 +182,7 @@ def load_project_authority_config(
             f"{path} or the repos registry"
         )
 
-    inrepo_authority = _load_state_root_authority(
+    inrepo_authority, resolved_remote = _load_state_root_authority(
         name, str(anchor), platform_name, remote_name,
     )
     stateless = bool(
@@ -189,7 +212,7 @@ def load_project_authority_config(
             name: cfg.RepoConfig(
                 anchor=str(anchor),
                 worktree_root=str(worktree_root),
-                remote=remote_name,
+                remote=str(inrepo_authority.get("remote", resolved_remote) or ""),
                 stateless=stateless,
                 requires_external_state_root=requires_external_state_root,
             ),
