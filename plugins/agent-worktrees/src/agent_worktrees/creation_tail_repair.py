@@ -188,8 +188,13 @@ def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord):
     if root.requires_external:
         allocation = _allocation(record)
         child = _retained_sibling(config, record, root, *allocation)
-        if existing is not None and existing.pair_kind == "worktree" and child is None:
-            raise ValueError("retained pair does not match the original creation allocation")
+        if existing is not None and existing.pair_kind == "worktree":
+            if (
+                child is None or existing.sibling is None
+                or existing.sibling.worktree_id != child.worktree_id
+                or Path(existing.sibling.path).resolve() != Path(child.worktree_path).resolve()
+            ):
+                raise ValueError("retained pair does not match the original creation allocation")
         if child is not None and repos.normalize_class(entry.repo_class) not in {"worktree", "knowledge"}:
             raise ValueError("knowledge management class no longer permits the retained worktree")
         if child is not None:
@@ -212,7 +217,9 @@ def _require_composition(result: dict) -> None:
         raise ValueError(error or result.get("error") or "knowledge composition failed")
 
 
-def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) -> None:
+def _prepare_pair(
+    config: cfg.Config, record, path: Path, seed_id: str, plan, scope: ExitStack,
+) -> None:
     root, existing, allocation, child = plan
     config = cfg.load_config()
     record, _ = _validate(config, path, seed_id)
@@ -247,41 +254,41 @@ def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) ->
     requires_child = repos.normalize_class(entry.repo_class) in {
         "worktree", "knowledge",
     }
-    with fin.FinalizeLock(
+    scope.enter_context(fin.FinalizeLock(
         Path(knowledge_config.default_repo.worktree_root) / ".finalize.lock",
         timeout=300, stale_after=3600,
-    ):
-        fresh = cfg.load_config()
-        current, _ = _validate(fresh, path, seed_id)
-        current_root, existing, _, child = _pair_plan(fresh, current)
-        if (current_root.repo, current_root.path) != (root.repo, root.path):
-            raise ValueError("knowledge binding changed during creation recovery")
-        if requires_child and child is None:
-            raise ValueError("original companion disappeared before locked creation recovery")
-        if child is not None:
-            _prepare_permissions(root.path, child.worktree_path)
-            stamp = {
-                "pair_id": child.pair_id, "pair_role": "harness",
-                "pair_ref": tracking.format_claim_ref(child.machine, child.repo, child.worktree_id),
-                "pair_kind": "worktree",
-            }
-        if existing is not None:
-            result = knowledge_plugins.compose_from_pair(cwd=current.worktree_path, config=fresh)
-            _require_composition(result)
-            return
-        fresh = cfg.load_config()
-        current, _ = _validate(fresh, path, seed_id)
-        current_root = state_root.resolve_state_root(fresh)
-        if (current_root.repo, current_root.path) != (root.repo, root.path):
-            raise ValueError("knowledge binding changed during creation recovery")
-        if any((current.pair_id, current.pair_ref, current.pair_role, current.pair_kind)):
-            raise ValueError("pair metadata changed during creation recovery")
-        result = worktree_creation._stamp_and_compose_paired_knowledge(
-            fresh, current, current.worktree_path, stamp,
-        )
-        if result is None:
-            result = knowledge_plugins.compose_from_pair(cwd=current.worktree_path, config=fresh)
+    ))
+    fresh = cfg.load_config()
+    current, _ = _validate(fresh, path, seed_id)
+    current_root, existing, _, child = _pair_plan(fresh, current)
+    if (current_root.repo, current_root.path) != (root.repo, root.path):
+        raise ValueError("knowledge binding changed during creation recovery")
+    if requires_child and child is None:
+        raise ValueError("original companion disappeared before locked creation recovery")
+    if child is not None:
+        _prepare_permissions(root.path, child.worktree_path)
+        stamp = {
+            "pair_id": child.pair_id, "pair_role": "harness",
+            "pair_ref": tracking.format_claim_ref(child.machine, child.repo, child.worktree_id),
+            "pair_kind": "worktree",
+        }
+    if existing is not None:
+        result = knowledge_plugins.compose_from_pair(cwd=current.worktree_path, config=fresh)
         _require_composition(result)
+        return
+    fresh = cfg.load_config()
+    current, _ = _validate(fresh, path, seed_id)
+    current_root = state_root.resolve_state_root(fresh)
+    if (current_root.repo, current_root.path) != (root.repo, root.path):
+        raise ValueError("knowledge binding changed during creation recovery")
+    if any((current.pair_id, current.pair_ref, current.pair_role, current.pair_kind)):
+        raise ValueError("pair metadata changed during creation recovery")
+    result = worktree_creation._stamp_and_compose_paired_knowledge(
+        fresh, current, current.worktree_path, stamp,
+    )
+    if result is None:
+        result = knowledge_plugins.compose_from_pair(cwd=current.worktree_path, config=fresh)
+    _require_composition(result)
 
 
 def _checks(record, plan) -> dict:
@@ -349,7 +356,7 @@ def targeted_doctor(args) -> int:
                 with step("Restoring creation permissions", worktree_id=identity):
                     _prepare_permissions(config.default_repo.anchor, record.worktree_path)
                 with step("Restoring creation pair", worktree_id=identity):
-                    _prepare_pair(config, record, path, seed.seed_id, plan)
+                    _prepare_pair(config, record, path, seed.seed_id, plan, admission)
                 with step("Restoring creation guidance", worktree_id=identity):
                     refreshed = local_cache_refresh.prepare_for_launch(record.worktree_path)
                     if refreshed.status != "ready":

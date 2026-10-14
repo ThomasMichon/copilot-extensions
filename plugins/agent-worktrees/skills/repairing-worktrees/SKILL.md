@@ -132,6 +132,9 @@ without delivery. A confirmed live Open bypasses seed planning, not the cold
 execution fence, so reattachment stays available without mutating launch intent.
 Every backend command remains fenced at execution, including plans resolved while
 live; normal mux reattachment does not execute that backend command.
+The companion lifecycle lock also stays held through guidance and final readiness
+to exclude detached `embody` creation. An existing pair must resolve to the exact
+original child's ID and path; a reciprocal but different companion refuses.
 The kernel releases it after process exit, without guessing that a PID is stale.
 Direct seed-mutating clients require receiving verb version 4; structured request
 staging requires version 3, so an older daemon cannot silently omit this fence.

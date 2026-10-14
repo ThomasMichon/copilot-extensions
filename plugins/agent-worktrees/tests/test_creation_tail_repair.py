@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -253,6 +254,129 @@ def test_creation_reuses_companion_after_parent_stamp_failure(native_creation, m
     code, report = _run(creation, capsys, fix=True)
     assert code == 0 and report["prepared"]
     assert sorted(creation.projects["knowledge"].joinpath("worktrees").glob("*.yaml")) == children
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.guard
+def test_creation_refuses_reciprocal_pair_to_a_different_original_child(creation, monkeypatch, capsys):
+    parent = tracking.load_record(creation.record.yaml_path)
+    for child_id in (parent.worktree_id + "-k", parent.worktree_id + "-other-k"):
+        checkout = creation.roots["knowledge"] / child_id
+        checkout.mkdir(parents=True)
+        tracking.create_new_record(
+            child_id, f"worktree/{child_id}", str(checkout), "knowledge", "host",
+            cfg.detect_platform(), creation.projects["knowledge"] / "worktrees",
+            pair_id="20261013-100000-abcd", pair_role="knowledge",
+            pair_ref=tracking.format_claim_ref("host", "harness", parent.worktree_id),
+            pair_kind="worktree",
+        )
+    parent.pair_id = "20261013-100000-abcd"
+    parent.pair_role = "harness"
+    parent.pair_kind = "worktree"
+    parent.pair_ref = tracking.format_claim_ref("host", "knowledge", child_id)
+    tracking.save_record(parent)
+    pair = state_root.resolve_pair(creation.configs["harness"], cwd=parent.worktree_path)
+    assert pair.paired and pair.sibling.worktree_id == child_id
+    before = launch_seed_state.state_path(parent.yaml_path).read_bytes()
+    monkeypatch.setattr(
+        repair, "_prepare_permissions", lambda *a: pytest.fail("conflicting pair mutated permissions"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and "original creation allocation" in report["error"]
+    assert launch_seed_state.state_path(parent.yaml_path).read_bytes() == before
+
+
+def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embody(
+    native_creation, monkeypatch, capsys,
+):
+    from agent_worktrees import handoff_cli
+
+    creation = native_creation
+    child_id = creation.record.worktree_id + "-k"
+    lock_path = creation.roots["knowledge"] / ".finalize.lock"
+    waiting, spawned = threading.Event(), threading.Event()
+    worker = None
+    results = []
+    original_config, original_dir = cfg.load_config, cfg.project_dir
+    original_acquire = repair.fin.FinalizeLock.acquire
+    original_output = repair.output._json_output
+    core = handoff_cli._core()
+
+    def child_thread():
+        return worker is not None and threading.current_thread() is worker
+
+    def load_config(config_file=None, *, project=None, **kwargs):
+        if child_thread() and project is None:
+            return creation.configs["knowledge"]
+        return original_config(config_file, project=project, **kwargs)
+
+    def acquire(lock):
+        if child_thread():
+            waiting.set()
+        return original_acquire(lock)
+
+    def emit(value):
+        if child_thread():
+            results.append(value)
+        else:
+            original_output(value)
+
+    def spawn(*args, **kwargs):
+        spawned.set()
+        return {"ok": True, "session": f"wt-{child_id}", "new_pane": None}
+
+    monkeypatch.setattr(cfg, "load_config", load_config)
+    monkeypatch.setattr(
+        cfg, "project_dir",
+        lambda name=None: original_dir("knowledge" if child_thread() and name is None else name),
+    )
+    monkeypatch.setattr(repair.fin.FinalizeLock, "acquire", acquire)
+    monkeypatch.setattr(repair.output, "_json_output", emit)
+    monkeypatch.setattr(sessions, "has_mux_session", lambda *a: False)
+    monkeypatch.setattr(sessions, "mux_new_session", spawn)
+    monkeypatch.setattr(core, "_preflight_launch", lambda *a: SimpleNamespace(error=None))
+    monkeypatch.setattr(core, "_build_launch_cmd", lambda *a, **kw: ["copilot"])
+    monkeypatch.setattr(core, "_build_env", lambda *a, **kw: {})
+    monkeypatch.setattr(core, "_repo_session_env", lambda *a: {})
+    monkeypatch.setattr(core, "_unsupported_hosted_launch", lambda *a: None)
+    monkeypatch.setattr(
+        core, "_launch_profile_selection",
+        lambda *a, **kw: handoff_cli.profile_assignment.LaunchProfileSelection(profile=None),
+    )
+    monkeypatch.setattr(core, "_reflect_assignment", lambda *a: None)
+
+    def embody():
+        results.append(handoff_cli.cmd_embody(argparse.Namespace(
+            worktree_id=child_id, fresh=True, seed=None, dry_run=False,
+        )))
+
+    def guidance(*args):
+        nonlocal worker
+        assert lock_path.exists()
+        worker = threading.Thread(target=embody, daemon=True)
+        worker.start()
+        assert waiting.wait(5)
+        assert not spawned.wait(0.05)
+        return local_cache_refresh.RefreshResult("ready")
+
+    original_checks = repair._checks
+
+    def checks(*args):
+        if worker is not None:
+            assert lock_path.exists() and not spawned.is_set()
+        return original_checks(*args)
+
+    monkeypatch.setattr(local_cache_refresh, "prepare_for_launch", guidance)
+    monkeypatch.setattr(repair, "_checks", checks)
+    try:
+        code, report = _run(creation, capsys, fix=True)
+    finally:
+        if worker is not None:
+            worker.join(10)
+    assert code == 0 and report["prepared"]
+    assert worker is not None and not worker.is_alive()
+    assert spawned.is_set() and results[-1] == 0
+    assert any(isinstance(value, dict) and value.get("created") for value in results)
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 
