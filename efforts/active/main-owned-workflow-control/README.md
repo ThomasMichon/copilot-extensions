@@ -1014,3 +1014,21 @@ hosted checks, review and a containing full validation remain required.
   promotion must then prove actual main-PR CI invocation absence while
   the trusted admission/scanner and main-push CI remain. This journal
   records candidate validation, not release or parent completion.
+
+### 2026-10-14 - Review caught retarget admission
+
+- #6661's first current-head native review identified a real missing event:
+  retargeting main to dev emits `edited`, while the default PR activity
+  set would leave the required CI absent. Added that activity alongside
+  opened/reopened/synchronize and made the exact set a guarded contract.
+  Other edits also invoke CI because GitHub has no workflow-admission
+  filter for base edits alone. This bounded cost preserves immediate
+  retarget feedback without adding a separate dispatcher or privileged
+  PR-code path.
+- Corrected the remaining current producer pointers in rollback and
+  promotion comments. No runtime program or release-job behavior changed.
+  The earlier structural-equality proof now has one additional intentional
+  event difference; all surviving jobs and push/manual paths remain intact.
+- The revised candidate passes 192 focused cases, Ruff F/E9, trusted-CI,
+  documentation and whitespace checks. Parsed CI equality confirms only
+  the stated base/activity changes and duplicate-gate deletion.

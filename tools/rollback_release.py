@@ -32,7 +32,7 @@ Pass `--no-pr` only against an unprotected/trusted repo (tests use this).
 plain stdout (never ``--json``, which that subcommand has never supported)
 and this tool's own state-commit/revert branch shapes
 (``release-pipeline/state-*``, ``release-pipeline/rollback-*``) are among
-``.github/workflows/ci.yml``'s ``main-gate`` job's recognized automated-PR
+``.github/workflows/base-branch-reminder.yml``'s ``main-gate`` job's recognized automated-PR
 shapes, so a ``pause``/``resume --push``/``revert --push`` PR lands
 through the normal sanctioned flow without an operator admin-bypass merge.
 

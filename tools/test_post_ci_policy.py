@@ -112,7 +112,10 @@ def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
     assert events["branches"] == ["main"]
     assert set(events["types"]) == {"opened", "reopened", "edited", "synchronize"}
     ci_events = ci.get("on", ci.get(True))
-    assert ci_events["pull_request"] == {"branches-ignore": ["main"]}
+    assert ci_events["pull_request"] == {
+        "branches-ignore": ["main"],
+        "types": ["opened", "reopened", "synchronize", "edited"],
+    }
     assert ci_events["push"] == {"branches": ["main", "dev"]}
     assert "workflow_dispatch" in ci_events
     assert "main-gate" not in ci["jobs"]

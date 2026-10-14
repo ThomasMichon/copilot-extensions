@@ -341,11 +341,14 @@ def test_ci_must_keep_pull_request_trigger(tmp_path: Path) -> None:
     ci_path = tmp_path / "ci.yml"
     ci_path.write_text(
         ci_path.read_text(encoding="utf-8").replace(
-            "  pull_request:\n    branches-ignore: [main]\n", "",
+            "  pull_request:\n"
+            "    branches-ignore: [main]\n"
+            "    # Retargeting main -> dev emits edited, not synchronize.\n"
+            "    types: [opened, reopened, synchronize, edited]\n", "",
         ),
         encoding="utf-8",
     )
-    assert "ci.yml must exclude only main-base pull requests" in (
+    assert "ci.yml must exclude only main-base pull requests and include retarget edits" in (
         MODULE.validate_workflow(trusted)
     )
 
@@ -359,18 +362,24 @@ def test_ci_must_keep_pull_request_trigger(tmp_path: Path) -> None:
     "    branches-ignore: [dev]\n",
     "    branches-ignore: [main, dev]\n",
     "    branches-ignore: [main]\n    paths: [tools/**]\n",
+    "    branches-ignore: [main]\n",
+    "    branches-ignore: [main]\n    types: [opened, reopened, synchronize]\n",
+    "    branches-ignore: [main]\n    types: [edited]\n",
 ])
 def test_ci_pull_request_trigger_excludes_only_main(tmp_path: Path, trigger: str) -> None:
     trusted = _workflow(tmp_path, lambda text: text)
     ci_path = tmp_path / "ci.yml"
     ci_path.write_text(
         ci_path.read_text(encoding="utf-8").replace(
-            "  pull_request:\n    branches-ignore: [main]\n",
+            "  pull_request:\n"
+            "    branches-ignore: [main]\n"
+            "    # Retargeting main -> dev emits edited, not synchronize.\n"
+            "    types: [opened, reopened, synchronize, edited]\n",
             "  pull_request:\n" + trigger,
         ),
         encoding="utf-8",
     )
-    assert "ci.yml must exclude only main-base pull requests" in (
+    assert "ci.yml must exclude only main-base pull requests and include retarget edits" in (
         MODULE.validate_workflow(trusted)
     )
 

@@ -282,9 +282,12 @@ def validate_workflow(path: Path = WORKFLOW) -> list[str]:
         ci_events = _mapping(ci_workflow.get("on"))
         if (
             ci_events is None
-            or ci_events.get("pull_request") != {"branches-ignore": ["main"]}
+            or ci_events.get("pull_request") != {
+                "branches-ignore": ["main"],
+                "types": ["opened", "reopened", "synchronize", "edited"],
+            }
         ):
-            errors.append("ci.yml must exclude only main-base pull requests")
+            errors.append("ci.yml must exclude only main-base pull requests and include retarget edits")
         ci_jobs = _mapping(ci_workflow.get("jobs"))
         guard_found = False
         if ci_jobs is not None:
