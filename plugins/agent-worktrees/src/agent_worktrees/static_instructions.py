@@ -17,6 +17,7 @@ from plugin_resolve import (
 )
 from plugin_activation import validate_identity
 from plugin_activation._installed_root import _installed_root
+from plugin_activation.state import _reject_duplicates, _split_jsonc_header
 
 NAMESPACE = ".github/instructions/agent-worktrees-generated"
 _RESERVED_NAMES = {
@@ -35,18 +36,19 @@ def _remaining(deadline: float | None, ceiling: float | None = None) -> float | 
     return min(remaining, ceiling) if ceiling is not None else remaining
 
 
-def _object(path: Path) -> dict:
-    from .reconcile import _strict_json_object
-
-    value = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=_strict_json_object)
+def _object(path: Path, *, jsonc_header: bool = False) -> dict:
+    raw = path.read_text(encoding="utf-8-sig")
+    if jsonc_header:
+        _, raw = _split_jsonc_header(raw)
+    value = json.loads(raw, object_pairs_hook=_reject_duplicates)
     if not isinstance(value, dict):
         raise ValueError(f"expected JSON object: {path}")
     return value
 
 
-def _optional_object(path: Path) -> dict | None:
+def _optional_object(path: Path, *, jsonc_header: bool = False) -> dict | None:
     try:
-        return _object(path)
+        return _object(path, jsonc_header=jsonc_header)
     except FileNotFoundError:
         if path.is_symlink() or any(parent.is_symlink() and not parent.exists() for parent in path.parents):
             raise ValueError(f"broken instruction input link: {path}")
@@ -73,7 +75,7 @@ def _settings(root: Path, home: Path, *, deadline: float | None = None) -> tuple
     ] + [(root.joinpath(*rel), root) for rel in SETTINGS_RELS]
     for path, base in layers:
         _remaining(deadline)
-        data = _optional_object(path)
+        data = _optional_object(path, jsonc_header=True)
         if data is None:
             continue
         for key, destination, expected in (
@@ -103,7 +105,7 @@ def _plugin(identity: str, markets: dict, home: Path, *, deadline: float | None 
     if not isinstance(source, dict):
         raise ValueError(f"invalid marketplace source: {market}")
     kind = source.get("source")
-    if definition and kind not in ("directory", "local", "agent-worktrees-repo", "github", "git", "git-subdir", "npm", "url"):
+    if market in markets and kind not in ("directory", "local", "agent-worktrees-repo", "github", "git", "git-subdir", "npm", "url"):
         raise ValueError(f"invalid marketplace source kind: {market}")
     if kind in ("directory", "local", "agent-worktrees-repo"):
         if kind == "agent-worktrees-repo":

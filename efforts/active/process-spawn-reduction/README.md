@@ -405,6 +405,16 @@ single-final-batch contract.
   group: 245 passed / 1 unavailable-symlink skip in 99.04s; final publisher file,
   including the individual-template overlap case: 68 passed / 1 same skip in
   40.66s. Lint passes; all test budgets remain unchanged.
+- Matched canonical settings JSON behavior for leading comments and opaque
+  built-in values containing case-distinct keys, rather than reusing a
+  filename-oriented case-conflict check. This also removes the incidental
+  reconciler import from the copy parser. The focused source/native selection
+  passes 251 tests / 1 unavailable-symlink skip in 83.51s.
+- Latest overview found an explicitly empty marketplace registration could
+  incorrectly fall back to installed content. Registration presence, not dict
+  truthiness, now distinguishes absent from malformed resolution; the new
+  regression preserves previously published bytes. The settings/built-in
+  selection passes all 9 cases, unchanged budgets.
 
 ### 2026-10-14 - Declarations decide static publication
 

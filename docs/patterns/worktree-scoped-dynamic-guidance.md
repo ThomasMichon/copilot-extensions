@@ -130,6 +130,10 @@ marketplace projection surface. Local catalog identity uses the existing
 `source.manifestName` mapping when a registration name differs. Missing enabled
 payloads, invalid declarations and inconclusive index checks report failure
 before publication instead of treating incomplete discovery as an empty set.
+Settings use the host's leading-comment and exact-duplicate JSON semantics,
+without applying filename case-folding rules to opaque built-in settings.
+An explicitly malformed marketplace registration cannot fall back to an
+otherwise installed payload.
 
 Direct creation copies after paired allocation and composition. Direct resume
 composes the selected pair before copying. The outer launchers explicitly defer

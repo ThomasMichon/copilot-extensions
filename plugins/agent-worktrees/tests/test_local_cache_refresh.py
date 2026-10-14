@@ -511,13 +511,17 @@ def test_user_directory_marketplace_is_relative_to_copilot_settings(copy_workspa
     assert output.read_bytes() == template.read_bytes()
 
 
-@pytest.mark.parametrize("value", [True, {"enabled": True}, None])
-def test_builtin_plugin_settings_are_outside_marketplace_projection(copy_workspace, value):
+@pytest.mark.parametrize("value", [True, {"enabled": True}, None, {"Case": "first", "case": "second"}])
+@pytest.mark.parametrize("header", [False, True])
+def test_builtin_plugin_settings_are_outside_marketplace_projection(copy_workspace, value, header):
     root, home = copy_workspace
     template, output = provider(root, home)
     write_json(root / ".github" / "copilot" / "settings.json", {
         "enabledPlugins": {"builtin": value, "demo@market": True},
     })
+    if header:
+        settings = root / ".github" / "copilot" / "settings.json"
+        settings.write_text("// canonical settings header\n" + settings.read_text(encoding="utf-8"), encoding="utf-8")
     assert lcr.refresh_local_cache(root).status == "ready"
     assert output.read_bytes() == template.read_bytes()
 
@@ -547,6 +551,19 @@ def test_directory_catalog_identity_requires_explicit_mapping(copy_workspace):
     })
     assert lcr.refresh_local_cache(root).status == "failed"
     assert not (root / static.NAMESPACE).exists()
+
+
+def test_empty_registered_marketplace_cannot_fall_back_to_installed_payload(copy_workspace):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    previous = output.read_bytes()
+    template.write_bytes(b"must not be selected by malformed registration")
+    write_json(root / ".github" / "copilot" / "settings.json", {
+        "enabledPlugins": {"demo@market": True}, "extraKnownMarketplaces": {"market": {}},
+    })
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert output.read_bytes() == previous
 
 
 @pytest.mark.parametrize("kind", [123, "agents", None, {}])
