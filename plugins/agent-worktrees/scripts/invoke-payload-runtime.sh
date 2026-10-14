@@ -510,8 +510,13 @@ else
         owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
         if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
             sleep 1
-        elif [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
+        elif [[ -n "$owner" && "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
             rm -f "$LOCK_LINK"
+        else
+            # An empty value means the link vanished after the failed
+            # `ln -s` (or is not a symlink): never unlink then -- a live lock
+            # could be created between the read and the unlink. Just retry.
+            sleep 0.1
         fi
     done
 fi

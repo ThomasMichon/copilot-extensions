@@ -220,10 +220,17 @@ else
             continue
         fi
         _owner2="$(readlink "$_lock_link" 2>/dev/null || true)"
-        case "$_owner2" in
-            *[!0-9]*|"") rm -f "$_lock_link" ;;
-            *) kill -0 "$_owner2" 2>/dev/null || rm -f "$_lock_link" ;;
-        esac
+        # Unlink only if the link still holds the owner judged stale above
+        # and that owner is still not live. An empty value (absent link) or
+        # a different value (a newer holder, possibly just released) is never
+        # removed: lock creators are not serialized by this mutex, so a live
+        # lock could be created between the read and the unlink.
+        if [ -n "$_owner2" ] && [ "$_owner2" = "$_owner" ]; then
+            case "$_owner2" in
+                *[!0-9]*) rm -f "$_lock_link" ;;
+                *) kill -0 "$_owner2" 2>/dev/null || rm -f "$_lock_link" ;;
+            esac
+        fi
         rmdir "$_reap_mutex" 2>/dev/null || true
     done
 fi

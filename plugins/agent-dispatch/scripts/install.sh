@@ -500,9 +500,17 @@ _versioned_activate() {
         flock 8
     else
         _activate_lock_link="$INSTALL_DIR/.activate.lock.pid"
-        local owner
+        local owner owner_now
         until ln -s "$$" "$_activate_lock_link" 2>/dev/null; do
             owner="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
+            if [[ -z "$owner" ]]; then
+                # The link vanished after the failed `ln -s` (or is not a
+                # symlink): never unlink then -- lock creators are not
+                # serialized by the reap mutex, so an unlink could delete a
+                # live lock taken meanwhile. Just retry.
+                sleep 0.1
+                continue
+            fi
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$_activate_lock_link.reap" 2>/dev/null; then
@@ -514,10 +522,18 @@ _versioned_activate() {
                 # self-healing (mirrors plugins/agent-machines/scripts/
                 # init.sh's stamp lock): only the process that wins this
                 # `ln -s .reap` may remove the main lock, and only after
-                # re-verifying it is still the SAME stale value observed
-                # above.
-                if [[ "$(readlink "$_activate_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                    rm -f "$_activate_lock_link"
+                # re-checking its current value (below).
+                # Unlink only if the link still holds the owner judged stale above
+                # and that owner is still not live: a dead owner cannot release its
+                # own link and only serialized reapers remove a stale one, so that
+                # value is stable under this mutex. An absent link, or one naming a
+                # different (possibly just-released) holder, is never removed.
+                owner_now="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
+                if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                    case "$owner_now" in
+                        *[!0-9]*) rm -f "$_activate_lock_link" ;;
+                        *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_activate_lock_link" ;;
+                    esac
                 fi
                 rm -f "$_activate_lock_link.reap"
             elif owner="$(readlink "$_activate_lock_link.reap" 2>/dev/null || true)" &&
@@ -1228,14 +1244,31 @@ _ensure_runtime() {
             flock 8
         else
             _publish_lock_link="$INSTALL_DIR/.activate.lock.pid"
-            local owner
+            local owner owner_now
             until ln -s "$$" "$_publish_lock_link" 2>/dev/null; do
                 owner="$(readlink "$_publish_lock_link" 2>/dev/null || true)"
+                if [[ -z "$owner" ]]; then
+                    # The link vanished after the failed `ln -s` (or is not a
+                    # symlink): never unlink then -- lock creators are not
+                    # serialized by the reap mutex, so an unlink could delete a
+                    # live lock taken meanwhile. Just retry.
+                    sleep 0.1
+                    continue
+                fi
                 if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                     sleep 1
                 elif ln -s "$$" "$_publish_lock_link.reap" 2>/dev/null; then
-                    if [[ "$(readlink "$_publish_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                        rm -f "$_publish_lock_link"
+                    # Unlink only if the link still holds the owner judged stale above
+                    # and that owner is still not live: a dead owner cannot release its
+                    # own link and only serialized reapers remove a stale one, so that
+                    # value is stable under this mutex. An absent link, or one naming a
+                    # different (possibly just-released) holder, is never removed.
+                    owner_now="$(readlink "$_publish_lock_link" 2>/dev/null || true)"
+                    if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                        case "$owner_now" in
+                            *[!0-9]*) rm -f "$_publish_lock_link" ;;
+                            *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_publish_lock_link" ;;
+                        esac
                     fi
                     rm -f "$_publish_lock_link.reap"
                 elif owner="$(readlink "$_publish_lock_link.reap" 2>/dev/null || true)" &&
@@ -2074,14 +2107,31 @@ do_stamp() {
         flock 8
     else
         _stamp_lock_link="$INSTALL_DIR/.activate.lock.pid"
-        local owner
+        local owner owner_now
         until ln -s "$$" "$_stamp_lock_link" 2>/dev/null; do
             owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            if [[ -z "$owner" ]]; then
+                # The link vanished after the failed `ln -s` (or is not a
+                # symlink): never unlink then -- lock creators are not
+                # serialized by the reap mutex, so an unlink could delete a
+                # live lock taken meanwhile. Just retry.
+                sleep 0.1
+                continue
+            fi
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$_stamp_lock_link.reap" 2>/dev/null; then
-                if [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                    rm -f "$_stamp_lock_link"
+                # Unlink only if the link still holds the owner judged stale above
+                # and that owner is still not live: a dead owner cannot release its
+                # own link and only serialized reapers remove a stale one, so that
+                # value is stable under this mutex. An absent link, or one naming a
+                # different (possibly just-released) holder, is never removed.
+                owner_now="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+                if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                    case "$owner_now" in
+                        *[!0-9]*) rm -f "$_stamp_lock_link" ;;
+                        *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_stamp_lock_link" ;;
+                    esac
                 fi
                 rm -f "$_stamp_lock_link.reap"
             elif owner="$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" &&
@@ -2230,14 +2280,31 @@ do_update() {
         flock 8
     else
         _cutover_lock_link="$INSTALL_DIR/.activate.lock.pid"
-        local owner
+        local owner owner_now
         until ln -s "$$" "$_cutover_lock_link" 2>/dev/null; do
             owner="$(readlink "$_cutover_lock_link" 2>/dev/null || true)"
+            if [[ -z "$owner" ]]; then
+                # The link vanished after the failed `ln -s` (or is not a
+                # symlink): never unlink then -- lock creators are not
+                # serialized by the reap mutex, so an unlink could delete a
+                # live lock taken meanwhile. Just retry.
+                sleep 0.1
+                continue
+            fi
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$_cutover_lock_link.reap" 2>/dev/null; then
-                if [[ "$(readlink "$_cutover_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                    rm -f "$_cutover_lock_link"
+                # Unlink only if the link still holds the owner judged stale above
+                # and that owner is still not live: a dead owner cannot release its
+                # own link and only serialized reapers remove a stale one, so that
+                # value is stable under this mutex. An absent link, or one naming a
+                # different (possibly just-released) holder, is never removed.
+                owner_now="$(readlink "$_cutover_lock_link" 2>/dev/null || true)"
+                if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                    case "$owner_now" in
+                        *[!0-9]*) rm -f "$_cutover_lock_link" ;;
+                        *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_cutover_lock_link" ;;
+                    esac
                 fi
                 rm -f "$_cutover_lock_link.reap"
             elif owner="$(readlink "$_cutover_lock_link.reap" 2>/dev/null || true)" &&

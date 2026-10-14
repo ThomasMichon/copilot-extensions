@@ -365,3 +365,178 @@ def test_posix_pid_fallback_fails_closed_on_a_dead_reapers_mutex(tmp_path: Path)
         assert out.strip() == "refused", err
     assert os.readlink(install_dir / ".install.lock.pid") == stale_owner
     assert os.readlink(install_dir / ".install.lock.pid.reap") == stale_reaper
+
+
+# ---------------------------------------------------------------------------
+# Deterministic interleavings (shimmed filesystem; runs under any bash)
+# ---------------------------------------------------------------------------
+
+def _shim_bash() -> str | None:
+    """A bash that can run the shimmed harness. On Windows prefer Git Bash:
+    ``bash`` on PATH may be a WSL relay that cannot see host paths."""
+    if os.name != "nt":
+        return shutil.which("bash")
+    git = shutil.which("git")
+    if git is None:
+        return None
+    root = Path(git).resolve().parents[1]
+    for candidate in (root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"):
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+# Replaces ln/readlink/rm/kill/sleep with shell functions over plain files (a
+# "link" is a file holding its target), so a scenario can inject another
+# process's action at an exact point of the acquisition loop through the
+# before_read/after_read hooks (called with the 1-based count of reads of the
+# lock link). ``rm`` records a VIOLATION whenever the lock link is removed
+# while it names a live owner -- i.e. whenever a contender deletes a lock it
+# does not own.
+_SHIM = r"""
+LINK="$INSTALL_DIR/.install.lock.pid"
+_count() {
+    local c; c=$(( $(cat "$STATE/$1" 2>/dev/null || echo 0) + 1 ))
+    echo "$c" > "$STATE/$1"; echo "$c"
+}
+sleep() { :; }
+kill() { [[ "$1" == -0 ]] && grep -qx -- "$2" "$STATE/live"; }
+ln() { [[ "$1" == -s && ! -e "$3" ]] || return 1; printf '%s' "$2" > "$3"; }
+rm() {
+    local p
+    for p in "$@"; do
+        if [[ "$p" == "$LINK" && -e "$p" ]] && kill -0 "$(cat "$p")"; then
+            echo VIOLATION >> "$STATE/violations"
+        fi
+    done
+    command rm "$@"
+}
+readlink() {
+    local n="" rc=1
+    if [[ "$1" == "$LINK" ]]; then n="$(_count reads)"; before_read "$n"; fi
+    if [[ -e "$1" ]]; then cat "$1"; rc=0; fi
+    if [[ -n "$n" ]]; then after_read "$n"; fi
+    return "$rc"
+}
+"""
+
+
+def _run_shimmed(tmp_path: Path, owner: str, live: list[str], hooks: str) -> tuple[str, str]:
+    bash = _shim_bash()
+    if bash is None:
+        pytest.skip("bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    state = tmp_path / "state"
+    state.mkdir()
+    (install_dir / ".install.lock.pid").write_bytes(owner.encode())
+    (state / "live").write_bytes("".join(f"{pid}\n" for pid in live).encode())
+
+    def posix(path: Path) -> str:
+        return str(path).replace("\\", "/")
+
+    script = (
+        "set -euo pipefail\n_fail() { printf 'FAIL:%s\\n' \"$1\"; }\n"
+        f"INSTALL_DIR='{posix(install_dir)}'\nSTATE='{posix(state)}'\n"
+        + _block(SH_SCRIPT) + "\n" + _SHIM + hooks
+        + 'if _enter_install_lock 30; then '
+        + 'echo "acquired $$ $(cat "$LINK")"; else echo refused; fi\n'
+    )
+    script_path = tmp_path / "harness.sh"
+    script_path.write_bytes(script.encode())
+    result = subprocess.run(
+        [bash, posix(script_path)], capture_output=True, text=True, timeout=60,
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    violations = state / "violations"
+    return result.stdout.strip(), violations.read_text() if violations.exists() else ""
+
+
+@pytest.mark.guard
+def test_pid_fallback_never_unlinks_a_lock_that_vanished_before_readlink(
+    tmp_path: Path,
+) -> None:
+    """The holder releases between the failed ``ln -s`` and ``readlink`` (so
+    the owner reads empty), and a competitor takes the lock right after the
+    next read sees it absent. The empty owner must never lead to an unlink:
+    unlinking then would delete the competitor's live lock and let two
+    contenders into the transaction at once."""
+    hooks = (
+        'before_read() { if [[ "$1" == 1 ]]; then command rm -f "$LINK"; fi; }\n'
+        'after_read() { if [[ "$1" == 2 && ! -e "$LINK" ]]; then printf 5151 > "$LINK"; fi; }\n'
+    )
+    out, violations = _run_shimmed(tmp_path, "4242", ["4242", "5151"], hooks)
+    assert violations == ""
+    status, pid, holder = out.split()
+    assert status == "acquired" and holder == pid
+
+
+@pytest.mark.guard
+def test_pid_fallback_reaper_rechecks_liveness_under_the_mutex(tmp_path: Path) -> None:
+    """The owner looked dead before the reap mutex was taken but names a live
+    holder by the time the reaper re-reads the link (pid reuse: the stale lock
+    was reaped and a new holder with the same pid took it). The reaper must
+    re-derive staleness under the mutex and leave the live lock alone."""
+    hooks = (
+        'before_read() {\n'
+        '    case "$1" in\n'
+        '        2) echo 6161 >> "$STATE/live" ;;\n'
+        '        3) command rm -f "$LINK" ;;\n'
+        '    esac\n'
+        '}\n'
+        'after_read() { :; }\n'
+    )
+    out, violations = _run_shimmed(tmp_path, "6161", [], hooks)
+    assert violations == ""
+    status, pid, holder = out.split()
+    assert status == "acquired" and holder == pid
+
+
+@pytest.mark.guard
+def test_pid_fallback_reaper_never_unlinks_a_newer_holder_released_mid_check(
+    tmp_path: Path,
+) -> None:
+    """The owner is dead at the first check, but by the under-mutex re-read
+    another reaper has removed it and a live holder P has taken the lock. P
+    then releases and Q re-creates the lock before the reaper's liveness
+    probe. The reaper may only remove the owner it judged stale itself, so
+    Q's live lock must survive."""
+    hooks = (
+        'before_read() {\n'
+        '    case "$1" in\n'
+        '        2) printf 7171 > "$LINK"; echo 7171 > "$STATE/live" ;;\n'
+        '        3) command rm -f "$LINK" ;;\n'
+        '    esac\n'
+        '}\n'
+        'after_read() {\n'
+        '    if [[ "$1" == 2 ]]; then echo 8181 > "$STATE/live"; printf 8181 > "$LINK"; fi\n'
+        '}\n'
+    )
+    out, violations = _run_shimmed(tmp_path, "6161", [], hooks)
+    assert violations == ""
+    status, pid, holder = out.split()
+    assert status == "acquired" and holder == pid
+
+
+def test_posix_pid_fallback_fails_closed_on_an_unattributable_lock_path(tmp_path: Path) -> None:
+    """A non-symlink at the lock path names no owner: it is never unlinked,
+    and the run fails closed at its deadline."""
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    lock = install_dir / ".install.lock.pid"
+    lock.write_text("not a symlink")
+    script = (
+        "set -euo pipefail\n_fail() { printf 'FAIL:%s\\n' \"$1\"; }\n"
+        f"INSTALL_DIR='{install_dir}'\n" + _block(SH_SCRIPT) + "\n"
+        "if _enter_install_lock 1; then echo acquired; else echo refused; fi\n"
+    )
+    result = subprocess.run(
+        [bash, "-c", script], capture_output=True, text=True, timeout=60,
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.stdout.strip() == "refused", result.stderr
+    assert lock.read_text() == "not a symlink"

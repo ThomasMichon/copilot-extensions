@@ -1718,7 +1718,12 @@ build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` 
 fd 8 (fd 7 for `agent-ssh`), or an atomic pid symlink
 `<install-dir>/.install.lock.pid` where `flock` is unavailable, whose dead owner is
 reaped under a pid-bearing `.install.lock.pid.reap` mutex so two contenders can
-never both reap and then delete each other's live lock. A `.reap` link left by a
+never both reap and then delete each other's live lock. The reaper re-derives
+staleness from the link's current value while holding that mutex, and a link that
+reads empty -- absent (just released or reaped) or not a symlink -- is never
+unlinked: lock creators are not serialized by the mutex, so such an unlink could
+delete a live lock taken in the meantime; an unattributable lock path fails
+closed at the deadline. A `.reap` link left by a
 reaper that died mid-reap is deliberately never reclaimed automatically (that
 would reintroduce the same race); runs fail closed at their deadline until it is
 removed by hand). It is
