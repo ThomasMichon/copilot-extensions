@@ -405,3 +405,58 @@ def test_cleanup_failure_keeps_primary_failure_and_redacts_native_detail(
     assert "reader process cleanup could not be confirmed" in error
     assert "secret-native-cleanup-detail" not in json.dumps(posture)
     assert posture["calculated"] is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX host startup boundary")
+def test_host_does_not_execute_ambient_sitecustomize_before_containment(tmp_path, monkeypatch):
+    marker = tmp_path / "ambient-ran"
+    (tmp_path / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('unexpected')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    reader = CommandReader(
+        (sys.executable, "-I", "-S", "-c", f"print({json.dumps(_reading())!r})"), tmp_path,
+    )
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["availability"] == "available"
+    assert not marker.exists(), "host executed ambient code before establishing the owned group"
+
+
+def test_completed_output_after_spawn_exhausts_deadline_is_not_success(tmp_path, monkeypatch):
+    import budget_guidance.external_reader as module
+
+    clock = [0.0]
+    spawn = module.spawn_sync_in_kill_on_close_job
+
+    def spawn_after_deadline(*args, **kwargs):
+        process, job = spawn(*args, **kwargs)
+        if os.name == "nt":
+            process.wait(timeout=5)
+        else:
+            os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+        clock[0] = 2.0
+        return process, job
+
+    class ImmediateOutput:
+        ident = 1
+
+        def __init__(self, target, args, daemon):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+        def join(self, timeout):
+            pass
+
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(module, "spawn_sync_in_kill_on_close_job", spawn_after_deadline)
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module, "Thread", ImmediateOutput)
+    reader = _reader(tmp_path, f"print({json.dumps(_reading())!r})", timeout_seconds=1)
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["calculated"] is None
+    assert posture["adapters"][0]["error"] == "reader deadline exceeded"

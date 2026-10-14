@@ -94,7 +94,8 @@ def _run(reader: CommandReader) -> bytes:
     deadline = time.monotonic() + reader.timeout_seconds
     try:
         argv = list(reader.argv) if windows else [
-            sys.executable, str(Path(__file__).with_name("_command_host.py")), *reader.argv,
+            sys.executable, "-I", "-S",
+            str(Path(__file__).resolve().with_name("_command_host.py")), *reader.argv,
         ]
         process, job = spawn_sync_in_kill_on_close_job(
             argv, cwd=reader.cwd, stdin=subprocess.DEVNULL,
@@ -123,6 +124,8 @@ def _run(reader: CommandReader) -> bytes:
         if isinstance(output, ReaderFailure):
             raise output
         while True:
+            if time.monotonic() >= deadline:
+                raise ReaderFailure("reader deadline exceeded")
             if windows:
                 returncode = process.poll()
             else:
@@ -137,6 +140,8 @@ def _run(reader: CommandReader) -> bytes:
                     )
                 )
             if returncode is not None:
+                if time.monotonic() >= deadline:
+                    raise ReaderFailure("reader deadline exceeded")
                 if returncode != 0:
                     raise ReaderFailure("reader exited unsuccessfully")
                 return output

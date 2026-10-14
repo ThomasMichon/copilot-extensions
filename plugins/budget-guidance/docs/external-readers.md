@@ -80,20 +80,24 @@ Timeout is finite, positive, and at most 30 seconds (default 10); stdout is
 bounded to at most 65536 bytes (default 65536). Reading and process completion
 share a deadline beginning before process creation. Native process creation
 itself is synchronous and not interruptible by this deadline; after it returns,
-an already-expired deadline immediately fails acquisition. Cleanup has a
+an already-expired deadline fails acquisition even if output and successful
+completion are already queued. Cleanup has a
 separate bounded wait. Stdin and stderr go to the null device; stderr floods
 cannot fill a captured pipe, and diagnostic output never forwards reader
 stdout, stderr, arguments, paths, or opaque reader error text.
 
 Windows uses the canonical headless process helper and a required,
 non-breakaway, kill-on-close Job before the executable can run. POSIX uses a
-small Python host that establishes an owned process group without leaving the
+small isolated, no-site Python host (`-I -S`) that establishes an owned process group without leaving the
 caller's session, preserving contained-test supervision. It retains the root
 PID until group cleanup to avoid signaling a reused process identity.
 Descendants are terminated after success as well as on timeout or output
 overflow. The contract is for one-shot readers, never detached services.
 POSIX platforms lacking `setpgid` or non-reaping `waitid` report unsupported
 execution, rather than silently falling back to unbounded spawning.
+The host does not run ambient `.pth`/`sitecustomize` code or honor Python
+startup overrides before containment. Its `execv` preserves the original
+environment for the explicitly authorized reader.
 
 | Platform | Implementation and validation status |
 |----------|--------------------------------------|
