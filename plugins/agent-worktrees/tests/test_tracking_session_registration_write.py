@@ -319,9 +319,15 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     assert foreign_path.read_bytes() == before
 
 
-@pytest.mark.parametrize("failure", ["nonzero", "timeout"])
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("nonzero", "cannot read committed authority"),
+        ("timeout", "timed out"),
+    ],
+)
 def test_registration_authority_fails_closed_when_committed_config_is_unreadable(
-    tmp_path: Path, monkeypatch, failure,
+    tmp_path: Path, monkeypatch, failure, message,
 ):
     from agent_worktrees import git_ops, repos
     from agent_worktrees.execution_spaces import ExecutionSpaceError
@@ -361,7 +367,7 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
 
     monkeypatch.setattr(git_ops, "git", failed_git)
 
-    with pytest.raises(ExecutionSpaceError, match="cannot read committed authority"):
+    with pytest.raises(ExecutionSpaceError, match=message):
         config_authority.require_registration_record_mutation(
             SimpleNamespace(repo="harness"),
         )
