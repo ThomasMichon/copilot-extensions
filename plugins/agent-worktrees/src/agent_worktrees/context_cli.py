@@ -900,7 +900,7 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
             from dataclasses import asdict
             from . import local_cache_refresh
 
-            root = args.harness_path or summary.get("harness_path") or args.cwd or os.getcwd()
+            root = args.harness_path or args.cwd or os.getcwd()
             result = local_cache_refresh.prepare_for_launch(root)
             summary["projections"] = asdict(result)
             if result.status not in ("ready", "skipped"):

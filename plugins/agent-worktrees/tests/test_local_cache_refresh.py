@@ -577,6 +577,30 @@ def test_pending_pair_blocks_final_noop_and_backup_without_cleanup(copy_workspac
     assert static.pair_pending_path(root).exists()
 
 
+def test_final_preparation_targets_selected_knowledge_checkout(copy_workspace, tmp_path, monkeypatch, capsys):
+    from dataclasses import replace
+    from test_knowledge_plugins import _pair_resolution
+
+    knowledge, home = copy_workspace
+    template, output = provider(knowledge, home)
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    subprocess.run(["git", "init", "--quiet", str(harness)], check=True, capture_output=True)
+    pair = _pair_resolution(harness, knowledge)
+    pair = replace(pair, current=pair.sibling, sibling=pair.current)
+    config = SimpleNamespace(knowledge_repo="private")
+    monkeypatch.setattr(knowledge_plugins, "_resolve_pair_state", lambda **kw: (pair, config, None))
+    monkeypatch.setattr(context_cli, "_core_helper", lambda *a: lambda path: None)
+    assert context_cli.cmd_knowledge_dispatch([
+        "compose-plugins", "--cwd", str(knowledge), "--prepare-projections", "--json",
+    ]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert Path(summary["harness_path"]) == harness
+    assert summary["projections"]["status"] == "ready"
+    assert output.read_bytes() == template.read_bytes()
+    assert not (harness / static.NAMESPACE).exists()
+
+
 @pytest.mark.parametrize("entrypoint", ["direct", "final"])
 @pytest.mark.parametrize("fault", ["settings", "config"])
 def test_post_success_pair_failure_blocks_backup_until_repaired(

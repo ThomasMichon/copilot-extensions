@@ -1174,7 +1174,7 @@ def _restore_production_picker_session(
     return _run_launch(request)
 
 
-def _resolve_for(req) -> "tuple[object | None, int]":
+def _resolve_for(req, *, defer_projections: bool = False) -> "tuple[object | None, int]":
     """Resolve a picker :class:`LaunchRequest` to a launch plan (shared).
 
     Returns ``(plan, 0)`` on success, else ``(None, exit_code)`` after printing
@@ -1196,6 +1196,7 @@ def _resolve_for(req) -> "tuple[object | None, int]":
             target_environment=getattr(req, "environment", None),
             target_no_mux=getattr(req, "no_mux", False),
             seed=getattr(req, "seed_prompt", None),
+            **({"defer_projections": True} if defer_projections else {}),
         )
     except EngineFeatureUnavailable as e:
         print(f"error: could not resolve a launch plan: {e}")
@@ -1213,8 +1214,25 @@ def _is_windows() -> bool:
 
 def _run_launch(req) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
-    from . import launcher
-    plan, code = _resolve_for(req)
+    from . import engine_client, launcher
+
+    use_ahp = bool(getattr(req, "ahp", False))
+    script = (
+        _relocated_launch_script()
+        if getattr(req, "machine", None) is None and not use_ahp else None
+    )
+    backend_checked = script is not None
+    if backend_checked:
+        try:
+            use_ahp = launcher.uses_ahp(req, str(getattr(req, "worktree_id", None) or ""))
+        except engine_client.EngineError as error:
+            print(f"error: could not inspect the persisted execution leg: {error}")
+            return 1
+        if use_ahp:
+            script = None
+    plan, code = _resolve_for(
+        req, **({"defer_projections": True} if script is not None else {}),
+    )
     if plan is None:
         return code
     if plan.action == "none":
@@ -1224,49 +1242,16 @@ def _run_launch(req) -> int:
         if new_window:
             print('error: "new window" launches are supported only for local worktrees.')
             return 1
-        if getattr(req, "ahp", False):
+        if use_ahp:
             print("error: AHP is supported only for same-machine launches")
             return 1
         return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
-    use_ahp = bool(getattr(req, "ahp", False))
-    worktree_id = str(getattr(plan, "worktree_id", None) or "")
-    if (
-        getattr(req, "machine", None) is None
-        and worktree_id
-        and getattr(req, "mode", "") in {"resume", "bare-resume"}
-    ):
-        from . import engine_client
-
+    if not backend_checked:
         try:
-            persisted = engine_client.execution_leg_get(
-                req.project,
-                worktree_id,
-            ).get("execution_leg")
-        except engine_client.EngineFeatureUnavailable:
-            persisted = None
+            use_ahp = launcher.uses_ahp(req, str(getattr(plan, "worktree_id", None) or ""))
         except engine_client.EngineError as error:
             print(f"error: could not inspect the persisted execution leg: {error}")
             return 1
-        if persisted is not None:
-            if not isinstance(persisted, dict):
-                print("error: agent-worktrees returned an invalid execution leg")
-                return 1
-            state = str(persisted.get("state") or "unknown")
-            if state in {"active", "unknown"}:
-                provider = str(persisted.get("provider") or "")
-                if provider != "ahp":
-                    print(
-                        "error: worktree requires unsupported execution-leg "
-                        f"provider {provider or '<unknown>'}"
-                    )
-                    return 1
-                if req.mode == "bare-resume":
-                    print(
-                        "error: bare resume is incompatible with the worktree's "
-                        "active AHP execution leg"
-                    )
-                    return 1
-                use_ahp = True
     if use_ahp:
         if new_window:
             print('error: "new window" launches are not yet supported for AHP-backed sessions.')
@@ -1300,7 +1285,6 @@ def _run_launch(req) -> int:
         # regression: AHP launches never went through launch-session.ps1).
         return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
     if getattr(req, "machine", None) is None and plan.action == "exec":
-        script = _relocated_launch_script()
         if script is not None:
             return _run_relocated_mux_launch(req, plan, script)
     if new_window:

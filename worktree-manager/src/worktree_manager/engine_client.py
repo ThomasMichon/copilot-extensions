@@ -216,6 +216,7 @@ def _run(
     runner=None,
     cwd: str | None = None,
     stream_progress: bool = False,
+    environment: dict[str, str] | None = None,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
@@ -237,7 +238,7 @@ def _run(
         else:
             kwargs = {
                 "capture_output": True, "text": True, "timeout": timeout,
-                "check": False, "env": _engine_environment(),
+                "check": False, "env": {**_engine_environment(), **(environment or {})},
                 "stdin": subprocess.DEVNULL,
                 **({"cwd": cwd} if cwd else {}),
             }
@@ -291,7 +292,8 @@ def run_json(project: str | None, args: list[str], *,
              timeout: int | None = _DEFAULT_TIMEOUT,
              allow_nonzero: bool = False,
              runner=None,
-             stream_progress: bool = False) -> dict:
+             stream_progress: bool = False,
+             environment: dict[str, str] | None = None) -> dict:
     """Run a ``--json`` verb and parse its stdout envelope into a dict."""
     raw = _run(
         project,
@@ -300,6 +302,7 @@ def run_json(project: str | None, args: list[str], *,
         allow_nonzero=allow_nonzero,
         runner=runner,
         stream_progress=stream_progress,
+        **({"environment": environment} if environment is not None else {}),
     )
     try:
         obj = json.loads(raw)
@@ -591,6 +594,7 @@ def resolve_launch_plan(
     target_no_mux: bool = False,
     seed: str | None = None,
     defer_new_seed: bool | None = None,
+    defer_projections: bool = False,
     timeout: int | None = None,
 ) -> LaunchPlan:
     """Fetch a launch plan via ``agent-worktrees resolve --json`` (process boundary).
@@ -623,6 +627,8 @@ def resolve_launch_plan(
     Foreground preparation waits for completion by default and streams stderr
     progress. Individual engine operations retain their own failure bounds;
     an explicit timeout remains available to bounded automation.
+    Shell-delegated launches can defer publication with a call-scoped environment
+    hint; older engines can ignore it without rejecting their resolve arguments.
     """
     selectors = sum(bool(value) for value in (worktree_id, new, base))
     if selectors != 1:
@@ -659,6 +665,7 @@ def resolve_launch_plan(
                 if target_machine and seed and timeout is not None else timeout
             ),
             stream_progress=True,
+            **({"environment": {"AGENT_WORKTREES_DEFER_PROJECTIONS": "1"}} if defer_projections else {}),
         )
     except EngineError as e:
         detail = _engine_error_detail(e)
@@ -678,6 +685,7 @@ def resolve_launch_plan(
                 target_environment=target_environment,
                 target_no_mux=target_no_mux, seed=seed,
                 defer_new_seed=defer_new_seed,
+                defer_projections=defer_projections,
                 bare_resume=False, timeout=timeout)
         if target_machine and any(
             flag in detail

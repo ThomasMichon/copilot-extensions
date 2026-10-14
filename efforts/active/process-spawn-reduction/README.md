@@ -273,6 +273,16 @@ single-final-batch contract.
 
 ### 2026-10-14 - In-process startup copy implementation
 
+- Closed two further launch-integration gaps. Final preparation now targets the
+  selected checkout, rather than the sibling harness reported by pair composition.
+  A real knowledge-side pair test proves its own output is refreshed. The Manager
+  now defers its initial resolve only for local shell delegation; direct, remote,
+  explicit AHP and persisted AHP consumers retain immediate preparation. Existing
+  backend inspection is reused once, not duplicated, and call-scoped deferral
+  survives the old-engine bare-resume retry without mutating Manager environment.
+  Source/native selection: 95 passed / 7 platform skips; Manager client, entrypoint
+  routing and launch contracts: 184 passed; six headed-launch contracts also pass.
+  Existing module ceilings and containment budgets remain unchanged.
 - Review also identified a mixed-version startup window: a new launcher passed
   a new resolve argument before reaching its update barrier. Replaced that
   mandatory argument with a call-scoped environment hint, understood by the new
