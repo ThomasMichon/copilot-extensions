@@ -466,11 +466,41 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
         writer = _PS1_WRITER.search(code)
         check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
         return bool(check) and _fails_unconditionally(_braced_body(code[check.end() - 1:]))
-    writers = [line for line in code.splitlines() if _SH_WRITER.search(line)]
-    return bool(writers) and all(
-        not sep or bool(re.match(r"\s*rc=\$\?", tail)) or _fails_unconditionally(tail)
-        for _, sep, tail in (line.partition("||") for line in writers)
-    )
+    lines = [line for line in code.splitlines() if line.strip()]
+    found = [i for i, line in enumerate(lines) if _SH_WRITER.search(line)]
+    return bool(found) and all(_sh_writer_status_kept(lines, i) for i in found)
+
+
+_SH_RC_CAPTURE = re.compile(r"(?:^|\|\|)\s*(?:local\s+)?rc=\$\?|PIPESTATUS", re.M)
+_SH_RC_TEST = re.compile(
+    r'^\s*if\s+(?:\[\[\s*"?\$\{?rc\}?"?\s+-ne\s+0\s*\]\]|\(\(\s*rc\s*(?:!=\s*0\s*)?\)\))'
+)
+
+
+def _sh_writer_status_kept(lines: list[str], index: int) -> bool:
+    """Whether the shell writer at ``lines[index]`` decides the helper's result.
+
+    The writer is the helper's last statement (``pipefail`` returns its status);
+    tested by ``if ! writer`` with a failing branch; followed by an ``||``
+    branch that fails; or its status is captured in ``rc`` and then drives a
+    failing return (a top-level ``return "$rc"`` or ``if [[ "$rc" -ne 0 ]]``
+    whose branch fails). Capturing the status and then returning success does
+    not count.
+    """
+    line, rest = lines[index], lines[index + 1:]
+    following = "\n".join([line, *rest[:1]])
+    if _SH_RC_CAPTURE.search(following) or any("PIPESTATUS" in r for r in rest):
+        after = "\n".join(rest)
+        tests = [i for i, r in enumerate(rest) if _SH_RC_TEST.match(r)]
+        return _fails_unconditionally(after) or any(
+            _sh_failure_branch_stops(rest[i:], negated=True) for i in tests
+        )
+    if re.match(r"\s*if\s+!", line):
+        return _sh_failure_branch_stops(lines[index:], negated=True)
+    _, sep, tail = line.partition("||")
+    if sep:
+        return _fails_unconditionally(tail)
+    return not rest
 
 
 _MARK_COMPLETE_SH_IF = re.compile(r"^\s*(?:el)?if\s+(!\s*)?_versioned_mark_complete\b")
@@ -484,7 +514,8 @@ def _sh_failure_branch_stops(lines: list[str], *, negated: bool) -> bool:
     body of ``if helper``; a positive test with no ``else`` ignores the failure.
     """
     code = "\n".join(
-        _strip_quoted_strings(line) for line in lines if not line.lstrip().startswith("#")
+        _strip_quoted_strings(_QUOTED_STATUS.sub(r"\1", line))
+        for line in lines if not line.lstrip().startswith("#")
     )
     keywords = list(_SH_KEYWORD.finditer(code))
     start = next((k for k in keywords if k.group(1) == "then"), None)

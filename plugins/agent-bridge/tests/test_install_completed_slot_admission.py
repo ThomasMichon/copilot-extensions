@@ -1271,6 +1271,27 @@ def test_sh_only_a_flock_conflict_is_contention(tmp_path: Path, flock_rc: int, e
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize(("owner_alive", "expected"), [(True, 75), (False, 1)],
+                         ids=["live-owner", "stale-owner-reap-stuck"])
+def test_sh_pid_fallback_contention_needs_a_live_owner(
+    tmp_path: Path, owner_alive: bool, expected: int
+) -> None:
+    """Only a live holder is contention (75). A stale owner whose recovery
+    cannot proceed (its reap mutex is held) is a lock fault (1) at the
+    deadline. Shims stand in for symlinks so this runs without that privilege."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        "ln() { return 1; }\nreadlink() { echo 424242; }\nrm() { :; }\n"
+        f"kill() {{ return {0 if owner_alive else 1}; }}\n"
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    assert f"RC={expected}" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 def test_sh_pid_fallback_unattributable_lock_path_is_a_fault(tmp_path: Path) -> None:
     """A lock path that can never be created or attributed (here a regular
     file) is a lock fault, not another install holding the lock."""

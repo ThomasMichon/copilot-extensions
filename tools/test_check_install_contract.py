@@ -374,6 +374,22 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         ),
         ("install.ps1", _PS1_HELPER + "    $ok = Invoke-VersionedMarkComplete\n"),
         ("install.sh", _SH_HELPER + "main() {\n    out=\"$(_versioned_mark_complete)\"\n}\n"),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    local out rc=0\n    out=\"$(\"$py\" \"${args[@]}\" 2>&1)\" || rc=$?\n"
+            "    return 0\n}\nmain() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    local out rc=0\n    out=\"$(\"$py\" \"${args[@]}\" 2>&1)\" || rc=$?\n"
+            "    if [[ \"$rc\" -ne 0 ]]; then\n        _warn 'x'\n    fi\n    return 0\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    \"$py\" \"${args[@]}\" 2>&1\n    return 0\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
     ],
     ids=[
         "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
@@ -388,7 +404,8 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         "sh-or-conditional-exit", "sh-if-not-nested-conditional-return",
         "sh-helper-conditional-return",
         "ps1-positive-if-no-else", "ps1-positive-if-else-warns", "ps1-assigned-result",
-        "sh-command-substitution",
+        "sh-command-substitution", "sh-captured-status-returns-0", "sh-rc-test-only-warns",
+        "sh-writer-status-dropped",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:
@@ -446,11 +463,18 @@ def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text)
             "    Write-Host 'see Invoke-VersionedMarkComplete'\n"
             "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
         ),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n"
+            "    if ! \"$py\" \"${args[@]}\" 2>&1 | sed 's/^/  /'; then\n"
+            "        _fail 'x'\n        return 1\n    fi\n    return 0\n}\n"
+            "main() {\n    _versioned_mark_complete || exit 1\n}\n",
+        ),
     ],
     ids=[
         "sh-checked", "ps1-checked", "ps1-captured-exit-code", "sh-if-not-checked-nested",
         "sh-if-else-checked", "sh-pipefail-tail", "ps1-positive-if-else-fails",
-        "mentions-in-comments-and-strings",
+        "mentions-in-comments-and-strings", "sh-if-not-writer",
     ],
 )
 def test_checked_completion_marker_publication_passes(tmp_path, name, text) -> None:

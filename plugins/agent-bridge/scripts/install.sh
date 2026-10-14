@@ -1612,14 +1612,17 @@ _enter_install_lock() {
             # symlink this lock can attribute. Never unlink here: creators are
             # not serialized by the reap mutex. Retry; an unattributable path
             # fails closed at the deadline.
+            __held=0
             sleep 0.1
             continue
         fi
-        __held=1
         case "$__owner" in
             *[!0-9]*) __live=0 ;;
             *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
         esac
+        # Contention means the latest look found a live holder; a stale owner
+        # whose recovery cannot proceed is a fault at the deadline.
+        __held="$__live"
         if [[ "$__live" == 1 ]]; then
             sleep 1
         elif ln -s "$$" "$__link.reap" 2>/dev/null; then
