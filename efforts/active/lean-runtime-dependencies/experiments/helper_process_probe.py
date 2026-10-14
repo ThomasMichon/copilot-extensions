@@ -70,7 +70,8 @@ def helper(root: Path):
         host, port = rendezvous["endpoint"].rsplit(":", 1)
         endpoint = (host, int(port), rendezvous["token"])
         # A successful request, not just the startup line, establishes readiness.
-        assert request(endpoint, "alpha") == {"fixture": "alpha"}
+        if request(endpoint, "alpha") != {"fixture": "alpha"}:
+            raise RuntimeError("helper readiness returned the wrong consumer")
         yield endpoint
     finally:
         if process.poll() is None:
@@ -103,7 +104,8 @@ def measure(operation, rounds: int) -> dict:
         samples = []
         for _ in range(rounds):
             start = time.perf_counter()
-            assert operation(consumer) == {"fixture": consumer}
+            if operation(consumer) != {"fixture": consumer}:
+                raise RuntimeError("measured operation returned the wrong consumer")
             samples.append((time.perf_counter() - start) * 1000)
         return samples
 
@@ -157,7 +159,8 @@ def probe(rounds: int) -> dict:
             unavailable_detected = True
         else:
             raise RuntimeError("closed helper still answered")
-        assert read(root, "alpha") == {"fixture": "alpha"}
+        if read(root, "alpha") != {"fixture": "alpha"}:
+            raise RuntimeError("direct path failed after helper shutdown")
         return {
             "python": sys.version.split()[0],
             "platform": sys.platform,
