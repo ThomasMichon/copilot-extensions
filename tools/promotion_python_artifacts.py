@@ -748,7 +748,8 @@ def validate_composed_artifacts(
     with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
         candidate = Path(temporary).resolve()
         _run(
-            ["git", "checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
+            ["git", f"--attr-source={content_tree}", "checkout-index", "--all",
+             f"--prefix={candidate}{os.sep}"], cwd=scratch,
         )
         return validate_artifacts(
             directory, content_tree=content_tree,

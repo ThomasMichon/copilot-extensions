@@ -854,12 +854,30 @@ def test_composed_source_identity_refuses_before_checkout_or_artifact_reads(
         )
 
 
-def test_composed_source_ignores_working_tree_representation_and_noise(repo, tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "attribute_noise", ["none", "unstaged-root", "untracked-nested", "staged-policy"],
+)
+def test_composed_source_ignores_working_tree_representation_and_noise(
+    repo, tmp_path, monkeypatch, attribute_noise,
+):
     relative = Path("plugins/demo-plugin/generated.ps1")
     (repo / ".gitattributes").write_text("*.ps1 text eol=crlf\n", encoding="utf-8")
     (repo / relative).write_bytes(b"first line\nsecond line\n")
     _commit(repo, "canonical source contract")
     tree = _git(["write-tree"], repo)
+    expected = b"first line\r\nsecond line\r\n"
+    if attribute_noise == "staged-policy":
+        (repo / ".gitattributes").write_text("*.ps1 text eol=lf\n", encoding="utf-8")
+        _git(["add", ".gitattributes"], repo)
+        tree = _git(["write-tree"], repo)
+        (repo / ".gitattributes").write_text("*.ps1 text eol=crlf\n", encoding="utf-8")
+        expected = b"first line\nsecond line\n"
+    elif attribute_noise != "none":
+        attributes = repo / (
+            ".gitattributes" if attribute_noise == "unstaged-root"
+            else "plugins/demo-plugin/.gitattributes"
+        )
+        attributes.write_text("*.ps1 text eol=lf\n", encoding="utf-8")
     (repo / relative).write_bytes(b"first line\nsecond line\n")
     os.utime(repo / relative, (1, 1))
     noise = repo / "plugins/demo-plugin/.pytest_cache"
@@ -871,7 +889,7 @@ def test_composed_source_ignores_working_tree_representation_and_noise(repo, tmp
         candidate = kwargs["candidate_root"]
         checked.append(candidate)
         assert kwargs["content_tree"] == tree
-        assert (candidate / relative).read_bytes() == b"first line\r\nsecond line\r\n"
+        assert (candidate / relative).read_bytes() == expected
         assert not (candidate / "plugins/demo-plugin/.pytest_cache").exists()
         return {"canonical": True}
 

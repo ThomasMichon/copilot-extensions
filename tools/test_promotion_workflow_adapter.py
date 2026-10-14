@@ -110,7 +110,7 @@ def test_adapter_uses_real_cli_validation_and_failure_boundary(
     checkouts = []
 
     def fail_checkout(argv, *args, **kwargs):
-        if argv[:2] == ["git", "checkout-index"]:
+        if argv[0] == "git" and "checkout-index" in argv:
             return subprocess.CompletedProcess(argv, 128, "", "forced canonical checkout failure")
         return subprocess_run(argv, *args, **kwargs)
 
@@ -118,7 +118,7 @@ def test_adapter_uses_real_cli_validation_and_failure_boundary(
         monkeypatch.setattr(subprocess, "run", fail_checkout)
 
     def checkout(argv, **kwargs):
-        if argv[:2] == ["git", "checkout-index"]:
+        if argv[0] == "git" and "checkout-index" in argv:
             checkouts.append(Path(argv[-1].removeprefix("--prefix=")))
         return run(argv, **kwargs)
 

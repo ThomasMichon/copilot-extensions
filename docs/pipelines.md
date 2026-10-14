@@ -119,7 +119,10 @@ artifacts or checking out source. It reports index drift separately from an
 artifact/source mismatch rather than comparing unrelated snapshots and emitting
 an opaque payload-hash refusal. Working-file timestamps, untracked caches and
 raw LF/CRLF generator output are not source identity: only the admitted index's
-canonical checkout is hashed. A real source-content or checkout-policy mismatch
+canonical checkout is hashed. Attribute lookup is explicitly pinned to that
+same tree, not `HEAD` or unstaged/untracked `.gitattributes` in the scratch
+directory. Canonical validation requires Git 2.45 or newer and never falls back
+to working-tree attribute policy. A real source-content or checkout-policy mismatch
 still refuses publication and names the plugin/version and expected/actual
 payload digests. Archive and wheel digests remain exact integrity checks; they
 are not relaxed or used as a substitute for this source contract.
