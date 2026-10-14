@@ -237,25 +237,12 @@ def _emit(value: Any) -> int:
 
 
 def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
-    """Resolve which coordinator (URL + token) a client command targets.
+    """Resolve the ordinary fleet client's coordinator and bearer.
 
-    Precedence:
-
-    1. An explicit ``--url`` (with ``--token``/``AGENT_DISPATCH_TOKEN``) -- the
-       operator's direct override, always wins.
-    2. ``--shared`` -- route to the **shared/elected coordinator**
-       (``AGENT_DISPATCH_SHARED_URL``; the hosted coordinator) for cross-machine
-       dispatch, authenticated with its own ``AGENT_DISPATCH_SHARED_TOKEN``. If no
-       shared coordinator is configured, error loudly rather than silently using
-       the local queue (which would strand a cross-machine task on one host).
-    3. Otherwise the **local** loopback coordinator -- same-machine work, the
-       single-machine default that needs no shared service. **Failover:** if a
-       shared coordinator is configured (``AGENT_DISPATCH_SHARED_URL``) *and* the
-       local coordinator is not live (this environment's coordinator is down),
-       transparently fall back to the shared/hosted coordinator so work is
-       dispatched onto it (e.g. the standby) rather than stranded on a dead local
-       queue. This is opt-in by construction: with no shared URL configured,
-       nothing is probed and the local default is unchanged.
+    An explicit ``--url`` wins; ``--shared`` requires a hosted coordinator.
+    Otherwise use the local coordinator, falling back to a configured shared
+    endpoint only when the local one is down. With no shared endpoint there is
+    no probe or fallback. Task-only workers bypass this resolution entirely.
     """
     url = getattr(args, "url", None)
     token = getattr(args, "token", None)
@@ -304,6 +291,11 @@ def _should_ssh_failover(args: argparse.Namespace) -> str | None:
 
 
 def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
+    from .task_worker_cli import task_worker
+
+    worker = task_worker(args)
+    if worker is not None:
+        return worker.client()
     if ensure:
         _ensure_local_coordinator(args)
     # SSH-transport failover: local coordinator down + a peer configured -> open
@@ -634,7 +626,12 @@ def _enrich(result: Any, *, resolve_repo_names: bool = True) -> Any:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = _DashDashParser(prog="agent-dispatch", description="Agent task queue + coordinator")
+    parser = _DashDashParser(
+        prog="agent-dispatch", description="Agent task queue + coordinator", allow_abbrev=False,
+    )
+    from .task_worker_cli import register_task_worker_flags
+
+    register_task_worker_flags(parser)
     parser.add_argument("--version", action="version", version=f"agent-dispatch {__version__}")
     parser.add_argument(
         "--url", help="coordinator base URL (default: AGENT_DISPATCH_URL or config)"
@@ -955,6 +952,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        from .task_worker_cli import run_task_worker, task_worker
+
+        worker = task_worker(args)
+        if worker is not None:
+            return run_task_worker(args, worker)
         return args.func(args)
     except DispatchError as exc:
         detail = exc.as_dict()

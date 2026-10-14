@@ -8,8 +8,8 @@
 - **Status:** Active. Design merged in #6618; initial task grants merged in
   #6630. Check-in found missing deny-by-default route authorization and
   transactional incarnation fences; those corrections merged in #6665.
-  Phase 2 assignment push implemented and under validation/review.
-  Push-first delivery, direct restricted-worker calls, container placement
+  Phase 2 assignment push merged in #6698; restricted-worker delivery is next.
+  Direct restricted-worker calls, container placement
   and explicit local/central authority remain the completion gate.
 - **Vision:** [`machine-fleet`](../../../visions/machine-fleet/README.md):
   `authenticated-scoped-and-revocable` (routing/control authorized per
@@ -222,6 +222,9 @@ subscription-ready frame; no additional long-poll endpoint is needed.
   coalescing, cross-affinity isolation, missed-event poll recovery and teardown.
 
 ### Phase 3 -- Projected relay component
+- [x] Implement a strict task-only client/CLI boundary before any ordinary
+  endpoint discovery, autostart, identity lookup or fleet credential path.
+  This is the worker call surface only; automatic delivery remains below.
 - [ ] Implement the relay as an **operating mode of the existing local
   supervisor** (`supervisor.py`/`supervisor_daemon.py`), not a new
   standalone process -- per the operator's own "could just be the local
@@ -315,6 +318,57 @@ _Reviewed by the operator 2026-10-13 -- see Journal for the decisions
 recorded against each open fork._
 
 ## Journal
+
+### 2026-10-14 -- Phase 3 strict worker client implemented
+- Task-only CLI mode activates before command handlers or coordinator
+  autostart/discovery, with an explicit task, worker, URL and credential
+  projection. Incomplete projections, mixed fleet credentials, different
+  endpoints, other tasks and fleet/history/cleanup commands fail closed.
+  Authorized reads and transitions use only the task header; no machine
+  identity, credential command, environment proxy or redirect can widen it.
+- Native ordinary CLI/client/task-authority regression selection passed 387
+  with one platform skip. The final task-worker selection passed 48, including
+  a real HTTP coordinator and eight fresh CLI process invocations: own reads,
+  progress, heartbeat, structured completion and terminal invalidation, plus
+  refusal of global/other-task commands. The fresh Linux candidate passed 89
+  task-worker/task-authority/transport contracts, including the real CLI
+  process path. Install-contract and touched-code lint pass.
+- Documentation impact: the plugin README describes the explicit projection,
+  narrower `show`/self-abandon behavior, exact global option spelling and
+  server authorization boundary. This closes the scoped-client part of
+  `machine-fleet`'s authenticated/scoped/revocable intent, without adding a
+  second queue, daemon or credential issuer.
+- This is only the client boundary. Trusted supervisor issuance, incarnation-
+  bound delivery and renewal, real restricted-container execution, and the
+  Phase 4/5 authority/provider proofs remain open. Nothing in this slice
+  changes first-use installation or enrolls an operator's live fleet.
+- Validation tiers: unit/real-route contracts plus simple end-to-end fresh CLI
+  processes on native Windows and in a fresh Linux candidate with a governed
+  dependency-feed fixture. No installer/first-provision path changed, so this
+  slice does not claim that clean-room enrollment gate. A live fleet/provider
+  execution is not exercised by a client-only slice; it remains a required
+  campaign gate rather than being treated as satisfied by a generic image.
+
+### 2026-10-14 -- Phase 2 merged; restricted-worker delivery next
+- PR #6698 squash-merged as `5e2f85636cc9d3e0f47965e71ccf0c041d27faf2`
+  after current-head Copilot approval with zero open findings and required CI
+  success. The umbrella #6617 remains open. Promotion stays automatic; no
+  manual promotion or operator service rollout was triggered.
+- The final production-route burst and admission corrections passed six
+  targeted native contracts and the same six in a fresh Linux container.
+  Earlier native full delivery/cutover selection passed 141; the preceding
+  fresh Linux cutover selection passed 140 and credential follow-up passed 12.
+  All proofs name their actual snapshots; none claim fresh fleet enrollment.
+- Phase 2 Plan items are resolved. The campaign remains Active: Phase 3 must
+  deliver task-only credentials through the trusted supervisor, pin restricted
+  worker CLI calls before discovery/health/autostart or broad-token lookup,
+  renew grants without disclosing issuer authority, and prove own-task access
+  plus denial of other tasks in a real container. Phase 4 local projections
+  and Phase 5 provider-backed container execution remain open.
+- Continue in a fresh phase worktree. First implement the strict task-scoped
+  client/CLI boundary, then integrate trusted credential delivery and renewal
+  with existing admitted launch/provider seams; do not create another daemon
+  or replace the fleet/queue owners.
 
 ### 2026-10-14 -- Phase 2 push-first intake implemented
 - Reused `/events` and its ready barrier; added a cancelable async reader with

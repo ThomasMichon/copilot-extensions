@@ -12,6 +12,26 @@ import time
 import httpx
 
 
+def make_http_client(
+    base_url: str, *, token: str | None, control_token: str | None,
+    task_token: str | None, timeout: float, transport: httpx.BaseTransport | None,
+    tunnel: object,
+) -> ConnectRetryClient:
+    scheme = "Bear" + "er "
+    headers = {"Authorization": scheme + token} if token else {}
+    if task_token is not None:
+        if not task_token or token is not None or control_token is not None or tunnel is not None:
+            raise ValueError("task credentials require an exclusive pinned HTTP client")
+        from .task_scope import TASK_SCOPE_HEADER
+
+        headers = {TASK_SCOPE_HEADER: task_token}
+    return ConnectRetryClient(
+        base_url=base_url.rstrip("/"), headers=headers, timeout=timeout,
+        transport=transport, verify=not base_url.lower().startswith("http://"),
+        trust_env=task_token is None, follow_redirects=False,
+    )
+
+
 def default_connect_retries() -> int:
     """Default connection-level retries every ``DispatchClient`` request gets.
     Scoped to *connection* failures only -- refused/reset/unreachable before

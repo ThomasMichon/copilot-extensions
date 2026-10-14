@@ -1,0 +1,9 @@
+{
+  "comment": "Add a fail-closed pinned task-only CLI and exclusive scoped HTTP credentials",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

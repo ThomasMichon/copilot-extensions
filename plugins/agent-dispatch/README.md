@@ -53,6 +53,38 @@ by default. A separately reviewed admission adapter must verify the CI source,
 attempt policy and independent venue authentication; a signature/issue label is
 not authorization. Container selection and charter selection remain distinct.
 
+## Task-only worker client
+
+A trusted supervisor can give an isolated worker a coordinator-issued task
+grant without handing it the fleet bearer or control token. The CLI accepts
+four explicit projection fields: `AGENT_DISPATCH_TASK_TOKEN`,
+`AGENT_DISPATCH_TASK_ID`, `AGENT_DISPATCH_TASK_URL`, and
+`AGENT_DISPATCH_TASK_WORKER_ID` (or the corresponding global flags
+`--task-token`, `--task-scope`, `--task-url`, and `--task-worker`).
+Any supplied field selects task-only mode; an incomplete projection fails
+closed rather than falling back to ordinary coordinator discovery. Global
+options require their full spelling, so task-worker flags do not intercept
+existing subcommand flags such as `claim --task` or `doctor --task`.
+
+Only `show`, `payload`, `progress`, `heartbeat`, `complete`, and
+`abandon --permit` are accepted, for the projected task only. `show` returns
+the authorized task snapshot without separate progress-history, attachment,
+or worktree-tracking reads. `heartbeat` retains its explicit worker positional;
+other owner verbs use the projected worker when omitted. Task abandonment
+reports the worker's own failure directly, not a fleet/session cleanup request.
+Fleet/history/cleanup options are refused. The coordinator independently
+checks the signed task, owner, session, generation, expiry and fencing epoch
+on every request; terminal transitions invalidate the grant.
+
+This client pins the supplied HTTP(S) endpoint and sends only the task header.
+It does not discover endpoints, autostart a service, resolve machine identity,
+fetch ambient credentials, use environment proxies, or follow redirects.
+Explicit fleet credentials, `--shared`, and a different `--url` are rejected.
+Python callers can likewise use `DispatchClient(url, task_token=grant)`;
+the server denies every route outside task authority. Credentials must not
+appear in task payloads, prompts, public metadata, or logs. Automatic supervisor
+delivery and renewal are not yet wired by this client boundary.
+
 ## Install
 
 Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifecycle.md)
