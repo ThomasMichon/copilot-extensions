@@ -602,6 +602,11 @@ constraint. No stronger index is rebuilt at startup. Historical multiple live
 candidates produce a local HTTP `409` / `dedup_conflict` naming the repo, key,
 and candidate task IDs, rather than selecting one or rewriting records; unrelated
 keys and coordinator startup remain usable.
+Selection combines disjoint active and verification-pending queries with
+`UNION ALL` in one read snapshot. Active candidates use the existing partial
+dedup index; pending submissions use the existing status index. Exact lookup and
+reviewer-alias selection therefore avoid scanning completed lane history without
+adding an index or changing startup migrations.
 
 ## Producers
 

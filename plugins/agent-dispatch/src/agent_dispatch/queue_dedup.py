@@ -8,10 +8,24 @@ from collections.abc import Callable
 from .queue_common import Task, _TASK_SELECT
 from .queue_records import TaskError
 
-_LIVE_DEDUP_PREDICATE = (
-    "(status IN ('proposed','queued','claimed','started','suspended') "
-    "OR (status = 'submitted' AND require_verification = 1))"
+_ACTIVE_DEDUP_PREDICATE = (
+    "dedup_key IS NOT NULL AND status IN ('proposed','queued','claimed','started','suspended')"
 )
+
+
+def _live_dedup_rows(
+    conn: sqlite3.Connection, selector: str, params: tuple[str, ...]
+) -> list[sqlite3.Row]:
+    # Keep disjoint branches in one snapshot, using the existing indexes rather
+    # than scanning completed lane history through a combined OR predicate.
+    return conn.execute(
+        f"SELECT {_TASK_SELECT} FROM tasks INDEXED BY idx_tasks_dedup "
+        f"WHERE {selector} AND {_ACTIVE_DEDUP_PREDICATE} "
+        "UNION ALL "
+        f"SELECT {_TASK_SELECT} FROM tasks INDEXED BY idx_tasks_status "
+        f"WHERE {selector} AND status = 'submitted' AND require_verification = 1",
+        (*params, *params),
+    ).fetchall()
 
 
 class DedupConflictError(TaskError):
@@ -49,20 +63,21 @@ def find_live_dedup_task(
     pending submissions and inserting a new task remain one serialized operation.
     The five-state physical index is a supplementary, intentionally weaker guard.
     """
-    rows = conn.execute(
-        f"SELECT {_TASK_SELECT} FROM tasks WHERE repo = ? "
-        f"AND dedup_key = ? AND {_LIVE_DEDUP_PREDICATE}",
+    rows = _live_dedup_rows(
+        conn,
+        "repo = ? AND dedup_key = ?",
         (repo, dedup_key),
-    ).fetchall()
+    )
     candidates = {row["id"]: row for row in rows}
     target = reviewer_target_for_key(dedup_key) if reviewer_target_for_key else None
     if target is not None and reviewer_target_for_key is not None:
-        aliases = conn.execute(
-            f"SELECT {_TASK_SELECT} FROM tasks WHERE repo = ? "
+        aliases = _live_dedup_rows(
+            conn,
+            "repo = ? "
             "AND source = 'recipe' AND origin_ref = 'reviewer' "
-            f"AND {_LIVE_DEDUP_PREDICATE} AND dedup_key LIKE 'recipe:reviewer:%'",
+            "AND dedup_key LIKE 'recipe:reviewer:%'",
             (repo,),
-        ).fetchall()
+        )
         candidates.update(
             (row["id"], row)
             for row in aliases
