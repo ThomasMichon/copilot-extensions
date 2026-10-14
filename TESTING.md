@@ -9,6 +9,25 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+### Derived native installation diagnostics
+
+`libs/payload-invocation/tests/test_derived_diagnostic_cli.py` executes the
+actual vendored shell entry points selected by the installation-context
+inventory. Each copy has independent legacy/active and absent/retained-pointer
+items; each item invokes `status` and `probe-legacy` twice and compares the
+complete fixture profile after every call and after PowerShell-host shutdown.
+The existing initialized-host fixture excludes only host initialization from
+the baseline, never product execution or profile contents.
+
+Required change-scoped CI runs the Agent Worktrees copy's four cases with
+`-m "not derived_diagnostic_full"`; the existing derived-Python API matrix and
+mutation tripwires remain required. The explicit
+`installation-context-acceptance.yml` manual workflow executes every native
+copy on Windows PowerShell 5.1 and POSIX, partitioned by mode and pointer state
+into eight independently bounded four-minute jobs. Run it against the exact
+candidate ref before claiming all-copy native acceptance. A smoke pass or
+byte-identical vendoring check alone does not satisfy that broader gate.
+
 ### Native category view contracts
 
 `plugins/agent-dispatch/tests/test_task_categories.py` gives each native view

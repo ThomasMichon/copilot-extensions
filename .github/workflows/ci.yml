@@ -475,6 +475,7 @@ jobs:
       - name: Payload invocation foundation tests
         run: >-
           python -m pytest -q
+          --ignore=libs/payload-invocation/tests/test_derived_diagnostic_cli.py
           libs/payload-invocation/tests
           plugins/agent-index/tests/test_command_catalog.py
       - id: installation-context
@@ -495,6 +496,13 @@ jobs:
           libs/installation-context/tests
       - name: Installation context vendoring
         run: python tools/sync-installation-context.py --check
+      - name: Derived native diagnostics (POSIX)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        run: >-
+          python -m pytest -q
+          -m "not derived_diagnostic_full"
+          libs/payload-invocation/tests/test_derived_diagnostic_cli.py
       - name: Bootstrap-killswitch guard vendoring
         run: python tools/sync-bootstrap-killswitch.py --check
       - name: Bootstrap-killswitch guard tests
@@ -1091,6 +1099,15 @@ jobs:
           libs/payload-invocation/tests/test_command_binding.py
           libs/payload-invocation/tests/test_command_lifecycle.py
           -k "payload_source or installation_context_ci_scope or command_binding or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+      - name: Derived native diagnostics (Windows PowerShell 5.1)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          uv run --with pytest python -m pytest -q
+          -m "not derived_diagnostic_full"
+          libs/payload-invocation/tests/test_derived_diagnostic_cli.py
       - name: Manager read-only wrapper (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
