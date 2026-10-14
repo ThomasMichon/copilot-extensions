@@ -85,6 +85,15 @@ build tooling has the explicit exception described in Guiding Intent above;
 the earlier wording must not be read as requiring public runners to reach a
 private consumer feed. Consumer-side admission still checks the actual feed.
 
+**2026-10-13 consumer-policy direction:**
+
+> Whatever has the biggest chance of succeeding in most machine governance situations
+
+The operator delegated the implementation choice, rather than prescribing a
+particular resolver or authorizing a governance exception. The
+agent-recommended first consumer lane below uses inspected governed-feed
+wheels and offline resolution; it does not relax the original feed-only rule.
+
 ## Plan
 
 ### Phase 1 - Spike: governed-feed-only install and timing baseline
@@ -154,8 +163,10 @@ private consumer feed. Consumer-side admission still checks the actual feed.
       builder remains independently usable. Actual trusted-main signing
       and publication evidence is tracked explicitly in Validation Plan.
 - [ ] Resolve and pin a dependency closure for the third-party portion only,
-      using a lag-tolerant selection policy informed by Phase 1, and record
-      it in the manifest.
+      using the consumer's actual governed-feed availability and applicable
+      machine policy. Record the admitted closure in an installation-local
+      receipt bound to the signed first-party manifest, not in a globally
+      promoted manifest that cannot know a consumer's private feed.
 - [x] **Contract implemented (2026-10-12).** Native GitHub OIDC attestations
       authenticate both the transfer index and first-party bundles.
       Signing runs without release-write credentials. Verification constrains
@@ -176,6 +187,46 @@ private consumer feed. Consumer-side admission still checks the actual feed.
       immutable-slot assembly, health gates, activation, and rollback.
 - [ ] Validate across supported platform/architecture/Python-ABI
       combinations, including a clean-room first install.
+
+#### First consumer lane _(agent-recommended; review before implementation)_
+
+Prefer a portable, invocation-local acquisition boundary over a new proxy,
+resident service, administrator-installed egress rule or unrestricted source
+build. These additional machine facilities would reduce deployability on
+locked-down hosts without themselves proving the package-source contract.
+
+- [ ] Acquire candidate wheels only through the affirmatively trusted
+      governed feed. Preserve named-index authentication and OS trust
+      configuration without exposing credentials in argv, logs or receipts.
+      Bind download locations and redirect chains to explicit feed trust;
+      a trusted index URL alone does not authorize arbitrary linked hosts.
+- [ ] Inspect each candidate's actual wheel metadata before traversing its
+      dependencies or exposing it to the resolver. Reject direct URL,
+      VCS and external-path requirements before their targets are acquired.
+      Require intact distribution identity, wheel tags and file hashes;
+      metadata-sidecar hints do not replace verification of actual bytes.
+- [ ] Resolve and install solely from the inspected local wheel set, with
+      network disabled for those operations and no ambient cache, index,
+      override or build-backend escape. Retain the standard resolver's
+      backtracking, extras, markers, interpreter/tag compatibility and version
+      constraints rather than substituting a greedy newest-version walk.
+      Admission selects among versions the feed actually carries and honors
+      any applicable machine seasoning policy; no universal age constant
+      stands in for feed availability.
+- [ ] Persist the selected versions and wheel hashes in a local admission
+      receipt binding manifest digest, target interpreter/platform, feed
+      identity and effective policy. Cached reuse must revalidate that
+      binding; successful resolution alone never activates a slot.
+- [ ] Refuse an unavailable compatible wheel or inadmissible closure with a
+      specific diagnostic. This first lane does not execute third-party
+      source backends or silently reinterpret refusal as permission to use
+      public packages or a source build. Safe source-only support remains a
+      separately reviewed extension, not a claim of this lane's coverage.
+- [ ] Integrate only through the existing shared installer engine after
+      acquisition/admission contracts pass. Preserve source fallback for an
+      absent matching first-party artifact and fail closed for a present
+      invalid artifact. Native release verification and Windows/POSIX
+      first-touch evidence remain prerequisites to enabling consumption.
 
 ### Phase 4 - Retention, provenance, and documentation
 
@@ -422,6 +473,68 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-13 - Native signing reached; publication and consumer admission remain open
+
+- Genuine promotion `38479483177` passed the native/full lanes, first-party
+  build and attestation, then failed promotion because the Bridge coverage
+  baseline was absent. The already-owned sibling-fixture import repair #6597
+  merged normally; no competing repair was published.
+- Containing promotion `38484939290` passed all suites, enrolled baselines,
+  artifact build and attestation, but its final consumer rejected
+  `manifest payload hash differs from candidate`. Run `38487345996`
+  repeated that refusal. These are native build/signing evidence, not
+  successful release publication or immutable-retry proof.
+- Canonical source correction #6604 and its dev workflow mirror #6611 are
+  merged. Current issue #6535 separates the already-owned trusted-main
+  bootstrap from a bounded source-identity durability follow-through.
+  This effort retains broader #4876 custody and does not duplicate either
+  repair, dispatch another promotion or authorize an updater.
+- #6568's separate Windows landing timeout is now linked to the older
+  open PR #5694, which already modifies the exact fixture and owns repeated
+  normal-budget acceptance. Its evidence was attached there; the untouched
+  investigation workspace finalized normally. The timeout issue remains
+  open pending the canonical owner's full-file and complete-portfolio proof.
+- The operator delegated consumer-policy selection to the approach most
+  likely to work across machine governance settings. The proposed inspected
+  wheel/offline lane above avoids requiring new host services or privileged
+  network controls, while explicitly naming its source-only limitation.
+  Implementation waits for plan review. No artifact consumer, dependency
+  policy, installed runtime or shared service was enabled.
+
+### 2026-10-13 - Journal published; separate obligation-fixture claimant retained
+
+- Journal PR #6582 merged as
+  `9cbf0441ebfc351de3b3bc24eb7a4a31579cad27` at
+  `2026-10-13T22:37:17Z`. Its final head
+  `e0b3c2d040a663b5a00dabe12210dd4e5fa668fb` received Copilot approval
+  `5510820616` with zero open findings, the earlier status finding was
+  resolved, and required CI `38477048301` passed. This publishes progress,
+  not a completed artifact or installer gate; the effort remains Active.
+- The four obligation-settlement signatures are tracked by #6587 and the
+  automatic signature issues #6589 through #6592. A recent, non-indexed issue
+  read exposed #6587's claim and its PR #6588 after earlier indexed searches
+  had returned no match. Both precede the later umbrella reservation.
+  That reservation was released before PR publication, and no competing
+  repair was opened. The earlier claimant retains the four-fixture slice.
+- Local complete-record/receiving-config fixtures passed the entire
+  obligation-settlement and independent-execution-space portfolio: 122
+  tests, with unchanged containment and timeout budgets. Ruff F/E9,
+  installer-contract checks (13 plugins) and whitespace checks passed.
+  The unsubmitted source is retained pending explicit disposition, not reset
+  or marked landed. Its local result does not verify #6588's current head.
+- Canonical repair #6588 subsequently merged as
+  `117476aa6f005e498a69880352c39ea3c0aeed86` at
+  `2026-10-13T22:41:34Z`. With the operator's explicit approval, the duplicate
+  local commit was preserved on a backup reference before discarding its
+  two unpublished files. The duplicate child then finalized normally and its
+  parent obligation settled at rest; no competing implementation was landed.
+  Automatic promotion `38479483177` is the next native-evidence candidate.
+- Native signing/publication proof still awaits the canonical repair's
+  actual merge and a subsequent genuine promotion. Consumer closure/admission,
+  shared-engine consumption, cross-platform clean-room validation, measured
+  network/storage behavior and retention remain unresolved. No installed
+  runtime or shared service was changed.
 
 ### 2026-10-13 - Phase 2 integration released; native signing proof pending
 
