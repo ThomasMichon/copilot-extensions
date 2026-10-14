@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg, git_ops
 from . import installer as inst
 from . import sessions
@@ -279,6 +281,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
             ["git", "-C", str(path), "rev-parse", *args],
             capture_output=True, text=True, timeout=5,
             env=git_ops.repository_identity_env(), stdin=subprocess.DEVNULL,
+            **no_window_kwargs(),
         )
 
     try:

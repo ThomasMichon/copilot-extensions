@@ -13,7 +13,7 @@ import pytest
 import yaml
 from agent_procutil import no_window_kwargs
 
-from agent_worktrees import config, git_ops, installer, registry_paths
+from agent_worktrees import config, front_door_cli, git_ops, installer, registry_paths
 
 pytestmark = pytest.mark.guard
 
@@ -119,6 +119,9 @@ def test_native_cli_project_configuration_never_queries_uname(tmp_path):
     env.update(HOME=str(home), USERPROFILE=str(home))
     script = """
 import platform, runpy, sys
+# Python 3.12 POSIX uuid initialization probes the OS, not Windows WMI.
+# Warm only that stdlib dependency; product imports and config stay fresh.
+import uuid
 class UnexpectedDiscovery(BaseException):
     pass
 def forbidden():
@@ -134,3 +137,18 @@ runpy.run_module("agent_worktrees", run_name="__main__")
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == expected_platform
+
+
+def test_front_door_git_probe_forwards_shared_headless_kwargs(tmp_path, monkeypatch):
+    seen = {}
+    marker = {"creationflags": 1234}
+
+    def run(argv, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, str(tmp_path), "")
+
+    monkeypatch.setattr(front_door_cli, "no_window_kwargs", lambda: marker)
+    monkeypatch.setattr(front_door_cli.subprocess, "run", run)
+    monkeypatch.setattr(git_ops, "resolve_to_anchor", lambda path: path)
+    assert front_door_cli._git_toplevel(tmp_path) == tmp_path.resolve()
+    assert seen["creationflags"] == marker["creationflags"]
