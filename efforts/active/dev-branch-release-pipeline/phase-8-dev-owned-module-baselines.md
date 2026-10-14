@@ -1,5 +1,17 @@
 # Phase 8 - Dev-owned module-size baseline updates
 
+**Status: Superseded by the canonical implementation and rollout in
+[issue #6430](https://github.com/ThomasMichon/copilot-extensions/issues/6430)
+and [main-owned-workflow-control Phase 5](../main-owned-workflow-control/README.md#phase-5---finish-validation-and-automation-consolidation).**
+
+The Plan, Validation Plan, and proposed mechanism below are retained historical
+evidence from reviewed plan #6436, not a competing current contract. The operator
+selected merged #6438's widening-only automation: no automated tightening,
+graduation/removal, or exact-current-parent admission. Those conflicting parts
+of this proposal are retired. Remaining compatible validation and actual
+trusted-main activation obligations are transferred to the named canonical
+objective above; neither this supersession nor the dev merge proves activation.
+
 ## Guiding Intent
 
 Baseline maintenance must not create an independent release-branch writer that
@@ -129,7 +141,29 @@ lock wait used `functools.partial`, but the production call's explicit
 two-second argument overrode that partial keyword. The fixture now sets the
 constant read by that call; production best-effort logging is unchanged. The
 named regression passed through the bounded supervisor on Windows. Required CI
-and plan review remain pending.
+and plan review subsequently passed; plan #6436 merged as `df15d7ce2`.
+
+### 2026-10-13 - Duplicate source superseded; activation audit
+
+Merged #6438 (`87c5f5ddcca1`) implements the same prevention through the existing
+trusted CI-completion invocation. Its producer pins trusted tooling and committed
+dev data in credential-free checkouts, runs isolated Python, fences publication
+with the live dev ref API, and publishes only a baseline PR to dev. The operator
+selected that canonical widening-only policy and authorized closing duplicate
+#6493; its branch and review evidence remain retained. No competing workflow,
+strict freshness gate, or automated tightening is carried forward.
+
+The actual-main audit at `9c4d6acade64` still found the old main-only baseline
+producer and verification workflow, with the baseline-only main admission
+exception intact. Legacy baseline PR #6444 still targets main. Thus the
+dev-landed correction is not yet live prevention. Named covering run
+`38479483177` reported failure and `38480618519` cancellation; release recovery
+remains with the existing #6237/#6535 owners. No run, legacy proposal, candidate,
+or attestation surface was changed by this audit.
+
+The canonical Phase 5 activation item and #6430 retain the covering-release and
+deployed producer/admission proof. This historical slice is superseded, not a
+claim that the release-pipeline effort or deployed system is complete.
 
 ## See Also
 
