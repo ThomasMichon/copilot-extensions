@@ -206,7 +206,12 @@ native installer child. It passes that interpreter to the installer, avoiding
 redundant bootstrap-shell startup and interpreter discovery while keeping both
 installer ownership checks. Explicit installation contexts never enter this
 legacy path. The standalone bootstrap script remains the no-Python/deployed-copy
-fallback; stamp diagnostics stay on stderr, not in session guidance.
+fallback; it forwards the supplied interpreter through both ownership admission
+and the staged installer, including paths containing spaces. Stamp diagnostics
+use UTF-8 and stay on stderr, not in session guidance. The lifecycle owner
+enforces the cold stamp's ten-second child deadline, stopping the installer
+tree before releasing its ownership lease rather than killing the owner from
+the hook.
 The stamp copies the same source tree
 through native filesystem APIs; runtime provisioning remains deferred to first
 tool use.

@@ -9,7 +9,6 @@ post-tool advisory work falls back to nudge_status and bind_nudge.
 from __future__ import annotations
 
 import importlib.util
-import hashlib
 import json
 import math
 import os
@@ -18,7 +17,6 @@ import signal
 import shutil
 import socket
 import stat
-import struct
 import subprocess
 import sys
 import tempfile
@@ -214,38 +212,9 @@ def _probe_terminal() -> dict:
 
 
 def _session_launch_key(payload: dict) -> str:
-    metadata = payload.get("_agentWorktrees")
-    if not isinstance(metadata, dict):
-        return ""
-    version = metadata.get("pluginVersion")
-    session_id = payload.get("sessionId")
-    cwd = payload.get("cwd")
-    source = payload.get("source", "")
-    timestamp = payload.get("timestamp")
-    if (
-        not isinstance(version, str)
-        or not version
-        or not isinstance(session_id, str)
-        or not session_id
-        or not isinstance(cwd, str)
-        or not os.path.isabs(cwd)
-        or not isinstance(source, str)
-        or isinstance(timestamp, bool)
-        or not isinstance(timestamp, (int, float))
-        or not math.isfinite(timestamp)
-    ):
-        return ""
-    timestamp_text = (
-        str(timestamp)
-        if isinstance(timestamp, int)
-        else f"f64:{struct.pack('>d', timestamp).hex()}"
-    )
-    identity = json.dumps(
-        [session_id, os.path.realpath(cwd), source, version, timestamp_text],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(identity).hexdigest()
+    if _RUNTIME is None:
+        raise RuntimeError("Runtime hook helper is unavailable.")
+    return _RUNTIME.session_launch_key(payload)
 
 
 def _additional_context(raw: str) -> str:
@@ -488,79 +457,24 @@ def _resident_started(payload: dict, home: Path) -> bool:
     runtime = _selected_runtime_root(home)
     if runtime is None:
         return False
-    receipt = runtime / ".session-context" / f"lifecycle-{launch_key}.json"
-    try:
-        value = json.loads(receipt.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError, TypeError):
-        return False
-    return (
-        isinstance(value, dict)
-        and value.get("launchKey") == launch_key
-        and value.get("state") in {"started", "completed"}
-    )
-
-
-def _complete_runtime_python(runtime: Path, version: str) -> Path | None:
-    if not version or "\\" in version or "/" in version:
-        return None
-    slot = runtime / "versions" / version
-    try:
-        marker = json.loads(
-            (slot / ".install-complete.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, ValueError, TypeError):
-        return None
-    if not isinstance(marker, dict) or marker.get("version") != version:
-        return None
-    for relative in (
-        Path("Scripts") / "python.exe",
-        Path("bin") / "python",
-    ):
-        executable = slot / relative
-        if executable.is_file():
-            return executable
-    return None
-
-
-def _version_key(version: str) -> tuple:
-    import re
-
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", version)
-    if match:
-        major, minor, patch, dev = match.groups()
-        return (0, int(major), int(minor), int(patch), dev is None, int(dev or 0))
-    return (1, version.lower())
+    if _RUNTIME is None:
+        raise RuntimeError("Runtime hook helper is unavailable.")
+    return _RUNTIME.resident_started(runtime, launch_key)
 
 
 def _runtime_python(home: Path) -> Path | None:
     runtime = _selected_runtime_root(home)
     if runtime is None:
         return None
-    for marker_name in ("current-version", "last-known-good"):
-        try:
-            version = (runtime / marker_name).read_text("utf-8").strip()
-        except (OSError, UnicodeError):
-            continue
-        executable = _complete_runtime_python(runtime, version)
-        if executable is not None:
-            return executable
-    try:
-        versions = sorted(
-            (
-                path.name
-                for path in (runtime / "versions").iterdir()
-                if path.is_dir()
-            ),
-            key=_version_key,
-            reverse=True,
-        )
-    except OSError:
-        return None
-    for version in versions:
-        executable = _complete_runtime_python(runtime, version)
-        if executable is not None:
-            return executable
-    return None
+    if _RUNTIME is None:
+        raise RuntimeError("Runtime hook helper is unavailable.")
+    return _RUNTIME.runtime_python(runtime)
+
+
+def _version_key(version: str) -> tuple:
+    if _RUNTIME is None:
+        raise RuntimeError("Runtime hook helper is unavailable.")
+    return _RUNTIME.version_key(version)
 
 
 def _bootstrap_first_install(payload: dict) -> dict:
@@ -597,7 +511,8 @@ def _bootstrap_first_install(payload: dict) -> dict:
                 "--payload-root", str(scripts.parent), "--plugin-id", "agent-worktrees",
                 "--legacy-root", str(Path.home() / ".agent-worktrees"),
                 "--source-payload-root", str(scripts.parent),
-                "--deferred-runtime", "--run-lifecycle", "--",
+                "--deferred-runtime", "--run-lifecycle",
+                "--lifecycle-timeout", str(_SESSION_START_TIMEOUT_S - 2), "--",
                 shell, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
                 "-File", str(installer), "stamp", "-BootstrapPython", sys.executable,
             ]
@@ -613,9 +528,11 @@ def _bootstrap_first_install(payload: dict) -> dict:
             argv,
             input=json.dumps(payload, separators=(",", ":")),
             text=True,
-            timeout=_SESSION_START_TIMEOUT_S,
+            encoding="utf-8",
+            timeout=None if direct_stamp else _SESSION_START_TIMEOUT_S,
             check=False,
             capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError) as error:
         if direct_stamp:
@@ -897,6 +814,9 @@ def _load_sibling(name: str):
         return module
     except Exception:
         return None
+
+
+_RUNTIME = _load_sibling("hook_runtime.py")
 
 
 def _merge_pre_decisions(current: dict, new: dict) -> dict:

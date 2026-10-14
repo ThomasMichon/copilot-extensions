@@ -74,6 +74,7 @@ def test_all_installers_deploy_every_py_hook():
         "pr_supersede_guard.py",
         "nudge_status.py",
         "bind_nudge.py",
+        "hook_runtime.py",
         "terminal_probe.py",
     }
     installers = {

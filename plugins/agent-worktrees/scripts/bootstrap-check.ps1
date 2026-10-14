@@ -1,5 +1,8 @@
 param([string]$BootstrapPython = '')
 
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+
 # --- bootstrap-killswitch guard (vendored; see libs/bootstrap-killswitch/README.md) ---
 # One shared, repo-wide switch (not per-plugin) that pauses EVERY adopting
 # plugin's reconcile-on-session-start at once, for when an operator/agent is
@@ -82,7 +85,7 @@ if ((-not $VenvPython) -and (-not (Test-AwProvisioned))) {
                 --legacy-root $InstallDir --source-payload-root $payloadRoot `
                 --deferred-runtime --run-lifecycle -- `
                 (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
-                -File $installer stamp 2>&1 |
+                -File $installer stamp -BootstrapPython $BootstrapPython 2>&1 |
                 ForEach-Object { [Console]::Error.WriteLine([string]$_) }
             $stampExitCode = $LASTEXITCODE
             if ($stampExitCode -ne 0) {

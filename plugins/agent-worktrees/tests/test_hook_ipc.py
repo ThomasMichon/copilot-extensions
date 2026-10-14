@@ -5,6 +5,7 @@ import io
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -1380,14 +1381,49 @@ def test_windows_first_install_enters_exact_canonical_lifecycle(
     assert argv[argv.index("--legacy-root") + 1] == str(Path.home() / ".agent-worktrees")
     assert argv[argv.index("--source-payload-root") + 1] == str(_SCRIPT.parents[1])
     assert argv[argv.index("--deferred-runtime"):argv.index("--") + 2] == [
-        "--deferred-runtime", "--run-lifecycle", "--", shell,
+        "--deferred-runtime", "--run-lifecycle", "--lifecycle-timeout", "10.0", "--", shell,
     ]
     assert argv[-5:] == ["-File", str(_SCRIPT.parent / "install.ps1"), "stamp", "-BootstrapPython", sys.executable]
     assert "bootstrap-check.ps1" not in " ".join(argv)
-    assert seen["kwargs"]["timeout"] == 12.0
+    assert seen["kwargs"]["timeout"] is None
+    assert seen["kwargs"]["encoding"] == "utf-8"
+    assert seen["kwargs"]["creationflags"] == subprocess.CREATE_NO_WINDOW
     assert result["_stderr"].startswith("stamp diagnostic\nwarning\n")
     assert "additionalContext" not in result
     assert ("failed (exit 3)" in result["_stderr"]) == bool(returncode)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ANSI parent / UTF-8 child")
+def test_windows_first_install_decodes_real_non_ascii_child_diagnostics(monkeypatch, tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("bootstrap-check.ps1", "install.ps1"):
+        (scripts / name).touch()
+    (scripts / "command_binding.py").write_text(
+        "import sys\nprint(chr(0x410))\nprint(chr(0x410), file=sys.stderr)\n",
+        encoding="ascii",
+    )
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
+    monkeypatch.setattr(hook_client, "__file__", str(scripts / "hook_client.py"))
+    result = hook_client._bootstrap_first_install({})
+    assert result == {"_stderr": f"{chr(0x410)}\n{chr(0x410)}\n"}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cold hook consumer")
+def test_windows_first_install_direct_hook_stamps_without_runtime(monkeypatch, tmp_path):
+    home = Path.home()
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
+    result = hook_client._bootstrap_first_install({"sessionId": "cold-hook"})
+    assert "Bootstrap stamp failed" not in result.get("_stderr", ""), result
+    runtime = home / ".agent-worktrees"
+    assert (runtime / "stamped-version").is_file(), result
+    snapshot = Path((runtime / "payload-dir").read_text().strip())
+    assert (snapshot / "scripts/hook_runtime.py").is_file()
+    assert (home / ".local/bin/agent-worktrees.cmd").is_file()
+    assert not (runtime / "versions").exists()
+    assert not runtime.with_name(runtime.name + ".command-binding-publication.lock").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")

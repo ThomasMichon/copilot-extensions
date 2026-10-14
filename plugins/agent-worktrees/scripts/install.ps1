@@ -58,6 +58,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ($BootstrapPython) {
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    $OutputEncoding = [Console]::OutputEncoding
+}
+
 function ConvertTo-NativeArgument {
     param([AllowEmptyString()][string]$Value)
 
@@ -572,9 +577,15 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
+                    ForEach-Object {
+                        '"' + ([regex]::Replace(
+                            [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
+                        )) + '"'
+                    }) -join ' '
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
-                    -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd)
+                    -ArgumentList $__selfStageArgs
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -2663,7 +2674,7 @@ function Deploy-Wrappers {
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'post-tool-hook.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
+    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'hook_runtime.py', 'post-tool-hook.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
