@@ -18,9 +18,12 @@ from . import config
 from .cache import CACHE_DIR_ENV
 
 SERVICE_STDIO_LOG = "service-stdio.log"
+# Every filesystem override the service reads (the client-side endpoint is a
+# dial spec, not a path).
 _PATH_OVERRIDES = (
     config.CONFIG_ENV, config.RUN_DIR_ENV, config.PID_ENV, config.LOG_ENV, config.SOCKET_ENV,
-    CACHE_DIR_ENV, "KPDB",
+    CACHE_DIR_ENV, "KPDB", "AGENT_VAULT_KEK_DIR", "AGENT_VAULT_WINDOWS_RUN_DIR",
+    "AGENT_VAULT_CORE_RUN_DIR",
 )
 
 
@@ -54,7 +57,8 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
     for name in _PATH_OVERRIDES:
         value = os.environ.get(name)
         if value:
-            overrides[name] = os.path.abspath(value)
+            # Expanded first, exactly as the readers expand it (``~``, ``$VAR``).
+            overrides[name] = config._expand_kpdb(value)
     return spawn_daemon(
         [windowless_python(python), "-m", "agent_vault.service", *args],
         cwd=root,

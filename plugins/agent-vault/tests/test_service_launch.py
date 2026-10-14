@@ -88,7 +88,8 @@ def test_relative_path_overrides_are_passed_resolved(monkeypatch, tmp_path):
     relative = {
         config.CONFIG_ENV: "settings.json", config.RUN_DIR_ENV: "run",
         config.PID_ENV: "vault.pid", config.LOG_ENV: "vault.log", config.SOCKET_ENV: "vault.sock",
-        launch.CACHE_DIR_ENV: "cache", "KPDB": "vault.kdbx",
+        launch.CACHE_DIR_ENV: "cache", "KPDB": "vault.kdbx", "AGENT_VAULT_KEK_DIR": "keys",
+        "AGENT_VAULT_WINDOWS_RUN_DIR": "winrun", "AGENT_VAULT_CORE_RUN_DIR": "corerun",
     }
     for name, value in relative.items():
         monkeypatch.setenv(name, value)
@@ -117,3 +118,18 @@ def test_relative_database_path_is_absolute_before_any_request(monkeypatch, tmp_
     assert config._expand_kpdb("db/vault.kdbx", base_dir=tmp_path / "repo") == str(
         tmp_path / "repo" / "db" / "vault.kdbx"
     )
+
+
+@pytest.mark.parametrize("value", ["~/vault.kdbx", "$VAULT_TEST_ROOT/vault.kdbx"])
+def test_path_overrides_are_expanded_before_they_are_resolved(monkeypatch, tmp_path, value):
+    # `abspath("~/x")` would name `<caller>/~/x`: expand as the readers do first.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("VAULT_TEST_ROOT", str(tmp_path / "home"))
+    monkeypatch.setenv("KPDB", value)
+    monkeypatch.setattr(launch, "service_root", lambda: tmp_path / "root")
+    seen: dict = {}
+    monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
+    launch.spawn_service(["--foreground"])
+    assert seen["env_overrides"]["KPDB"] == str(tmp_path / "home" / "vault.kdbx")
