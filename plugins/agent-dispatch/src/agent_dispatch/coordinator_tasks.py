@@ -51,7 +51,7 @@ from .queue import (
     TaskQueue,
     worker_id_for,
 )
-from .task_authority import mint_task_token, resolve_task_authority
+from .task_authority import mint_task_token, register_task_grant_route, resolve_task_authority
 
 #: Event types that run periodically for every live task without ever
 #: transitioning its state (a heartbeat lease extension, a routine activity
@@ -118,6 +118,7 @@ def register_task_routes(
     resolve_owner_session_id: Callable[[str | None], str | None],
     fencing_guard: FencingGuard | None = None,
 ) -> None:
+    register_task_grant_route(app, queue, control_token, fencing_guard, bus)
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
     register_category_routes(app, queue, control_token=control_token,

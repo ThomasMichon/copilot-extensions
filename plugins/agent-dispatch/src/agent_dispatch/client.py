@@ -219,6 +219,19 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
             self._http.post(f"/tasks/{task_id}/start", json=body)
         )
 
+    def task_grant(
+        self, task_id: str, worker_id: str, owner_session_id: str,
+        *, expected_generation: int, expected_epoch: int,
+    ) -> dict:
+        """Issue or renew a grant without changing the task's ownership or lease."""
+        return self._unwrap(self._http.post(
+            f"/tasks/{task_id}/task-grant", headers=self._control_headers(),
+            json={
+                "worker_id": worker_id, "owner_session_id": owner_session_id,
+                "expected_generation": expected_generation, "expected_epoch": expected_epoch,
+            },
+        ))
+
     def yield_task(
         self, task_id: str, worker_id: str, *, note: str | None = None,
         exclude: str | None = None, release_spawn: bool = True,

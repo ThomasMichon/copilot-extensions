@@ -6,6 +6,7 @@ import argparse
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .client import DispatchClient, DispatchError
 from .client_transport import validate_task_url
@@ -34,6 +35,9 @@ class TaskWorker:
 def register_task_worker_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--task-token", help="task-only credential (AGENT_DISPATCH_TASK_TOKEN)")
     parser.add_argument(
+        "--task-token-file", help="private renewable credential (AGENT_DISPATCH_TASK_TOKEN_FILE)",
+    )
+    parser.add_argument(
         "--task-scope", dest="task_scope_id",
         help="task-only identity (AGENT_DISPATCH_TASK_ID)",
     )
@@ -51,8 +55,15 @@ def task_worker(args: argparse.Namespace) -> TaskWorker | None:
         if getattr(args, name, None) is not None else os.environ.get(env)
         for name, env in _FIELDS.items()
     }
-    if all(value is None for value in supplied.values()):
+    token_file = getattr(args, "task_token_file", None)
+    if token_file is None:
+        token_file = os.environ.get("AGENT_DISPATCH_TASK_TOKEN_FILE")
+    if all(value is None for value in supplied.values()) and token_file is None:
         return None
+    if token_file is not None:
+        if supplied["task_token"] is not None:
+            raise DispatchError(403, "direct and file task credentials cannot be combined")
+        supplied["task_token"] = _read_task_token(token_file)
     values = {
         name: value if isinstance(value, str) else ""
         for name, value in supplied.items()
@@ -71,6 +82,20 @@ def task_worker(args: argparse.Namespace) -> TaskWorker | None:
     if not re.fullmatch(r"[A-Za-z0-9_-]+", values["task_scope_id"]):
         raise DispatchError(403, "invalid projected task identity")
     return TaskWorker(values["task_token"], values["task_scope_id"], url, values["task_worker"])
+
+
+def _read_task_token(filename: str) -> str:
+    if not isinstance(filename, str) or not filename or not Path(filename).is_absolute():
+        raise DispatchError(403, "task credential file must have an absolute path")
+    try:
+        with Path(filename).open("rb") as source:
+            raw = source.read(8193)
+        token = raw.decode("utf-8").strip()
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise DispatchError(403, "cannot read private task credential file") from exc
+    if not token or len(raw) > 8192 or any(char.isspace() for char in token):
+        raise DispatchError(403, "invalid private task credential file")
+    return token
 
 
 def run_task_worker(args: argparse.Namespace, worker: TaskWorker) -> int:

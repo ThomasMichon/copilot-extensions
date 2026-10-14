@@ -8,7 +8,8 @@
 - **Status:** Active. Design merged in #6618; initial task grants merged in
   #6630. Check-in found missing deny-by-default route authorization and
   transactional incarnation fences; those corrections merged in #6665.
-  Phase 2 assignment push merged in #6698; restricted-worker delivery is next.
+  Phase 2 assignment push merged in #6698; the strict task-only client merged
+  in #6718. Trusted restricted-worker delivery and renewal are next.
   Direct restricted-worker calls, container placement
   and explicit local/central authority remain the completion gate.
 - **Vision:** [`machine-fleet`](../../../visions/machine-fleet/README.md):
@@ -225,6 +226,10 @@ subscription-ready frame; no additional long-poll endpoint is needed.
 - [x] Implement a strict task-only client/CLI boundary before any ordinary
   endpoint discovery, autostart, identity lookup or fleet credential path.
   This is the worker call surface only; automatic delivery remains below.
+- [x] Add control-authorized grant issuance/renewal fenced to the existing
+  worker, native session, generation and coordinator epoch, with a reloadable
+  private token-file client. Renewal neither starts/rebinds the task nor
+  extends its lease. Provider delivery and supervisor renewal remain below.
 - [ ] Implement the relay as an **operating mode of the existing local
   supervisor** (`supervisor.py`/`supervisor_daemon.py`), not a new
   standalone process -- per the operator's own "could just be the local
@@ -237,6 +242,8 @@ subscription-ready frame; no additional long-poll endpoint is needed.
   the Phase-1 task-scoped token for that exact task/worker identity and
   injects **only that token** into the container (env var or a mounted
   read-only file) -- the shared/control bearer never enters the container.
+  Renewal must recheck the current owner, native session and task generation;
+  the worker cannot mint or renew through issuer authority of its own.
 - [x] **Approach confirmed by the operator (2026-10-13): start with direct
   scoped-token calls** -- the containerized agent calls the coordinator's
   HTTP API directly using only the scoped token; the token alone already
@@ -318,6 +325,51 @@ _Reviewed by the operator 2026-10-13 -- see Journal for the decisions
 recorded against each open fork._
 
 ## Journal
+
+### 2026-10-14 -- Trusted renewal and private credential-file boundary
+- Added control-only `POST /tasks/{id}/task-grant` and
+  `DispatchClient.task_grant()`. Every request must identify the current held
+  ownership incarnation and epoch; workers cannot mint or renew, including
+  when a task header accompanies a control header. Responses contain the
+  fixed-lifetime token and expiry, are non-cacheable, and do not persist
+  credentials in task metadata, events or the audit trail.
+- The CLI reloads a bounded absolute private token file on each invocation.
+  Incomplete, unreadable, malformed and mixed projections fail closed before
+  discovery, credential lookup or ordinary handlers. The file contains only
+  the token; task, endpoint and worker identity remain separately pinned.
+- Native contained boundary selection passed 131 tests, including real TCP
+  with fresh CLI processes for both direct and file credentials. The file
+  path starts with an invalid grant, is explicitly denied, then accepts a
+  control-issued renewal through atomic replacement and completes the task.
+  Expanded issuance/epoch/binding and ordinary coordinator/client regression
+  selection passed 203 tests. Ruff and the install-contract check passed.
+- This closes only the issuance/consumption contract, not provider delivery.
+  Container placement, per-incarnation file isolation, trusted supervisor
+  renewal, real restricted-container proof, central/local projections and
+  first-touch provisioning remain open. No installer changed in this slice;
+  fresh CLI/coordinator integration was exercised without claiming that it
+  proves a fresh container or external deployment.
+
+### 2026-10-14 -- Strict client merged; trusted grant delivery next
+- PR #6718 squash-merged as `e9d2d585861976679faec1c2e67c4f369dc0363d`
+  after current-head Copilot approval with zero open findings and successful
+  required CI. The corrected native worker/TLS selection passed 56; the
+  fresh Linux correction selection passed eight. Earlier full scoped-client
+  Linux proof passed 89. The source worktree is finalized; #6617 stays open.
+- Phase 3's client boundary is resolved, not Phase 3 itself. Next implement
+  trusted coordinator grant issuance/renewal and a private renewable worker
+  projection, then integrate it with the existing supervisor and admitted
+  provider launch. Bind the exact native session before delivering a grant or
+  task prompt. Keep signing/fleet authority outside worker containers and
+  credentials outside public task/agent metadata and prompts.
+- Natural promotion is currently blocked by the already-owned receiving-
+  authority fixture repair in #6693/#6696 and #6212: run 38589060318 failed
+  the two owning-directory registration tests and the terminal-registration
+  fixture, with no other failing job. #6696 remains open at
+  `11bbaaaab5824eface3f9269b4b85db8d609995b`; its owner retains the fix,
+  including two Medium findings in the latest review overview. No competing
+  patch, merge/review bypass, pipeline retry or manual release is being made.
+  Continue containerization while that owner clears the normal release gate.
 
 ### 2026-10-14 -- Phase 3 strict worker client implemented
 - Task-only CLI mode activates before command handlers or coordinator
