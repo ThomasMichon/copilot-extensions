@@ -13,7 +13,7 @@ import yaml
 
 from agent_worktrees import __main__ as main
 from agent_worktrees import config as cfg
-from agent_worktrees import list_cli, output, record_cli, session_tracking_cli, sessions, tracking
+from agent_worktrees import list_cli, output, record_cli, repos, session_tracking_cli, sessions, tracking
 from agent_worktrees import worktrees_client as client
 
 
@@ -23,20 +23,13 @@ def record_fixture(tmp_path, monkeypatch):
     cfg.set_active_project(project)
     tdir = tmp_path / f".{project}" / "worktrees"
     tdir.mkdir(parents=True)
-    config = cfg.Config(
-        srcroot=str(tmp_path),
-        machine="receiving-owner",
-        platform="linux",
-        repo_name=project,
-        repos={
-            project: cfg.RepoConfig(
-                anchor=str(tmp_path / "repo"),
-                worktree_root=str(tmp_path / "workspaces"),
-            )
-        },
-    )
-    monkeypatch.setattr(cfg, "load_config", lambda **kw: config)
+    (tdir.parent / "config.yaml").write_text(yaml.safe_dump({
+        "platform": "linux",
+        "repos": {project: {"anchor": str(tmp_path / "repo")}},
+    }), encoding="utf-8")
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: tmp_path / "repos.yaml")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "global.yaml")
     monkeypatch.setattr(cfg.project_state, "project_state_root", lambda project, legacy: legacy)
     monkeypatch.setattr(main, "_resolve_active_project", lambda _: (project, None))
     data = {
@@ -330,12 +323,58 @@ def test_record_read_rejects_malformed_session_state_without_fallback(record_fix
     "failure", [RuntimeError("project unavailable"), ValueError("invalid config")]
 )
 def test_record_read_project_unavailable_explicit(record_fixture, monkeypatch, failure):
-    def unavailable(**kwargs):
+    def unavailable(*args, **kwargs):
         raise failure
 
-    monkeypatch.setattr(cfg, "load_config", unavailable)
+    monkeypatch.setattr(cfg, "project_name", unavailable)
     rc, result = invoke("example-worktree")
     assert rc == 1 and result["error"]["code"] == "project-unavailable"
+
+
+def test_record_read_without_project_uses_structured_error(record_fixture, monkeypatch):
+    cfg.set_active_project(None)
+    monkeypatch.setattr(main, "_resolve_active_project", lambda _: (None, None))
+    rc, result = invoke("example-worktree")
+    assert rc == 1
+    assert result["error"]["code"] == "project-unavailable"
+    assert result["worktree"] is None
+
+
+def test_record_read_registered_project_ignores_other_global_default(
+    record_fixture, monkeypatch,
+):
+    data, path = record_fixture
+    (path.parent.parent / "config.yaml").unlink()
+    cfg.global_config_path().write_text(
+        "repo_name: unrelated-project\nplatform: linux\n", encoding="utf-8",
+    )
+    repos.write_registry(repos.ReposRegistry(repos={
+        data["repo"]: repos.RepoEntry(
+            name=data["repo"], repo_class="worktree",
+            paths={"linux": str(path.parent / "registered-anchor")},
+        ),
+    }))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("exact metadata configuration started a subprocess")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(cfg, "load_config", forbidden)
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["repo"] == data["repo"]
+
+
+def test_record_read_invalid_yaml_date_is_structured(record_fixture):
+    data, path = record_fixture
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write("started_at: 2026-02-30\n")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1
+    assert result["error"]["code"] == "record-malformed"
+    assert result["worktree"] is None
+    assert path.read_bytes() == before
 
 
 def test_record_read_opaque_execution_leg_is_not_disposed(record_fixture):

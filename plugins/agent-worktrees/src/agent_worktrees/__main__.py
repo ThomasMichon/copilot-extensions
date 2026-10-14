@@ -6523,6 +6523,8 @@ def main(argv: list[str] | None = None) -> int:
     # A project-requiring subcommand without any project context → balk
     # helpfully instead of raising a bare RuntimeError deep in load_config.
     if not has_project and not _is_no_project_invocation(args_list):
+        if args_list[0] == "record":
+            return _dispatch_lazy("record", args_list)
         return cmd_help_unrouted(requested=args_list[0])
 
     # --version / -V → print version + build info + boot provenance

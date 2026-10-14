@@ -44,6 +44,10 @@ codenames; the command never searches another project, enumerates records or
 sessions, asks the resident, or computes live facts. A newly created record
 is readable even before the resident publishes it. Ordinary `list` projection
 authority and failure behavior are unchanged.
+Membership is read from the selected project's machine-local repository
+declarations and registered anchors, not from a global default project or
+Git-backed repository policy. No plugin activation, policy overlays, or Git
+probes are needed to identify these metadata records.
 
 Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
 The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,

@@ -12,6 +12,7 @@ import yaml
 
 from . import config as cfg
 from . import tracking
+from .record_config import configured_repositories
 from .record_io import read_record_mapping
 
 
@@ -73,9 +74,10 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
         raise RecordReadError("invalid-id", "Expected one exact worktree record ID")
 
     try:
-        config = cfg.load_config(include_control_plane_related_pr=False)
-        record_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-    except (OSError, RuntimeError, ValueError) as exc:
+        project = cfg.project_name()
+        repositories = configured_repositories(project)
+        record_path = cfg.tracking_dir(project) / f"{worktree_id}.yaml"
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as exc:
         raise RecordReadError("project-unavailable", str(exc)) from exc
 
     try:
@@ -88,6 +90,8 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
         raise RecordReadError("record-malformed", "Record is not UTF-8") from exc
     except yaml.YAMLError as exc:
         raise RecordReadError("record-malformed", str(exc)) from exc
+    except ValueError as exc:
+        raise RecordReadError("record-malformed", str(exc)) from exc
 
     try:
         for key in ("worktree_id", "repo", "worktree_path", "branch", "status"):
@@ -95,7 +99,7 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
                 raise ValueError(f"Record requires a nonempty string: {key}")
         if data["worktree_id"] != worktree_id:
             raise RecordReadError("id-mismatch", "Stored worktree ID does not match the request")
-        if data["repo"] not in config.repos:
+        if data["repo"] not in repositories:
             raise RecordReadError(
                 "repository-mismatch", "Record repository is not configured in this project"
             )

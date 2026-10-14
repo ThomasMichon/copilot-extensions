@@ -1,0 +1,48 @@
+"""Filesystem-only repository membership for exact record metadata reads."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from . import config as cfg, repos
+
+
+def _mapping(path: Path) -> dict:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    value = yaml.safe_load(text)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected a configuration mapping: {path}")
+    return value
+
+
+def configured_repositories(project: str) -> frozenset[str]:
+    """Read declared membership without loading repository policy or Git."""
+    machine = _mapping(cfg.project_dir(project) / "config.yaml")
+    global_defaults = _mapping(cfg.global_config_path())
+    platform = machine.get("platform") or global_defaults.get("platform") or cfg.detect_platform()
+    declared = machine.get("repos", {})
+    if not isinstance(declared, dict):
+        raise ValueError("Project repositories must be a mapping")
+    registry = repos.read_registry(strict=True)
+    names = {project, *declared}
+    configured = set()
+    for name in names:
+        entry = declared.get(name, {})
+        if not isinstance(name, str) or not isinstance(entry, dict):
+            raise ValueError("Project repository entries must be named mappings")
+        anchor = entry.get("anchor")
+        if anchor is not None and (not isinstance(anchor, str) or not anchor):
+            raise ValueError(f"Invalid repository anchor for {name!r}")
+        registered = registry.repos.get(name)
+        if anchor or (registered is not None and registered.local_path(platform)):
+            configured.add(name)
+    if project not in configured:
+        raise ValueError(f"No repository configured for active project {project!r}")
+    return frozenset(configured)
