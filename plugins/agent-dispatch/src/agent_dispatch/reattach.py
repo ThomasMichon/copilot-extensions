@@ -4,8 +4,8 @@ formalize the manual ``create`` (same ``dedup_key``) -> ``claim`` -> ``start``
 tracked reservation is dead while an earlier attempt's embody session is
 still alive and fully resumable.
 
-Background: a task's ``dedup_key`` only releases from the create-dedup index
-once the task reaches a **concluded** status (see
+Background: a task's ``dedup_key`` releases after a dedup-releasing
+**concluded** status, excluding verification-pending submissions (see
 :data:`agent_dispatch.queue_records.Status.CONCLUDED` and
 ``TaskQueue.create``'s docstring) -- so this primitive is viable only against
 an *already*-concluded task, typically one just abandoned for exactly this
@@ -272,6 +272,11 @@ def reattach(
             f"task {task_id!r} is {old_task.get('status')!r}, not terminal -- "
             "reattach only re-mints a terminal task's dedup_key (abandon it "
             "first if it should stop tracking its current dead reservation)"
+        )
+    if old_task.get("status") == Status.SUBMITTED and old_task.get("require_verification"):
+        raise ReattachError(
+            f"task {task_id!r} is awaiting verification and still owns its dedup_key -- "
+            "confirm or explicitly abandon the submission before reattaching"
         )
     dedup_key = old_task.get("dedup_key")
     if not dedup_key:

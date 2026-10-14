@@ -2184,8 +2184,12 @@ agent-dispatch reattach <task-id> <session-id> --no-resume
 
 A task's `dedup_key` releases from logical create-dedup selection when it leaves
 proposed, queued, claimed, started, suspended, or verification-required submitted.
-`reattach` additionally requires a **terminal** source task,
-typically one just `abandon`ed for this purpose. It refuses (non-zero exit,
+`reattach` requires a dedup-releasing **concluded** source task,
+typically one just `abandon`ed for this purpose. A verification-pending
+submission is refused before liveness probes, reservation retirement, or
+task creation; explicit confirmation or abandonment must settle it first.
+Legacy unverified submissions retain their existing reattach behavior.
+It refuses (non-zero exit,
 no mutation) unless `session-id` is
 itself confirmed live, the source task is terminal, it carries a
 `dedup_key`, and it is **not** producer-managed (a `producer_fence` can't be
