@@ -2026,11 +2026,15 @@ the POSIX `link` utility with a privately staged regular receipt, never bare
 destination: an existing directory or directory symlink fails rather than
 receiving a child link. This remains atomic when the destination appears
 immediately before creation; a check-then-`ln` sequence is not sufficient.
-The receipt is one bounded line, `copilot-extensions.install-lock-pid:v1:<pid>`.
-Owner reads capture a private hard-link snapshot and reject non-regular or
-malformed records before opening them, including a raced FIFO. Older dangling
-numeric PID symlinks remain readable; symlinks resolving to filesystem nodes
-are refused, not erased as stale PID evidence.
+The receipt is one newline-terminated ASCII line of at most 64 bytes, including
+the newline: `copilot-extensions.install-lock-pid:v1:<pid>`. Owner reads capture
+a private hard-link snapshot and reject non-regular nodes before opening them,
+including a raced FIFO. A single bounded, NUL-delimited Bash read accepts only
+EOF within that byte bound, rejecting NUL anywhere (including after the newline)
+before Bash can discard it. Missing or extra newlines and malformed records
+never authorize admission, stale deletion or owner-checked EXIT cleanup. Older
+dangling numeric PID symlinks remain readable; symlinks resolving to filesystem
+nodes are refused, not erased as stale PID evidence.
 
 The fallback requires Bash, `mktemp` and the standard `link` utility and
 same-filesystem hard-link support; missing utilities fail closed before
