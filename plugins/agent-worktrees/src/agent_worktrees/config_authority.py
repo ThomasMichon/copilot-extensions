@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 _GIT_PROBE_TIMEOUT_S = 0.3
@@ -31,6 +32,7 @@ def _load_state_root_authority(
         head = git_ops.git(
             "symbolic-ref", "-q", "refs/remotes/origin/HEAD",
             cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
+            isolated_repository=True,
         )
         prefix = "refs/remotes/origin/"
         ref = head.stdout.strip() if head.returncode == 0 else ""
@@ -42,6 +44,7 @@ def _load_state_root_authority(
         "ls-tree", "-r", "--name-only", ref, "--",
         *(candidate.as_posix() for candidate in candidates),
         cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
+        isolated_repository=True,
     )
     if listing.returncode != 0:
         raise ValueError(f"cannot read committed authority config for {name!r}")
@@ -55,6 +58,7 @@ def _load_state_root_authority(
     content = git_ops.git(
         "show", f"{ref}:{selected.as_posix()}",
         cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
+        isolated_repository=True,
     )
     if content.returncode != 0:
         raise ValueError(f"cannot read committed authority config for {name!r}")
@@ -163,7 +167,10 @@ def require_registration_record_mutation(record) -> None:
                 "requested project is not registered in receiving-side configuration"
             )
         require_record_mutation(record, config)
-    except (OSError, ValueError, KeyError, TypeError, cfg.yaml.YAMLError) as exc:
+    except (
+        OSError, ValueError, KeyError, TypeError,
+        cfg.yaml.YAMLError, subprocess.TimeoutExpired,
+    ) as exc:
         raise ExecutionSpaceError(
             f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"
         ) from exc

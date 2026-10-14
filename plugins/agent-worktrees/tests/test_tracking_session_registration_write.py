@@ -17,6 +17,7 @@ precisely so a sessionStart hook is never made to wait on a daemon boot.
 
 from __future__ import annotations
 
+import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -227,6 +228,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
 
     def committed_config(*args, **kwargs):
         timeouts.append(kwargs["timeout"])
+        assert kwargs["isolated_repository"] is True
         if args[0] == "symbolic-ref":
             return SimpleNamespace(
                 returncode=0,
@@ -317,8 +319,9 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     assert foreign_path.read_bytes() == before
 
 
+@pytest.mark.parametrize("failure", ["nonzero", "timeout"])
 def test_registration_authority_fails_closed_when_committed_config_is_unreadable(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, failure,
 ):
     from agent_worktrees import git_ops, repos
     from agent_worktrees.execution_spaces import ExecutionSpaceError
@@ -350,11 +353,13 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
     monkeypatch.setattr(
         cfg, "global_config_path", lambda: tmp_path / "missing-global.yaml",
     )
-    monkeypatch.setattr(
-        git_ops,
-        "git",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=""),
-    )
+    def failed_git(*_args, **kwargs):
+        assert kwargs["isolated_repository"] is True
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("git", kwargs["timeout"])
+        return SimpleNamespace(returncode=1, stdout="")
+
+    monkeypatch.setattr(git_ops, "git", failed_git)
 
     with pytest.raises(ExecutionSpaceError, match="cannot read committed authority"):
         config_authority.require_registration_record_mutation(
