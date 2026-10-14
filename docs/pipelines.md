@@ -114,6 +114,15 @@ composed index through Git so declared checkout attributes, including CRLF
 scripts, match the fresh candidate checkout used by the exporter. It does not
 normalize payload hashes or waive byte equality. The promoter uses the same
 canonical composed-index validator before creating a release candidate.
+That boundary first verifies the composed index's tree identity, before reading
+artifacts or checking out source. It reports index drift separately from an
+artifact/source mismatch rather than comparing unrelated snapshots and emitting
+an opaque payload-hash refusal. Working-file timestamps, untracked caches and
+raw LF/CRLF generator output are not source identity: only the admitted index's
+canonical checkout is hashed. A real source-content or checkout-policy mismatch
+still refuses publication and names the plugin/version and expected/actual
+payload digests. Archive and wheel digests remain exact integrity checks; they
+are not relaxed or used as a substitute for this source contract.
 Candidate-supplied hashes and
 first-party labels alone never establish source provenance. The publisher
 repeats this source binding against the actual merged snapshot.
