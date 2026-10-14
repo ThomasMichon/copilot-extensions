@@ -318,6 +318,12 @@ def _python_prints_only_to_stderr(text: str) -> bool:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return False
+    for node in ast.walk(tree):
+        # `from builtins import print as emit` binds print under another name.
+        if isinstance(node, ast.ImportFrom) and node.module == "builtins" and any(
+            alias.name in ("print", "*") for alias in node.names
+        ):
+            return False
     stderr_calls: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
