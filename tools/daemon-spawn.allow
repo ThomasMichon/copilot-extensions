@@ -3,8 +3,10 @@
 # instead of launching through agent_procutil.spawn_daemon().
 #
 # One "relative/path.py::qualified.function  reason" entry per line; the reason
-# is required. An entry whose function no longer hand-rolls a detached Popen is
-# reported as stale, so remove it when the site migrates. New code should not
+# is required. Each entry covers exactly one launch, so a function with two
+# hand-rolled launches is listed twice and a third launch added there is still
+# reported. An entry that no longer matches a launch is reported as stale, so
+# remove it when the site migrates. New code should not
 # add entries: launch a resident daemon with spawn_daemon(), and mark a detached
 # child that is not a resident daemon with an inline
 # "# daemon-spawn: allow <why>" comment on its Popen line.
@@ -22,6 +24,7 @@ plugins/agent-worktrees/src/agent_worktrees/status_updater_cli.py::_spawn_status
 
 # Resident daemons not yet on spawn_daemon (migrate, then delete the entry).
 plugins/agent-bridge/src/agent_bridge/service_process_cli.py::_spawn_detached_argv  resident bridge service; its WMI-broker fallback must move into the shared launch first
+plugins/agent-bridge/src/agent_bridge/service_process_cli.py::_spawn_detached_argv  same service: the contained retry after breakaway and the WMI broker both fail
 plugins/agent-codespaces/src/agent_codespaces/connection_owner.py::ensure_owner_running  resident connection owner; migration pending
 plugins/agent-dispatch/src/agent_dispatch/__main__.py::_spawn_coordinator_process  resident coordinator; spawn_daemon(console_children=True) migration pending
 plugins/agent-dispatch/src/agent_dispatch/coordinator_cli.py::_cmd_cutover.spawn_passive  passive coordinator generation; spawn_daemon(console_children=True) migration pending

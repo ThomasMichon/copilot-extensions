@@ -126,7 +126,8 @@ check into recurring self-SSH process churn.
   function) must instead launch through `spawn_daemon`. A detached child that
   is not a resident daemon carries `# daemon-spawn: allow <reason>` on its
   `Popen` line. `tools/daemon-spawn.allow` is a shrink-only, reasoned baseline
-  of the sites not yet migrated; a stale entry fails the check.
+  of the sites not yet migrated: each entry covers one launch, and a stale
+  entry fails the check.
 
 `agent_procutil.spawn_daemon` is an approved headless primitive: a launch
 through it is windowless by construction. It approves only its own call; a raw

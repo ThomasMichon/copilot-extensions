@@ -594,3 +594,44 @@ def test_daemon_baseline_entries_need_a_function_key_and_reason(repo, entry):
     _mk_plugin(repo, "agent-daemon", adopts=True, body=_UPDATE_SHAPE.format(comment=""))
     _write_daemon_allow(repo, entry + "\n")
     assert any("daemon-spawn.allow:1: expected" in p for p in guard.verify())
+
+def test_a_daemon_baseline_entry_covers_exactly_one_launch(repo):
+    body = (
+        "import subprocess\nfrom agent_procutil import detached_kwargs\n"
+        "def start():\n    subprocess.Popen(['a'], **detached_kwargs())\n"
+        "    subprocess.Popen(['b'], **detached_kwargs())\n"
+    )
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
+    key = "plugins/agent-daemon/src/agent_daemon/mod.py::start"
+    _write_daemon_allow(repo, f"{key}  first launch, migration pending\n")
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "hand-rolled detached Popen in start" in problems[0]
+    _write_daemon_allow(repo, f"{key}  first launch\n{key}  second launch\n")
+    assert _daemon_problems(guard.verify()) == []
+    _write_daemon_allow(repo, f"{key}  first\n{key}  second\n{key}  third\n")
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "stale entry" in problems[0]
+
+
+@pytest.mark.parametrize("body", [
+    ("import subprocess\nfrom agent_procutil import detached_kwargs\n"
+     "def helper():\n    import subprocess as sp\n    return sp\n"
+     "def run(sp):\n    return sp.Popen(['x'], **detached_kwargs())\n"),
+    ("from agent_procutil import detached_kwargs\n"
+     "class Box:\n    from subprocess import Popen as P\n"
+     "def run(P):\n    return P(['x'], **detached_kwargs())\n"),
+], ids=["sibling-function-import", "class-body-import"])
+def test_local_subprocess_aliases_do_not_leak_to_other_scopes(repo, body):
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
+    assert _daemon_problems(guard.verify()) == []
+
+
+def test_enclosing_function_alias_reaches_a_nested_function(repo):
+    _mk_plugin(
+        repo, "agent-daemon", adopts=True,
+        body=("from agent_procutil import detached_kwargs\ndef outer():\n"
+              "    import subprocess as sp\n    def inner():\n"
+              "        return sp.Popen(['x'], **detached_kwargs())\n    return inner\n"),
+    )
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "outer.inner" in problems[0]

@@ -80,9 +80,9 @@ and its Job breakaway handling. A detached child that is not a resident
 daemon (a waiter, a one-shot helper, a deliberately contained child) carries
 an inline ``# daemon-spawn: allow <why>`` comment on the ``Popen`` line, or a
 ``relative/path.py::qualified.function  reason`` entry in
-``tools/daemon-spawn.allow``. That file is a shrink-only baseline: an entry
-whose function no longer matches is itself reported, and every entry needs a
-reason.
+``tools/daemon-spawn.allow``. That file is a shrink-only baseline: each entry
+covers exactly one launch in its function, an entry with no matching launch
+is itself reported, and every entry needs a reason.
 
 Usage::
 
@@ -98,6 +98,7 @@ import json
 import re
 import sys
 import tokenize
+from collections import Counter
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -289,23 +290,41 @@ def _find_unsuppressed_spawns(f: Path) -> tuple[str, list[tuple[int, str]]]:
     return text, sorted(set(finder.hits))
 
 
+def _own_scope_nodes(node: ast.AST):
+    """``node``'s descendants, not descending into nested function/class bodies."""
+    pending = list(ast.iter_child_nodes(node))
+    while pending:
+        sub = pending.pop()
+        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield sub
+        pending.extend(ast.iter_child_nodes(sub))
+
+
+def _subprocess_aliases(scope: ast.AST) -> tuple[set[str], set[str]]:
+    """(module aliases, ``Popen`` aliases) imported in ``scope``'s own body."""
+    modules: set[str] = set()
+    popens: set[str] = set()
+    for node in _own_scope_nodes(scope):
+        if isinstance(node, ast.Import):
+            modules.update(a.asname for a in node.names if a.name == "subprocess" and a.asname)
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            popens.update(a.asname or a.name for a in node.names if a.name == "Popen")
+    return modules, popens
+
+
 def _calls_detach_helper(node: ast.AST) -> bool:
     """Whether ``node``'s own scope calls a detach helper.
 
     Nested function and class bodies are separate scopes and are not searched,
     so a helper inside an inner function never marks an outer launch.
     """
-    pending = list(ast.iter_child_nodes(node))
-    while pending:
-        sub = pending.pop()
-        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
+    for sub in _own_scope_nodes(node):
         if isinstance(sub, ast.Call):
             func = sub.func
             name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
             if name in _DETACH_HELPERS:
                 return True
-        pending.extend(ast.iter_child_nodes(sub))
     return False
 
 
@@ -316,26 +335,20 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
         self.hits: list[tuple[int, str]] = []
         self._names: list[str] = []
         self._funcs: list[ast.AST] = []
-        # Indexed up front: a function may be defined before the import it uses.
-        self._popen_aliases: set[str] = set()
-        self._subprocess_aliases: set[str] = {"subprocess"}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                self._subprocess_aliases.update(
-                    alias.asname for alias in node.names
-                    if alias.name == "subprocess" and alias.asname
-                )
-            elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-                self._popen_aliases.update(
-                    alias.asname or alias.name for alias in node.names if alias.name == "Popen"
-                )
+        # Aliases per lexical scope, each indexed before its body is visited (a
+        # function may precede the import it uses); a function sees its own and
+        # its enclosing functions' imports, never a sibling's.
+        modules, popens = _subprocess_aliases(tree)
+        self._alias_stack: list[tuple[set[str], set[str]]] = [({"subprocess", *modules}, popens)]
 
     def _scoped(self, node: ast.AST, *, func: bool) -> None:
         self._names.append(node.name)  # type: ignore[attr-defined]
         if func:
             self._funcs.append(node)
+            self._alias_stack.append(_subprocess_aliases(node))
         self.generic_visit(node)
         if func:
+            self._alias_stack.pop()
             self._funcs.pop()
         self._names.pop()
 
@@ -350,11 +363,12 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
+        modules = set().union(*(scope[0] for scope in self._alias_stack))
+        popens = set().union(*(scope[1] for scope in self._alias_stack))
         is_popen = (
             (isinstance(func, ast.Attribute) and func.attr == "Popen"
-             and isinstance(func.value, ast.Name)
-             and func.value.id in self._subprocess_aliases)
-            or (isinstance(func, ast.Name) and func.id in self._popen_aliases)
+             and isinstance(func.value, ast.Name) and func.value.id in modules)
+            or (isinstance(func, ast.Name) and func.id in popens)
         )
         scope = self._funcs[-1] if self._funcs else None
         if is_popen and (
@@ -364,11 +378,12 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def _load_daemon_spawn_allowlist(problems: list[str]) -> set[str]:
+def _load_daemon_spawn_allowlist(problems: list[str]) -> Counter[str]:
+    """Baseline entries; each one covers exactly one launch in its function."""
     allowlist = REPO / DAEMON_SPAWN_ALLOWLIST
+    entries: Counter[str] = Counter()
     if not allowlist.is_file():
-        return set()
-    entries: set[str] = set()
+        return entries
     for lineno, line in enumerate(allowlist.read_text(encoding="utf-8").splitlines(), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -380,7 +395,7 @@ def _load_daemon_spawn_allowlist(problems: list[str]) -> set[str]:
                 "'relative/path.py::qualified.function  <reason>'"
             )
             continue
-        entries.add(key)
+        entries[key] += 1
     return entries
 
 
@@ -718,7 +733,7 @@ def verify() -> list[str]:
     # Rule 5: a resident daemon launches through spawn_daemon (see module
     # docstring); tools/daemon-spawn.allow is a shrink-only baseline.
     daemon_allow = _load_daemon_spawn_allowlist(problems)
-    matched: set[str] = set()
+    unmatched = Counter(daemon_allow)
     for plugin in _adopting_plugins():
         src = plugin / "src"
         if not src.is_dir():
@@ -729,8 +744,8 @@ def verify() -> list[str]:
             rel = f.relative_to(REPO).as_posix()
             for lineno, qualname in detached.get(f, []):
                 key = f"{rel}::{qualname}"
-                if key in daemon_allow:
-                    matched.add(key)
+                if unmatched[key] > 0:
+                    unmatched[key] -= 1
                     continue
                 if _allowed(lines, lineno, _DAEMON_ALLOW):
                     continue
@@ -739,10 +754,11 @@ def verify() -> list[str]:
                     "resident daemon with agent_procutil.spawn_daemon() (explicit cwd, "
                     f"log, Job breakaway); mark a non-daemon child '# {_DAEMON_ALLOW} <why>'"
                 )
-    for key in sorted(daemon_allow - matched):
-        problems.append(
-            f"tools/daemon-spawn.allow: stale entry {key} -- it no longer hand-rolls a "
-            "detached Popen; remove it"
+    for key, count in sorted(unmatched.items()):
+        problems.extend(
+            f"tools/daemon-spawn.allow: stale entry {key} -- it no longer hand-rolls that "
+            "many detached Popen calls; remove one entry per migrated launch"
+            for _ in range(count)
         )
     return problems
 
