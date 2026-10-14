@@ -229,7 +229,8 @@ def test_current_feed_loader_reconnect_resolves_new_generation_without_empty_ove
     assert not worker.is_alive() and not loader._procs
 
 
-def test_current_feed_local_and_remote_argv_preserve_authority(monkeypatch):
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_current_feed_local_and_remote_argv_preserve_authority(monkeypatch, shell):
     monkeypatch.setattr(data_ssh, "_project", lambda: "project")
     monkeypatch.setattr(engine_client, "engine_base_command", lambda: ["selected-engine"])
     source = data_ssh.Source("host", "Win", None, local=True)
@@ -237,9 +238,18 @@ def test_current_feed_local_and_remote_argv_preserve_authority(monkeypatch):
     assert argv[:3] == ["selected-engine", "--project", "project"]
     assert {"--current", "--stream", "--follow"} <= set(argv)
     assert "--include-other-platforms" not in argv
-    remote = data_ssh.Source("peer", "Linux", [], alias="peer", shell="bash")
+    remote = data_ssh.Source("peer", "Linux", [], alias="peer", shell=shell)
+    original = data_ssh._stream_argv(remote)
     argv = loader_feed.feed_argv(remote)
-    assert "--current" in argv[-1] and "--follow" in argv[-1]
+    assert argv[0] == "ssh"
+    assert argv[:-1] == original[:-1]
+    assert argv[-2] == "peer"
+    assert data_ssh._remote_cmd_str(argv) == data_ssh._remote_cmd_str(original).replace(
+        " --stream", " --stream --follow",
+    )
+    command = data_ssh._remote_cmd_str(argv)
+    assert "--current" in command and "--stream --follow" in command
+    assert command.count("--follow") == 1
 
 
 def test_current_feed_unsupported_is_actionable_not_legacy_fallback(monkeypatch):

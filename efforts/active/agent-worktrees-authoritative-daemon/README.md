@@ -1034,6 +1034,16 @@ the shared file's read-only attribute. The runner contract suite passes 62
 with one platform skip. Added these regressions without weakening ownership
 checks or inventing a counter change for an unobserved failure.
 
+The next review found a genuine machine-SSH argv corruption: the encoding-aware
+transform visits every argument, so appending `--follow` modified the executable,
+SSH options and alias as well as the remote command. It now replaces the
+existing `--stream` flag inside the remote command, including encoded PowerShell.
+Both Bash and PowerShell regressions assert that every executable/option/alias
+argument remains byte-for-byte unchanged and that the decoded remote command
+adds exactly one held-feed flag. The full current-feed/current-roster/SSH-source
+selection passes 158 with one platform skip; whole-tree Ruff and all 29 changed
+source-module ceilings pass. This is source evidence, not deployed SSH proof.
+
 ### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
 
 The existing authenticated status-monitor control endpoint now offers the

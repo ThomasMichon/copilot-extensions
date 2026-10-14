@@ -56,7 +56,8 @@ def feed_argv(source):
 
     if not source.local:
         return data_ssh._edit_remote_cmd(
-            data_ssh._stream_argv(source), lambda command: command + " --follow"
+            data_ssh._stream_argv(source),
+            lambda command: command.replace(" --stream", " --stream --follow"),
         )
     from ... import engine_client
 
