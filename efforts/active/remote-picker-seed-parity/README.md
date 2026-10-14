@@ -591,3 +591,32 @@ hiding the problem or silently dropping text.
   The narrowed current-base selection passes all five fast guard cases,
   including both real late-owner refusal branches; canonical fixture data
   and comments from #6726 are retained unchanged.
+- **2026-10-14** -- Narrowed repair #6730 merged as
+  `3fc5f5b1812c3cab05d26e33eb8d3551be30437c` after current-head Approved
+  review with zero findings and successful CI, workflow and attribution gates.
+  The separate first-install timeout #6727 already has an active diagnosis
+  owner and merged fixture-isolation repair #6734; do not duplicate that work
+  or infer Linux acceptance from its Windows checks. A newer containing full
+  run is still active and has exposed an agent-logger failure requiring its
+  own literal diagnosis. Immutable publication, authorized installed rollout,
+  delivered Picker conversation evidence and managed cleanup remain open.
+- **2026-10-14** -- Literal completed-job logs for full run `38633055933`
+  pin its validation snapshot to `ee4e6b0063dff7eafed04942feec10974de4f52c`,
+  before #6730. Its two negative-Resume mock failures therefore do not justify
+  another Worktrees patch. The separate agent-logger PowerShell classifier
+  timeout is already under active diagnosis in #6747; coordinated there and
+  retained normal release stewardship without duplicating its repair or
+  increasing a deadline. Preserve the original publication and delivered
+  conversation gates while following that canonical repair.
+- **2026-10-14** -- Logger harness isolation #6756 merged through its own
+  review and checks. The next full run, `38637663769`, pins
+  `c45b1430b53a387ddb588ab5c9708d35273393e5` and passes agent-logger, but
+  exposes a distinct create-plan project-scoping fixture failure. Claimed
+  #6759 after checking for an existing repair. Its record mock omitted fields
+  now consumed by the real creation path; derive a real `WorktreeRecord` from
+  the shared fixture and preserve the selected creation identity instead.
+  The unchanged selected-project versus stale-ambient-project assertions pass
+  in all four contained module cases. Mark the affected behavior as a fast
+  guard; production creation, authority and deferred admission remain unchanged.
+  This fixture-only repair does not exercise a new install or external venue;
+  normal full release and delivered Picker evidence remain separate gates.

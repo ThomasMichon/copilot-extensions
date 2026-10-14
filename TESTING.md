@@ -9,6 +9,12 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The create-plan project-scoping guard uses a real `WorktreeRecord` derived from
+the shared fixture, with the selected creation identity and owning project.
+Only external side effects are stubbed: the real creation path assembles its
+launch plan, including the deferred admission command. The guard still requires
+that plan to name the selected repository rather than the stale ambient project.
+
 Agent Logger's PowerShell access-denied classifier guard executes the extracted
 installer functions under both installed PowerShell hosts. Each child uses fresh
 contained home/config/temp roots, noninteractive startup and disabled telemetry
