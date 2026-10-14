@@ -12,6 +12,15 @@ from typing import Callable
 _HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
+def isolated_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
+    value = dict(os.environ if environment is None else environment)
+    value.pop("PYTHONPATH", None)
+    value.pop("PYTHONHOME", None)
+    value["PYTHONUTF8"] = "1"
+    value["PYTHONDONTWRITEBYTECODE"] = "1"
+    return value
+
+
 def load_versioned_runtime(
     payload_root: Path, *, error_type: type[Exception],
     validate_chain: Callable[[Path, Path, str], None], validate_file: Callable[[Path, str], None],

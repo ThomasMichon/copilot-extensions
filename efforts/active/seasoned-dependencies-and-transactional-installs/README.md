@@ -571,3 +571,17 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   Windows provider lane now carries that blocking proof, independently of the
   existing POSIX suite; suite and CI deadlines remain unchanged. No further
   deadline increase, failed-check bypass, merge or rollout occurred.
+- New provider CI did not register because intervening development commits
+  made the PR unmergeable. Preserved the published tip, collapsed only this
+  coordinator's commits without changing their source tree, and reconciled
+  the two conflicts once. Bootstrap fixtures retain the upstream bounded
+  fake-source optimization and this change's admitted metadata graph.
+  Existing upstream size ceilings remain unchanged except for this effort's
+  already-established versioned-runtime reductions. Cell process-environment
+  hygiene now lives beside the existing process helpers, preserving its public
+  compatibility seam rather than widening a newly tightened core ceiling.
+- Reconciled bootstrap metadata passed both focused cases; process-environment
+  hygiene and native cell failure/retry/retention passed all four cases.
+  Current PR-scoped size checks, touched-code lint, all thirteen installer
+  contracts and canonical engine synchronization passed. Fresh provider review
+  and native CI still own the remaining merge gate.

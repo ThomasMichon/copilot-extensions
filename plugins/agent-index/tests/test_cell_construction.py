@@ -11,6 +11,24 @@ import pytest
 from test_installation_cells import CELL, PLUGIN
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_cell_process_environment_preserves_caller_and_filters_python_state(monkeypatch, explicit):
+    incoming = {
+        "PATH": "retained", "VIRTUAL_ENV": "retained",
+        "PYTHONPATH": "outside", "PYTHONHOME": "outside",
+        "PYTHONUTF8": "0", "PYTHONDONTWRITEBYTECODE": "0",
+    }
+    original = dict(incoming)
+    if not explicit:
+        monkeypatch.setattr(CELL.os, "environ", incoming)
+    result = CELL._isolated_environment(incoming if explicit else None)
+    assert incoming == original
+    assert result == {
+        "PATH": "retained", "VIRTUAL_ENV": "retained",
+        "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1",
+    }
+
+
 @pytest.mark.parametrize("previous", [False, True])
 def test_cell_construction_native_failure_retry_and_retention(tmp_path, monkeypatch, previous):
     tests = PLUGIN.parents[1] / "libs" / "installation-context" / "tests"

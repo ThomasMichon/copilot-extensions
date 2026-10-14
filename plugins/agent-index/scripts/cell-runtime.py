@@ -219,15 +219,8 @@ def _atomic_bytes(path: Path, value: bytes, *, mode: int | None = None) -> None:
     os.replace(temporary, path)
 
 
-def _isolated_environment(
-    environment: dict[str, str] | None = None,
-) -> dict[str, str]:
-    value = dict(os.environ if environment is None else environment)
-    value.pop("PYTHONPATH", None)
-    value.pop("PYTHONHOME", None)
-    value["PYTHONUTF8"] = "1"
-    value["PYTHONDONTWRITEBYTECODE"] = "1"
-    return value
+def _isolated_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
+    return _cell_process_helpers().isolated_environment(environment)
 
 
 def _context_runner(payload_root: Path) -> Path:
