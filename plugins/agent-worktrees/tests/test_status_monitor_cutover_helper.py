@@ -5,10 +5,11 @@ from __future__ import annotations
 import threading
 import time
 import subprocess
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
-
+from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd import breadcrumb, routing
 
 from agent_worktrees import status_monitor_cutover as smc
@@ -183,6 +184,10 @@ def _wait_for(predicate, *, timeout: float = 10.0, interval: float = 0.05, messa
 
 
 def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agent_worktrees.runtime_monitor_demand.retain_transition_demand",
+        lambda root, pid: nullcontext(),
+    )
     route_dir = tmp_path / "routing"
     lock_path = tmp_path / "status-monitor.lock"
     route_dir.mkdir(parents=True)
@@ -288,3 +293,92 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
 
     for daemon in daemons.values():
         daemon.force_terminate()
+
+
+@pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.parametrize("owned_settlement", [False, True])
+def test_caller_owned_guard_survives_monitor_cutover_settlement(
+    tmp_path, monkeypatch, failure, owned_settlement,
+):
+    from types import SimpleNamespace
+    from agent_worktrees import status_monitor_runtime as smr
+    from agent_worktrees import status_monitor_reap_stale as reap
+
+    route_dir = tmp_path / "status-monitor-routing"
+    scheduled = []
+    monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: route_dir)
+    monkeypatch.setattr(smr, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: "http://127.0.0.1:1234")
+    monkeypatch.setattr(smc.breadcrumb, "read_breadcrumb", lambda path: None)
+    monkeypatch.setattr(smc.breadcrumb, "recover_stale_cutover", lambda *a, **k: {})
+    monkeypatch.setattr(smc, "_reap_abandoned_passive", lambda record: {})
+    monkeypatch.setattr(reap, "schedule_delayed_daemon_health_reap", lambda: scheduled.append(True))
+
+    with SingleInstance(
+        route_dir, service="status-monitor-cutover", lock_name="cutover.lock",
+    ) as guard:
+        def run(**kwargs):
+            assert guard.held
+            with pytest.raises(AlreadyRunningError):
+                smc._acquire_cutover_lock(route_dir, timeout_s=0.01, poll_s=0.001)
+            if failure:
+                raise RuntimeError("cutover failed before settlement")
+            return SimpleNamespace(to_dict=lambda: {"ok": True, "committed": True})
+
+        monkeypatch.setattr(smc, "CutoverOrchestrator", lambda *a, **k: SimpleNamespace(run=run))
+        arguments = {"spawned_handles": []} if owned_settlement else {}
+        if failure:
+            with pytest.raises(RuntimeError, match="before settlement"):
+                smc.activate_after_update(runtime_python="candidate-python", cutover_guard=guard, **arguments)
+        else:
+            result = smc.activate_after_update(runtime_python="candidate-python", cutover_guard=guard, **arguments)
+            assert result["result"]["committed"]
+        assert guard.held, "only the owning lifecycle may release its whole-operation guard"
+        with pytest.raises(AlreadyRunningError):
+            smc._acquire_cutover_lock(route_dir, timeout_s=0.01, poll_s=0.001)
+    assert scheduled == ([] if owned_settlement else [True])
+    with SingleInstance(route_dir, lock_name="cutover.lock"):
+        pass
+
+
+@pytest.mark.parametrize("held,matching", [(False, True), (True, False)])
+def test_foreign_or_unheld_cutover_guard_refuses_before_side_effects(
+    tmp_path, monkeypatch, held, matching,
+):
+    from agent_worktrees import status_monitor_runtime as smr
+
+    route_dir = tmp_path / "status-monitor-routing"
+    monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: route_dir)
+    monkeypatch.setattr(smr, "_status_monitor_enabled", lambda: pytest.fail("no effects before authority"))
+    guard = SingleInstance(
+        route_dir if matching else tmp_path / "foreign", lock_name="cutover.lock",
+    )
+    try:
+        if held:
+            guard.acquire()
+        with pytest.raises(ValueError, match="held guard"):
+            smc.activate_after_update(cutover_guard=guard)
+        assert guard.held is held
+    finally:
+        guard.release()
+
+
+def test_legacy_monitor_restart_uses_the_candidate_not_the_installer_bootstrap(
+    tmp_path, monkeypatch,
+):
+    from agent_worktrees import status_monitor_runtime as smr
+    from agent_worktrees import status_monitor_reap_stale as reap
+
+    captured = []
+    monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: tmp_path / "routing")
+    monkeypatch.setattr(smr, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: False)
+    monkeypatch.setattr(smr, "_restart_status_monitor", lambda **k: captured.append(k) or {"spawned": True})
+    monkeypatch.setattr(reap, "schedule_delayed_daemon_health_reap", lambda: None)
+    with SingleInstance(tmp_path / "routing", lock_name="cutover.lock") as guard:
+        result = smc.activate_after_update(
+            runtime_python="candidate-python", monitor_was_live=True, cutover_guard=guard,
+        )
+        assert guard.held and result["action"] == "restart"
+    assert captured == [{"runtime_python": "candidate-python"}]

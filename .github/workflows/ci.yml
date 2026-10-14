@@ -881,7 +881,9 @@ jobs:
     runs-on: windows-latest
     # Native diagnostic/wrapper acceptance shares this job with runner,
     # payload-CWD and fleet contracts; retain each selection's own bound.
-    timeout-minutes: 7
+    # The full fleet suite measured 114s locally and exhausted its 120s
+    # hosted-runner bound; allow aggregate headroom without dropping tests.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1014,7 +1016,7 @@ jobs:
           PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full"' || '' }}
         run: |
           uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 120
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 300
 
   archive-sources-windows:
     name: archive sources (windows-latest)
@@ -1271,6 +1273,9 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
+        env:
+          PYTHONUNBUFFERED: "1"
+          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-worktrees' && '--verbose --verbose --durations=20' || '' }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
 
   coverage-guided-selection-integration:

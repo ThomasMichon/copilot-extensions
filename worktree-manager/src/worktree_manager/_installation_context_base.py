@@ -95,6 +95,10 @@ class InstallationContextError(ValueError):
     """Raised when installation identity or ownership cannot be proven."""
 
 
+class _FileIdentityChanged(InstallationContextError):
+    """A file changed during observation; never a malformed or unreadable file."""
+
+
 @dataclass(frozen=True)
 class NormalizedSource:
     """Portable marketplace source identity."""

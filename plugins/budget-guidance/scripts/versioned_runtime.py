@@ -1,33 +1,20 @@
 #!/usr/bin/env python3
 """Immutable per-version runtime layout manager (dotfiles #581).
 
-Never mutate a runtime venv in place. Each version installs into its own immutable
-directory under ``<root>/versions/<version>``; the active version is published by a
-``<root>/current-version`` **plain-text marker file**. Switching versions writes the
-marker (atomic temp + rename) and the installer rewrites its **version-pinned
-binstubs** (and scheduled task / deploy manifest) to point straight at
-``versions/<version>/...`` -- so a running daemon (which already holds its own
-immutable files open) is never edited underneath itself, rollback is a marker
-rewrite (no rebuild), and the concurrent-venv-mutation race that spawns duplicate
-daemons (#123) cannot happen.
+Numbered runtimes are immutable ``<root>/versions/<version>`` directories,
+selected by a ``<root>/current-version`` **plain-text marker file**. Atomic selection and
+version-pinned launchers keep running daemons' files immutable; rollback selects
+the retained previous generation without rebuilding it.
 
-On **Windows there is no directory junction at all**. The legacy ``current``/``venv``
-junction (a reparse point) was blocked by Windows RedirectionGuard with WinError 448
-("untrusted mount point") on managed devices whenever the installer *traversed* it
-over a non-interactive logon; a marker file + pinned binstubs need no reparse point
-at all, so those machines work with no special-casing and the legacy real-venv fork
-is retired. On **POSIX** the active slot is still published by a plain ``venv``/
-``.venv`` **symlink** (not a reparse point, never blocked by RedirectionGuard) that
-the ``.sh`` binstub, systemd unit, and deploy-manifest resolve *through* -- the
-marker is authoritative and the symlink is the stable runtime-facing path.
-``current_version`` still falls back to reading an old link target during the
-one-time migration.
+Windows uses markers and pinned binstubs, never directory junctions: traversing
+legacy junctions under non-interactive logons can trigger RedirectionGuard
+WinError 448. POSIX publishes a ``venv``/``.venv`` symlink for shell launchers,
+systemd and deploy manifests; the marker remains authoritative.
+``current_version`` accepts an old link target during migration.
 
-This is a **stdlib-only** helper deliberately kept *out* of every runtime venv (no
-vendored-lib fan-out): the bootstrapping python at install time runs it as
-``python versioned_runtime.py <cmd> ...``. It owns only the ``versions/`` +
-``current-version`` layout; venv *creation* and package install stay in the
-per-plugin installer, which points them at the slot this returns.
+This stdlib-only helper owns layout, admission and runtime custody; package
+construction stays in the installer engine. A repair slot retains its package
+version but adds ``+repair.<uuid>`` (or ``.repair.<uuid>`` after a local version).
 
 Commands (all take ``--root <dir>``; ``--json`` for machine output)::
 
@@ -147,9 +134,16 @@ def list_versions(root: Path) -> list[str]:
     return sorted(names, key=_version_key)
 
 
+def package_version(slot_name: str) -> str:
+    """Separate a generated repair identity from its unchanged package version."""
+    return re.sub(r"[+.]repair\.[0-9a-f]{32}$", "", slot_name)
+
+
 def _version_key(v: str):
-    """Stdlib-only ordering key for supported ``X.Y.Z[-devN]`` versions."""
-    supported = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", v)
+    """Order package releases first, then their distinct runtime identities."""
+    supported = re.fullmatch(
+        r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?(?:\+[a-z0-9][a-z0-9.-]*)?", package_version(v),
+    )
     if supported:
         major, minor, patch, dev = supported.groups()
         return (
@@ -158,7 +152,7 @@ def _version_key(v: str):
             int(minor),
             int(patch),
             1 if dev is None else 0,
-            int(dev or 0),
+            int(dev or 0), v.casefold(),
         )
     tokens = re.split(r"(\d+)", v.casefold())
     return (1, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))
@@ -1380,32 +1374,26 @@ def _ownership_key(root: Path, version: str) -> tuple[int, str, str]:
 @contextmanager
 def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
                        poll_interval: float = 0.05):
-    """Hold exclusive construction ownership for one installation/version.
+    """Yield the descriptor under exclusive construction ownership for one version.
 
-    This is an installer-facing Python primitive, not a shell acquire/release
-    command: the descriptor must remain in the process doing construction.
-    Recheck ``check_admission`` inside the context before any slot writes.
-    Release before unrelated reconciliation or activation/cutover locking.
-
-    POSIX uses flock; Windows uses a nonblocking LockFileEx byte lock. Closing
-    the descriptor (including process death) releases ownership. The persistent
-    lock file is never unlinked: replacing it could create a second lock inode.
-    No PID file, stale timestamp, or mkdir fallback grants ownership.
-
-    This does not pin a completed candidate against GC or replace a repair's
-    outer cutover guard. Those protocols remain separate adoption prerequisites.
+    Keep the descriptor in the constructing process; recheck admission before
+    slot writes, and release before unrelated reconciliation or cutover locking.
+    POSIX flock and Windows LockFileEx release on final descriptor close.
+    Never unlink the persistent lock file or substitute PID/timestamp/mkdir
+    ownership. Completed-candidate retention and repair's outer cutover guard
+    remain separate adoption prerequisites.
     """
     with _kernel_lease(
         root, version, kind="construction", shared=False,
         timeout=timeout, poll_interval=poll_interval,
-    ):
+    ) as descriptor:
         owners = getattr(_construction_owners, "keys", None)
         if owners is None:
             owners = _construction_owners.keys = set()
         key = _ownership_key(root, version)
         owners.add(key)
         try:
-            yield
+            yield descriptor
         finally:
             owners.remove(key)
 
@@ -1421,10 +1409,22 @@ def retention_lease(root: Path, version: str, *, payload_hash: str | None = None
     this lease before releasing construction; retain it through cutover/drain
     or rollback, never store a PID/timestamp pin inside the immutable slot.
     """
+    with retention_custody(
+        root, version, payload_hash=payload_hash, timeout=timeout, poll_interval=poll_interval,
+    ) as (vdir, _):
+        yield vdir
+
+
+@contextmanager
+def retention_custody(root: Path, version: str, *, payload_hash: str | None = None,
+                      timeout: float = 60.0, poll_interval: float = 0.05):
+    """Yield a retained slot and borrowed descriptor under the same lease protocol.
+    POSIX guardians may inherit it; callers must never close it themselves.
+    """
     with _kernel_lease(
         root, version, kind="retention", shared=True,
         timeout=timeout, poll_interval=poll_interval,
-    ):
+    ) as descriptor:
         vdir = version_dir(root, version)
         if not vdir.is_dir() or _is_link(vdir):
             raise FileNotFoundError(f"ordinary runtime slot not installed: {vdir}")
@@ -1432,7 +1432,7 @@ def retention_lease(root: Path, version: str, *, payload_hash: str | None = None
             decision = check_admission(root, version, payload_hash=payload_hash)
             if decision != ADMIT_REUSE:
                 raise RuntimeError(f"runtime retention admission refused: {version}: {decision}")
-        yield vdir
+        yield vdir, descriptor
 
 
 def _publication_lease(root: Path, *, timeout: float = 60.0):
@@ -1533,9 +1533,8 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
                 mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
                 fcntl.flock(fd, mode | fcntl.LOCK_NB)
 
-            def unlock():
-                fcntl.flock(fd, fcntl.LOCK_UN)
-
+            # Final descriptor close, not LOCK_UN, preserves inherited custody
+            # while an owned writer guardian completes caller-death teardown.
             def is_busy(exc):
                 return exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}
         deadline = time.monotonic() + timeout
@@ -1559,9 +1558,10 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
             if (not stat.S_ISREG(named.st_mode) or
                     (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
                 raise OSError(f"{kind} lease path changed while waiting")
-            yield
+            yield fd
         finally:
-            unlock()
+            if os.name == "nt":
+                unlock()
     finally:
         os.close(fd)
 
@@ -1890,7 +1890,7 @@ def fingerprint_source(paths) -> str:
         # root (see `_root_label`), never the root's bare basename (not
         # unique across declared roots) and never its absolute path
         # (would make the digest depend on checkout location).
-        for root_path in ordered_roots:
+        for root_path in (f,) if f in root_modes else ordered_roots:
             try:
                 rel = f.relative_to(root_path)
             except ValueError:

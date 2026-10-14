@@ -489,13 +489,7 @@ def _complete_runtime_python(runtime: Path, version: str) -> Path | None:
 
 
 def _version_key(version: str) -> tuple:
-    import re
-
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", version)
-    if match:
-        major, minor, patch, dev = match.groups()
-        return (0, int(major), int(minor), int(patch), dev is None, int(dev or 0))
-    return (1, version.lower())
+    return _load_sibling("versioned_runtime.py")._version_key(version)
 
 
 def _runtime_python(home: Path) -> Path | None:

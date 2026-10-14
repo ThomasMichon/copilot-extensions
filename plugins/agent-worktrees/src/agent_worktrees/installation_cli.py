@@ -39,6 +39,9 @@ def _refresh_terminal_profiles(*args, **kwargs):
 
 
 def add_parsers(sub) -> None:
+    from . import runtime_dev_cli
+
+    runtime_dev_cli.add_parsers(sub)
     p = sub.add_parser("install", help="Deploy worktree manager (shared runtime + project)")
     p.add_argument("--force", action="store_true")
     p.add_argument("--machine", default=None)
@@ -97,6 +100,18 @@ def add_parsers(sub) -> None:
     from . import unregister_cli
 
     unregister_cli.add_parsers(sub)
+
+
+def cmd_dev_status(args) -> int:
+    from .runtime_dev_cli import cmd_dev_status as command
+
+    return command(args)
+
+
+def cmd_dev_release(args) -> int:
+    from .runtime_dev_cli import cmd_dev_release as command
+
+    return command(args)
 
 
 def _validate_machine_registry(

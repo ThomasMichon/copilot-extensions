@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -254,21 +255,25 @@ def test_lean_provision_deploys_runtime_resolvers() -> None:
 def test_posix_context_install_bootstraps_uv_before_runtime_build() -> None:
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     install = sh.split("    install)", 1)[1].split("    uninstall)", 1)[0]
+    owner = sh.split("_deploy_python_runtime() {", 1)[1].split(
+        "write_deploy_manifest() {", 1
+    )[0]
 
     assert "if $CONTEXTUAL_INSTALL; then" in install
-    assert "_ensure_uv || exit 1" in install
-    assert "_ensure_uv_index" in install
-    assert install.index("_ensure_uv || exit 1") < install.index(
-        "_deploy_venv_and_package"
-    )
+    assert "_deploy_python_runtime || exit 1" in install
+    assert owner.index("_ensure_uv || return 1") < owner.index('"$base" -I -B')
+    assert owner.index("_ensure_uv_index") < owner.index('"$base" -I -B')
     update = sh.split("    update)", 1)[1].split("    *)", 1)[0]
-    assert "_ensure_uv || exit 1" in update
-    assert "_ensure_uv_index" in update
+    assert "_deploy_python_runtime || exit 1" in update
 
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     ps1_update = ps1.split("    'update' {", 1)[1]
-    assert "if (-not (Ensure-Uv)) { exit 1 }" in ps1_update
-    assert "Ensure-UvIndex" in ps1_update
+    ps1_owner = ps1.split("function Deploy-PythonRuntime {", 1)[1].split(
+        "function Deploy-Wrappers {", 1
+    )[0]
+    assert "Deploy-PythonRuntime" in ps1_update
+    assert ps1_owner.index("Ensure-Uv") < ps1_owner.index("& $base -I -B")
+    assert ps1_owner.index("Ensure-UvIndex") < ps1_owner.index("& $base -I -B")
 
 
 def test_context_install_revalidates_generations_before_cutover() -> None:
@@ -284,11 +289,13 @@ def test_context_install_revalidates_generations_before_cutover() -> None:
         assert generation in ps1
     assert "context_governance_unchanged" in sh
     assert "Test-ContextGovernanceUnchanged" in ps1
-    assert sh.index("context_governance_unchanged") < sh.index(
-        "_versioned_activate || exit 1"
+    owner = (PLUGIN / "scripts" / "runtime_install.py").read_text(encoding="utf-8")
+    settlement = owner.split("def settle_candidate(", 1)[1]
+    assert settlement.index("governance.signature() != expected_governance") < settlement.index(
+        "runtime.activate(root, version"
     )
-    assert ps1.index("Test-ContextGovernanceUnchanged") < ps1.index(
-        "Invoke-VersionedActivate"
+    assert settlement.index("with governance.held(timeout=wait_timeout)") < settlement.index(
+        "runtime.activate(root, version"
     )
     assert ps1.index("Set-Location -LiteralPath $env:USERPROFILE") < ps1.index(
         "$validatedJson = & $hostExe"
@@ -441,24 +448,7 @@ def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
     assert "Remove-Item $snapDir" not in stamp
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
-# Genuinely heavier than most tests in this file: a real payload copytree,
-# then `install.sh provision` (self-stage re-exec + venv create + package
-# install + versioned-activate + the post-activation monitor seam),
-# followed by two more subprocess invocations of the generated launchers.
-# That's 5+ real subprocess spawns chained together -- reliably ~15s in
-# 20/20 isolated local reproductions, but observed to intermittently exceed
-# the suite-wide 30s pytest-timeout default under real CI concurrency (a
-# `full - agent-worktrees` run hit `Failed: Timeout (>30.0s)` here on an
-# otherwise-unrelated PR, blocking dev->main promotion). No logic bug found
-# -- this is legitimate multi-subprocess work that needs more headroom than
-# the blanket default under load, not a hang to fix. Give it real margin
-# rather than reaching for a global timeout bump that would mask a genuine
-# hang in a lighter test.
-@pytest.mark.timeout(90)
-def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
-    tmp_path: Path,
-) -> None:
+def _materialized_payload(tmp_path: Path) -> tuple[Path, Path]:
     home = tmp_path / "home"
     payload = (
         home
@@ -474,58 +464,50 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
             "__pycache__",
             "*.pyc",
             ".pytest_cache",
+            ".ruff_cache",
             ".test-venvs",
+            "*.egg-info",
+            "build",
+            "dist",
         ),
     )
-
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir()
-    fake_uv = fake_bin / "uv"
-    fake_uv.write_text(
-        """#!/usr/bin/env bash
-set -eu
-case "${1:-}" in
-  venv)
-    target="$2"
-    mkdir -p "$target/bin" "$target/fake-site/agent_worktrees"
-    cat > "$target/bin/python" <<'PY'
-#!/bin/sh
-set -eu
-slot_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
-_arg1="${1:-}"
-[ "$_arg1" = "-I" ] && shift
-if [ "${1:-}" = "-c" ]; then
-  case "${2:-}" in
-    *"import agent_worktrees, os"*)
-      printf '%s\n' "$slot_dir/fake-site/agent_worktrees"
-      exit 0
-      ;;
-    *"import agent_worktrees"*) exit 0 ;;
-  esac
-fi
-if [ "${1:-}" = "-m" ] && [ "${2:-}" = "agent_worktrees" ]; then
-  shift 2
-  printf 'fake-agent-worktrees %s\n' "$*"
-  exit 0
-fi
-exec "$REAL_PYTHON" "$@"
-PY
-    chmod +x "$target/bin/python"
-    ;;
-  pip) ;;
-  *) exit 2 ;;
-esac
-""",
-        encoding="utf-8",
+    repo = PLUGIN.parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "_bootstrap_materializer", repo / "tools" / "materialize_main.py",
     )
-    fake_uv.chmod(0o755)
+    materializer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(materializer)
+    log = materializer.materialize_uv_editable_ref_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=payload, canonical_root=repo,
+    )
+    assert not any(line.startswith("SKIP ") for line in log), log
+    return home, payload
 
+
+def test_bootstrap_payload_contains_closed_dependency_graph(tmp_path: Path, monkeypatch) -> None:
+    _, payload = _materialized_payload(tmp_path)
+    monkeypatch.syspath_prepend(str(payload / "scripts"))
+    import installer_engine
+
+    packages = installer_engine._package_roots(payload)
+    assert payload in packages
+    assert len(packages) > 1
+    assert all(package.is_relative_to(payload) for package in packages)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
+@pytest.mark.timeout(240)
+def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("uv") is None:
+        pytest.skip("native package construction requires uv")
+    home, payload = _materialized_payload(tmp_path)
     env = os.environ.copy()
     env.update(
         {
             "HOME": str(home),
-            "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
-            "REAL_PYTHON": sys.executable,
+            "USERPROFILE": str(home),
             "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0",
         }
     )
@@ -535,6 +517,7 @@ esac
         env=env,
         capture_output=True,
         text=True,
+        timeout=210,
     )
     assert provision.returncode == 0, provision.stderr
 
@@ -557,10 +540,12 @@ esac
             text=True,
         )
         assert launched.returncode == 0, launched.stderr
-        assert launched.stdout.strip() == "fake-agent-worktrees --version"
+        version = json.loads((payload / "plugin.json").read_text())["version"]
+        assert launched.stdout.startswith(f"agent-worktrees {version} "), launched.stdout
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
+@pytest.mark.timeout(120)
 def test_posix_health_gate_rejects_namespace_package_slot(
     tmp_path: Path,
 ) -> None:
@@ -570,88 +555,38 @@ def test_posix_health_gate_rejects_namespace_package_slot(
 def _assert_posix_namespace_slot_rejected(
     tmp_path: Path, *, stall_health_gate: bool,
 ) -> None:
-    """A partial ``uv pip install`` can leave ``agent_worktrees`` on disk as an
-    empty directory -- no ``__init__.py``, no ``__main__.py``, no dist-info.
-    Python still imports that as a PEP 420 *namespace* package with no error,
-    so a health gate that only runs ``import agent_worktrees`` falsely passes
-    and the broken slot gets marked complete and activated (the exact bug
-    this regression guards). The fixed gate imports ``agent_worktrees.__main__``
-    instead, which requires a real ``__main__.py`` and its full transitive
-    import chain to resolve, so it must fail loudly here and the slot must
-    never be activated.
-    """
-    home = tmp_path / "home"
-    payload = (
-        home
-        / ".copilot"
-        / "installed-plugins"
-        / "copilot-extensions"
-        / "agent-worktrees"
-    )
-    # uv is fake here: copying/fingerprinting the full growing source tree
-    # adds unrelated, load-dependent work before the health gate is reached.
-    # Keep the real staging, slot admission, resolver and activation code.
-    for relative in (
-        "plugin.json",
-        "pyproject.toml",
-        "scripts/install.sh",
-        "scripts/command_binding.py",
-        "scripts/command_lifecycle.py",
-        "scripts/versioned_runtime.py",
-        "scripts/resolve-runtime.sh",
-        "scripts/resolve-runtime.ps1",
-    ):
-        destination = payload / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(PLUGIN / relative, destination)
-    shutil.copytree(
-        PLUGIN / "scripts" / "installation-context",
-        payload / "scripts" / "installation-context",
-    )
-    assert not (payload / "src").exists()
-    assert not (payload / "libs").exists()
+    """Reject a namespace-only package at the actual installed health boundary."""
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native package construction requires uv")
+    home, payload = _materialized_payload(tmp_path)
 
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
     fake_uv = fake_bin / "uv"
+    wrapper = f"""#!{sys.executable}
+import os, pathlib, sys, time
+if "verify_runtime_candidate" in sys.argv:
+    pathlib.Path(os.environ["HEALTH_REACHED"]).write_text("reached")
+    slot = pathlib.Path(__file__).parent.parent
+    packages = list(slot.glob("lib/python*/site-packages/agent_worktrees"))
+    assert len(packages) == 1, packages
+    for name in ("__init__.py", "__main__.py"):
+        (packages[0] / name).unlink()
+    if os.environ["NAMESPACE_HEALTH_STALL"] == "1":
+        time.sleep(120)
+real = pathlib.Path(__file__).with_name("python-real")
+os.execv(str(real), [str(real), *sys.argv[1:]])
+"""
     fake_uv.write_text(
-        """#!/usr/bin/env bash
-set -eu
-case "${1:-}" in
-  venv)
-    target="$2"
-    # Simulate the partial install: the package directory exists (so it is
-    # importable as a namespace package) but is otherwise empty -- no
-    # __init__.py, no __main__.py, no dist-info -- exactly what an
-    # interrupted `uv pip install` of the multi-package project left behind.
-    mkdir -p "$target/bin" "$target/fake-site/agent_worktrees"
-    cat > "$target/bin/python" <<'PY'
-#!/bin/sh
-set -eu
-slot_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
-_arg1="${1:-}"
-[ "$_arg1" = "-I" ] && shift
-if [ "${1:-}" = "-c" ]; then
-  if [ "${NAMESPACE_HEALTH_STALL:-}" = "1" ]; then
-    case "$2" in *"import agent_worktrees.__main__"*) sleep 60 ;; esac
-  fi
-  # Exclude the runner venv's real package, which would beat a namespace.
-  exec "$REAL_PYTHON" -I -S -c \
-    'import sys; sys.path.insert(0, sys.argv[1]); exec(sys.argv[2])' \
-    "$slot_dir/fake-site" "$2"
-fi
-if [ "${1:-}" = "-m" ] && [ "${2:-}" = "agent_worktrees" ]; then
-  echo "should never run: broken slot was activated" >&2
-  exit 1
-fi
-exec "$REAL_PYTHON" "$@"
-PY
-    chmod +x "$target/bin/python"
-    ;;
-  pip) ;;
-  *) exit 2 ;;
-esac
-""",
+        f"#!{sys.executable}\n"
+        "import os, pathlib, subprocess, sys\n"
+        f"subprocess.run([{uv!r}, *sys.argv[1:]], check=True)\n"
+        "if sys.argv[1:3] == ['pip', 'install']:\n"
+        "    python = pathlib.Path(sys.argv[sys.argv.index('--python') + 1])\n"
+        "    python.rename(python.with_name('python-real'))\n"
+        f"    python.write_text({wrapper!r})\n"
+        "    python.chmod(0o755)\n",
         encoding="utf-8",
     )
     fake_uv.chmod(0o755)
@@ -660,10 +595,11 @@ esac
     env.update(
         {
             "HOME": str(home),
+            "USERPROFILE": str(home),
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
-            "REAL_PYTHON": sys.executable,
-            "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "10",
+            "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "60",
             "NAMESPACE_HEALTH_STALL": "1" if stall_health_gate else "0",
+            "HEALTH_REACHED": str(tmp_path / "health-reached"),
         }
     )
     provision = subprocess.run(
@@ -672,16 +608,17 @@ esac
         env=env,
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=90,
     )
 
     assert provision.returncode != 0
+    assert (tmp_path / "health-reached").read_text() == "reached", provision.stderr
     if stall_health_gate:
         assert provision.returncode == 124, provision.stderr
         assert list((home / ".agent-worktrees" / ".install-stage").glob("*/.watchdog-fired"))
     else:
-        assert "failed its health gate" in provision.stderr
-        assert "No module named 'agent_worktrees.__main__'" in provision.stderr
+        assert "Python runtime lifecycle failed" in provision.stderr
+        assert "cannot import name '__main__'" in provision.stderr
 
     # The broken slot must never be marked complete or activated: no
     # current-version marker, and no last-known-good pointing at it.

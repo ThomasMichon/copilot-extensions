@@ -125,6 +125,24 @@ def test_shared_reuse_holders_coexist_and_last_owner_gates_gc(tmp_path, processe
     assert list((tmp_path / ".retention-leases").glob("*.lock"))
 
 
+def test_retention_custody_descriptor_uses_the_existing_cleanup_protocol(tmp_path, processes):
+    slot = install(tmp_path, complete=True)
+    before = slot.stat().st_mtime_ns
+    with vr.retention_custody(tmp_path, "1.0", payload_hash="same") as (retained, descriptor):
+        assert retained == slot
+        os.fstat(descriptor)
+        assert vr.gc(tmp_path) == []
+        other = start_owner(
+            tmp_path, processes,
+            "with vr.retention_lease(root, '1.0', payload_hash='same', timeout=0):",
+        )
+        assert vr.gc(tmp_path) == []
+        other.communicate(input="\n", timeout=10)
+        assert other.returncode == 0
+        assert vr.gc(tmp_path) == [] and slot.stat().st_mtime_ns == before
+    assert vr.gc(tmp_path) == ["1.0"]
+
+
 @pytest.mark.guard
 def test_construction_handoff_has_no_unprotected_candidate(tmp_path, processes):
     process = child(

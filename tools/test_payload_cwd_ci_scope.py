@@ -35,7 +35,7 @@ PATTERNS = [re.search(r"grep -Eq \\\n\s*'([^'\n]+)'", step).group(1) for step in
 def test_native_jobs_preserve_dev_scope_budget_and_required_aggregate():
     assert PATTERNS[0] == PATTERNS[1]
     for name, job in zip(("test-runner-linux", "test-runner-windows"), JOBS):
-        budget = 7 if name == "test-runner-windows" else 5
+        budget = 10 if name == "test-runner-windows" else 5
         assert f"    timeout-minutes: {budget}\n" in job
         assert "if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'" in job
         assert "if: steps.payload-cwd-contracts.outputs.run == 'true'" in job
@@ -46,6 +46,18 @@ def test_native_jobs_preserve_dev_scope_budget_and_required_aggregate():
     assert 'cron: "27 11 * * 3"' in STANDALONE
     assert "workflow_dispatch:" in STANDALONE
     assert STANDALONE.count("if: github.event_name != 'pull_request'") == 2
+
+
+def test_full_worktrees_reports_current_item_without_narrowing_or_widening():
+    full = _job("full")
+    assert "PYTHONUNBUFFERED: \"1\"" in full
+    assert (
+        "PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-worktrees' && "
+        "'--verbose --verbose --durations=20' || '' }}"
+    ) in full
+    assert "run: python tools/run-plugin-tests.py ${{ matrix.plugin }}\n" in full
+    assert "--timeout" not in full and " -k " not in full
+    assert len(re.findall(r"^          - agent-[a-z-]+$", full, re.M)) == 9
 
 
 @pytest.mark.parametrize("index,suffix", [(0, "launch_survives"), (1, "windows_bash")])

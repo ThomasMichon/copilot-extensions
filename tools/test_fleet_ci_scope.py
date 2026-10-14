@@ -14,9 +14,12 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
     assert PATTERNS[0] == PATTERNS[1]
     assert WORKFLOW.count("if: steps.fleet-contracts.outputs.run == 'true'") == 2
     assert WORKFLOW.count("""'-m "not client_distribution_full"'""") == 2
-    assert WORKFLOW.count(
-        "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 120"
-    ) == 2
+    linux = WORKFLOW.split("  test-runner-linux:", 1)[1].split("  agent-index-service-linux:", 1)[0]
+    windows = WORKFLOW.split("  test-runner-windows:", 1)[1].split("  archive-sources-windows:", 1)[0]
+    command = "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout "
+    assert command + "120" in linux
+    assert command + "300" in windows
+    assert "timeout-minutes: 10" in windows
 
 
 @pytest.mark.parametrize("path,selected", [

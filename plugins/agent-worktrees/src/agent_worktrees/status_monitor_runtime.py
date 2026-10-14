@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import logging
 import os
 import re
 import secrets
@@ -21,7 +20,8 @@ from agent_procutil import windowless_python
 from . import activity, locks, output, sessions_pane_retire, stale_runtime_reap, tracking
 from . import config as cfg
 from . import status_updater_cli
-from .status_monitor_python import direct_monitor_python
+from .status_monitor_python import direct_monitor_python as direct_monitor_python
+from .status_monitor_spawn import _spawn_detached as _spawn_detached
 
 
 def _core():
@@ -608,32 +608,6 @@ def _daemon_cwd() -> str:
         pass
     return os.path.expanduser("~")
 
-def _spawn_detached(argv: list[str]) -> bool:
-    """Spawn in the install dir; never raises. Windows uses direct console
-    Python under ``CREATE_NO_WINDOW``: PID ownership is unambiguous and periodic
-    children inherit one hidden console tree."""
-    override = _core_helper("_spawn_detached", _spawn_detached)
-    if override is not _spawn_detached:
-        return override(argv)
-    argv = list(argv)
-    kwargs: dict = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "cwd": _daemon_cwd(),
-        "env": _daemon_environment(),
-    }
-    kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
-    try:
-        argv[0], extra_env = direct_monitor_python(argv[0])
-        kwargs["env"].update(extra_env)
-        subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
-        return True
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Cannot spawn status-monitor: %s", exc)
-        return False
-
-
 def _ensure_status_monitor() -> bool:
     """Start the resident monitor unless one is already live on the CURRENT
     runtime.  Returns whether a current monitor is believed running (already
@@ -649,7 +623,8 @@ def _ensure_status_monitor() -> bool:
         if _locks.lock_is_live(data) and isinstance(data, dict):
             other_prefix = data.get("prefix")
             superseded_fn = _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)
-            if not other_prefix or not superseded_fn(prefix=other_prefix):
+            identity = {"generation": data["runtime_generation"]} if data.get("runtime_generation") else {}
+            if not other_prefix or not superseded_fn(prefix=other_prefix, **identity):
                 import shutil
 
                 caller_has_mux = bool(shutil.which("psmux") or shutil.which("tmux"))
@@ -661,7 +636,10 @@ def _ensure_status_monitor() -> bool:
     return _spawn_detached([_smrs.current_runtime_python(), "-m", "agent_worktrees", "status-monitor"])
 
 
-def _restart_status_monitor() -> dict:
+def _restart_status_monitor(
+    *, runtime_python: str | None = None,
+    spawned_handles: list[subprocess.Popen] | None = None,
+) -> dict:
     """Reap a superseded status-monitor and (re)spawn the current-runtime one.
 
     Called by the auto-update cutover (the installer, after it activates a new
@@ -694,7 +672,10 @@ def _restart_status_monitor() -> dict:
         if _locks.lock_is_live(data) and isinstance(data, dict):
             pid = data.get("pid")
             prefix = data.get("prefix")
-            superseded = bool(prefix) and _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)(prefix=prefix)
+            identity = {"generation": data["runtime_generation"]} if data.get("runtime_generation") else {}
+            superseded = bool(prefix) and _core_helper(
+                "_runtime_superseded", status_updater_cli._runtime_superseded,
+            )(prefix=prefix, **identity)
             if pid == os.getpid():
                 pass  # our own lock (shouldn't happen from the installer) -- ignore
             elif superseded and isinstance(pid, int):
@@ -715,7 +696,11 @@ def _restart_status_monitor() -> dict:
             _locks.remove_lock(lock)
     except Exception:
         pass
-    result["spawned"] = _spawn_detached([sys.executable, "-m", "agent_worktrees", "status-monitor"])
+    argv = [runtime_python or sys.executable, "-m", "agent_worktrees", "status-monitor"]
+    result["spawned"] = (
+        _spawn_detached(argv) if spawned_handles is None else
+        _spawn_detached(argv, spawned_handles=spawned_handles)
+    )
     return result
 
 

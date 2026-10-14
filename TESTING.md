@@ -9,6 +9,14 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The manual full Worktrees CI lane reports each current pytest item and the
+twenty slowest completed calls, with unbuffered runner progress. Its two verbose
+flags offset the runner's quiet flag. This is diagnostic visibility only:
+the full nine-plugin matrix, collected tests, and existing item, sub-suite and
+plugin budgets remain unchanged. An aggregate timeout still fails acceptance;
+use the last reported item to diagnose a stalled call or establish measured
+budget composition before changing test grouping.
+
 ### Derived native installation diagnostics
 
 `libs/payload-invocation/tests/test_derived_diagnostic_cli.py` executes the

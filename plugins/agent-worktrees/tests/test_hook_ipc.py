@@ -598,10 +598,12 @@ def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
         encoding="utf-8",
     )
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: None)
+    versioned_runtime = hook_client._load_sibling("versioned_runtime.py")
     monkeypatch.setattr(
         hook_client,
         "_load_sibling",
         lambda name: SimpleNamespace(
+            _version_key=versioned_runtime._version_key,
             _pid_alive=lambda pid: pid == os.getpid(),
             _pid_image_path=lambda pid: str(python),
         ),

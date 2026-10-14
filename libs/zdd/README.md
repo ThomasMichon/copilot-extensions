@@ -94,6 +94,10 @@ Generic diagnostic terminators must accept the `exit_timeout` keyword and
 confirm exit through the same native handle within five seconds while the
 routing fence remains held. Legacy signal-only callbacks, nonboolean evidence
 and unconfirmed exits are blocked outcomes, not successful retirement.
+Read-only Linux liveness uses a native pidfd exit probe when available:
+an exited child whose parent has not reaped its PID no longer owns live
+retention custody. Failure to obtain native evidence preserves the existing
+conservative PID-existence fallback; a failed exit probe does not imply exit.
 An unavailable or failed process census is never an empty inventory; occupied
 slot replacement remains refused when native candidate absence is unverified.
 Ordinary cutover also refuses unreadable or unknown recovery states rather than
