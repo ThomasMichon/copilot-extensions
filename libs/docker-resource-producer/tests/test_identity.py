@@ -161,11 +161,49 @@ def test_success_shaped_remove_without_absence_fails(fixture: tuple) -> None:
 def test_pin_resolves_context_once_then_ignores_ambient_host(fixture: tuple) -> None:
     client, path, _state = fixture
     env = {**client.environment, "DOCKER_CONTEXT": "fixture"}
+    env.pop("DOCKER_HOST")
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint == Endpoint("unix:///fixture.sock", "fixture-daemon", context="fixture")
     assert pinned.probe(identity()) is True
     assert logs(path)[0]["args"] == ["context", "inspect", "--", "fixture"]
     assert all(c["args"][0] == "--host" for c in logs(path)[1:])
+
+
+def test_explicit_host_environment_wins_over_context_environment(fixture: tuple) -> None:
+    client, path, _state = fixture
+    env = {**client.environment, "DOCKER_CONTEXT": "fixture", "DOCKER_TLS": "", "DOCKER_TLS_VERIFY": ""}
+    pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert pinned.endpoint.host == env["DOCKER_HOST"]
+    assert pinned.endpoint.context is None and pinned.endpoint.tls is False
+    assert pinned.probe(identity()) is True
+    assert all(call["args"][:2] == ["--host", env["DOCKER_HOST"]] for call in logs(path))
+    assert all("context" not in call["args"] for call in logs(path))
+
+
+@pytest.mark.parametrize("verify", [True, False])
+def test_default_context_in_memory_tls_uses_default_files(fixture: tuple, verify: bool) -> None:
+    client, path, state = fixture
+    certs = path.parent / "default context certificates"
+    certs.mkdir()
+    (certs / "ca.pem").write_text("fixture CA", encoding="utf-8")
+    state["context"] = {
+        "Name": "default",
+        "Endpoints": {"docker": {"Host": "tcp://example.invalid:2376", "SkipTLSVerify": not verify}},
+        "TLSMaterial": {"docker": ["ca.pem"]},
+        "Storage": {"MetadataPath": "<IN MEMORY>", "TLSPath": "<IN MEMORY>"},
+    }
+    path.write_text(json.dumps(state), encoding="utf-8")
+    env = {**client.environment, "DOCKER_CERT_PATH": str(certs),
+           "DOCKER_TLS": "1", "DOCKER_TLS_VERIFY": "1" if verify else ""}
+    env.pop("DOCKER_HOST")
+    env.pop("DOCKER_CONTEXT")
+    pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert pinned.endpoint.context == "default" and pinned.endpoint.tls_verify is verify
+    assert pinned.endpoint.tls_ca == str(certs / "ca.pem")
+    assert pinned.probe(identity()) is True
+    for call in logs(path)[2:]:
+        assert "--tls=true" in call["args"]
+        assert call["tls_files"] == {"ca.pem": str(certs / "ca.pem"), "cert.pem": "", "key.pem": ""}
 
 
 @pytest.mark.parametrize("field,value", [
@@ -227,7 +265,9 @@ def test_named_context_tls_paths_and_verification_are_pinned(fixture: tuple, ver
     state["context"]["Storage"] = {"TLSPath": str(root)}
     path.write_text(json.dumps(state), encoding="utf-8")
     pinned = DockerClient.pin(
-        docker_argv=client.docker_argv, environment={**client.environment, "DOCKER_CONTEXT": "fixture"},
+        docker_argv=client.docker_argv,
+        environment={**{key: value for key, value in client.environment.items() if key != "DOCKER_HOST"},
+                     "DOCKER_CONTEXT": "fixture"},
     )
     assert pinned.endpoint.tls is True
     assert pinned.endpoint.tls_verify is verify
@@ -283,7 +323,8 @@ def test_context_without_ca_preserves_tls_and_system_roots(fixture: tuple, mater
     path.write_text(json.dumps(state), encoding="utf-8")
     pinned = DockerClient.pin(
         docker_argv=client.docker_argv,
-        environment={**client.environment, "DOCKER_CONTEXT": "fixture", "DOCKER_CONFIG": str(ambient)},
+        environment={**{key: value for key, value in client.environment.items() if key != "DOCKER_HOST"},
+                     "DOCKER_CONTEXT": "fixture", "DOCKER_CONFIG": str(ambient)},
     )
     assert pinned.endpoint.tls is True and pinned.endpoint.tls_verify is not skip_verify
     assert pinned.endpoint.tls_ca is None

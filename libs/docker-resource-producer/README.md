@@ -9,6 +9,10 @@ assert allocation quiescence.
 `DockerClient.pin()` resolves CLI context/host/TLS settings once. Subsequent
 operations use explicit host and TLS flags rather than ambient context selection.
 TLS paths, not certificate/key contents, travel in `Endpoint.to_json()`.
+Transport selection follows Docker CLI's host/context environment precedence:
+a nonempty `DOCKER_HOST` selects the default endpoint before `DOCKER_CONTEXT`.
+The default context's in-memory TLS metadata is resolved to its environment's
+certificate directory, not treated as a stored named-context TLS path.
 Docker's `--tlsverify` flag enables TLS even when set to false, so non-TLS
 endpoints deliberately omit that flag.
 Explicit-host TLS retains the CA path and records genuinely absent optional

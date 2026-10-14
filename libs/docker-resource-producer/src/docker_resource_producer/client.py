@@ -48,6 +48,17 @@ def _optional_client_file(path: Path) -> str | None:
     return str(path)
 
 
+def _default_tls_paths(environment: Mapping[str, str]) -> dict[str, str | None]:
+    certs = Path(
+        environment.get("DOCKER_CERT_PATH") or environment.get("DOCKER_CONFIG") or str(Path.home() / ".docker")
+    ).expanduser().resolve()
+    return {
+        "tls_ca": str(certs / "ca.pem"),
+        "tls_cert": _optional_client_file(certs / "cert.pem"),
+        "tls_key": _optional_client_file(certs / "key.pem"),
+    }
+
+
 class DockerClient:
     """No installer, authentication bootstrap, SDK or ledger dependency."""
 
@@ -114,21 +125,14 @@ class DockerClient:
         env = dict(os.environ if environment is None else environment)
         probe = cls(Endpoint("unix:///unresolved", "unresolved"), docker_argv=docker_argv,
                     environment=env, timeout=timeout)
-        context = env.get("DOCKER_CONTEXT")
-        host = env.get("DOCKER_HOST") if not context else None
+        host = env.get("DOCKER_HOST")
+        context = env.get("DOCKER_CONTEXT") if not host else None
         tls = bool(env.get("DOCKER_TLS") or env.get("DOCKER_TLS_VERIFY"))
         verify = bool(env.get("DOCKER_TLS_VERIFY"))
         paths: dict[str, str | None] = {"tls_ca": None, "tls_cert": None, "tls_key": None}
         if host:
             if tls:
-                certs = Path(
-                    env.get("DOCKER_CERT_PATH") or env.get("DOCKER_CONFIG") or str(Path.home() / ".docker")
-                ).expanduser().resolve()
-                paths = {
-                    "tls_ca": str(certs / "ca.pem"),
-                    "tls_cert": _optional_client_file(certs / "cert.pem"),
-                    "tls_key": _optional_client_file(certs / "key.pem"),
-                }
+                paths = _default_tls_paths(env)
         else:
             context = context or probe._checked(["context", "show"], pinned=False).strip()
             text(context, "Docker context", limit=256)
@@ -154,7 +158,9 @@ class DockerClient:
                 raise VerificationError("Unsupported Docker TLS material")
             tls = bool(names) or docker["SkipTLSVerify"]
             verify = tls and not docker["SkipTLSVerify"]
-            if names:
+            if context == "default" and tls:
+                paths = _default_tls_paths(env)
+            elif names:
                 storage = entry.get("Storage")
                 root = storage.get("TLSPath") if isinstance(storage, dict) else None
                 text(root, "Docker TLS root")

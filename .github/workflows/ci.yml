@@ -473,11 +473,16 @@ jobs:
         with:
           python-version: "3.10"
           update-environment: false
+      - uses: astral-sh/setup-uv@v9.0.0
+        id: docker-identity-uv
+        if: steps.docker-identity.outputs.run == 'true'
+        with:
+          enable-cache: false
       - name: Docker identity fixture contracts (Python 3.10)
         if: steps.docker-identity.outputs.run == 'true'
         timeout-minutes: 3
         run: |
-          "${{ steps.docker-identity-python.outputs.python-path }}" -m pip install pytest pytest-timeout
+          uv pip install --python "${{ steps.docker-identity-python.outputs.python-path }}" --system pytest pytest-timeout
           "${{ steps.docker-identity-python.outputs.python-path }}" -m pytest -q --timeout=20 libs/docker-resource-producer/tests
       - id: zdd-singleton
         name: Detect zdd singleton changes

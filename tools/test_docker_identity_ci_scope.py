@@ -95,13 +95,17 @@ def test_workflow_runs_scoped_minimum_without_changing_guard_python() -> None:
     steps = workflow["jobs"]["checks"]["steps"]
     scope = next(s for s in steps if s.get("id") == "docker-identity")
     runtime = next(s for s in steps if s.get("id") == "docker-identity-python")
+    installer = next(s for s in steps if s.get("id") == "docker-identity-uv")
     smoke = next(s for s in steps if s.get("name") == "Docker identity fixture contracts (Python 3.10)")
     assert "docker_identity_ci_scope.py" in scope["run"]
     assert scope["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha || github.sha }}"
     assert runtime["if"] == smoke["if"] == "steps.docker-identity.outputs.run == 'true'"
+    assert installer["if"] == smoke["if"]
+    assert installer["uses"].startswith("astral-sh/setup-uv@")
     assert runtime["with"]["python-version"] == "3.10"
     assert runtime["with"]["update-environment"] is False
     assert smoke["timeout-minutes"] <= 3
     assert "steps.docker-identity-python.outputs.python-path" in smoke["run"]
     assert "libs/docker-resource-producer/tests" in smoke["run"]
     assert "--timeout=20" in smoke["run"]
+    assert "uv pip install --python" in smoke["run"] and "-m pip install" not in smoke["run"]
