@@ -49,6 +49,12 @@ def _pages(path: str, key: str, *, deadline: float) -> list[dict]:
     raise VerificationError(f"workflow {key} exceeds the bounded pagination limit")
 
 
+def _ancestor(repository: str, ancestor: str, descendant: str) -> None:
+    comparison = _api(f"repos/{repository}/compare/{ancestor}...{descendant}")
+    if not isinstance(comparison, dict) or comparison.get("status") not in ("ahead", "identical"):
+        raise VerificationError("the required release/control ancestry is not established on main")
+
+
 def _snapshot(repository: str, merge_sha: str, tag: str) -> None:
     ref = _api(f"repos/{repository}/git/ref/tags/{quote(tag, safe='')}")
     target = ref.get("object") if isinstance(ref, dict) else None
@@ -57,29 +63,37 @@ def _snapshot(repository: str, merge_sha: str, tag: str) -> None:
         target = annotation.get("object") if isinstance(annotation, dict) else None
     if not isinstance(target, dict) or target.get("type") != "commit" or target.get("sha") != merge_sha:
         raise VerificationError("promotion tag does not point at the exact merged commit")
-    comparison = _api(f"repos/{repository}/compare/{merge_sha}...main")
-    if not isinstance(comparison, dict) or comparison.get("status") not in ("ahead", "identical"):
-        raise VerificationError("the merged release is not on main")
+    _ancestor(repository, merge_sha, "main")
 
 
-def _runs(repository: str, filename: str, title: str, *, merge_sha: str, deadline: float) -> list[dict]:
+def _runs(
+    repository: str, filename: str, title: str, *, merge_sha: str, branch: str, deadline: float,
+) -> list[dict]:
+    scope = f"branch={quote(branch, safe='')}" if branch == "main" else f"head_sha={merge_sha}"
     return [
         run for run in _pages(
-            f"repos/{repository}/actions/workflows/{filename}/runs?event=workflow_dispatch&head_sha={merge_sha}",
+            f"repos/{repository}/actions/workflows/{filename}/runs?event=workflow_dispatch&{scope}",
             "workflow_runs", deadline=deadline,
         )
         if run.get("display_title") == title
     ]
 
 
-def _identity(run: dict, *, workflow_id: int, merge_sha: str, tag: str) -> int:
+def _identity(
+    run: dict, *, repository: str, workflow_id: int, merge_sha: str, branch: str,
+) -> int:
     if (
         type(run.get("id")) is not int or run["id"] <= 0
         or run.get("workflow_id") != workflow_id
         or run.get("event") != "workflow_dispatch"
-        or run.get("head_sha") != merge_sha or run.get("head_branch") != tag
+        or not isinstance(run.get("head_sha"), str) or not re.fullmatch(r"[0-9a-f]{40}", run["head_sha"])
+        or run.get("head_branch") != branch
+        or (branch != "main" and run["head_sha"] != merge_sha)
     ):
         raise VerificationError("dispatched workflow run does not match the exact promotion")
+    if branch == "main":
+        _ancestor(repository, merge_sha, run["head_sha"])
+        _ancestor(repository, run["head_sha"], "main")
     return run["id"]
 
 
@@ -111,25 +125,35 @@ def verify(
         ):
             raise VerificationError(f"required workflow is unavailable: {filename}")
         title = f"{name} promotion {promotion_run} at {merge_sha}"
-        existing = _runs(repository, filename, title, merge_sha=merge_sha, deadline=deadline)
+        branch = "main" if filename == "workflow-lockdown-guard.yml" else tag
+        existing = _runs(
+            repository, filename, title, merge_sha=merge_sha, branch=branch, deadline=deadline,
+        )
         if len(existing) > 1:
             raise VerificationError(f"ambiguous promotion workflow runs: {filename}")
         if existing:
-            _identity(existing[0], workflow_id=workflow["id"], merge_sha=merge_sha, tag=tag)
+            _identity(
+                existing[0], repository=repository, workflow_id=workflow["id"],
+                merge_sha=merge_sha, branch=branch,
+            )
         else:
             _api(f"repos/{repository}/actions/workflows/{filename}/dispatches", body={
-                "ref": tag, "inputs": {"promotion_sha": merge_sha, "promotion_run": promotion_run},
+                "ref": branch, "inputs": {"promotion_sha": merge_sha, "promotion_run": promotion_run},
             })
-        pending[filename] = (workflow["id"], title, required)
+        pending[filename] = (workflow["id"], title, required, branch)
     while pending:
-        for filename, (workflow_id, title, required) in list(pending.items()):
-            runs = _runs(repository, filename, title, merge_sha=merge_sha, deadline=deadline)
+        for filename, (workflow_id, title, required, branch) in list(pending.items()):
+            runs = _runs(
+                repository, filename, title, merge_sha=merge_sha, branch=branch, deadline=deadline,
+            )
             if len(runs) > 1:
                 raise VerificationError(f"ambiguous promotion workflow runs: {filename}")
             if not runs:
                 continue
             run = runs[0]
-            run_id = _identity(run, workflow_id=workflow_id, merge_sha=merge_sha, tag=tag)
+            run_id = _identity(
+                run, repository=repository, workflow_id=workflow_id, merge_sha=merge_sha, branch=branch,
+            )
             if run.get("status") != "completed":
                 continue
             if run.get("conclusion") != "success":
@@ -149,7 +173,10 @@ def verify(
                 raise VerificationError(f"{filename} has unsuccessful jobs: {failed}")
             receipts[filename] = run_id
             del pending[filename]
-            print(f"Verified {filename}: https://github.com/{repository}/actions/runs/{run_id}", flush=True)
+            print(
+                f"Verified {filename}: https://github.com/{repository}/actions/runs/{run_id} "
+                f"(release={merge_sha}, control={run['head_sha']})", flush=True,
+            )
         if pending:
             remaining = deadline - time.monotonic()
             if remaining <= 0:

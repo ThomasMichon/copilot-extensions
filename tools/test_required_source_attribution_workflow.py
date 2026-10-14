@@ -40,17 +40,16 @@ def test_existing_heads_refresh_from_default_branch_or_verified_promotion():
     refresh = workflow["jobs"]["refresh-source-attribution"]
     assert workflow["on"]["push"]["branches"] == ["main"]
     assert "github.event.repository.default_branch" in refresh["if"]
-    assert "inputs.promotion_sha != ''" in refresh["if"]
-    assert "startsWith(github.ref, 'refs/tags/promote-')" in refresh["if"]
+    assert "refs/tags/" not in refresh["if"]
     assert refresh["permissions"] == {
         "contents": "read", "pull-requests": "read", "checks": "write",
     }
     guard, checkout, install, backfill = refresh["steps"]
     assert guard["if"] == "github.event_name == 'workflow_dispatch' && (inputs.promotion_sha != '' || inputs.promotion_run != '')"
-    assert '"$RUN_SHA" = "$EXPECTED_SHA"' in guard["run"]
-    assert '"$WORKFLOW_SHA" = "$EXPECTED_SHA"' in guard["run"]
-    assert "^refs/tags/promote-[0-9]{14}-[0-9a-f]{8}$" in guard["run"]
-    assert checkout["with"]["ref"] == "${{ github.workflow_sha }}"
+    assert '"$RUN_REF" = "$DEFAULT_REF"' in guard["run"]
+    assert '"$RUN_SHA" = "$WORKFLOW_SHA"' in guard["run"]
+    assert "/compare/$EXPECTED_SHA...$WORKFLOW_SHA" in guard["run"]
+    assert checkout["with"]["ref"] == "${{ inputs.promotion_sha || github.workflow_sha }}"
     assert checkout["uses"] == "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
     assert checkout["with"]["persist-credentials"] == "false"
     assert install["run"] == "npm ci --ignore-scripts --no-audit --no-fund"

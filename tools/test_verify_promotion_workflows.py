@@ -26,6 +26,7 @@ def backend(monkeypatch):
     state = {
         "calls": [], "dispatched": [], "runs": {}, "main": "ahead",
         "tag_sha": SHA, "annotation": True, "conclusion": "success", "missing": set(),
+        "control_sha": SHA, "ancestry": {},
     }
 
     def api(path, *, body=None, timeout=60):
@@ -37,17 +38,21 @@ def backend(monkeypatch):
         if "/git/tags/" in path:
             return {"object": {"type": "commit", "sha": state["tag_sha"]}}
         if "/compare/" in path:
-            return {"status": state["main"]}
+            comparison = path.split("/compare/")[1]
+            return {"status": state["ancestry"].get(comparison, state["main"])}
         if "/actions/workflows/" in path:
             filename = path.split("/actions/workflows/")[1].split("/")[0].split("?")[0]
             name, required = verification.WORKFLOWS[filename]
             workflow_id = list(verification.WORKFLOWS).index(filename) + 10
             if "/dispatches" in path:
-                assert body == {"ref": TAG, "inputs": {"promotion_sha": SHA, "promotion_run": RUN}}
+                branch = "main" if filename == "workflow-lockdown-guard.yml" else TAG
+                assert body == {"ref": branch, "inputs": {"promotion_sha": SHA, "promotion_run": RUN}}
                 state["dispatched"].append(filename)
                 state["runs"][filename] = [{
                     "id": workflow_id + 100, "workflow_id": workflow_id,
-                    "event": "workflow_dispatch", "head_sha": SHA, "head_branch": TAG,
+                    "event": "workflow_dispatch",
+                    "head_sha": state["control_sha"] if branch == "main" else SHA,
+                    "head_branch": branch,
                     "display_title": f"{name} promotion {RUN} at {SHA}",
                     "status": "completed", "conclusion": state["conclusion"],
                 }]
@@ -77,10 +82,13 @@ def verify():
 @pytest.mark.parametrize("annotation", [True, False])
 def test_dispatches_both_consumers_and_accepts_main_control_ahead_of_release(backend, annotation):
     backend["annotation"] = annotation
+    backend["control_sha"] = "c" * 40
     assert verify() == {"ci.yml": 110, "workflow-lockdown-guard.yml": 111}
     assert backend["dispatched"] == list(verification.WORKFLOWS)
     calls = [path for path, _ in backend["calls"]]
     assert sum("/git/ref/" in path for path in calls) == 2
+    assert any(f"/compare/{SHA}...{'c' * 40}" in path for path in calls)
+    assert any(f"/compare/{'c' * 40}...main" in path for path in calls)
     assert calls.index(next(path for path in calls if "/jobs?" in path)) > max(
         i for i, path in enumerate(calls) if "/dispatches" in path
     )
@@ -130,6 +138,21 @@ def test_ambiguous_same_identity_runs_refuse(backend):
     verify()
     backend["runs"]["ci.yml"] *= 2
     with pytest.raises(verification.VerificationError, match="ambiguous"):
+        verify()
+
+
+def test_check_publishing_workflow_never_adopts_a_matching_direct_tag_dispatch(backend):
+    verify()
+    backend["runs"]["workflow-lockdown-guard.yml"][0]["head_branch"] = TAG
+    with pytest.raises(verification.VerificationError, match="does not match"):
+        verify()
+
+
+@pytest.mark.parametrize("comparison", [f"{SHA}...{'c' * 40}", f"{'c' * 40}...main"])
+def test_guard_release_and_control_ancestry_are_independently_required(backend, comparison):
+    backend["control_sha"] = "c" * 40
+    backend["ancestry"][comparison] = "diverged"
+    with pytest.raises(verification.VerificationError, match="ancestry"):
         verify()
 
 
@@ -231,7 +254,8 @@ def test_dispatch_mode_preserves_main_push_coverage_without_manual_exhaustive_ti
                  if "github.event_name" in step.get("env", {}).get("PYTEST_ADDOPTS", "")]
         assert tiers and all("inputs.promotion_run != ''" in value for value in tiers)
     refresh = workflows()["workflow-lockdown-guard.yml"]["jobs"]["refresh-source-attribution"]
-    assert "refs/tags/promote-" in refresh["if"]
+    assert "refs/tags/" not in refresh["if"]
+    assert "github.event.repository.default_branch" in refresh["if"]
     for name, workflow in workflows().items():
         if name == "validate-and-promote.yml":
             continue
@@ -240,9 +264,15 @@ def test_dispatch_mode_preserves_main_push_coverage_without_manual_exhaustive_ti
         job = workflow["jobs"]["checks" if name == "ci.yml" else "refresh-source-attribution"]
         assert "Verify the dispatched promotion snapshot" in job["steps"][0]["name"]
         guard = job["steps"][0]["run"]
-        assert '"$RUN_SHA" = "$EXPECTED_SHA"' in guard
-        assert '"$WORKFLOW_SHA" = "$EXPECTED_SHA"' in guard
-        assert "^refs/tags/promote-" in guard
+        if name == "ci.yml":
+            assert '"$RUN_SHA" = "$EXPECTED_SHA"' in guard
+            assert '"$WORKFLOW_SHA" = "$EXPECTED_SHA"' in guard
+            assert "^refs/tags/promote-" in guard
+        else:
+            assert '"$RUN_REF" = "$DEFAULT_REF"' in guard
+            assert '"$RUN_SHA" = "$WORKFLOW_SHA"' in guard
+            assert "/compare/$EXPECTED_SHA...$WORKFLOW_SHA" in guard
+            assert job["steps"][1]["with"]["ref"] == "${{ inputs.promotion_sha || github.workflow_sha }}"
 
 
 @pytest.mark.parametrize("filename", ["ci.yml", "workflow-lockdown-guard.yml"])
@@ -259,18 +289,63 @@ def test_native_snapshot_guard_checks_the_executed_workflow_not_only_its_checkou
     job = workflow["jobs"]["checks" if filename == "ci.yml" else "refresh-source-attribution"]
     environment = {
         **os.environ, "EXPECTED_SHA": SHA, "PROMOTION_RUN": RUN,
-        "RUN_SHA": SHA, "WORKFLOW_SHA": SHA, "RUN_REF": f"refs/tags/{TAG}",
+        "RUN_SHA": SHA, "WORKFLOW_SHA": SHA,
+        "RUN_REF": "refs/heads/main" if filename != "ci.yml" else f"refs/tags/{TAG}",
+        "DEFAULT_REF": "refs/heads/main", "GITHUB_REPOSITORY": "example/project",
+        "ANCESTRY_STATUS": "identical",
     }
     if changed:
         environment[changed] = "moved"
+    script = "gh() { printf '%s\\n' \"$ANCESTRY_STATUS\"; }\n" + job["steps"][0]["run"]
     result = subprocess.run(
-        [bash, "--noprofile", "--norc", "-e"], input=job["steps"][0]["run"],
+        [bash, "--noprofile", "--norc", "-e"], input=script,
         text=True, capture_output=True, env=environment, timeout=10,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == (1 if changed else 0), result.stdout + result.stderr
     if changed:
-        assert "does not execute the exact merged snapshot" in result.stdout
+        message = (
+            "does not execute the exact merged snapshot" if filename == "ci.yml"
+            else "requires a trusted main control snapshot"
+        )
+        assert message in result.stdout
+
+
+@pytest.mark.parametrize("ref,status,accepted", [
+    ("refs/heads/main", "identical", True),
+    ("refs/heads/main", "ahead", True),
+    ("refs/heads/main", "diverged", False),
+    ("refs/heads/main", "behind", False),
+    (f"refs/tags/{TAG}", "identical", False),
+])
+def test_native_guard_rejects_self_consistent_off_main_target_before_checkout(ref, status, accepted):
+    bash, git = shutil.which("bash"), shutil.which("git")
+    if os.name == "nt" and git:
+        candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe"
+        bash = str(candidate) if candidate.is_file() else None
+    if not bash:
+        pytest.skip("native workflow guard validation requires Bash")
+    job = workflows()["workflow-lockdown-guard.yml"]["jobs"]["refresh-source-attribution"]
+    environment = {
+        **os.environ, "EXPECTED_SHA": SHA, "PROMOTION_RUN": RUN,
+        "RUN_SHA": "c" * 40, "WORKFLOW_SHA": "c" * 40,
+        "RUN_REF": ref, "DEFAULT_REF": "refs/heads/main",
+        "GITHUB_REPOSITORY": "example/project", "ANCESTRY_STATUS": status,
+    }
+    script = """
+    gh() {
+      [ "$*" = "api repos/example/project/compare/$EXPECTED_SHA...$WORKFLOW_SHA --jq .status" ] || return 91
+      printf '%s\\n' "$ANCESTRY_STATUS"
+    }
+    """ + job["steps"][0]["run"]
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e"], input=script,
+        text=True, capture_output=True, env=environment, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == (0 if accepted else 1), result.stdout + result.stderr
+    if not accepted:
+        assert "::error::" in result.stdout
 
 
 @pytest.mark.parametrize("result", ["success", "skipped", "failure", "cancelled"])

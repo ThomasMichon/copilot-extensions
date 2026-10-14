@@ -222,8 +222,11 @@ twice, in two different shapes:
   SHA and require an existing ref to equal it; normalized tree/state equality
   on a mutable pre-existing branch is not evidence of trusted provenance.
   Because the Actions-token merge suppresses automatic push workflows,
-  explicitly dispatch every required main-push consumer at the state-derived
-  immutable promotion tag. Verify the dispatched run's exact merged SHA and
+  explicitly dispatch read-only CI at the state-derived immutable promotion
+  tag. Dispatch a check-publishing consumer from trusted main instead, verify
+  release ancestry against that immutable control snapshot before executing
+  the exact release implementation, and reject direct tag dispatches. Verify
+  the dispatched run's exact target and control identities and
   required job results before reporting promotion complete; a dispatch
   acknowledgment alone is not proof. Preserve shape-validated human repairs
   and allow the main control tip to advance beyond that release snapshot.

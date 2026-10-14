@@ -650,7 +650,9 @@ win grows with build complexity.
 - An Actions-token merge suppresses automatic push workflows. Completion
   therefore owes explicit dispatch and successful immutable-snapshot evidence
   for both existing main-push consumers: CI and Workflow lockdown guard.
-  Dispatches use the state-derived promotion tag, pin the expected merged SHA,
+  Read-only CI uses the state-derived promotion tag; the check-publishing
+  guard runs only from trusted main and verifies target ancestry before
+  executing the exact merged implementation. Dispatches pin the expected merged SHA,
   and must fail on a moved tag, wrong run identity, skipped required refresh,
   failed job or deadline. This is a new event contract coordinated with #6237,
   not retrospective proof that its earlier automatic-push lane ran.
@@ -691,6 +693,22 @@ win grows with build complexity.
   identity and no persisted token. That contract and its coupled credential/
   CI-selector checks passed four cases; the Windows changed-path lane now
   selects it as well.
+- Native review correctly rejected caller-supplied tag/SHA consistency as
+  authority for privileged source-attribution execution. The revised guard
+  keeps its definition main-only, independently verifies the exact release
+  against the immutable main control snapshot before checkout, and executes
+  only that verified release implementation. The coordinator records both
+  control and target identities, rather than requiring control HEAD to equal
+  the published release. This closes the trusted-admission and compatible
+  execution intent in `visions/main-owned-workflow-control/README.md`; it
+  does not introduce mutable contribution imports or a new credential.
+  The focused trust/metadata/event-policy selection passed 99 cases,
+  including executing the literal guard against self-consistent off-main
+  targets and tag dispatches, and allowing a newer main control snapshot.
+  Live GitHub comparison accepted the immutable main snapshot and refused
+  the unmerged PR head with a no-common-ancestor error; no fetched code
+  executed. Hosted review/publication proof and strict-rule activation are
+  still outstanding.
 
 ### 2026-10-14 - Candidate-scoped readiness before merge
 

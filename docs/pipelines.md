@@ -787,9 +787,13 @@ commit or the tag already points elsewhere, and a re-run on the same commit is
 a no-op. Only a successfully verified tag is emitted as a workflow receipt.
 
 An Actions-token merge does not trigger push workflows. The promotion flow
-therefore explicitly dispatches both CI and Workflow lockdown guard at that
-promotion tag with the exact expected merged SHA and owning run-attempt
-identity. CI's promotion dispatch retains all main-push discovery, plugin,
+therefore explicitly dispatches CI at that promotion tag, and the privileged
+Workflow lockdown guard from trusted main, with the exact expected merged SHA
+and owning run-attempt identity. The guard independently verifies that target
+SHA is on its immutable main control snapshot before checking out the release
+implementation; matching caller-supplied tag/SHA fields are not authority.
+Its control snapshot may be newer than the release, and verification records
+both identities. CI's promotion dispatch retains all main-push discovery, plugin,
 native Windows and standalone-service coverage, without selecting the separate
 manual exhaustive tiers or repeating the full validation matrix. Its promotion
 aggregate rejects any skipped required job. The verifier waits for both exact
