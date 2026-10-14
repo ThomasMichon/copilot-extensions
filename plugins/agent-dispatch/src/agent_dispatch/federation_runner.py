@@ -301,7 +301,7 @@ class FederationRunner:
                             self._admitting()
                             and config.satellite_gate_open()
                             and config.shared_url() == url
-                            and config.shared_token() == token
+                            and self._work_intake_token == token
                         ),
                         reconcile=self._reconcile_work_intake,
                     )

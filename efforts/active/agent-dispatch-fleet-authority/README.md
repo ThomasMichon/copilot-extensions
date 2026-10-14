@@ -364,6 +364,13 @@ recorded against each open fork._
   first-response scheduling race on Windows while still proving quiet reads
   terminate. Earlier 61/59 counts identify the native/Linux delivery-only
   snapshots above; they are not the enlarged cutover selection.
+- Fresh Linux final cutover/events selection at `398594942`: 140 passed.
+  A subsequent review found credential commands executing in the per-event
+  enabled predicate. Moved resolution exclusively to the owning federation
+  tick; child readers use the pinned cached credential, and owner-driven
+  rotation still retires both old threads before replacement. A 10,000-event
+  burst regression asserts command fetches run only on that owner tick.
+  Native final assignment/events/federation/cutover selection: 141 passed.
 
 ### 2026-10-14 -- Corrective task-authority PR merged; assignment push next
 - PR #6665 merged as `b8d3ec6a710beb376ef655e5a715e7055b783b93` after

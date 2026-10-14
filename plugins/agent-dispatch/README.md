@@ -2580,7 +2580,9 @@ backoff at 1-30 seconds. Old coordinators without ready/keepalive support
 degrade to polling while reconnection is retried. Closing the satellite gate
 or changing/removing its shared URL or credential retires the subscription
 and waits for an in-flight intake before closing its client; replacement is
-deferred rather than racing two intakes. `GET /health` on the local serving
+deferred rather than racing two intakes. Credential-command resolution runs
+only on the owning federation tick, never in the per-event reader predicate;
+rotation is observed at that presence cadence. `GET /health` on the local serving
 coordinator reports `assignment_intake` connection state, sanitized failure
 type and reconciliation count (null when no intake exists). This is delivery
 health, not queue replication, offline authority or container enrollment.

@@ -199,6 +199,59 @@ def test_assignment_admission_rechecks_drain_inside_tracked_boundary(app, monkey
         assert response.json() is None
 
 
+def test_assignment_credential_command_runs_only_on_owner_tick(monkeypatch, server_url):
+    from agent_dispatch import client as client_module
+    from agent_dispatch import config, satellite_work_intake
+
+    monkeypatch.setattr(config, "satellite_gate_open", lambda: True)
+    monkeypatch.setattr(config, "shared_url", lambda: server_url)
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", "fake-credential-fetch")
+    owner = threading.get_ident()
+    calls = []
+    credential = ["first"]
+
+    def fetch(command):
+        calls.append(threading.get_ident())
+        return credential[0]
+
+    monkeypatch.setattr(config, "run_token_command", fetch)
+    events = ScriptedEvents()
+    clients = []
+
+    def make_client(*args, **kwargs):
+        result = DispatchClient(*args, **kwargs)
+        result.async_stream_events = events.async_stream_events
+        clients.append(result)
+        return result
+
+    monkeypatch.setattr(client_module, "DispatchClient", make_client)
+    monkeypatch.setattr(
+        satellite_work_intake, "SatelliteWorkIntake", lambda *a, **kw: CountingIntake(),
+    )
+    runner = FederationRunner(FleetDirectory(), "host-a", role="satellite")
+    monkeypatch.setattr(runner, "_satellite_kwargs", lambda: {})
+    runner._running = True
+    try:
+        runner.tick()
+        wait_for(lambda: runner.assignment_status()["state"] == "connected")
+        for _ in range(10_000):
+            events.frames.put(task_event())
+        wait_for(events.frames.empty)
+        assert calls == [owner]
+        old = runner._assignment_intake
+        credential[0] = "rotated"
+        runner.tick()
+        wait_for(lambda: not (old._worker.is_alive() or old._reader.is_alive()))
+        runner.tick()
+        wait_for(lambda: runner.assignment_status()["state"] == "connected")
+        assert clients[0]._http.is_closed
+        assert runner._work_intake_token == "rotated"
+        assert calls == [owner, owner, owner]
+    finally:
+        runner.stop(timeout=2)
+
+
 def settled_count(loop, intake):
     wait_for(lambda: loop.status()["state"] == "connected" and intake.count >= 1)
     time.sleep(0.06)
