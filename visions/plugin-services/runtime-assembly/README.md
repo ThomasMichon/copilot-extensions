@@ -117,16 +117,21 @@ governed feed, and an artifact-integrity or source-provenance failure is not
 an ordinary availability fallback. If no permitted dependency closure can
 be assembled, the outcome is explicit and the current generation survives.
 
-### artifact-availability-is-not-release-authority
+### optional-client-artifacts-complete-promotion
 
-Failure confined to optional artifact production or publication does not
-block an independently validated source release or the client's governed
-source-build path. Source validation and provenance requirements remain
-blocking for the source they protect. Artifact failure is visible and
-retryable for the exact release, without weakening signer, digest or
-immutable-publication checks. Source promotion, asset publication and runtime
-activation have distinct outcomes; success in one never impersonates the
-others.
+Artifact consumption is optional for install and update: an authorized,
+governed local-source build does not depend on successful artifact
+discovery, matching or publication. Availability evidence required to
+complete a promotion is not an additional client installation gate.
+
+The promotion flow produces, verifies and establishes availability of the
+exact candidate's artifacts before merging its PR or declaring completion.
+Build, signing or publication failure leaves promotion incomplete and its
+candidate unmerged, with visible, idempotent retry rather than a
+source-only success claim. Source validation, signer/source binding, digest
+verification and immutable-publication requirements remain strict.
+Source promotion, asset publication and runtime activation have distinct
+outcomes; success in one never impersonates the others.
 
 ### complete-or-rejected-generations
 

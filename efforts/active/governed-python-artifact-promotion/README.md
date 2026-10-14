@@ -122,7 +122,22 @@ policy. That is a different, attributable assembly decision, not silent
 mutation of the artifact lock. Neither mode can bypass a package block,
 seasoning requirement, source-integrity failure or governed-feed routing.
 Artifact infrastructure must not become a prerequisite for an otherwise
-validated source release or local source installation.
+permitted local source installation.
+
+**Promotion ordering and interim client requirement:**
+
+> Somehow agents are unable to take the latest main promotion due to "unavailable" or "non-matching" artifacts. Is that caused by the work done here? Artifact production needs to be done by the promotion flow, before it declares completion and merges the PR. And for now dependency on artifacts needs to be optional during install and update.
+
+This supersedes the earlier proposal to let an artifact-production failure
+pass source promotion. The promotion flow must produce, verify and establish
+availability of the exact candidate's artifacts before merging its PR or
+declaring completion. A post-merge publisher alone cannot satisfy that gate.
+Install and update have a different contract: artifact use remains optional
+for now, and their existing governed local-source path must not wait for
+artifact rollout/publication proof. Missing or non-matching artifacts are
+availability outcomes, not permission to consume invalid bytes or bypass
+dependency governance. Preserve source-integrity and artifact-integrity
+refusals and the installation authority's explicit path selection.
 
 ## Plan
 
@@ -295,13 +310,20 @@ locked-down hosts without themselves proving the package-source contract.
       unavailable artifact path and fail closed for a present invalid
       artifact. Native release verification and Windows/POSIX
       first-touch evidence remain prerequisites to enabling consumption.
-- [ ] Coordinate source-release availability with the existing workflow
-      owner: failures confined to optional artifact production/publication
-      must not block independently validated source promotion or local
-      installation. Keep source validation, signer/source binding and
-      immutable-asset checks strict. Report artifact failure separately and
-      make retry idempotent for the exact promoted candidate; never mark
-      publication successful because source promotion succeeded.
+- [ ] Coordinate with the existing workflow/publisher owners so promotion
+      produces, verifies and establishes client-consumable availability of
+      exact-candidate artifacts before merging its PR or declaring success.
+      Artifact build/sign/publication failures leave that PR unmerged, with
+      an explicit failed gate and exact-candidate retry; retain source
+      validation, signer/source binding and immutable-asset checks. Any
+      final post-merge identity binding must not be the first availability
+      check or retroactively stand in for pre-merge production.
+- [ ] Keep install/update artifact consumption optional for now. The
+      authorized governed local-source path remains usable for an already
+      selected release when artifacts are missing, non-matching or
+      unavailable, without an agent-imposed publication/rollout-proof gate.
+      Preserve dependency governance, immutable staging, health checks and
+      integrity refusal; source fallback is not an authorization to install.
 
 ### Phase 4 - Retention, provenance, and documentation
 
@@ -514,11 +536,19 @@ verified answer against its actual repository or machine configuration:
       artifact manifest, and activates atomically. Tampered artifacts,
       blocked fallback choices and fallback build failures cannot activate
       or alter the prior slot.
-- [ ] Release tests inject an optional artifact build/sign/upload failure
-      while independent source validation passes. Source promotion and the
-      client source path remain usable, artifact publication reports failure
-      distinctly, and an exact-candidate retry cannot overwrite immutable
-      assets. A source-validation/provenance failure still blocks its release.
+- [ ] Client tests corrupt source payload bytes, source release identity and
+      its expected digest independently, with no artifact manifest present.
+      Each refuses before any build/backend execution or slot activation;
+      source-mode receipts cannot legitimize unverified source inputs.
+- [ ] Release tests inject artifact build/sign/upload failure or an
+      unavailable/non-matching candidate asset while source validation
+      passes: promotion remains failed/incomplete and its PR unmerged.
+      A successful run proves exact-candidate production, verification and
+      availability before merge; exact-candidate retry cannot overwrite
+      immutable assets. Source-validation/provenance failure also blocks.
+      Separately, install/update of an already selected verified source
+      release succeeds through its governed local-build path with artifact
+      acquisition unavailable; no artifact-publication proof is required.
 - [ ] Cold/warm source-build and artifact paths report comparable wall
       time, network, and physical storage, measured against Phase 1's
       baseline.
@@ -602,6 +632,26 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-14 - Promotion must finish artifact production before merge
+
+- The operator explicitly separated mandatory promotion-time artifact
+  production from optional client consumption. The prior non-blocking
+  source-promotion proposal is superseded before implementation.
+- Normal run `38519804724` built and attested artifacts, then merged #6642
+  to main `f327cf44793c60321bc205eddadccaeda3d5ee43`. Its post-merge
+  publisher `115719534253` failed the same temporary-index removal using
+  older trusted tooling at `f5e4e30353a076aec74781e6ef5cfe5df474e939`.
+  The ordering allowed source to become current before asset publication.
+  #6633 is contained in the new main, but later successful publication
+  has not been established here. Existing publisher/workflow custody stays.
+- A direct read of the new main's runtime plugins/shared libraries found no
+  Python artifact-manifest/admission integration. The reported updater
+  refusal still needs its literal error and input identity; no claim that
+  executable client code requires these artifacts is justified yet.
+  Publication proof for this campaign must not become an agent-only
+  install/update prerequisite. No updater, rerun or deployed-copy edit was
+  performed as part of this diagnosis.
 
 ### 2026-10-14 - Explicit local fallback; artifact publication remains incomplete
 
