@@ -521,10 +521,17 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 - The preceding head's native Windows job
   [115659324492](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38503575369/job/115659324492)
   passed 220 source/diagnostic cases, two Manager cases, seven reconciliation
-  cases, and its other runner contracts. This proves the initialized-host
+  cases, and its admission/CWD contracts. This proves the initialized-host
   acceptance correction, not the new teardown changes. Current-head review,
   native teardown evidence, and required aggregate/lockdown checks remain
   necessary before merge; the effort and all wider acceptance gates stay open.
+- That job still failed its aggregate: its five-minute budget cancelled the
+  final fleet contract at 96% after the earlier selections succeeded.
+  Job timing and the contained runner's interruption log confirm the deadline,
+  not a failing diagnostic assertion. The Windows job now has a seven-minute
+  aggregate limit, while every individual diagnostic/wrapper bound and the
+  Linux job's five-minute limit remain unchanged. Coupled budget guards were
+  updated; no selection or assertion is removed.
 
 ### 2026-10-13 — Real launcher selection and initialized-host diagnostic acceptance
 

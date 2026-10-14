@@ -660,6 +660,10 @@ uses Windows PowerShell 5.1 via
 and derived implementation changes trigger it; unrelated docs do not.
 An explicitly requested unavailable shell fails collection rather than
 silently skipping the evidence. No exhaustive adapter matrix is added to PR CI.
+The Windows job has a seven-minute aggregate budget for these diagnostic and
+wrapper selections plus its runner, payload-CWD, and fleet contracts. Individual
+diagnostic/wrapper selections retain their two-minute limits; the Linux runner
+job retains its five-minute budget.
 
 Source-qualified catalog no-write cases invoke the unchanged PowerShell script
 twice in one real, initialized host. Host-only initialization stops CLR startup

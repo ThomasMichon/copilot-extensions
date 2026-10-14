@@ -35,7 +35,8 @@ PATTERNS = [re.search(r"grep -Eq \\\n\s*'([^'\n]+)'", step).group(1) for step in
 def test_native_jobs_preserve_dev_scope_budget_and_required_aggregate():
     assert PATTERNS[0] == PATTERNS[1]
     for name, job in zip(("test-runner-linux", "test-runner-windows"), JOBS):
-        assert "timeout-minutes: 5" in job
+        budget = 7 if name == "test-runner-windows" else 5
+        assert f"    timeout-minutes: {budget}\n" in job
         assert "if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'" in job
         assert "if: steps.payload-cwd-contracts.outputs.run == 'true'" in job
         assert "if: steps.payload-cwd-contracts.outputs.run == 'true'\n        shell: bash\n" in job

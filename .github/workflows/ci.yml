@@ -1054,7 +1054,9 @@ jobs:
     name: test runner (windows-latest)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
-    timeout-minutes: 5
+    # Native diagnostic/wrapper acceptance shares this job with runner,
+    # payload-CWD and fleet contracts; retain each selection's own bound.
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
         with:
