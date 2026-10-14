@@ -531,3 +531,19 @@ hiding the problem or silently dropping text.
   native contention case hit its existing lock deadline, then passed alone and
   in the complete rerun; #6663 records that intermittent evidence without a
   timeout increase or CI waiver. Actual artifact publication remains required.
+- **2026-10-14** -- Registration fixture repair #6667 merged as
+  `8bc763c230319e3b3e1e134fa7b8cefeac379f3c` after the exact head received
+  an Approved review with zero findings, successful CI, workflow guard and
+  source attribution. The failed preceding full release still used an older
+  snapshot with the same six fixture signatures. Await a containing full run
+  and actual immutable asset publication; source promotion alone is not
+  installed or delivered Picker evidence.
+- **2026-10-14** -- The next containing full run passed the assignment
+  registration tests and exposed one separate exact-session scan fixture,
+  tracked in #6675. It now reuses the existing shared authority setup and
+  tracking directory rather than patching only the previous policy loader.
+  The first integration attempt also tried to create that already-owned
+  directory; reusing the supplied fixture resolves it. All 186 register,
+  deregister and independent execution-space cases pass, with the exact
+  deterministic-order test also selected in fast guards. Production
+  registration, authority and scan behavior remain unchanged.
