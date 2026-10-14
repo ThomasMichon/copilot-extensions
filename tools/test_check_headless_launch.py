@@ -560,9 +560,12 @@ def test_hand_rolled_detached_popen_is_flagged(repo, body):
     ("from agent_procutil import detached_kwargs\nclass Service:\n"
      "    import subprocess as sp\n    def start(self, sp):\n"
      "        return sp.Popen(['x'], **detached_kwargs())\n"),
+    ("import subprocess\nfrom agent_procutil import detached_kwargs\ndef start():\n"
+     "    return subprocess.Popen(  # daemon-spawn: allow bounded helper\n"
+     "        ['svc'], **detached_kwargs(),\n    )\n"),
 ], ids=[
     "spawn-daemon", "no-detach-helper", "inline-allow-with-reason", "helper-only-in-nested-scope",
-    "helper-only-in-lambda", "class-alias-not-visible-in-method",
+    "helper-only-in-lambda", "class-alias-not-visible-in-method", "multiline-inline-allow",
 ])
 def test_daemon_launches_that_pass(repo, body):
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)

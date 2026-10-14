@@ -607,11 +607,15 @@ def _find_flags(f: Path) -> tuple[str, list[tuple[int, str]]]:
 
 def _allowed(lines: list[str], lineno: int, marker: str = _ALLOW) -> bool:
     line = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
+    comments: list[str] = []
     try:
-        tokens = tokenize.generate_tokens(io.StringIO(line).readline)
-        comments = [tok.string for tok in tokens if tok.type == tokenize.COMMENT]
+        for tok in tokenize.generate_tokens(io.StringIO(line).readline):
+            if tok.type == tokenize.COMMENT:
+                comments.append(tok.string)
     except (IndentationError, tokenize.TokenError):
-        return False
+        # A multiline call's opening line ends inside an open bracket: keep the
+        # comments tokenized before EOF.
+        pass
     for comment in comments:
         text = comment.removeprefix("#").strip()
         if not text.startswith(marker):

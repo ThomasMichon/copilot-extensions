@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+
 import agent_procutil
 import pytest
 
@@ -133,3 +137,43 @@ def test_path_overrides_are_expanded_before_they_are_resolved(monkeypatch, tmp_p
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
     assert seen["env_overrides"]["KPDB"] == str(tmp_path / "home" / "vault.kdbx")
+
+
+@pytest.mark.parametrize("value", ["~/cache", "$VAULT_TEST_ROOT/cache"])
+def test_non_database_overrides_are_resolved_raw_like_their_readers(monkeypatch, tmp_path, value):
+    # The cache reader takes the raw path (`<caller>/~/cache`); expanding it for
+    # the service alone would split the client and service credential caches.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("VAULT_TEST_ROOT", str(tmp_path / "home"))
+    monkeypatch.setenv(launch.CACHE_DIR_ENV, value)
+    monkeypatch.setattr(launch, "service_root", lambda: tmp_path / "root")
+    seen: dict = {}
+    monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
+    launch.spawn_service(["--foreground"])
+    client_view = str(Path(os.environ[launch.CACHE_DIR_ENV]).absolute())
+    assert seen["env_overrides"][launch.CACHE_DIR_ENV] == client_view
+    assert client_view == str(tmp_path / value)
+
+
+@pytest.mark.parametrize("layout", ["flat", "registry"])
+def test_global_config_relative_database_survives_the_service_cwd(monkeypatch, tmp_path, layout):
+    # A request that omits kpdb makes the service resolve the configured
+    # default from its own runtime root; it must name the client's database.
+    settings = tmp_path / "settings" / "config.json"
+    settings.parent.mkdir()
+    data = (
+        {"kpdb": "vault.kdbx"} if layout == "flat"
+        else {"vaults": {"main": {"kpdb": "vault.kdbx"}}, "default_vault": "main"}
+    )
+    settings.write_text(json.dumps(data), encoding="utf-8")
+    for name in ("KPDB", "AGENT_VAULT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(config.CONFIG_ENV, str(settings))
+    monkeypatch.setattr(config, "_ext_config", lambda cwd: {})
+    expected = str(tmp_path / "settings" / "vault.kdbx")
+    for cwd in ("client", "service-root"):
+        (tmp_path / cwd).mkdir()
+        monkeypatch.chdir(tmp_path / cwd)
+        assert config.resolve_kpdb(required=False) == expected

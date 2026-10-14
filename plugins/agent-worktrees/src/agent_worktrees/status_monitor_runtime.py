@@ -581,6 +581,15 @@ def _windowless_python() -> str:
 
 
 _DAEMON_SESSION_SCOPED_ENV_KEYS = ("COPILOT_AGENT_SESSION_ID",)
+# State-root inputs the daemon re-reads from its own cwd (``_daemon_cwd``): a
+# relative value must name the caller's directory, not a second root there.
+_DAEMON_PATH_ENV_KEYS = ("AGENT_HOME", "AGENT_WORKTREES_PAYLOAD_ROOT", "COPILOT_PLUGIN_ROOT")
+
+
+def _caller_relative(value: str) -> str:
+    """``value`` anchored at the caller's cwd when it is relative (no drive or root)."""
+    stripped = value.strip()
+    return os.path.abspath(stripped) if stripped and not Path(stripped).anchor else value
 
 
 def _daemon_environment() -> dict[str, str]:
@@ -593,7 +602,12 @@ def _daemon_environment() -> dict[str, str]:
     (Windows env names are case-insensitive)."""
     env = _core_helper("_background_environment", status_updater_cli._background_environment)()
     scoped = {key.upper() for key in _DAEMON_SESSION_SCOPED_ENV_KEYS}
-    return {key: value for key, value in env.items() if key.upper() not in scoped}
+    paths = {key.upper() for key in _DAEMON_PATH_ENV_KEYS}
+    return {
+        key: _caller_relative(value) if key.upper() in paths else value
+        for key, value in env.items()
+        if key.upper() not in scoped
+    }
 
 
 def _daemon_cwd() -> str:
@@ -603,7 +617,9 @@ def _daemon_cwd() -> str:
     try:
         root = cfg.install_dir()
         if root.is_dir():
-            return str(root)
+            # spawn_daemon requires an absolute cwd; a relative AGENT_HOME
+            # yields a relative root here.
+            return os.path.abspath(root)
     except Exception:
         pass
     return os.path.expanduser("~")

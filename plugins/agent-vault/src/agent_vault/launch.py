@@ -57,8 +57,11 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
     for name in _PATH_OVERRIDES:
         value = os.environ.get(name)
         if value:
-            # Expanded first, exactly as the readers expand it (``~``, ``$VAR``).
-            overrides[name] = config._expand_kpdb(value)
+            # Resolved exactly as its readers resolve it: only ``KPDB`` is
+            # expanded (``~``, ``$VAR``); every other reader takes the raw path.
+            overrides[name] = (
+                config._expand_kpdb(value) if name == "KPDB" else os.path.abspath(value)
+            )
     return spawn_daemon(
         [windowless_python(python), "-m", "agent_vault.service", *args],
         cwd=root,

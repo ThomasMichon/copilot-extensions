@@ -4854,6 +4854,31 @@ def test_daemon_cwd_degrades_to_home_when_install_dir_does_not_exist(monkeypatch
     assert smr._daemon_cwd() == os.path.expanduser("~")
 
 
+@pytest.mark.parametrize("path", ["resident", "passive"])
+def test_relative_agent_home_launches_from_the_callers_absolute_root(monkeypatch, tmp_path, path):
+    """``spawn_daemon`` rejects a relative cwd, and the child re-reads
+    ``AGENT_HOME`` from that cwd: both must name the caller's state root."""
+    from agent_worktrees import status_monitor_cutover as smc
+
+    seen: dict = {}
+
+    def _fake_spawn(argv, **kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_HOME", "state")
+    (tmp_path / "state" / ".agent-worktrees").mkdir(parents=True)
+    monkeypatch.setattr(smc, "spawn_daemon", _fake_spawn)
+    if path == "resident":
+        assert m._spawn_detached([m.sys.executable, "-m", "agent_worktrees", "status-monitor"])
+    else:
+        smc.spawn_passive(m.sys.executable, port=1)
+    assert seen["cwd"] == str(tmp_path / "state" / ".agent-worktrees")
+    assert seen["env"]["AGENT_HOME"] == str(tmp_path / "state")
+
+
 def test_headless_child_guard_ors_no_window():
     from conftest import _headless_creationflags
 
