@@ -173,6 +173,110 @@ def test_failed_publication_is_sanitized_and_preserves_native_fence(target, monk
         projection.project("pool-1", PHYSICAL_ID, grant(binding, owner_session_id="native-other"))
 
 
+@pytest.mark.parametrize("failure", ["timeout", "final-write"])
+def test_ambiguous_publication_fences_expiry_before_delivery(target, monkeypatch, failure):
+    binding = projection.prepare("pool-1", PHYSICAL_ID, FACTS)
+    initial = grant(binding)
+    monkeypatch.setattr(
+        projection.subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0),
+    )
+    projection.project("pool-1", PHYSICAL_ID, initial)
+    newer = {**initial, "task_token": "newer-credential", "expires_at": initial["expires_at"] + 100}
+    delivered = []
+    write = projection.atomic_write_json
+
+    def run(argv, **kwargs):
+        delivered.append(kwargs["input"])
+        retained = projection._read(PHYSICAL_ID)
+        assert retained["attempted_expires_at"] == newer["expires_at"]
+        assert retained["expires_at"] == initial["expires_at"]
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, 30)
+        return subprocess.CompletedProcess(argv, 0)
+
+    def fail_final_write(path, record):
+        if record["expires_at"] == newer["expires_at"]:
+            raise OSError("interrupted final acknowledgement")
+        write(path, record)
+
+    monkeypatch.setattr(projection.subprocess, "run", run)
+    monkeypatch.setattr(projection, "atomic_write_json", fail_final_write)
+    with pytest.raises((RuntimeError, OSError)):
+        projection.project("pool-1", PHYSICAL_ID, newer)
+    assert delivered == ["newer-credential"]
+    with pytest.raises(RuntimeError, match="backwards"):
+        projection.project("pool-1", PHYSICAL_ID, initial)
+    assert delivered == ["newer-credential"]
+    monkeypatch.setattr(projection, "atomic_write_json", write)
+    monkeypatch.setattr(
+        projection.subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0),
+    )
+    retried = projection.project("pool-1", PHYSICAL_ID, newer)
+    assert retried["expires_at"] == retried["attempted_expires_at"] == newer["expires_at"]
+    assert "newer-credential" not in projection._path(PHYSICAL_ID).read_text(encoding="utf-8")
+
+
+def test_legacy_binding_preserves_delivered_expiry_floor(target, monkeypatch):
+    binding = projection.prepare("pool-1", PHYSICAL_ID, FACTS)
+    monkeypatch.setattr(
+        projection.subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0),
+    )
+    request = grant(binding)
+    published = projection.project("pool-1", PHYSICAL_ID, request)
+    published.pop("attempted_expires_at")
+    projection.atomic_write_json(projection._path(PHYSICAL_ID), published)
+    assert projection._read(PHYSICAL_ID)["attempted_expires_at"] == request["expires_at"]
+    with pytest.raises(RuntimeError, match="backwards"):
+        projection.project("pool-1", PHYSICAL_ID, {**request, "expires_at": request["expires_at"] - 1})
+
+
+@pytest.mark.parametrize("expiry", [True, float("inf"), -1, "123", 123])
+def test_invalid_attempt_fence_is_not_available_authority(target, expiry):
+    binding = projection.prepare("pool-1", PHYSICAL_ID, FACTS)
+    binding["attempted_expires_at"] = expiry
+    projection.atomic_write_json(projection._path(PHYSICAL_ID), binding)
+    with pytest.raises(RuntimeError, match="binding is invalid"):
+        projection._read(PHYSICAL_ID)
+
+
+@pytest.mark.parametrize("state,expected", [(0, "idle"), (75, "active"), (1, "unknown")])
+def test_guest_worker_probe_is_fail_closed(target, monkeypatch, state, expected):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, state, "", "untrusted diagnostic")
+
+    monkeypatch.setattr(projection.subprocess, "run", run)
+    result = projection.probe_worker_liveness(PHYSICAL_ID, {"Id": PHYSICAL_ID})
+    assert result.state == expected
+    assert "--conflict-exit-code 75" in calls[0][-1]
+    assert projection.WORKER_LOCK in calls[0][-1]
+    assert "untrusted diagnostic" not in (result.reason or "")
+
+
+@pytest.mark.parametrize("error", [OSError("failed"), subprocess.TimeoutExpired("probe", 30)])
+def test_guest_worker_probe_transport_failure_is_unknown(target, monkeypatch, error):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(projection.subprocess, "run", fail)
+    assert projection.probe_worker_liveness(PHYSICAL_ID, {"Id": PHYSICAL_ID}).state == "unknown"
+
+
+@pytest.mark.parametrize("reason", ["provider session admission is active", "container lifecycle hold"])
+def test_task_launch_maps_provider_busy_to_exit_75(monkeypatch, capsys, reason):
+    from agent_containers import __main__ as cli
+
+    def busy(*args):
+        raise lease.ProviderAdmissionError(reason)
+
+    monkeypatch.setattr(projection, "_launch_task", busy)
+    args = SimpleNamespace(dispatch_binding_id="binding", expected_container_id=PHYSICAL_ID)
+    assert cli._cmd_exec(args) == 75
+    assert reason in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("updates", [
     {"task_token": ""}, {"task_token": "secret\n"}, {"task_token": "x" * 8193},
     {"expires_at": True}, {"expires_at": float("inf")}, {"expires_at": 0},

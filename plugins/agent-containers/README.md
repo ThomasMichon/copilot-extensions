@@ -52,6 +52,9 @@ a time. Admission, lifecycle and projection writers share a kernel-owned
 host lock that is never stolen based on file age. Task execution additionally
 holds a guest `flock` on a stable root-owned file for the worker's lifetime:
 terminating only the host wrapper does not admit a duplicate surviving worker.
+Destructive lifecycle probes that guest lock under its provider hold, both
+before rescue and immediately before stop/removal/recreation; an active or
+unreadable lock defers the action even without host admission or Copilot markers.
 The provider's creation-time binding identity is pinned in both an
 immutable Docker label and owner-private state. Missing, corrupt or mismatched
 birth state is not an unused slot: preparation refuses it and requires
@@ -66,6 +69,10 @@ travels over stdin to a root-owned atomic file at
 `/run/agent-dispatch/task-token`; the nonroot worker can read but not overwrite
 it. Neither Docker configuration, retained binding metadata, launch argv nor
 command output stores the token. Rotation preserves the same incarnation.
+The host persists a monotonic attempted-expiry fence before delivery, separately
+from acknowledged expiry. An interrupted publication cannot permit an older
+grant to replace a potentially delivered newer one; equal-expiry retries remain
+admissible without claiming a failed delivery succeeded.
 
 The explicit launch projects only the pinned task/worker/endpoint and token-file
 path, using an immutable absolute Bash executable outside writable mounts and

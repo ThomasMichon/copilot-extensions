@@ -118,7 +118,7 @@ def test_restricted_container_is_writable_only_on_bounded_tmpfs():
 
 def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp_path):
     from agent_containers import dispatch_projection as projection
-    from agent_containers import lease, lifecycle, resolver
+    from agent_containers import lease, lifecycle, replacement, resolver
     from agent_containers.config import ContainersConfig
 
     name = f"agent-containers-dispatch-{uuid.uuid4().hex[:8]}"
@@ -135,6 +135,7 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
     for key, filename in (
         ("_LOCK_FILE", "leases.lock"), ("_DEPLOY_HOLDS_FILE", "deploy-holds.json"),
         ("_SESSION_ADMISSIONS_FILE", "session-admissions.json"),
+        ("LEASE_FILE", "leases.json"), ("_LEASE_DETAILS_FILE", "lease-details.json"),
     ):
         monkeypatch.setattr(lease, key, tmp_path / filename)
 
@@ -145,6 +146,7 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
         )
 
     holder = None
+    holder_errors = (tmp_path / "worker-wrapper.stderr").open("wb")
     try:
         _image_run("dispatch-e2e", fleet, name, workspace_folder="/workspace", exec_user="node")
         inspected = lifecycle.inspect_container(name)
@@ -233,7 +235,7 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
         ]
         holder = subprocess.Popen(
             launch_args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, env=env, creationflags=no_window_flags(),
+            stderr=holder_errors, env=env, creationflags=no_window_flags(),
         )
         worker_pid = None
         deadline = time.monotonic() + 30
@@ -248,7 +250,13 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
                 break
             assert holder.poll() is None, "worker wrapper exited before guest readiness"
             time.sleep(0.2)
-        assert worker_pid is not None
+        assert worker_pid is not None, (tmp_path / "worker-wrapper.stderr").read_text(encoding="utf-8")
+        duplicate = subprocess.run(
+            launch_args, stdin=subprocess.DEVNULL, capture_output=True,
+            text=True, timeout=45, env=env, creationflags=no_window_flags(),
+        )
+        assert duplicate.returncode == 75, duplicate.stderr
+        assert holder.poll() is None
         holder.kill()
         holder.wait(timeout=10)
         alive = run(
@@ -265,8 +273,28 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
             "exec", "-u", "node", physical_id, "/usr/local/bin/node", "-e",
             f"process.kill({worker_pid},0)",
         ).returncode == 0
+        assert lease.active_session_admissions(name) == []
+        member = lifecycle.get_container(config, name)
+        assert member is not None
+        for operation in ("stop", "remove", "recreate"):
+            if operation == "stop":
+                decision = replacement.stop_restricted_member(
+                    config, fleet, member, force_abandon=True,
+                )
+            else:
+                decision = replacement.destroy_restricted_member(
+                    config, fleet, member, operation=operation,
+                    force_remove=True, force_abandon=True,
+                )
+            assert decision.status == "deferred", decision
+            assert "restricted worker lock" in decision.reason
+            assert run(
+                "exec", "-u", "node", physical_id, "/usr/local/bin/node", "-e",
+                f"process.kill({worker_pid},0)",
+            ).returncode == 0
     finally:
         if holder is not None and holder.poll() is None:
             holder.kill()
             holder.wait(timeout=10)
+        holder_errors.close()
         run("rm", "-f", name)

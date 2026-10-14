@@ -8,11 +8,14 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from agent_procutil import no_window_flags
+from session_liveness_probe import SessionLiveness
 
 from .config import (
     DISPATCH_BINDING_LABEL, DISPATCH_ONLY_LABEL, FLEET_LABEL,
@@ -143,7 +146,7 @@ def _read(container_id: str) -> dict | None:
     try:
         if (
             not isinstance(raw, dict)
-            or set(raw) != _FACTS | {
+            or set(raw) - {"attempted_expires_at"} != _FACTS | {
                 "version", "container_id", "binding_id", "owner_session_id", "expires_at"
             }
             or type(raw["version"]) is not int or raw["version"] != 1
@@ -154,7 +157,9 @@ def _read(container_id: str) -> dict | None:
         facts = {key: raw[key] for key in _FACTS}
         if any(value is not None for value in facts.values()):
             _facts(facts)
-        elif raw["owner_session_id"] is not None or raw["expires_at"] is not None:
+        elif any(raw.get(key) is not None for key in (
+            "owner_session_id", "expires_at", "attempted_expires_at",
+        )):
             raise ValueError
         if raw["owner_session_id"] is not None:
             _text(raw["owner_session_id"], "owner_session_id")
@@ -162,6 +167,16 @@ def _read(container_id: str) -> dict | None:
         if expiry is not None and (
             type(expiry) not in (int, float) or not math.isfinite(expiry) or expiry <= 0
         ):
+            raise ValueError
+        attempted = raw.setdefault("attempted_expires_at", expiry)
+        if attempted is not None and (
+            type(attempted) not in (int, float) or not math.isfinite(attempted)
+            or attempted <= 0 or (expiry is not None and attempted < expiry)
+        ):
+            raise ValueError
+        if expiry is not None and attempted is None:
+            raise ValueError
+        if attempted is not None and raw["owner_session_id"] is None:
             raise ValueError
     except (KeyError, TypeError, ValueError, RuntimeError):
         raise RuntimeError("Container task binding is invalid; refusing admission") from None
@@ -182,6 +197,7 @@ def register_birth(container_id: str, binding_id: str) -> None:
     write_json_exclusive(_path(container_id), {
         **dict.fromkeys(_FACTS), "version": 1, "container_id": container_id,
         "binding_id": binding_id, "owner_session_id": None, "expires_at": None,
+        "attempted_expires_at": None,
     })
 
 
@@ -274,7 +290,7 @@ def project(name: str, expected_container_id: str, request: object) -> dict:
         binding = verify_binding(expected_container_id, request["binding_id"])
         if binding["owner_session_id"] not in (None, owner):
             raise RuntimeError("Physical container native session cannot be rebound; recreate it")
-        if binding["expires_at"] is not None and expiry < binding["expires_at"]:
+        if binding["attempted_expires_at"] is not None and expiry < binding["attempted_expires_at"]:
             raise RuntimeError("Task credential rotation cannot move expiry backwards")
         target = resolve_live_exec_target(
             name, dispatch_binding_id=binding["binding_id"],
@@ -286,8 +302,9 @@ def project(name: str, expected_container_id: str, request: object) -> dict:
         )
         if name in holds:
             raise RuntimeError("Container lifecycle is busy; refusing credential delivery")
-        # Retain the native-session fence even if Docker publication is interrupted.
+        # Publication may succeed before its acknowledgement; fence the attempt first.
         binding["owner_session_id"] = owner
+        binding["attempted_expires_at"] = expiry
         atomic_write_json(_path(expected_container_id), binding)
         inspected = lifecycle.inspect_container(expected_container_id)
         if inspected.get("Id") != expected_container_id:
@@ -370,8 +387,46 @@ def _initialize_worker_lock(target, inspected: dict) -> None:
         raise RuntimeError("Restricted worker lock initialization failed")
 
 
+def probe_worker_liveness(container_id: str, inspected: dict) -> SessionLiveness:
+    """Probe the guest-held lock, independent of host wrapper process lifetime."""
+    try:
+        if inspected.get("Id") != container_id:
+            raise RuntimeError("Container physical identity changed before worker probe")
+        _initialize_worker_lock(SimpleNamespace(container_id=container_id), inspected)
+        deadline = time.monotonic() + 30
+        bash, home = resolve_executable(container_id, "0", inspected, kind="bash", deadline=deadline)
+        flock, _ = resolve_executable(container_id, "0", inspected, kind="flock", deadline=deadline)
+        script = (
+            f"exec 9<{shlex.quote(WORKER_LOCK)} || exit 1; "
+            f"{shlex.quote(flock)} --nonblock --conflict-exit-code 75 9"
+        )
+        result = subprocess.run(
+            [*sanitized_exec_prefix(container_id, "0", home),
+             bash, "--noprofile", "--norc", "-c", script],
+            stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=30,
+            creationflags=no_window_flags(),
+        )
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        return SessionLiveness("unknown", [], [], "restricted worker lock probe failed")
+    if result.returncode == 75:
+        return SessionLiveness("active", [], [], "active restricted worker lock present")
+    if result.returncode != 0:
+        return SessionLiveness("unknown", [], [], "restricted worker lock probe failed")
+    return SessionLiveness("idle", [], [])
+
+
 def launch_task(args, run_stdio) -> int:
     """Admit the explicit task lane without widening ordinary provider launches."""
+    from .lease import ProviderAdmissionError
+
+    try:
+        return _launch_task(args, run_stdio)
+    except ProviderAdmissionError as busy:
+        print(str(busy), file=sys.stderr)
+        return 75
+
+
+def _launch_task(args, run_stdio) -> int:
     from .config import load_config
     from .lease import session_admission
     from .resolver import _append_copilot_args, resolve_extra_copilot_args, resolve_live_exec_target
