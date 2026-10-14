@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import installer as inst
 from . import output, reclaim, sessions, tracking, worktree_identity
@@ -236,6 +238,7 @@ def cmd_dev(args) -> int:
         result = subprocess.run(
             ["pwsh", "-NoProfile", "-File", str(script), dev_action],
             cwd=str(repo_dir),
+            **no_window_kwargs(),
         )
         return result.returncode
 
@@ -817,17 +820,11 @@ def _render_doctor_report(
 
     lag = report.get("runtime_lag") or []
     if lag:
+        from .runtime_identity import drift_description
+
         print(f"  ! Runtime drift: {len(lag)} service(s) differ from installed payload/build")
         for entry in lag:
-            if entry.get("running_generation"):
-                running = f"build {entry['running_generation']} ({entry.get('running_slot') or 'unknown slot'})"
-                installed = f"{entry['installed_generation']} ({entry.get('installed_slot') or 'unknown slot'})"
-            else:
-                running, installed = entry["running"], entry["payload"]
-            print(
-                f"      - {entry['service']}: running {running} but {installed} installed -> "
-                f"{entry['service']} service restart"
-            )
+            print(drift_description(entry))
         print(
             "      (a new launch heals this automatically; restart to "
             "converge this running session sooner)"
@@ -892,6 +889,7 @@ def cmd_register_project_entry(args) -> int:
                     capture_output=True,
                     text=True,
                     timeout=5,
+                    **no_window_kwargs(),
                 )
                 if result.returncode == 0:
                     remote = result.stdout.strip()

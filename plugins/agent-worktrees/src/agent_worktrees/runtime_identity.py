@@ -12,6 +12,19 @@ PROCESS_GENERATION = BUILD_INFO.get("runtime_generation")
 PROCESS_VERSION = BUILD_INFO.get("version")
 
 
+def drift_description(entry: dict) -> str:
+    """Describe recorded build identities, retaining legacy version-only output."""
+    if entry.get("running_generation"):
+        running = f"build {entry['running_generation']} ({entry.get('running_slot') or 'unknown slot'})"
+        installed = f"{entry['installed_generation']} ({entry.get('installed_slot') or 'unknown slot'})"
+    else:
+        running, installed = entry["running"], entry["payload"]
+    return (
+        f"      - {entry['service']}: running {running} but {installed} installed -> "
+        f"{entry['service']} service restart"
+    )
+
+
 def monitor_record(root: Path) -> dict | None:
     from . import locks
 

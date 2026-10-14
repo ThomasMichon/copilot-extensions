@@ -65,6 +65,7 @@ def _entry(tmp_path: Path, extension: str, contextual: bool = False) -> tuple[Pa
             header += (
                 "$ErrorActionPreference = 'Stop'\n"
                 "$contextPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path\n"
+                "$RuntimeInputPlugin = $contextPayload\n"
                 "$InstallDir = Join-Path $env:USERPROFILE 'runtime'\n"
                 "$hostExe = (Get-Process -Id $PID).Path\n"
                 "if ($true) {\n"
@@ -73,6 +74,8 @@ def _entry(tmp_path: Path, extension: str, contextual: bool = False) -> tuple[Pa
             header += (
                 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
                 'PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"\n'
+                '__aw_origin_payload="$PLUGIN_DIR"\n'
+                '__aw_runtime_inputs="$PLUGIN_DIR"\n'
                 '__aw_install_root="$HOME/runtime"\n'
                 'mkdir -p "$__aw_install_root"\n'
                 'if true; then\n'

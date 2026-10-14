@@ -16,6 +16,22 @@ from agent_worktrees import runtime_deployment as deployment
 REPO = Path(__file__).resolve().parents[3]
 
 
+def test_runtime_drift_description_preserves_build_and_legacy_evidence():
+    from agent_worktrees.runtime_identity import drift_description
+
+    assert drift_description({
+        "service": "example", "running": "1.0.0", "payload": "2.0.0",
+    }) == "      - example: running 1.0.0 but 2.0.0 installed -> example service restart"
+    assert drift_description({
+        "service": "example", "running_generation": "original",
+        "installed_generation": "candidate", "running_slot": "dev",
+        "installed_slot": "1.0.0",
+    }) == (
+        "      - example: running build original (dev) but candidate (1.0.0) installed -> "
+        "example service restart"
+    )
+
+
 @pytest.fixture
 def engine(monkeypatch):
     monkeypatch.syspath_prepend(str(REPO / "plugins" / "agent-worktrees" / "scripts"))

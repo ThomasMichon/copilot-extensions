@@ -568,13 +568,13 @@ def _assert_posix_namespace_slot_rejected(
 import os, pathlib, sys, time
 if "verify_runtime_candidate" in sys.argv:
     pathlib.Path(os.environ["HEALTH_REACHED"]).write_text("reached")
-    if os.environ["NAMESPACE_HEALTH_STALL"] == "1":
-        time.sleep(120)
     slot = pathlib.Path(__file__).parent.parent
     packages = list(slot.glob("lib/python*/site-packages/agent_worktrees"))
     assert len(packages) == 1, packages
     for name in ("__init__.py", "__main__.py"):
         (packages[0] / name).unlink()
+    if os.environ["NAMESPACE_HEALTH_STALL"] == "1":
+        time.sleep(120)
 real = pathlib.Path(__file__).with_name("python-real")
 os.execv(str(real), [str(real), *sys.argv[1:]])
 """

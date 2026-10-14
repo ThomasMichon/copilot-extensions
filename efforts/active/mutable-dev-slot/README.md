@@ -257,6 +257,40 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Journal
 
+### 2026-10-14 -- Native bootstrap reached; remaining CI failures classified
+
+The second full candidate run,
+[38563025573](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38563025573),
+exercised real lean provisioning and namespace-package rejection on Ubuntu with
+the materialized payload and real UV construction. Both passed. The watchdog
+fixture reached installed health and observed its bounded stage timeout, but
+its final namespace assertion failed because the injected stall preceded the
+fixture's corruption. The fault now precedes the stall; neither a missing
+health invocation nor an earlier construction timeout can satisfy the test.
+Worktrees still stopped in sub-suite four of sixteen, so the complete
+dev/source-removal/deployed-release fixture remains unexercised by CI.
+
+The remaining guard failures were two maintenance subprocess calls lacking the
+shared headless helper and a minimal CWD fixture missing the newly separated
+authority/input roots. Those calls now use `no_window_kwargs`; the generation
+diagnostic formatter moved to its existing identity owner to preserve the
+maintenance module's ceiling. Both minimal native staging fixtures initialize
+the same roots as their real callers.
+
+The Windows fleet lane passed its runner and provenance selections, then hit
+its 120-second aggregate bound partway through the full fleet portfolio.
+The same contained standalone suite passed locally: 604 passed, six skipped
+in 114.44 seconds, leaving no credible hosted-runner headroom. Only that
+Windows aggregate is now 300 seconds, with its enclosing job ten minutes;
+Linux remains 120 seconds, individual test bounds and the nine-plugin full
+matrix are unchanged. This is not a runtime construction deadline change.
+
+The integrated local follow-up passed 256 contracts with six platform skips;
+fleet-CI/headless guard tests passed 58. Full native CI must still validate the
+next published head. Eight other full-plugin suites and the standalone
+worktree-manager again passed, but neither their results nor the real bootstrap
+slice completes the first adopter, the portfolio, or the active effort.
+
 ### 2026-10-14 -- Native CI candidate published as a draft
 
 The Python-owned runtime-admission and deployed dev-lifecycle candidate is
