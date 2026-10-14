@@ -596,3 +596,20 @@ requested contract.
   Clean-room provisioning and live rollout were not exercised: this correction
   changes neither installation nor runtime deployment, and this worker has no
   rollout authorization. Review, CI, merge and release remain coordinator-owned.
+
+- **Ordinary-client identity correction (PR #6542):** Exact published-head CI
+  run `38541143072`, job `115784120648`, caught a genuine regression: globally
+  wrapping the supervisor client changed the ordinary label-route snapshot's
+  client identity. Keep the existing assertion unchanged. Four fail-first
+  cases reproduced it, including actual claim/validate/outcome RPC host proofs
+  for local, foreign and unknown hosts. The supervisor now retains its supplied
+  client and uses its existing host-binding adapter only at housekeeping
+  conclusion boundaries; no client lifetime, allocation or auth policy changes.
+  The combined ordinary-Bridge/recovery portfolio passed 160 cases, legacy
+  supervisor conclusion flows passed 85, and seed/removal protocol tests passed
+  48. Host, generation, outcome, session, exact-pair and removal-v4 guards remain
+  intact. The additional combined identity/lifetime, auth and real native
+  portfolio passed 84 cases under unchanged budgets. This coupled correction
+  uses the same PR and existing patch changefile. Original native/Git
+  uncertainties remain separate and unproven;
+  source publication, fresh review/CI and any release remain coordinator custody.

@@ -207,7 +207,8 @@ class Supervisor:
         reserving_timeout: float = _MIN_RESERVING_TIMEOUT_SECONDS,
         consistency_sweep: bool = True,
     ):
-        self.client = HostBoundConclusionClient(client, machine)
+        self.client = client
+        self._conclusion_client = HostBoundConclusionClient(client, machine)
         self.spawn_fn = spawn_fn
         self.repo = repo
         self.labels = set(labels) if labels else None
@@ -830,7 +831,7 @@ class Supervisor:
             )
             if target_missing is True:
                 try:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         key,
                         conclusion_state=_CONCLUSION_COMPLETE,
                         conclusion_detail=json.dumps(
@@ -1579,7 +1580,7 @@ class Supervisor:
                     continue
                 if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                     try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
+                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                     except DispatchError:
                         continue
                     if not claim.get("claimed"):
@@ -1587,7 +1588,7 @@ class Supervisor:
                     claim_token = claim.get("claim_token")
                     held_payload = self._hold_pending_cleanup(retry_payload)
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             res["key"],
                             conclusion_state=_CONCLUSION_HELD,
                             conclusion_detail=json.dumps(
@@ -1604,7 +1605,7 @@ class Supervisor:
                 if not session_due and not worktree_due:
                     continue
                 try:
-                    claim = self.client.claim_spawn_conclusion_retry(res["key"])
+                    claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                 except DispatchError:
                     log.exception(
                         "failed to claim session cleanup retry for %s",
@@ -1615,7 +1616,7 @@ class Supervisor:
                     continue
                 claim_token = claim.get("claim_token")
                 try:
-                    self.client.validate_spawn_conclusion_claim(
+                    self._conclusion_client.validate_spawn_conclusion_claim(
                         res["key"],
                         claim_token,
                     )
@@ -1905,7 +1906,7 @@ class Supervisor:
             else:
                 if body_already_released and claim_token is None:
                     try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
+                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                     except DispatchError:
                         log.exception(
                             "failed to claim cleanup retry for %s",
@@ -1916,7 +1917,7 @@ class Supervisor:
                         continue
                     claim_token = claim.get("claim_token")
                     try:
-                        self.client.validate_spawn_conclusion_claim(
+                        self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
                             claim_token,
                         )
@@ -1924,7 +1925,7 @@ class Supervisor:
                         continue
                 elif body_already_released and claim_token is not None:
                     try:
-                        self.client.validate_spawn_conclusion_claim(
+                        self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
                             claim_token,
                         )
@@ -1992,7 +1993,7 @@ class Supervisor:
                     detail_outcome,
                 )
                 if body_already_released:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         res["key"],
                         conclusion_state=conclusion_state,
                         conclusion_detail=conclusion_detail,
@@ -2273,7 +2274,7 @@ class Supervisor:
                         ),
                     }
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             reservation["key"],
                             conclusion_state=(
                                 _CONCLUSION_HELD
@@ -2297,7 +2298,7 @@ class Supervisor:
                     "next_attempt_at": 0,
                 }
                 try:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         reservation["key"],
                         conclusion_state=_CONCLUSION_PENDING,
                         conclusion_detail=json.dumps(
@@ -2331,7 +2332,7 @@ class Supervisor:
                         ),
                     }
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             reservation["key"],
                             conclusion_state=(
                                 _CONCLUSION_HELD
@@ -2454,7 +2455,7 @@ class Supervisor:
                         continue
                     if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         try:
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 conclusion_state=_CONCLUSION_HELD,
                                 conclusion_detail=res.get("conclusion_detail") or "{}",
@@ -2505,7 +2506,7 @@ class Supervisor:
                             else _CONCLUSION_PENDING
                         )
                         try:
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 conclusion_state=state,
                                 conclusion_detail=json.dumps(
@@ -2656,15 +2657,15 @@ class Supervisor:
                         continue
                     if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         try:
-                            claim = self.client.claim_spawn_conclusion_retry(res["key"])
+                            claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                             if not claim.get("claimed"):
                                 continue
                             claim_token = claim.get("claim_token")
-                            self.client.validate_spawn_conclusion_claim(
+                            self._conclusion_client.validate_spawn_conclusion_claim(
                                 res["key"],
                                 claim_token,
                             )
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 detail=detail,
                                 conclusion_state=_CONCLUSION_HELD,
@@ -2706,7 +2707,7 @@ class Supervisor:
                                     else _CONCLUSION_PENDING
                                 )
                                 try:
-                                    self.client.record_spawn_conclusion(
+                                    self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=state,
                                         conclusion_detail=json.dumps(
@@ -2739,7 +2740,7 @@ class Supervisor:
                                     else _CONCLUSION_PENDING
                                 )
                                 try:
-                                    self.client.record_spawn_conclusion(
+                                    self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=state,
                                         conclusion_detail=json.dumps(
@@ -2765,7 +2766,7 @@ class Supervisor:
                                     "same_owner_nudge": "delivered",
                                 }
                                 try:
-                                    res = self.client.record_spawn_conclusion(
+                                    res = self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=_CONCLUSION_PENDING,
                                         conclusion_detail=json.dumps(
@@ -2793,7 +2794,7 @@ class Supervisor:
                         continue
                 if policy_applies and conclusion_claim_token is None:
                     try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
+                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                     except DispatchError:
                         log.exception(
                             "failed to claim terminal cleanup retry for %s",
@@ -2804,7 +2805,7 @@ class Supervisor:
                         continue
                     conclusion_claim_token = claim.get("claim_token")
                     try:
-                        self.client.validate_spawn_conclusion_claim(
+                        self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
                             conclusion_claim_token,
                         )
@@ -2842,7 +2843,7 @@ class Supervisor:
                         separators=(",", ":"),
                     )
                     if conclusion_claim_token is not None:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             res["key"],
                             conclusion_state=conclusion_state,
                             conclusion_detail=encoded_conclusion,

@@ -76,6 +76,9 @@ The pre-existing release obligation is retained in that immutable fence too.
 Recovery lease claim, validation and conclusion publication carry the
 supervisor's resolved `claimant_machine`. Each must match the retained creating
 host before granting or using a lease, including session-ending side effects.
+The host binding is confined to those housekeeping RPCs. Ordinary spawning and
+label-routed snapshots retain the supplied client's identity and lifetime;
+the supervisor does not globally substitute a proxy client.
 Unknown/empty or foreign claimants reject without changing progress or stealing
 another host's lease; the coordinator never guesses a local hostname. Ordinary
 conclusion rows without recovery history retain their compatible optional-host

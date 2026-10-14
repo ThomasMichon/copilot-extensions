@@ -605,6 +605,71 @@ def test_foreign_supervisor_cannot_consume_recovery_or_steal_lease(held, compone
         assert len(ended if component == "session" else worktrees) == 1
 
 
+@pytest.mark.parametrize("claimant", ["host", "other-host", None])
+def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch, claimant):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.spawn_factories import make_headless_spawn, make_label_routed_spawn
+    from agent_dispatch.supervisor import Supervisor
+    from agent_dispatch import embody
+    from tests._helpers import TEST_REPO
+
+    queue, _, key = held
+    apply(held, preview(held))
+    before = asdict(queue.get_reservation(key))
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    rpc_hosts = []
+
+    @app.middleware("http")
+    async def observe_lease_host(request, call_next):
+        if (request.method == "POST" and request.url.path.startswith("/spawn-reservations/")
+                and request.url.path.rsplit("/", 1)[-1] in {"claim", "validate", "conclusion"}):
+            body = await request.json()
+            rpc_hosts.append((request.url.path.rsplit("/", 1)[-1], body.get("claimant_machine")))
+        return await call_next(request)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("ordinary Bridge allocation must remain owned by the real spawn")
+
+    monkeypatch.setattr(embody, "prepare_reusable_worktree", forbidden)
+    routed = make_label_routed_spawn(lambda _: (False, {}), overrides={
+        "review": make_headless_spawn(agent="local", charter="reviewer"),
+    })
+    worktrees = []
+    with DispatchClient("http://testserver") as client:
+        client._http.close()
+        client._http = TestClient(app)
+        transport = client._http
+        ordinary = client.create("ordinary Bridge fixture", repo=TEST_REPO)
+        reservation, _ = queue.reserve_spawn(ordinary["id"])
+        ordinary_before = asdict(queue.get(ordinary["id"]))
+        supervisor = Supervisor(
+            client, spawn_fn=routed, repo=TEST_REPO, machine=claimant, nudge=False,
+            attempt_conclusion_fn=lambda *a: worktrees.append(a) or {
+                "action": "primed", "managed_gc_eligible": True,
+            },
+        )
+        snapshot = supervisor._prepare_spawn_task(
+            {**ordinary, "labels": ["review"]}, {"key": reservation.key},
+        )
+        supervisor.release_requested_bodies()
+        assert rpc_hosts and all(host == claimant for _, host in rpc_hosts)
+        if claimant == "host":
+            assert {"claim", "validate", "conclusion"} <= {stage for stage, _ in rpc_hosts}
+            assert queue.get_reservation(key).conclusion_state == "complete"
+            assert len(worktrees) == 1
+        else:
+            assert {stage for stage, _ in rpc_hosts} == {"claim"}
+            assert asdict(queue.get_reservation(key)) == before
+            assert worktrees == []
+        assert asdict(queue.get(ordinary["id"])) == ordinary_before
+        assert snapshot["_spawn_client"] is client
+        assert supervisor.client is client
+        assert "spawn_worktree" not in snapshot
+    assert transport.is_closed
+
+
 def test_legacy_conclusion_rpc_without_recovery_keeps_optional_host_behavior(held):
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
