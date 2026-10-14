@@ -2163,7 +2163,9 @@ Dependabot's seven-day cooldown is complementary, not a substitute for that
 guard or the resolver cutoff.
 
 `installer_dependency_policy.py` is the canonical stdlib-only installer policy,
-shipped beside each versioned runtime helper and the shared engine. The native
+with private configuration-retention primitives in
+`installer_dependency_config.py`; both ship beside each versioned runtime helper
+and the shared engine. The native
 UV configuration probe is bounded, captured without printing credential-bearing
 settings, and fail-closed on an unsupported projection. Installation uses the
 stronger of seven days or the configured global cutoff, preserves stricter

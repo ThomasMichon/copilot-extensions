@@ -21,7 +21,7 @@ import uv_editable_ref as uer
 REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installer-engine"
 FILES = ("installer-engine.ps1", "installer-engine.sh")
-SUPPORT_FILES = ("installer_dependency_policy.py",)
+SUPPORT_FILES = ("installer_dependency_policy.py", "installer_dependency_config.py")
 INSTALLER_SCRIPTS = ("install.ps1", "install.sh")
 ADOPTERS = (
     "agent-pull-requests",
@@ -41,7 +41,7 @@ def support_files(canonical_dir: Path) -> tuple[str, ...]:
         (canonical_dir / name).read_text(encoding="utf-8")
         for name in FILES if (canonical_dir / name).is_file()
     ]
-    return tuple(name for name in SUPPORT_FILES if any(name in body for body in bodies))
+    return SUPPORT_FILES if any(SUPPORT_FILES[0] in body for body in bodies) else ()
 
 _LOCAL_LINES = {
     "ps1": ". (Join-Path $PSScriptRoot 'installer-engine.ps1')",

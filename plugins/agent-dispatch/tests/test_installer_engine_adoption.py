@@ -169,6 +169,38 @@ def _prelude(ext: str, engine: Path = ENGINE) -> str:
     )
 
 
+def _retained_uv_fixture_prelude() -> str:
+    return """
+import re, tempfile, tomllib
+if args[:2] == ["pip", "install"]:
+    config = Path(args[args.index("--config-file") + 1]).resolve()
+    private = config.parent
+    assert config.is_file() and not config.is_symlink() and private.name == "inputs"
+    assert private.parent.parent.samefile(Path(tempfile.gettempdir()))
+    if os.name != "nt":
+        assert private.stat().st_uid == os.getuid() and private.stat().st_mode & 0o077 == 0
+    expected = json.loads(os.environ.get("TEST_UV_EXPECTED_SOURCES", "{}"))
+    for index, argument in enumerate(args):
+        match = re.fullmatch(r"(.*?)(\\[[^\\]]+\\])?", argument)
+        source = Path(match[1])
+        if not source.is_dir() or not (source / "pyproject.toml").is_file():
+            continue
+        project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+        original = Path(expected[project["name"]])
+        assert source.resolve() != original.resolve() and source.resolve().is_relative_to(private)
+        assert project == tomllib.loads((original / "pyproject.toml").read_text())["project"]
+        for member in original.rglob("*.py"):
+            assert (source / member.relative_to(original)).read_bytes() == member.read_bytes()
+        args[index] = str(original) + (match[2] or "")
+    position = args.index("--config-file")
+    del args[position:position + 2]
+    if "--config-setting" in args:
+        position = args.index("--config-setting")
+        assert args[position + 1] == "editable_mode=compat"
+        del args[position:position + 2]
+"""
+
+
 def _fake_uv(tmp_path: Path) -> Path:
     driver = tmp_path / "uv-driver.py"
     driver.write_text(
@@ -176,8 +208,9 @@ def _fake_uv(tmp_path: Path) -> Path:
 from pathlib import Path
 args = sys.argv[1:]
 if args[:3] == ["pip", "install", "--show-settings"]:
-    print("PipInstallSettings {\\n    index_locations: IndexLocations {\\n        flat_index: [],\\n    },\\n    exclude_newer: ExcludeNewer {\\n        global: None,\\n        package: ExcludeNewerPackage({}),\\n    },\\n}")
+    print("PipInstallSettings { settings: PipSettings {\\n    index_locations: IndexLocations {\\n        flat_index: [],\\n    },\\n    exclude_newer: ExcludeNewer {\\n        global: None,\\n        package: ExcludeNewerPackage({}),\\n    },\\n}, }")
     raise SystemExit(0)
+""" + _retained_uv_fixture_prelude() + """
 def normalized(arguments):
     result = []
     iterator = iter(arguments)
@@ -281,6 +314,7 @@ def test_package_retry_keeps_optional_extra_and_exact_exit_code(tmp_path, ext, m
     env["TEST_UV_MODE"] = mode
     plugin = tmp_path / "plugin"
     engine = _stage_owned_source(plugin, {})
+    env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({"agent-dispatch": str(plugin)})
     spec = str(plugin) + "[mcp]"
     args = ["--python", sys.executable, "--reinstall-package", "agent-dispatch", spec]
     if ext == "sh":
@@ -680,11 +714,14 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 4)
             )
     for name in (
         "installer_dependency_policy.py",
+        "installer_dependency_config.py",
         "versioned_runtime.py",
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
     ):
-        source = ENGINE if name == "installer_dependency_policy.py" else PLUGIN / "scripts"
+        source = ENGINE if name in (
+            "installer_dependency_policy.py", "installer_dependency_config.py",
+        ) else PLUGIN / "scripts"
         assert (snapshot / "scripts" / name).read_bytes() == (source / name).read_bytes()
     project = tomllib.loads((snapshot / "pyproject.toml").read_text())
     assert project["tool"]["uv"]["sources"] == {
@@ -696,8 +733,29 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 4)
     assert nested["tool"]["uv"]["sources"]["agent-dropin-registry"] == {
         "path": "../dropin-registry"
     }
+
+
+def test_materialized_snapshot_admits_install_without_authoring_checkout(tmp_path):
+    env = _env(tmp_path)
+    plugin = _fixture_checkout(tmp_path)
+    runtime = tmp_path / "runtime"
+    stamped = _run(
+        "ps1", _snapshot_prelude() + f"""
+$PluginDir='{plugin}'
+$InstallDir='{runtime}'
+$LocalBin='{tmp_path / "local-bin"}'
+$SrcVersion='1.2.3'
+$Force=$false
+$script:GlobalActivationLockTimeoutSeconds=10
+function Deploy-SelfProvisioningBinstub {{ }}
+Invoke-Stamp
+""", tmp_path, env,
+    )
+    assert stamped.returncode == 0, stamped.stdout + stamped.stderr
+    snapshot = Path((runtime / "payload-dir").read_text().strip())
     shutil.move(str(plugin.parents[1]), str(tmp_path / "authoring-unavailable"))
     uv = _fake_uv(tmp_path)
+    env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({"agent-dispatch": str(snapshot)})
     proof = _run(
         "ps1",
         _prelude("ps1", snapshot / "scripts")

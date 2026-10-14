@@ -61,14 +61,32 @@ def _run(
     # display formatting -- stub output must go to a marker FILE, never
     # stdout, so that pipeline can never swallow the proof of what ran.
     marker = isolated_home.parent / "marker.txt"
+    original = plugin_dir / "libs" / "agent-procutil"
+    if not original.is_dir():
+        original = plugin_dir.parents[1] / "libs" / "agent-procutil"
     uv = fake_uv(
         isolated_home.parent,
+        "import tomllib\n"
+        "candidate = pathlib.Path(sys.argv[sys.argv.index('--python') + 2])\n"
+        f"original = pathlib.Path({str(original)!r})\n"
+        "private = pathlib.Path(sys.argv[sys.argv.index('--config-file') + 1]).parent\n"
+        "assert candidate.resolve().is_relative_to(private.resolve())\n"
+        "assert candidate.resolve() != original.resolve()\n"
+        "assert tomllib.loads((candidate / 'pyproject.toml').read_text())['project'] == "
+        "tomllib.loads((original / 'pyproject.toml').read_text())['project']\n"
+        "for member in original.rglob('*.py'):\n"
+        " assert (candidate / member.relative_to(original)).read_bytes() == member.read_bytes()\n"
+        "sys.argv[sys.argv.index('--python') + 2] = str(original)\n"
         f"with pathlib.Path({str(marker)!r}).open('a', encoding='utf-8') as stream:\n"
         " stream.write('UV_INSTALL_ARGS:' + ' '.join(sys.argv[1:]) + '\\n')\n",
     )
     policy = plugin_dir / "scripts/installer_dependency_policy.py"
     policy.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(PLUGIN / "scripts/installer_dependency_policy.py", policy)
+    shutil.copy2(
+        PLUGIN / "scripts/installer_dependency_config.py",
+        policy.with_name("installer_dependency_config.py"),
+    )
     uv_stub = f"""
 function Invoke-IndexUvPipInstall {{
     & '{sys._base_executable}' -I '{policy}' --uv '{uv}' -- @args
@@ -123,6 +141,7 @@ $ErrorActionPreference = 'Continue'
         text=True,
         encoding="utf-8",
         env=env,
+        cwd=plugin_dir,
         timeout=30,
     )
     return proc, marker

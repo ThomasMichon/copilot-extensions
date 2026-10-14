@@ -144,7 +144,7 @@ def run_ps(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
     )
     return subprocess.run(
         [pwsh, "-NoProfile", "-File", str(harness)],
-        env=environment(tmp_path), capture_output=True, text=True, timeout=25,
+        cwd=tmp_path, env=environment(tmp_path), capture_output=True, text=True, timeout=25,
     )
 
 
@@ -503,7 +503,8 @@ def test_powershell_snapshot_is_immutable_self_contained_and_ordered(tmp_path: P
         shutil.copy2(PLUGIN / name, source / name)
     for ext in ("sh", "ps1"):
         shutil.copy2(PLUGIN / "scripts" / f"install.{ext}", source / "scripts" / f"install.{ext}")
-    shutil.copy2(ENGINE / "installer_dependency_policy.py", source / "scripts/installer_dependency_policy.py")
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+        shutil.copy2(ENGINE / name, source / "scripts" / name)
     (source / "server").mkdir()
     shutil.copy2(PLUGIN / "server/pyproject.toml", source / "server/pyproject.toml")
     for library in ("zdd", "agent-procutil", "dropin-registry"):

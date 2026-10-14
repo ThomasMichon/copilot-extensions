@@ -695,8 +695,11 @@ try {
     Write-Host '  Try: agent-pull-requests --version' -ForegroundColor DarkGray
     exit 0
 } finally {
-    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
-        Stop-RuntimeConstruction
+    try {
+        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+            Stop-RuntimeConstruction
+        }
+    } finally {
+        if ($needsInstallLock) { Exit-InstallLock }
     }
-    if ($needsInstallLock) { Exit-InstallLock }
 }

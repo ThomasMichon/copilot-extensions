@@ -38,6 +38,10 @@ def _run(
     scripts.mkdir(parents=True)
     policy = scripts / "installer_dependency_policy.py"
     shutil.copyfile(INSTALLER.parent / policy.name, policy)
+    shutil.copyfile(
+        INSTALLER.parent / "installer_dependency_config.py",
+        scripts / "installer_dependency_config.py",
+    )
     script = f"""
 $ErrorActionPreference = 'Stop'
 function Write-Fail {{ param([string]$Message) }}

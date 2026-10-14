@@ -62,6 +62,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 import venv
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -107,9 +108,9 @@ else:
     assert len(sources) == 1, args
     project = sources[0]
     assert project.resolve().is_relative_to(root.resolve())
-    text = (project / 'pyproject.toml').read_text()
-    name = re.search(r'^name\\s*=\\s*"([^"]+)"', text, re.M)[1]
-    version = re.search(r'^version\\s*=\\s*"([^"]+)"', text, re.M)[1]
+    metadata = tomllib.loads((project / 'pyproject.toml').read_text())['project']
+    name = metadata['name']
+    version = metadata['version']
     source = project / 'src'
     assert source.is_dir()
     info = site / (name.replace('-', '_') + '-' + version + '.dist-info')
@@ -251,6 +252,7 @@ def _stage_payload(tmp_path: Path) -> Path:
     staged_libs.mkdir(parents=True, exist_ok=True)
     for lib in (
         "installer-engine",
+        "versioned-runtime",
         "config-migrate",
         "agent-procutil",
         "dropin-registry",
@@ -606,6 +608,7 @@ def test_provision_publishes_durable_compatibility_wrappers(
     provision = subprocess.run(
         command,
         env=env,
+        cwd=payload,
         capture_output=True,
         text=True,
         timeout=420,
@@ -687,6 +690,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "installer_dependency_policy.py",
+        "installer_dependency_config.py",
     ):
         assert (snapshot / "scripts" / component).is_file(), component
     assert '. "$SCRIPT_DIR/installer-engine.sh"' in (
@@ -703,6 +707,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     provision = subprocess.run(
         invoke,
         env=env,
+        cwd=snapshot,
         capture_output=True,
         text=True,
         timeout=420,

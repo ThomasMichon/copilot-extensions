@@ -38,6 +38,10 @@ def _run(bash: str, plugin_dir: Path, have_uv: bool) -> subprocess.CompletedProc
     scripts.mkdir(parents=True)
     policy = scripts / "installer_dependency_policy.py"
     shutil.copyfile(INSTALLER.parent / policy.name, policy)
+    shutil.copyfile(
+        INSTALLER.parent / "installer_dependency_config.py",
+        scripts / "installer_dependency_config.py",
+    )
     script = f"""
 set -euo pipefail
 _fail() {{ echo "FAIL:$1" >&2; exit 1; }}

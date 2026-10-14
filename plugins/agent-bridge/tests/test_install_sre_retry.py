@@ -51,10 +51,10 @@ def _run_harness(
         "arguments = sys.argv[1:]\n"
         "assert arguments[:2] == ['pip', 'install']\n"
         "if '--show-settings' in arguments:\n"
-        "    print('PipInstallSettings {\\n"
+        "    print('PipInstallSettings { settings: PipSettings {\\n"
         "    index_locations: IndexLocations { indexes: [], flat_index: [], },\\n"
         "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\\n"
-        "}')\n"
+        "}, }')\n"
         "    sys.exit(0)\n"
         "assert '--reinstall' in arguments and '--quiet' in arguments\n"
         "cutoff = datetime.datetime.fromisoformat(arguments[arguments.index('--exclude-newer') + 1].replace('Z', '+00:00'))\n"
@@ -91,6 +91,7 @@ function Start-Sleep {{ param([int]$Seconds) Add-Content -LiteralPath '{delays_f
     )
     return subprocess.run(
         [exe, "-NoProfile", "-File", str(harness)],
+        cwd=tmp_path,
         check=True,
         capture_output=True,
         text=True,

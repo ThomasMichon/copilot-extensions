@@ -129,6 +129,16 @@ lane runs configured-registry queries and `npm ci` against a controlled registry
 newer or unknown releases must refuse before artifact download. These helpers
 perform no production service mutations.
 
+The standalone runner's retained-resource regressions build real Fleet and
+Index wheels with their declared setuptools backend; use a prepared test
+environment, not an older host setuptools installation. Installer fixtures
+must run from their own attributable payload or isolated working directory so
+UV does not discover unrelated checkout metadata. Retained-path assertions
+validate source identity, private ownership and content at the physical UV
+boundary before normalizing paths for ordering or retry comparisons.
+`tools/test_installer_finalizers.py` exercises production cleanup and exclusive
+lock reacquisition in the same still-live Windows PowerShell host.
+
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
 against the bundled `actions/github-script` runtime as well, download

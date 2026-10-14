@@ -222,6 +222,7 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         run_uv_install(
             "uv", ["--python", str(python), *overrides, *sources],
             trusted_source_roots=(REPO,),
+            retained_resource_roots=(REPO / "libs" / "versioned-runtime",),
             cwd=REPO,
             check=True,
             capture_output=True,

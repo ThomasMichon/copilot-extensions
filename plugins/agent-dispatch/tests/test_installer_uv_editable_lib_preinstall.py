@@ -68,8 +68,9 @@ def _run(pwsh: str, plugin_dir: Path, tmp_path: Path) -> subprocess.CompletedPro
 from pathlib import Path
 args = sys.argv[1:]
 if args[:3] == ["pip", "install", "--show-settings"]:
-    print("PipInstallSettings {\\n    index_locations: IndexLocations {\\n        flat_index: [],\\n    },\\n    exclude_newer: ExcludeNewer {\\n        global: None,\\n        package: ExcludeNewerPackage({}),\\n    },\\n}")
+    print("PipInstallSettings { settings: PipSettings {\\n    index_locations: IndexLocations {\\n        flat_index: [],\\n    },\\n    exclude_newer: ExcludeNewer {\\n        global: None,\\n        package: ExcludeNewerPackage({}),\\n    },\\n}, }")
     raise SystemExit(0)
+""" + _FIXTURES._retained_uv_fixture_prelude() + """
 assert args[:2] == ["pip", "install"], args
 with Path(os.environ["TEST_UV_LOG"]).open("a", encoding="utf-8") as stream:
     stream.write(json.dumps(args) + "\\n")
@@ -98,6 +99,9 @@ with Path(os.environ["TEST_UV_LOG"]).open("a", encoding="utf-8") as stream:
         env[key] = str(root)
     env["PATH"] = str(fake_bin)
     env["TEST_UV_LOG"] = str(tmp_path / "uv.jsonl")
+    env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({
+        package: str(library_root / lib) for package, lib in LIBRARIES.items() if lib != "zdd"
+    })
     env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
     script = f"""
 $ErrorActionPreference = 'Stop'

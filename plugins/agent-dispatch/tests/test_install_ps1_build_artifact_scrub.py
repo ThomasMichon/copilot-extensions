@@ -101,7 +101,7 @@ def _run_harness(
     driver = fixture_bin / "uv-driver.ps1"
     driver.write_text(
         """if ($args -contains '--show-settings') {
-    Write-Output 'PipInstallSettings {
+    Write-Output 'PipInstallSettings { settings: PipSettings {
     index_locations: IndexLocations {
         flat_index: [],
     },
@@ -109,7 +109,7 @@ def _run_harness(
         global: None,
         package: ExcludeNewerPackage({}),
     },
-}'
+}, }'
     exit 0
 }
 """
@@ -175,6 +175,7 @@ exit $code
     )
     return subprocess.run(
         [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        cwd=plugin_dir,
         capture_output=True,
         text=True,
         env=env,

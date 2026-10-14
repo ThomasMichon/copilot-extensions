@@ -108,7 +108,7 @@ def _run_harness(
     uv.write_text(
         f'#!{_BASH}\n'
         """if [[ " $* " == *" --show-settings "* ]]; then
-    printf '%s\\n' 'PipInstallSettings {
+    printf '%s\\n' 'PipInstallSettings { settings: PipSettings {
     index_locations: IndexLocations {
         flat_index: [],
     },
@@ -116,7 +116,7 @@ def _run_harness(
         global: None,
         package: ExcludeNewerPackage({}),
     },
-}'
+}, }'
     exit 0
 fi
 """
@@ -170,6 +170,7 @@ exit "$code"
     harness.chmod(0o755)
     return subprocess.run(
         [_BASH, str(harness)],
+        cwd=plugin_dir,
         capture_output=True,
         text=True,
         env=env,

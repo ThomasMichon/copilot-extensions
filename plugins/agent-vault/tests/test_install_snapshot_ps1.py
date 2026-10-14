@@ -505,6 +505,7 @@ def stamped_snapshot(tmp_path_factory):
     for helper in (
         "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py", "installer_dependency_policy.py",
+        "installer_dependency_config.py",
     ):
         assert (snapshot / "scripts" / helper).is_file()
     policy = runpy.run_path(str(snapshot / "scripts" / "installer_dependency_policy.py"))

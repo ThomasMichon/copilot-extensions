@@ -111,21 +111,21 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
     path = tmp_path / f"harness.{ext}"
     path.write_text(script, encoding="utf-8")
     command = ["bash", str(path)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(path)]
-    return subprocess.run(
-        command,
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=45,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            command, env=env, cwd=tmp_path, capture_output=True, text=True,
+            timeout=45, check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        log = tmp_path / "uv.jsonl"
+        calls = log.read_text() if log.is_file() else "no UV calls"
+        pytest.fail(f"native fixture timeout; UV calls: {calls}; stdout: {exc.stdout}; stderr: {exc.stderr}")
 
 
 def _fake_uv(tmp_path: Path) -> Path:
     driver = tmp_path / "uv-driver.py"
     driver.write_text(
-        """import json, os, subprocess, sys
+        """import json, os, subprocess, sys, tomllib
 from pathlib import Path
 args = sys.argv[1:]
 if "--show-settings" in args:
@@ -138,11 +138,35 @@ def unseasoned(arguments):
     result = []
     items = iter(arguments)
     for argument in items:
-        if argument == "--exclude-newer":
+        if argument in ("--exclude-newer", "--config-file"):
             next(items)
+        elif argument == "--config-setting":
+            assert next(items) == "editable_mode=compat"
         elif argument != "--reinstall":
             result.append(argument)
     return result
+expected_sources = json.loads(os.environ.get("TEST_UV_EXPECTED_SOURCES", "{}"))
+if expected_sources and args[:2] == ["pip", "install"]:
+    config = Path(args[args.index("--config-file") + 1]).resolve()
+    private_root = config.parent
+    assert config.is_file() and not config.is_symlink()
+    assert private_root.name == "inputs"
+    assert private_root.parent.parent.samefile(Path(os.environ["TEMP"]))
+    if os.name != "nt":
+        assert private_root.stat().st_uid == os.getuid()
+        assert private_root.stat().st_mode & 0o077 == 0
+    for index, argument in enumerate(args):
+        source = Path(argument)
+        if not source.is_dir() or not (source / "pyproject.toml").is_file():
+            continue
+        project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+        original = Path(expected_sources[project["name"]])
+        assert source.resolve() != original.resolve()
+        assert any(parent.samefile(private_root) for parent in source.resolve().parents)
+        assert project == tomllib.loads((original / "pyproject.toml").read_text())["project"]
+        for member in original.rglob("*.py"):
+            assert (source / member.relative_to(original)).read_bytes() == member.read_bytes()
+        args[index] = str(original)
 log = Path(os.environ["TEST_UV_LOG"])
 history = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 with log.open("a") as stream:
@@ -213,8 +237,10 @@ def _without_policy_arguments(arguments):
     result = []
     items = iter(arguments)
     for argument in items:
-        if argument == "--exclude-newer":
+        if argument in ("--exclude-newer", "--config-file"):
             next(items)
+        elif argument == "--config-setting":
+            assert next(items) == "editable_mode=compat"
         elif argument != "--reinstall":
             result.append(argument)
     return result
@@ -490,6 +516,29 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     logs = mm.materialize_uv_editable_refs(repository, canonical_root=REPO)
     skipped = [line for line in logs if line.startswith("SKIP")]
     assert not skipped, "\n".join(skipped)
+    # Ordering/retry tests need the real attributed metadata graph, not the
+    # product's whole source corpus (artifact tests exercise that separately).
+    for manifest_path in list(payload.rglob("pyproject.toml")):
+        project = manifest_path.parent
+        for directory in project.iterdir():
+            if directory.is_dir() and directory.name not in ("libs", "scripts"):
+                shutil.rmtree(directory)
+        scripts = project / "scripts"
+        if scripts.is_dir():
+            for member in scripts.iterdir():
+                if member.name in (
+                    "install.sh", "install.ps1",
+                    "installer-engine.sh", "installer-engine.ps1",
+                    "installer_dependency_policy.py", "installer_dependency_config.py",
+                ):
+                    continue
+                if member.is_dir():
+                    shutil.rmtree(member)
+                else:
+                    member.unlink()
+        code = project / "src"
+        code.mkdir()
+        (code / "fixture_source.py").write_text("value = 'retained-source-contract'\n")
     manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
     standalone = repository / "snapshots" / manifest["version"]
     if layout == "local":
@@ -507,7 +556,10 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     shutil.copyfile(PLUGIN / "pyproject.toml", payload / "pyproject.toml")
     engine = repository / "libs" / "installer-engine"
     engine.mkdir(parents=True, exist_ok=True)
-    for name in ("installer-engine.sh", "installer-engine.ps1", "installer_dependency_policy.py"):
+    for name in (
+        "installer-engine.sh", "installer-engine.ps1",
+        "installer_dependency_policy.py", "installer_dependency_config.py",
+    ):
         shutil.copyfile(ENGINE / name, engine / name)
     roster = repository / ".github" / "plugin" / "marketplace.json"
     roster.parent.mkdir(parents=True)
@@ -557,6 +609,10 @@ def test_codespaces_library_install_order_retry_and_errors(
     uv = _fake_uv(tmp_path)
     env["TEST_UV_MODE"] = mode
     engine, sources = attributed_library_sources["canonical" if editable else "local"]
+    env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({
+        tomllib.loads((source / "pyproject.toml").read_text())["project"]["name"]: str(source)
+        for source in sources
+    })
     python = Path(sys._base_executable)
     if ext == "sh":
         script = _prelude(ext, engine) + _function(ext, "_install_package_into")
@@ -710,9 +766,8 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         "versioned_runtime_construction.py",
     ):
         assert (snapshot / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
-    assert (snapshot / "scripts" / "installer_dependency_policy.py").read_bytes() == (
-        ENGINE / "installer_dependency_policy.py"
-    ).read_bytes()
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+        assert (snapshot / "scripts" / name).read_bytes() == (ENGINE / name).read_bytes()
     project = tomllib.loads((snapshot / "pyproject.toml").read_text())
     for spec in project["tool"]["uv"]["sources"].values():
         library = snapshot / spec["path"]

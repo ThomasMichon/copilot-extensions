@@ -82,10 +82,10 @@ def _run_harness(
         "for arg do\n"
         '    if [ "$arg" = "--show-settings" ]; then\n'
         "        cat <<'SETTINGS'\n"
-        "PipInstallSettings {\n"
+        "PipInstallSettings { settings: PipSettings {\n"
         "    index_locations: IndexLocations { indexes: [], flat_index: [], },\n"
         "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\n"
-        "}\n"
+        "}, }\n"
         "SETTINGS\n"
         "        exit 0\n"
         "    fi\n"
@@ -126,6 +126,7 @@ _warn() { echo "WARN: $*" >&2; }
     env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
     return subprocess.run(
         [_BASH, str(harness)],
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         env=env,

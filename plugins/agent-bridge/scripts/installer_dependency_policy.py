@@ -14,13 +14,15 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import sysconfig
 import tempfile
 import types
 import zipimport
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
@@ -367,8 +369,12 @@ def _cutoff_value(value: str, now: datetime) -> datetime:
     value = value.strip().removesuffix(",").strip()
     absolute = re.fullmatch(r"Absolute\(\s*([^,\s]+),?\s*\)", value)
     if absolute:
+        timestamp = re.sub(
+            r"\.(\d{1,9})(?=Z$|[+-]\d{2}:\d{2}$)",
+            lambda match: "." + match[1][:6].ljust(6, "0"), absolute[1],
+        )
         try:
-            result = datetime.fromisoformat(absolute[1].replace("Z", "+00:00"))
+            result = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         except ValueError as exc:
             raise DependencyPolicyError("UV returned an invalid cutoff timestamp") from exc
         if result.tzinfo is None:
@@ -646,69 +652,16 @@ def _check_requirements_sources(
             _check_requirement(re.sub(r"\s+--hash=\S+", "", line), base, roots, projects)
 
 
-def _toml_value(value):
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=True)
-    if isinstance(value, bool):
-        return str(value).lower()
-    if isinstance(value, (int, float)):
-        return repr(value)
-    if isinstance(value, (datetime, date, time)):
-        return value.isoformat()
-    if isinstance(value, list):
-        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
-    if isinstance(value, dict):
-        return "{" + ", ".join(
-            json.dumps(key) + " = " + _toml_value(item) for key, item in value.items()
-        ) + "}"
-    raise DependencyPolicyError("dependency input TOML value cannot be retained")
-
-
-def _write_toml(path, data):
-    text = "\n".join(json.dumps(key) + " = " + _toml_value(value) for key, value in data.items())
-    # The private snapshot can contain credential-bearing index settings.
-    if path.exists():
-        os.chmod(path, 0o600)
-    with path.open("w", encoding="utf-8") as stream:
-        os.chmod(path, 0o600)
-        stream.write(text + "\n")
-
-
-def _private_retained_root(parent):
-    root = parent / "inputs"
-    if os.name != "nt":
-        root.mkdir(mode=0o700)
-        return root
-    import ctypes
-    from ctypes import wintypes
-
-    class SecurityAttributes(ctypes.Structure):
-        _fields_ = [
-            ("length", wintypes.DWORD), ("descriptor", wintypes.LPVOID),
-            ("inherit", wintypes.BOOL),
-        ]
-
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
-    convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID), wintypes.LPVOID]
-    convert.restype = wintypes.BOOL
-    create = kernel.CreateDirectoryW
-    create.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(SecurityAttributes)]
-    create.restype = wintypes.BOOL
-    kernel.LocalFree.argtypes = [wintypes.LPVOID]
-    kernel.LocalFree.restype = wintypes.LPVOID
-    descriptor = wintypes.LPVOID()
-    # Protected, owner-only DACL propagates to both files and directories.
-    if not convert("D:P(A;OICI;FA;;;OW)", 1, ctypes.byref(descriptor), None):
-        raise DependencyPolicyError("private dependency-input permissions could not be constructed")
-    try:
-        attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
-        if not create(str(root), ctypes.byref(attributes)):
-            raise DependencyPolicyError("private dependency-input directory could not be created")
-    finally:
-        kernel.LocalFree(descriptor)
-    return root
+_configuration_path = Path(__file__).with_name("installer_dependency_config.py")
+_configuration = types.ModuleType(__name__ + "_configuration")
+_configuration.__file__ = str(_configuration_path)
+exec(compile(_configuration_path.read_bytes(), str(_configuration_path), "exec"), _configuration.__dict__)
+_write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
+_private_retained_root = partial(_configuration.private_retained_root, error_type=DependencyPolicyError)
+_merge_config = _configuration.merge_config
+_resolver_configuration = partial(
+    _configuration.resolver_configuration, balanced=_balanced, error_type=DependencyPolicyError,
+)
 
 
 def _config_inputs(arguments, environment, base):
@@ -760,76 +713,29 @@ def _config_inputs(arguments, environment, base):
     return [(path, project) for path, project in candidates if path.is_file()]
 
 
-def _merge_config(high, low):
-    result = dict(low)
-    for key, value in high.items():
-        previous = result.get(key)
-        if isinstance(value, dict) and isinstance(previous, dict):
-            result[key] = _merge_config(value, previous)
-        elif isinstance(value, list) and isinstance(previous, list):
-            result[key] = [*value, *previous]
-        else:
-            result[key] = value
-    return result
-
-
-def _resolver_configuration(projection, remapper=None):
-    match = re.search(r"\bsettings: PipSettings \{", projection)
-    if match is None:
-        raise DependencyPolicyError("UV resolver configuration cannot be compared")
-    body, _ = _balanced(projection, projection.index("{", match.start()), "{", "}")
-    cutoff = re.search(r"(?m)^\s*exclude_newer: ExcludeNewer \{", body)
-    if cutoff is None:
-        raise DependencyPolicyError("UV resolver cutoff cannot be compared")
-    cutoff_body, end = _balanced(body, body.index("{", cutoff.start()), "{", "}")
-    package = re.search(r"\bpackage:\s*ExcludeNewerPackage\(", cutoff_body)
-    if package is None:
-        raise DependencyPolicyError("UV package cutoffs cannot be compared")
-    package_body, _ = _balanced(cutoff_body, package.end() - 1, "(", ")")
-    body = body[:cutoff.start()] + "package_cutoffs:" + package_body + "\n" + body[end:]
-    if remapper is not None:
-        for field in ("dependency_metadata", "extra_build_dependencies", "sources"):
-            match = re.search(r"(?m)^\s*" + field + r":\s*[^\n({\[]*([({\[])", body)
-            if match:
-                start = match.start(1)
-                opening = body[start]
-                _, end = _balanced(body, start, opening, {"(": ")", "{": "}", "[": "]"}[opening])
-                body = body[:start] + remapper(body[start:end]) + body[end:]
-    body = re.sub(r"(?m)^\s*reinstall: (?:None|All),", "", body)
-    # Discovery provenance changes to explicit-file provenance; index identity,
-    # order, authentication and every resolver option must remain identical.
-    while origin := re.search(r"(?m)^\s*origin: (?:None,|Some\()", body):
-        end = origin.end()
-        if body[end - 1] == "(":
-            _, end = _balanced(body, end - 1, "(", ")")
-            if body[end:end + 1] == ",":
-                end += 1
-        body = body[:origin.start()] + body[end:]
-    for field in (
-        "constraints_from_workspace", "overrides_from_workspace",
-        "excludes_from_workspace", "build_constraints_from_workspace",
-    ):
-        match = re.search(r"\b" + field + r":\s*\[", projection)
-        if match:
-            value, _ = _balanced(projection, projection.index("[", match.start()), "[", "]")
-            if remapper is not None:
-                value = remapper(value)
-            body += field + ":[" + value + "]"
-    global_settings = re.search(r"(?m)^GlobalSettings \{", projection)
-    if global_settings:
-        value, _ = _balanced(projection, projection.index("{", global_settings.start()), "{", "}")
-        body += value
-    return "\n".join(line.strip() for line in body.splitlines() if line.strip())
-
-
 def run_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
-    trusted_source_roots: tuple[Path, ...] = (), **run_options,
+    trusted_source_roots: tuple[Path, ...] = (),
+    retained_resource_roots: tuple[Path, ...] = (), **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
     environment = _captured_environment(env)
     base, projects, files, editables = _source_inputs(arguments, environment, cwd, trusted_source_roots)
+    resources = []
+    for resource in retained_resource_roots:
+        if not Path(resource).is_absolute():
+            raise DependencyPolicyError("retained build resources must be absolute caller-attributed paths")
+        source = _contained(Path(resource), tuple(Path(path).resolve() for path in trusted_source_roots))
+        if not source.is_dir():
+            raise DependencyPolicyError("retained build resource root is not a directory")
+        for child in source.rglob("*"):
+            if child.is_symlink() or (
+                getattr(child.lstat(), "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            ):
+                raise DependencyPolicyError("retained build resources must not be linked")
+        resources.append(source)
     for variable in (
         "UV_CACHE_DIR", "UV_CREDENTIALS_DIR", "UV_TARGET", "UV_PREFIX",
         "VIRTUAL_ENV", "CONDA_PREFIX", "SSL_CERT_FILE",
@@ -872,9 +778,9 @@ def run_uv_install(
         if project.drive.lower() != Path(tempfile.gettempdir()).drive.lower():
             temporary_parent = project.parent
     with tempfile.TemporaryDirectory(prefix="seasoned-uv-", dir=temporary_parent) as temporary:
-        root = _private_retained_root(Path(temporary))
+        root = _private_retained_root(Path(temporary)).resolve()
         context_project = dict(_argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
-        paths = [base, *projects, *files]
+        paths = [base, *projects, *files, *resources]
         if context_project:
             paths.append((base / context_project).resolve())
         anchors = {}
@@ -912,6 +818,8 @@ def run_uv_install(
                 lambda match: replacements[match[0]], value,
             )
 
+        for resource in resources:
+            shutil.copytree(resource, mirror(resource), dirs_exist_ok=True)
         for project in sorted(projects, key=lambda path: len(path.parts)):
             destination = mirror(project)
             if not destination.is_dir():

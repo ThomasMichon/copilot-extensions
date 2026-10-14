@@ -16,6 +16,12 @@ SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("fraction", ["1", "12", "123", "1234", "12345", "123456", "123456789"])
+def test_absolute_cutoff_fraction_is_python310_compatible_and_conservative(fraction):
+    value = policy._cutoff_value(f"Absolute(2026-10-06T00:00:00.{fraction}Z)", NOW)
+    assert value == datetime(2026, 10, 6, microsecond=int(fraction[:6].ljust(6, "0")), tzinfo=timezone.utc)
+
+
 def settings(global_value="None", packages="", index="None"):
     return f"""PipInstallSettings {{
     settings: PipSettings {{
@@ -1072,6 +1078,7 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
         helper = payload / "scripts" / PATH.name
     helper.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(PATH, helper)
+    shutil.copyfile(PATH.with_name("installer_dependency_config.py"), helper.with_name("installer_dependency_config.py"))
     import subprocess
 
     uv = shutil.which("uv")
@@ -1201,3 +1208,45 @@ def test_at_in_paths_does_not_relax_source_attribution(tmp_path, monkeypatch, re
         policy.prepare_uv_install(
             "uv", [requirement], cwd=tmp_path, trusted_source_roots=(owned,), now=NOW,
         )
+
+
+@pytest.mark.parametrize("resource", ["relative", "outside", "missing"])
+def test_retained_build_resources_require_existing_attributed_directories(tmp_path, monkeypatch, resource):
+    source = source_project(tmp_path / "source")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    selected = {"relative": Path("source"), "outside": outside, "missing": source / "missing"}[resource]
+    monkeypatch.setattr(policy.subprocess, "run", lambda *args, **kwargs: pytest.fail("probe ran"))
+    with pytest.raises(policy.DependencyPolicyError):
+        policy.run_uv_install(
+            "uv", [str(source)], trusted_source_roots=(source,), retained_resource_roots=(selected,),
+        )
+
+
+def test_new_private_snapshot_paths_are_canonicalized_without_trusting_source_aliases(tmp_path, monkeypatch):
+    source = source_project(tmp_path / "source")
+    create = policy._private_retained_root
+    roots = []
+
+    def private(parent):
+        root = create(parent)
+        roots.append(root)
+        return root / ".." / root.name
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            return CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
+                index_locations: IndexLocations { indexes: [], flat_index: [], },
+                exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+            }, }""", "")
+        config = Path(kwargs["env"]["UV_CONFIG_FILE"])
+        assert config == config.resolve()
+        assert Path(kwargs["cwd"]).is_relative_to(roots[0])
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr(policy, "_private_retained_root", private)
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    result = policy.run_uv_install(
+        "uv", ["--no-config", str(source)], cwd=source, trusted_source_roots=(source,),
+    )
+    assert result.returncode == 0 and roots and not roots[0].exists()

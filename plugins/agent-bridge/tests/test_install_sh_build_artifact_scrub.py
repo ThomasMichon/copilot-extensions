@@ -104,6 +104,10 @@ def _owned_plugin_fixture(tmp_path: Path) -> Path:
         _ENGINE_SH.with_name("installer_dependency_policy.py"),
         scripts / "installer_dependency_policy.py",
     )
+    shutil.copyfile(
+        _ENGINE_SH.with_name("installer_dependency_config.py"),
+        scripts / "installer_dependency_config.py",
+    )
     return plugin_dir
 
 
@@ -132,10 +136,10 @@ def _run_harness(
         "for arg do\n"
         '    if [ "$arg" = "--show-settings" ]; then\n'
         "        cat <<'SETTINGS'\n"
-        "PipInstallSettings {\n"
+        "        PipInstallSettings { settings: PipSettings {\n"
         "    index_locations: IndexLocations { indexes: [], flat_index: [], },\n"
         "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\n"
-        "}\n"
+        "}, }\n"
         "SETTINGS\n"
         "        exit 0\n"
         "    fi\n"
@@ -224,10 +228,10 @@ def test_fixture_local_sources_have_canonical_ownership(tmp_path: Path) -> None:
         "arguments = sys.argv[1:]\n"
         "assert arguments[:2] == ['pip', 'install']\n"
         "if '--show-settings' in arguments:\n"
-        "    print('PipInstallSettings {\\n"
+        "    print('PipInstallSettings { settings: PipSettings {\\n"
         "    index_locations: IndexLocations { indexes: [], flat_index: [], },\\n"
         "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\\n"
-        "}')\n"
+        "}, }')\n"
         "    sys.exit(0)\n"
         "assert '--reinstall' in arguments and '--quiet' in arguments\n"
         "cutoff = datetime.datetime.fromisoformat(arguments[arguments.index('--exclude-newer') + 1].replace('Z', '+00:00'))\n"

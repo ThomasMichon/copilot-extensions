@@ -18,7 +18,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.guard
 _SH = shutil.which("sh")
-_UV_SETTINGS = """PipInstallSettings {
+_UV_SETTINGS = """PipInstallSettings { settings: PipSettings {
     index_locations: IndexLocations {
         flat_index: [],
     },
@@ -26,7 +26,7 @@ _UV_SETTINGS = """PipInstallSettings {
         global: None,
         package: ExcludeNewerPackage({}),
     },
-}
+}, }
 """
 
 
@@ -40,8 +40,26 @@ if [[ "${{1:-}}" == pip && "${{2:-}}" == install ]]; then
             exit 0
         fi
     done
-    [[ "${{@: -3:1}}" == --exclude-newer &&
-       "${{@: -2:1}}" == *Z && "${{@: -1}}" == --reinstall ]] || exit 2
+    saw_cutoff=0
+    saw_reinstall=0
+    saw_config=0
+    pending=''
+    for argument in "$@"; do
+        if [[ "$pending" == cutoff ]]; then
+            [[ "$argument" == *Z ]] || exit 2
+            saw_cutoff=1
+        elif [[ "$pending" == config ]]; then
+            [[ -f "$argument" && "$argument" == */inputs/uv.toml ]] || exit 2
+            saw_config=1
+        fi
+        pending=''
+        case "$argument" in
+            --exclude-newer) pending=cutoff ;;
+            --config-file) pending=config ;;
+            --reinstall) saw_reinstall=1 ;;
+        esac
+    done
+    [[ "$saw_cutoff$saw_reinstall$saw_config" == 111 ]] || exit 2
 fi
 """
 
@@ -98,7 +116,10 @@ def _materialize_installed_payload(payload: Path) -> None:
 
 def test_installed_bootstrap_payload_has_release_owned_sources(tmp_path: Path) -> None:
     payload = tmp_path / "agent-worktrees"
-    for relative in ("plugin.json", "pyproject.toml", "scripts/installer_dependency_policy.py"):
+    for relative in (
+        "plugin.json", "pyproject.toml",
+        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py",
+    ):
         destination = payload / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(PLUGIN / relative, destination)

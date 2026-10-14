@@ -508,3 +508,34 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   project and directory selection without resolving a venv interpreter symlink
   to its base Python. Required fresh-head provider CI and genuine review remain
   blocking; no merge, release or deployed-runtime claim is made.
+- Fresh required CI exposed the shared policy module's size limit and missing
+  standalone build resources. Configuration-retention primitives now ship as
+  an adjacent canonical companion, synchronized across all thirteen consumers.
+  The standalone runner explicitly retains its attributable runtime build
+  helper and three primitives without expanding dependency-source trust.
+- Real Fleet and Index setuptools wheel builds consumed retained resources
+  after the original helper and primitives were replaced. Exact wheel bytes
+  and snapshot cleanup passed. A fresh configured-feed Fleet install preserved
+  its complete development extra and passed 591 tests with six platform skips.
+  The Pull Requests finalizer now releases its install lock even when
+  construction cleanup raises; a still-live PowerShell host reacquired the
+  actual exclusive file lock.
+- Native Python 3.10 exposed variable-width fractional timestamps in UV's
+  settings projection. Conservative microsecond normalization now preserves
+  the seven-day boundary across supported interpreters. The complete parent
+  policy, runner, artifact, fan-out and module-size contracts passed 532 tests
+  with two platform skips.
+- Installer fixtures now ship both canonical companions, preserve real source
+  ownership and validate retained identity, private containment and Python
+  bytes before normalizing logged paths. Retry/scrub fixtures run from their
+  declared fixture context rather than discovering unrelated checkout metadata.
+  Compound snapshot stamping and removed-checkout admission are distinct
+  native cases under unchanged deadlines. Required fresh-head provider CI,
+  review, release and runtime rollout remain unresolved.
+- Corrected native fixture validation passed Index 15 cases with thirteen
+  platform skips, Codespaces eight with four skips, Dispatch scrub eight and
+  preinstall two, Bridge retries six with one skip, and Logger's durable
+  provision and snapshot-only first-use cases. Ordering/retry fixtures retain
+  canonical metadata and source graphs but use bounded fixture code bodies;
+  real product artifact coverage remains separate. Touched-code lint and all
+  thirteen installer/fan-out contracts passed without raising any deadline.
