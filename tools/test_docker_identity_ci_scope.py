@@ -22,6 +22,7 @@ SPEC.loader.exec_module(MODULE)
     "libs/docker-resource-producer/pyproject.toml",
     "tools/docker_identity_ci_scope.py", "tools/test_docker_identity_ci_scope.py",
     ".github/workflows/ci.yml",
+    "tools/accumulate_bumps.py", "tools/test_accumulate_bumps.py",
 ])
 def test_selects_contract_surface(path: str) -> None:
     assert MODULE.needs_docker_identity_smoke([path])
@@ -97,10 +98,13 @@ def test_workflow_runs_scoped_minimum_without_changing_guard_python() -> None:
     runtime = next(s for s in steps if s.get("id") == "docker-identity-python")
     installer = next(s for s in steps if s.get("id") == "docker-identity-uv")
     smoke = next(s for s in steps if s.get("name") == "Docker identity fixture contracts (Python 3.10)")
+    promotion = next(s for s in steps if s.get("name") == "Docker identity promotion compatibility")
     assert "docker_identity_ci_scope.py" in scope["run"]
     assert scope["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha || github.sha }}"
     assert runtime["if"] == smoke["if"] == "steps.docker-identity.outputs.run == 'true'"
     assert installer["if"] == smoke["if"]
+    assert promotion["if"] == smoke["if"]
+    assert "tools/test_accumulate_bumps.py::test_docker_resource_producer_canonical_version_is_promotable" in promotion["run"]
     assert installer["uses"].startswith("astral-sh/setup-uv@")
     assert runtime["with"]["python-version"] == "3.10"
     assert runtime["with"]["update-environment"] is False

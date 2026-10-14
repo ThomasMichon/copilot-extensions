@@ -353,8 +353,10 @@ from a mutable source fallback.
 
 The independent `libs/docker-resource-producer/tests` suite uses only a fake
 Docker process and temporary JSON state, never a live daemon. Required PR guards
-select it when that library, its selector, or the CI workflow changes, and run it
+select it when that library, its selector, promotion tool/tests, or the CI workflow changes, and run it
 on the declared minimum Python 3.10 with bounded per-test and step timeouts.
+The same selection runs the canonical package's focused promotion-compatibility
+regression on guard Python, before minimum-runtime setup.
 Minimum-runtime setup uses its explicit interpreter output without replacing
 the guard job's Python 3.12 environment. This catches fractional-timestamp and
 optional TLS client-identity compatibility; it is not live Docker lifecycle

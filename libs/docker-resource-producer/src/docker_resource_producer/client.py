@@ -57,11 +57,14 @@ def _default_tls_paths(environment: Mapping[str, str]) -> dict[str, str | None]:
             raise VerificationError(f"Docker TLS directory requires supplied {home_key} or explicit config")
         directory = str(Path(home) / ".docker")
     certs = Path(directory).resolve()
-    return {
+    paths = {
         "tls_ca": str(certs / "ca.pem"),
         "tls_cert": _optional_client_file(certs / "cert.pem"),
         "tls_key": _optional_client_file(certs / "key.pem"),
     }
+    if bool(paths["tls_cert"]) != bool(paths["tls_key"]):
+        raise VerificationError("TLS certificate and key must be paired")
+    return paths
 
 
 class DockerClient:
@@ -131,48 +134,46 @@ class DockerClient:
         probe = cls(Endpoint("unix:///unresolved", "unresolved"), docker_argv=docker_argv,
                     environment=env, timeout=timeout)
         host = env.get("DOCKER_HOST")
-        context = env.get("DOCKER_CONTEXT") if not host else None
+        context = "default" if host else env.get("DOCKER_CONTEXT")
         tls = bool(env.get("DOCKER_TLS") or env.get("DOCKER_TLS_VERIFY"))
         verify = bool(env.get("DOCKER_TLS_VERIFY"))
         paths: dict[str, str | None] = {"tls_ca": None, "tls_cert": None, "tls_key": None}
-        if host:
-            if tls:
-                paths = _default_tls_paths(env)
-        else:
-            context = context or probe._checked(["context", "show"], pinned=False).strip()
-            text(context, "Docker context", limit=256)
-            entries = _json(probe._checked(["context", "inspect", "--", context], pinned=False))
-            if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
-                raise VerificationError("Malformed Docker context inspection")
-            entry = entries[0]
-            if entry.get("Name") != context:
-                raise VerificationError("Docker context identity changed")
-            endpoints = entry.get("Endpoints")
-            docker = endpoints.get("docker") if isinstance(endpoints, dict) else None
-            if not isinstance(docker, dict) or type(docker.get("SkipTLSVerify")) is not bool:
-                raise VerificationError("Malformed Docker context endpoint")
-            host = text(docker.get("Host"), "Docker endpoint")
-            material = entry.get("TLSMaterial", {})
-            if not isinstance(material, dict):
-                raise VerificationError("Malformed Docker TLS material")
-            names = material.get("docker", [])
-            if not isinstance(names, list) or any(
-                not isinstance(name, str) or name not in {"ca.pem", "cert.pem", "key.pem"}
-                for name in names
-            ):
-                raise VerificationError("Unsupported Docker TLS material")
-            tls = bool(names) or docker["SkipTLSVerify"]
-            verify = tls and not docker["SkipTLSVerify"]
-            if context == "default" and tls:
-                paths = _default_tls_paths(env)
-            elif names:
-                storage = entry.get("Storage")
-                root = storage.get("TLSPath") if isinstance(storage, dict) else None
-                text(root, "Docker TLS root")
-                if not Path(root).is_absolute():
-                    raise VerificationError("Docker TLS root must be absolute")
-                for field, name in zip(paths, ("ca.pem", "cert.pem", "key.pem")):
-                    paths[field] = str(Path(root) / "docker" / name) if name in names else None
+        if host and tls:
+            _default_tls_paths(env)
+        context = context or probe._checked(["context", "show"], pinned=False).strip()
+        text(context, "Docker context", limit=256)
+        entries = _json(probe._checked(["context", "inspect", "--", context], pinned=False))
+        if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+            raise VerificationError("Malformed Docker context inspection")
+        entry = entries[0]
+        if entry.get("Name") != context:
+            raise VerificationError("Docker context identity changed")
+        endpoints = entry.get("Endpoints")
+        docker = endpoints.get("docker") if isinstance(endpoints, dict) else None
+        if not isinstance(docker, dict) or type(docker.get("SkipTLSVerify")) is not bool:
+            raise VerificationError("Malformed Docker context endpoint")
+        host = text(docker.get("Host"), "Docker endpoint")
+        material = entry.get("TLSMaterial", {})
+        if not isinstance(material, dict):
+            raise VerificationError("Malformed Docker TLS material")
+        names = material.get("docker", [])
+        if not isinstance(names, list) or any(
+            not isinstance(name, str) or name not in {"ca.pem", "cert.pem", "key.pem"}
+            for name in names
+        ):
+            raise VerificationError("Unsupported Docker TLS material")
+        tls = (bool(names) or docker["SkipTLSVerify"]) and host.startswith("tcp://")
+        verify = tls and not docker["SkipTLSVerify"]
+        if context == "default" and tls:
+            paths = _default_tls_paths(env)
+        elif names and tls:
+            storage = entry.get("Storage")
+            root = storage.get("TLSPath") if isinstance(storage, dict) else None
+            text(root, "Docker TLS root")
+            if not Path(root).is_absolute():
+                raise VerificationError("Docker TLS root must be absolute")
+            for field, name in zip(paths, ("ca.pem", "cert.pem", "key.pem")):
+                paths[field] = str(Path(root) / "docker" / name) if name in names else None
         probe.endpoint = Endpoint(host, "unresolved", context=context, tls=tls, tls_verify=verify, **paths)
         probe.endpoint = replace(probe.endpoint, daemon_id=probe._daemon_id())
         return probe

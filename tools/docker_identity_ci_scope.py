@@ -12,7 +12,8 @@ def needs_docker_identity_smoke(paths: Iterable[str]) -> bool:
     return any(
         path.startswith("libs/docker-resource-producer/") or path in {
             ".github/workflows/ci.yml", "tools/docker_identity_ci_scope.py",
-            "tools/test_docker_identity_ci_scope.py",
+            "tools/test_docker_identity_ci_scope.py", "tools/accumulate_bumps.py",
+            "tools/test_accumulate_bumps.py",
         }
         for path in paths
     )

@@ -11,6 +11,9 @@ operations use explicit host and TLS flags rather than ambient context selection
 TLS paths, not certificate/key contents, travel in `Endpoint.to_json()`.
 Transport selection follows Docker CLI's host/context environment precedence:
 a nonempty `DOCKER_HOST` selects the default endpoint before `DOCKER_CONTEXT`.
+The CLI's default-context inspection supplies its normalized host, so accepted
+host shorthand is never persisted as an incomplete endpoint. Socket and SSH
+transports do not replay unused TLS settings.
 The default context's in-memory TLS metadata is resolved to its environment's
 certificate directory, not treated as a stored named-context TLS path.
 TLS directory fallback uses `HOME` on POSIX or `USERPROFILE` on Windows from
@@ -65,6 +68,8 @@ Required PR CI runs this fixture-only suite on the declared minimum Python 3.10
 when the library or its CI selector changes. The selector uses the actual PR
 head, and minimum-runtime setup does not replace the guard job's Python.
 Inherited Git repository/config overrides cannot redirect the scope probe.
+The same path selector gates a focused canonical-library promotion regression
+and includes changes to the promotion tool and its test.
 
 Transport semantics: [Docker CLI options](https://github.com/docker/cli/blob/master/cli/flags/options.go).
 Volume deletion contract: [Moby client API](https://github.com/moby/moby/blob/master/client/volume_remove.go).

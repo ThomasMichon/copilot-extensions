@@ -45,7 +45,17 @@ def main() -> int:
         print(state["context"]["Name"])
         return 0
     if operation == "context inspect":
-        print(json.dumps([state["context"]]))
+        context = state["context"]
+        if args[-1] == "default" and context["Name"] != "default":
+            enabled = bool(os.environ.get("DOCKER_TLS") or os.environ.get("DOCKER_TLS_VERIFY"))
+            context = state.get("default_context", {
+                "Name": "default",
+                "Endpoints": {"docker": {"Host": os.environ["DOCKER_HOST"],
+                                        "SkipTLSVerify": enabled and not bool(os.environ.get("DOCKER_TLS_VERIFY"))}},
+                "TLSMaterial": {"docker": ["ca.pem"] if enabled else []},
+                "Storage": {"TLSPath": "<IN MEMORY>"},
+            })
+        print(json.dumps([context]))
         return 0
     kind, action = args[:2]
     resources = state[kind]

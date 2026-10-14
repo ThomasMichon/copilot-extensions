@@ -174,10 +174,40 @@ def test_explicit_host_environment_wins_over_context_environment(fixture: tuple)
     env = {**client.environment, "DOCKER_CONTEXT": "fixture", "DOCKER_TLS": "", "DOCKER_TLS_VERIFY": ""}
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.host == env["DOCKER_HOST"]
-    assert pinned.endpoint.context is None and pinned.endpoint.tls is False
+    assert pinned.endpoint.context == "default" and pinned.endpoint.tls is False
     assert pinned.probe(identity()) is True
-    assert all(call["args"][:2] == ["--host", env["DOCKER_HOST"]] for call in logs(path))
-    assert all("context" not in call["args"] for call in logs(path))
+    assert logs(path)[0]["args"] == ["context", "inspect", "--", "default"]
+    assert all(call["args"][:2] == ["--host", env["DOCKER_HOST"]] for call in logs(path)[1:])
+
+
+@pytest.mark.parametrize("configured,resolved", [
+    ("localhost:5555", "tcp://localhost:5555"),
+    ("unix://", "unix:///var/run/docker.sock"),
+])
+def test_host_shorthand_uses_cli_resolved_default_endpoint(fixture: tuple, configured: str, resolved: str) -> None:
+    client, path, state = fixture
+    state["default_context"] = {
+        "Name": "default", "Endpoints": {"docker": {"Host": resolved, "SkipTLSVerify": False}}, "TLSMaterial": {},
+    }
+    path.write_text(json.dumps(state), encoding="utf-8")
+    env = {**client.environment, "DOCKER_HOST": configured, "DOCKER_TLS": "", "DOCKER_TLS_VERIFY": ""}
+    pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert pinned.endpoint.host == resolved
+    assert pinned.probe(identity()) is True
+    assert logs(path)[0]["args"] == ["context", "inspect", "--", "default"]
+    assert all(call["args"][:2] == ["--host", resolved] for call in logs(path)[1:])
+
+
+def test_socket_context_does_not_replay_unused_tls_material(fixture: tuple) -> None:
+    client, path, state = fixture
+    state["context"]["Endpoints"]["docker"]["SkipTLSVerify"] = True
+    state["context"]["TLSMaterial"] = {"docker": ["ca.pem"]}
+    path.write_text(json.dumps(state), encoding="utf-8")
+    env = {key: value for key, value in client.environment.items() if key != "DOCKER_HOST"}
+    env["DOCKER_CONTEXT"] = "fixture"
+    pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
+    assert pinned.endpoint.tls is False and pinned.endpoint.tls_ca is None
+    assert pinned.probe(identity()) is True
 
 
 @pytest.mark.parametrize("verify", [True, False])
@@ -362,6 +392,8 @@ def test_explicit_host_ca_only_tls_omits_absent_client_identity(fixture: tuple) 
     assert pinned.endpoint.tls_cert is None and pinned.endpoint.tls_key is None
     assert pinned.probe(identity()) is True
     for call in logs(path):
+        if call["args"][0] != "--host":
+            continue
         assert "--tlsverify=true" in call["args"]
         assert call["tls_files"] == {"ca.pem": str(certs / "ca.pem"), "cert.pem": "", "key.pem": ""}
 
@@ -409,7 +441,7 @@ def test_explicit_host_client_identity_files_are_retained(fixture: tuple) -> Non
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.tls_cert == str(certs / "cert.pem")
     assert pinned.endpoint.tls_key == str(certs / "key.pem")
-    assert "--tlscert" in logs(path)[0]["args"] and "--tlskey" in logs(path)[0]["args"]
+    assert "--tlscert" in logs(path)[1]["args"] and "--tlskey" in logs(path)[1]["args"]
 
 
 def test_inaccessible_optional_client_identity_is_not_ca_only_fallback(monkeypatch, tmp_path: Path) -> None:

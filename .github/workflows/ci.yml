@@ -467,6 +467,9 @@ jobs:
         run: |
           run="$(python tools/docker_identity_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
           echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Docker identity promotion compatibility
+        if: steps.docker-identity.outputs.run == 'true'
+        run: python -m pytest -q tools/test_accumulate_bumps.py::test_docker_resource_producer_canonical_version_is_promotable
       - uses: actions/setup-python@v5
         id: docker-identity-python
         if: steps.docker-identity.outputs.run == 'true'
