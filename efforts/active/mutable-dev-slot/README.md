@@ -257,6 +257,37 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Journal
 
+### 2026-10-14 -- Identify the unfinished Windows backend, not just its deadline
+
+A temporary, isolated diagnostic forwarded each copied fixture's declared
+setuptools backend while recording bounded `faulthandler` samples to files
+outside the frozen inputs. The same native namespaced sequence passed original
+construction and its first development iteration, then hit the unchanged
+180-second build deadline in its PowerShell 5.1 refresh. Two unfinished
+metadata processes repeatedly showed Python 3.12.10 `platform._wmi_query`,
+called by `platform.system()` during setuptools' vendored
+`jaraco.context.robust_remover` import. The copied diagnostic backend did not
+waive fingerprint, origin or publication checks and is not a shipped fix.
+Its source was removed after the contained process tree settled.
+
+Standalone calls to that interpreter's `platform.system()` completed in
+0.238 seconds ordinarily and 0.284 seconds under the installer's exact owned
+child Job. Therefore the evidence does not establish a generally unhealthy
+WMI service or justify an automatic service restart, interpreter replacement,
+platform monkey-patch or deadline increase. The remaining diagnosis must
+explain the nested backend context; the Windows deployed gate stays open.
+
+The third native CI run,
+[38568141163](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38568141163),
+passed the full guards and bootstrap/watchdog sub-suite. Worktrees reached
+sub-suite five, then exposed two more coupled fixtures: a blanket sibling-loader
+mock omitted the real version-ordering primitive, and a stable-origin source
+assertion still expected the pre-normalization shell variable. Both now retain
+their actual contracts. The Windows diagnostic scope assertion was updated for
+the measured enclosing ten-minute job while preserving its three- and
+two-minute step bounds. None of these results closes the complete native
+adopter or portfolio gates.
+
 ### 2026-10-14 -- Native bootstrap reached; remaining CI failures classified
 
 The second full candidate run,
