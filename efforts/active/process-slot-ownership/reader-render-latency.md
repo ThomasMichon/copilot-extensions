@@ -40,8 +40,9 @@ and #1919's catalog contract, not another catalog or store of record.
    Repeated callers cannot start overlapping equivalent refreshes.
 4. Keep refresh publication atomic and generation/provider fenced. Source
    replacement or shutdown must not allow old results to overwrite new state;
-   retain superseded holders until actual completion or existing bounded
-   shutdown observation. Apply existing native execution and cleanup policies,
+   retain superseded holders until actual completion. Shutdown observation
+   remains bounded, but wait expiry leaves ownership tracked until completion.
+   Apply existing native execution and cleanup policies,
    without new kill/restart authority or new across-provider fan-out.
 5. Preserve exact-ID detail, resume, lineage and action lookup behavior and
    their existing budgets. Rendering's subprocess-free degraded path is the
