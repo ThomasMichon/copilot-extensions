@@ -251,7 +251,10 @@ inventories replace prior rows; failed, malformed, incomplete or incompatible
 source reads retain their last good rows without erasing healthy peers.
 Freshness expires after 30 seconds or the configured discovery interval,
 whichever is greater; automatic failed/stale retries have a 10-second minimum
-spacing. Source replacement and shutdown fence late publication.
+spacing. Source replacement and shutdown fence late publication. A render
+that replaces a source queues one current-epoch cache-allowed warm-up behind
+any retired holder or continuation; it needs no second request to populate
+the replacement projection, and repeated source changes never overlap reads.
 
 `GET /api/v1/worktrees?refresh=true` joins that same shielded refresh holder
 with at most a 10-second caller wall wait. It requests Worktree Manager's
