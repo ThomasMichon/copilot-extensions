@@ -94,6 +94,10 @@ def _reset_payload(raw):
     if ("cleanup_kind" in payload or "session_end" in payload or "worktree_cleanup" in payload):
         if not isinstance(payload.get("worktree_cleanup"), dict):
             raise TaskError("structured cleanup envelope requires a worktree_cleanup component")
+    for name, component in payload.items():
+        if (name not in {"session_end", "worktree_cleanup"}
+                and isinstance(component, dict) and "state" in component):
+            raise TaskError(f"unknown cleanup component: {name}")
     updated = {**payload, "action": "pending", "reason": "operator-cleanup-retry",
                "attempts": 0, "next_attempt_at": 0}
     components = []

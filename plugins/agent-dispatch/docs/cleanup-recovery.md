@@ -51,6 +51,8 @@ later success replaces the current conclusion detail. Old recorded flat retry
 payloads without components remain supported. Structured envelopes must identify
 the normal producer's `worktree_cleanup` component, with at least one incomplete
 housekeeping component;
+Only `session_end` and `worktree_cleanup` are supported state-bearing components;
+an unknown component is rejected even when the known components are valid.
 `cleanup_kind` alone is not evidence of pending cleanup. Malformed or unsupported
 envelopes fail explicitly. Session-only envelopes are rejected even when they
 omit `cleanup_kind`: without `worktree_cleanup`, the existing consumer cannot

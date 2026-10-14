@@ -319,6 +319,25 @@ def test_session_only_recovery_never_ends_session_without_lease(held, kind):
         assert queue.cleanup_recovery_history(key) == []
 
 
+@pytest.mark.parametrize("state", ["held", "pending", "complete", False])
+@pytest.mark.parametrize("boundary", ["preview", "apply"])
+def test_unknown_state_bearing_component_preserves_cleanup_obligation(held, state, boundary):
+    queue, task_id, key = held
+    plan = preview(held)
+    payload = json.loads(queue.get_reservation(key).conclusion_detail)
+    payload["future_cleanup"] = {"state": state}
+    raw = json.dumps(payload)
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET conclusion_detail=? WHERE key=?", (raw, key))
+    before = asdict(queue.get_reservation(key))
+    task_before = asdict(queue.get(task_id))
+    with pytest.raises(TaskError, match="unknown cleanup component: future_cleanup"):
+        apply(held, plan) if boundary == "apply" else preview(held)
+    assert asdict(queue.get_reservation(key)) == before
+    assert asdict(queue.get(task_id)) == task_before
+    assert queue.cleanup_recovery_history(key) == []
+
+
 def test_session_retry_with_producer_worktree_component_is_leased(held, monkeypatch):
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient

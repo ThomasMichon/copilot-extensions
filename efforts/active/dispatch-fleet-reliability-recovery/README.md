@@ -529,3 +529,14 @@ requested contract.
   items with the original 15-second child / 30-second item limits; HTTP and
   actual supervisor consumption remain real in every case. No timeout is raised
   and no cached fake transport or in-process CLI substitute is introduced.
+
+- **Unknown-component review correction (PR #6542):** Fresh review confirmed
+  the claimant-host and removal-v4 corrections, then identified an unsupported
+  state-bearing cleanup component that could be ignored by completion
+  aggregation. Eight preview/apply regressions reproduced the missing explicit
+  rejection; recovery now rejects any top-level state-bearing component other
+  than `session_end` and `worktree_cleanup`, before scheduling or recording
+  recovery history. Exact reservation and business-task state remain unchanged.
+  The coupled recovery/conclusion portfolio passed 107 tests. This is a source
+  correction only; adopter release, migration, live validation and schema
+  custody gates remain open.
