@@ -408,15 +408,7 @@ class SupervisorDaemon(BoundedReconciliation):
         Behavior *overrides-take-precedence*). A dropped id is then wound down by the
         reconcile's stop-not-desired step."""
         declared = self._declared()
-        try:
-            regs = self._bounded_read("registrations", lambda: self.client.list_registrations(
-                machine=self.machine, env=self.env, include_paused=False
-            ))
-        except _FUTURE_TIMEOUT:
-            log.warning("registration discovery remains pending; retaining confirmed registrations")
-            regs = self._last_store_registrations
-        else:
-            self._last_store_registrations = copy.deepcopy(regs)
+        regs = self._store_registrations()
         regs = [r for r in regs if r.get("id") not in self._published_declared_ids]
         merged = merge_registration_sources(regs, declared)
         diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
@@ -1996,15 +1988,15 @@ class SupervisorDaemon(BoundedReconciliation):
                 target,
             )
             return False
-        # Wind down units before releasing the singleton. Optional status I/O
-        # must also finish before an inline successor can own the same file.
+        # Optional status I/O must settle before winding down units for an
+        # inline successor that can own the same file.
         try:
             native_unit = native_restart_unit()
         except NativeOwnershipUnconfirmed as exc:
             log.warning("supervisor self-update deferred: %s", exc)
             return False
-        daemon_audit(self, "handoff", "new-slot-selected")
-        drained = self.shutdown()
+        if native_unit is None and self._progress_future is not None:
+            _wait_futures([self._progress_future], timeout=_SHUTDOWN_GRACE_SECONDS)
         if (
             native_unit is None and self._progress_future is not None
             and not self._progress_future.done()
@@ -2015,6 +2007,8 @@ class SupervisorDaemon(BoundedReconciliation):
                 "still owns its generation; retaining singleton"
             )
             return False
+        daemon_audit(self, "handoff", "new-slot-selected")
+        drained = self.shutdown()
         self._self_update_last_spawn = now
         self.release_singleton()
         if native_unit is not None:

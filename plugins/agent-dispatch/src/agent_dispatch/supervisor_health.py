@@ -47,6 +47,11 @@ def supervisor_progress_observation(
     observed_now = time.time() if now is None else now
     if not math.isfinite(observed_now) or started > observed_now:
         return result
+    if finished is not None and (
+        type(finished) not in (int, float)
+        or not math.isfinite(finished) or finished > observed_now
+    ):
+        return result
     progress = runtime_status.get("progress")
     last_progress = started
     if isinstance(progress, dict):
@@ -62,11 +67,9 @@ def supervisor_progress_observation(
             last_progress = stamp
     elapsed = observed_now - last_progress
     state = "progressing"
-    if not isinstance(finished, (float, int)) or finished < started:
+    if finished is None or finished < started:
         if elapsed >= SUPERVISOR_STALL_THRESHOLD_SECONDS:
             state = "stalled"
-    elif not math.isfinite(finished):
-        return result
     elif observed_now - finished >= SUPERVISOR_STALL_THRESHOLD_SECONDS:
         state = "stalled"
     return {

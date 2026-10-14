@@ -443,3 +443,27 @@ requested contract.
 - Integrated the resolver into this supervisor slice, retaining both effort
   journals. Native independent watchdog custody and scalar repair still remain
   with their existing unresolved acceptance gates.
+
+### 2026-10-14 - Cold discovery and pre-shutdown handoff corrections
+
+- Fresh review of #6487 reproduced an unobserved initial registry being treated
+  as empty, stopped units during a deferred inline handoff, and healthy-looking
+  future completion timestamps. The fail-first selection reported five failures
+  and two already-correct invalid-time cases.
+- The store snapshot is explicitly absent until its first successful read.
+  A pending initial read raises an indeterminate result before any unit removal
+  or receipt withdrawal; completed snapshots retain the existing retry behavior.
+  The persisted-receipt regression crosses the real inventory boundary and
+  consumes the same completed registry future on the next cycle.
+- Inline handoff drains optional status publication within the existing grace
+  budget before stopping units. A pending writer retains the singleton and
+  running units without arming cooldown. The existing serve-loop contract also
+  passes; merely checking an unfinished future without bounded draining did not
+  preserve that near-completion behavior.
+- Completion observations reject future, non-finite, boolean and nonnumeric
+  timestamps as unknown, without granting recovery authority. Missing completion
+  retains the unfinished-cycle contract.
+- The combined supervisor, CLI/progress, bounded receipt and health selection
+  passes 176 tests. Fatal lint, module ceilings, documentation, headless-launch,
+  install-contract and changefile-presence gates pass with unchanged budgets.
+  These are source/consumer results, not rollout or independent keeper proof.

@@ -10,7 +10,10 @@ watchdog or a claim that an earlier outage's requester has been identified.
 The master establishes its shared wait budget before declaration discovery,
 registration reads and companion provider resolution. Pending reads retain the
 last confirmed desired state; unfinished providers cannot supply new launch
-authority. Receipt integrity runs in a separate two-worker pool, so a contended
+authority. Before the first successful store snapshot, a pending read is
+explicitly indeterminate, not a confirmed empty registry: reconciliation defers
+before stopping units or scheduling receipt withdrawal. Receipt integrity runs
+in a separate two-worker pool, so a contended
 root lock or slow tree hash cannot occupy every health/runtime worker.
 Receipt inventory, including receipt/selection/operation metadata reads, runs on
 its own single-worker executor. The master consumes only completed results and
@@ -84,8 +87,9 @@ limited to one warning per category per 30 seconds. Unavailable receipt progress
 is marked unknown (`null` with an observation error), not a confirmed empty list.
 Data/state failures in the final summary follow the same classified best-effort
 rules. The observer uses only finite, non-future progress timestamps from the
-current cycle and matching generation; future cycle starts are unknown, not
-healthy progress. A fresh phase can distinguish an advancing
+current cycle and matching generation; future cycle starts and invalid or future
+completion timestamps (including booleans) are unknown, not healthy progress.
+A fresh phase can distinguish an advancing
 slow cycle from a wedge. A superseded writer cannot overwrite another generation's
 progress. These observations still confer no recovery authority.
 Collection and filesystem publication are also off the master: one tracked
@@ -97,11 +101,13 @@ the master rather than refreshed by delayed publication.
 The idle-worker handoff is atomic with producer admission, so a frame arriving
 as the worker finishes is not lost. A coalesced final summary from a superseded
 cycle cannot be written under the newer cycle's start marker. An inline update
-retains the singleton while old-generation status I/O is unresolved, without
-arming spawn cooldown for that deferral; it may hand off once publication settles.
+drains old-generation status I/O within the existing grace window before stopping
+any managed unit. If publication remains unresolved, it retains both the singleton
+and running units without arming spawn cooldown; it may hand off once publication
+settles.
 Independent watchdog invocation,
 custody/recovery and native platform proof remain integration gates of the
-existing #5301/#5655 owners. This slice neither implements a second watchdog nor
+tracked #5301/#5655 objectives. This slice neither implements a second watchdog nor
 claims that same-loop status writing proves independent recovery. The inner-lane
 conclusion boundary in #6185 is unchanged.
 

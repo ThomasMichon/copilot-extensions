@@ -807,6 +807,20 @@ def test_progress_observation_refuses_future_cycle_start(finished):
     assert observation["retain_authority"] is True
 
 
+@pytest.mark.parametrize("finished", [401.0, True, float("nan"), float("inf"), "later"])
+def test_progress_observation_refuses_invalid_completion_time(finished):
+    observation = supervisor_progress_observation(
+        {
+            "generation": {"pid": 123, "start_token": "owner"},
+            "cycle_started_at": 100.0, "updated_at": finished,
+        },
+        token_source=lambda pid: "owner", now=400.0,
+    )
+    assert observation["state"] == "unknown"
+    assert observation["recovery_permitted"] is False
+    assert observation["retain_authority"] is True
+
+
 def test_integrity_deadline_never_accepts_partial_digest(tmp_path):
     (tmp_path / "file").write_bytes(b"content")
     started = time.monotonic()

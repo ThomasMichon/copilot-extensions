@@ -4,7 +4,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from agent_dispatch.companion import DefaultCompanionController
+import pytest
+
+from agent_dispatch.companion import CompanionIndeterminate, DefaultCompanionController
 from agent_dispatch.supervisor_daemon import SupervisorDaemon
 from tests.test_supervisor_daemon import FakeClient, FakeCompanionController, FakeLauncher, _companion_reg, _reg
 
@@ -280,7 +282,7 @@ def test_inline_self_update_keeps_singleton_until_status_publication_settles(tmp
     entered, release = threading.Event(), threading.Event()
     lock, spawned = FakeLock(granted=True), []
     daemon = SupervisorDaemon(
-        FakeClient([]), "host", launcher=FakeLauncher(), lock=lock,
+        FakeClient([_reg("unit", machine="host")]), "host", launcher=FakeLauncher(), lock=lock,
         companion_controller=FakeCompanionController(), self_update_enabled=True,
         self_update_argv=["supervise", "serve"], self_update_install_dir=lambda: tmp_path,
         self_update_stale_target=lambda *_: tmp_path / "next",
@@ -296,9 +298,12 @@ def test_inline_self_update_keeps_singleton_until_status_publication_settles(tmp
     daemon._progress_callback = publish
     try:
         assert daemon.acquire_singleton()
-        daemon._phase("blocked")
+        assert daemon.reconcile_once().started == ["unit"]
+        process = daemon.launcher.proc_for("unit")
         assert entered.wait(1)
         assert daemon._maybe_self_update() is False
+        assert not process.terminated
+        assert "unit" in daemon._units
         assert not lock.released
         assert spawned == []
         assert daemon._self_update_last_spawn is None
@@ -306,8 +311,61 @@ def test_inline_self_update_keeps_singleton_until_status_publication_settles(tmp
         daemon._progress_future.result(1)
         daemon._self_update_last_check = 0
         assert daemon._maybe_self_update() is True
+        assert process.terminated
         assert lock.released
         assert len(spawned) == 1
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
+def test_cold_registry_timeout_preserves_receipts_until_first_confirmed_snapshot(tmp_path, monkeypatch):
+    from tests.test_bounded_receipt_reconcile import _receipt
+
+    entered, release = threading.Event(), threading.Event()
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    _receipt(controller, rid="persisted")
+    before = controller._receipt_path("persisted").read_bytes()
+    registration = _companion_reg("persisted")
+    registration["machine"] = "host"
+    client = FakeClient([registration, _reg("unrelated", machine="host")])
+    original_read = client.list_registrations
+    inventories = []
+    original_inventory = controller.request_receipt_inventory
+    process_controller = FakeCompanionController()
+
+    def read(**kwargs):
+        entered.set()
+        assert release.wait(3)
+        return original_read(**kwargs)
+
+    def inventory(adopted, **kwargs):
+        inventories.append(set(adopted))
+        return original_inventory(adopted, **kwargs)
+
+    monkeypatch.setattr(client, "list_registrations", read)
+    monkeypatch.setattr(controller, "request_receipt_inventory", inventory)
+    monkeypatch.setattr(controller, "resolve", process_controller.resolve)
+    monkeypatch.setattr(controller, "launch", process_controller.launch)
+    monkeypatch.setattr(controller, "stop", process_controller.stop)
+    daemon = SupervisorDaemon(
+        client, "host", launcher=FakeLauncher(), companion_controller=controller,
+        reconcile_call_budget=0.05,
+    )
+    try:
+        started = time.monotonic()
+        with pytest.raises(CompanionIndeterminate, match="confirmed registry snapshot"):
+            daemon.reconcile_once()
+        assert time.monotonic() - started < 0.5
+        assert entered.is_set()
+        assert inventories == []
+        assert controller._receipt_path("persisted").read_bytes() == before
+        assert daemon.launcher.launched == []
+        release.set()
+        daemon._discovery_futures["registrations"].result(1)
+        assert set(daemon.reconcile_once().started) == {"persisted", "unrelated"}
+        assert inventories and all("persisted" in adopted for adopted in inventories)
+        assert controller._receipt_path("persisted").read_bytes() == before
     finally:
         release.set()
         daemon.shutdown()

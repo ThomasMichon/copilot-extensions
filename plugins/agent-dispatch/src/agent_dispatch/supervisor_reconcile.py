@@ -40,7 +40,7 @@ class BoundedReconciliation:
         self._declaration_publisher = None
         self._resolution_futures = {}
         self._discovery_futures = {}
-        self._last_store_registrations = []
+        self._last_store_registrations: list[dict] | None = None
         self._progress_callback = None
         self._phase_name = "idle"
         self._progress_warning_after: dict[str, float] = {}
@@ -244,6 +244,23 @@ class BoundedReconciliation:
         finally:
             if future.done():
                 self._discovery_futures.pop(key, None)
+
+    def _store_registrations(self) -> list[dict]:
+        try:
+            registrations = self._bounded_read(
+                "registrations", lambda: self.client.list_registrations(
+                    machine=self.machine, env=self.env, include_paused=False,
+                ),
+            )
+        except TimeoutError as exc:
+            if self._last_store_registrations is None:
+                raise CompanionIndeterminate(
+                    "registration discovery pending; no confirmed registry snapshot"
+                ) from exc
+            log.warning("registration discovery remains pending; retaining confirmed registrations")
+            return self._last_store_registrations
+        self._last_store_registrations = copy.deepcopy(registrations)
+        return registrations
 
     def _receipt_pool(self) -> Executor:
         if self._receipt_executor is None:
