@@ -1,0 +1,9 @@
+{
+  "comment": "Make legacy stdio MCP dependencies an explicit opt-in extra, separate from host and client profiles",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

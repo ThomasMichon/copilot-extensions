@@ -247,3 +247,28 @@ shared mutable venv is presumed acceptable.
   introduce a shared runtime or close the compatibility/lifecycle design gate.
   Next implementation slice: isolate legacy stdio MCP dependencies, retaining
   the existing CLI bridge and explicit opt-in legacy entry point.
+
+### 2026-10-14 - Helper evidence merged
+- #6643 merged to `dev` as `9015d09d8` after approval and green CI.
+  Review corrected assertion-elision under optimized Python; four process
+  contract tests now pass under `-O`. This closes publication of the bounded
+  probe, not installation deduplication, auth isolation or shared lifecycle work.
+- The full Phase 5 design gate remains open. Proceeding with the already
+  planned optional dependency reduction before choosing a reuse mechanism.
+
+### 2026-10-14 - Explicit legacy stdio MCP profile
+- Moved the MCP SDK requirement out of `[store]` into `[stdio-mcp]`; native
+  `[store,server]` installers do not request it. The normal agent read CLI is
+  unchanged. The legacy adapter is HTTP-client-only and runs in the explicitly
+  opted-in invoking runtime, not a host sibling that no longer installs its SDK.
+- Full contained Windows validation passed: 857 tests, 180 explicit/platform
+  skips. The suite includes a real `agent-index mcp` initialize/tools-list
+  handshake, plus role-parametrized no-host-dispatch and manifest checks.
+- A fresh 12-package base profile has no MCP SDK, NumPy or FastAPI and refuses
+  `mcp` with exit 2 and actionable opt-in guidance. Adding only `[stdio-mcp]`
+  exposes all five real SDK tools and completes the real stdio handshake without
+  NumPy or FastAPI. The SDK has its own transitive HTTP dependencies; the extra
+  is not described as dependency-free.
+- Focused Python lint and the 13-plugin installer contract pass. Linux behavior
+  remains subject to PR CI; no local macOS lane or Docker daemon is available.
+  No managed runtime slot, service, model or production endpoint was changed.

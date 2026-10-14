@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import subprocess
+import sys
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 import agent_index.mcp_app as mcp_app
 
@@ -19,6 +23,29 @@ def test_all_tools_registered() -> None:
     tools = asyncio.run(mcp_app.mcp.list_tools())
     names = {tool.name for tool in tools}
     assert _TOOLS <= names
+
+
+def test_real_stdio_command_initializes_and_lists_tools() -> None:
+    messages = [
+        {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": {"name": "dependency-profile-test", "version": "1"},
+            },
+        },
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    ]
+    result = subprocess.run(
+        [sys.executable, "-I", "-m", "agent_index", "mcp"],
+        input="".join(json.dumps(message) + "\n" for message in messages),
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    responses = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    tools = next(response["result"]["tools"] for response in responses if response.get("id") == 2)
+    assert {tool["name"] for tool in tools} == _TOOLS
 
 
 def test_search_delegates_and_formats(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -286,7 +286,10 @@ separate lower-level MCP surface:
    FastMCP tools (`agent_index_search`/`find_similar`/`clusters`/`status`) plus
    `agent_index_reindex`. It resolves `AGENT_INDEX_ENDPOINT` first, then local
    endpoint discovery. This is a lower-level surface for embedding/automation, not
-   the agent retrieval path.
+   the agent retrieval path. Its `[stdio-mcp]` extra is explicit opt-in, absent
+   from both native `[store,server]` installations and the base CLI. It runs in
+   the invoking runtime on either role, without forwarding into the host slot:
+   it needs a reachable HTTP endpoint, not local store/server dependencies.
 
 ## Robustness and fail-loud behavior
 
