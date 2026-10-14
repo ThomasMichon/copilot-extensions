@@ -16,6 +16,21 @@ launchers under the existing 90-second item budget. Package construction and
 whole-source fingerprint coverage belong to their own contracts; this fixture
 must not grow with unrelated runtime source files.
 
+### Fleet replay-retention boundaries
+
+The required native fleet lane runs the replay-expiry/idempotency contract with
+a four-event window and real, fully synchronous SQLite transactions. The same
+parameterized test also crosses the production 1,024-event window under
+`observation_retention_full`; unfiltered local and manual workflow runs retain
+that full-size proof. Required PR/push lanes exclude only that parameter and
+the existing `client_distribution_full` artifact matrix, keeping the
+120-second containment budget unchanged. This avoids making one boundary
+test issue over 1,000 disk flushes on every hosted Windows run; neither the
+production retention limit nor its durability policy changes. Explicit manual
+runs select both windows and the full artifact matrix with a 600-second fleet
+suite budget inside a 15-minute native runner job. PR/push budgets remain
+120 seconds for fleet, five minutes for the Linux job and seven for Windows.
+
 ### Derived native installation diagnostics
 
 `libs/payload-invocation/tests/test_derived_diagnostic_cli.py` executes the

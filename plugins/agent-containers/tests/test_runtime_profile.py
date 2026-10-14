@@ -305,3 +305,67 @@ def test_signed_python_probe_continues_after_unavailable_candidate(tmp_path):
         capture_output=True, text=True, check=False, timeout=15,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_path, extension):
+    if extension == "ps1":
+        if os.name != "nt":
+            pytest.skip("native Windows PowerShell staging contract")
+        shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        if not shell.is_file():
+            pytest.skip("Windows PowerShell 5.1 unavailable")
+    else:
+        shell = shutil.which("bash")
+        if os.name == "nt" or shell is None:
+            pytest.skip("native POSIX staging contract")
+    home = tmp_path / "home"
+    home.mkdir()
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    payload = home / ".copilot" / "installed-plugins" / "example" / "agent-containers"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    (payload / "plugin.json").write_text('{"name":"agent-containers"}\n', encoding="utf-8")
+    source = (SCRIPTS / f"init.{extension}").read_text(encoding="utf-8")
+    marker = "# === end install-contract:v4 self-stage ==="
+    prefix = source[:source.index(marker) + len(marker)]
+    receipt = tmp_path / "staged-arguments.txt"
+    if extension == "ps1":
+        body = (
+            '[System.IO.File]::WriteAllLines($env:PROFILE_STAGE_RECEIPT, '
+            '[string[]]@($InstallDir, $Profile, $Action, [string]$Force.IsPresent, '
+            '$env:COPILOT_PLUGIN_STAGED_FROM))\n'
+        )
+        arguments = [
+            str(shell), "-NoProfile", "-File", str(scripts / "init.ps1"),
+            "-Action", "provision", "-InstallDir", ".\\new runtime\\nested",
+            "-Profile", "provider-exec", "-Force",
+        ]
+    else:
+        body = (
+            'printf "%s\\n" "$INSTALL_DIR" "$PROFILE" "$ACTION" "$FORCE" '
+            '"$COPILOT_PLUGIN_STAGED_FROM" > "$PROFILE_STAGE_RECEIPT"\n'
+        )
+        arguments = [
+            shell, str(scripts / "init.sh"), "provision",
+            "--install-dir", "./new runtime/nested", "--profile", "provider-exec", "--force",
+        ]
+    (scripts / f"init.{extension}").write_text(prefix + "\n" + body, encoding="utf-8")
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("COPILOT_", "AGENT_CONTAINERS_"))}
+    env.update(HOME=str(home), USERPROFILE=str(home), PROFILE_STAGE_RECEIPT=str(receipt),
+               COPILOT_EXTENSIONS_TEST_CONTAINED="1", COPILOT_PLUGIN_INSTALL_DEADLINE_SEC="20")
+    completed = subprocess.run(
+        arguments, cwd=caller, env=env, capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    root, profile, action, force, origin = receipt.read_text(encoding="utf-8-sig").splitlines()
+    assert Path(root).is_absolute()
+    assert Path(root).resolve() == caller / "new runtime" / "nested"
+    assert (profile, action, force) == (
+        "provider-exec", "provision", "True" if extension == "ps1" else "1",
+    )
+    assert Path(origin).resolve() == payload
+    assert not (home / "new runtime").exists()

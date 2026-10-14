@@ -12,6 +12,7 @@ import pytest
 from fleet_manager.observation_store import (
     MAX_PAGE_ROWS, MAX_REPLAY_EVENTS, ObservationStore,
 )
+from fleet_manager import observation_store
 from fleet_manager.observations import (
     MAX_TEXT_BYTES, MAX_UPDATE_BYTES, CurrentUpdate, ObservationCursor, OriginBinding,
 )
@@ -187,16 +188,23 @@ def test_scoped_point_pages_and_replay_never_return_other_origins_or_projects(tm
         result.page(origin=BINDING.origin, project="example", at=first["cursor"])
 
 
-def test_bounded_replay_expires_visibly_but_latest_retry_remains_idempotent(tmp_path):
+@pytest.mark.parametrize("retention", [
+    4,
+    pytest.param(MAX_REPLAY_EVENTS, marks=pytest.mark.observation_retention_full),
+], ids=["small-window", "production-window"])
+def test_bounded_replay_expires_visibly_but_latest_retry_remains_idempotent(
+    tmp_path, monkeypatch, retention,
+):
+    monkeypatch.setattr(observation_store, "MAX_REPLAY_EVENTS", retention)
     result = ready(tmp_path)
     original = read(result)["cursor"]
     first = update()
     result.apply(first)
-    for sequence in range(2, MAX_REPLAY_EVENTS + 3):
+    for sequence in range(2, retention + 3):
         latest = update(sequence=sequence)
         position = result.apply(latest)
     with closing(sqlite3.connect(result.path)) as connection:
-        assert connection.execute("SELECT count(*) FROM changes").fetchone()[0] == MAX_REPLAY_EVENTS
+        assert connection.execute("SELECT count(*) FROM changes").fetchone()[0] == retention
     with pytest.raises(PlanError, match="fresh snapshot"):
         result.replay(original)
     with pytest.raises(PlanError, match="outside replay retention"):

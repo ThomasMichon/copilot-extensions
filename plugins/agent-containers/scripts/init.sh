@@ -36,9 +36,14 @@ parse_arguments() {
         esac
     done
 }
-# Preserve argv for the shared self-stage re-exec, including profile and root.
+# Resolve caller-relative roots before self-staging changes the working directory.
 parse_arguments "$@"
 case "$PROFILE" in ""|base|provider-exec) ;; *) _fail "Unknown runtime profile: $PROFILE"; exit 2 ;; esac
+case "$INSTALL_DIR" in ""|/*) ;; *) INSTALL_DIR="$PWD/$INSTALL_DIR" ;; esac
+set -- "$ACTION"
+if [[ "$FORCE" == 1 ]]; then set -- "$@" --force; fi
+if [[ -n "$PROFILE" ]]; then set -- "$@" --profile "$PROFILE"; fi
+if [[ -n "$INSTALL_DIR" ]]; then set -- "$@" --install-dir "$INSTALL_DIR"; fi
 export AGENT_CONTAINERS_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

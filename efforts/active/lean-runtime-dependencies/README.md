@@ -358,3 +358,27 @@ shared mutable venv is presumed acceptable.
   #4876's exact authority-owned lock/profile decision and #6598's seasoning and
   construction ownership. The current engine's default-install/torch-only-swap
   assumption is not a safe substitute for an approved compatible closure.
+
+### 2026-10-14 - Native staging and bounded CI follow-through
+- The next review identified caller-relative roots crossing marketplace
+  self-staging and a contradictory profiled development-version fixture.
+  Normalize and forward installation roots before either shell changes CWD;
+  a native staged-child regression preserves the root, profile, action and
+  force flag without provisioning a live runtime. Both recovery parameters now
+  compare development versions before testing the final release.
+- Windows CI then exhausted the fleet lane's 120-second budget in the
+  production-window replay test: over 1,000 independent fully synchronous
+  SQLite transactions. The exact unmodified selection passed locally in
+  61.47 seconds, with that test taking 10.15 seconds; hosted-runner progress
+  stopped at the same boundary. Required CI now runs the identical retention
+  assertions with a four-event window; the full 1,024-event parameter remains
+  in unfiltered and explicit manual validation, with an appropriate full-suite
+  budget. Production retention, durability and required CI timeouts are unchanged.
+- The required fleet selection passed 597 tests / 6 skips in 55.11 seconds
+  under its unchanged 120-second containment budget. The complete suite,
+  including production-window retention and the full artifact matrix, passed
+  605 / 6 in 69.78 seconds. Workflow selection contracts: 17 passed.
+  Containers profile/dependency/transaction coverage: 34 / 8; Codespaces
+  recovery: 8 / 8. Focused lint and the install contract pass.
+- These are candidate checks, not a merge, released payload or production
+  rollout. Current-head review and hosted CI remain required.

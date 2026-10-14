@@ -230,7 +230,7 @@ def test_posix_resolver_rejects_invalid_marker_states(
 def test_posix_tier3_orders_dev_versions_without_sort_v(tmp_path: Path, profile: str) -> None:
     root = tmp_path / "runtime"
     _slot(root, f"0.4.0-dev9{profile}", complete=True, interpreter=True)
-    newest_version = f"0.4.0{profile}" if profile else "0.4.0-dev10"
+    newest_version = f"0.4.0-dev10{profile}"
     newest = _slot(root, newest_version, complete=True, interpreter=True)
     real_sort = shutil.which("sort")
     assert real_sort is not None
