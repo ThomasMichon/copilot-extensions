@@ -226,6 +226,35 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-13 - Process-log source containment reviewed and merged
+- #6156 merged at `2026-10-14T06:35:39Z` as
+  `f79c873ee4c03022216d5d1a0ff3d8a79f9e4fc1`, from final head
+  `f66434f9bb7e78574766479e5d7c3e95af53040f`. The current-head Balanced
+  Copilot review had zero open findings. Complete successful same-head CI
+  `38515571854` and fresh required-check run `38518755723` both finished
+  before merge; historical watcher rollups were not used as gate evidence.
+- Process-log enumeration, direct reads and filesystem transfer sources
+  reuse canonical ancestor pinning. Intentional ancestor aliases, configured
+  reference identity, incremental POSIX enumeration, native handle release,
+  root-change diagnostics and per-entry copy deferral retain their documented
+  contracts. Only source-opener `ELOOP` is treated as a skipped candidate;
+  other source-open and all destination-publication failures remain visible.
+- Final-head Linux CI executed the agent-logger suite in two contained groups:
+  476 passed / 29 skipped and 823 passed / 32 skipped. The publisher's native
+  rebased-head selection passed 192 tests with 87 documented platform skips
+  and verified cleanup. The preceding 264-pass Linux receipt is historical,
+  not substituted for validation of the final rebased head.
+- Re-read the effort's Plan and Validation Plan after actual merge. This
+  closes the process-log source-read containment slice only. #5727 remains
+  open for destination containment; reclamation, complete transports,
+  source/session discovery, usage-evidence preservation, catalog/accounting,
+  daily products, fixed-corpus consumer parity and released adoption remain
+  active. No original evidence was retired or runtime rollout performed.
+- The next preservation stretch remains coordinated with the existing
+  publisher and the separate usage-evidence slice. This receipt does not
+  transfer source publication ownership or authorize a second concurrent
+  driver of those shared modules.
+
 ### 2026-10-13 - Usage-evidence amendment reviewed and merged
 - #6442 merged after the current-head Copilot review had no open Medium/High
   findings and the configured required CI contexts passed. The worktree
