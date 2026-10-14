@@ -301,6 +301,8 @@ class ContentStore(_ContentFtsWorkerMixin):
                 if src:
                     counts[src] = counts.get(src, 0) + 1
         except Exception:
+            if self._source_domain is not None:
+                raise
             logger.debug("source_counts scan failed", exc_info=True)
         return counts
 

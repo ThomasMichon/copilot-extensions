@@ -378,7 +378,7 @@ def queued_source(tmp_path, monkeypatch):
 
     def repository(name):
         repo = tmp_path / name
-        repo.mkdir()
+        repo.mkdir(parents=True)
         run_git(repo, "init", "--quiet")
         run_git(repo, "config", "user.name", "Synthetic Fixture")
         run_git(repo, "config", "user.email", "fixture@example.invalid")
@@ -388,9 +388,10 @@ def queued_source(tmp_path, monkeypatch):
         run_git(repo, "commit", "--quiet", "-m", "fixture")
         return repo
 
-    def configure(repo):
+    def configure(repo, *, name="git:alias", extra=()):
         inline = {"role": "host", "corpus": {"sources": [
-            {"name": "git:alias", "type": "git", "_repo_path": str(repo)},
+            {"name": alias, "type": "git", "_repo_path": str(path)}
+            for alias, path in [(name, repo), *extra]
         ]}}
         monkeypatch.setenv("AGENT_INDEX_CONFIG_DATA_B64",
                            base64.urlsafe_b64encode(json.dumps(inline).encode()).decode())
@@ -413,8 +414,8 @@ def queued_source(tmp_path, monkeypatch):
     configure(repository("old"))
     queue = TaskStore(data / "tasks.db")
 
-    def run(full=False):
-        task = queue.enqueue("all", full=full, trigger_source="fixture")
+    def run(full=False, *, source="all"):
+        task = queue.enqueue(source, full=full, trigger_source="fixture")
         assert queue.dequeue_next().id == task.id
         code = run_worker(task.id)
         return code, queue.get_task(task.id)

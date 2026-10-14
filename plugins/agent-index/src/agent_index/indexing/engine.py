@@ -706,8 +706,10 @@ def _crawl_source(
     cancel_check = progress_cb.check_cancelled if progress_cb else None
 
     # Get what's currently in our index for deletion detection
-    stored_family = connector.source_name if selected_layout() else source_name
-    stored_by_source = path_index.get_paths_by_prefix(stored_family)
+    stored_by_source = (
+        path_index.get_paths_by_family(canonical) if canonical is not None
+        else path_index.get_paths_by_prefix(source_name)
+    )
 
     if full:
         # Full crawl: discover everything

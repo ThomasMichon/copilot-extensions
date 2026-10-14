@@ -146,10 +146,24 @@ commit cursor. A configured alias such as `git:fixture` can therefore retain its
 `git:repo` family and exact colon descendants such as `git:repo:commits`.
 Neither aliases nor arbitrary string prefixes are guessed into canonical
 identities: `git:repository` is not a descendant of `git:repo`.
+Selected deletion planning uses `PathIndex.get_paths_by_family()`: exact
+case-sensitive identity or colon descendants, with literal `_` and `%`.
+It does not use SQLite's case-insensitive/wildcard `LIKE` prefix lookup.
+The existing genuine-prefix API and unselected reconciliation remain unchanged.
 
 All-source configured GC uses that connector-derived evidence, including
 cached identities for still-configured sources that were not crawled this run.
-Mappings for removed configuration entries do not retain their old families.
+Stored-row retention uses only resolved canonical families, not configured alias
+spellings. Crawl cursors are a separate namespace: an active alias keeps its
+cursor even if it happens to equal a retired stored family. Only after the
+complete configured GC pass succeeds are removed aliases' cursors and mappings
+pruned, including when another configured alias still owns their canonical
+family. Re-adding a retired alias to an unchanged repository therefore starts
+discovery without its removed cursor and restores content incrementally.
+Unknown identities defer the pass without state pruning; scan/deletion/path-index
+failure propagates and does not falsely retire alias state. Partial data deletion
+is not rolled back or reported complete. Mappings for removed configuration
+entries do not retain their old families.
 If a configured source has no known canonical identity, destructive configured
 GC is explicitly deferred (warning plus `source_gc_deferred` in the indexing
 result), rather than risking a configured but unindexed family. Unselected
