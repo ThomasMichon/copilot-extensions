@@ -55,6 +55,9 @@ and raw historical `machine`, `platform`, `owner`,
 been indexed, not zero; an indexed empty list returns zero.
 `last_session_id` uses the existing record-local asserted-head resolution,
 including its transition ledger, without filesystem/session discovery.
+Malformed present ledgers or session states return `record-malformed` rather
+than silently deriving a legacy head. An absent or empty legacy ledger retains
+the existing asserted-head fallback; an explicit null head transition clears it.
 `execution_leg` uses the existing read-only legacy-backend compatibility view,
 preserving an unrecognized explicit leg as opaque data.
 An unrecognized legacy backend likewise remains visible as raw data with its
@@ -215,6 +218,7 @@ continue to work unchanged.
 | `session-recovery` | Read one exact session's reciprocal projection and emit validated, machine-readable recovery state without changing bindings. Version-aware output includes schema version, history completeness, relation overflow (`omitted_relations` is `null` for v2 overflow), and tombstone-overflow diagnostics. `--stdin` accepts a sessionStart payload; `--emit-context` renders the bounded pointer used when startup cannot establish an authoritative worktree binding |
 | `session-lineage` | Read one exact session projection and validate every retained worktree relation against authoritative records. Reports restored evidence, missing records, unsupported or invalid projections, schema/history completeness, relation overflow, full-key v1 or opaque-digest v2 tombstones, and tombstone overflow without enumerating the live session-state root |
 | `head-session` | Project-agnostic replay of a worktree's monotonic head-transition ledger, including pending handoffs (JSON; fail-open when untracked) |
+| `record` | Read one exact durable record in the current project (`--worktree-id <exact-id> --json`), without resident roster computation, session discovery, or lifecycle/launch authority |
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
 | `fleet` | Aggregate `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. |
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |

@@ -273,6 +273,57 @@ def test_record_read_reuses_head_ledger_and_preserves_execution_leg(record_fixtu
 
 
 @pytest.mark.parametrize(
+    "ledger",
+    [
+        None, {}, "invalid", [None], [1], [{}],
+        [{"revision": value} for value in (0, -1)],
+        [{"revision": "invalid"}], [{"revision": True}], [{"revision": 1.5}],
+        [{"revision": 1, "session_id": {}}],
+        [{"revision": 1, "session_id": ""}],
+        [{"revision": 1, "handoff_ordinal": "invalid"}],
+        [{"revision": 1}, {"revision": 1}],
+    ],
+)
+def test_record_read_rejects_malformed_head_ledger_without_fallback(record_fixture, ledger):
+    data, path = record_fixture
+    data.update(
+        sessions=[{"session_id": "legacy-head"}],
+        head_session="legacy-head",
+        head_transitions=ledger,
+    )
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1 and result["error"]["code"] == "record-malformed"
+    assert result["worktree"] is None
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("ledger", ["absent", "empty", "cleared"])
+def test_record_read_preserves_legacy_and_explicit_clear_head_semantics(record_fixture, ledger):
+    data, path = record_fixture
+    data.update(sessions=[{"session_id": "legacy-head"}], head_session="legacy-head")
+    if ledger == "empty":
+        data["head_transitions"] = []
+    elif ledger == "cleared":
+        data["head_transitions"] = [{"revision": 1, "session_id": None}]
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["last_session_id"] == (
+        None if ledger == "cleared" else "legacy-head"
+    )
+
+
+def test_record_read_rejects_malformed_session_state_without_fallback(record_fixture):
+    data, path = record_fixture
+    data["sessions"] = [{"session_id": "legacy-head", "state": "unknown-state"}]
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1 and result["error"]["code"] == "record-malformed"
+
+
+@pytest.mark.parametrize(
     "failure", [RuntimeError("project unavailable"), ValueError("invalid config")]
 )
 def test_record_read_project_unavailable_explicit(record_fixture, monkeypatch, failure):

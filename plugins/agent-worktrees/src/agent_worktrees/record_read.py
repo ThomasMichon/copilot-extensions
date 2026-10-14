@@ -22,6 +22,28 @@ class RecordReadError(ValueError):
         self.code = code
 
 
+def _validate_head_ledger(data: dict) -> None:
+    if "head_transitions" not in data:
+        return
+    transitions = data["head_transitions"]
+    if not isinstance(transitions, list):
+        raise ValueError("Record head_transitions must be a list")
+    revisions: set[int] = set()
+    for transition in transitions:
+        if not isinstance(transition, dict):
+            raise ValueError("Each head transition must be a mapping")
+        revision = transition.get("revision")
+        if type(revision) is not int or revision <= 0 or revision in revisions:
+            raise ValueError("Each head transition requires a unique positive integer revision")
+        revisions.add(revision)
+        session_id = transition.get("session_id")
+        if session_id is not None and (not isinstance(session_id, str) or not session_id):
+            raise ValueError("Head transition session_id must be a nonempty string or null")
+        ordinal = transition.get("handoff_ordinal")
+        if ordinal is not None and (type(ordinal) is not int or ordinal <= 0):
+            raise ValueError("Head transition handoff_ordinal must be a positive integer or null")
+
+
 def read_exact_record(worktree_id: str) -> dict[str, object]:
     """Read only the selected project's exact record; never authorize launch."""
     if (
@@ -98,6 +120,9 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
                     or not entry["session_id"]
                 ):
                     raise ValueError("Each recorded session requires a nonempty session_id")
+                if "state" in entry and entry["state"] not in get_args(tracking.SessionState):
+                    raise ValueError("Recorded session has an unknown state")
+        _validate_head_ledger(data)
         record = tracking.parse_record_data(data, path=record_path)
         leg = tracking.derive_execution_leg(record)
         worktree = {
