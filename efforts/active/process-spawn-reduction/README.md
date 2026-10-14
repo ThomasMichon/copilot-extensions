@@ -68,6 +68,29 @@ mock process calls/output rather than probing host WSL; prioritize reducing
 spawn churn even on powerful hosts. The sessions-times-enabled-plugins idea is
 a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 
+Startup follow-up, summarized from the operator's subsequent sequence review:
+prioritize create/cold-start preparation, keep plugin enablement/dependency
+planning local, and report progress rather than impose broad startup timeouts.
+The configured anchor/default-branch behavior and current plugin-update scope
+are accepted. Update-versus-allocation ordering raises a separate failure and
+recovery concern; it does not authorize rolling back shared updates.
+
+Operator's projection and mux decisions, verbatim:
+
+> Projection ordering: bad. Definitiely should only happen when both the harness and knowledge worktrees are created, and the complete plugin-hoist is computed. We know the set of plugins that need projection ahead of time, but the actual copying should occur all at once
+>
+> Machine preferences: that's fine
+>
+> Mux registration: makes sense. Good that daemon is async, so we can tear it down and restart it independently without breaking the mux pane or copilot. We want as few important pieces between the Mux pane and Copilot, other than to launch the mux pane, so that when we need to update, nothing in that gap needs restarting unless we want to create a new Copilot process.
+
+The operator clarified the publication contract, verbatim:
+
+> One final batch, and failure should be highly unlikely, because it's just file copies into empty space.
+
+This means one final projection pass, not a new rollback-capable filesystem
+transaction. Current machine-preference behavior and asynchronous mux-daemon
+registration remain unchanged.
+
 ## Plan
 
 ### Phase 1 - Reviewed scope and baseline
@@ -125,6 +148,24 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 - [ ] Resolve or explicitly transfer every Plan and Validation Plan item to a
   named tracked objective; journal completion and archive normally.
 
+### Phase 5 - One final startup projection batch
+
+- [ ] Prioritize this bounded startup slice before further classifier tuning.
+  Coordinate with #6600's existing launch timing/rendering owner; do not
+  duplicate its latency work or the separate catalog-rendering proposals.
+- [ ] Publish local projections only after both applicable worktrees exist
+  and the complete combined plugin surface and local overrides are ready.
+  Preserve direct creation and direct launch-plan consumers as well as both
+  shell launchers; avoid early or repeated projection passes.
+- [ ] Keep maintenance separate from offline planning and final projection.
+  Record allocation/retry behavior when maintenance or later preparation fails;
+  do not invent rollback of shared plugin/runtime updates.
+- [ ] Retain progress and elapsed-time reporting instead of introducing broad
+  startup ceilings. Preserve machine preferences, async mux registration and
+  the minimal pane-to-Copilot process/lifetime boundary.
+- [ ] Review, merge and verify the bounded ordering change through the normal
+  release flow; keep the parent campaign Active for its remaining work.
+
 ## Validation Plan
 
 - [x] First hook slice proves zero client/CLI child processes on daemon success,
@@ -149,6 +190,15 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
   transitions; deliberate interactive launch semantics are unchanged.
 - [ ] Release/deploy behavior is verified after caller cleanup, not inferred
   from merged PRs or updated payload versions.
+- [ ] Startup order tests prove no projection before paired allocation and
+  final combined settings, and exactly one final batch for each cold launch.
+- [ ] A plugin enabled only by the paired knowledge worktree appears in the
+  actual resulting projection, not just in a mocked call-order assertion.
+- [ ] Direct create/resolve, cold Resume, no-pair/recovery and Windows/POSIX
+  launcher contracts retain delivery; reattach does not create a new Copilot
+  process or a mandatory daemon bridge.
+- [ ] Failure-path checks retain recoverable worktree identities, surface
+  preparation errors and preserve existing update/ownership safeguards.
 
 ## Proposal
 
@@ -164,6 +214,13 @@ _(Agent-recommended sequencing)_ Begin with one PowerShell read/advisory hook
 if that is the smallest proven compatibility surface. Extend safety hooks only
 after equivalence and error semantics are established. Keep native integration
 small and explicit while unit policy tests remain in-process.
+
+_(Agent-recommended startup mechanics)_ Let an outer launcher defer projection
+publication until its maintenance and knowledge/settings preflights finish;
+direct callers still prepare their final surface before returning a launch
+plan. Reuse existing progress/reporting and rendering APIs, not a new resident
+or pane-side helper. Do not add cross-file transaction machinery for this
+single-final-batch contract.
 
 ## Journal
 
