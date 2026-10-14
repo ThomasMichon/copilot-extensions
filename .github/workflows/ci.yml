@@ -1057,6 +1057,7 @@ jobs:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: |
           python tools/seasoned_uv.py --uv uv -- --system pytest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q -m "not derived_diagnostic_full" libs/payload-invocation/tests/test_derived_diagnostic_cli.py
       - name: Manager read-only wrapper (Windows)
         if: steps.installation-context.outputs.run == 'true'
@@ -1207,8 +1208,10 @@ jobs:
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
         run: |
           python tools/seasoned_uv.py --uv uv -- --system pytest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 300 }}
 
   archive-sources-windows:
     name: archive sources (windows-latest)

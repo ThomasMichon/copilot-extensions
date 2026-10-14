@@ -148,6 +148,11 @@ spaced directory and probes its exact executable and prefix with a restricted
 PATH before invoking the hook. Copying a base `python.exe` and writing
 `pyvenv.cfg` is not a runnable cold interpreter fixture: its DLL dependencies
 may be absent, independently of argument forwarding or installation policy.
+The full native Fleet check allows 300 seconds on Windows under its unchanged
+seven-minute CI job limit; Linux retains 120 seconds. This is a full-suite
+budget, not a reduced test selection or a relaxed dependency-admission gate.
+Multiline PowerShell steps propagate each native admission or prerequisite-test
+failure explicitly before starting later commands.
 `tools/test_installer_finalizers.py` exercises production cleanup and exclusive
 lock reacquisition in the same still-live Windows PowerShell host.
 

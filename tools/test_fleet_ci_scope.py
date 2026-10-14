@@ -16,10 +16,19 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
     assert WORKFLOW.count(
         """'-m "not client_distribution_full and not observation_retention_full"'"""
     ) == 2
-    assert WORKFLOW.count(
-        "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 "
-        "--timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}"
-    ) == 2
+    for job_id, timeout in (("test-runner-linux", 120), ("test-runner-windows", 300)):
+        match = re.search(
+            rf"(?ms)^  {job_id}:\n(.*?)(?=^  \S|\Z)", WORKFLOW,
+        )
+        assert match is not None
+        job = match.group(1)
+        assert (
+            "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 "
+            "--timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || "
+            f"{timeout}" + " }}"
+        ) in job
+        if job_id == "test-runner-windows":
+            assert re.search(r"(?m)^    timeout-minutes: 7$", job)
 
 
 @pytest.mark.parametrize("path,selected", [

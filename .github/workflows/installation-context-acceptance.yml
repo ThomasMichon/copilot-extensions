@@ -47,4 +47,5 @@ jobs:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: |
           python tools/seasoned_uv.py --uv uv -- --system pytest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"

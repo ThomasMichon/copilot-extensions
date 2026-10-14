@@ -489,6 +489,10 @@ def test_standalone_real_uv_preparation_preserves_environment_identity(cache, mo
     runner = load_runner("run-standalone-tests.py")
     monkeypatch.setattr(runner, "REPO", cache)
     monkeypatch.setenv("UV_VENV_CLEAR", "true")
+    shutil.copytree(
+        TOOLS.parent / "libs" / "versioned-runtime", cache / "libs" / "versioned-runtime",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "tests"),
+    )
     for relative, name in {
         "libs/zdd": "agent-zdd",
         "libs/agent-procutil": "agent-procutil",

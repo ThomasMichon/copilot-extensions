@@ -596,3 +596,17 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   and lock-release assertions. The base-interpreter Windows regression passed
   in 17.20 seconds and touched-code lint passed. No deadline was raised;
   fresh-head provider CI and review remain required before merge or rollout.
+- The next genuine review identified two validation defects: multiline
+  PowerShell admission steps could mask native failure, and an exhaustive
+  standalone identity fixture omitted canonical retained runtime resources.
+  All three affected Windows steps now stop on admission failure; the Fleet
+  step also stops on its prerequisite-test failure. Four real PowerShell
+  failure-propagation cases and the real UV environment-identity case passed.
+- Windows Fleet acceptance exhausted its two-minute full-suite bound halfway
+  through the growing selected roster, rather than reporting an individual
+  failure. With explicit operator approval, only that Windows suite now allows
+  five minutes; Linux retains two minutes and the existing seven-minute job
+  is unchanged. All 602 tests passed with six platform skips and eleven
+  pre-existing full-distribution deselections in 158.75 seconds. No selection
+  was reduced. All 72 workflow contracts passed in a stable interpreter.
+  Fresh-head native CI and confirmation of the two review fixes remain open.
