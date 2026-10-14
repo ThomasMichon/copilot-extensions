@@ -1400,3 +1400,48 @@ hosted checks, review and a containing full validation remain required.
   contract. Its proposed explicit post-merge CI/lockdown dispatch must be
   recorded as such, not substituted for this campaign's outstanding natural
   main-push proof. No competing bootstrap or policy mutation is introduced.
+
+### 2026-10-14 - Reviewed evidence reconciliation merged; FIFO repair follows
+
+- #6774 merged as `2635c295c5095a8e1d4e64c5abcf367b570b57e8` at
+  `23:18:08Z`. Exact head `c9df18ad404b` received native Copilot approval
+  with zero findings. All three same-head check suites and the fresh source
+  required-check verifier passed before managed merge; no CI bypass.
+- Reread the Plan and Validation Plan after merge. Only the scoped existing
+  version-update routing item closes; the proposed reuse boundary is not an
+  implemented compact gate, and #6237 remains Active.
+- Retained FIFO repair #6773 merged independently as
+  `23367596f6caabeee879df9bfb1813cdc6ad895c` at `23:13:09Z` after native
+  approval. No competing patch or merge was performed here.
+- Earlier natural full `38647658802` validates the unchanged `5d08c74d7185`
+  input and repeats the FIFO refusal. Dispatch job `116141175848` passes all
+  eight ordinary groups and emits baseline `11934069896`; the original
+  #6771 cause remains open, not repaired or accepted as a flake. Shared that
+  unchanged-input evidence with its retained owner.
+- Natural full `38652751643` is queued. Establish its actual checkout and
+  containing release before claiming the #6661 main-PR invocation cutover;
+  no manual dispatch, deadline increase or local rollout.
+
+### 2026-10-14 - FIFO cleared; optional-assignment plan assertion repaired
+
+- Natural full `38652751643` actually checks out
+  `23367596f6caabeee879df9bfb1813cdc6ad895c`, including #6773. The
+  FIFO group's 498 passing cases and five skips clear that earlier blocker.
+  Worktrees then reaches group 10/16 and exposes
+  `test_new_worktree_survives_optional_assignment_state_failure`.
+- Exact issue/PR searches find no existing repair. Reserved only this family
+  under #6237 and reproduced the same failure in the contained native runner.
+  The test strips execution admission but then mistakes the still-required
+  setup launcher for Copilot. The production two-layer plan is intentional;
+  the fixture's unrelated fake-Git metadata warning does not cause that wrapper.
+- The existing case now requires the exact admission module, record and
+  admission-only flag before checking the real setup command's underlying model
+  arguments. Both real launch builders, profile environment and absence-of-
+  assignment assertions remain; no production behavior or deadline changes.
+  This case also joins fast guards.
+- The complete assignment, setup-launcher and creation-seed/admission modules
+  pass 161 cases in the contained native runner. The actual guard selector
+  executes and passes the repaired case. Ruff F/E9, docs, the 13-plugin install
+  contract and whitespace checks pass; the required patch changefile is
+  generated. The later watchdog #6780 matches this already-reserved repair,
+  with no other writer. Hosted review/CI and containing release remain gates.

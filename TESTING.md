@@ -9,6 +9,12 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The optional profile-assignment-state failure guard follows both real command
+layers returned by worktree creation: exact record-bound execution admission,
+then the installed setup launcher. It checks the underlying model arguments,
+fallback profile environment and absence of assignment metadata without
+mocking either launcher or treating a setup host as the Copilot executable.
+
 The create-plan project-scoping guard uses a real `WorktreeRecord` derived from
 the shared fixture, with the selected creation identity and owning project.
 Only external side effects are stubbed: the real creation path assembles its
