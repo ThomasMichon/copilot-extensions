@@ -75,6 +75,15 @@ Deferred `stamp` holds the same admission lock but neither reserves an
 unfinished runtime build nor publishes new selectable ownership. First-use
 `provision` performs the runtime-building transaction.
 
+Legacy `uninstall` uses the same ownership-validated transaction without a
+runtime-build reservation. The shared lock is a sibling of the canonical
+runtime root, so deleting that root cannot remove the lock or admit a concurrent
+installer. Obvious foreign ownership is refused before lock creation and is
+revalidated after acquisition. Teardown keeps the lock until the native child
+finishes, including configuration removal, and requires parent and child
+interpreters outside the erased runtime. After teardown, lock ownership is
+verified without requiring the intentionally removed payload or manifest.
+
 An unavailable source on an unowned legacy installation is reported without
 breaking its existing command. An explicit install can still use the canonical
 legacy probe's missing-policy/default-false admission, under the same lock,

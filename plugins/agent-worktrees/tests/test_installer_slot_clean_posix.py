@@ -142,19 +142,21 @@ def test_bootstrap_python_excludes_the_target_slot_even_when_link_dir_resolves_i
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
-def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path):
+@pytest.mark.parametrize("exclusion", ["exclude-venv-dir", "exclude-runtime-root"])
+def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path, exclusion: str):
     """Behavioral (not just textual) regression guard: with `LINK_DIR`
     SYMLINKED into `VENV_DIR` (the exact mid-migration scenario a plain
     string comparison of the two variables wouldn't catch),
     `_bootstrap_python exclude-venv-dir` must never return the slot's own
     interpreter -- it must fall through to `python3`/`python` on PATH."""
-    venv_dir = tmp_path / "versions" / "1.0.0"
+    runtime = tmp_path / "runtime"
+    venv_dir = runtime / "versions" / "1.0.0"
     (venv_dir / "bin").mkdir(parents=True)
     target_python = venv_dir / "bin" / "python"
     target_python.write_text("#!/bin/sh\necho target-slot-python\n")
     target_python.chmod(0o755)
 
-    link_dir = tmp_path / ".venv"
+    link_dir = runtime / ".venv"
     try:
         # A drive-absolute target can switch MSYS mount aliases on traversal.
         link_dir.symlink_to(venv_dir.relative_to(link_dir.parent), target_is_directory=True)
@@ -174,10 +176,11 @@ def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path):
 set -uo pipefail
 LINK_DIR="{_bash_path(link_dir)}"
 VENV_DIR="{_bash_path(venv_dir)}"
+INSTALL_DIR="{_bash_path(runtime)}"
 PATH="{_bash_path(fallback_bin)}:$PATH"
 {fn_body}
 }}
-_bootstrap_python exclude-venv-dir
+_bootstrap_python {exclusion}
 """
     with tempfile.TemporaryDirectory() as td:
         harness_path = Path(td) / "harness.sh"
@@ -195,15 +198,17 @@ _bootstrap_python exclude-venv-dir
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+@pytest.mark.parametrize("exclusion", ["exclude-venv-dir", "exclude-runtime-root"])
 def test_bootstrap_python_exclude_venv_dir_filters_the_path_fallback_too(
-    tmp_path: Path,
+    tmp_path: Path, exclusion: str,
 ):
     """`exclude-venv-dir` must reject the `python3`/`python` PATH fallback
     too, not just the explicit `$LINK_DIR/bin/python` candidate: if an
     installer is launched with the target venv's own `bin/` on PATH (e.g.
     an activated venv), `command -v python3` would otherwise resolve
     straight back into `$VENV_DIR` and defeat the whole exclusion."""
-    venv_dir = tmp_path / "versions" / "1.0.0"
+    runtime = tmp_path / "runtime"
+    venv_dir = runtime / "versions" / "1.0.0"
     (venv_dir / "bin").mkdir(parents=True)
     excluded_python = venv_dir / "bin" / "python3"
     excluded_python.write_text("#!/bin/sh\necho excluded\n")
@@ -229,10 +234,11 @@ def test_bootstrap_python_exclude_venv_dir_filters_the_path_fallback_too(
 set -uo pipefail
 LINK_DIR="{_bash_path(link_dir)}"
 VENV_DIR="{_bash_path(venv_dir)}"
+INSTALL_DIR="{_bash_path(runtime)}"
 PATH="{_bash_path(venv_dir)}/bin:{_bash_path(fallback_bin)}:$PATH"
 {fn_body}
 }}
-_bootstrap_python exclude-venv-dir
+_bootstrap_python {exclusion}
 """
     with tempfile.TemporaryDirectory() as td:
         harness_path = Path(td) / "harness.sh"
@@ -834,4 +840,3 @@ sleep 0.5
             line for line in out_file.read_text().splitlines() if line.strip()
         ]
         assert events == ["FIRST=OK", "SECOND=REFUSED", "THIRD=OK"], events
-

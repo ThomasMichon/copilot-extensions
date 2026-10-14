@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 from test_command_binding import (
     PLUGIN_ID, POWERSHELL, ROOT, _catalog_environment, _load, _prepare_catalog,
     _resolve, _snapshot, _write, binding_fixture as binding_fixture,
+    _publish,
 )
 
 
@@ -55,6 +57,86 @@ def test_command_binding_same_owner_retries_pending_and_completes(binding_fixtur
                 **binding_fixture["arguments"],
             )
         assert _resolve(binding_fixture)["status"] == "selected"
+
+
+def test_command_binding_teardown_lock_survives_runtime_removal(binding_fixture: dict) -> None:
+    binding = binding_fixture["binding"]
+    primitive = binding_fixture["primitive"]
+    lifecycle = binding._load_lifecycle()
+    _publish(binding_fixture)
+    with lifecycle.legacy_lifecycle(
+        binding, primitive, reserve=False, teardown=True, **binding_fixture["arguments"],
+    ) as lease:
+        assert not lease.lock.path.is_relative_to(binding_fixture["legacy"])
+        shutil.rmtree(binding_fixture["legacy"])
+        lease.lock.assert_owned()
+        with pytest.raises(primitive.InstallationContextError):
+            with lifecycle._lock(primitive, binding_fixture["arguments"]):
+                pytest.fail("A competing installer entered while teardown still held its lock")
+    assert not lease.lock.path.exists()
+    assert not binding_fixture["legacy"].exists()
+
+
+def test_command_binding_teardown_foreign_owner_refuses_without_writes(binding_fixture: dict) -> None:
+    _publish(binding_fixture)
+    _write(binding_fixture["home"] / ".copilot/settings.json", {
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Other/Plugins"}},
+        },
+    })
+    before = _snapshot(binding_fixture["home"])
+    binding = binding_fixture["binding"]
+    with pytest.raises(binding.CommandOwnershipConflict, match="transfer"):
+        with binding._load_lifecycle().legacy_lifecycle(
+            binding, binding_fixture["primitive"], reserve=False, teardown=True,
+            **binding_fixture["arguments"],
+        ):
+            pytest.fail("Foreign teardown reached runtime removal")
+    assert _snapshot(binding_fixture["home"]) == before
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
+@pytest.mark.parametrize("inside_runtime", [False, True])
+def test_command_binding_teardown_bootstrap_excludes_entire_runtime(
+    binding_fixture: dict, inside_runtime: bool,
+) -> None:
+    root = binding_fixture["legacy"]
+    candidate = root / "active/Scripts/python.exe" if inside_runtime else Path(sys.executable)
+    if inside_runtime:
+        candidate.parent.mkdir(parents=True)
+        candidate.write_bytes(b"fixture interpreter must not be selected")
+    program = """
+$tokens=$null; $errors=$null
+$source=Get-Content -LiteralPath $env:TEST_INSTALLER -Raw
+$ast=[System.Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+$function=$ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Get-BootstrapPython'
+},$true)
+if (-not $function) { throw 'Missing real bootstrap function' }
+Invoke-Expression $function.Extent.Text
+$InstallDir=$env:TEST_RUNTIME
+$VenvDir=Join-Path $InstallDir 'versions/next'
+$LinkDir=Join-Path $InstallDir 'active'
+function Get-Command { $true }
+function Invoke-NativeCapture { @{ExitCode=0;Output=$env:TEST_CANDIDATE} }
+function Get-ApplicationPath { $env:TEST_CANDIDATE }
+$selected=Get-BootstrapPython -ExcludeRuntimeRoot
+if ($selected) { Write-Output $selected }
+"""
+    completed = subprocess.run(
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-Command", program],
+        env={
+            **_catalog_environment(binding_fixture),
+            "TEST_INSTALLER": str(ROOT / "plugins/agent-worktrees/scripts/install.ps1"),
+            "TEST_RUNTIME": str(root), "TEST_CANDIDATE": str(candidate),
+        },
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.stdout.strip() == ("" if inside_runtime else str(candidate))
 
 
 def test_command_binding_ticket_presence_is_not_admission(
@@ -213,6 +295,10 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
             "LOCAL_BIN=\"$INSTALL_DIR/local-bin\"\nLINK_DIR=\"$INSTALL_DIR/.venv\"\n"
             "VENV_DIR=\"$INSTALL_DIR/versions/fixture\"\nVENV_PYTHON=\"$TEST_PYTHON\"\n"
             "SRC_VERSION=fixture\nSERVICE_NAME=fixture\n"
+            "REMOVE_CONFIG=${TEST_REMOVE_CONFIG:-false}\nHAS_PROJECT=false\n"
+            "LIB_DIR=\"$INSTALL_DIR/lib\"\nVERSIONED_RUNTIME=1\n"
+            "remove_legacy_binstubs() { :; }\nremove_legacy_scripts() { :; }\n"
+            "changed() { :; }\nskipped() { :; }\n"
             "_bootstrap_python() { printf '%s\\n' \"$TEST_PYTHON\"; }\n"
             "resolve_executable_command_path() { type -P \"$1\"; }\n"
             "resolve_machine() { printf 'example-host'; }\n"
@@ -226,6 +312,9 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
             "_versioned_activate() { cp \"$INSTALL_DIR/runtime-slot\" \"$INSTALL_DIR/current-version\"; }\n"
             + writer + "\n" + admission + "\n" + dispatch
         )
+        if action == "uninstall":
+            uninstall = source.split("    uninstall)\n", 1)[1].split("    start)\n", 1)[0]
+            program += "\nrun_uninstall() {\ncase \"$ACTION\" in\nuninstall)\n" + uninstall + "esac\n}\nrun_uninstall\n"
         script = payload / "scripts/install.sh"
         script.write_text(program, encoding="utf-8")
         return [str(Path(subprocess.check_output(["which", "bash"], text=True).strip())), str(script), action]
@@ -267,9 +356,71 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
         "  $true\n}\n"
         + writer + "\n" + stamp + "\n" + admission + "\n" + dispatch
     )
+    if action == "uninstall":
+        program = program.replace(
+            "param([switch]$ExcludeVenvDir)",
+            "param([switch]$ExcludeVenvDir,[switch]$ExcludeRuntimeRoot)",
+        )
+        uninstall = source.split("    'uninstall' {\n", 1)[1].split("    'start' {\n", 1)[0]
+        program += (
+            "\n$RemoveConfig=($env:TEST_REMOVE_CONFIG -eq 'true')\n"
+            "$VersionedRuntime=$true\n$LibDir=Join-Path $InstallDir 'lib'\n"
+            "$ProjectName='example'\n$ProjectDir=Join-Path $InstallDir 'projects/example'\n"
+            "$env:LOCALAPPDATA=Join-Path $InstallDir 'profile-cache'\n"
+            "function Remove-Binstub {}\nfunction Remove-LegacyBinstubs {}\n"
+            "switch ($Action) {\n'uninstall' {\n" + uninstall + "}\n"
+        )
     script = payload / "scripts/install.ps1"
     script.write_text(program, encoding="utf-8")
     return [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(script), "-Action", action]
+
+
+@pytest.mark.parametrize("shell", [
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
+    pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
+])
+@pytest.mark.parametrize("remove_config", [False, True])
+def test_command_binding_native_teardown_refuses_foreign_then_removes_owned_runtime(
+    binding_fixture: dict, shell: str, remove_config: bool,
+) -> None:
+    command = _native_fixture(binding_fixture, shell, "uninstall")
+    _publish(binding_fixture)
+    runtime = binding_fixture["legacy"]
+    for relative in ("versions/fixture/retained", "lib/retained", "bin/session-options.sh"):
+        path = runtime / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("retained", encoding="utf-8")
+    environment = {
+        **_catalog_environment(binding_fixture),
+        "TEST_RUNTIME": str(runtime), "TEST_OWNER": "example",
+        "TEST_REMOVE_CONFIG": str(remove_config).lower(), "COMPUTERNAME": "example-host",
+        "TEST_PYTHON": sys.executable if os.name == "nt" else
+        str(binding_fixture["home"] / "test-bin/python3"),
+    }
+    settings = binding_fixture["home"] / ".copilot/settings.json"
+    original = settings.read_bytes()
+    _write(settings, {"extraKnownMarketplaces": {
+        "example": {"source": {"source": "github", "repo": "Other/Plugins"}},
+    }})
+    before = _snapshot(runtime)
+    refused = subprocess.run(
+        command, env=environment, cwd=binding_fixture["home"], capture_output=True,
+        text=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert refused.returncode != 0, refused.stdout + refused.stderr
+    assert "Command ownership" in refused.stdout + refused.stderr
+    assert _snapshot(runtime) == before
+    settings.write_bytes(original)
+    completed = subprocess.run(
+        command, env=environment, cwd=binding_fixture["home"], capture_output=True,
+        text=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert runtime.exists() is not remove_config
+    assert not (runtime / "deploy-manifest.json").exists()
+    assert not (runtime / "versions").exists()
+    assert not (runtime / "lib").exists()
+    assert not runtime.with_name(runtime.name + ".command-binding-publication.lock").exists()
 
 
 @pytest.mark.parametrize("shell", [

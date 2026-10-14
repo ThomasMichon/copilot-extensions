@@ -10,6 +10,8 @@ import pytest
 
 from agent_worktrees import _command_binding, _installation_context, installation_cli, installer
 
+pytestmark = pytest.mark.guard
+
 
 @pytest.fixture
 def owned_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
@@ -138,3 +140,25 @@ def test_command_binding_python_install_admission_precedes_runtime_mutation(
     captured = capsys.readouterr()
     assert "Runtime installation refused" in captured.out + captured.err
     assert "Traceback" not in captured.out + captured.err
+
+
+def test_command_binding_python_install_rejects_invalid_context_at_error_boundary(
+    owned_install: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    home, runtime = owned_install
+    monkeypatch.setattr(installer, "check_prereqs", lambda: [])
+    monkeypatch.setattr(installation_cli.worktree_identity, "_find_repo_dir", lambda: home)
+    monkeypatch.setattr(installation_cli.cfg, "project_name", lambda: "example")
+    monkeypatch.setattr(installation_cli.cfg, "machines_yaml_path", lambda root: home / "missing-machines.yaml")
+
+    def invalid_context():
+        raise _installation_context.InstallationContextError("invalid fixture context")
+
+    monkeypatch.setattr(installer.registry_paths, "installation_context", invalid_context)
+    monkeypatch.setattr(installation_cli, "_install_project", lambda *args: pytest.fail("Mutation admitted"))
+    before = list(runtime.iterdir())
+    assert installation_cli.cmd_install(argparse.Namespace(machine="example-host")) == 1
+    captured = capsys.readouterr()
+    assert "Runtime installation refused" in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
+    assert list(runtime.iterdir()) == before

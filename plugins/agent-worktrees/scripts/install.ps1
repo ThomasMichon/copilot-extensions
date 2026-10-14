@@ -1278,8 +1278,8 @@ function Get-BootstrapPython {
        activated target venv has put its own `Scripts` directory on PATH,
        either fallback could still resolve straight back into $VenvDir and
        defeat the whole exclusion. #>
-    param([switch]$ExcludeVenvDir)
-    $dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }
+    param([switch]$ExcludeVenvDir, [switch]$ExcludeRuntimeRoot)
+    $dirs = if ($ExcludeRuntimeRoot) { @() } elseif ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }
     foreach ($d in $dirs) {
         if (-not $d) { continue }
         if ($ExcludeVenvDir -and $VenvDir -and ($d -eq $VenvDir)) { continue }
@@ -1290,11 +1290,15 @@ function Get-BootstrapPython {
     if ($ExcludeVenvDir -and $VenvDir) {
         $venvFull = [System.IO.Path]::GetFullPath($VenvDir).TrimEnd('\')
     }
+    if ($ExcludeRuntimeRoot) {
+        $venvFull = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
+    }
     $isExcluded = {
         param($candidate)
         if (-not $venvFull -or -not $candidate) { return $false }
         $candidateFull = [System.IO.Path]::GetFullPath($candidate)
-        return $candidateFull.StartsWith("$venvFull\", [StringComparison]::OrdinalIgnoreCase)
+        $prefix = "$venvFull$([System.IO.Path]::DirectorySeparatorChar)"
+        return $candidateFull.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $result = Invoke-NativeCapture { & py -3 -c 'import sys; print(sys.executable)' }
@@ -3791,8 +3795,10 @@ function Invoke-Stamp {
     Write-ServiceOk 'Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use.'
 }
 
-if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp')) {
-    $lifecyclePython = Get-BootstrapPython -ExcludeVenvDir
+if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall')) {
+    $lifecyclePython = if ($Action -eq 'uninstall') {
+        Get-BootstrapPython -ExcludeRuntimeRoot
+    } else { Get-BootstrapPython -ExcludeVenvDir }
     if (-not $lifecyclePython) { throw 'Attributable runtime admission requires bootstrap Python.' }
     $lifecycleSource = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
         $env:COPILOT_PLUGIN_STAGED_FROM
@@ -3818,6 +3824,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         }
         $lifecycleShell = (Get-Process -Id $PID).Path
         if ($Action -eq 'stamp') { $lifecycleArgs += '--deferred-runtime' }
+        elseif ($Action -eq 'uninstall') { $lifecycleArgs += '--teardown' }
         & $lifecyclePython @lifecycleArgs --run-lifecycle -- `
             $lifecycleShell -NoLogo -NoProfile -ExecutionPolicy Bypass `
             -File $PSCommandPath @lifecycleForward

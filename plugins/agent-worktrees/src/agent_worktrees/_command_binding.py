@@ -158,11 +158,11 @@ def write_legacy_manifest(
         raise ValueError("The lifecycle must supply an unbound schema-3 plugin manifest.")
     lifecycle = _load_lifecycle()
     lease = lifecycle.borrowed_lease(_rules(), primitive, **arguments)
-    with (nullcontext(lease) if lease is not None else primitive._DirectoryLock(
-        root / ".command-binding-publication.lock",
-        kind="command-binding-publication", marketplace_id="legacy",
-        plugin_id=arguments["plugin_id"],
-    )) as lock:
+    if lease is None:
+        lifecycle._reservation(
+            _rules(), primitive, root, lifecycle._owner(_rules(), primitive, arguments),
+        )
+    with (nullcontext(lease) if lease is not None else lifecycle._lock(primitive, arguments)) as lock:
         try:
             receipt = publish_legacy_binding(primitive, **arguments)
         except SourceProvenanceUnavailable as error:
@@ -387,6 +387,7 @@ def main() -> int:
     parser.add_argument("--run-lifecycle", action="store_true")
     parser.add_argument("--check-lifecycle", action="store_true")
     parser.add_argument("--deferred-runtime", action="store_true")
+    parser.add_argument("--teardown", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args()
     if arguments.payload_root.resolve() != Path(__file__).resolve().parents[1]:
@@ -396,6 +397,8 @@ def main() -> int:
         parser.error("Specify only one lifecycle operation.")
     if arguments.deferred_runtime and not arguments.run_lifecycle:
         parser.error("--deferred-runtime requires --run-lifecycle.")
+    if arguments.teardown and (not arguments.run_lifecycle or arguments.deferred_runtime):
+        parser.error("--teardown requires --run-lifecycle without --deferred-runtime.")
     if arguments.source_payload_root is not None and not (arguments.publish_legacy or lifecycle_action):
         parser.error("--source-payload-root belongs to explicit lifecycle publication.")
     if arguments.write_manifest and not arguments.publish_legacy:
@@ -420,7 +423,8 @@ def main() -> int:
                     command = command[1:]
                 return lifecycle.run_lifecycle(
                     _rules(), primitive, command,
-                    deferred_runtime=arguments.deferred_runtime, **publication_arguments
+                    deferred_runtime=arguments.deferred_runtime,
+                    teardown=arguments.teardown, **publication_arguments,
                 )
             elif arguments.write_manifest:
                 manifest = json.load(sys.stdin)

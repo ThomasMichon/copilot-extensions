@@ -891,7 +891,16 @@ _bootstrap_python() {
     # the target venv's own bin/ on PATH could otherwise still resolve
     # straight back into $VENV_DIR and defeat the whole exclusion.
     local exclude_venv_dir="${1:-}" use_link_python=1 venv_real=""
-    if [[ "$exclude_venv_dir" == "exclude-venv-dir" ]] && [[ -d "$VENV_DIR" ]]; then
+    if [[ "$exclude_venv_dir" == "exclude-runtime-root" ]]; then
+        use_link_python=0
+        if [[ -d "$INSTALL_DIR" ]]; then
+            venv_real="$(cd "$INSTALL_DIR" 2>/dev/null && pwd -P)" || return 1
+        else
+            local runtime_parent
+            runtime_parent="$(cd "$(dirname "$INSTALL_DIR")" 2>/dev/null && pwd -P)" || return 1
+            venv_real="$runtime_parent/$(basename "$INSTALL_DIR")"
+        fi
+    elif [[ "$exclude_venv_dir" == "exclude-venv-dir" ]] && [[ -d "$VENV_DIR" ]]; then
         venv_real="$(cd "$VENV_DIR" 2>/dev/null && pwd -P)"
         if [[ -d "$LINK_DIR" ]]; then
             local link_real
@@ -2825,8 +2834,10 @@ except Exception as e:
 
 if ! $CONTEXTUAL_INSTALL; then
     case "$ACTION" in
-        install|update|provision|stamp)
-            __aw_lifecycle_python="$(_bootstrap_python exclude-venv-dir)" || {
+        install|update|provision|stamp|uninstall)
+            __aw_lifecycle_exclusion=exclude-venv-dir
+            [[ "$ACTION" == uninstall ]] && __aw_lifecycle_exclusion=exclude-runtime-root
+            __aw_lifecycle_python="$(_bootstrap_python "$__aw_lifecycle_exclusion")" || {
                 err "Attributable runtime admission requires bootstrap Python."
                 exit 1
             }
@@ -2842,6 +2853,8 @@ if ! $CONTEXTUAL_INSTALL; then
                 __aw_lifecycle_bash="$(resolve_executable_command_path bash)" || exit 1
                 if [[ "$ACTION" == stamp ]]; then
                     __aw_lifecycle_args+=(--deferred-runtime)
+                elif [[ "$ACTION" == uninstall ]]; then
+                    __aw_lifecycle_args+=(--teardown)
                 fi
                 "$__aw_lifecycle_python" "${__aw_lifecycle_args[@]}" --run-lifecycle -- \
                     "$__aw_lifecycle_bash" "$SCRIPT_DIR/install.sh" "${__aw_args[@]}"

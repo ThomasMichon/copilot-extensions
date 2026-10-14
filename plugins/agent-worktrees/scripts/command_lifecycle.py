@@ -94,8 +94,9 @@ class LifecycleLease:
 
 
 def _lock(primitive: Any, arguments: dict[str, Any]) -> Any:
+    root = Path(arguments["legacy_root"]).resolve()
     return primitive._DirectoryLock(
-        Path(arguments["legacy_root"]) / ".command-binding-publication.lock",
+        root.with_name(root.name + ".command-binding-publication.lock"),
         kind="command-binding-publication", marketplace_id="legacy",
         plugin_id=arguments["plugin_id"],
     )
@@ -139,17 +140,26 @@ def borrowed_lease(binding: Any, primitive: Any, **arguments: Any) -> LifecycleL
 
 @contextmanager
 def legacy_lifecycle(
-    binding: Any, primitive: Any, *, reserve: bool = True, **arguments: Any,
+    binding: Any, primitive: Any, *, reserve: bool = True, teardown: bool = False,
+    **arguments: Any,
 ) -> Iterator[LifecycleLease]:
     """Reserve the existing manifest before the first shared-runtime write."""
     borrowed = borrowed_lease(binding, primitive, **arguments)
     if borrowed is not None:
         yield borrowed
-        borrowed.assert_owned()
+        if teardown:
+            borrowed.lock.assert_owned()
+        else:
+            borrowed.assert_owned()
         return
     root = Path(arguments["legacy_root"])
     if not root.is_absolute():
         raise ValueError("Runtime lifecycle requires an absolute runtime root.")
+    if teardown and reserve:
+        raise ValueError("Teardown must not reserve an unfinished runtime build.")
+    # Refuse obvious foreign ownership without creating even a lock directory;
+    # admission is repeated after acquisition to close the concurrent-writer race.
+    _reservation(binding, primitive, root, _owner(binding, primitive, arguments))
     with _lock(primitive, arguments) as lock:
         owner = _owner(binding, primitive, arguments)
         manifest = _reservation(binding, primitive, root, owner)
@@ -169,19 +179,29 @@ def legacy_lifecycle(
         token = _CURRENT.set(lease)
         try:
             yield lease
-            lease.assert_owned()
+            if teardown:
+                lock.assert_owned()
+            else:
+                lease.assert_owned()
         finally:
             _CURRENT.reset(token)
 
 
 def run_lifecycle(
     binding: Any, primitive: Any, command: list[str], *,
-    deferred_runtime: bool = False, **arguments: Any,
+    deferred_runtime: bool = False, teardown: bool = False, **arguments: Any,
 ) -> int:
     """Keep the native installer child contained under its admitting parent."""
     if not command or not Path(command[0]).is_absolute():
         raise ValueError("A lifecycle child requires an exact absolute interpreter.")
-    with legacy_lifecycle(binding, primitive, reserve=not deferred_runtime, **arguments) as lease:
+    if teardown:
+        root = Path(arguments["legacy_root"]).resolve()
+        if any(Path(path).resolve().is_relative_to(root) for path in (sys.executable, command[0])):
+            raise ValueError("Teardown requires parent and child interpreters outside the runtime.")
+    with legacy_lifecycle(
+        binding, primitive, reserve=not (deferred_runtime or teardown),
+        teardown=teardown, **arguments,
+    ) as lease:
         environment = {**os.environ, TICKET_ENV: json.dumps(lease.ticket)}
         child = subprocess.Popen(
             command, env=environment,

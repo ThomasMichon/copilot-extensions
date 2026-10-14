@@ -495,6 +495,37 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Ownership-safe teardown and complete install refusal boundary
+
+- Current-head review found that the native uninstall branches bypassed the
+  newly introduced lifecycle admission. Both platform branches now join the
+  same ownership transaction before any teardown effects. The shared lock is
+  outside the canonical runtime root and survives configuration/root removal;
+  all publishers and builders use that same lock, not a second teardown-only
+  lock. A pure preflight rejects obvious foreign ownership without writing,
+  followed by mandatory revalidation after acquiring the lock.
+- Teardown does not reserve a runtime build. It holds ownership until the
+  native child exits, verifies the retained lock rather than deleted metadata,
+  and excludes the whole erased runtime from bootstrap interpreter selection.
+  The common parent also rejects interpreters inside the root.
+- Moved Python context resolution and lifecycle construction inside the
+  established installation refusal boundary. An invalid or foreign context
+  now returns the documented error rather than escaping with a traceback;
+  the six publisher/CLI contracts are included in the bounded guard lane.
+- Regression cases exercise both actual native uninstall branches with and
+  without configuration removal, foreign refusal, complete runtime deletion,
+  and a competing lock acquisition while teardown still owns the transaction.
+  The shared/catalog/scope and CLI selection passed 200 cases with 14 platform
+  skips locally. The disconnected installed-package selection passed eight
+  cases and skipped two unavailable native PowerShell cases.
+- The preceding head's native Windows job
+  [115659324492](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38503575369/job/115659324492)
+  passed 220 source/diagnostic cases, two Manager cases, seven reconciliation
+  cases, and its other runner contracts. This proves the initialized-host
+  acceptance correction, not the new teardown changes. Current-head review,
+  native teardown evidence, and required aggregate/lockdown checks remain
+  necessary before merge; the effort and all wider acceptance gates stay open.
+
 ### 2026-10-13 — Real launcher selection and initialized-host diagnostic acceptance
 
 - Review on the previous catalog head identified a Store app-execution alias

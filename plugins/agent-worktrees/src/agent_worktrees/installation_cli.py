@@ -411,16 +411,16 @@ def cmd_install(args: argparse.Namespace) -> int:
     from . import _command_binding, _command_lifecycle, _installation_context, registry_paths
     from contextlib import nullcontext
 
-    context = registry_paths.installation_context()
-    lifecycle = (
-        nullcontext() if context is not None else
-        _command_lifecycle.legacy_lifecycle(
-            _command_binding, _installation_context,
-            payload_root=inst._payload_root(repo_dir), plugin_id="agent-worktrees",
-            legacy_root=inst.install_dir(), project_root=Path(repo_dir),
-        )
-    )
     try:
+        context = registry_paths.installation_context()
+        lifecycle = (
+            nullcontext() if context is not None else
+            _command_lifecycle.legacy_lifecycle(
+                _command_binding, _installation_context,
+                payload_root=inst._payload_root(repo_dir), plugin_id="agent-worktrees",
+                legacy_root=inst.install_dir(), project_root=Path(repo_dir),
+            )
+        )
         with lifecycle:
             return _install_project(args, project, repo_dir, machine, plat, machine_entry)
     except (

@@ -415,8 +415,9 @@ def test_slot_clean_uses_an_interpreter_outside_the_target_slot():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell execution is Windows-only here")
+@pytest.mark.parametrize("exclusion", ["ExcludeVenvDir", "ExcludeRuntimeRoot"])
 def test_get_bootstrap_python_excludes_the_target_slot_even_when_link_dir_equals_venv_dir(
-    tmp_path: Path,
+    tmp_path: Path, exclusion: str,
 ):
     """Reproduces the exact production invariant a purely textual check
     can't: $LinkDir can equal $VenvDir (the current versioned-runtime
@@ -451,11 +452,14 @@ Invoke-Expression $functionAst.Extent.Text
 # The exact production invariant: $LinkDir equals $VenvDir.
 $VenvDir = $env:TARGET_DIR
 $LinkDir = $env:TARGET_DIR
+$InstallDir = $env:INSTALL_DIR
 
 function Get-Command { $null }               # no `py` launcher resolvable
 function Get-ApplicationPath { 'FALLBACK-USED' }
 
-Get-BootstrapPython -ExcludeVenvDir
+$options=@{}
+$options[$env:EXCLUSION]=$true
+Get-BootstrapPython @options
 """
     proc = subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
@@ -466,6 +470,8 @@ Get-BootstrapPython -ExcludeVenvDir
             **os.environ,
             "INSTALLER": str(INSTALLER),
             "TARGET_DIR": str(target_dir),
+            "INSTALL_DIR": str(tmp_path),
+            "EXCLUSION": exclusion,
         },
         timeout=30,
     )
@@ -479,8 +485,9 @@ Get-BootstrapPython -ExcludeVenvDir
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell execution is Windows-only here")
+@pytest.mark.parametrize("exclusion", ["ExcludeVenvDir", "ExcludeRuntimeRoot"])
 def test_get_bootstrap_python_excludes_a_path_fallback_resolving_into_venv_dir(
-    tmp_path: Path,
+    tmp_path: Path, exclusion: str,
 ):
     """The `py -3` launcher and `Get-ApplicationPath` PATH-search fallbacks
     must be excluded too, not just the initial $dirs candidates: if an
@@ -516,6 +523,7 @@ Invoke-Expression $functionAst.Extent.Text
 
 $VenvDir = $env:VENV_DIR
 $LinkDir = $env:LINK_DIR   # distinct from VenvDir -- no Scripts\python.exe here
+$InstallDir = $env:INSTALL_DIR
 
 function Get-Command { $true }   # `py` launcher IS resolvable
 function Invoke-NativeCapture {
@@ -524,7 +532,9 @@ function Invoke-NativeCapture {
 }
 function Get-ApplicationPath { $env:EXCLUDED_PYTHON }
 
-Get-BootstrapPython -ExcludeVenvDir
+$options=@{}
+$options[$env:EXCLUSION]=$true
+Get-BootstrapPython @options
 """
     proc = subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
@@ -537,6 +547,8 @@ Get-BootstrapPython -ExcludeVenvDir
             "VENV_DIR": str(venv_dir),
             "LINK_DIR": str(link_dir),
             "EXCLUDED_PYTHON": str(excluded_python),
+            "INSTALL_DIR": str(tmp_path),
+            "EXCLUSION": exclusion,
         },
         timeout=30,
     )
