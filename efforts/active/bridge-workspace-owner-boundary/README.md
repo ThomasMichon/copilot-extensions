@@ -91,6 +91,12 @@ from local managed-worktree allocation. No new shared library or installer flow.
 
 ### 2026-10-14 - Independent review and real owner-boundary verification
 
+- Current-head provider review identified refusal reasons emitted on owner
+  stdout being discarded when stderr was empty. Bridge failure diagnostics
+  now retain stderr when present and otherwise report stdout. The real
+  pending/retrying owner-harness cases assert their refusal reason reaches
+  bridge logs; all 11 boundary tests pass, with one unrelated collection skip.
+  Current-head review and required CI remain publication gates.
 - Independent review identified automatic exact cleanup missing the bulk
   dispatch-allocation exclusion. The owner now checks fresh provenance under
   its finalization/record locks for the explicit automatic cleanup mode.

@@ -183,7 +183,7 @@ async def test_codespace_singleton_still_refuses_provider_policy(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["pending", "retrying", "unused"])
-async def test_zero_turn_cleanup_crosses_actual_owner_harness(tmp_path, monkeypatch, state):
+async def test_zero_turn_cleanup_crosses_actual_owner_harness(tmp_path, monkeypatch, caplog, state):
     owner_python = os.environ.get("COPILOT_EXTENSIONS_WORKTREE_OWNER_TEST_PYTHON")
     if not owner_python:
         pytest.skip("explicit independent Worktrees test interpreter required")
@@ -213,6 +213,7 @@ async def test_zero_turn_cleanup_crosses_actual_owner_harness(tmp_path, monkeypa
         assert proof["payload"]["removed"] is False
         assert proof["payload"]["bucket"] == "dispatch-pending"
         assert proof["reaped"] == []
+        assert proof["payload"]["reason"] in caplog.text
 
 
 @pytest.mark.asyncio

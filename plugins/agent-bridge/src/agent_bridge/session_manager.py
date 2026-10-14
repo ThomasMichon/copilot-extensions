@@ -690,7 +690,7 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
                 for line in stdout.decode(errors="replace").strip().splitlines():
                     log.debug("cleanup: %s", line)
         else:
-            err = stderr.decode(errors="replace").strip()
+            err = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
             log.warning("Worktree cleanup failed (exit %d): %s", proc.returncode, err)
     except Exception as exc:
         log.warning("Worktree cleanup error: %s", exc)
