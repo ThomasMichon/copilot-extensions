@@ -20,7 +20,7 @@ items/PRs;
 - LanceDB content/vector stores, path state, task queue, GC/repair, and
 similarity-cluster artifacts;
 - CLI (the agent-facing surface), HTTP, and an optional stdio MCP adapter
-requiring the host dependency profile (unavailable in the base-only client);
+requiring explicit `[stdio-mcp]` opt-in on either role (absent from base and host profiles);
 - host/client role routing for read commands over SSH.
 
 That means the old "Phase 1 service shell only" description is stale. Future
