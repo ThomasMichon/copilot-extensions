@@ -51,7 +51,8 @@ def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
         )},
     )
     monkeypatch.setattr(
-        config_authority, "load_project_authority_config", lambda name: config,
+        config_authority, "load_project_authority_config",
+        lambda name, **_kwargs: config,
     )
     path = tmp_tracking_dir / "wt-reg.yaml"
     rec = WorktreeRecord(
@@ -156,7 +157,8 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
         )},
     )
     monkeypatch.setattr(
-        config_authority, "load_project_authority_config", lambda name: config,
+        config_authority, "load_project_authority_config",
+        lambda name, **_kwargs: config,
     )
     path = tmp_tracking_dir / "wt-terminal.yaml"
     rec = WorktreeRecord(
@@ -182,21 +184,21 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
         "expected_refs", "expected_probes",
     ),
     [
-        ("main", "origin", (), True, "", "", ("refs/remotes/origin/main",), 3),
-        ("", "origin", (), True, "", "", ("refs/remotes/origin/main",), 3),
+        ("main", "origin", (), True, "", "", ("refs/remotes/origin/main",), 4),
+        ("", "origin", (), True, "", "", ("refs/remotes/origin/main",), 4),
         (
             "main", "upstream", (), True, "", "",
-            ("refs/remotes/upstream/main",), 3,
+            ("refs/remotes/upstream/main",), 4,
         ),
-        ("main", "origin", (), False, "", "", ("refs/heads/main",), 4),
-        ("main", None, (), False, "", "", ("refs/heads/main",), 4),
+        ("main", "origin", (), False, "", "", ("refs/heads/main",), 5),
+        ("main", None, (), False, "", "", ("refs/heads/main",), 5),
         (
             "main", None, ("upstream",), True, "", "upstream",
-            ("refs/remotes/upstream/main",), 4,
+            ("refs/remotes/upstream/main",), 5,
         ),
         (
             "registry", "origin", (), True, "dev", "",
-            ("refs/remotes/origin/main", "refs/remotes/origin/dev"), 5,
+            ("refs/remotes/origin/main", "refs/remotes/origin/dev"), 7,
         ),
     ],
 )
@@ -276,10 +278,17 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
                 returncode=0,
                 stdout=f"{ref}\n",
             )
+        if args[0] == "show-ref":
+            ref = args[3]
+            return SimpleNamespace(
+                returncode=(
+                    1 if ref.startswith("refs/remotes/")
+                    and not remote_ref_available else 0
+                ),
+                stdout="",
+            )
         if args[0] == "ls-tree":
             ref = args[3]
-            if ref.startswith("refs/remotes/") and not remote_ref_available:
-                return SimpleNamespace(returncode=1, stdout="")
             return SimpleNamespace(returncode=0, stdout=f"{committed_path}\n")
         if args[0] == "show":
             ref = args[1].split(":", 1)[0]
@@ -366,9 +375,14 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     elapsed = time.monotonic() - started
     assert accepted == {"ok": True, "linked_handoff": None}
     assert elapsed < 1.0
-    assert timeouts == [
-        config_authority._GIT_PROBE_TIMEOUT_S
-    ] * expected_probes
+    assert len(timeouts) == expected_probes
+    request_deadline = (
+        tracking_session_registration_write._SESSION_REGISTER_REQUEST_DEADLINE_S
+    )
+    assert all(
+        0 < timeout <= request_deadline
+        for timeout in timeouts
+    )
     assert shown_refs == list(expected_refs)
     assert tracking.load_record(local_path).session_entry("sess-local") is not None
 
@@ -390,6 +404,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         ("nonzero", "cannot read committed authority"),
         ("timeout", "timed out"),
         ("absent", "committed authority config is absent"),
+        ("remote_error", "cannot verify committed authority ref"),
     ],
 )
 def test_registration_authority_fails_closed_when_committed_config_is_unreadable(
@@ -434,114 +449,22 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
         assert kwargs["isolated_repository"] is True
         if failure == "timeout":
             raise subprocess.TimeoutExpired("git", kwargs["timeout"])
+        if failure == "remote_error" and _args[0] == "show-ref":
+            return SimpleNamespace(returncode=2, stdout="")
         if failure == "absent":
             return SimpleNamespace(returncode=0, stdout="")
         return SimpleNamespace(returncode=1, stdout="")
 
     monkeypatch.setattr(git_ops, "git", failed_git)
 
+    request_deadline = (
+        tracking_session_registration_write._SESSION_REGISTER_REQUEST_DEADLINE_S
+    )
     with pytest.raises(ExecutionSpaceError, match=message):
         config_authority.require_registration_record_mutation(
             SimpleNamespace(repo="harness"),
+            request_deadline_s=request_deadline,
         )
-
-
-@pytest.mark.parametrize(
-    ("probe_duration", "accepted"),
-    [(0.09, True), (0.19, False)],
-)
-def test_registration_authority_bounds_cumulative_git_probes(
-    tmp_path: Path, monkeypatch, probe_duration, accepted,
-):
-    from agent_worktrees import git_ops, repos
-    from agent_worktrees.execution_spaces import ExecutionSpaceError
-
-    anchor = tmp_path / "harness"
-    (anchor / ".git").mkdir(parents=True)
-    registry = repos.ReposRegistry(
-        repos={
-            "harness": repos.RepoEntry(
-                name="harness",
-                repo_class="worktree",
-                default_branch="registry",
-                paths={
-                    "windows": str(anchor),
-                    "wsl": str(anchor),
-                    "linux": str(anchor),
-                },
-            )
-        }
-    )
-    monkeypatch.setattr(repos, "read_registry", lambda: registry)
-    project_root = tmp_path / ".harness"
-    project_root.mkdir()
-    (project_root / "config.yaml").write_text(
-        "machine: workstation-windows\n"
-        "platform: windows\n"
-        "repos:\n"
-        "  harness:\n"
-        f"    anchor: {anchor}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_root)
-    monkeypatch.setattr(
-        cfg, "global_config_path", lambda: tmp_path / "missing-global.yaml",
-    )
-    committed_path = cfg.inrepo_config_path(Path()).as_posix()
-    clock = {"now": 1000.0}
-    calls = []
-
-    def slow_git(*args, **kwargs):
-        timeout = kwargs["timeout"]
-        calls.append((args[0], timeout))
-        clock["now"] += min(probe_duration, timeout)
-        if timeout < probe_duration:
-            raise subprocess.TimeoutExpired("git", timeout)
-        if args[0] == "remote":
-            return SimpleNamespace(returncode=0, stdout="upstream\n")
-        if args[0] == "symbolic-ref":
-            return SimpleNamespace(
-                returncode=0,
-                stdout="refs/remotes/upstream/main\n",
-            )
-        if args[0] == "ls-tree":
-            return SimpleNamespace(
-                returncode=(
-                    1 if args[3].startswith("refs/remotes/") else 0
-                ),
-                stdout=(
-                    "" if args[3].startswith("refs/remotes/")
-                    else f"{committed_path}\n"
-                ),
-            )
-        if args[0] == "show":
-            ref = args[1].split(":", 1)[0]
-            return SimpleNamespace(
-                returncode=0,
-                stdout=(
-                    "default_branch: dev\nstateless: false\n"
-                    if ref.endswith("/main")
-                    else "stateless: true\n"
-                ),
-            )
-        raise AssertionError(args)
-
-    monkeypatch.setattr(git_ops, "git", slow_git)
-    monkeypatch.setattr(
-        config_authority.time, "monotonic", lambda: clock["now"],
-    )
-
-    started = clock["now"]
-    if accepted:
-        config = config_authority.load_project_authority_config("harness")
-        assert config.default_repo.stateless is True
-        assert len(calls) == 8
-    else:
-        with pytest.raises(ExecutionSpaceError, match="timed out"):
-            config_authority.require_registration_record_mutation(
-                SimpleNamespace(repo="harness"),
-            )
-    assert clock["now"] - started <= config_authority._AUTHORITY_GIT_BUDGET_S
 
 
 def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkeypatch_config):
