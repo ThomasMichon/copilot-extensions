@@ -88,6 +88,12 @@ runtime selector. Consumers obtain bounded immutable byte snapshots with current
 authentication, not reusable filesystem paths. Default planner/doctor commands
 do not stage anything.
 
+The [explicit selected-release intent](docs/release-selection.md) contract binds
+an independently trusted current owner decision to exact manifest content,
+sequence, scope and role closure. It does not choose or authenticate a decision,
+persist admission, execute artifacts or grant activation. Signed or
+higher-sequence releases are not automatically selected.
+
 ## Thin client artifacts and local diagnostics
 
 `fleet-manager` builds as a dependency-free runtime wheel. Its wheel carries the
@@ -225,8 +231,10 @@ bounded local files against that same manifest:
 `python -m fleet_manager.artifacts --release release.json --sources sources.json --role client`.
 It reports `integrity-match`, not installed/active/ready or authenticated.
 It never reads unselected server artifacts, installs packages or authorizes
-activation. Signed release trust and owned immutable staging remain pending;
-the independently owned client lifecycle/diagnostics lane remains #6424.
+activation. [Release authentication](docs/release-authentication.md),
+[immutable staging](docs/artifact-staging.md) and explicit selection are
+separate prerequisites, not installation or activation. The independently
+owned client lifecycle/diagnostics lane remains #6424.
 
 ## Operation and receipt shapes
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Bind explicit current release selection to immutable manifest sequence scope and role closure",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -637,7 +637,8 @@ def test_actual_installed_authenticated_artifact_staging_has_no_execution_or_net
     uv = shutil.which("uv")
     assert uv is not None
     target = tmp_path / "installed-sdk"
-    installed = run([uv, "pip", "install", "--target", str(target), "--no-deps",
+    installed = run([uv, "pip", "install", "--python", sys.executable,
+                     "--target", str(target), "--no-deps",
                      "--no-index", "--offline", str(artifact)])
     assert installed.returncode == 0, installed.stderr
     fixture = artifact_fixture(tmp_path)

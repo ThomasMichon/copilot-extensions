@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; pinned-key verifier landed, role lifecycle next; GitHub proof deferred
+- **Status:** Active; common authenticated staging landed, role lifecycle next; GitHub proof deferred
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -146,7 +146,14 @@ All detailed slices are **agent-recommended** and remain subject to review.
   Role-selected actual artifact integrity preflight landed in #6437 as a prerequisite;
   client packaging/diagnostics/managed installation remain owned by #6424.
   The [both-method release authentication plan](release-authentication.md)
-  landed in #6451 and pinned-key manifest verification in #6475.
+  landed in #6451, pinned-key manifest verification in #6475 and retained
+  authenticated artifact staging in #6569. Staging yields selected immutable
+  bytes, not candidate construction, lifecycle admission or activation.
+  Explicit selected-release data correlates a trusted current decision with the
+  manifest, sequence, scope and role closure; it supplies no selection authority
+  or durable admission. The reviewed
+  [client admission plan](../linux-role-fleet/client-lifecycle-admission.md)
+  retains installation-owned state and candidate execution with #6424.
   GitHub-positive proof is deferred under the operator's authentication constraint;
   no live trust-root, signing or activation authority follows from verification.
 - [ ] Prove independent setup/update/doctor/recovery and bounded activation,
@@ -747,3 +754,70 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   staging paths. Role consumers must retain their own admitted construction,
   custody, health, sequence and activation checks. No competing installer,
   publisher, Gateway, credential or authentication implementation was started.
+- #6609 actually merged at `2026-10-14T01:05:06Z`, commit
+  `1b40e6525127f50a73ddcbca2eebdffda946a066`, after exact-head Copilot
+  APPROVED review with zero findings (Balanced effort) and all required CI.
+  No CI gate was bypassed. Re-read the complete parent Plan/Validation after
+  merge and synchronized the retained effort worktree; full gates stay open.
+- Next stretch consumes the common staging/lifecycle and authenticated runtime
+  interfaces from their retained owners rather than creating a second
+  implementation. The index owner's #6605 separately proposes authorized-store
+  migration and serving-eligibility gates; it is not merged runtime evidence.
+  Released-runtime follow-through remains blocked by the existing #6535/#4876
+  promotion owner. Neither a dev merge nor successful artifact attestation
+  proves publication or an installed runtime.
+
+### 2026-10-14 - Common staging landed; lifecycle consumer seam retained
+- Confirmed #6569 actually merged at `2026-10-14T03:30:07Z`, commit
+  `fb06b7ae8b516cff4c432019603d598afc4e93cf`, and synchronized the retained
+  effort worktree. Read the delivered
+  [staging contract](../../../fleet-manager/docs/artifact-staging.md) and the
+  complete parent Plan/Validation before selecting the next stretch.
+- Client, Gateway and node consumers can now share the context-lifetime
+  authenticated immutable-byte boundary. They must not reopen a saved stage
+  path, treat a serialized report as a grant, or build/activate inside the
+  temporary spool. Current policy, freshness, retention and selected bytes
+  remain independently verified at use.
+- Requested the retained #6424 owner's common durable sequence/content-conflict
+  and candidate construction/health/activation seam before Gateway/node
+  assembly under #6240. This avoids a parallel installer while the client
+  lifecycle remains open. Historical #6499 was closed as superseded work on a
+  separate installation-mode pointer contract, not merged installer evidence.
+- The release incident has a newly explicit trusted-main bootstrap reservation
+  under #6535; its owner reports maintainer authorization and retains actual
+  review, source gate and normal full promotion. This parent has not patched
+  main, dispatched a release, waived artifact evidence or installed dev bytes.
+  All full Phase 1-4/Validation gates remain open.
+
+### 2026-10-14 - Explicit selected-release input contract
+- Confirmed the retained client's #6624 admission plan merged at
+  `2026-10-14T05:35:58Z`, commit `4060b69774489615b397b8e376937f49141783cd`.
+  Read its actual home under `linux-role-fleet` and the full parent Plan before
+  taking only the missing product-release input shape under #6240.
+  Coordinated exclusive source scope with #6424; no admission journal, installer
+  or competing release selector was added.
+- Added [immutable selected-release intent](../../../fleet-manager/docs/release-selection.md):
+  attributable logical owner/decision/revision, authority/installation/role,
+  exact manifest digest/sequence and sorted complete component closure.
+  Current intent must be independently trusted and byte-identical; a signed
+  or higher-sequence candidate is not automatically selected. Parsing and
+  correlation are not owner authentication, currentness proof, persistence,
+  compatibility, execution or activation authority.
+- Unit/contract selection: 82 passed, including malformed/canonical/immutable
+  inputs, stale current decisions, wrong scope/sequence and partial/widened
+  closures. Simple installed isolated consumers exercised all three roles,
+  verified installed imports, denied Python socket entry points and created
+  no working-directory state. This is not OS-level network isolation.
+- Full native contained portfolio: 582 passed and six platform skips in
+  53.43 seconds under the unchanged 120-second deadline. Five skips are POSIX
+  quarantine contracts; one is native FIFO unavailability. The first full run
+  exposed the existing staging wheel test letting `uv` choose ambient Python
+  3.9 while its consumer used managed Python 3.11. Bound that one real offline
+  install to `sys.executable`, matching existing distribution-test prior art;
+  the actual signature/byte/cleanup assertions remain unchanged.
+- Clean-room provisioning and live external deployment were not exercised:
+  this is an execution-free data API, not install/bootstrap or resident transport.
+  The full portfolio retains real fresh-wheel and installed-stage proofs;
+  hosted native platform gates remain separate. #6424 owns durable admission
+  and the construction/health/removal follow-ons; #6443/#5789 retain authenticated
+  runtime integration. All full Phase 1-4/Validation items remain open.
