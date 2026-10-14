@@ -257,6 +257,29 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Journal
 
+### 2026-10-14 -- Native aggregate timeout needs a current-item witness
+
+Automatic PR run 38588429018 passed against the shell-fixture correction.
+Full run 38588564136 passed every other lane, but Worktrees' tenth 25-file
+group reached its unchanged 300-second aggregate deadline without an assertion
+report. The native fixture, real builds and 120-second monitor drain share that
+group. Quiet dots do not establish which call consumed the remaining time or
+prove that the namespaced lifecycle completed.
+
+The existing full Worktrees CI lane now reports its current pytest item and
+completed-call durations; runner progress is unbuffered. The full nine-plugin
+matrix, selection and all deadlines remain unchanged. Acceptance still owes
+a terminal exact-candidate result, not an inferred pass or a timeout increase.
+
+Public CPython history also identifies a distinct, later WMI worker-data race:
+python/cpython#134313 copied the shared query-data structure in May 2025,
+with 3.13/3.14 backports python/cpython#134396 and python/cpython#134397.
+The 3.12 branch has no later WMI-module change after the query-string-only
+python/cpython#126203 fix already present in 3.12.10. This is a concrete
+version-specific hazard worth a controlled construction comparison, not proof
+that it caused the sampled backend hang or authorization to force another
+base, modify Python, or upgrade the operator's machine.
+
 ### 2026-10-14 -- Kernel exit fix passes; native shell profile fixture isolated
 
 Exact-head full run 38584999329 passed both native runner jobs, repository

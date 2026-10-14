@@ -48,6 +48,18 @@ def test_native_jobs_preserve_dev_scope_budget_and_required_aggregate():
     assert STANDALONE.count("if: github.event_name != 'pull_request'") == 2
 
 
+def test_full_worktrees_reports_current_item_without_narrowing_or_widening():
+    full = _job("full")
+    assert "PYTHONUNBUFFERED: \"1\"" in full
+    assert (
+        "PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-worktrees' && "
+        "'--verbose --verbose --durations=20' || '' }}"
+    ) in full
+    assert "run: python tools/run-plugin-tests.py ${{ matrix.plugin }}\n" in full
+    assert "--timeout" not in full and " -k " not in full
+    assert len(re.findall(r"^          - agent-[a-z-]+$", full, re.M)) == 9
+
+
 @pytest.mark.parametrize("index,suffix", [(0, "launch_survives"), (1, "windows_bash")])
 def test_platform_payload_selection_is_unchanged(index, suffix):
     selector = f"legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or {suffix}"
