@@ -1667,6 +1667,13 @@ while True:
         if [[ "$__live" == 1 ]]; then
             sleep 1
         elif ln -s "$$" "$__link.reap" 2>/dev/null; then
+            # `ln -s` into a directory at the reap path creates a child and
+            # succeeds without taking the mutex, so two contenders could both
+            # "recover". Only our own pid link at the reap path is the mutex.
+            if [[ ! -L "$__link.reap" || "$(readlink "$__link.reap" 2>/dev/null || true)" != "$$" ]]; then
+                [[ -L "$__link.reap/$$" ]] && rm -f "$__link.reap/$$"
+                return 1
+            fi
             # Serialized stale-owner recovery: unlink only while the link still
             # holds the exact owner judged stale and that owner is still dead.
             __now="$(readlink "$__link" 2>/dev/null || true)"

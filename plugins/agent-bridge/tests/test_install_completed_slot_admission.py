@@ -1306,6 +1306,31 @@ def test_sh_pid_fallback_rejects_a_link_created_inside_a_directory(tmp_path: Pat
     assert "RC=1" in result.stdout, result.stdout + result.stderr
 
 
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_pid_fallback_reap_path_directory_is_a_fault_not_the_mutex(tmp_path: Path) -> None:
+    """A directory at the reap path makes `ln -s` succeed by creating a child,
+    so every contender would think it holds the recovery mutex and could unlink
+    a lock another contender just took. The run must fail closed without ever
+    touching the lock link. Shims stand in for symlinks (no privilege needed)."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        'ln() { [[ "${@: -1}" == *.reap ]]; }\n'
+        'readlink() { [[ "$1" == *.reap ]] && return 1; echo 424242; }\n'
+        "kill() { return 1; }\n"
+        'rm() { echo "RM:$*"; }\n'
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    detail = result.stdout + result.stderr
+    assert "RC=1" in result.stdout, detail
+    assert not any(
+        line.startswith("RM:") and line.rstrip().endswith("/.install.lock.pid")
+        for line in result.stdout.splitlines()
+    ), detail
+
+
 _FLOCK_HOLDER = """
 import fcntl, sys, time
 handle = open(sys.argv[1], "a+b")
