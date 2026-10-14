@@ -137,6 +137,22 @@ def test_same_version_source_change_refuses_immutable_rebuild(
     assert marker.read_bytes() == before
 
 
+def test_relative_install_root_and_payload_use_the_callers_directory(
+    profiles, payload, commands, tmp_path, monkeypatch
+):
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    result = _provision(profiles, Path("runtime"), Path("..") / "payload")
+    assert Path(result["venv"]).is_relative_to(caller / "runtime")
+    create = next(call for call in commands if "venv" in call)
+    assert Path(create[-1]).is_absolute()
+    install = next(call for call in commands if "install" in call)
+    assert str(payload) in install
+    assert (caller / "runtime" / "current-version").is_file()
+    assert not (payload / "runtime").exists()
+
+
 @pytest.mark.parametrize("paramiko", [False, True])
 def test_legacy_selected_runtime_preserves_installed_ssh_capability(
     profiles, tmp_path, paramiko
@@ -254,3 +270,38 @@ def test_native_bootstrap_accepts_current_profile_without_reconcile(
     assert completed.stdout.strip() == "{}"
     assert "reconciling" not in completed.stderr
     assert not (root / "reconcile.lock").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell 5.1 native stderr contract")
+def test_signed_python_probe_continues_after_unavailable_candidate(tmp_path):
+    shell = Path(os.environ["SystemRoot"]) / (
+        "System32/WindowsPowerShell/v1.0/powershell.exe"
+    )
+    if not shell.is_file():
+        pytest.skip("Windows PowerShell 5.1 unavailable")
+    source = (SCRIPTS / "init.ps1").read_text(encoding="utf-8")
+    start = source.index("$signedBase = $null")
+    end = source.index("$profileArgs = @(", start)
+    probe = source[start:end]
+    command = (
+        "$ErrorActionPreference = 'Stop'; "
+        "$script:candidates = @(); "
+        "function py { "
+        "  $script:candidates += $args[0]; "
+        "  if ($args[0] -eq '-3.13') { "
+        "    & $env:ComSpec /c 'echo unavailable 1>&2 & exit /b 103'; "
+        "  } else { "
+        f"    '{sys.executable}'; $global:LASTEXITCODE = 0; "
+        "  } "
+        "}; "
+        "function Get-AuthenticodeSignature { [pscustomobject]@{Status='Valid'} }; "
+        f"{probe}\n"
+        "if (($script:candidates -join ',') -ne '-3.13,-3.12') { throw 'probe stopped early' }; "
+        "if ($ErrorActionPreference -ne 'Stop') { throw 'preference not restored' }; "
+        f"if ($signedBase -ne '{sys.executable}') {{ throw 'candidate not selected' }}"
+    )
+    result = subprocess.run(
+        [str(shell), "-NoProfile", "-Command", command],
+        capture_output=True, text=True, check=False, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr

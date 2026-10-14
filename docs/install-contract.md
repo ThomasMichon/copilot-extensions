@@ -23,6 +23,11 @@ source admission, completion and activation primitives. Explicit optional-profil
 failure leaves the active selector intact, never a successful base-only downgrade.
 See the plugin README's **Optional restricted SSH runtime** for provisioning.
 
+The canonical Python and native shell recovery resolvers order qualified slots
+by the package-version portion before the profile qualifier. A completed final
+release therefore outranks its development versions even when selectors are
+missing and legacy unqualified slots coexist with profiled slots.
+
 ## Core agent service installation-cell contract
 
 The prescriptive ownership boundary for persistent core `agent-*` runtimes is a

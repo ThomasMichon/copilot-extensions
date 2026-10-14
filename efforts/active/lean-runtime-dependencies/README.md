@@ -340,3 +340,21 @@ shared mutable venv is presumed acceptable.
   container, lease or service activation is part of this slice.
 - Publication, Linux CI and review remain pending; the Plan item is not yet
   claimed complete.
+
+### 2026-10-14 - Profile review corrections and engine ownership
+- #6735 opened for the persistent profile slice. Review identified relative-root
+  interpretation, Windows PowerShell's unavailable-interpreter stderr handling
+  and fallback ordering of profile-qualified versions. Added focused regressions
+  and corrected all three boundaries rather than widening module ceilings.
+- Canonical Python/PowerShell/POSIX recovery now compares package versions before
+  profile suffixes. Synchronized every primitive/resolver consumer and supplied
+  changefiles for all 13 affected runtime plugins. Focused owning-suite coverage:
+  Containers 34 passed / 7 skipped, Bridge 126 / 4, Codespaces 9 / 8.
+- The native staging smoke check also exposed a receipt deadline shorter than
+  the cold parent startup plus its child's 20-second watchdog. The receipt wait
+  now permits 30 seconds while still rejecting early child exit immediately;
+  18 staging/watchdog tests passed locally, one platform-specific skip.
+- Filed #6737 for complete engine CPU/accelerator dependency profiles, preserving
+  #4876's exact authority-owned lock/profile decision and #6598's seasoning and
+  construction ownership. The current engine's default-install/torch-only-swap
+  assumption is not a safe substitute for an approved compatible closure.

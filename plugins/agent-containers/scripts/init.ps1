@@ -601,8 +601,15 @@ Write-Ok "Directories: $InstallDir"
 $signedBase = $null
 if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
     foreach ($v in '3.13', '3.12', '3.11') {
-        $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
+        $probePreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
+            $probeExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $probePreference
+        }
+        if ($probeExit -eq 0 -and $cand -and (Test-Path $cand)) {
             if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break }
         }
     }

@@ -169,6 +169,8 @@ def provision(
     requested: str | None = None,
 ) -> dict:
     """Called under the installer's installation-wide transaction lock."""
+    root = Path(os.path.abspath(root.expanduser()))
+    payload = Path(os.path.abspath(payload.expanduser()))
     version_match = re.search(
         r'(?m)^version\s*=\s*"([^"]+)"',
         (payload / "pyproject.toml").read_text(encoding="utf-8"),

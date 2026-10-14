@@ -398,6 +398,22 @@ def test_list_versions_sorted(tmp_path):
     assert got == ["0.4.0-dev2", "0.4.0-dev9", "0.4.0-dev10"]
 
 
+@pytest.mark.parametrize("old,new", [
+    ("1.0.0-dev2+base", "1.0.0+base"),
+    ("1.0.0-dev10+provider-exec", "1.0.0"),
+    ("1.0.0+provider-exec", "1.0.1-dev1+base"),
+])
+def test_profiled_recovery_orders_package_version_before_qualifier(tmp_path, old, new):
+    for version in (old, new):
+        slot = _install(tmp_path, version)
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"fixture interpreter")
+        vr.mark_complete(tmp_path, version)
+    assert vr.list_versions(tmp_path) == [old, new]
+    assert vr.resolve_python(tmp_path).parent.parent.name == new
+
+
 def test_version_key_is_stdlib_and_orders_supported_dev_versions(monkeypatch):
     import builtins
 
