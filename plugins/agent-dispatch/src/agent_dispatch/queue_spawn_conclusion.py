@@ -162,7 +162,7 @@ class SpawnConclusionMixin:
                 blocker = conn.execute(
                     "SELECT key FROM spawn_reservations "
                     "WHERE key <> ? AND (worktree = ? OR inherited_worktree = ?) "
-                    "AND reserved_at > ? "
+                    "AND reserved_at >= ? "
                     "ORDER BY reserved_at DESC LIMIT 1",
                     (
                         key,

@@ -1525,6 +1525,64 @@ class TestReciprocalDisposal:
         assert result["managed_gc_eligible"] is (blocker is None)
         assert tracking.load_record(record_path).is_paired is (blocker is not None)
 
+    def test_pair_progress_blocks_native_gc_until_primary_unlink(self, tmp_path, monkeypatch):
+        from agent_worktrees import reap_cli
+
+        project_config_loader = tc.cfg.load_project_config
+        sibling, sibling_path, sibling_worktree = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tracking.save_record
+
+        def crash_primary(record, path=None, **kwargs):
+            if path == record_path and not record.is_paired:
+                raise RuntimeError("primary unlink interrupted")
+            return original(record, path, **kwargs)
+
+        monkeypatch.setattr(tracking, "save_record", crash_primary)
+        with pytest.raises(RuntimeError, match="primary unlink"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        monkeypatch.setattr(tracking, "save_record", original)
+        receipt = sibling_path.with_suffix(".terminal-pair.json")
+        before = record_path.read_bytes(), sibling_path.read_bytes(), receipt.read_bytes()
+        sibling_repo = types.SimpleNamespace(
+            anchor=str(tmp_path / "knowledge-proj-anchor"),
+            remote="origin", default_branch="main",
+        )
+        (tc.cfg.project_dir("knowledge-proj") / "config.yaml").write_text(json.dumps({
+            "repo_name": "knowledge-proj", "machine": "host",
+            "repos": {"knowledge-proj": {
+                "anchor": sibling_repo.anchor, "default_branch": "main",
+            }},
+        }), encoding="utf-8")
+        monkeypatch.setattr(tc.cfg, "load_project_config", project_config_loader)
+        removed, reasons = reap_cli._remove_managed_worktree(
+            tracking.load_record(sibling_path), sibling_repo, sibling_path.parent,
+        )
+        assert not removed and any("terminal-pair" in reason for reason in reasons)
+        assert sibling_worktree.exists()
+        assert (record_path.read_bytes(), sibling_path.read_bytes(), receipt.read_bytes()) == before
+        result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                           reservation_key="dispatch-task:task-1:1")
+        assert result["managed_gc_eligible"]
+        primary_removed, primary_reasons = reap_cli._remove_managed_worktree(
+            tracking.load_record(record_path), repo, record_path.parent,
+        )
+        assert not primary_removed and any("terminal-pair" in reason for reason in primary_reasons)
+        assert record_path.exists()
+        removed, reasons = reap_cli._remove_managed_worktree(
+            tracking.load_record(sibling_path), sibling_repo, sibling_path.parent,
+        )
+        assert removed and not reasons
+        assert not sibling_path.exists() and not receipt.exists()
+
+
     def test_pair_progress_interrupted_receipt_publication_keeps_reciprocity(self, tmp_path, monkeypatch):
         sibling, sibling_path, _ = _pair_sibling(
             tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
@@ -1536,7 +1594,7 @@ class TestReciprocalDisposal:
         )
         original = tc.terminal_pair_progress.publish
 
-        def crash(*args):
+        def crash(*args, **kwargs):
             raise RuntimeError("injected receipt publication failure")
 
         monkeypatch.setattr(tc.terminal_pair_progress, "publish", crash)

@@ -452,7 +452,9 @@ def _dispatch_pair_clearance(
     return True, None
 
 
-def _conclude_pair_sibling(record: tracking.WorktreeRecord) -> dict[str, Any]:
+def _conclude_pair_sibling(
+    record: tracking.WorktreeRecord, *, primary_path: Path | None = None,
+) -> dict[str, Any]:
     """Dispose of the RECIPROCAL sibling of a dispatch-owned pair, once the
     harness half's own conclusion has just been decided and persisted
     under lock. Re-resolves and re-locks the sibling's own record file
@@ -499,13 +501,20 @@ def _conclude_pair_sibling(record: tracking.WorktreeRecord) -> dict[str, Any]:
                 and sibling.status in {"complete", "finalized"}
             )
             if already_primed and not sibling.is_paired:
+                if primary_path is not None:
+                    snapshot = terminal_pair_progress.reciprocal_snapshot(record, sibling, sibling_path)
+                    if snapshot is None:
+                        return {"action": "skipped", "reason": "pair-sibling-identity-mismatch"}
+                    terminal_pair_progress.publish(
+                        record, snapshot, sibling_path, primary_path=primary_path,
+                    )
                 return {"action": "already-primed", "worktree_id": sibling.worktree_id}
             sibling.kind = "bridge"
             sibling.owner = record.owner
             sibling.origin = "delegate"
             tracking.update_status(sibling, "complete", save=False)
             tracking.save_record(sibling, sibling_path)
-            terminal_pair_progress.publish(record, sibling, sibling_path)
+            terminal_pair_progress.publish(record, sibling, sibling_path, primary_path=primary_path)
             # Discharge the pairing link -- see the docstring above.
             sibling.pair_id = None
             sibling.pair_role = None
@@ -883,7 +892,7 @@ def conclude_disposable_worktree(
                     }
                     pairing_discharged = True
                 else:
-                    sibling_result = _conclude_pair_sibling(record)
+                    sibling_result = _conclude_pair_sibling(record, primary_path=record_path)
                     pairing_discharged = sibling_result.get("action") in (
                         "primed", "already-primed",
                     )

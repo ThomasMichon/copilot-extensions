@@ -613,3 +613,23 @@ requested contract.
   uses the same PR and existing patch changefile. Original native/Git
   uncertainties remain separate and unproven;
   source publication, fresh review/CI and any release remain coordinator custody.
+
+- **Reviewed cleanup-boundary corrections (PR #6542):** Reproduced an
+  equal-clock active/settled competitor that escaped the durable held
+  transition, the actual foreground supervise constructor omitting its host,
+  and native managed GC deleting reciprocal proof before primary retry.
+  Align the inclusive reservation fence and carry the existing registration
+  scope alias through the real constructor. Receipt-bearing siblings remain
+  protected until exact durable primary unlink; a primary-side guard prevents
+  collecting that proof record first. This defines sibling-before-primary GC,
+  including crashes after either unlink, without inferring missing proof.
+  Existing malformed/raw-pair, owner, identity and legacy-receipt preservation
+  remains fail-closed. No supplier/registrar discovery files or adoption state
+  are changed. The combined dispatch contracts passed 187 cases, final
+  constructor/identity/auth checks 67, authoritative seed/removal checks 58,
+  pair fault recovery 11, and ordinary GC 23. An overbroad worktree selection
+  exceeded its 300-second aggregate limit; remaining families were then tested
+  separately within the unchanged budgets, with no test expectations weakened.
+  Existing per-PR patch changefiles cover both plugins. Original timing/crash
+  uncertainties remain separate and unproven; fresh publication/review/CI and
+  authorized rollout remain coordinator custody.

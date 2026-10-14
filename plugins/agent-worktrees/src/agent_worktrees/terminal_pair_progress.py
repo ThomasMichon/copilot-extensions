@@ -47,14 +47,108 @@ def _primary_identity(record):
     }
 
 
-def publish(record, sibling, sibling_path: Path) -> None:
+def _supported_pair(pair) -> bool:
+    return (
+        isinstance(pair, dict) and set(pair) == set(_PAIR_FIELDS)
+        and all(isinstance(pair[name], str) and pair[name].strip() for name in _PAIR_FIELDS)
+        and pair["pair_role"] in {"harness", "knowledge"}
+        and pair["pair_kind"] == "worktree"
+    )
+
+
+def publish(record, sibling, sibling_path: Path, *, primary_path: Path | None = None) -> None:
     """Caller holds both records' locks and has saved the primed reciprocal sibling."""
     receipt = {
         "version": 1, "primary": _primary_identity(record),
         "sibling_pair": {name: getattr(sibling, name) for name in _PAIR_FIELDS},
         "sibling_digest": _digest(sibling_path),
     }
+    if primary_path is not None:
+        receipt["primary_record_path"] = str(primary_path.resolve())
     tracking._atomic_write(_receipt_path(sibling_path), json.dumps(receipt, sort_keys=True) + "\n")
+    if primary_path is not None:
+        primary_guard = {
+            "version": 1, "receipt_role": "primary", "primary": receipt["primary"],
+            "owner": record.owner, "sibling": _primary_identity(sibling),
+            "sibling_record_path": str(sibling_path.resolve()),
+        }
+        tracking._atomic_write(
+            _receipt_path(primary_path), json.dumps(primary_guard, sort_keys=True) + "\n",
+        )
+
+
+def gc_preservation_reason(sibling_path: Path) -> str | None:
+    """A receipt is collectible only after its exact primary unlink is durable."""
+    path = _receipt_path(sibling_path)
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "terminal-pair-receipt-unverified"
+    try:
+        if path.is_symlink():
+            return "terminal-pair-receipt-unverified"
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        expected = receipt["primary"]
+        if receipt.get("receipt_role") == "primary":
+            document = _document(sibling_path)
+            if any(name in document for name in _PAIR_FIELDS):
+                return "terminal-pair-discharge-pending"
+            current = tracking.load_record(sibling_path)
+            identity = _primary_identity(current)
+            identity["pair"] = expected["pair"]
+            other_name = receipt["sibling_record_path"]
+            if (receipt["version"] != 1 or not _supported_pair(expected["pair"])
+                    or identity != expected or _document(sibling_path) != document
+                    or current.kind not in tracking.MANAGED_KINDS
+                    or current.status not in {"complete", "finalized"}
+                    or current.resolved_origin != "delegate"
+                    or not current.owner or current.owner != receipt["owner"]
+                    or not isinstance(other_name, str) or not other_name.strip()):
+                return "terminal-pair-primary-changed"
+            other_path = Path(other_name)
+            if (not other_path.is_absolute() or other_path.is_symlink()
+                    or other_path.name != receipt["sibling"]["worktree_id"] + ".yaml"):
+                return "terminal-pair-sibling-unverified"
+            try:
+                _receipt_path(other_path).lstat()
+            except FileNotFoundError:
+                return None
+            return "terminal-pair-sibling-gc-pending"
+        if "receipt_role" in receipt:
+            return "terminal-pair-receipt-unverified"
+        primary_name = receipt.get("primary_record_path")
+        if (receipt["version"] != 1 or not isinstance(expected, dict)
+                or not _supported_pair(expected.get("pair"))
+                or not _supported_pair(receipt.get("sibling_pair"))
+                or not isinstance(primary_name, str) or not primary_name.strip()):
+            return "terminal-pair-primary-unverified"
+        primary_path = Path(primary_name)
+        if (not primary_path.is_absolute() or primary_path.is_symlink()
+                or primary_path.name != expected["worktree_id"] + ".yaml"):
+            return "terminal-pair-primary-unverified"
+        primary_document = _document(primary_path)
+        if any(name in primary_document for name in _PAIR_FIELDS):
+            return "terminal-pair-discharge-pending"
+        sibling_document = _document(sibling_path)
+        if (any(name in sibling_document for name in _PAIR_FIELDS)
+                or receipt["sibling_digest"] != _document_digest(sibling_document)):
+            return "terminal-pair-sibling-changed"
+        primary = tracking.load_record(primary_path)
+        sibling = tracking.load_record(sibling_path)
+        if _document(primary_path) != primary_document or _document(sibling_path) != sibling_document:
+            return "terminal-pair-record-changed"
+        identity = _primary_identity(primary)
+        identity["pair"] = expected["pair"]
+        if (identity != expected or primary.kind not in tracking.MANAGED_KINDS
+                or primary.status not in {"complete", "finalized"}
+                or primary.resolved_origin != "delegate"
+                or not primary.owner or primary.owner != sibling.owner):
+            return "terminal-pair-primary-changed"
+        return None
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
+        return "terminal-pair-receipt-unverified"
 
 
 def reciprocal_snapshot(record, sibling, sibling_path: Path):
@@ -73,10 +167,7 @@ def reciprocal_snapshot(record, sibling, sibling_path: Path):
                 or receipt["sibling_digest"] != _document_digest(document)):
             return None
         pair = receipt["sibling_pair"]
-        if (not isinstance(pair, dict) or set(pair) != set(_PAIR_FIELDS)
-                or any(not isinstance(pair[name], str) or not pair[name].strip() for name in _PAIR_FIELDS)
-                or pair["pair_role"] not in {"harness", "knowledge"}
-                or pair["pair_kind"] != "worktree"):
+        if not _supported_pair(pair):
             return None
         return replace(sibling, **pair)
     except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):

@@ -144,7 +144,8 @@ def test_recovery_rejects_missing_existing_cleanup_obligation(held, obligation):
 
 
 @pytest.mark.parametrize("settled", [False, True])
-def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held, monkeypatch, settled):
+@pytest.mark.parametrize("reserved_at", [10, 20])
+def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held, monkeypatch, settled, reserved_at):
     from fastapi.testclient import TestClient
     from agent_dispatch.client import DispatchClient
     from agent_dispatch.coordinator import create_app
@@ -156,7 +157,7 @@ def test_recovery_newer_allocation_is_held_once_by_real_supervisor(held, monkeyp
     before = asdict(queue.get(task_id))
     apply(held, preview(held))
     newer = queue.create("newer allocation")
-    reservation, _ = queue.reserve_spawn(newer.id, now=20)
+    reservation, _ = queue.reserve_spawn(newer.id, now=reserved_at)
     # Fault-inject delayed allocation publication after recovery acceptance.
     with queue._connect() as conn:
         conn.execute(
@@ -668,6 +669,62 @@ def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch,
         assert supervisor.client is client
         assert "spawn_worktree" not in snapshot
     assert transport.is_closed
+
+
+@pytest.mark.parametrize("machine_arg,local_machine", [
+    (None, "host"), ("host", "other-host"), (None, "other-host"), (None, None),
+])
+def test_actual_supervise_constructor_consumes_held_cleanup(held, monkeypatch, machine_arg, local_machine):
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from agent_dispatch import __main__ as cli, remote_dispatch, supervisor as sup_mod
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from tests._helpers import TEST_REPO
+
+    queue, _, key = held
+    apply(held, preview(held))
+    before = asdict(queue.get_reservation(key))
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    constructed = []
+    worktrees = []
+    real_supervisor = sup_mod.Supervisor
+
+    def create_supervisor(*args, **kwargs):
+        instance = real_supervisor(*args, **kwargs)
+        constructed.append(instance)
+        instance.attempt_conclusion_fn = lambda *a: worktrees.append(a) or {
+            "action": "primed", "managed_gc_eligible": True,
+        }
+        instance.poll_once = lambda: (instance.release_requested_bodies(), [])[1]
+        return instance
+
+    def open_client(*args, **kwargs):
+        client = DispatchClient("http://testserver")
+        client._http.close()
+        client._http = TestClient(app)
+        return client
+
+    monkeypatch.setattr(cli, "_client", open_client)
+    monkeypatch.setattr(cli, "_scope_repo", lambda *a: TEST_REPO)
+    monkeypatch.setattr(cli, "_spawn_route", lambda *a: None)
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: local_machine)
+    monkeypatch.setattr(sup_mod, "Supervisor", create_supervisor)
+    args = SimpleNamespace(
+        all_repos=False, repo=TEST_REPO, url=None, token=None, label=None,
+        max_concurrent=1, verify_timeout=0, once=True, interval=30,
+        no_heartbeat=True, max_attempts=3, embody_backend="cli",
+        cli_label=None, headless_label=None, machine=machine_arg,
+    )
+    assert cli._cmd_supervise(args) == 0
+    expected_machine = machine_arg or local_machine
+    if expected_machine == "host":
+        assert queue.get_reservation(key).conclusion_state == "complete"
+        assert len(worktrees) == 1
+    else:
+        assert asdict(queue.get_reservation(key)) == before
+        assert worktrees == []
+    assert constructed[0].machine == expected_machine
 
 
 def test_legacy_conclusion_rpc_without_recovery_keeps_optional_host_behavior(held):

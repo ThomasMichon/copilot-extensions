@@ -37,6 +37,30 @@ def _record(tmp_path):
     ).yaml_path
 
 
+def _settled_pair_receipt(path):
+    from agent_worktrees import terminal_pair_progress
+
+    sibling = tracking.load_record(path)
+    sibling.kind, sibling.status = "bridge", "complete"
+    sibling.origin, sibling.owner = "delegate", "dispatcher"
+    sibling.pair_id, sibling.pair_role, sibling.pair_kind = "fixture-pair", "knowledge", "worktree"
+    sibling.pair_ref = tracking.format_claim_ref("test", "demo", "wt-primary")
+    primary = dataclasses.replace(
+        sibling, worktree_id="wt-primary", branch="worktree/wt-primary",
+        worktree_path=str(path.parent / "primary"), pair_role="harness",
+        pair_ref=tracking.format_claim_ref("test", "demo", sibling.worktree_id),
+    )
+    primary_path = path.parent / "wt-primary.yaml"
+    tracking.save_record(primary, primary_path)
+    tracking.save_record(sibling, path)
+    terminal_pair_progress.publish(primary, sibling, path, primary_path=primary_path)
+    for record, record_path in ((primary, primary_path), (sibling, path)):
+        for name in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+            setattr(record, name, None)
+        tracking.save_record(record, record_path)
+    return primary_path
+
+
 @pytest.mark.parametrize(("name", "old_version"), [
     ("stage", 1), ("take", 1), ("restore", 1), ("finish", 1), ("remove", 2), ("remove", 3),
 ])
@@ -271,7 +295,7 @@ def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeyp
     path = _record(tmp_path)
     state.stage(path, kind="resume", text="private pending prompt")
     pair_receipt = path.with_suffix(".terminal-pair.json")
-    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    _settled_pair_receipt(path)
     other_receipt = tmp_path / "other.terminal-pair.json"
     other_receipt.write_text("retain other record evidence", encoding="utf-8")
     other = state.state_path(path).parent / "unrelated-state.txt"
@@ -294,6 +318,55 @@ def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeyp
     assert not pair_receipt.exists()
     assert other_receipt.read_text(encoding="utf-8") == "retain other record evidence"
     assert other.read_text(encoding="utf-8") == "keep me"
+
+
+@pytest.mark.parametrize("fault", [
+    "pair_id", "pair_role", "pair_ref", "pair_kind", "identity", "owner",
+    "missing-primary", "receipt", "missing-path",
+])
+def test_terminal_pair_gc_preserves_unknown_primary_proof(tmp_path, fault):
+    from agent_worktrees import terminal_pair_progress
+    import yaml
+
+    path = _record(tmp_path)
+    primary_path = _settled_pair_receipt(path)
+    receipt_path = path.with_suffix(".terminal-pair.json")
+    assert terminal_pair_progress.gc_preservation_reason(path) is None
+    if fault.startswith("pair_"):
+        document = yaml.safe_load(primary_path.read_text(encoding="utf-8"))
+        document[fault] = False
+        primary_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    elif fault in {"identity", "owner"}:
+        primary = tracking.load_record(primary_path)
+        if fault == "identity":
+            primary.branch = "worktree/another-allocation"
+        else:
+            primary.owner = "another-owner"
+        tracking.save_record(primary, primary_path)
+    elif fault == "missing-primary":
+        primary_path.unlink()
+    elif fault == "receipt":
+        receipt_path.write_text("{}", encoding="utf-8")
+    else:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt.pop("primary_record_path")
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    before = path.read_bytes(), receipt_path.read_bytes()
+    assert terminal_pair_progress.gc_preservation_reason(path).startswith("terminal-pair")
+    assert (path.read_bytes(), receipt_path.read_bytes()) == before
+
+
+def test_terminal_pair_gc_primary_waits_until_sibling_receipt_is_collected(tmp_path):
+    from agent_worktrees import terminal_pair_progress
+
+    path = _record(tmp_path)
+    primary_path = _settled_pair_receipt(path)
+    assert terminal_pair_progress.gc_preservation_reason(primary_path) == "terminal-pair-sibling-gc-pending"
+    assert terminal_pair_progress.gc_preservation_reason(path) is None
+    state.remove(path, remove_record=True)
+    assert terminal_pair_progress.gc_preservation_reason(primary_path) is None
+    state.remove(primary_path, remove_record=True)
+    assert not primary_path.exists() and not primary_path.with_suffix(".terminal-pair.json").exists()
 
 
 def test_terminal_pair_sidecar_removal_preserves_receipt_when_record_retained(tmp_path):
@@ -468,7 +541,7 @@ def test_native_reap_terminal_pair_sidecar_failure_preserves_evidence(tmp_path, 
     path = _record(tmp_path)
     state.stage(path, kind="resume", text="retain native retry")
     pair_receipt = path.with_suffix(".terminal-pair.json")
-    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    _settled_pair_receipt(path)
     before = {file: file.read_bytes() for file in (path, state.state_path(path), pair_receipt)}
     record = tracking.load_record(path)
     record.branch = record.worktree_path = ""

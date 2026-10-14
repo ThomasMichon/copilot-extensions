@@ -76,6 +76,8 @@ The pre-existing release obligation is retained in that immutable fence too.
 Recovery lease claim, validation and conclusion publication carry the
 supervisor's resolved `claimant_machine`. Each must match the retained creating
 host before granting or using a lease, including session-ending side effects.
+The foreground supervise construction uses the same explicit/configured local
+alias resolution as registration scope; it does not omit that identity.
 The host binding is confined to those housekeeping RPCs. Ordinary spawning and
 label-routed snapshots retain the supplied client's identity and lifetime;
 the supervisor does not globally substitute a proxy client.
@@ -88,6 +90,8 @@ At lease claim, unchanged task generation and provenance are checked first. A
 newer reservation carrying the worktree then uses the ordinary durable
 `held`/`worktree-carried-by-newer-reservation` transition, even if the newer
 reservation has settled, rather than remaining pending and failing every cycle.
+Equal-timestamp competing reservations are ambiguous too and use the same
+inclusive fence, transitioning once to held instead of repeatedly failing pending.
 No lease is granted on that path. All allocation fences still run before any
 actual lease grant, and again at lease validation and outcome publication.
 All ordinary terminal guards still apply: live/unknown processes, dirty or
@@ -111,6 +115,12 @@ numeric or unsupported values. This absence check and the non-pair digest use
 the same parsed document; malformed or reintroduced pair keys preserve both
 records and the receipt with the ordinary pair-preservation reason.
 Managed garbage collection remains the deletion authority.
+The sibling receipt pins the exact primary record, and a primary-side guard
+keeps that record available until the sibling receipt has been collected.
+GC preserves both during partial unlink, verifies durable primary unlink before
+collecting the sibling, then collects the primary independently. Missing,
+changed, malformed or unresolved legacy proof remains preserved; absence is
+never used to infer that a paired discharge succeeded.
 
 The owned terminal-pair receipt follows its worktree record's lifetime. The
 authoritative launch-seed/record removal deletes the owned seed and exact pair
