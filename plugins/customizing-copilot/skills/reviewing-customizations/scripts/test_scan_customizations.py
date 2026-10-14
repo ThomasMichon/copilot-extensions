@@ -2602,12 +2602,16 @@ def test_named_bootstrap_check_with_json_only_stdout_is_output_free(
     ('import builtins\nbuiltins.print("leak")', False),
     ('from builtins import print as emit\nemit("leak")', False),
     ('from builtins import *\nprint("leak", file=sys.stderr)', False),
+    ('import builtins\nemit = builtins.print\nemit("leak")', False),
+    ('import builtins\nemit = getattr(builtins, "print")\nemit("leak")', False),
+    ('emit = __builtins__["print"]\nemit("leak")', False),
     ('print("unterminated', False),
     ('x = 1\x00', False),
 ], ids=["stderr", "stderr-spaced", "stdout", "explicit-stdout", "stderr-then-stdout",
         "stdout-then-stderr", "nested-stdout", "multiline-stderr", "aliased-print",
         "kwargs-destination", "attribute-print", "imported-print-alias",
-        "builtins-star-import", "unparseable", "null-byte"])
+        "builtins-star-import", "attribute-alias", "getattr-alias", "subscript-alias",
+        "unparseable", "null-byte"])
 def test_python_hook_stderr_diagnostics_stay_output_free(tmp_path: Path, line, output_free):
     # stderr never reaches model context; a stdout print may.
     script = tmp_path / "hook.py"
