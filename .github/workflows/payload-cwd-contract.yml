@@ -31,11 +31,14 @@ jobs:
       - name: Focused PR smoke
         if: github.event_name == 'pull_request'
         run: >-
-          uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest &&
+          python -m pytest tools/test_payload_cwd_contract.py -q
           -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or launch_survives"
       - name: Full contract matrix
         if: github.event_name != 'pull_request'
-        run: uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest &&
+          python -m pytest tools/test_payload_cwd_contract.py -q
 
   windows:
     runs-on: windows-latest
@@ -49,8 +52,11 @@ jobs:
       - name: Focused PR smoke
         if: github.event_name == 'pull_request'
         run: >-
-          uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest &&
+          python -m pytest tools/test_payload_cwd_contract.py -q
           -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
       - name: Full contract matrix
         if: github.event_name != 'pull_request'
-        run: uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest &&
+          python -m pytest tools/test_payload_cwd_contract.py -q

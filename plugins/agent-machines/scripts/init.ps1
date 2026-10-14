@@ -1703,35 +1703,28 @@ public static class CePayloadDirectoryState {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
-       --allow-existing` over a corpse (#935); the current/active slot is never
-       tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op in legacy mode. #>
-    if (-not $VersionedRuntime -or $CellMode) { return }
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so "marker present" == "healthy, complete build". A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) {
-        throw 'Cannot locate Python to write the runtime completion marker'
+    param([string]$PayloadHash = '')
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
-    $ph = Get-PayloadHash
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion, '--payload-hash', $ph)
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
-    if ($LASTEXITCODE -ne 0) {
-        throw "Runtime completion marker writer failed with exit code $LASTEXITCODE"
-    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -2159,6 +2152,9 @@ if (-not $CellMode) {
 
 # -- 2. Create venv ----------------------------------------------------
 
+try {
+[void](Invoke-VersionedSlotClean)
+if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -2230,9 +2226,9 @@ foreach ($lib in @(
     }
     if (Test-Path (Join-Path $libDir 'pyproject.toml')) {
         if ($haveUv) {
-            & uv pip install --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
+            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
         } else {
-            & $VenvPython -m pip install --quiet "$libDir" 2>&1 | Out-Null
+            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" 2>&1 | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "$($lib.Dir) library install failed"
@@ -2250,17 +2246,17 @@ $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     if ($CellMode) {
-        & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 |
+        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
+        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
     }
 } else {
     if ($CellMode) {
-        & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 |
+        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 | Out-Null
+        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 | Out-Null
     }
 }
 $pkgResult = $LASTEXITCODE
@@ -2273,6 +2269,8 @@ if ($pkgResult -ne 0) {
 # Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused).
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 Write-Ok 'Package installed: agent-machines'
+
+}
 
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if ($VersionedRuntime) {
@@ -2459,3 +2457,9 @@ if ($CellMode) {
     Write-Host '  Try: agent-machines version' -ForegroundColor DarkGray
 }
 exit 0
+
+} finally {
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        Stop-RuntimeConstruction
+    }
+}

@@ -8,7 +8,7 @@ the SVG's OWN Fira Code font via ``svg2png.mjs``. It never substitutes the font:
 Rich lays out the SVG's glyph x-positions on Fira Code's metric grid, so a
 different monospace breaks the box-drawing tiling and leaves choppy borders.
 
-Prereq (once):  npm install    # in this directory (installs @resvg/resvg-js)
+Prereq (once):  python install.py  # in this directory (age-gated locked install)
 Also requires node + a Python env with textual/rich/pyyaml importable.
 
 Usage:

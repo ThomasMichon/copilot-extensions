@@ -38,7 +38,10 @@ def project_at(root, *, nested=False):
     shutil.copytree(PROJECT / "src", project / "src", ignore=shutil.ignore_patterns("__pycache__"))
     library = root / "libs" / "versioned-runtime"
     library.mkdir(parents=True)
-    for name in ("versioned_runtime.py", "standalone_build.py"):
+    for name in (
+        "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_construction.py", "standalone_build.py",
+    ):
         shutil.copy2(LIBRARY / name, library / name)
     return project, library
 
@@ -73,6 +76,13 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         rows = list(csv.reader(io.StringIO(archive.read(name).decode())))
         expected = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
         assert [row for row in rows if row[0] == member] == [[member, expected, str(len(data))]]
+        for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+            member = f"fleet_manager/{name}"
+            content = (library / name).read_bytes()
+            assert archive.namelist().count(member) == 1
+            assert archive.read(member) == content
+            digest = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode()
+            assert [row for row in rows if row[0] == member] == [[member, digest, str(len(content))]]
         metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
         requirements = [
             Requirement(line.removeprefix("Requires-Dist:").strip())
@@ -139,13 +149,17 @@ def test_nested_service_directory_uses_same_canonical_resource(tmp_path):
 
 
 @pytest.mark.client_distribution_full
-@pytest.mark.parametrize("resource", ["versioned_runtime.py", "standalone_build.py"])
+@pytest.mark.parametrize("resource", [
+    "versioned_runtime.py", "versioned_runtime_leases.py",
+    "versioned_runtime_construction.py", "standalone_build.py",
+])
 @pytest.mark.parametrize("included_copy", [False, True])
 def test_missing_build_resource_is_not_a_successful_partial_wheel(tmp_path, resource, included_copy):
     project, library = project_at(tmp_path)
     if included_copy:
-        included = (project / "src" / "fleet_manager" / "_versioned_runtime.py"
-                    if resource == "versioned_runtime.py" else project / "_standalone_runtime_build.py")
+        name = "_versioned_runtime.py" if resource == "versioned_runtime.py" else resource
+        included = (project / "_standalone_runtime_build.py" if resource == "standalone_build.py"
+                    else project / "src" / "fleet_manager" / name)
         shutil.copy2(library / resource, included)
     (library / resource).unlink()
     result = build(project, tmp_path / "artifacts")

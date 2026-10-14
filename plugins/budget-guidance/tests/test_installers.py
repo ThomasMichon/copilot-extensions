@@ -22,10 +22,18 @@ pytestmark = pytest.mark.guard
 
 def _copy_payload(target: Path) -> None:
     shutil.copytree(PLUGIN, target)
-    shutil.copytree(
-        PLUGIN.parents[1] / "libs" / "agent-procutil",
-        target / "libs" / "agent-procutil",
+    previous = sys.path.copy()
+    sys.path.insert(0, str(PLUGIN.parents[1] / "tools"))
+    try:
+        import materialize_main
+    finally:
+        sys.path[:] = previous
+    changes = materialize_main.materialize_uv_editable_ref_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=target,
+        canonical_root=PLUGIN.parents[1],
     )
+    assert not any(change.startswith("SKIP ") for change in changes), changes
+    assert (target / "libs" / "agent-procutil" / "pyproject.toml").is_file()
 
 
 def test_installers_recommend_supported_version_flag():
@@ -41,9 +49,10 @@ def test_installers_recommend_supported_version_flag():
 def test_package_installers_retain_quiet_native_output_with_explicit_failure():
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
-    assert '"$procutil" "$PLUGIN_DIR" --quiet 2>/dev/null' in posix
-    assert '--quiet "$procutil" "$PLUGIN_DIR" 2>/dev/null' in posix
-    assert '@Dependencies $Source --quiet 2>&1 | Out-Null' in powershell
+    assert '"$procutil" "$PLUGIN_DIR" --quiet' in posix
+    assert '@pipSources --quiet 2>&1' in powershell
+    assert "installer_dependency_policy.py" in posix and "installer_dependency_policy.py" in powershell
+    assert '-m pip install' not in posix and '-m pip install' not in powershell
     assert "Failed to install budget-guidance package into venv" in posix
     assert "Failed to install budget-guidance package into venv" in powershell
 
@@ -64,6 +73,15 @@ import json
 
 args = sys.argv[1:]
 base = os.environ["TEST_BASE_PYTHON"]
+if args[:2] == ["python", "find"] or (args and args[0] == "run"):
+    print(base)
+    raise SystemExit(0)
+if "--show-settings" in args:
+    print("PipInstallSettings {\\n settings: PipSettings {\\n"
+          " index_locations: IndexLocations { indexes: [], flat_index: [], },\\n"
+          " exclude_newer: ExcludeNewer {\\n"
+          " global: None, package: ExcludeNewerPackage({}),\\n },\\n },\\n}")
+    raise SystemExit(0)
 if args and args[0] == "venv":
     target = Path(args[1])
     log = os.environ.get("TEST_UV_VENV_LOG")
@@ -93,7 +111,8 @@ if is_pip:
     args = ["pip", "install", "--python", sys.executable, *args[1:]]
 if args[:2] == ["pip", "install"]:
     python = args[args.index("--python") + 1]
-    plugin = Path(args[-2] if args[-1] == "--quiet" else args[-1])
+    plugin = next(Path(value) for value in args[2:]
+                  if (Path(value) / "src" / "budget_guidance").is_dir())
     if os.environ.get("TEST_BUILD_ARTIFACT_PROBE"):
         sources = [Path(arg) for arg in args if (Path(arg) / "pyproject.toml").is_file()]
         artifacts = []
@@ -109,8 +128,10 @@ if args[:2] == ["pip", "install"]:
             (source / "build" / "lib").mkdir(parents=True)
             (source / "stale.egg-info").mkdir()
             (source / "src" / "stale.egg-info").mkdir()
-        if not is_pip:
-            raise SystemExit(9)
+        failure = int(os.environ.get("TEST_INSTALL_EXIT_CODE", "9"))
+        if failure:
+            raise SystemExit(failure)
+    assert "--exclude-newer" in args and "--reinstall" in args
     site_dir = subprocess.check_output(
         [python, "-c", "import site; print(site.getsitepackages()[0])"],
         text=True,
@@ -133,7 +154,7 @@ raise SystemExit(2)
     )
     uv = fake_bin / "uv"
     uv.write_text(
-        f"#!/bin/sh\nexec '{sys.executable}' '{driver}' \"$@\"\n",
+        f"#!/bin/sh\nexec '{sys._base_executable}' '{driver}' \"$@\"\n",
         encoding="utf-8",
     )
     uv.chmod(0o755)
@@ -146,7 +167,7 @@ raise SystemExit(2)
         "HOME": str(tmp_path / "home"),
         "USERPROFILE": str(tmp_path / "home"),
         "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
-        "TEST_BASE_PYTHON": sys.executable,
+        "TEST_BASE_PYTHON": sys._base_executable,
         "TEST_UV_DRIVER": str(driver),
         "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
         "COMPUTERNAME": "TEST-HOST",
@@ -155,6 +176,82 @@ raise SystemExit(2)
     env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
     Path(env["HOME"]).mkdir()
     return fake_bin, env
+
+
+@pytest.mark.skipif(os.name != "nt" or PWSH is None, reason="native Windows installer")
+@pytest.mark.parametrize("previous", [False, True])
+def test_native_failed_install_preserves_selection_and_retry(tmp_path, previous):
+    fake_bin, env = _fake_uv_environment(tmp_path)
+    (fake_bin / "uv").unlink()
+    for name in ("python", "python3", "py"):
+        (fake_bin / name).unlink()
+        prefix = (
+            '@echo off\nsetlocal EnableDelayedExpansion\nif "%~1"=="-3" (\n'
+            f'  "{sys._base_executable}" %2 %3 %4 %5 %6 %7 %8 %9\n'
+            '  exit /b !errorlevel!\n)\n'
+        ) if name == "py" else "@echo off\n"
+        (fake_bin / f"{name}.cmd").write_text(
+            prefix + f'"{sys._base_executable}" %*\nexit /b %errorlevel%\n',
+            encoding="utf-8",
+        )
+    driver = tmp_path / "fake_uv.py"
+    source = driver.read_text(encoding="utf-8")
+    source = source.replace(
+        'if args and args[0] == "venv":',
+        'if args == ["--version"]:\n    print("uv 0.12.5")\n    raise SystemExit(0)\n'
+        'if args and args[0] == "venv":',
+    )
+    source = source.replace(
+        'if args[:2] == ["pip", "install"]:\n',
+        'if args[:2] == ["pip", "install"]:\n'
+        '    if os.environ.get("TEST_DEPENDENCY_FAIL") == "1":\n'
+        '        python = Path(args[args.index("--python") + 1])\n'
+        '        (python.parent.parent / "partial-install").write_text("partial")\n'
+        '        print("controlled dependency failure 29", file=sys.stderr)\n'
+        '        raise SystemExit(29)\n',
+    )
+    driver.write_text(source, encoding="utf-8")
+    (fake_bin / "uv.cmd").write_text(
+        f'@echo off\n"{sys._base_executable}" "{driver}" %*\nexit /b %errorlevel%\n',
+        encoding="utf-8",
+    )
+    root = tmp_path / "runtime with spaces"
+    old = root / "versions" / "0.0.1"
+    if previous:
+        old.mkdir(parents=True)
+        (old / "live").write_text("untouched")
+        (old / ".install-complete.json").write_text(json.dumps({
+            "version": "0.0.1", "completed_at": "2026-01-01T00:00:00Z",
+            "pid": 1, "payload_hash": "0" * 64,
+        }))
+        (root / "current-version").write_text("0.0.1")
+    command = [
+        PWSH, "-NoProfile", "-NonInteractive", "-File",
+        str(PLUGIN / "scripts" / "install.ps1"),
+        "install", "-InstallDir", str(root),
+    ]
+    before = (root / "current-version").read_bytes() if previous else None
+    failed = subprocess.run(
+        command, env={**env, "TEST_DEPENDENCY_FAIL": "1"}, cwd=tmp_path,
+        capture_output=True, text=True, timeout=45,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert failed.returncode != 0, failed.stdout + failed.stderr
+    assert "Canonical dependency installation exited 29" in failed.stdout, failed.stdout + failed.stderr
+    assert not (root / "versions" / VERSION).exists()
+    assert not (root / "deploy-manifest.json").exists()
+    if previous:
+        assert (root / "current-version").read_bytes() == before
+        assert (old / "live").read_text() == "untouched"
+    else:
+        assert not (root / "current-version").exists()
+    retried = subprocess.run(
+        command, env=env, cwd=tmp_path, capture_output=True, text=True,
+        timeout=45, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert retried.returncode == 0, retried.stdout + retried.stderr
+    assert not (root / "versions" / VERSION / "partial-install").exists()
+    assert (root / "current-version").read_text().strip() == VERSION
 
 
 def test_posix_installer_is_uv_first_when_ambient_python_is_absent():
@@ -349,7 +446,7 @@ def test_posix_stamp_uses_owned_versioned_snapshot_without_marketplace_fallback(
 
 
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX installer coverage")
-def test_posix_self_stage_forwards_custom_root_and_force(tmp_path: Path):
+def test_posix_self_stage_preserves_custom_root_and_completed_runtime_on_force(tmp_path: Path):
     _, env = _fake_uv_environment(tmp_path)
     installed = (
         Path(env["HOME"])
@@ -405,6 +502,8 @@ def test_posix_self_stage_forwards_custom_root_and_force(tmp_path: Path):
     initial_calls = venv_log.read_text(encoding="utf-8").splitlines()
     assert len(initial_calls) == 1
     assert all(str(custom_root) in call for call in initial_calls)
+    marker = next((custom_root / "versions").glob("*/.install-complete.json"))
+    before = marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns
 
     forced = subprocess.run(
         [
@@ -425,8 +524,9 @@ def test_posix_self_stage_forwards_custom_root_and_force(tmp_path: Path):
     )
     assert forced.returncode == 0, forced.stdout
     forced_calls = venv_log.read_text(encoding="utf-8").splitlines()
-    assert len(forced_calls) == 2
+    assert forced_calls == initial_calls
     assert all(str(custom_root) in call for call in forced_calls)
+    assert (marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns) == before
 
 
 @pytest.mark.skipif(PWSH is None or os.name == "nt", reason="portable pwsh installer coverage")

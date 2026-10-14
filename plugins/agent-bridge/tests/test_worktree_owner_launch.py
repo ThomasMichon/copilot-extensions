@@ -33,7 +33,8 @@ def installation(tmp_path, monkeypatch):
     own = tmp_path / ".agent-bridge"
     scripts = own / "scripts"
     scripts.mkdir(parents=True)
-    shutil.copy2(PLUGIN / "scripts" / "versioned_runtime.py", scripts)
+    for name in ("versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts)
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
     monkeypatch.setenv("PATH", "/usr/bin:/bin" if os.name != "nt" else "")
     which = Mock(return_value=None)

@@ -35,6 +35,7 @@ repo via the Copilot CLI marketplace.
 | Author a **skill / sub-agent / harness plugin** | the **`authoring-skills`** / **`defining-subagents`** / **`authoring-harness-plugins`** skills |
 | **Diagnose** a broken plugin or deploy | the **`copilot-extensions-harness:diagnosing-copilot-extensions`** skill |
 | The **deploy / install contract** | `docs/install-contract.md` |
+| **Declare or install external dependencies** | Seven-day minimum age; `docs/install-contract.md` (*External dependency seasoning*) and `tools/check-dependency-age.py` |
 
 ---
 

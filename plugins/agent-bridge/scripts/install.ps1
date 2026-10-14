@@ -512,21 +512,10 @@ function Invoke-UvPipInstallResilient {
         [string]$SourceDir = ''
     )
 
-    Remove-PluginBuildArtifacts -SourceDir $SourceDir
-    $delays = @(3, 6, 10)
-    $out = & uv pip install @Arguments 2>&1
-    $exit = $LASTEXITCODE
-    if ($exit -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
-    foreach ($delay in $delays) {
-        if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
-        Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        Start-Sleep -Seconds $delay
-        Remove-PluginBuildArtifacts -SourceDir $SourceDir
-        $out = & uv pip install @Arguments 2>&1
-        $exit = $LASTEXITCODE
-        if ($exit -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
-    }
-    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
+    $result = Invoke-UvPipInstallResilientShared -Arguments $Arguments `
+        -BeforeAttempt { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
+    if ($result.ExitCode -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
+    return $result
 }
 
 function Invoke-UvVenvResilient {
@@ -813,49 +802,29 @@ function Test-PayloadUnchangedSinceAdmission {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Ensure the target slot exists, tossing it first if a prior build left it
-       INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-       over a corpse (#935). The current/active slot is never tossed. Returns
-       $false when the primitive REFUSES (e.g. the incomplete slot is selected or
-       still in use): building over it would mutate a live/selected slot in
-       place, so the caller must not proceed (#5472). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return $true }
+    param([string]$PayloadHash = '')
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return $true }
-    & $py $vr --root $InstallDir --link-name 'venv' slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Step $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Runtime slot versions/$SrcVersion could not be safely prepared (exit $LASTEXITCODE); refusing to build over it in place"
-        return $false
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
     }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash $PayloadHash -LinkName (Split-Path -Leaf $LinkDir)
     return $true
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so the slot is provably a healthy, complete build. A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode.
-
-       $PayloadHash is the value computed ONCE before admission and used to
-       build this slot -- never recomputed here. Callers that built the slot
-       first confirm via Test-PayloadUnchangedSinceAdmission that the sources
-       still hash to it, so the marker never names bytes that were not
-       installed. #>
     param([string]$PayloadHash = '')
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', 'venv', 'mark-complete', $SrcVersion)
-    if ($PayloadHash) { $mcArgs += @('--payload-hash', $PayloadHash) }
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Step $_ }
-    # A refused publication (e.g. conflicting completion evidence for this
-    # numbered version) must fail the install, never be swallowed (#5472).
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to publish the completion marker for runtime slot versions/$SrcVersion (exit $LASTEXITCODE)"
-        return $false
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 
@@ -1214,7 +1183,6 @@ function Get-SignedBasePython {
 }
 
 function New-SignedVenv {
-    if (-not (Invoke-VersionedSlotClean)) { return $false }
     return [bool](New-SignedVenvShared `
         -VenvDir $VenvDir `
         -VenvPython $VenvPython `
@@ -2441,6 +2409,8 @@ function Invoke-Install {
         Exit-InstallLock
         exit 1
     }
+    [void](Invoke-VersionedSlotClean -PayloadHash $payloadHash)
+    $admission = if ($script:RuntimeConstructionReuse) { 'reuse' } else { 'construct' }
 
     # Create directories
     foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -3152,6 +3122,8 @@ function Invoke-Update {
         Exit-InstallLock
         exit 1
     }
+    [void](Invoke-VersionedSlotClean -PayloadHash $payloadHash)
+    $admission = if ($script:RuntimeConstructionReuse) { 'reuse' } else { 'construct' }
 
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
@@ -3273,10 +3245,8 @@ function Invoke-Update {
             # new slot -- only one this run constructed: a reused slot was already
             # published (create-once, #5472) and is never deleted here -- and
             # restart the previous version if the classic path stopped it.
-            if ($SrcVersion -and $SrcVersion -ne $prevVersion -and $admission -ne 'reuse') {
-                $failedSlot = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
-                if (Test-Path $failedSlot) { Remove-Item -Recurse -Force $failedSlot -ErrorAction SilentlyContinue }
-            }
+            # The attached construction owner reclaims only its own unfinished
+            # candidate after rollback settles; no unguarded directory deletion.
             if ($wasRunning -and -not $useCutover -and -not $activeForward) {
                 if (-not (Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous version...')) { $wasRunning = $false }
             }
@@ -3399,7 +3369,13 @@ try {
         'provision' { Invoke-Provision }
     }
 } finally {
+    try {
+        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+            Stop-RuntimeConstruction
+        }
+    } finally {
     # Release the install lock on any exit path (the OS also drops it on process
     # death, so an `exit`/crash never strands it).
     Exit-InstallLock
+    }
 }

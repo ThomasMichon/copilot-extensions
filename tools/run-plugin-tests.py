@@ -55,6 +55,7 @@ import time
 import tomllib
 from pathlib import Path
 
+from seasoned_uv import prepare_uv_install
 from plugin_test_containment import (
     ContainmentError,
     Limits,
@@ -277,7 +278,12 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         for child in venv.iterdir():
             if child.is_symlink():
                 child.unlink()
-            elif os.name == "nt" and child.lstat().st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT:
+            elif (
+                callable(getattr(child, "is_junction", None)) and child.is_junction()
+            ) or (
+                os.name == "nt"
+                and getattr(child.lstat(), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+            ):
                 child.rmdir()
             elif child.is_dir():
                 shutil.rmtree(child)
@@ -306,6 +312,9 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
             cmd.extend(RUNNER_DEPENDENCIES)
+            cmd = [uv, "pip", "install", *prepare_uv_install(
+                uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,),
+            )]
             subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
         else:
             # A pyproject-less plugin (e.g. a skill-script plugin like
@@ -314,13 +323,11 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # pytest runner is present in the venv.
             subprocess.run(
                 [
-                    uv,
-                    "pip",
-                    "install",
-                    "--python",
-                    str(py),
-                    "pytest",
-                    *RUNNER_DEPENDENCIES,
+                    uv, "pip", "install",
+                    *prepare_uv_install(
+                        uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES],
+                        cwd=_plugin_dir(name), trusted_source_roots=(REPO,),
+                    ),
                 ],
                 cwd=str(_plugin_dir(name)), check=True,
             )

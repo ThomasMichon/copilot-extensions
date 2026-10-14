@@ -164,6 +164,59 @@ def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
     ]
 
 
+@pytest.mark.parametrize("has_project", [False, True])
+def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, has_project):
+    plugin = tmp_path / "plugins" / "example"
+    plugin.mkdir(parents=True)
+    if has_project:
+        (plugin / "pyproject.toml").write_text(
+            '[project]\nname="example"\nversion="1.0"\ndependencies=["owned-lib"]\n'
+            '[tool.uv.sources]\nowned-lib={path="../../libs/owned"}\n',
+            encoding="utf-8",
+        )
+        library = tmp_path / "libs" / "owned"
+        library.mkdir(parents=True)
+        (library / "pyproject.toml").write_text(
+            '[project]\nname="owned-lib"\nversion="1.0"\n', encoding="utf-8",
+        )
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "PLUGINS", tmp_path / "plugins")
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "environments")
+    monkeypatch.setattr(runner, "_dep_fingerprint", lambda name: "fixture")
+    environment = runner.VENV_ROOT / "example"
+    environment.mkdir(parents=True)
+    python = runner._venv_python("example")
+    admitted = runner.prepare_uv_install
+    installs = []
+    probes = []
+
+    def prepare(uv, arguments, **kwargs):
+        assert kwargs["trusted_source_roots"] == (tmp_path,)
+        return admitted(uv, arguments, **kwargs)
+
+    def command(arguments, **kwargs):
+        if arguments[1] == "venv":
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.touch()
+        elif "--show-settings" in arguments:
+            probes.append(arguments)
+            return subprocess.CompletedProcess(arguments, 0, """PipInstallSettings { settings: PipSettings {
+                index_locations: IndexLocations { indexes: [], flat_index: [], },
+                exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+            }, }""", "")
+        else:
+            installs.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(runner, "prepare_uv_install", prepare)
+    monkeypatch.setattr(runner.subprocess, "run", command)
+    assert runner._ensure_venv("example", "uv", reinstall=False) == python
+    assert len(probes) == len(installs) == 1
+    assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
+    assert ("-e" in installs[0]) is has_project
+    assert (environment / ".dep-fingerprint").read_text() == "fixture"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX creation permissions")
 def test_pytest_group_parent_is_created_without_shared_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

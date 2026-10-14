@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tomllib
 
 import pytest
 
@@ -9,7 +10,8 @@ from test_installers import BASH, PWSH, _copy_payload, _fake_uv_environment
 
 
 @pytest.mark.parametrize("platform", ["posix", "powershell"])
-def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tmp_path, platform):
+@pytest.mark.parametrize("failure", [0, 9])
+def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tmp_path, platform, failure):
     if platform == "posix" and (BASH is None or os.name == "nt"):
         pytest.skip("POSIX installer coverage")
     if platform == "powershell" and (PWSH is None or os.name == "nt"):
@@ -23,6 +25,7 @@ def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tm
         (source / "seed.egg-info").mkdir()
         (source / "src" / "seed.egg-info").mkdir()
     env["TEST_BUILD_ARTIFACT_PROBE"] = "1"
+    env["TEST_INSTALL_EXIT_CODE"] = str(failure)
     attempts = tmp_path / "attempts.jsonl"
     env["TEST_INSTALL_ATTEMPTS_LOG"] = str(attempts)
     install_dir = Path(env["HOME"]) / ".budget-guidance"
@@ -36,11 +39,16 @@ def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tm
         command, cwd=tmp_path, env=env, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, timeout=120, check=False,
     )
-    assert result.returncode == 0, result.stdout
+    assert (result.returncode != 0) is bool(failure), result.stdout
     assert [json.loads(line) for line in attempts.read_text().splitlines()] == [
-        {"engine": "uv", "sources": 2}, {"engine": "pip", "sources": 2},
+        {"engine": "uv", "sources": 2},
     ]
     for source in (payload, procutil):
         assert not (source / "build").exists()
         assert not list(source.glob("*.egg-info"))
         assert not list((source / "src").glob("*.egg-info"))
+    if failure:
+        assert not (install_dir / "current-version").exists()
+        assert not (install_dir / "versions" / tomllib.loads(
+            (payload / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]["version"]).exists()

@@ -14,6 +14,8 @@
     source this file across plugin boundaries.
 #>
 
+$script:InstallerDependencyPolicy = Join-Path $PSScriptRoot 'installer_dependency_policy.py'
+
 function Invoke-NativeCapture {
     param([Parameter(Mandatory)][scriptblock]$Command)
 
@@ -46,18 +48,43 @@ function Invoke-UvPipInstallResilient {
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
         [string]$UvCommand = 'uv',
-        [string]$PayloadDirToScrub
+        [string]$PayloadDirToScrub,
+        [scriptblock]$BeforeAttempt
     )
 
+    $policyPython = $null
+    for ($i = 0; $i -lt $Arguments.Count - 1; $i++) {
+        if ($Arguments[$i] -eq '--python' -and (Test-Path -LiteralPath $Arguments[$i + 1] -PathType Leaf)) {
+            $policyPython = $Arguments[$i + 1]
+            break
+        }
+    }
+    if (-not $policyPython) {
+        $candidate = Get-Command python3, python -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
+        if ($candidate) { $policyPython = $candidate.Source }
+    }
+    if (-not $policyPython -or -not (Test-Path -LiteralPath $script:InstallerDependencyPolicy -PathType Leaf)) {
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output = 'dependency-seasoning: bootstrap Python or canonical policy helper is unavailable'
+        }
+    }
     $delays = @(3, 6, 10)
-    $result = Invoke-NativeCapture { & $UvCommand pip install @Arguments }
+    if ($BeforeAttempt) { & $BeforeAttempt | Out-Null }
+    $result = Invoke-NativeCapture {
+        & $policyPython -I $script:InstallerDependencyPolicy --uv $UvCommand -- @Arguments
+    }
     foreach ($delay in $delays) {
         if ($result.ExitCode -eq 0 -or -not (Test-IsSreModuleMismatch ($result.Output | Out-String))) {
             break
         }
         Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
         Start-Sleep -Seconds $delay
-        $result = Invoke-NativeCapture { & $UvCommand pip install @Arguments }
+        if ($BeforeAttempt) { & $BeforeAttempt | Out-Null }
+        $result = Invoke-NativeCapture {
+            & $policyPython -I $script:InstallerDependencyPolicy --uv $UvCommand -- @Arguments
+        }
     }
 
     if ($result.ExitCode -eq 0 -and $PayloadDirToScrub) {
@@ -108,7 +135,8 @@ function Ensure-Uv {
         [string]$BootstrapVersion = '0.12.6'
     )
 
-    $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+    $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     if ($existing) {
         $result = Invoke-NativeCapture { & $existing.Source --version }
         if ($result.ExitCode -eq 0) {

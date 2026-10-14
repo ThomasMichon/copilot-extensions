@@ -1585,72 +1585,32 @@ _wait_for_versioned_slot_lease() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python exclude-venv-dir)"
-    if [[ -z "$py" ]]; then
-        # No bootstrap python to run the actual census with (e.g. a
-        # uv-only machine with no system python on PATH yet and no prior
-        # `venv` link to borrow from). An ABSENT slot needs no validation
-        # at all -- genuinely clean, return 0. But an EXISTING slot (e.g.
-        # abandoned/incomplete from a prior attempt) must fail CLOSED here
-        # rather than silently reporting "clean": returning success would
-        # let the caller proceed straight to `uv venv --allow-existing`
-        # over it without ever having actually validated it, defeating the
-        # whole point of this check.
-        [[ -e "$VENV_DIR" ]] && return 1
-        return 0
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
     fi
-    # Propagate the underlying python call's real exit code (never the
-    # trailing `sed`'s, and never force-succeed via `|| true`) -- callers
-    # must be able to tell a genuinely dirty/contended slot from a clean one
-    # (#5416).
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'
-    return "${PIPESTATUS[0]}"
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    if ! py="$(_bootstrap_python)" || [[ -z "$py" ]]; then
-        err "Completion publication requires bootstrap Python -- refusing activation"
-        return 1
-    fi
-    local ph
-    if ! ph="$(_payload_hash)" || [[ -z "$ph" ]]; then
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -z "$actual_hash" ]]; then
         err "Runtime input fingerprint unavailable -- refusing completion publication"
         return 1
     fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    args+=(--payload-hash "$ph")
-    local rc
-    if "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
-        rc=0
-    else
-        local -a pipeline_status=("${PIPESTATUS[@]}")
-        rc="${pipeline_status[0]}"
-        if [[ "${pipeline_status[1]}" -ne 0 ]]; then
-            rc="${pipeline_status[1]}"
-            err "Completion output formatter failed (exit $rc; publisher exit ${pipeline_status[0]}) -- refusing activation"
-        fi
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
+        return 1
     fi
-    if [[ "$rc" -ne 0 ]]; then
-        err "Completion publication failed for versions/$SRC_VERSION -- refusing activation"
-    fi
-    return "$rc"
+    _runtime_construction_complete "$actual_hash"
 }
 
 _test_slot_already_complete() {
@@ -1783,7 +1743,7 @@ deploy_package() {
     # marketplace layouts.
     local cfg_migrate_dir="$PLUGIN_DIR/libs/config-migrate"
     if [[ -f "$cfg_migrate_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-config-migrate \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-config-migrate \
                 "$cfg_migrate_dir" --quiet; then
             err "config-migrate library install failed"
             return 1
@@ -1795,7 +1755,7 @@ deploy_package() {
     # from the local path (mirrors config-migrate above).
     local plugin_resolve_dir="$PLUGIN_DIR/libs/plugin-resolve"
     if [[ -f "$plugin_resolve_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-plugin-resolve \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-plugin-resolve \
                 "$plugin_resolve_dir" --quiet; then
             err "plugin-resolve library install failed"
             return 1
@@ -1808,7 +1768,7 @@ deploy_package() {
     # unpublished dependency from the package index.
     local zdd_dir="$PLUGIN_DIR/libs/zdd"
     if [[ -f "$zdd_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-zdd \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-zdd \
                 "$zdd_dir" --quiet; then
             err "zdd library install failed"
             return 1
@@ -1820,7 +1780,7 @@ deploy_package() {
     # guard as zdd above.
     local remote_login_shell_dir="$PLUGIN_DIR/libs/remote-login-shell"
     if [[ -f "$remote_login_shell_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-remote-login-shell \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-remote-login-shell \
                 "$remote_login_shell_dir" --quiet; then
             err "remote-login-shell library install failed"
             return 1
@@ -1833,7 +1793,7 @@ deploy_package() {
     # itself depends on remote-login-shell.
     local machine_transport_dir="$PLUGIN_DIR/libs/machine-transport"
     if [[ -f "$machine_transport_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-machine-transport \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-machine-transport \
                 "$machine_transport_dir" --quiet; then
             err "machine-transport library install failed"
             return 1
@@ -1845,14 +1805,14 @@ deploy_package() {
     # above; stdlib-only, so it has no ordering constraint of its own.
     local update_telemetry_dir="$PLUGIN_DIR/libs/update-telemetry"
     if [[ -f "$update_telemetry_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-update-telemetry \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-update-telemetry \
                 "$update_telemetry_dir" --quiet; then
             err "update-telemetry library install failed"
             return 1
         fi
     fi
 
-    if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
+    if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1
     fi
@@ -1912,6 +1872,9 @@ deploy_venv() {
         fi
         return 1
     fi
+    _versioned_slot_clean || return 1
+    [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]] && return 2
+
     # Re-check completeness NOW, under the just-acquired lease: a concurrent
     # process may have already finished building AND activating this exact
     # slot while we were waiting for the lease (#5439) -- the pre-lease

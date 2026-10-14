@@ -522,51 +522,28 @@ function Test-PythonVenv {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Delegate incomplete-slot cleanup and live-process protection to the
-       canonical versioned-runtime primitive. #>
-    if (-not $VersionedRuntime -or -not (Test-Path -LiteralPath $VenvDir)) {
-        return $true
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
     }
-    $result = Invoke-VersionedRuntime -Arguments @(
-        '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir),
-        'slot', $SrcVersion, '--clean-incomplete'
-    )
-    if ($result.Output) { $result.Output -split "`r?`n" | ForEach-Object { Write-Host "  ...    $_" } }
-    if ($result.ExitCode -ne 0) {
-        Write-ServiceErr "Failed to clean incomplete runtime slot (versions/$SrcVersion)"
-        return $false
-    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
     return $true
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so "marker present" == "healthy, complete build". A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
-        $VenvPython
-    } else {
-        Get-BootstrapPython
+    param([string]$PayloadHash = '')
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
-    if (-not $py) {
-        Write-ServiceErr 'Cannot mark runtime complete: no bootstrap Python is available'
-        return $false
-    }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
-    if (-not $ph) {
-        Write-ServiceErr "Runtime input fingerprint unavailable -- not publishing versions/$SrcVersion"
-        return $false
-    }
-    $mcArgs += @('--payload-hash', $ph)
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
-    if ($LASTEXITCODE -ne 0) {
-        Write-ServiceErr "Failed to mark runtime slot complete (versions/$SrcVersion)"
-        return $false
-    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -667,8 +644,8 @@ function Install-PackageInto {
        path-dependencies with `uv pip install -e` instead, so the venv's
        site-packages resolve straight back to this worktree's own checkout --
        an ordinary source edit takes effect without re-running the installer.
-       Used only for the mutable `versions/dev` slot; never for a real
-       (numbered) version. #>
+       Used only for distinct claimed development generations; never for a
+       numbered release. #>
     param([string]$Python, [switch]$Editable)
     if (-not (Test-Path (Join-Path $SshMgrDir 'pyproject.toml'))) {
         Write-ServiceErr "ssh-manager source not found at $SshMgrDir"
@@ -733,6 +710,7 @@ function Install-PackageInto {
 
 function Deploy-Package {
     <# Install agent-codespaces into its own venv and stamp build info. #>
+    if ($script:RuntimeConstructionReuse) { return $true }
     if (-not (Install-PackageInto -Python $VenvPython)) { return $false }
     Stamp-BuildInfo -Python $VenvPython
     Write-ServiceOk "Package installed into venv"
@@ -752,19 +730,28 @@ function Deploy-VersionedRuntimeHelper {
        versions/), so the DEPLOYED agent-codespaces CLI's `dev-release`/
        `dev-status` verbs can shell out to it even when the operator is not
        standing in a source checkout (docs/patterns/mutable-dev-slot.md
-       Runtime accessibility, option 1). Best-effort -- never fatal. #>
+       Runtime accessibility). Publication must not leave a stale release helper. #>
     if (-not $VersionedRuntime) { return }
-    try {
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'versioned_runtime.py') `
-            -Destination (Join-Path $InstallDir 'versioned_runtime.py') -Force
-    } catch {
-        Write-ServiceWarn "Could not stage versioned_runtime.py into ${InstallDir}: $_"
+    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime.py')) {
+        $destination = Join-Path $InstallDir $name
+        $temporary = "$destination.tmp-$([guid]::NewGuid().ToString('N'))"
+        try {
+            Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) `
+                -Destination $temporary -ErrorAction Stop
+            if (Test-Path -LiteralPath $destination) {
+                [IO.File]::Replace($temporary, $destination, [NullString]::Value)
+            } else {
+                [IO.File]::Move($temporary, $destination)
+            }
+        } finally {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction Stop }
+        }
     }
 }
 
 function Resolve-DevSlotOwner {
-    <# The absolute worktree checkout path claiming/releasing the mutable dev
-       slot -- the same value + resolution `agent-codespaces`' own
+    <# The absolute worktree checkout path claiming/releasing development
+       generations -- the same value + resolution `agent-codespaces`' own
        cross-machine CodeSpace claims already use as their `owner`
        (docs/patterns/mutable-dev-slot.md). Falls back to this repo checkout's
        own root when `agent-worktrees` is unavailable (e.g. a bare clone). #>
@@ -779,12 +766,7 @@ function Resolve-DevSlotOwner {
 }
 
 function Invoke-Dev {
-    <# Claim + (re)build the mutable `versions/dev` slot IN PLACE (an editable
-       install against THIS checkout), then activate it. Safe to call
-       repeatedly across an iteration loop: the dev venv is reused, only the
-       editable package links are refreshed -- not a fresh venv every call.
-       Release with the deployed CLI's own `dev-release` verb (not this
-       installer -- see docs/patterns/mutable-dev-slot.md). #>
+    <# Editable source stays live; each dependency refresh uses a new generation. #>
     Write-ServiceHeader "$ServiceName (dev slot)"
     if (-not $VersionedRuntime) {
         Write-ServiceErr 'dev mode requires the versioned-runtime layout (no version in pyproject.toml?)'
@@ -793,25 +775,12 @@ function Invoke-Dev {
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    Deploy-VersionedRuntimeHelper
-
     $owner = Resolve-DevSlotOwner
-    $devDir = Join-Path (Join-Path $InstallDir 'versions') 'dev'
+    $devVersion = 'dev-' + [guid]::NewGuid().ToString('N')
+    $devDir = Join-Path (Join-Path $InstallDir 'versions') $devVersion
     $devPython = Join-Path $devDir 'Scripts\python.exe'
 
     Assert-Uv
-    if (-not (Test-PythonVenv -Dir $devDir -Python $devPython)) {
-        $result = Invoke-UvVenvResilient -VenvDir $devDir `
-            -Arguments @('--python', '3.11', '--allow-existing') -UvCommand $UvCommand
-        if ($result.ExitCode -ne 0 -or -not (Test-PythonVenv -Dir $devDir -Python $devPython)) {
-            Write-ServiceErr "dev venv creation failed at ${devDir}: $($result.Output)"
-            return $false
-        }
-        Write-ServiceOk "dev venv created at $devDir"
-    } else {
-        Write-ServiceOk "Reusing existing dev venv at $devDir (mutable in place)"
-    }
-
     $prevVersionResult = Invoke-VersionedRuntime -Arguments @('--root', $InstallDir, '--link-name', '.venv', 'current')
     $prevVersion = $prevVersionResult.Output
 
@@ -830,6 +799,25 @@ function Invoke-Dev {
     $restoreNote = if ($prevVersion) { " (restores to '$prevVersion' on release)" } else { '' }
     Write-ServiceOk "dev slot claimed by ${owner}${restoreNote}"
 
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Development construction requires a bootstrap interpreter' }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical development construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $payloadHash = Get-PayloadHash
+    [void](Start-RuntimeConstruction -Python $py -Helper $vr -Root $InstallDir `
+        -Version $devVersion -PayloadHash $payloadHash -LinkName '.venv' -DevOwner $owner)
+    try {
+    $result = Invoke-UvVenvResilient -VenvDir $devDir `
+        -Arguments @('--python', '3.11', '--allow-existing') -UvCommand $UvCommand
+    if ($result.ExitCode -ne 0 -or -not (Test-PythonVenv -Dir $devDir -Python $devPython)) {
+        Write-ServiceErr "Development venv creation failed at ${devDir}: $($result.Output)"
+        return $false
+    }
+
     if (-not (Install-PackageInto -Python $devPython -Editable)) { return $false }
     # NOTE: deliberately do NOT call Stamp-BuildInfo here -- an editable
     # install's "package dir" resolves straight back to src/agent_codespaces/
@@ -843,23 +831,28 @@ function Invoke-Dev {
         return $false
     }
 
-    $mc = Invoke-VersionedRuntime -Arguments @('--root', $InstallDir, '--link-name', '.venv', 'mark-complete', 'dev')
-    if ($mc.ExitCode -ne 0) {
-        Write-ServiceErr "Failed to mark dev slot complete: $($mc.Output)"
-        return $false
+    if ((Get-PayloadHash) -ne $payloadHash) { throw 'Development payload changed during construction' }
+    Complete-RuntimeConstruction -PayloadHash $payloadHash
+    return $true
+    Deploy-VersionedRuntimeHelper
+    if (-not (Test-Path (Join-Path $InstallDir 'versioned_runtime.py'))) {
+        throw 'Development release helper was not staged'
     }
-    $act = Invoke-VersionedRuntime -Arguments @('--root', $InstallDir, '--link-name', '.venv', 'activate', 'dev', '--no-link')
+    $act = Invoke-VersionedRuntime -Arguments @('--root', $InstallDir, '--link-name', '.venv', 'activate', $devVersion, '--no-link', '--dev-owner', $owner)
     if ($act.ExitCode -ne 0) {
         Write-ServiceErr "Failed to activate dev slot: $($act.Output)"
         return $false
     }
-    Write-ServiceOk "dev slot active (current-version -> dev, editable install from $PluginDir)"
+    Write-ServiceOk "Development generation active: $devVersion (editable source: $PluginDir)"
 
     Deploy-SelfProvisioningBinstub
     Write-Host ''
     Write-ServiceOk "$ServiceName dev slot ready. Edit $PluginDir and re-run 'dev' to refresh."
     Write-ServiceOk "Release when done: agent-codespaces dev-release"
     return $true
+    } finally {
+        Stop-RuntimeConstruction
+    }
 }
 # === end mutable-dev-slot ===
 
@@ -872,6 +865,8 @@ function Deploy-Venv {
         return $false
     }
     Assert-Uv
+    [void](Invoke-VersionedSlotClean)
+    if ($script:RuntimeConstructionReuse) { return $true }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     # Prefer a SAC-trusted signed base Python via `--copies` so the venv
@@ -886,13 +881,6 @@ function Deploy-Venv {
             }
         }
     }
-    if (-not (Invoke-VersionedSlotClean)) {
-        $ErrorActionPreference = $prevEAP
-        return $false
-    }
-    if ($signedBase -and (Test-Path $VenvPython)) {
-        try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
-    }
     if ($signedBase -and -not (Test-Path $VenvPython)) {
         & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
         $signedRc = $LASTEXITCODE
@@ -901,16 +889,9 @@ function Deploy-Venv {
                 Write-ServiceWarn "Signed Python venv creation exited $signedRc after producing a usable venv"
             }
         } else {
-            Write-ServiceWarn "Signed Python venv creation failed validation (exit $signedRc) -- falling back to uv"
-            try {
-                if (Test-Path -LiteralPath $VenvDir) {
-                    Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction Stop
-                }
-            } catch {
-                $ErrorActionPreference = $prevEAP
-                Write-ServiceErr "Could not discard failed signed-Python venv: $($_.Exception.Message)"
-                return $false
-            }
+            $ErrorActionPreference = $prevEAP
+            Write-ServiceErr "Signed Python venv creation failed validation (exit $signedRc); construction aborted"
+            return $false
         }
     }
     if (-not (Test-Path $VenvPython)) {
@@ -1630,9 +1611,15 @@ try {
     Write-ServiceErr $_.Exception.Message
     exit 1
 } finally {
+    try {
+        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+            Stop-RuntimeConstruction
+        }
+    } finally {
     if ($lifecycleHeld) {
         try { $lifecycleMutex.ReleaseMutex() } catch { }
     }
     if ($lifecycleMutex) { $lifecycleMutex.Dispose() }
+    }
 }
 exit 0

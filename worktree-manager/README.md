@@ -354,7 +354,7 @@ uv run python -m worktree_manager picker mock <project> --local
 uv run python -m worktree_manager picker screenshot <project> --format text
 uv run python -m worktree_manager picker screenshot <project> --format svg --out picker.svg
 pwsh -File scripts/preview-picker.ps1 -Project <project> -Format svg -Out picker.svg
-cd scripts/picker-snapshot && npm install
+cd scripts/picker-snapshot && python install.py
 uv run python render.py picker.png
 ```
 
@@ -389,7 +389,7 @@ at the end:
 uv run python -m worktree_manager picker screenshot --demo --format text
 
 # Shareable PNG (once, to install the Node dependency + cache the font):
-cd scripts/picker-snapshot && npm install
+cd scripts/picker-snapshot && python install.py
 uv run python -m worktree_manager picker screenshot --demo --format svg --out /tmp/pivot.svg
 node svg2png.mjs /tmp/pivot.svg /tmp/pivot.png 3
 ```

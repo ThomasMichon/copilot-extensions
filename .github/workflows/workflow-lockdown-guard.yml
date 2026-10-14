@@ -384,8 +384,7 @@ jobs:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - name: Install locked metadata parser without lifecycle scripts
-        working-directory: .github/actions
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions --health-module commonmark --health-module parse5
       - name: Require public-safe source metadata
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
@@ -434,8 +433,7 @@ jobs:
           ref: ${{ inputs.promotion_sha || github.workflow_sha }}
           persist-credentials: false
       - name: Install locked metadata parser without lifecycle scripts
-        working-directory: .github/actions
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions --health-module commonmark --health-module parse5
       - name: Refresh current dev source metadata checks
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:

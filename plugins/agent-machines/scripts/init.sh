@@ -1372,44 +1372,28 @@ print(f"{kind}|{st.st_dev}|{st.st_ino}|{st.st_size}|{int(st.st_mtime)}|{int(st.s
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 && "$CELL_MODE" == 0 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || {
-        _fail "Cannot locate Python to write the runtime completion marker"
-        return 1
-    }
-    [[ -n "$py" ]] || {
-        _fail "Cannot locate Python to write the runtime completion marker"
-        return 1
-    }
-    local ph
-    if ! ph="$(_payload_hash)"; then
-        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION" --payload-hash "$ph")
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
+    _runtime_construction_complete "$actual_hash"
 }
 
 echo ''
@@ -1708,6 +1692,8 @@ if [[ "$CELL_MODE" == 0 ]]; then
 fi
 
 # -- 2. Venv -----------------------------------------------------------
+_versioned_slot_clean || exit 1
+if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     if [[ "$HAVE_UV" -eq 1 ]]; then
         _step 'Creating venv via uv...'
@@ -1756,11 +1742,11 @@ for _lib_entry in \
     if [[ -f "$_lib_path/pyproject.toml" ]]; then
         if [[ "$HAVE_UV" -eq 1 ]]; then
             _lib_install_rc=0
-            uv pip install --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
+            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
                 "$_lib_path" --quiet || _lib_install_rc=$?
         else
             _lib_install_rc=0
-            "$VENV_PYTHON" -m pip install --quiet "$_lib_path" || _lib_install_rc=$?
+            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$_lib_path" || _lib_install_rc=$?
         fi
         if [[ "$_lib_install_rc" -ne 0 ]]; then
             _fail "$_lib_dir_name library install failed"
@@ -1773,13 +1759,13 @@ done
 # -- 3. Install the package into the venv ------------------------------
 if [[ "$HAVE_UV" -eq 1 ]]; then
     if [[ "$CELL_MODE" == 1 ]]; then
-        if uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet; then
+        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
         fi
     else
-        if uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
@@ -1791,13 +1777,13 @@ if [[ "$HAVE_UV" -eq 1 ]]; then
     fi
 else
     if [[ "$CELL_MODE" == 1 ]]; then
-        if "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR"; then
+        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR"; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
         fi
     else
-        if "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null; then
+        if "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR" 2>/dev/null; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
@@ -1809,6 +1795,8 @@ else
     fi
 fi
 _ok 'Package installed: agent-machines'
+
+fi
 
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then

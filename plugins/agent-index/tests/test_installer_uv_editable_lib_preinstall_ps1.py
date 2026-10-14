@@ -1,21 +1,16 @@
-"""Guard for install.ps1's two `agent-procutil` non-uv (bare-pip) preinstall
-blocks (vendor-pointer-generalization effort): the service-runtime venv and
-the durable-engine-runtime venv. Both mirror the existing `zdd` preinstall
-immediately above them. Exercises each block via real pwsh execution
-(stubbing `Resolve-VendoredLib`'s own local-copy/canonical-fallback
-resolution and the actual install call) for both the uv path and the
-bare-pip fallback path -- a regression here would still pass every other
-installer guard while silently reintroducing the bare-pip dependency
-failure the review on PR #4465 caught."""
+"""Source-attributable procutil preinstalls retain canonical dependency policy."""
 
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from test_install_engine_adoption import environment, fake_uv
+from test_installer_publication_provisioning import stage_index_policy_sources
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -32,7 +27,7 @@ _BLOCKS = {
         "\n    Remove-ConsoleTrampolines -VenvDir $VenvDir",
     ),
     "engine": (
-        "    # agent-procutil is likewise a `uv`-editable canonical reference in a",
+        "    $engRc = 0\n    $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'",
         "\n\n    # agent-index-engine",
     ),
 }
@@ -66,25 +61,37 @@ def _run(
     # display formatting -- stub output must go to a marker FILE, never
     # stdout, so that pipeline can never swallow the proof of what ran.
     marker = isolated_home.parent / "marker.txt"
-    # No `function uv` stub at all when `have_uv` is false: a same-named
-    # function would still resolve via `Get-Command uv`, defeating the
-    # PATH-removal simulation below (function resolution outranks native
-    # executables in PowerShell's command lookup order).
+    uv = fake_uv(
+        isolated_home.parent,
+        f"with pathlib.Path({str(marker)!r}).open('a', encoding='utf-8') as stream:\n"
+        " stream.write('UV_INSTALL_ARGS:' + ' '.join(sys.argv[1:]) + '\\n')\n",
+    )
+    policy = plugin_dir / "scripts/installer_dependency_policy.py"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(PLUGIN / "scripts/installer_dependency_policy.py", policy)
     uv_stub = f"""
-function uv {{
-    Add-Content -Path '{marker}' -Value ("UV_INSTALL_ARGS:" + ($args -join ' '))
-    $global:LASTEXITCODE = 0
+function Invoke-IndexUvPipInstall {{
+    & '{sys._base_executable}' -I '{policy}' --uv '{uv}' -- @args
 }}
-function Invoke-IndexUvPipInstall {{ uv pip install @args }}
 """ if have_uv else ""
     script = f"""
 function Write-Fail {{ param([string]$Message) }}
 function Write-Host {{ param([Parameter(ValueFromPipeline=$true)]$Object, [string]$ForegroundColor) }}
 {uv_stub}
 function Invoke-StubVenvPython {{
-    Add-Content -Path '{marker}' -Value ("PIP_INSTALL_ARGS:" + ($args -join ' '))
-    $global:LASTEXITCODE = 0
+    if ($args[0] -ne '-I' -or $args[1] -ne '{policy}' -or $args[2] -ne '--uv' -or $args[3] -ne 'uv') {{
+        throw 'canonical policy adapter was bypassed'
+    }}
+    $policyArgs = @($args)
+    # PowerShell consumes -- at a function boundary; restore the native argv.
+    if ($policyArgs[4] -ne '--') {{
+        $policyArgs = @($policyArgs[0..3]) + @('--') + @($policyArgs[4..($policyArgs.Count - 1)])
+    }}
+    Add-Content -Path '{marker}' -Value ("POLICY_INSTALL_ARGS:" + ($policyArgs -join ' '))
+    $policyArgs[3] = '{uv}'
+    & '{sys._base_executable}' @policyArgs
 }}
+$PSScriptRoot = '{plugin_dir / "scripts"}'
 $TheVenvPython = 'Invoke-StubVenvPython'
 $script:UvCommand = {"'uv'" if have_uv else "$null"}
 $PluginDir = '{plugin_dir}'
@@ -107,18 +114,15 @@ $ErrorActionPreference = 'Continue'
         path_entries = [
             p for p in path_entries if not (Path(p) / uv_exe).is_file()
         ]
-    environment = {
-        **os.environ,
-        "HOME": str(isolated_home),
-        "USERPROFILE": str(isolated_home),
-        "PATH": os.pathsep.join(path_entries),
-    }
+    env = environment(isolated_home.parent)
+    env.update(HOME=str(isolated_home), USERPROFILE=str(isolated_home),
+               PATH=os.pathsep.join(path_entries))
     proc = subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=environment,
+        env=env,
         timeout=30,
     )
     return proc, marker
@@ -128,19 +132,14 @@ def _install_path(marker: Path) -> str | None:
     if not marker.exists():
         return None
     for line in marker.read_text(encoding="utf-8").splitlines():
-        if line.startswith("PIP_INSTALL_ARGS:"):
-            args = line[len("PIP_INSTALL_ARGS:"):].split()
-            return args[-1] if args else None
         if not line.startswith("UV_INSTALL_ARGS:"):
             continue
         args = line[len("UV_INSTALL_ARGS:"):].split()
-        for arg in args:
-            if arg not in {
-                "pip", "install", "--python", "--reinstall-package",
-                "--refresh-package", "--quiet", "agent-procutil",
-                "Invoke-StubVenvPython",
-            }:
-                return arg
+        assert args[:2] == ["pip", "install"]
+        assert "--show-settings" not in args
+        assert "--exclude-newer" in args and "--reinstall" in args
+        assert "--no-deps" not in args and "--no-build-isolation" not in args
+        return args[args.index("--python") + 2]
     return None
 
 
@@ -153,10 +152,8 @@ def test_procutil_preinstall_resolves_plugin_local_copy(
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
 
-    plugin_dir = tmp_path / "plugins" / "agent-index"
+    plugin_dir = stage_index_policy_sources(tmp_path, materialized=True)
     lib_dir = plugin_dir / "libs" / "agent-procutil"
-    lib_dir.mkdir(parents=True)
-    (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
 
     proc, marker = _run(pwsh, block_name, plugin_dir, have_uv, isolated_home=tmp_path / "home")
     assert proc.returncode == 0, proc.stderr
@@ -175,11 +172,8 @@ def test_procutil_preinstall_falls_back_to_repo_root_canonical_when_absent(
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
 
-    plugin_dir = tmp_path / "plugins" / "agent-index"
-    plugin_dir.mkdir(parents=True)
+    plugin_dir = stage_index_policy_sources(tmp_path, materialized=False)
     canonical = tmp_path / "libs" / "agent-procutil"
-    canonical.mkdir(parents=True)
-    (canonical / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
 
     proc, marker = _run(pwsh, block_name, plugin_dir, have_uv, isolated_home=tmp_path / "home")
     assert proc.returncode == 0, proc.stderr
@@ -259,7 +253,7 @@ $ErrorActionPreference = 'Continue'
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env={**os.environ, "HOME": str(tmp_path / "home"), "USERPROFILE": str(tmp_path / "home")},
+        env=environment(tmp_path),
         timeout=30,
     )
     assert proc.returncode == 0, proc.stderr

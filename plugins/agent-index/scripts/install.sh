@@ -852,44 +852,28 @@ print(f"{kind}|{st.st_dev}|{st.st_ino}|{st.st_size}|{int(st.st_mtime)}|{int(st.s
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || {
-        _fail "Cannot locate Python to write the runtime completion marker"
-        return 1
-    }
-    [[ -n "$py" ]] || {
-        _fail "Cannot locate Python to write the runtime completion marker"
-        return 1
-    }
-    local ph
-    if ! ph="$(_payload_hash)"; then
-        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION" --payload-hash "$ph")
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
+    _runtime_construction_complete "$actual_hash"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -1145,7 +1129,7 @@ _test_index_venv() {
 _new_index_venv() {
     local dir="$1" python="$2" base_python="$3" have_uv="$4" output rc=0
     if _test_index_venv "$dir" "$python"; then return 0; fi
-    if [[ -e "$dir" ]]; then
+    if [[ "$dir" != "$VENV_DIR" && -e "$dir" ]]; then
         _warn "Existing venv failed interpreter/prefix health validation -- rebuilding: $dir"
         rm -rf -- "$dir" || return 1
     fi
@@ -1154,7 +1138,7 @@ _new_index_venv() {
         if [[ "$rc" == 0 ]] && _test_index_venv "$dir" "$python"; then return 0; fi
         _warn "uv venv failed health validation (exit $rc): $output"
     fi
-    if ! output="$("$base_python" -m venv --clear "$dir" 2>&1)"; then
+    if ! output="$("$base_python" -m venv "$dir" 2>&1)"; then
         _warn "Python venv fallback failed: $output"
         return 1
     fi
@@ -1192,7 +1176,7 @@ _install_server_venv() {
         if [[ "$have_uv" -eq 1 ]]; then
             _uv_pip_install --python "$server_venv_python" "$lib_dir" --quiet >/dev/null 2>&1
         else
-            "$server_venv_python" -m pip install "$lib_dir" >/dev/null 2>&1
+            "$server_venv_python" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$server_venv_python" "$lib_dir" >/dev/null 2>&1
         fi || {
             _warn "Server venv $lib_name install failed"
             return 1
@@ -1203,7 +1187,7 @@ _install_server_venv() {
     if [[ "$have_uv" -eq 1 ]]; then
         srv_out="$(_uv_pip_install --python "$server_venv_python" "${PLUGIN_DIR}[store,server]" 2>&1)" || srv_rc=$?
     else
-        srv_out="$("$server_venv_python" -m pip install "${PLUGIN_DIR}[store,server]" 2>&1)" || srv_rc=$?
+        srv_out="$("$server_venv_python" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$server_venv_python" "${PLUGIN_DIR}[store,server]" 2>&1)" || srv_rc=$?
     fi
     if [[ "$srv_rc" -ne 0 ]]; then
         _warn 'Server venv package install failed'
@@ -1372,6 +1356,8 @@ _ensure_runtime() {
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _ok "Directories: $INSTALL_DIR"
 
+    _versioned_slot_clean || return 1
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
     _prepare_index_runtime() {
     _index_publication_fresh || return 3
     # Detach an invalid active marker before any rebuild. If provisioning fails
@@ -1397,33 +1383,6 @@ _ensure_runtime() {
         fi
     fi
 
-    # A failed prior build may have left an interpreter-shaped target slot or,
-    # on older installers, even an active marker. Reuse requires both a valid
-    # completion marker and an importable agent_index package.
-    if [[ "$VERSIONED_RUNTIME" == 1 && -d "$VENV_DIR" ]]; then
-        local slot_ready=0 vr="$SCRIPT_DIR/versioned_runtime.py"
-        if _test_index_venv "$VENV_DIR" "$VENV_PYTHON" \
-            && "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1 \
-            && _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
-            slot_ready=1
-        fi
-        if [[ "$slot_ready" == 0 || "${AGENT_INDEX_REBUILD_CURRENT:-0}" == 1 ]]; then
-            local target_was_active=0
-            local marker_name marker_version
-            for marker_name in current-version last-known-good; do
-                marker_version=""
-                [[ -f "$INSTALL_DIR/$marker_name" ]] && marker_version="$(tr -d ' \t\r\n' < "$INSTALL_DIR/$marker_name")"
-                if [[ "$marker_version" == "$SRC_VERSION" ]]; then
-                    [[ "$marker_name" == current-version ]] && target_was_active=1
-                    rm -f "$INSTALL_DIR/$marker_name"
-                fi
-            done
-            [[ "$target_was_active" == 1 ]] && { _stop >/dev/null 2>&1 || true; }
-            rm -rf "$VENV_DIR"
-            _warn "Removed runtime slot versions/$SRC_VERSION before a clean role-aware rebuild"
-        fi
-    fi
-
     }
     local preparation_rc=0
     _with_index_publication_lock _prepare_index_runtime || preparation_rc=$?
@@ -1442,7 +1401,7 @@ _ensure_runtime() {
         if [[ "$have_uv" -eq 1 ]]; then
             _uv_pip_install --python "$VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
         else
-            "$VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null
+            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$zdd_dir" >/dev/null
         fi || {
             _fail "zdd install failed"
             exit 1
@@ -1463,7 +1422,7 @@ _ensure_runtime() {
         if [[ "$have_uv" -eq 1 ]]; then
             _uv_pip_install --python "$VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
         else
-            "$VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null
+            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$procutil_dir" >/dev/null
         fi || {
             _fail "agent-procutil install failed"
             exit 1
@@ -1478,7 +1437,7 @@ _ensure_runtime() {
     if [[ "$have_uv" -eq 1 ]]; then
         _uv_pip_install --python "$VENV_PYTHON" "$dropin_dir" --quiet
     else
-        "$VENV_PYTHON" -m pip install "$dropin_dir"
+        "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$dropin_dir"
     fi || { _fail 'dropin-registry install failed'; exit 1; }
 
     _pip_install() {
@@ -1488,7 +1447,7 @@ _ensure_runtime() {
         if [[ "$have_uv" -eq 1 ]]; then
             _uv_pip_install --python "$VENV_PYTHON" "$pkg"
         else
-            "$VENV_PYTHON" -m pip install "$pkg"
+            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$pkg"
         fi
     }
     if ! pkg_out="$(_pip_install 2>&1)"; then
@@ -1504,6 +1463,8 @@ _ensure_runtime() {
     if ! _install_server_venv "$install_role" "$py"; then
         _fail 'Required host runtime failed provisioning -- not activating'
         exit 1
+    fi
+
     fi
 
     local prev_version=""
@@ -1615,25 +1576,35 @@ _install_engine() {
         _skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
         return 1
     fi
-    _install_engine_build() {
-    # Provision the DURABLE engine venv (agent-index-engine, the torch stack) at
-    # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
-    # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
-    # light, torch-free service fully functional. With arg "upgrade", an existing
-    # venv is upgraded in place (the explicit engine-runtime update path) instead
-    # of skipped.
+    local py vr="$SCRIPT_DIR/versioned_runtime.py" selected engine_version="$SRC_VERSION"
+    py="$(_bootstrap_python)" || return 1
+    if [[ -e "$ENGINE_HOME/current-version" || -e "$ENGINE_HOME/last-known-good" ]] \
+        && selected="$("$py" -I "$vr" --root "$ENGINE_HOME" resolve-python)" \
+        && [[ -n "$selected" && "${1:-}" != upgrade ]]; then
+        ENGINE_VENV_PYTHON="$selected"
+        ENGINE_VENV="$(dirname "$(dirname "$selected")")"
+        _skip "Completed engine runtime preserved: $ENGINE_VENV"
+        return 0
+    fi
+    if [[ "${1:-}" == upgrade ]]; then
+        engine_version+=".repair-$("$py" -I -c 'import uuid; print(uuid.uuid4().hex)')" || return 1
+    fi
+    ENGINE_VENV="$ENGINE_HOME/versions/$engine_version"
+    ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
+    _install_engine_build() (
+    local helpers payload_hash
+    helpers="$("$py" -I "$vr" --root "$ENGINE_HOME" construction-shell --shell sh)" || return 1
+    eval "$helpers"
+    payload_hash="$(_payload_hash)" || return 1
+    _runtime_construction_begin "$py" "$vr" "$ENGINE_HOME" "$engine_version" \
+        "$payload_hash" '.venv' || return 1
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
     local upgrade=0
     [[ "${1:-}" == "upgrade" ]] && upgrade=1
     if [[ "${AGENT_INDEX_NO_ENGINE_DEPS:-}" == "1" ]]; then
         _skip "Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)"
         return 1
     fi
-    if [[ "$upgrade" -eq 0 ]] && _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON"; then
-        _skip "Engine runtime already provisioned (durable venv preserved): $ENGINE_VENV"
-        return 0
-    fi
-    local py
-    py="$(_find_python)" || { _warn 'Python not found -- cannot provision engine runtime'; return 1; }
     if [[ "$upgrade" -eq 1 ]]; then
         _step 'Updating durable engine runtime (torch stack) -- may take a while'
     else
@@ -1650,25 +1621,19 @@ _install_engine() {
         if [[ "$have_uv" -eq 1 ]]; then
             _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1 || { _warn 'Engine zdd install failed'; return 1; }
         else
-            "$ENGINE_VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null 2>&1 || { _warn 'Engine zdd install failed'; return 1; }
+            "$ENGINE_VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$ENGINE_VENV_PYTHON" "$zdd_dir" >/dev/null 2>&1 || { _warn 'Engine zdd install failed'; return 1; }
         fi
     fi
 
-    # agent-procutil is likewise a `uv`-editable canonical reference in a
-    # dev checkout (no local copy, not on PyPI) -- pre-install it the same
-    # way as zdd above. Unlike zdd's own silent `|| true`, a failed refresh
-    # here must fail the whole engine install: `agent-index` declares only
-    # an UNVERSIONED `agent-procutil` requirement, so the main-package
-    # install below could still "succeed" against a stale copy already
-    # present in a preserved engine venv, silently shipping old shared
-    # code (PR #4465 review).
+    # Local libraries remain source-attributable; external dependencies resolve
+    # through the same configured-feed seasoning policy.
     local rc=0
     local procutil_dir
     if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
         if [[ "$have_uv" -eq 1 ]]; then
             _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || rc=$?
         else
-            "$ENGINE_VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null 2>&1 || rc=$?
+            "$ENGINE_VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$ENGINE_VENV_PYTHON" "$procutil_dir" >/dev/null 2>&1 || rc=$?
         fi
     fi
 
@@ -1679,17 +1644,7 @@ _install_engine() {
     # pre-install above, since neither is on PyPI and a plain `pip install
     # agent-index-engine` cannot resolve "agent-index" on its own.
     #
-    # Torch install is TWO STEPS so a GPU host works even behind a managed/CFS
-    # package feed:
-    #   1. Install agent-index-engine from the DEFAULT feed (governed mirror or
-    #      public PyPI) -- CPU torch wheel + ALL of torch's pure-python deps
-    #      (sympy, networkx, ...) + the rest of the engine stack.
-    #   2. If AGENT_INDEX_TORCH_INDEX is set (a CUDA wheel index), SWAP the torch
-    #      wheel ONLY from that index with --no-deps. Essential on a CFS box: the
-    #      CUDA index links torch's pure-python deps to files.pythonhosted.org
-    #      (often network-blocked), so we take deps from the reachable default feed
-    #      (step 1) and only the reachable CUDA torch wheel here; --no-deps skips
-    #      re-resolving the CUDA build's exact dep pins through the blocked host.
+    # A selected CUDA feed must also resolve and season its transitive graph.
     local torch_idx="${AGENT_INDEX_TORCH_INDEX:-}"
     if [[ "$rc" -ne 0 ]]; then
         :
@@ -1701,19 +1656,19 @@ _install_engine() {
             _uv_pip_install "${uv_args[@]}" || rc=$?
         fi
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
-            _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
-            _uv_pip_install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
+            _step "Resolving CUDA torch and dependencies from the configured CUDA wheel index"
+            _uv_pip_install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx"  --reinstall-package torch torch || rc=$?
         fi
     else
-        "$ENGINE_VENV_PYTHON" -m pip install "$PLUGIN_DIR" || rc=$?
+        "$ENGINE_VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
         if [[ "$rc" -eq 0 ]]; then
-            local pip_args=(-m pip install "$PLUGIN_DIR/server")
+            local pip_args=(-I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
             [[ "$upgrade" -eq 1 ]] && pip_args+=(--upgrade)
             "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
         fi
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
-            _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
-            "$ENGINE_VENV_PYTHON" -m pip install --index-url "$torch_idx" --no-deps --force-reinstall torch || rc=$?
+            _step "Resolving CUDA torch and dependencies from the configured CUDA wheel index"
+            "$ENGINE_VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --reinstall-package torch torch || rc=$?
         fi
     fi
     if [[ "$rc" -ne 0 ]]; then
@@ -1721,25 +1676,30 @@ _install_engine() {
         return 1
     fi
     if ! _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" \
-        || ! "$ENGINE_VENV_PYTHON" -c 'import torch' 2>/dev/null; then
+        || ! "$ENGINE_VENV_PYTHON" -I -c 'import torch, agent_index, agent_index_engine.app'; then
         _warn 'Engine venv failed final interpreter/prefix or torch import validation'
         return 1
     fi
-    if [[ "$upgrade" -eq 1 ]]; then
+    [[ "$(_payload_hash)" == "$payload_hash" ]] || { _fail 'Engine payload changed during construction'; return 1; }
+    _runtime_construction_complete "$payload_hash" || return 1
+    fi
+    local resolver_tmp name
+    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime.py; do
+        resolver_tmp="$(mktemp "$ENGINE_HOME/$name.tmp.XXXXXX")" || return 1
+        if ! cp "$SCRIPT_DIR/$name" "$resolver_tmp" || ! mv -f "$resolver_tmp" "$ENGINE_HOME/$name"; then
+            rm -f -- "$resolver_tmp"
+            return 1
+        fi
+    done
+    "$py" -I "$vr" --root "$ENGINE_HOME" --link-name '.venv' activate "$engine_version" --no-link || return 1
+    _runtime_construction_finish || return 1
+    if [[ "${1:-}" == upgrade ]]; then
         _ok "Engine runtime updated (durable venv): $ENGINE_VENV"
     else
         _ok "Engine runtime provisioned (durable venv): $ENGINE_VENV"
     fi
     return 0
-    }
-    _engine_cached() {
-        if [[ "${1:-}" != upgrade ]] && _test_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON"; then return 0; fi
-        return 3
-    }
-    local cached_rc=0
-    _with_index_build_lock "$ENGINE_VENV" _engine_cached "$@" || cached_rc=$?
-    [[ "$cached_rc" != 0 ]] || return 0
-    [[ "$cached_rc" == 3 ]] || return "$cached_rc"
+    )
     local have_uv=0
     if _ensure_uv; then have_uv=1; else _warn 'uv acquisition failed -- using the engine pip fallback'; fi
     _with_index_build_lock "$ENGINE_VENV" _install_engine_build "$@"
@@ -1788,7 +1748,12 @@ if [[ -f "$ENGINE_ENV_FILE" ]]; then
     set +a
 fi
 cd "$ENGINE_HOME"
-exec "$ENGINE_VENV_PYTHON" -I -X utf8 -m agent_index engine run
+python="$ENGINE_VENV_PYTHON"
+if [[ -e "$ENGINE_HOME/current-version" || -e "$ENGINE_HOME/last-known-good" ]]; then
+    python="\$("\$python" -I "$ENGINE_HOME/versioned_runtime.py" --root "$ENGINE_HOME" resolve-python)"
+    [[ -n "\$python" ]] || { printf '%s\n' 'No completed engine runtime is selectable' >&2; exit 1; }
+fi
+exec "\$python" -I -X utf8 -m agent_index engine run
 EOF
     chmod +x "$ENGINE_LAUNCHER"
 }
@@ -2141,6 +2106,14 @@ _service_cutover() {
     return 1
 }
 
+if [[ "$ACTION" != uninstall && "$ACTION" != stamp && "$ACTION" != engine && "$ACTION" != engine-update ]] \
+    && [[ -e "$ENGINE_HOME/current-version" || -e "$ENGINE_HOME/last-known-good" ]]; then
+    bootstrap="$(_bootstrap_python)" || exit 1
+    ENGINE_VENV_PYTHON="$("$bootstrap" -I "$SCRIPT_DIR/versioned_runtime.py" --root "$ENGINE_HOME" resolve-python)" || exit 1
+    [[ -n "$ENGINE_VENV_PYTHON" ]] || { _fail 'No completed engine runtime is selectable'; exit 1; }
+    ENGINE_VENV="$(dirname "$(dirname "$ENGINE_VENV_PYTHON")")"
+fi
+
 case "$ACTION" in
     install)
         _ensure_runtime
@@ -2169,9 +2142,9 @@ case "$ACTION" in
         _service_cutover || _ensure_running
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
-    engine) _install_engine || true; _register_engine_daemon ;;     # explicit host-side provisioning (role-independent)
+    engine) _install_engine || exit $?; _register_engine_daemon ;;
     engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)
-        if _install_engine upgrade; then _restart_engine_daemon; fi ;;
+        _install_engine upgrade || exit $?; _restart_engine_daemon ;;
     status) _status ;;
     start) _start ;;
     stop) _stop ;;

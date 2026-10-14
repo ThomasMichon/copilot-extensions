@@ -1,0 +1,587 @@
+"""Fail-closed seasoning for UV's actual configured resolver.
+
+UV resolves its own configuration, including user and index settings. Its
+development settings projection is intentionally treated as a versioned input:
+an unknown representation refuses installation, never weakens the policy.
+Captured settings may contain credentials and must never be printed.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+import re
+import subprocess
+import sys
+import sysconfig
+import types
+import zipimport
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
+from urllib.request import url2pathname
+
+MIN_AGE_SECONDS = 604800
+SETTINGS_TIMEOUT_SECONDS = 30
+_HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+_BUNDLED_TOML = None
+_REMOTE_REFERENCE = re.compile(r"(?:https?|git(?:\+[^:]+)?|ssh|svn|hg|bzr)://", re.IGNORECASE)
+_INDEX_OPTIONS = {"--index", "--index-url", "--default-index", "--extra-index-url", "-i"}
+_FILE_OPTIONS = {
+    "-r", "--requirements", "--requirement", "--constraint", "--constraints", "-c",
+    "--override", "--overrides", "--build-constraint", "--build-constraints", "-b",
+    "--excludes",
+}
+_VALUE_OPTIONS = _INDEX_OPTIONS | _FILE_OPTIONS | {
+    "-e", "--editable", "--no-editable-package", "--extra", "--cert", "--group",
+    "-t", "--target", "--prefix", "--no-binary", "--only-binary", "--python-version",
+    "--python-platform", "--torch-backend", "-f", "--find-links", "--index-strategy",
+    "--keyring-provider", "-P", "--upgrade-package", "--upgrade-group", "--resolution",
+    "--prerelease", "--prerelease-package", "--fork-strategy", "--exclude-newer",
+    "--exclude-newer-package", "--no-sources-package", "--reinstall-package", "--link-mode",
+    "-C", "--config-setting", "--config-settings-package", "--no-build-isolation-package",
+    "--cache-dir", "--refresh-package", "-p", "--python", "--color", "--allow-insecure-host",
+    "--directory", "--project", "--config-file",
+}
+
+
+class DependencyPolicyError(RuntimeError):
+    """An installation could not establish the seasoning policy."""
+
+
+def _toml_parser():
+    global _BUNDLED_TOML
+    for name in ("tomllib", "tomli"):
+        try:
+            return importlib.import_module(name)
+        except ModuleNotFoundError:
+            pass
+    if _BUNDLED_TOML is not None:
+        return _BUNDLED_TOML
+    # Fresh Python 3.10 UV venvs have no pip/tomli, but their base stdlib
+    # supplies ensurepip's parser. Import only that package, never wheel-wide pip.
+    stdlib = Path(sysconfig.get_path("stdlib")).resolve()
+    bundled = _contained(stdlib / "ensurepip" / "_bundled", (stdlib,))
+    for wheel in sorted(bundled.glob("pip-*.whl"), reverse=True):
+        if wheel.is_symlink() or wheel.resolve().parent != bundled.resolve():
+            continue
+        namespace = "_installer_seasoning_bundled_tomli"
+        package = types.ModuleType(namespace)
+        package.__path__ = [str(wheel) + "/pip/_vendor/tomli"]
+        try:
+            importer = zipimport.zipimporter(package.__path__[0])
+            code = importer.get_code("__init__")
+            if code is None:
+                continue
+            sys.modules[namespace] = package
+            exec(code, package.__dict__)
+            _BUNDLED_TOML = package
+            return package
+        except (ImportError, OSError):
+            for name in list(sys.modules):
+                if name == namespace or name.startswith(namespace + "."):
+                    del sys.modules[name]
+    raise DependencyPolicyError("a proper TOML parser is unavailable in this bootstrap interpreter")
+
+
+def _toml(path: Path) -> dict:
+    parser = _toml_parser()
+    try:
+        return parser.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DependencyPolicyError("first-party source TOML could not be read or parsed") from exc
+
+
+def _identity(name: str) -> str:
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+        raise DependencyPolicyError("first-party source has no literal project identity")
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _contained(path: Path, roots: tuple[Path, ...]) -> Path:
+    lexical = Path(os.path.abspath(path))
+    resolved = lexical.resolve()
+    for root in roots:
+        if lexical.is_relative_to(root) and resolved.is_relative_to(root):
+            current = lexical
+            while current != root:
+                if current.is_symlink() or getattr(current, "is_junction", lambda: False)():
+                    break
+                current = current.parent
+            else:
+                return resolved
+    raise DependencyPolicyError("local source is outside attributable trusted source roots")
+
+
+def _argument_pairs(arguments: list[str]):
+    iterator = iter(arguments)
+    positional = False
+    for argument in iterator:
+        if positional or not argument.startswith("-"):
+            yield "", argument
+        elif argument == "--":
+            positional = True
+        else:
+            option, separator, value = argument.partition("=")
+            if (not argument.startswith("--") and len(argument) > 2
+                    and argument[:2] in _VALUE_OPTIONS):
+                option, separator, value = argument[:2], "=", argument[2:]
+            if option in _VALUE_OPTIONS:
+                if not separator:
+                    value = next(iterator, "")
+                if not value or value.startswith("--"):
+                    raise DependencyPolicyError("dependency installation option has no value")
+                yield option, value
+            else:
+                yield option, value
+
+
+def _check_requirement(
+    requirement: str, base: Path, roots: tuple[Path, ...], seen: set[Path],
+) -> None:
+    if _REMOTE_REFERENCE.search(requirement):
+        raise DependencyPolicyError("direct remote dependencies lack release-age evidence")
+    requirement = requirement.strip()
+    expected = None
+    path_input = re.sub(r"\[[^\]]*\]$", "", requirement)
+    unnamed_source = (
+        requirement.lower().startswith("file:")
+        or Path(path_input).is_absolute()
+        or (base / path_input).exists()
+    )
+    if "@" in requirement and not unnamed_source:
+        name, requirement = requirement.split("@", 1)
+        expected = _identity(name.strip().split("[", 1)[0])
+        requirement = requirement.split(";", 1)[0].strip()
+    if requirement.lower().startswith("file:"):
+        parsed = urlsplit(requirement)
+        if parsed.netloc not in ("", "localhost") or parsed.query or parsed.fragment:
+            raise DependencyPolicyError("local file URL lacks attributable source evidence")
+        candidate = base / url2pathname(unquote(parsed.path))
+    else:
+        source = re.sub(r"\[[^\]]*\]$", "", requirement)
+        candidate = base / source
+        if not (expected or candidate.exists() or source in (".", "..")
+                or re.search(r"[/\\]|^[A-Za-z]:|(?i:\.(whl|zip|tar\.gz|tgz))$", source)):
+            return
+    candidate = _contained(candidate, roots)
+    if not candidate.is_dir():
+        raise DependencyPolicyError("local artifacts cannot prove release age; only owned source directories are exempt")
+    _check_project(candidate, roots, seen, expected)
+
+
+def _check_project(
+    source: Path, roots: tuple[Path, ...], seen: set[Path], expected: str | None = None,
+) -> None:
+    try:
+        _inspect_project(source, roots, seen, expected)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise DependencyPolicyError("source dependency metadata is unsupported") from exc
+
+
+def _inspect_project(
+    source: Path, roots: tuple[Path, ...], seen: set[Path], expected: str | None = None,
+) -> None:
+    source = _contained(source, roots)
+    manifest = _contained(source / "pyproject.toml", roots)
+    data = _toml(manifest)
+    project = data.get("project", {})
+    if not isinstance(project, dict):
+        raise DependencyPolicyError("source project metadata is unsupported")
+    identity = _identity(project.get("name"))
+    if expected is not None and identity != _identity(expected):
+        raise DependencyPolicyError("local source project identity does not match its dependency")
+    if source in seen:
+        return
+    seen.add(source)
+    if set(project.get("dynamic", [])) & {"dependencies", "optional-dependencies"}:
+        raise DependencyPolicyError("dynamic local dependency sources cannot be attributed")
+    uv = data.get("tool", {}).get("uv", {})
+    if not isinstance(uv, dict):
+        raise DependencyPolicyError("source UV metadata is unsupported")
+    mappings = uv.get("sources", {})
+    if not isinstance(mappings, dict):
+        raise DependencyPolicyError("local UV source graph is unsupported")
+    for name, entries in mappings.items():
+        for entry in entries if isinstance(entries, list) else [entries]:
+            if not isinstance(entry, dict):
+                raise DependencyPolicyError("local UV source entry is unsupported")
+            if "path" in entry:
+                if (set(entry) - {"path", "editable", "extra", "group", "marker"}
+                        or not isinstance(entry["path"], str)):
+                    raise DependencyPolicyError("local UV path source is unsupported")
+                child = _contained(source / entry["path"], roots)
+                if not child.is_dir():
+                    raise DependencyPolicyError("local UV artifacts cannot prove release age")
+                _check_project(child, roots, seen, _identity(name))
+            elif set(entry) - {"index", "extra", "group", "marker"}:
+                raise DependencyPolicyError("non-registry UV sources lack release-age evidence")
+    sections = [
+        data.get("build-system", {}).get("requires", []), project.get("dependencies", []),
+        uv.get("dev-dependencies", []), uv.get("constraint-dependencies", []),
+        uv.get("override-dependencies", []), uv.get("build-constraint-dependencies", []),
+        *project.get("optional-dependencies", {}).values(),
+        *data.get("dependency-groups", {}).values(),
+    ]
+    for entry in uv.get("dependency-metadata", []):
+        if not isinstance(entry, dict):
+            raise DependencyPolicyError("source dependency metadata is unsupported")
+        sections.append(entry.get("requires-dist", []))
+    for entries in uv.get("extra-build-dependencies", {}).values():
+        if not isinstance(entries, list):
+            raise DependencyPolicyError("extra build dependencies are unsupported")
+        sections.append([
+            entry.get("requirement") if isinstance(entry, dict) else entry for entry in entries
+        ])
+    for section in sections:
+        if not isinstance(section, list):
+            raise DependencyPolicyError("source dependency declarations are unsupported")
+        for requirement in section:
+            if isinstance(requirement, dict) and set(requirement) == {"include-group"}:
+                continue
+            if not isinstance(requirement, str):
+                raise DependencyPolicyError("source dependency declaration is unsupported")
+            _check_requirement(requirement, source, roots, seen)
+
+
+def _anchor_roots() -> tuple[Path, ...]:
+    """CLI-only attribution from the helper's owner, never installation inputs."""
+    helper = Path(__file__).resolve()
+    owner_payload = None
+    repository = None
+    if helper.parent.name == "scripts":
+        payload = helper.parent.parent
+        try:
+            manifest = json.loads(_contained(payload / "plugin.json", (payload,)).read_text(encoding="utf-8"))
+            project = _toml(_contained(payload / "pyproject.toml", (payload,)))["project"]
+            if (_identity(manifest["name"]) == _identity(project["name"])
+                    and manifest["version"] == project["version"]
+                    and manifest.get("repository") == "https://github.com/ThomasMichon/copilot-extensions"):
+                candidate = payload.parent.parent
+                if (payload.parent.name == "plugins"
+                        and (candidate / ".github" / "plugin" / "marketplace.json").is_file()):
+                    repository, owner_payload = candidate, payload
+                else:
+                    return (payload,)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        if repository is None:
+            return ()
+    # Canonical source graphs are roster-owned plugins plus their explicitly
+    # named library references. Standalone projects need caller attestation.
+    if repository is None:
+        if helper.parent.name != "installer-engine" or helper.parent.parent.name != "libs":
+            return ()
+        repository = helper.parents[2]
+    roster = repository / ".github" / "plugin" / "marketplace.json"
+    if not roster.is_file():
+        return ()
+    try:
+        data = json.loads(_contained(roster, (repository,)).read_text(encoding="utf-8"))
+        if data.get("name") != "copilot-extensions":
+            return ()
+        roots = set()
+        pending = []
+        for entry in data["plugins"]:
+            source = entry.get("source", "")
+            if not isinstance(source, str) or not re.fullmatch(r"plugins/[A-Za-z0-9_-]+", source):
+                continue
+            path = _contained(repository / source, (repository,))
+            manifest_path = _contained(path / "plugin.json", (repository,))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest["name"] != entry["name"] or manifest["version"] != entry["version"]:
+                raise DependencyPolicyError("canonical plugin roster identity is inconsistent")
+            if (path / "pyproject.toml").is_file():
+                project = _toml(_contained(path / "pyproject.toml", (repository,)))
+                if _identity(project["project"]["name"]) != _identity(entry["name"]):
+                    raise DependencyPolicyError("canonical project identity is inconsistent")
+                roots.add(path)
+                pending.append(path)
+        if owner_payload is not None and owner_payload not in roots:
+            raise DependencyPolicyError("installer helper owner is not a roster-attributed project")
+        while pending:
+            source = pending.pop()
+            mappings = _toml(_contained(source / "pyproject.toml", (repository,))).get("tool", {}).get("uv", {}).get("sources", {})
+            for name, entries in mappings.items():
+                for entry in entries if isinstance(entries, list) else [entries]:
+                    if not isinstance(entry, dict) or "path" not in entry:
+                        continue
+                    child = _contained(source / entry["path"], (repository,))
+                    if not (child.is_relative_to(repository / "libs")
+                            or child.is_relative_to(source / "libs")):
+                        raise DependencyPolicyError("canonical local graph lacks library attribution")
+                    if _identity(_toml(_contained(child / "pyproject.toml", (repository,)))["project"]["name"]) != _identity(name):
+                        raise DependencyPolicyError("canonical library identity is inconsistent")
+                    if child not in roots:
+                        roots.add(child)
+                        pending.append(child)
+        return tuple(sorted(roots))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise DependencyPolicyError("canonical source ownership could not be established") from exc
+
+
+def _balanced(text: str, start: int, opening: str, closing: str) -> tuple[str, int]:
+    depth = 0
+    quoted = escaped = False
+    for offset in range(start, len(text)):
+        char = text[offset]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:offset], offset + 1
+    raise DependencyPolicyError("UV settings projection is incomplete")
+
+
+def _cutoff_value(value: str, now: datetime) -> datetime:
+    value = value.strip().removesuffix(",").strip()
+    absolute = re.fullmatch(r"Absolute\(\s*([^,\s]+),?\s*\)", value)
+    if absolute:
+        try:
+            result = datetime.fromisoformat(absolute[1].replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise DependencyPolicyError("UV returned an invalid cutoff timestamp") from exc
+        if result.tzinfo is None:
+            raise DependencyPolicyError("UV returned a cutoff without a timezone")
+        return result.astimezone(timezone.utc)
+    relative = re.fullmatch(
+        r"Relative\(\s*ExcludeNewerSpan\(\s*([^,\s]+),?\s*\),?\s*\)",
+        value,
+    )
+    if relative:
+        span = relative[1]
+        parts = re.findall(r"(\d+)(w|d|h|m|s)", span)
+        if not parts or "".join(number + unit for number, unit in parts) != span:
+            raise DependencyPolicyError("unsupported UV relative cutoff; use an RFC3339 timestamp")
+        seconds = sum(int(number) * {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
+                      for number, unit in parts)
+        try:
+            return now - timedelta(seconds=seconds)
+        except OverflowError as exc:
+            raise DependencyPolicyError("UV relative cutoff exceeds the supported range") from exc
+    raise DependencyPolicyError("unsupported UV cutoff representation")
+
+
+def cutoff_arguments(settings: str, *, now: datetime | None = None) -> list[str]:
+    """Honor a stronger global cutoff; reject package/index escape hatches."""
+    now = datetime.now(timezone.utc) if now is None else now
+    if now.tzinfo is None:
+        raise DependencyPolicyError("seasoning requires a timezone-aware clock")
+    floor = now.astimezone(timezone.utc) - timedelta(seconds=MIN_AGE_SECONDS)
+    projections = list(re.finditer(r"(?m)^PipInstallSettings \{", settings))
+    if len(projections) != 1:
+        raise DependencyPolicyError("UV installation settings projection is unsupported")
+    _, projection_end = _balanced(settings, settings.index("{", projections[0].start()), "{", "}")
+    if settings[projection_end:].strip():
+        raise DependencyPolicyError("UV settings projection has unexpected trailing content")
+    settings = settings[projections[0].start():projection_end]
+    indexes = list(re.finditer(r"(?m)^\s*index_locations: IndexLocations \{", settings))
+    if len(indexes) != 1:
+        raise DependencyPolicyError("UV registry source configuration is unsupported")
+    index_body, indexes_end = _balanced(settings, settings.index("{", indexes[0].start()), "{", "}")
+    flat = re.search(r"\bflat_index:\s*\[", index_body)
+    if flat is None:
+        raise DependencyPolicyError("UV flat-index configuration is unsupported")
+    flat_body, _ = _balanced(index_body, index_body.index("[", flat.start()), "[", "]")
+    if flat_body.strip():
+        raise DependencyPolicyError("flat-index dependencies cannot prove artifact upload age")
+    non_registry = settings[:indexes[0].start()] + settings[indexes_end:]
+    if _REMOTE_REFERENCE.search(non_registry):
+        raise DependencyPolicyError("direct remote dependencies lack release-age evidence")
+    matches = list(re.finditer(r"(?m)^\s*exclude_newer: ExcludeNewer \{", settings))
+    if len(matches) != 1:
+        raise DependencyPolicyError("UV does not expose an unambiguous seasoning configuration")
+    match = matches[0]
+    body, end = _balanced(settings, settings.index("{", match.start()), "{", "}")
+    # Index overrides allow unknown upload timestamps to acquire a synthetic
+    # date. Even a strict index cutoff therefore cannot prove artifact age.
+    remaining = settings[:match.start()] + settings[end:]
+    index_values = re.findall(r"(?m)^\s*exclude_newer:\s*([^\n]+)", remaining)
+    if any(value.strip().rstrip(",") != "None" for value in index_values):
+        raise DependencyPolicyError("index-specific exclude-newer cannot prove artifact upload age")
+    global_match = re.match(r"\s*global:\s*(None|Some\()", body)
+    if global_match is None:
+        raise DependencyPolicyError("UV global cutoff settings are unsupported")
+    position = global_match.end()
+    if global_match[1] == "Some(":
+        global_body, position = _balanced(body, position - 1, "(", ")")
+        floor = min(floor, _cutoff_value(global_body, now))
+    package_match = re.fullmatch(
+        r",?\s*package:\s*ExcludeNewerPackage\(\s*\{(.*)\},?\s*\),?\s*",
+        body[position:], re.DOTALL,
+    )
+    if package_match is None:
+        raise DependencyPolicyError("UV package cutoff settings are unsupported")
+    entries = package_match[1].strip()
+    while entries:
+        entry = re.match(r'PackageName\(\s*"([a-z0-9._-]+)",?\s*\):\s*Enabled\(', entries)
+        if entry is None:
+            raise DependencyPolicyError("disabled or unsupported package-specific seasoning")
+        value, stop = _balanced(entries, entry.end() - 1, "(", ")")
+        if _cutoff_value(value, now) > floor:
+            raise DependencyPolicyError(f"package-specific cutoff weakens seasoning: {entry[1]}")
+        entries = entries[stop:].lstrip(", \r\n\t")
+    return ["--exclude-newer", floor.isoformat().replace("+00:00", "Z"), "--reinstall"]
+
+
+def prepare_uv_install(
+    uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
+    cwd: Path | None = None, now: datetime | None = None,
+    trusted_source_roots: tuple[Path, ...] = (),
+) -> list[str]:
+    """Prepare seasoned resolution; local source trust is explicit for API callers."""
+    if any(arg.split("=", 1)[0] in ("--show-settings", "--dry-run") for arg in arguments):
+        raise DependencyPolicyError("a settings-only invocation is not a dependency installation")
+    if any(arg.split("=", 1)[0] in ("--no-deps", "--no-build-isolation", "--no-build-isolation-package")
+           for arg in arguments):
+        raise DependencyPolicyError("dependency or isolated-build resolution cannot bypass seasoning")
+    # Registry/index URLs still use UV's artifact timestamps. Direct URL/Git
+    # requirements do not; only local first-party source inputs are exempt.
+    roots = tuple(Path(root).resolve() for root in trusted_source_roots)
+    if any(not Path(root).is_absolute() for root in trusted_source_roots):
+        raise DependencyPolicyError("trusted source roots must be absolute caller-attributed paths")
+    if any(not root.is_dir() for root in roots):
+        raise DependencyPolicyError("trusted source root is not an existing directory")
+    environment = os.environ if env is None else env
+    base = Path(cwd or Path.cwd()).resolve()
+    pairs = list(_argument_pairs(arguments))
+    directory = environment.get("UV_WORKING_DIR")
+    project_directory = environment.get("UV_PROJECT")
+    for option, value in pairs:
+        if option == "--directory":
+            directory = value
+        elif option == "--project":
+            project_directory = value
+    if directory:
+        base = (base / directory).resolve()
+    seen: set[Path] = set()
+    for option, value in pairs:
+        if option in _INDEX_OPTIONS:
+            if re.search(r"\s|@", value) and _REMOTE_REFERENCE.search(value):
+                # Userinfo is allowed, but a named requirement is not an index.
+                if not re.fullmatch(r"(?:https?|file)://\S+", value, re.IGNORECASE):
+                    raise DependencyPolicyError("direct remote dependencies lack release-age evidence")
+            continue
+        if _REMOTE_REFERENCE.search(value):
+            raise DependencyPolicyError("direct remote dependencies lack release-age evidence")
+        if option in _FILE_OPTIONS:
+            path = base / value
+            if path.suffix == ".toml":
+                if path.name != "pyproject.toml":
+                    raise DependencyPolicyError("dependency TOML input lacks attributable project identity")
+                _check_project(path.parent, roots, seen)
+            else:
+                _check_requirements_sources(path, set(), roots, base)
+        elif option in ("", "-e", "--editable"):
+            _check_requirement(value, base, roots, seen)
+        elif option in ("-f", "--find-links"):
+            raise DependencyPolicyError("flat-index dependencies cannot prove artifact upload age")
+        elif option == "--group":
+            project_path = base / (project_directory or ".")
+            if ":" in value:
+                project_path = base / value.rsplit(":", 1)[0]
+            _check_project(project_path, roots, seen)
+        elif "file:" in value.lower():
+            raise DependencyPolicyError("local file reference in an unsupported option")
+    if project_directory:
+        manifest = base / project_directory / "pyproject.toml"
+        if manifest.is_file():
+            data = _toml(manifest)
+            if data.get("tool", {}).get("uv", {}).get("sources"):
+                _check_project(manifest.parent, roots, seen)
+    for variable in ("UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE"):
+        if environment.get(variable):
+            for path in environment[variable].split():
+                _check_requirements_sources(base / path, set(), roots, base)
+    probe_arguments = [
+        argument for argument in arguments
+        if argument != "--quiet" and not re.fullmatch(r"-q+", argument)
+    ]
+    command = [uv, "pip", "install", "--show-settings", *probe_arguments]
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, env=env, cwd=cwd,
+            timeout=SETTINGS_TIMEOUT_SECONDS, creationflags=_HEADLESS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise DependencyPolicyError("UV seasoning configuration probe failed or timed out") from exc
+    if result.returncode != 0:
+        # Do not include UV's debug projection or credential-bearing arguments.
+        raise DependencyPolicyError("UV seasoning configuration probe failed")
+    admitted = cutoff_arguments(result.stdout, now=now)
+    cleaned = []
+    iterator = iter(arguments)
+    for argument in iterator:
+        if argument == "--exclude-newer":
+            next(iterator, None)
+        elif (not argument.startswith("--exclude-newer=")
+              and argument not in ("--reinstall", "--force-reinstall")):
+            cleaned.append(argument)
+    return [*cleaned, *admitted]
+
+
+def _check_requirements_sources(
+    path: Path, seen: set[Path], roots: tuple[Path, ...], base: Path,
+) -> None:
+    if path.suffix == ".toml":
+        if path.name != "pyproject.toml":
+            raise DependencyPolicyError("dependency TOML input lacks attributable project identity")
+        _check_project(path.parent, roots, set())
+        return
+    path = path.resolve()
+    if path in seen:
+        raise DependencyPolicyError("cyclic requirement includes cannot prove dependency sources")
+    seen = seen | {path}
+    try:
+        text = re.sub(r"\\\r?\n", " ", path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise DependencyPolicyError("dependency sources file could not be read") from exc
+    for line in text.splitlines():
+        line = re.split(r"\s+#", line, maxsplit=1)[0].strip()
+        if not line or line.startswith("#"):
+            continue
+        include = re.fullmatch(r"(?:-r|--requirements?|--constraints?|-c)\s+(.+)", line)
+        if include:
+            _check_requirements_sources(path.parent / include[1], seen, roots, base)
+        elif line.startswith(("--index-url ", "--extra-index-url ", "--index-url=", "--extra-index-url=")):
+            continue
+        elif line.startswith(("-e ", "--editable ")):
+            _check_requirement(line.split(maxsplit=1)[1], base, roots, set())
+        elif line.startswith("-"):
+            raise DependencyPolicyError("unsupported dependency sources option")
+        else:
+            _check_requirement(re.sub(r"\s+--hash=\S+", "", line), base, roots, set())
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--uv", required=True)
+    parser.add_argument("--trusted-source-root", action="append", type=Path, default=[])
+    parser.add_argument("arguments", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
+    try:
+        roots = tuple(args.trusted_source_root) or _anchor_roots()
+        prepared = prepare_uv_install(args.uv, arguments, trusted_source_roots=roots)
+        return subprocess.call(
+            [args.uv, "pip", "install", *prepared],
+            stdout=sys.stdout, stderr=sys.stderr, creationflags=_HEADLESS,
+        )
+    except (DependencyPolicyError, OSError) as exc:
+        print(f"dependency-seasoning: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

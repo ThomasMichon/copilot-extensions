@@ -19,7 +19,9 @@ fine over ``external`` mode -- that decoupling is the whole point.
 from __future__ import annotations
 
 import os
+import importlib.util
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -41,8 +43,23 @@ def engine_home() -> Path:
 
 
 def engine_venv_python(home: Path | None = None) -> Path:
-    """Path to the durable engine venv's Python interpreter."""
-    root = (home or engine_home()) / ".venv"
+    """Resolve a completed engine slot, retaining pre-migration legacy engines."""
+    home = home or engine_home()
+    helper = home / "versioned_runtime.py"
+    if any((home / name).exists() or (home / name).is_symlink() for name in (
+        "current-version", "last-known-good",
+    )):
+        spec = importlib.util.spec_from_file_location("_agent_index_engine_runtime", helper)
+        if spec is None or spec.loader is None:
+            raise FileNotFoundError("Durable engine runtime resolver is unavailable")
+        runtime = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = runtime
+        spec.loader.exec_module(runtime)
+        python = runtime.resolve_python(home)
+        if python is None:
+            raise FileNotFoundError("No completed durable engine runtime is selectable")
+        return python
+    root = home / ".venv"
     if os.name == "nt":
         return root / "Scripts" / "python.exe"
     return root / "bin" / "python"

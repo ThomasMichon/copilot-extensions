@@ -7,6 +7,11 @@ from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
 
 HELPER_NAME = "_standalone_runtime_build.py"
+RUNTIME_RESOURCES = {
+    "versioned_runtime.py": "_versioned_runtime.py",
+    "versioned_runtime_leases.py": "versioned_runtime_leases.py",
+    "versioned_runtime_construction.py": "versioned_runtime_construction.py",
+}
 
 
 def ordinary_file(path):
@@ -49,46 +54,57 @@ def select_bytes(paths, label, *, optional_paths=()):
 def commands(project, package, canonical_directory=None):
     """Bind one package's hooks; generated sdist resources are not source mirrors."""
     project = Path(project).absolute()
-    resource = Path("src") / package / "_versioned_runtime.py"
+    resources = {
+        name: Path("src") / package / destination
+        for name, destination in RUNTIME_RESOURCES.items()
+    }
     canonical_directory = Path(canonical_directory) if canonical_directory else None
 
     def inputs():
-        primitive_paths = [project / resource]
         helper_paths = [project / HELPER_NAME]
-        optional_primitives = []
         optional_helpers = []
         if canonical_directory is not None:
-            optional_primitives = primitive_paths
             optional_helpers = helper_paths
-            primitive_paths = [canonical_directory / "versioned_runtime.py"]
             helper_paths = [canonical_directory / "standalone_build.py"]
+        primitives = {}
+        for name, resource in resources.items():
+            paths = [project / resource]
+            optional = []
+            if canonical_directory is not None:
+                optional = paths
+                paths = [canonical_directory / name]
+            label = "runtime primitive" if name == "versioned_runtime.py" else name
+            primitives[resource.name] = select_bytes(paths, label, optional_paths=optional)
         return (
-            select_bytes(primitive_paths, "runtime primitive", optional_paths=optional_primitives),
+            primitives,
             select_bytes(helper_paths, "runtime build helper", optional_paths=optional_helpers),
         )
 
     class BuildPy(build_py):
         def run(self):
-            data, _ = inputs()
+            primitives, _ = inputs()
             super().run()
-            destination = Path(self.build_lib) / package / resource.name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(data)
+            for name, data in primitives.items():
+                destination = Path(self.build_lib) / package / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(data)
 
         def get_outputs(self, include_bytecode=1):
             outputs = super().get_outputs(include_bytecode)
-            name = str(Path(self.build_lib) / package / resource.name)
-            if name not in outputs:
-                outputs.append(name)
+            for resource in resources.values():
+                name = str(Path(self.build_lib) / package / resource.name)
+                if name not in outputs:
+                    outputs.append(name)
             return outputs
 
     class BuildSdist(sdist):
         def make_release_tree(self, base_dir, files):
-            data, helper = inputs()
+            primitives, helper = inputs()
             super().make_release_tree(base_dir, files)
-            destination = Path(base_dir) / resource
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(data)
+            for name, data in primitives.items():
+                destination = Path(base_dir) / "src" / package / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(data)
             (Path(base_dir) / HELPER_NAME).write_bytes(helper)
 
     return {"build_py": BuildPy, "sdist": BuildSdist}

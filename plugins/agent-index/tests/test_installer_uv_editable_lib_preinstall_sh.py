@@ -1,20 +1,16 @@
-"""Guard for install.sh's two `agent-procutil` non-uv (bare-pip) preinstall
-blocks (vendor-pointer-generalization effort): the service-runtime venv and
-the durable-engine-runtime venv. Both mirror the existing `zdd` preinstall
-immediately above them. Exercises each block via real bash execution for
-both the uv path and the bare-pip fallback path, confirming plugin-local/
-repo-root-canonical resolution -- a regression here would still pass every
-other installer guard while silently reintroducing the bare-pip dependency
-failure the review on PR #4465 caught."""
+"""Source-attributable procutil preinstalls retain canonical dependency policy."""
 
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from test_install_engine_adoption import environment, fake_uv
+from test_installer_publication_provisioning import stage_index_policy_sources
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -31,7 +27,7 @@ _BLOCKS = {
         "\n\n    local dropin_dir",
     ),
     "engine": (
-        "    # agent-procutil is likewise a `uv`-editable canonical reference in a",
+        "    local rc=0\n    local procutil_dir",
         "\n\n    # agent-index-engine",
     ),
 }
@@ -69,13 +65,27 @@ def _run(
     # never stdout, or the engine variant's own redirect would silently
     # swallow the proof of what was installed.
     marker = isolated_home.parent / "marker.txt"
+    uv = fake_uv(
+        isolated_home.parent,
+        f"with pathlib.Path({str(marker)!r}).open('a', encoding='utf-8') as stream:\n"
+        " stream.write('UV_INSTALL_ARGS:' + ' '.join(sys.argv[1:]) + '\\n')\n",
+    )
+    policy = plugin_dir / "scripts/installer_dependency_policy.py"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(PLUGIN / "scripts/installer_dependency_policy.py", policy)
     script = f"""
 set -uo pipefail
 _fail() {{ echo "FAIL:$1"; exit 1; }}
-uv() {{ echo "UV_INSTALL_ARGS:$*" >> '{marker}'; }}
-_uv_pip_install() {{ uv pip install "$@"; }}
+_uv_pip_install() {{ '{sys._base_executable}' -I '{policy}' --uv '{uv}' -- "$@"; }}
 THE_VENV_PYTHON=venv_python_stub
-venv_python_stub() {{ echo "PIP_INSTALL_ARGS:$*" >> '{marker}'; }}
+venv_python_stub() {{
+    [[ "$1" == -I && "$2" == '{policy}' && "$3" == --uv && "$4" == uv ]] || return 97
+    echo "POLICY_INSTALL_ARGS:$*" >> '{marker}'
+    local policy_args=("$@")
+    policy_args[3]='{uv}'
+    '{sys._base_executable}' "${{policy_args[@]}}"
+}}
+SCRIPT_DIR='{plugin_dir / "scripts"}'
 PLUGIN_DIR='{plugin_dir}'
 have_uv={1 if have_uv else 0}
 {_resolve_vendored_lib_fn(text)}
@@ -84,13 +94,14 @@ run_block() {{
 }}
 run_block
 """
-    environment = {**os.environ, "HOME": str(isolated_home)}
+    env = environment(isolated_home.parent)
+    env["HOME"] = str(isolated_home)
     proc = subprocess.run(
         [bash, "-c", script],
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=environment,
+        env=env,
         timeout=30,
     )
     return proc, marker
@@ -100,19 +111,14 @@ def _install_path(marker: Path) -> str | None:
     if not marker.exists():
         return None
     for line in marker.read_text(encoding="utf-8").splitlines():
-        if line.startswith("PIP_INSTALL_ARGS:"):
-            args = line[len("PIP_INSTALL_ARGS:"):].split()
-            return args[-1] if args else None
         if not line.startswith("UV_INSTALL_ARGS:"):
             continue
         args = line[len("UV_INSTALL_ARGS:"):].split()
-        for arg in args:
-            if arg not in {
-                "pip", "install", "--python", "--reinstall-package",
-                "--refresh-package", "--quiet", "agent-procutil",
-                "venv_python_stub",
-            }:
-                return arg
+        assert args[:2] == ["pip", "install"]
+        assert "--show-settings" not in args
+        assert "--exclude-newer" in args and "--reinstall" in args
+        assert "--no-deps" not in args and "--no-build-isolation" not in args
+        return args[args.index("--python") + 2]
     return None
 
 
@@ -125,10 +131,8 @@ def test_procutil_preinstall_resolves_plugin_local_copy(
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
 
-    plugin_dir = tmp_path / "plugins" / "agent-index"
+    plugin_dir = stage_index_policy_sources(tmp_path, materialized=True)
     lib_dir = plugin_dir / "libs" / "agent-procutil"
-    lib_dir.mkdir(parents=True)
-    (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
 
     proc, marker = _run(bash, block_name, plugin_dir, have_uv, isolated_home=tmp_path / "home")
     assert proc.returncode == 0, proc.stderr
@@ -147,11 +151,8 @@ def test_procutil_preinstall_falls_back_to_repo_root_canonical_when_absent(
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
 
-    plugin_dir = tmp_path / "plugins" / "agent-index"
-    plugin_dir.mkdir(parents=True)
+    plugin_dir = stage_index_policy_sources(tmp_path, materialized=False)
     canonical = tmp_path / "libs" / "agent-procutil"
-    canonical.mkdir(parents=True)
-    (canonical / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
 
     proc, marker = _run(bash, block_name, plugin_dir, have_uv, isolated_home=tmp_path / "home")
     assert proc.returncode == 0, proc.stderr
@@ -233,7 +234,7 @@ run_it
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env={**os.environ, "HOME": str(tmp_path / "home")},
+        env=environment(tmp_path),
         timeout=30,
     )
     assert proc.returncode == 0, proc.stderr

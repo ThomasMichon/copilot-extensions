@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import artifact_builder_cli as cli
@@ -21,8 +23,120 @@ PINS = {"setuptools": "84.0.0", "wheel": "0.46.0", "packaging": "25.0"}
 HASHES = {name: ("a" * 64,) for name in PINS}
 
 
+@pytest.mark.parametrize(
+    "workflow",
+    sorted(path.name for path in (Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml")),
+)
+def test_workflow_root_uv_resolvers_use_canonical_seasoning(workflow):
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
+    resolver = re.compile(r"(?:^|\n|&&|;)\s*uv\s+(?:run|pip\s+install|tool\s+(?:run|install))\b")
+    for job_name, job in document.get("jobs", {}).items():
+        for step in job.get("steps", []):
+            cwd = step.get(
+                "working-directory",
+                job.get("defaults", {}).get("run", {}).get(
+                    "working-directory", document.get("defaults", {}).get("run", {}).get("working-directory", "."),
+                ),
+            )
+            if cwd not in (".", "./"):
+                continue
+            assert not resolver.search(step.get("run", "")), (
+                workflow, job_name, step.get("name"), "root has no pyproject seasoning policy",
+            )
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "payload-cwd-contract.yml"])
+def test_workflow_host_pytest_provisioning_is_seasoned(workflow):
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
+    job_names = (
+        ["windows-python-artifact-builder", "test-runner-linux", "test-runner-windows",
+         "coverage-guided-selection-integration"]
+        if workflow == "ci.yml" else ["linux", "windows"]
+    )
+    for job_name in job_names:
+        consumers = 0
+        for step in document["jobs"][job_name]["steps"]:
+            run = step.get("run", "")
+            if "python -m pytest" not in run:
+                continue
+            consumers += 1
+            provision = "python tools/seasoned_uv.py --uv uv -- --system pytest"
+            assert provision in run, (job_name, step.get("name"))
+            assert run.index(provision) < run.index("python -m pytest")
+            assert "--no-deps" not in run
+            assert "--no-build-isolation" not in run
+        assert consumers
+
+
+def test_ci_python_floor_preserves_interpreter_and_hash_contract():
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    steps = document["jobs"]["checks"]["steps"]
+    index = next(i for i, step in enumerate(steps)
+                 if step.get("name") == "Promotion artifact compatibility (Python 3.10 floor)")
+    floor = steps[index]
+    assert steps[index - 1]["uses"] == steps[index + 1]["uses"] == "actions/setup-python@v5"
+    assert steps[index - 1]["with"]["python-version"] == "3.10"
+    assert steps[index + 1]["with"]["python-version"] == "3.12"
+    assert steps[index - 1]["if"] == floor["if"] == steps[index + 1]["if"]
+    assert floor["timeout-minutes"] == 2
+    run = floor["run"]
+    assert (
+        "python tools/seasoned_uv.py --uv uv -- --system "
+        "--only-binary :all: --require-hashes -r tools/artifact_validation_requirements.txt &&"
+    ) in run
+    assert "python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml tomli &&" in run
+    assert "python -m pytest -q tools/test_promotion_python_artifacts.py" in run
+    assert "--no-config" not in run
+    assert "--index-url" not in run
+
+
+@pytest.mark.parametrize("changed", [
+    "tools/seasoned_public_feed.py",
+    "worktree-manager/scripts/picker-snapshot/install.py",
+    "tools/seasoned_uv.py",
+    "tools/dependency_age.py",
+    "tools/check-dependency-age.py",
+    "libs/installer-engine/installer_dependency_policy.py",
+    "plugins/demo/pyproject.toml",
+    ".github/actions/package-lock.json",
+    "tools/artifact_validation_requirements.txt",
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+])
+def test_ci_dependency_policy_changes_trigger_age_guard(changed):
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    step = next(step for step in document["jobs"]["checks"]["steps"]
+                if step.get("id") == "dependency-age")
+    expression = re.search(r"grep -Eq\s*\\\n\s*'([^']+)'", step["run"])
+    assert expression is not None
+    assert re.search(expression.group(1), changed), changed
+
+
+@pytest.mark.parametrize("workflow,job_name,step_name", [
+    ("ci.yml", "checks", "Required source metadata contract tests"),
+    ("source-attribution-departures.yml", "refresh-departed-source-attribution", "Install locked metadata parser without lifecycle scripts"),
+    ("workflow-lockdown-guard.yml", "source-attribution", "Install locked metadata parser without lifecycle scripts"),
+    ("workflow-lockdown-guard.yml", "refresh-source-attribution", "Install locked metadata parser without lifecycle scripts"),
+])
+def test_workflow_action_parsers_use_existing_npm_owner(workflow, job_name, step_name):
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
+    step = next(step for step in document["jobs"][job_name]["steps"] if step.get("name") == step_name)
+    assert step.get("working-directory", ".") == "."
+    assert step["run"].splitlines()[0] == (
+        "python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions "
+        "--health-module commonmark --health-module parse5"
+    )
+    assert not re.search(r"\bnpm\s+(?:ci|install)\b", step["run"])
+
+
 @pytest.fixture
 def isolated(monkeypatch):
+    monkeypatch.setattr(btl, "prepare_uv_install", lambda uv, args, **kwargs: args)
     monkeypatch.setattr(
         public, "_opaque_index_identity",
         lambda value: hashlib.sha256(value.encode()).hexdigest(),
@@ -62,6 +176,24 @@ def isolated(monkeypatch):
 
     monkeypatch.setattr(btl.subprocess, "run", run)
     return calls
+
+
+def test_macos_construction_lane_uses_stock_shell_and_required_gate():
+    root = Path(__file__).resolve().parents[1]
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
+    job = jobs["construction-macos"]
+    assert job["runs-on"] == "macos-latest"
+    assert "construction-macos" in jobs["pr-gate"]["needs"]
+    assert "continue-on-error" not in job
+    step = next(step for step in job["steps"] if step.get("name", "").startswith("Native Bash"))
+    assert step["env"]["VERSIONED_RUNTIME_TEST_BASH"] == "/bin/bash"
+    assert step["env"]["VERSIONED_RUNTIME_TEST_SOURCE"].endswith(
+        "/libs/versioned-runtime/versioned_runtime.py"
+    )
+    assert 'test "${BASH_VERSINFO[0]}" -eq 3' in step["run"]
+    assert "tools/seasoned_uv.py" in step["run"]
+    assert "--noconftest" in step["run"]
+    assert "test_failed_construction.py" in step["run"]
 
 
 def test_public_toolchain_pins_and_reuses(tmp_path, monkeypatch, isolated):

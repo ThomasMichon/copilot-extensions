@@ -72,6 +72,50 @@ note="invoke_uv_pip_install_resilient"
     assert checker._uses_engine_uv_install(sh, "sh") is False
 
 
+def test_captured_uv_call_remains_an_actual_install() -> None:
+    sh = '''
+source "$SCRIPT_DIR/installer-engine.sh"
+if out="$(invoke_uv_pip_install_resilient uv "$@" 2>&1)"; then
+    return 0
+fi
+'''
+    assert checker._uses_engine_uv_install(sh, "sh")
+    assert not checker._uses_engine_uv_install("# " + sh.replace("\n", "\n# "), "sh")
+
+
+def test_canonical_policy_invocation_counts_but_documentation_does_not() -> None:
+    sh = '''
+"$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \\
+    --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "$PLUGIN_DIR"
+'''
+    assert checker._uses_dependency_policy_install(sh, "sh")
+    assert not checker._uses_dependency_policy_install(
+        "# " + sh.replace("\n", "\n# "), "sh",
+    )
+    assert not checker._uses_dependency_policy_install(
+        'note="installer_dependency_policy.py --uv uv"', "sh",
+    )
+
+
+@pytest.mark.parametrize("statement", [
+    '"$PY" -I "$SCRIPT_DIR/installer_dependency_policy.py" -- --python "$PY"',
+    "& $Py -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') -- --python $Py",
+    '"$PY" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv --python "$PY"',
+])
+def test_policy_calls_require_provider_and_argument_separator(statement):
+    assert checker._incomplete_dependency_policy_calls(statement) == 1
+    assert checker._incomplete_dependency_policy_calls("# " + statement) == 0
+
+
+@pytest.mark.parametrize("statement", [
+    '"$PY" -I "$SCRIPT_DIR/installer_dependency_policy.py" \\\n    --uv uv -- --python "$PY"',
+    "& $Py -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') `\n    --uv $Uv -- --python $Py",
+    "$args = @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $Py)",
+])
+def test_policy_calls_accept_complete_native_and_array_argv(statement):
+    assert checker._incomplete_dependency_policy_calls(statement) == 0
+
+
 def test_engine_usage_accepts_trailing_comment_same_as_shared_parser() -> None:
     sh = '. "$SCRIPT_DIR/installer-engine.sh" # load helpers\n'
     ps1 = ". (Join-Path $PSScriptRoot 'installer-engine.ps1') # load helpers\n"

@@ -1,11 +1,9 @@
-"""Guard for init.ps1's non-uv (bare-pip) preinstall loop covering the
-`[tool.uv.sources]` workspace path deps: agent-credential-relay,
-agent-procutil, agent-single-instance-lease (all `uv`-editable canonical
-references, vendor-pointer-generalization effort), and agent-zdd (a real
-local copy). Exercises the loop via real pwsh execution for both the uv
-path and the bare-pip fallback path -- a regression here would still pass
-every other installer guard while silently reintroducing the bare-pip
-dependency failure the review on PR #4465 caught."""
+"""Source-resolution guard for the canonical dependency-policy preinstall loop.
+
+Both resolver-discovery branches must use the policy adapter and preserve
+plugin-local/canonical library resolution. The adapter spy does not exercise
+dependency-age admission.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +21,7 @@ INSTALLER = PLUGIN / "scripts" / "init.ps1"
 pytestmark = pytest.mark.guard
 
 _LOOP_START = "foreach ($lib in @(\n    @{ Dir = 'credential-relay';"
-_LOOP_END = "\n\nif (Get-Command uv -ErrorAction SilentlyContinue) {\n    Invoke-Hidden uv pip install --python $VenvPython \"$PluginDir\""
+_LOOP_END = "\n\nif (Get-Command uv -ErrorAction SilentlyContinue) {"
 
 
 def _extract_loop() -> str:
@@ -35,42 +33,48 @@ def _run(
     pwsh: str, plugin_dir: Path, have_uv: bool, *, marker: Path
 ) -> subprocess.CompletedProcess[str]:
     loop = _extract_loop()
+    assert "--uv uv -- --python $VenvPython" in loop
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True)
+    policy = scripts / "installer_dependency_policy.py"
+    shutil.copyfile(INSTALLER.parent / policy.name, policy)
     script = f"""
+$ErrorActionPreference = 'Stop'
 function Write-Fail {{ param([string]$Message) }}
+function Get-Command {{
+    param([string]$Name)
+    if ($Name -ne 'uv') {{ throw 'Unexpected executable discovery' }}
+    if ($haveUv) {{ return 'fixture-uv' }}
+}}
 function Invoke-Hidden {{
     $cmdArgs = $args
-    if ($cmdArgs[0] -eq 'uv') {{
-        Add-Content -Path '{marker}' -Value ("UV_INSTALL_ARGS:" + (($cmdArgs | Select-Object -Skip 1) -join ' '))
-    }} else {{
-        Add-Content -Path '{marker}' -Value ("PIP_INSTALL_ARGS:" + ($cmdArgs -join ' '))
+    if ($cmdArgs[0] -ne 'Invoke-StubVenvPython' -or
+        $cmdArgs[1] -ne '-I' -or $cmdArgs[2] -ne '{policy}' -or
+        -not (Test-Path -LiteralPath $cmdArgs[2]) -or
+        $cmdArgs[3] -ne '--uv' -or $cmdArgs[4] -ne 'uv' -or
+        $cmdArgs[5] -ne '--python' -or $cmdArgs[6] -ne 'Invoke-StubVenvPython') {{
+        throw 'Preinstall bypassed canonical dependency policy'
     }}
+    # PowerShell consumes the standalone separator when binding a function spy.
+    $pathIndex = if ($haveUv) {{ 9 }} else {{ 8 }}
+    if ($haveUv -and $cmdArgs[7] -ne '--reinstall-package') {{
+        throw 'Preinstall omitted package reinstall'
+    }}
+    Add-Content -LiteralPath '{marker}' -Value ("POLICY_INSTALL:" + $cmdArgs[$pathIndex])
     $global:LASTEXITCODE = 0
 }}
+$PSScriptRoot = '{scripts}'
+$haveUv = ${str(have_uv).lower()}
 $VenvPython = 'Invoke-StubVenvPython'
 $PluginDir = '{plugin_dir}'
 {loop}
 """
-    path_entries = os.environ.get("PATH", "").split(os.pathsep)
-    if not have_uv:
-        # A single `shutil.which("uv")` hit only finds the FIRST PATH
-        # directory carrying a `uv` executable -- insufficient on a
-        # machine where a package manager (e.g. WinGet) installs both the
-        # real binary AND a separate shim/Links directory, each its own
-        # PATH entry, both resolving `uv` (coverage-guided-ci effort,
-        # Phase 3.5, 2026-10-07: this duplication is real on at least one
-        # dev machine). Strip every PATH directory carrying a `uv`/`uv.exe`
-        # executable, not just the first one `which` would report.
-        uv_exe = "uv.exe" if os.name == "nt" else "uv"
-        path_entries = [
-            p for p in path_entries if not (Path(p) / uv_exe).is_file()
-        ]
-    environment = {**os.environ, "PATH": os.pathsep.join(path_entries)}
     return subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=environment,
+        env={**os.environ},
         timeout=30,
     )
 
@@ -78,21 +82,11 @@ $PluginDir = '{plugin_dir}'
 def _installed_paths(marker: Path) -> list[str]:
     if not marker.exists():
         return []
-    out = []
-    for line in marker.read_text(encoding="utf-8").splitlines():
-        if line.startswith("PIP_INSTALL_ARGS:"):
-            out.append(line[len("PIP_INSTALL_ARGS:"):].split()[-1])
-        elif line.startswith("UV_INSTALL_ARGS:"):
-            args = line[len("UV_INSTALL_ARGS:"):].split()
-            for arg in args:
-                if arg not in {
-                    "pip", "install", "--python", "Invoke-StubVenvPython", "--quiet",
-                    "--reinstall-package", "agent-credential-relay", "agent-procutil",
-                    "agent-single-instance-lease", "agent-zdd",
-                }:
-                    out.append(arg)
-                    break
-    return out
+    return [
+        line.removeprefix("POLICY_INSTALL:")
+        for line in marker.read_text(encoding="utf-8").splitlines()
+        if line.startswith("POLICY_INSTALL:")
+    ]
 
 
 def _make_libs(root: Path) -> None:

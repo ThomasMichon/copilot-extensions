@@ -24,7 +24,10 @@ def diagnose_client():
         raise PlanError("fleet client distribution and imported package versions differ")
     if files is None:
         raise PlanError("fleet client distribution has no installed file inventory")
-    required = ("__init__.py", "_versioned_runtime.py")
+    required = (
+        "__init__.py", "_versioned_runtime.py",
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    )
     resource_digest = None
     package = Path(__file__).absolute().parent
     for name in required:

@@ -237,20 +237,20 @@ function Install-AgentSshPackage {
             $dependencyArgs += @('--reinstall-package', 'agent-venue-copilot')
         }
         $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments $dependencyArgs
-        if ($depResult.ExitCode -eq 0) {
-            $pkgResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -PayloadDirToScrub $Source -Arguments @('--python', $Python, '--no-deps', $Source, '--quiet')
-            if ($pkgResult.ExitCode -eq 0) { return $true }
-            if ($pkgResult.Output) { Write-Host ($pkgResult.Output | Out-String) }
-            Write-Step "uv package install exited $($pkgResult.ExitCode) -- falling back to python -m pip"
-        } else {
+        if ($depResult.ExitCode -ne 0) {
             if ($depResult.Output) { Write-Host ($depResult.Output | Out-String) }
-            Write-Step 'uv package install failed -- falling back to python -m pip'
+            Write-Fail 'Selected dependency installation failed'
+            return $false
         }
+        $pkgResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -PayloadDirToScrub $Source -Arguments @('--python', $Python, $Source, '--quiet')
+        if ($pkgResult.ExitCode -eq 0) { return $true }
+        if ($pkgResult.Output) { Write-Host ($pkgResult.Output | Out-String) }
+        Write-Fail "Canonical dependency installation exited $($pkgResult.ExitCode)"
+        return $false
     }
 
-    $pipSources = @($Dependencies) + @($Source)
-    & $Python -m pip install --quiet @pipSources 2>&1 | Out-Null
-    return $LASTEXITCODE -eq 0
+    Write-Fail 'uv is required; unrestricted pip fallback is not supported'
+    return $false
 }
 
 function Resolve-VendoredLib {
@@ -515,43 +515,28 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
-       --allow-existing` over a corpse (#935); the current/active slot is never
-       tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so "marker present" == "healthy, complete build". A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. Returns $false (after reporting why) when the
-       marker could not be published; callers must not activate the slot. #>
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) {
-        Write-Fail "Cannot publish the completion marker for versions/$SrcVersion without a bootstrap Python interpreter -- not activating"
-        return $false
+    param([string]$PayloadHash = '')
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
-    if (-not $ph) {
-        Write-Fail "Runtime input fingerprint unavailable -- not publishing versions/$SrcVersion"
-        return $false
-    }
-    $mcArgs += @('--payload-hash', $ph)
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to publish the completion marker for versions/$SrcVersion (exit $LASTEXITCODE) -- not activating"
-        return $false
-    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -965,6 +950,8 @@ foreach ($h in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswi
 }
 Write-Ok "Session-start hook: $BinHookDir\bootstrap-check.ps1"
 
+[void](Invoke-VersionedSlotClean)
+if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
     Invoke-VersionedSlotClean
     if ($uvPath) {
@@ -1056,6 +1043,8 @@ if (-not $pkgInstalled) {
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 Write-Ok 'Package installed: agent-ssh'
 
+}
+
 # Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
 if (-not (Invoke-VersionedActivate)) { exit 1 }
 
@@ -1112,5 +1101,11 @@ Write-Host '=== agent-ssh install complete ===' -ForegroundColor Cyan
 Write-Host '  Try: agent-ssh version' -ForegroundColor DarkGray
 exit 0
 } finally {
-    Exit-InstallLock
+    try {
+        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+            Stop-RuntimeConstruction
+        }
+    } finally {
+        Exit-InstallLock
+    }
 }

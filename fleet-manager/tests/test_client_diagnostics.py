@@ -26,7 +26,10 @@ def installed(tmp_path, monkeypatch):
     package = tmp_path / "fleet_manager"
     package.mkdir()
     files = []
-    for name in ("__init__.py", "_versioned_runtime.py"):
+    for name in (
+        "__init__.py", "_versioned_runtime.py",
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    ):
         data = b"resource bytes\n"
         (package / name).write_bytes(data)
         files.append(Entry(f"fleet_manager/{name}", data))

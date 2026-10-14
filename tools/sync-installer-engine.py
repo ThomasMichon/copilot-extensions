@@ -51,7 +51,7 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
             REPO / "plugins" / plugin / "scripts" / name,
         )
         for plugin in ADOPTERS
-        for name in FILES
+        for name in (*FILES, *ier.support_files(CANONICAL_DIR))
     ]
 
 
@@ -96,7 +96,7 @@ def _ref_state(plugin: str, ext: str) -> tuple[str, str | None]:
         return (
             "malformed",
             f"plugins/{plugin}/scripts/install.{ext} references {ref.raw_path} "
-            f"(resolved {ref.resolved()}) which is not {canonical.relative_to(REPO)}",
+            f"(resolved {ref.resolved()}) which is not {canonical.relative_to(REPO).as_posix()}",
         )
     return (
         "malformed",
@@ -149,6 +149,16 @@ def _local_copy_problems(plugin: str) -> list[str]:
             source.stat().st_mode
         ):
             problems.append(f"{relative} mode differs from {source.relative_to(REPO)}")
+    for name in ier.support_files(CANONICAL_DIR):
+        source = CANONICAL_DIR / name
+        destination = plugin_dir / "scripts" / name
+        relative = destination.relative_to(REPO).as_posix()
+        if uer._find_symlinked_ancestor(source, REPO.resolve()) is not None or destination.is_symlink():
+            problems.append(f"{relative}: support asset is linked -- refusing")
+        elif not source.is_file():
+            problems.append(f"canonical source missing: {source.relative_to(REPO)}")
+        elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
+            problems.append(f"{relative} is missing or differs from {source.relative_to(REPO)}")
     return problems
 
 
@@ -169,6 +179,15 @@ def _canonical_copy_problems(plugin: str) -> list[str]:
                 f"{destination.relative_to(REPO).as_posix()} should not exist in dev once "
                 f"{plugin} uses the canonical reference"
             )
+    for name in ier.support_files(CANONICAL_DIR):
+        source = CANONICAL_DIR / name
+        destination = plugin_dir / "scripts" / name
+        if uer._find_symlinked_ancestor(source, REPO.resolve()) is not None or not source.is_file():
+            problems.append(f"canonical support source missing or linked: {source.relative_to(REPO)}")
+        elif destination.is_symlink() or (
+            destination.exists() and destination.read_bytes() != source.read_bytes()
+        ):
+            problems.append(f"{destination.relative_to(REPO)} differs from canonical support source")
     return problems
 
 
@@ -267,7 +286,7 @@ def sync() -> list[str]:
                     destination.unlink()
                     written.append(f"removed {destination.relative_to(REPO).as_posix()}")
             continue
-        for name in FILES:
+        for name in (*FILES, *ier.support_files(CANONICAL_DIR)):
             source = CANONICAL_DIR / name
             bad_ancestor = uer._find_symlinked_ancestor(source, REPO.resolve())
             if bad_ancestor is not None:

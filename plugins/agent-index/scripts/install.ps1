@@ -945,35 +945,28 @@ public static class CePayloadDirectoryState {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
-       --allow-existing` over a corpse (#935); the current/active slot is never
-       tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so "marker present" == "healthy, complete build". A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) {
-        throw 'Cannot locate Python to write the runtime completion marker'
+    param([string]$PayloadHash = '')
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
-    $ph = Get-PayloadHash
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion, '--payload-hash', $ph)
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
-    if ($LASTEXITCODE -ne 0) {
-        throw "Runtime completion marker writer failed with exit code $LASTEXITCODE"
-    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -1293,11 +1286,14 @@ function New-IndexVenv {
     }
     if ($healthy -and -not $unsigned) { return $true }
     Write-Step "Building healthy runtime venv: $Dir"
-    if (Test-Path -LiteralPath $Dir) { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop }
+    if ($Dir -ne $VenvDir -and (Test-Path -LiteralPath $Dir)) {
+        Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop
+    }
     if ($signedBase) {
         $result = Invoke-NativeCapture { & $signedBase -m venv --copies $Dir }
         if (Test-IndexVenv -Dir $Dir -Python $Python) { return $true }
         Write-Warn "Signed-Python venv is unusable (exit $($result.ExitCode)) -- retrying with uv"
+        if ($Dir -eq $VenvDir) { return $false }
         if (Test-Path -LiteralPath $Dir) { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop }
     }
     if ($script:UvCommand) {
@@ -1353,7 +1349,7 @@ function Install-ServerVenv {
         if ($script:UvCommand) {
             Invoke-IndexUvPipInstall --python $serverVenvPython "$libDir" --quiet | Out-Null
         } else {
-            & $serverVenvPython -m pip install "$libDir" 2>&1 | Out-Null
+            & $serverVenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $serverVenvPython "$libDir" 2>&1 | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Warn "Server venv $libName install failed (exit $LASTEXITCODE)"
@@ -1366,7 +1362,7 @@ function Install-ServerVenv {
     if ($script:UvCommand) {
         $srvOut = Invoke-IndexUvPipInstall --python $serverVenvPython $serverPkgSpec | Out-String
     } else {
-        $srvOut = & $serverVenvPython -m pip install $serverPkgSpec 2>&1 | Out-String
+        $srvOut = & $serverVenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $serverVenvPython $serverPkgSpec 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Warn 'Server venv package install failed'
@@ -1418,6 +1414,8 @@ function Install-Runtime {
 
     $buildMutex = Enter-IndexBuildLock -VenvPath $VenvDir
     try {
+    [void](Invoke-VersionedSlotClean)
+    if (-not $script:RuntimeConstructionReuse) {
     $preparationMutex = Enter-IndexStampLock -Scope 'Publish'
     try {
     if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
@@ -1454,49 +1452,6 @@ function Install-Runtime {
         }
     }
 
-    # A failed prior build may have left an interpreter-shaped target slot or,
-    # on older installers, even an active marker. A slot is reusable only when
-    # its completion marker is valid AND agent_index imports successfully.
-    if ($VersionedRuntime -and (Test-Path -LiteralPath $VenvDir -PathType Container)) {
-        $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-        $slotReady = $false
-        if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
-            & $VenvPython $vr --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
-            if ($LASTEXITCODE -eq 0) {
-                $slotReady = Test-RuntimeOrigin -Python $VenvPython -Slot $VenvDir
-            }
-        }
-        if (-not $slotReady -or $env:AGENT_INDEX_REBUILD_CURRENT -eq '1') {
-            $targetWasActive = $false
-            foreach ($markerName in @('current-version', 'last-known-good')) {
-                $markerPath = Join-Path $InstallDir $markerName
-                $markerVersion = ''
-                try { $markerVersion = ([IO.File]::ReadAllText($markerPath)).Trim() } catch {}
-                if ($markerVersion -ceq $SrcVersion) {
-                    if ($markerName -eq 'current-version') { $targetWasActive = $true }
-                    Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
-                }
-            }
-            if ($targetWasActive) { try { Invoke-Stop | Out-Null } catch {} }
-            Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction Stop
-            Write-Warn "Removed runtime slot versions/$SrcVersion before a clean role-aware rebuild"
-        }
-    }
-
-    # Rebuild an existing slot venv whose python.exe is a uv trampoline /
-    # unsigned (not spawnable over a non-interactive SSH logon, and Smart App
-    # Control-blocked) when a signed base Python is available to rebuild from.
-    # A re-deploy of the same version otherwise leaves the old trampoline in
-    # place, defeating the CLI SSH transport.
-    if (Test-Path $VenvPython) {
-        $sigStatus = try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' }
-        if ($sigStatus -ne 'Valid' -and (Get-SignedBasePython)) {
-            Write-Warn 'Existing slot python is a uv trampoline / unsigned (not SSH-invocable) -- rebuilding from signed Python'
-            try { Invoke-Stop | Out-Null } catch {}
-            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
-            catch { Write-Fail "Could not remove the unsigned slot venv (in use?): $_ -- refusing to leave a non-SSH-invocable runtime in place"; exit 1 }
-        }
-    }
     } finally {
         [void]$preparationMutex.ReleaseMutex(); $preparationMutex.Dispose()
     }
@@ -1515,7 +1470,7 @@ function Install-Runtime {
         if ($script:UvCommand) {
             $zddOut = Invoke-IndexUvPipInstall --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet
         } else {
-            $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
+            $zddOut = & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$ZddDir" 2>&1
         }
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
@@ -1539,7 +1494,7 @@ function Install-Runtime {
         if ($script:UvCommand) {
             $procutilOut = Invoke-IndexUvPipInstall --python $VenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
         } else {
-            $procutilOut = & $VenvPython -m pip install "$ProcutilDir" 2>&1
+            $procutilOut = & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$ProcutilDir" 2>&1
         }
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
@@ -1554,7 +1509,7 @@ function Install-Runtime {
     if ($script:UvCommand) {
         Invoke-IndexUvPipInstall --python $VenvPython "$DropinDir" --quiet | Out-Null
     } else {
-        & $VenvPython -m pip install "$DropinDir" 2>&1 | Out-Null
+        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$DropinDir" 2>&1 | Out-Null
     }
     if ($LASTEXITCODE -ne 0) { Write-Fail 'dropin-registry install failed'; exit 1 }
     # Both roles have a light primary CLI. Only a host receives a complete
@@ -1565,7 +1520,7 @@ function Install-Runtime {
     if ($script:UvCommand) {
         $out = Invoke-IndexUvPipInstall --python $VenvPython $pkgSpec | Out-String
     } else {
-        $out = & $VenvPython -m pip install $pkgSpec 2>&1 | Out-String
+        $out = & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython $pkgSpec 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail 'Failed to install agent-index package into venv'
@@ -1580,6 +1535,8 @@ function Install-Runtime {
     if (-not (Install-ServerVenv -InstallRole $installRole -PythonCmd $pythonCmd)) {
         Write-Fail 'Required host runtime failed provisioning -- not activating'
         exit 1
+    }
+
     }
 
     $prevVersion = ''
@@ -1715,31 +1672,41 @@ function Test-EnginePort {
 }
 
 function Install-Engine {
-    # Provision the DURABLE engine venv (agent-index-engine, the torch stack) at
-    # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
-    # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
-    # light, torch-free service fully functional. With -Upgrade, an existing venv
-    # is upgraded in place (the explicit engine-runtime update path) rather than
-    # skipped.
     param([switch]$Upgrade)
     if ($env:AGENT_INDEX_NO_ENGINE_DEPS -eq '1') {
         Write-Skip 'Engine runtime skipped (AGENT_INDEX_NO_ENGINE_DEPS=1)'
         return $false
     }
-    $cachedMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
-    try {
-    if ((Test-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython) -and -not $Upgrade) {
-        Write-Skip "Engine runtime already provisioned (durable venv preserved): $EngineVenv"
-        return $true
-    }
-    } finally {
-        [void]$cachedMutex.ReleaseMutex(); $cachedMutex.Dispose()
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Engine construction requires a bootstrap Python interpreter' }
+    if ((Test-Path (Join-Path $EngineHome 'current-version')) -or
+        (Test-Path (Join-Path $EngineHome 'last-known-good'))) {
+        $selected = & $py -I $vr --root $EngineHome resolve-python
+        if ($LASTEXITCODE -eq 0 -and $selected -and -not $Upgrade) {
+            $script:EngineVenvPython = "$selected".Trim()
+            $script:EngineVenv = Split-Path (Split-Path $script:EngineVenvPython)
+            Write-Skip "Completed engine runtime preserved: $EngineVenv"
+            return $true
+        }
     }
     $script:UvCommand = Get-IndexUv
     if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using the engine pip fallback' }
+    $engineVersion = $SrcVersion
+    if ($Upgrade) { $engineVersion += '.repair-' + [guid]::NewGuid().ToString('N') }
+    $script:EngineVenv = Join-Path $EngineHome "versions\$engineVersion"
+    $script:EngineVenvPython = Join-Path $EngineVenv 'Scripts\python.exe'
     $buildMutex = Enter-IndexBuildLock -VenvPath $EngineVenv
     try {
-    if ((Test-IndexVenv -Dir $EngineVenv -Python $EngineVenvPython) -and -not $Upgrade) { return $true }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $EngineHome construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical engine construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $payloadHash = Get-PayloadHash
+    $reuse = Start-RuntimeConstruction -Python $py -Helper $vr -Root $EngineHome `
+        -Version $engineVersion -PayloadHash $payloadHash -LinkName '.venv'
+    if (-not $reuse) {
     $pythonCmd = $null
     foreach ($candidate in @('python', 'python3', 'py')) {
         $found = Get-Command $candidate -ErrorAction SilentlyContinue
@@ -1775,7 +1742,7 @@ function Install-Engine {
             Invoke-IndexUvPipInstall --python $EngineVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         } else {
-            & $EngineVenvPython -m pip install "$ZddDir" 2>&1 |
+            & $EngineVenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $EngineVenvPython "$ZddDir" 2>&1 |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         }
         if ($LASTEXITCODE -ne 0) {
@@ -1784,14 +1751,8 @@ function Install-Engine {
         }
     }
 
-    # agent-procutil is likewise a `uv`-editable canonical reference in a
-    # dev checkout (no local copy, not on PyPI) -- pre-install it the same
-    # way as zdd above. Unlike zdd's own silently-ignored failure, a
-    # failed refresh here must fail the whole engine install: `agent-index`
-    # declares only an UNVERSIONED `agent-procutil` requirement, so the
-    # main-package install below could still "succeed" against a stale
-    # copy already present in a preserved engine venv, silently shipping
-    # old shared code (PR #4465 review).
+    # Local libraries remain source-attributable; all external dependencies
+    # resolve through the same configured-feed seasoning policy.
     $engRc = 0
     $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
     if ($ProcutilDir) {
@@ -1799,7 +1760,7 @@ function Install-Engine {
             Invoke-IndexUvPipInstall --python $EngineVenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         } else {
-            & $EngineVenvPython -m pip install "$ProcutilDir" 2>&1 |
+            & $EngineVenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $EngineVenvPython "$ProcutilDir" 2>&1 |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         }
         $engRc = $LASTEXITCODE
@@ -1812,21 +1773,7 @@ function Install-Engine {
     # pre-install above, since neither is on PyPI and a plain `pip install
     # agent-index-engine` cannot resolve "agent-index" on its own.
     #
-    # Torch install is TWO STEPS so a GPU host works even behind a managed/CFS
-    # package feed:
-    #   1. Install agent-index-engine from the DEFAULT feed (governed mirror or
-    #      public PyPI). This pulls the CPU torch wheel plus ALL of torch's
-    #      pure-python deps (sympy, networkx, jinja2, ...) and the rest of the
-    #      engine stack (transformers, sentence-transformers, numpy).
-    #   2. If AGENT_INDEX_TORCH_INDEX is set (a CUDA wheel index, e.g.
-    #      https://download.pytorch.org/whl/cu124), SWAP the torch wheel ONLY from
-    #      that index with --no-deps. This is essential on a CFS box: the CUDA index
-    #      links torch's pure-python deps to files.pythonhosted.org, which is often
-    #      network-blocked -- so we take deps from the reachable default feed (step 1)
-    #      and only the (reachable) CUDA torch wheel from the CUDA index here. The
-    #      CUDA build's exact dep pins (e.g. sympy==1.13.1) are satisfied at runtime
-    #      by the step-1 versions; --no-deps skips re-resolving them through the
-    #      blocked host.
+    # A selected CUDA feed must also resolve and season its transitive graph.
     $torchIdx = $env:AGENT_INDEX_TORCH_INDEX
     $engOut = @()
     if ($engRc -ne 0) {
@@ -1845,25 +1792,25 @@ function Install-Engine {
             $engOut += @($srvOut)
         }
         if ($engRc -eq 0 -and $torchIdx) {
-            Write-Host "  ...    Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)" -ForegroundColor DarkGray
-            $torchOut = Invoke-IndexUvPipInstall --python $EngineVenvPython --index-url $torchIdx --no-deps --reinstall-package torch torch
+            Write-Host "  ...    Resolving CUDA torch and dependencies from the configured CUDA wheel index" -ForegroundColor DarkGray
+            $torchOut = Invoke-IndexUvPipInstall --python $EngineVenvPython --index-url $torchIdx  --reinstall-package torch torch
             $engRc = $LASTEXITCODE
             $engOut += @($torchOut)
         }
     } else {
-        $baseOut = & $EngineVenvPython -m pip install "$PluginDir" 2>&1
+        $baseOut = & $EngineVenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $EngineVenvPython "$PluginDir" 2>&1
         $engRc = $LASTEXITCODE
         $engOut = @($baseOut)
         if ($engRc -eq 0) {
-            $pipArgs = @('-m', 'pip', 'install', "$PluginDir\server")
+            $pipArgs = @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $EngineVenvPython, "$PluginDir\server")
             if ($Upgrade) { $pipArgs += '--upgrade' }
             $srvOut = & $EngineVenvPython @pipArgs 2>&1
             $engRc = $LASTEXITCODE
             $engOut += @($srvOut)
         }
         if ($engRc -eq 0 -and $torchIdx) {
-            Write-Host "  ...    Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)" -ForegroundColor DarkGray
-            $torchOut = & $EngineVenvPython -m pip install --index-url $torchIdx --no-deps --force-reinstall torch 2>&1
+            Write-Host "  ...    Resolving CUDA torch and dependencies from the configured CUDA wheel index" -ForegroundColor DarkGray
+            $torchOut = & $EngineVenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $EngineVenvPython --index-url $torchIdx --reinstall-package torch torch 2>&1
             $engRc = $LASTEXITCODE
             $engOut += @($torchOut)
         }
@@ -1874,12 +1821,25 @@ function Install-Engine {
         Write-Host ($engOut | Out-String)
         return $false
     }
-    & $EngineVenvPython -c 'import torch' 2>$null
-    if ($LASTEXITCODE -ne 0) { Write-Warn 'Engine venv built but torch import failed'; return $false }
+    & $EngineVenvPython -I -c 'import torch, agent_index, agent_index_engine.app'
+    if ($LASTEXITCODE -ne 0) { Write-Warn 'Engine venv built but isolated imports failed'; return $false }
+    if ((Get-PayloadHash) -ne $payloadHash) { throw 'Engine payload changed during construction' }
+    Complete-RuntimeConstruction -PayloadHash $payloadHash
+    }
+    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime.py')) {
+        Publish-FileAtomically -Path (Join-Path $EngineHome $name) `
+            -Content ([IO.File]::ReadAllText((Join-Path $PSScriptRoot $name)))
+    }
+    & $py -I $vr --root $EngineHome --link-name '.venv' activate $engineVersion --no-link | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Completed engine runtime activation failed' }
     Write-Ok "Engine runtime $(if ($Upgrade) { 'updated' } else { 'provisioned' }) (durable venv): $EngineVenv"
     return $true
     } finally {
-        [void]$buildMutex.ReleaseMutex(); $buildMutex.Dispose()
+        try {
+            if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) { Stop-RuntimeConstruction }
+        } finally {
+            [void]$buildMutex.ReleaseMutex(); $buildMutex.Dispose()
+        }
     }
 }
 
@@ -1923,7 +1883,14 @@ if (Test-Path `$envFile) {
         }
     }
 }
-& '$($EngineVenvPython -replace "'","''")' -I -X utf8 -m agent_index engine run
+`$python = '$($EngineVenvPython -replace "'","''")'
+`$resolver = '$((Join-Path $EngineHome 'versioned_runtime.py') -replace "'","''")'
+if ((Test-Path -LiteralPath '$(Join-Path $EngineHome 'current-version' | ForEach-Object { $_ -replace "'","''" })') -or
+    (Test-Path -LiteralPath '$(Join-Path $EngineHome 'last-known-good' | ForEach-Object { $_ -replace "'","''" })')) {
+    `$python = & `$python -I `$resolver --root '$($EngineHome -replace "'","''")' resolve-python
+    if (`$LASTEXITCODE -ne 0 -or -not `$python) { throw 'No completed engine runtime is selectable' }
+}
+& `$python -I -X utf8 -m agent_index engine run
 exit `$LASTEXITCODE
 "@
     [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, $utf8NoBom)
@@ -2645,6 +2612,18 @@ function Invoke-Uninstall {
     Write-Ok 'agent-index uninstalled'
 }
 
+if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and
+    ((Test-Path (Join-Path $EngineHome 'current-version')) -or
+     (Test-Path (Join-Path $EngineHome 'last-known-good')))) {
+    $bootstrap = Get-BootstrapPython
+    if (-not $bootstrap) { throw 'Engine selection requires a bootstrap interpreter' }
+    $selected = & $bootstrap -I (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $EngineHome resolve-python
+    if ($LASTEXITCODE -ne 0 -or -not $selected) { throw 'No completed engine runtime is selectable' }
+    $EngineVenvPython = "$selected".Trim()
+    $EngineVenv = Split-Path (Split-Path $EngineVenvPython)
+}
+
+try {
 switch ($Action) {
     'install' {
         Install-Runtime
@@ -2672,8 +2651,8 @@ switch ($Action) {
         Install-LogonAutostart
     }
     'register-tasks' { Invoke-RegisterTasks }  # OPT-IN advanced tier (scheduled tasks) -- the sole action that may (opt-in) self-elevate that ONE step
-    'engine' { Install-Engine | Out-Null; Ensure-EngineRunning }        # explicit host-side provisioning (role-independent), user-mode
-    'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }  # rebuild durable engine venv + restart daemon (decoupled from service update)
+    'engine' { if (-not (Install-Engine)) { throw 'Engine runtime installation failed' }; Ensure-EngineRunning }
+    'engine-update' { if (-not (Install-Engine -Upgrade)) { throw 'Engine runtime update failed' }; Restart-EngineDaemon }
     'status' { Invoke-Status }
     'start' { Invoke-Start }
     'stop' { Invoke-Stop }
@@ -2683,5 +2662,11 @@ switch ($Action) {
         Install-Runtime
         Invoke-ServiceCutover
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
+    }
+}
+
+} finally {
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        Stop-RuntimeConstruction
     }
 }

@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,71 @@ if [[ "$*" == *sys.prefix* ]]; then
 fi
 exit 0
 """
+
+
+def fake_uv(tmp_path: Path, body: str) -> Path:
+    source = tmp_path / "fixture_uv.py"
+    source.write_text(
+        "import pathlib, sys\n"
+        "if '--show-settings' in sys.argv:\n"
+        " print('''PipInstallSettings { settings: PipSettings {\n"
+        " index_locations: IndexLocations { indexes: [], flat_index: [], },\n"
+        " exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\n"
+        " }, }''')\n"
+        " raise SystemExit(0)\n" + body,
+        encoding="utf-8",
+    )
+    wrapper = tmp_path / ("fixture_uv.cmd" if os.name == "nt" else "fixture_uv")
+    if os.name == "nt":
+        wrapper.write_text(f'@"{sys._base_executable}" "{source}" %*\n', encoding="utf-8")
+    else:
+        wrapper.write_text(
+            f"#!/bin/sh\nexec {shlex.quote(sys._base_executable)} {shlex.quote(str(source))} \"$@\"\n",
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+    return wrapper
+
+
+def construction_bundle(scripts: Path) -> None:
+    scripts.mkdir(parents=True, exist_ok=True)
+    for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
+                 "versioned_runtime_construction.py"):
+        shutil.copy2(REPO / "libs/versioned-runtime" / name, scripts / name)
+
+
+def posix_venv_uv(tmp_path: Path, *, failure: bool = False, transient: bool = False) -> Path:
+    """An offline executable with real venv identity and independent settings admission."""
+    uv = fake_uv(tmp_path, f"""
+import subprocess, venv
+root = pathlib.Path({str(tmp_path)!r})
+args = sys.argv[1:]
+with (root / 'calls').open('a') as stream:
+ stream.write(' '.join(args) + '\\n')
+if args == ['--version']:
+ print('uv 0.8.0')
+elif args[0] == 'venv':
+ attempt = root / 'venv-attempt'
+ if {transient!r} and not attempt.exists():
+  attempt.touch()
+  raise SystemExit(0)
+ destination = pathlib.Path(args[1])
+ venv.EnvBuilder(with_pip=False, symlinks=True).create(destination)
+ python = destination / 'bin/python'
+ site = pathlib.Path(subprocess.check_output([str(python), '-I', '-c',
+  'import sysconfig; print(sysconfig.get_path("purelib"))'], text=True).strip())
+ for name in ('torch.py', 'agent_index.py'):
+  (site / name).write_text('')
+ app = site / 'agent_index_engine'
+ app.mkdir(exist_ok=True)
+ (app / '__init__.py').write_text('')
+ (app / 'app.py').write_text('')
+elif {failure!r} and any('agent-procutil' in arg for arg in args):
+ raise SystemExit(37)
+""")
+    executable = tmp_path / "uv"
+    uv.rename(executable)
+    return executable
 
 
 def function(name: str, ext: str) -> str:
@@ -98,6 +164,72 @@ def test_canonical_references_and_both_runtime_builds():
     assert "Invoke-UvPipInstallResilient" in function("Invoke-IndexUvPipInstall", "ps1")
 
 
+@pytest.mark.parametrize("failure_stage", ["zdd", "agent-procutil", "server", "torch"])
+def test_native_engine_failed_upgrade_preserves_selection_and_retries(tmp_path, failure_stage):
+    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime.py"):
+        shutil.copyfile(REPO / "libs/versioned-runtime" / name, tmp_path / name)
+    base = str(Path(sys._base_executable)).replace("'", "''")
+    script = f"""
+$EngineHome = '{tmp_path / "engine"}'
+$PluginDir = '{tmp_path / "plugin"}'
+$env:AGENT_INDEX_TORCH_INDEX = 'https://example.invalid/cuda'
+$script:FailStage = ''
+function Get-BootstrapPython {{ '{base}' }}
+function Get-PayloadHash {{ 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }}
+function Get-IndexUv {{ 'fixture-uv' }}
+function Resolve-Zdd {{ Join-Path $PluginDir 'libs/zdd' }}
+function Resolve-VendoredLib {{ param($LibName) Join-Path $PluginDir "libs/$LibName" }}
+function New-IndexVenv {{
+    param($Dir, $Python, $PythonCmd, $PreferSignedPython)
+    & '{base}' -I -m venv --without-pip $Dir
+    if ($LASTEXITCODE -ne 0) {{ throw 'Fixture venv creation failed' }}
+    & '{base}' -I -c 'import os, pathlib, sys; root = pathlib.Path(sys.argv[1]); expected = pathlib.Path(sys.argv[2]); expected.parent.mkdir(exist_ok=True); expected.symlink_to(root / "bin/python") if os.name != "nt" and not expected.exists() else None' $Dir $Python
+    if ($LASTEXITCODE -ne 0) {{ throw 'Fixture interpreter layout failed' }}
+    $site = & $Python -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))'
+    if ($LASTEXITCODE -ne 0) {{ throw 'Fixture site discovery failed' }}
+    Set-Content (Join-Path $site 'torch.py') ''
+    Set-Content (Join-Path $site 'agent_index.py') ''
+    $app = Join-Path $site 'agent_index_engine'
+    New-Item -ItemType Directory $app | Out-Null
+    Set-Content (Join-Path $app '__init__.py') ''
+    Set-Content (Join-Path $app 'app.py') ''
+    return $true
+}}
+function Invoke-IndexUvPipInstall {{
+    $stage = if ($args[-1] -eq 'torch') {{ 'torch' }} else {{
+        @($args | Where-Object {{ "$_" -like "$PluginDir*" }})[0] | Split-Path -Leaf
+    }}
+    $global:LASTEXITCODE = if ($stage -eq $script:FailStage) {{ 37 }} else {{ 0 }}
+}}
+{function("Install-Engine", "ps1")}
+{function("Publish-FileAtomically", "ps1")}
+if (-not (Install-Engine)) {{ throw 'Initial engine installation failed' }}
+$before = Get-Content (Join-Path $EngineHome 'current-version') -Raw
+$good = Join-Path $EngineHome "versions/$($before.Trim())"
+$completion = [IO.File]::ReadAllText((Join-Path $good '.install-complete.json'))
+$script:FailStage = '{failure_stage}'
+$failed = $false
+try {{ if (-not (Install-Engine -Upgrade)) {{ $failed = $true }} }} catch {{
+    if ($_ -notmatch 'construction aborted') {{ throw }}
+    $failed = $true
+}}
+if (-not $failed) {{ throw 'Selected dependency failure was swallowed' }}
+if ((Get-Content (Join-Path $EngineHome 'current-version') -Raw) -cne $before) {{ throw 'Selection changed on failure' }}
+if ((Get-Content (Join-Path $EngineHome 'last-known-good') -Raw) -cne $before) {{ throw 'Last known good changed on failure' }}
+if ([IO.File]::ReadAllText((Join-Path $good '.install-complete.json')) -cne $completion) {{ throw 'Healthy completion was overwritten' }}
+if (@(Get-ChildItem (Join-Path $EngineHome 'versions') -Directory).Count -ne 1) {{ throw 'Failed engine candidate was not reclaimed' }}
+$script:FailStage = ''
+if (-not (Install-Engine -Upgrade)) {{ throw 'Clean retry failed' }}
+$after = (Get-Content (Join-Path $EngineHome 'current-version') -Raw).Trim()
+if ($after -eq $before.Trim()) {{ throw 'Retry did not select a distinct repair' }}
+if (-not (Test-Path (Join-Path $EngineHome "versions/$after/.install-complete.json"))) {{ throw 'Retry selected an incomplete slot' }}
+if (-not (Install-Engine)) {{ throw 'Completed engine reuse failed' }}
+if (@(Get-ChildItem (Join-Path $EngineHome 'versions') -Directory).Count -ne 2) {{ throw 'Completed reuse constructed another engine' }}
+"""
+    result = run_ps(tmp_path, script)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("failure", [False, True])
 @pytest.mark.parametrize("transient", [False, True])
 def test_posix_engine_build_order_and_durable_skip(tmp_path: Path, failure: bool, transient: bool):
@@ -105,25 +237,9 @@ def test_posix_engine_build_order_and_durable_skip(tmp_path: Path, failure: bool
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
     log = tmp_path / "calls"
-    uv = tmp_path / "uv"
-    retry = (
-        f' if [[ ! -f "{tmp_path / "venv-attempt"}" ]]; then\n'
-        f'  touch "{tmp_path / "venv-attempt"}"; exit 0; fi\n'
-        if transient else ""
-    )
-    uv.write_text(
-        "#!/usr/bin/env bash\n"
-        f'echo "$*" >> "{log}"\n'
-        'if [[ "$1" == --version ]]; then exit 0; fi\n'
-        'if [[ "$1" == venv ]]; then\n'
-        + retry +
-        ' mkdir -p "$2/bin"; echo "home = fixture" > "$2/pyvenv.cfg"\n'
-        f" printf '%s' {shlex.quote(FAKE_PYTHON)} > \"$2/bin/python\"\n"
-        ' chmod +x "$2/bin/python"; exit 0\nfi\n'
-        + ('if [[ "$*" == *agent-procutil* ]]; then exit 37; fi\n' if failure else ""),
-        encoding="utf-8",
-    )
-    uv.chmod(0o755)
+    posix_venv_uv(tmp_path, failure=failure, transient=transient)
+    scripts = tmp_path / "scripts"
+    construction_bundle(scripts)
     for library in ("zdd", "agent-procutil"):
         directory = tmp_path / "plugin/libs" / library
         directory.mkdir(parents=True)
@@ -141,14 +257,20 @@ systemctl() {{ echo FORBIDDEN >&2; exit 97; }}
 curl() {{ echo FORBIDDEN >&2; exit 97; }}
 wget() {{ echo FORBIDDEN >&2; exit 97; }}
 _find_python() {{ echo '{tmp_path / "forbidden-base-python"}'; }}
+_bootstrap_python() {{ echo '{sys._base_executable}'; }}
+_payload_hash() {{ printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }}
 _ensure_uv_index() {{ :; }}
+SCRIPT_DIR='{scripts}'
+SRC_VERSION='1.0.0'
 INSTALL_DIR='{tmp_path / "runtime"}'
+VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 PLUGIN_DIR='{tmp_path / "plugin"}'
 ENGINE_HOME='{tmp_path / "engine"}'
 ENGINE_VENV="$ENGINE_HOME/.venv"
 ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
 {function("_ensure_uv", "sh")}
 {function("_uv_pip_install", "sh")}
+_uv_pip_install() {{ "$UV_COMMAND" pip install "$@"; }}
 {function("_test_index_venv", "sh")}
 {function("_new_index_venv", "sh")}
 {function("_with_index_build_lock", "sh")}
@@ -175,12 +297,24 @@ exit "$rc"
     else:
         assert str(tmp_path / "plugin") in installs[2]
         assert str(tmp_path / "plugin/server") in installs[3]
-        assert "--index-url https://example.invalid/cuda --no-deps --reinstall-package torch torch" in installs[4]
+        assert "--index-url https://example.invalid/cuda --reinstall-package torch torch" in installs[4]
         assert len(installs) == 5
+        assert (tmp_path / "engine/versions/1.0.0/.install-complete.json").is_file()
+        assert (tmp_path / "engine/current-version").read_text().strip() == "1.0.0"
+    if failure:
+        engine = tmp_path / "engine"
+        assert not os.path.lexists(engine / "current-version")
+        assert not os.path.lexists(engine / "last-known-good")
+        versions = engine / "versions"
+        entries = list(versions.iterdir())
+        assert {entry.name for entry in entries} <= {".1.0.0.build.lock"}
+        assert all(entry.is_file() and not entry.is_symlink() for entry in entries)
+        assert not list(versions.rglob(".install-complete.json"))
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 def test_shared_pip_retry_preserves_exact_exit(tmp_path: Path, ext: str):
+    uv = fake_uv(tmp_path, "print('ordinary-failure')\nraise SystemExit(37)\n")
     if ext == "sh":
         bash = shutil.which("bash")
         if os.name == "nt" or not bash:
@@ -188,9 +322,8 @@ def test_shared_pip_retry_preserves_exact_exit(tmp_path: Path, ext: str):
         script = f"""
 . '{ENGINE / "installer-engine.sh"}'
 _warn() {{ :; }}; sleep() {{ :; }}
-uv_fixture() {{ echo ordinary-failure; return 37; }}
 {function("_uv_pip_install", "sh")}
-UV_COMMAND=uv_fixture
+UV_COMMAND='{uv}'
 _uv_pip_install --python fixture package
 exit $?
 """
@@ -198,8 +331,7 @@ exit $?
                                 capture_output=True, text=True, timeout=20)
     else:
         result = run_ps(tmp_path, f"""
-function uv_fixture {{ 'ordinary-failure'; $global:LASTEXITCODE = 37 }}
-$script:UvCommand = 'uv_fixture'
+$script:UvCommand = '{uv}'
 {function("Invoke-IndexUvPipInstall", "ps1")}
 Invoke-IndexUvPipInstall --python fixture package
 exit $LASTEXITCODE
@@ -211,6 +343,15 @@ exit $LASTEXITCODE
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 def test_shared_pip_retries_only_transient_failures(tmp_path: Path, ext: str):
     counter = tmp_path / "counter"
+    uv = fake_uv(tmp_path, f"""
+counter = pathlib.Path({str(counter)!r})
+if not counter.exists():
+    counter.write_text('1')
+    print('SRE module mismatch')
+    raise SystemExit(37)
+counter.write_text('2')
+print('recovered')
+""")
     if ext == "sh":
         bash = shutil.which("bash")
         if os.name == "nt" or not bash:
@@ -218,14 +359,8 @@ def test_shared_pip_retries_only_transient_failures(tmp_path: Path, ext: str):
         script = f"""
 . '{ENGINE / "installer-engine.sh"}'
 _warn() {{ :; }}; sleep() {{ :; }}
-uv_fixture() {{
-    if [[ ! -f '{counter}' ]]; then
-        echo 1 > '{counter}'; echo 'SRE module mismatch'; return 37
-    fi
-    echo 2 > '{counter}'; echo recovered; return 0
-}}
 {function("_uv_pip_install", "sh")}
-UV_COMMAND=uv_fixture
+UV_COMMAND='{uv}'
 _uv_pip_install --python fixture package
 exit $?
 """
@@ -234,12 +369,7 @@ exit $?
     else:
         result = run_ps(tmp_path, f"""
 function Start-Sleep {{ param($Seconds) }}
-function uv_fixture {{
-    if (-not (Test-Path '{counter}')) {{
-        Set-Content '{counter}' '1'; 'SRE module mismatch'; $global:LASTEXITCODE = 37
-    }} else {{ Set-Content '{counter}' '2'; 'recovered'; $global:LASTEXITCODE = 0 }}
-}}
-$script:UvCommand = 'uv_fixture'
+$script:UvCommand = '{uv}'
 {function("Invoke-IndexUvPipInstall", "ps1")}
 Invoke-IndexUvPipInstall --python fixture package
 exit $LASTEXITCODE
@@ -373,6 +503,7 @@ def test_powershell_snapshot_is_immutable_self_contained_and_ordered(tmp_path: P
         shutil.copy2(PLUGIN / name, source / name)
     for ext in ("sh", "ps1"):
         shutil.copy2(PLUGIN / "scripts" / f"install.{ext}", source / "scripts" / f"install.{ext}")
+    shutil.copy2(ENGINE / "installer_dependency_policy.py", source / "scripts/installer_dependency_policy.py")
     (source / "server").mkdir()
     shutil.copy2(PLUGIN / "server/pyproject.toml", source / "server/pyproject.toml")
     for library in ("zdd", "agent-procutil", "dropin-registry"):
@@ -387,7 +518,7 @@ def test_powershell_snapshot_is_immutable_self_contained_and_ordered(tmp_path: P
     names = ("Get-PayloadHash", "Resolve-VendoredLib", "Publish-FileAtomically",
              "Enter-IndexStampLock", "Materialize-IndexSnapshot", "New-IndexSnapshot",
              "Invoke-Stamp")
-    result = run_ps(tmp_path, "\n".join(function(name, "ps1") for name in names) + f"""
+    setup = "\n".join(function(name, "ps1") for name in names) + f"""
 $PluginDir = '{source}'
 $PSScriptRoot = '{source / "scripts"}'
 $InstallDir = '{tmp_path / "runtime"}'
@@ -400,14 +531,25 @@ function Deploy-SetupGatedBinstub {{
     if ([IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir')) -cne $PayloadRoot) {{ throw 'wrong payload marker' }}
     $script:Launchers = 1 + $script:Launchers
 }}
+"""
+    result = run_ps(tmp_path, setup + """
 Invoke-Stamp
 $first = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
 Invoke-Stamp
-if ([IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir')) -cne $first) {{ throw 'unchanged stamp drift' }}
+if ([IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir')) -cne $first) { throw 'unchanged stamp drift' }
 Set-Content -LiteralPath (Join-Path $PluginDir 'case.txt') 'changed'
-$newer = New-IndexSnapshot
-if ($newer -ceq $first) {{ throw 'case-distinct content omitted' }}
 Invoke-Stamp
+$newer = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
+if ($newer -ceq $first) { throw 'case-distinct content omitted' }
+$first
+$newer
+""")
+    assert result.returncode == 0, result.stderr
+    snapshots = [Path(line) for line in result.stdout.splitlines() if line.startswith(str(tmp_path))]
+    assert len(snapshots) == 2
+    result = run_ps(tmp_path, setup + f"""
+$first = '{snapshots[0]}'
+$newer = '{snapshots[1]}'
 Add-Content '{source.parents[1] / "libs/installer-engine/installer-engine.sh"}' '# fixture edit'
 $engineChanged = New-IndexSnapshot
 if ($engineChanged -ceq $newer) {{ throw 'engine content omitted from identity' }}
@@ -419,12 +561,8 @@ function New-IndexSnapshot {{ return $first }}
 Invoke-Stamp
 if ($script:Launchers -ne $before) {{ throw 'older snapshot overwrote launchers' }}
 if ([IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir')) -cne $newer) {{ throw 'older stamp replaced markers' }}
-$first
-$newer
 """)
     assert result.returncode == 0, result.stderr
-    snapshots = [Path(line) for line in result.stdout.splitlines() if line.startswith(str(tmp_path))]
-    assert len(snapshots) == 2
     for snapshot in snapshots:
         for ext in ("sh", "ps1"):
             assert (snapshot / "scripts" / f"installer-engine.{ext}").read_bytes() == (
@@ -439,17 +577,17 @@ $newer
     latest = snapshots[1]
     # Exercise the snapshot-local shared package mechanics with explicit fake uv.
     # The stub validates the complete dependency closure without installing it.
+    uv = fake_uv(tmp_path, f"""
+root = pathlib.Path({str(latest)!r})
+for name in ('zdd', 'agent-procutil', 'dropin-registry'):
+    assert (root / 'libs' / name / 'pyproject.toml').is_file()
+assert (root / 'server/pyproject.toml').is_file()
+assert '--exclude-newer' in sys.argv and '--reinstall' in sys.argv
+""")
     result = run_ps(tmp_path, f"""
 . '{latest / "scripts/installer-engine.ps1"}'
-function fixture_uv {{
-    if ($args[0] -ne 'pip' -or $args[1] -ne 'install') {{ throw 'unexpected uv operation' }}
-    foreach ($lib in @('zdd', 'agent-procutil', 'dropin-registry')) {{
-        if (-not (Test-Path (Join-Path '{latest}/libs' "$lib/pyproject.toml"))) {{ throw 'missing local dependency' }}
-    }}
-    if (-not (Test-Path '{latest / "server/pyproject.toml"}')) {{ throw 'missing engine package' }}
-    $global:LASTEXITCODE = 0
-}}
-$result = Invoke-UvPipInstallResilient -UvCommand 'fixture_uv' -Arguments @('--python', 'fixture', '{latest}')
+$result = Invoke-UvPipInstallResilient -UvCommand '{uv}' -Arguments @('--python', 'fixture', '{latest}')
+if ($result.ExitCode -ne 0) {{ Write-Host $result.Output }}
 exit $result.ExitCode
 """)
     assert result.returncode == 0, result.stderr
@@ -500,18 +638,7 @@ def test_posix_cli_build_uses_shared_venv_and_keeps_engine_lazy(tmp_path: Path):
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
     log = tmp_path / "calls"
-    uv = tmp_path / "uv"
-    uv.write_text(
-        "#!/usr/bin/env bash\n"
-        f'echo "$*" >> "{log}"\n'
-        'if [[ "$1" == --version ]]; then exit 0; fi\n'
-        'if [[ "$1" == venv ]]; then\n'
-        ' mkdir -p "$2/bin"; echo "home = fixture" > "$2/pyvenv.cfg"\n'
-        f" printf '%s' {shlex.quote(FAKE_PYTHON)} > \"$2/bin/python\"\n"
-        ' chmod +x "$2/bin/python"; fi\n',
-        encoding="utf-8",
-    )
-    uv.chmod(0o755)
+    posix_venv_uv(tmp_path)
     plugin = tmp_path / "plugin"
     for library in ("zdd", "agent-procutil", "dropin-registry"):
         directory = plugin / "libs" / library
@@ -522,11 +649,12 @@ def test_posix_cli_build_uses_shared_venv_and_keeps_engine_lazy(tmp_path: Path):
     (plugin / "scripts").mkdir()
     for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py"):
         shutil.copy2(PLUGIN / "scripts" / name, plugin / "scripts" / name)
+    construction_bundle(plugin / "scripts")
     env = environment(tmp_path)
     env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
     functions = "\n".join(function(name, "sh") for name in (
         "_ensure_uv", "_uv_pip_install", "_resolve_vendored_lib",
-        "_bootstrap_python",
+        "_bootstrap_python", "_versioned_slot_clean", "_versioned_mark_complete",
         "_test_index_venv", "_new_index_venv", "_with_index_build_lock", "_with_index_advisory_lock",
         "_with_index_publication_lock", "_index_publication_fresh", "_version_lt", "_install_server_venv", "_ensure_runtime",
     ))
@@ -543,8 +671,7 @@ _find_python() {{ echo '{tmp_path / "forbidden-base-python"}'; }}
 _ensure_uv_index() {{ :; }}
 _activation_role() {{ echo client; }}
 _runtime_origin_under() {{ return 0; }}
-_versioned_slot_clean() {{ :; }}
-_versioned_mark_complete() {{ :; }}
+_payload_hash() {{ printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }}
 _versioned_activate() {{ :; }}
 _versioned_current() {{ :; }}
 _versioned_gc() {{ :; }}
@@ -563,6 +690,8 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 LINK_PYTHON="$VENV_PYTHON"
 _resolve_zdd() {{ _resolve_vendored_lib zdd; }}
 {functions}
+_bootstrap_python() {{ echo '{sys._base_executable}'; }}
+_uv_pip_install() {{ "$UV_COMMAND" pip install "$@"; }}
 _ensure_runtime
 """], env=env, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
@@ -576,6 +705,7 @@ _ensure_runtime
     assert installs[3].endswith(str(plugin))
     assert all("torch" not in line and "[store,server]" not in line for line in installs)
     assert not (tmp_path / "runtime/engine").exists()
+    assert (tmp_path / "runtime/versions/1.0.0/.install-complete.json").is_file()
 
 
 def test_required_server_package_failure_refuses_activation_under_errexit(tmp_path: Path):

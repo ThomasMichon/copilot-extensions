@@ -170,7 +170,9 @@ def _tree(root: Path) -> dict[str, bytes]:
     }
 
 
-def _assert_outcome(tmp_path: Path, result: subprocess.CompletedProcess, expected: str) -> None:
+def _assert_outcome(
+    tmp_path: Path, result: subprocess.CompletedProcess, expected: str, *, failure_code: int = 42
+) -> None:
     events = _events(tmp_path)
     detail = (
         f"rc={result.returncode}\nevents={events}\n"
@@ -178,8 +180,9 @@ def _assert_outcome(tmp_path: Path, result: subprocess.CompletedProcess, expecte
     )
     assert "START" in events, detail
     if expected == _PROCEED:
-        assert result.returncode == 42, detail
+        assert result.returncode == failure_code, detail
         assert "PROCEEDED" in events, detail
+        assert not (tmp_path / "install" / "versions" / _VERSION).exists(), detail
     elif expected == _NOOP:
         assert result.returncode == 0, detail
         assert "PROCEEDED" not in events and "DRAINED" not in events, detail
@@ -220,6 +223,7 @@ _PS_FUNCTIONS = (
     ("Get-SlotAdmission", True),
     ("Write-SlotAdmissionRefusal", True),
     ("Test-SlotIsLiveDifferentContent", True),
+    ("Invoke-VersionedSlotClean", False),
     ("Invoke-VersionedMarkComplete", False),
     ("Invoke-InstallSlotBuild", True),
     ("Invoke-UpdateSlotBuild", True),
@@ -250,6 +254,7 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = {_ps_quote(_SCRIPTS)}
 $PluginDir = {_ps_quote(_fake_plugin(tmp_path))}
 $InstallDir = {_ps_quote(tmp_path / "install")}
+$LinkDir = Join-Path $InstallDir 'venv'
 $SrcVersion = '{_VERSION}'
 $VersionedRuntime = $true
 $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
@@ -317,7 +322,13 @@ New-Item -ItemType Directory -Force -Path $VenvDir | Out-Null
 if (Test-Path -LiteralPath $m) {{ Copy-Item -LiteralPath $m {_ps_quote(tmp_path / "before.json")} }}
 if (Test-Path -LiteralPath $VenvDir) {{ Copy-Item -LiteralPath $VenvDir {_ps_quote(tmp_path / "before-slot")} -Recurse }}
 Rec 'START'
+try {{
 {action}
+}} finally {{
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {{
+        Stop-RuntimeConstruction
+    }}
+}}
 """
     harness = tmp_path / "harness.ps1"
     harness.write_text(body, encoding="utf-8")
@@ -341,7 +352,7 @@ def test_ps1_completed_slot_admission(
     tmp_path: Path, action: str, scenario: str, expected: str
 ) -> None:
     result = _run_ps(_ps_harness(tmp_path, scenario, action))
-    _assert_outcome(tmp_path, result, expected)
+    _assert_outcome(tmp_path, result, expected, failure_code=1)
 
 
 # An unavailable payload hash must never let a same-content shortcut accept a
@@ -379,11 +390,13 @@ def test_ps1_mark_complete_reports_publication_result(
     harness = _ps_harness(
         tmp_path,
         scenario,
+        "[void](Invoke-VersionedSlotClean -PayloadHash $ph)\n"
         "$r = Invoke-VersionedMarkComplete -PayloadHash $ph\nWrite-Host \"RESULT=[$r]\"\n",
     )
     result = _run_ps(harness)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert f"RESULT=[{expected}]" in result.stdout, result.stdout + result.stderr
+    assert result.returncode == (1 if expected == "False" else 0), result.stdout + result.stderr
+    if expected != "False":
+        assert f"RESULT=[{expected}]" in result.stdout, result.stdout + result.stderr
     assert _slot_marker(tmp_path).exists()
     if scenario == "conflict-inactive":
         assert _slot_marker(tmp_path).read_bytes() == (tmp_path / "before.json").read_bytes()
@@ -510,12 +523,7 @@ def _assert_mid_build_outcome(
     for sentinel in ("ACTIVATED", "MANIFEST"):
         assert sentinel not in events, detail
     slot = tmp_path / "install" / "versions" / _VERSION
-    if update:
-        # The failed-update rollback discards the never-published slot.
-        assert not slot.exists(), detail
-    else:
-        # Left incomplete, for the next build's --clean-incomplete.
-        assert slot.is_dir(), detail
+    assert not slot.exists(), detail
 
 
 @pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
@@ -601,6 +609,7 @@ _SH_FUNCTIONS = (
     ("_payload_unchanged_since_admission", True),
     ("_bootstrap_python", False),
     ("_versioned_current", False),
+    ("_versioned_slot_clean", False),
     ("_versioned_mark_complete", False),
     ("_slot_admission", True),
     ("_slot_admission_refusal", True),
@@ -681,9 +690,8 @@ SYSTEMD_UNIT=agent-bridge-admission-test.service
 _install_sibling_plugins() {{ rec PRUNED; }}
 _runtime_healthy() {{ rec HEALTH; return 0; }}
 _versioned_activate() {{ rec ACTIVATED; exit 50; }}
-_versioned_slot_clean() {{ rec PROCEEDED; exit 42; }}
 _venv_healthy() {{ return 1; }}
-_uv_venv_resilient() {{ rec BUILT; exit 42; }}
+_uv_venv_resilient() {{ rec PROCEEDED; rec BUILT; exit 42; }}
 # Hermetic shared-library resolution: only the fake checkout's libs/.
 _resolve_vendored_lib() {{
     local c="$PLUGIN_DIR/../../libs/$1"
@@ -759,7 +767,7 @@ def test_sh_mark_complete_reports_publication_result(
     harness = _sh_harness(
         tmp_path,
         scenario,
-        prefix + 'if _versioned_mark_complete; then echo "MC=ok"; else echo "MC=fail"; fi\n',
+        prefix + 'if _versioned_slot_clean && _versioned_mark_complete; then echo "MC=ok"; else echo "MC=fail"; fi\n',
     )
     result = _run_sh(harness)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -906,14 +914,16 @@ def test_ps1_refused_slot_preparation_never_builds_over_the_slot(
     harness = _ps_harness(
         tmp_path,
         scenario,
+        "[void](Invoke-VersionedSlotClean -PayloadHash $ph)\n"
         "$r = New-SignedVenv\nWrite-Host \"RESULT=[$r]\"\n",
-        extra=("Invoke-VersionedSlotClean", "New-SignedVenv"),
+        extra=("New-SignedVenv",),
     )
     result = _run_ps(harness)
     detail = result.stdout + result.stderr
-    assert result.returncode == 0, detail
+    assert result.returncode == 1, detail
     assert ("BUILT" in _events(tmp_path)) is built, detail
-    assert f"RESULT=[{built}]" in result.stdout, detail
+    if built:
+        assert "RESULT=[True]" in result.stdout, detail
     assert (tmp_path / "install" / "versions" / _VERSION / "partial.txt").exists() is not built
 
 
@@ -924,7 +934,7 @@ def test_ps1_refused_slot_preparation_never_builds_over_the_slot(
 def test_sh_refused_slot_preparation_never_builds_over_the_slot(
     tmp_path: Path, scenario: str, built: bool
 ) -> None:
-    harness = _sh_harness(tmp_path, scenario, "do_install", extra=("_versioned_slot_clean",))
+    harness = _sh_harness(tmp_path, scenario, "do_install")
     result = _run_sh(harness)
     detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
     assert ("BUILT" in _events(tmp_path)) is built, detail
@@ -934,13 +944,20 @@ def test_sh_refused_slot_preparation_never_builds_over_the_slot(
 
 def test_slot_preparation_refusal_is_propagated_by_every_caller() -> None:
     ps = _INSTALL_PS1.read_text(encoding="utf-8")
-    assert "if (-not (Invoke-VersionedSlotClean)) { return $false }" in _extract_ps(
-        "New-SignedVenv", ps
-    )
+    for name in ("Invoke-Install", "Invoke-Update"):
+        body = _extract_ps(name, ps)
+        assert body.index("Invoke-VersionedSlotClean -PayloadHash $payloadHash") < body.index(
+            "Invoke-InstallSlotBuild" if name == "Invoke-Install" else "Write-UpdateMarker"
+        )
     sh = _INSTALL_SH.read_text(encoding="utf-8")
     assert "|| true" not in _extract_sh("_versioned_slot_clean", sh)
-    assert "    _versioned_slot_clean || exit 1\n" in _extract_sh("_install_slot_build", sh)
-    assert "_versioned_slot_clean || return 1\n" in _extract_sh("_update_core", sh)
+    for name in ("do_install", "do_update"):
+        body = _extract_sh(name, sh)
+        assert "_versioned_slot_clean || exit 1\n" in body
+        boundary = "_install_slot_build\n" if name == "do_install" else '_update_lifecycle_drain_stop "'
+        assert body.index("_versioned_slot_clean || exit 1") < body.index(boundary)
+    update = _extract_sh("do_update", sh)
+    assert update.index("trap _clear_update_marker EXIT") < update.index("_versioned_slot_clean || exit 1")
 
 def test_reused_slot_skips_every_slot_mutation_in_both_installers() -> None:
     """A matching completed slot is activated as-is (#5472): the build,
@@ -969,8 +986,7 @@ def test_reused_slot_skips_every_slot_mutation_in_both_installers() -> None:
 # Create-once: every slot mutation precedes verification and publication
 # --------------------------------------------------------------------------
 
-_SH_BUILD_STUBS = """_versioned_slot_clean() { :; }
-_uv_venv_resilient() { rec BUILT; return 0; }
+_SH_BUILD_STUBS = """_uv_venv_resilient() { rec BUILT; return 0; }
 _uv_pip_install_resilient() { return 0; }
 _resolve_ssh_manager() { echo lib; }
 _resolve_credential_relay() { echo lib; }

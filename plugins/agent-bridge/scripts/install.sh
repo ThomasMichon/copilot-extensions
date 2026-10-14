@@ -469,28 +469,18 @@ _scrub_payload_build_artifacts() {
 
 _uv_pip_install_resilient() {
     local scrub_dir="$1"; shift
-    local out delay
-    _scrub_payload_build_artifacts "$scrub_dir"
-    if out="$(uv pip install "$@" 2>&1)"; then
+    local INSTALLER_ENGINE_BEFORE_ATTEMPT=_scrub_payload_build_artifacts
+    local INSTALLER_ENGINE_BEFORE_ATTEMPT_ARGUMENT="$scrub_dir"
+    local out rc=0
+    if out="$(invoke_uv_pip_install_resilient uv "$@" 2>&1)"; then
         _scrub_payload_build_artifacts "$scrub_dir"
         printf '%s\n' "$out"
         return 0
+    else
+        rc=$?
     fi
-    for delay in 3 6 10; do
-        if ! test_is_sre_module_mismatch "$out"; then
-            break
-        fi
-        _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        sleep "$delay"
-        _scrub_payload_build_artifacts "$scrub_dir"
-        if out="$(uv pip install "$@" 2>&1)"; then
-            _scrub_payload_build_artifacts "$scrub_dir"
-            printf '%s\n' "$out"
-            return 0
-        fi
-    done
     printf '%s\n' "$out" >&2
-    return 1
+    return "$rc"
 }
 
 # A venv is only healthy when BOTH its python binary and pyvenv.cfg exist --
@@ -754,68 +744,29 @@ _payload_unchanged_since_admission() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). Returns
-    # non-zero when the primitive REFUSES (e.g. the incomplete slot is selected
-    # or still in use): building over it would mutate a live/selected slot in
-    # place, so the caller must not proceed (#5472). No-op in legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    local out rc=0
-    out="$("$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1)" || rc=$?
-    if [[ -n "$out" ]]; then printf '%s\n' "$out" | sed 's/^/  ...    /'; fi
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Runtime slot versions/$SRC_VERSION could not be safely prepared (exit $rc); refusing to build over it in place"
-        return 1
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
     fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then SLOT_ADMISSION=reuse; else SLOT_ADMISSION=construct; fi
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via the slot's own python (or any bootstrap python).
-    # A refused publication fails the caller (#5472).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    # Prefer the freshly built slot's own interpreter: it already passed the
-    # health gate, and an ambient one may be absent or unusable.
-    local py=""
-    if [[ -x "$VENV_DIR/bin/python" ]]; then
-        py="$VENV_DIR/bin/python"
-    else
-        py="$(_bootstrap_python)" || py=""
-    fi
-    if [[ -z "$py" ]]; then
-        _fail "No python available to publish the completion marker for runtime slot versions/$SRC_VERSION"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    # The transaction's payload fingerprint fixed before admission (see
-    # _payload_hash) -- never recomputed here; callers that built the slot
-    # first confirm the sources still hash to it
-    # (_payload_unchanged_since_admission).
-    local ph
-    if ! ph="$(_payload_hash)"; then
-        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
-        return 1
-    fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    # A refused publication (e.g. conflicting completion evidence for this
-    # numbered version) must fail the install, never be swallowed (#5472).
-    local out rc=0
-    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
-    if [[ -n "$out" ]]; then printf '%s\n' "$out" | sed 's/^/  ...    /'; fi
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to publish the completion marker for runtime slot versions/$SRC_VERSION (exit $rc)"
-        return 1
-    fi
+    _runtime_construction_complete "$actual_hash"
 }
 
 _slot_admission() {
@@ -1724,8 +1675,6 @@ _install_slot_build() {
     # #935: toss an INCOMPLETE prior slot first so we never `uv venv
     # --allow-existing` over a half-built corpse (the current/active slot is
     # never tossed). No-op in legacy mode.
-    _versioned_slot_clean || exit 1
-
     # Create venv via uv
     if ! _venv_healthy "$VENV_DIR"; then
         if [[ -x "$VENV_DIR/bin/python" ]]; then
@@ -1880,6 +1829,7 @@ do_install() {
         _write_deploy_manifest
         return 0
     fi
+    _versioned_slot_clean || exit 1
 
     mkdir -p "$INSTALL_DIR"
     if $PUBLISH_GLOBAL_BINSTUBS; then
@@ -2361,7 +2311,6 @@ _update_core() {
         fi
         if ! _venv_healthy "$VENV_DIR"; then
             _step "Building runtime slot versions/$SRC_VERSION..."
-            _versioned_slot_clean || return 1
             if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
                 _uv_venv_resilient "$VENV_DIR" --allow-existing || { _fail "Venv build failed (versions/$SRC_VERSION)"; return 1; }
             fi
@@ -2599,10 +2548,12 @@ do_update() {
         cutover=true
     fi
 
+    _versioned_slot_clean || exit 1
+
     # Stop the running instance before the in-place reinstall, UNLESS we are
     # doing a cutover (which keeps the old daemon up and retires it afterward).
     # Either way, drain first so in-flight turns get a chance to settle.
-    if [[ "$was_running" == true && "$cutover" == false ]]; then
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 && "$was_running" == true && "$cutover" == false ]]; then
         if ! _update_lifecycle_drain_stop "$predecessor_signature" "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"; then
             was_running=false
         fi
@@ -2617,13 +2568,10 @@ do_update() {
         if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
             # The `venv` link was never swapped (activate runs only after a healthy
             # build), so the previous slot is still active. Discard the half-built
-            # new slot -- only one this run constructed: a reused slot was already
-            # published (create-once, #5472) and is never deleted here -- and
-            # restart the previous version if the classic path stopped it.
-            if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "$prev_version" \
-                  && "${SLOT_ADMISSION:-construct}" == construct ]]; then
-                rm -rf "$INSTALL_DIR/versions/$SRC_VERSION"
-            fi
+            # new slot (unless it IS the active one) and restart the previous
+            # version if the classic path stopped it.
+            # The attached construction owner reclaims the failed candidate
+            # after rollback, under the canonical cleanup and selector guards.
             if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
                 _update_lifecycle_start "$predecessor_signature" "Restarting the previous version..." || was_running=false
             fi

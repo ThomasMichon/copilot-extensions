@@ -441,51 +441,28 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || py=""
-    if [[ -z "$py" ]]; then
-        [[ -e "$VENV_DIR" ]] || return 0
-        _fail "Cannot inspect or clean versions/$SRC_VERSION without a bootstrap Python interpreter"
-        return 1
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
     fi
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'
-    local rc=$?
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to clean incomplete runtime slot versions/$SRC_VERSION"
-        return "$rc"
-    fi
-    return 0
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    # The freshly built slot's own interpreter: it already passed the health
-    # gate, and an ambient one may be absent or unusable.
-    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
-    if [[ -z "$py" ]]; then
-        _fail "Cannot mark versions/$SRC_VERSION complete without a bootstrap Python interpreter"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    # Reuse the SAME payload hash computed once, before the build, into
-    # $PAYLOAD_HASH -- never recompute it here. A local-checkout install
-    # does not self-stage: the live source tree can change between the
-    # pre-build admission check and this post-build marker write (e.g. an
-    # edit landing mid-install), and `uv pip install` already consumed
-    # whatever bytes were present earlier. Recomputing here would let the
-    # marker describe NEWER content than what was actually built into the
-    # slot, letting a later install wrongly reuse it as if it matched.
-    local ph="$PAYLOAD_HASH"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
-    local rc=$?
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to mark versions/$SRC_VERSION complete"
-        return "$rc"
-    fi
-    return 0
+    _runtime_construction_complete "$actual_hash"
 }
 
 _versioned_is_complete() {
@@ -601,7 +578,8 @@ _ok "Directories: $INSTALL_DIR"
 _install_hook_files
 
 PAYLOAD_HASH="$(_payload_hash)" || exit 1
-SLOT_ALREADY_COMPLETE=0
+_versioned_slot_clean || exit 1
+SLOT_ALREADY_COMPLETE="$_RUNTIME_CONSTRUCTION_REUSE"
 if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
     if _versioned_is_complete "$PAYLOAD_HASH"; then
         SLOT_ALREADY_COMPLETE=1
@@ -639,9 +617,7 @@ if [[ "$SLOT_ALREADY_COMPLETE" -eq 0 ]]; then
     _ok 'Package installed: agent-pull-requests'
 fi
 
-if [[ "$SLOT_ALREADY_COMPLETE" -eq 0 ]]; then
-    _versioned_activate || exit 1
-fi
+_versioned_activate || exit 1
 write_simple_binstub \
     "agent-pull-requests" "agent_pull_requests" "$INSTALL_DIR" "$LOCAL_BIN" "$INSTALL_DIR/bin" "scripts/install.sh" "AGENT_PULL_REQUESTS_NO_SELFPROVISION" \
     "$SCRIPT_DIR/resolve-runtime.ps1" "$SCRIPT_DIR/resolve-runtime.sh"

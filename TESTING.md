@@ -112,6 +112,23 @@ contract executes both aliases in canonical contained fixture environments
 from an isolated parent whose pytest dependencies reside outside its interpreter
 scheme, exercising the layered dependency layout without installing packages.
 
+Dependency preparation uses the canonical seven-day configured-resolver policy.
+Do not replace a failed admission with plain pip or an alternate index. After
+changing declarations, run `python tools/check-dependency-age.py`; its explicit
+`--ecosystem` lanes are diagnostics, not a replacement for the all-ecosystem CI
+gate. Focused policy tests are:
+
+```bash
+python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_seasoned_npm_install.py
+```
+
+The native UV lane uses a controlled index to exercise a transitive dependency
+and an isolated build backend, including newer/missing upload timestamps,
+transitive URL refusal and UV's conservative exclusive boundary. The native npm
+lane runs configured-registry queries and `npm ci` against a controlled registry;
+newer or unknown releases must refuse before artifact download. These helpers
+perform no production service mutations.
+
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
 against the bundled `actions/github-script` runtime as well, download
@@ -199,6 +216,18 @@ mutations, and expose attempted forbidden effects as assertion failures.
 User-root redirection alone does not isolate executable discovery or scheduled
 tasks. The signed-venv health/exit-code matrix uses simulated signatures on both
 platforms; native signature-policy behavior still requires Windows validation.
+Isolated runtime-helper fixtures must copy `versioned_runtime.py` with its
+adjacent `versioned_runtime_leases.py` and `versioned_runtime_construction.py`.
+Standalone wheel/sdist tests bind every member to canonical bytes and wheel
+RECORD; a missing companion must fail rather than yield a partial artifact.
+
+Dependency fixtures must also preserve source attribution. Stage matching
+publisher/project metadata and the declared local library graph at the real
+helper location; use the existing release materializers before stamping a
+payload rather than retaining development paths that escape its root.
+Direct policy API callers attest the fixture creator's fixed repository root,
+not a root derived from the requested package argument. Keep admission active:
+do not mock ownership discovery or widen trust to make a fixture pass.
 
 The Codespaces module-launch matrix is an opt-in T3 contract:
 `python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.

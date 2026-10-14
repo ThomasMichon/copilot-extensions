@@ -20,6 +20,7 @@ SPEC.loader.exec_module(runner)
 
 
 def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "prepare_uv_install", lambda uv, args, **kwargs: args)
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     python = runner.default_python("fleet-manager")
@@ -42,6 +43,7 @@ def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_pat
 
 @pytest.mark.parametrize("smoke", [False, True])
 def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monkeypatch, smoke):
+    monkeypatch.setattr(runner, "prepare_uv_install", lambda uv, args, **kwargs: args)
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     metadata = tmp_path / "plugins" / "agent-index" / "pyproject.toml"
@@ -74,6 +76,7 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
 
 
 def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "prepare_uv_install", lambda uv, args, **kwargs: args)
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs: calls.append(argv))
@@ -83,6 +86,70 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
     python.touch()
     runner.prepare("worktree-manager", python)
     assert calls[-1][-2:] == ["--editable", str(tmp_path / "worktree-manager") + "[dev]"]
+
+
+@pytest.mark.parametrize("component", [
+    "fleet-manager", "worktree-manager", "services/index", "services/dispatch",
+])
+def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch, component):
+    projects = {
+        "fleet-manager": "fleet-manager",
+        "worktree-manager": "worktree-manager",
+        "services/index": "agent-index-service",
+        "services/dispatch": "agent-dispatch-service",
+        "plugins/agent-index": "agent-index",
+        "plugins/agent-dispatch": "agent-dispatch",
+        "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
+        "libs/zdd": "agent-zdd",
+        "libs/agent-procutil": "agent-procutil",
+        "libs/dropin-registry": "agent-dropin-registry",
+        "libs/plugin-activation": "agent-plugin-activation",
+        "libs/plugin-resolve": "agent-plugin-resolve",
+        "libs/single-instance-lease": "agent-single-instance-lease",
+    }
+    for relative, name in projects.items():
+        project = tmp_path / relative
+        project.mkdir(parents=True, exist_ok=True)
+        (project / "pyproject.toml").write_text(
+            f'[project]\nname="{name}"\nversion="1.0"\n'
+            '[project.optional-dependencies]\ndev=[]\nnative=[]\ntest=[]\nstore=[]\nserver=[]\n',
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    python = runner.default_python(component)
+    python.parent.parent.mkdir(parents=True)
+    admitted = runner.prepare_uv_install
+    probes = []
+    installs = []
+
+    def prepare(uv, arguments, **kwargs):
+        assert kwargs["trusted_source_roots"] == (tmp_path,)
+        return admitted(uv, arguments, **kwargs)
+
+    def command(arguments, **kwargs):
+        if arguments[1] == "venv":
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.touch()
+        elif "--show-settings" in arguments:
+            probes.append(arguments)
+            return subprocess.CompletedProcess(arguments, 0, """PipInstallSettings { settings: PipSettings {
+                index_locations: IndexLocations { indexes: [], flat_index: [], },
+                exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+            }, }""", "")
+        else:
+            installs.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(runner, "prepare_uv_install", prepare)
+    monkeypatch.setattr(runner.subprocess, "run", command)
+    runner.prepare(component, python, smoke=component == "services/index")
+    assert len(probes) == len(installs) == 1
+    assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
+    assert str(tmp_path / component) + (
+        "[test]" if component == "services/index" else "[dev]"
+    ) in installs[0]
+    if component in ("services/index", "services/dispatch"):
+        assert "--override" in installs[0]
 
 
 @pytest.mark.parametrize("component", [

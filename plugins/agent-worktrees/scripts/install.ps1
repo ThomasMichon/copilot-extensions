@@ -1630,60 +1630,31 @@ function Wait-ForVersionedSlotLease {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
-       --allow-existing` over a corpse (#935); the current/active slot is never
-       tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op ($true -- nothing to clean) in legacy mode.
-
-       Returns $true iff the slot is confirmed clean (or cleaning was a no-op);
-       $false when the underlying `slot --clean-incomplete` call failed (e.g.
-       "incomplete runtime slot is still in use"), OR when an EXISTING slot
-       can't be verified at all because no bootstrap Python could be
-       resolved (an absent slot needs no validation and is trivially clean)
-       -- callers must not build a signed-Python venv straight into a slot
-       this reports dirty (#2413): a still-populated $VenvDir predictably
-       fails `--copies` and silently downgrades to an unsigned uv-built
-       interpreter. Uses -ExcludeVenvDir: running the census with the
-       TARGET slot's own interpreter would make the helper process itself
-       show up as "a live process running from this slot", permanently
-       self-reporting an incomplete slot with a stale python.exe as still
-       in use on every retry. #>
-    if (-not $VersionedRuntime) { return $true }
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython -ExcludeVenvDir
-    if (-not $py) { return -not (Test-Path $VenvDir) }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
-    return ($LASTEXITCODE -eq 0)
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+    return $true
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so "marker present" == "healthy, complete build". A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py -or -not (Test-Path -LiteralPath $py -PathType Leaf)) {
-        Write-ServiceErr "Completion publication requires bootstrap Python -- refusing activation"
-        return $false
+    param([string]$PayloadHash = '')
+    $actualHash = Get-PayloadHash
+    if (-not $actualHash) {
+        throw 'Runtime input fingerprint unavailable -- refusing completion publication'
     }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
-    if (-not $ph) {
-        Write-ServiceErr "Runtime input fingerprint unavailable -- refusing completion publication"
-        return $false
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
-    $mcArgs += @('--payload-hash', $ph)
-    $result = Invoke-NativeCapture { & $py @mcArgs }
-    if ($result.Output) {
-        ($result.Output -split '\r?\n') | ForEach-Object { Write-Host "  ...    $_" }
-    }
-    if ($result.ExitCode -ne 0) {
-        Write-ServiceErr "Completion publication failed for versions/$SrcVersion -- refusing activation"
-        return $false
-    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 
@@ -2043,79 +2014,24 @@ finally:
 }
 
 function Invoke-VenvPackageInstall {
-    <# Install a local package dir into the venv, forcing the local code to
-       refresh even when its (dev) version string is unchanged.
-
-       PREFERS `uv` (harness convention: always uv, never bare pip). uv is
-       immune to a failure class pip is not: pip's post-install "scripts on
-       PATH?" check `realpath`s EVERY %PATH% entry, so an untrusted junction on
-       PATH -- e.g. Agency's `%APPDATA%\agency\CurrentVersion` -- makes pip die
-       with `WinError 448` under Windows RedirectionGuard (dotfiles book2). uv
-       never resolves PATH entries, so it sidesteps it. Falls back to
-       `<venv python> -m pip` ONLY when uv is unavailable (uv strictly preferred
-       whenever present). Every command runs from a trusted CWD (SystemDrive
-       root), never the profile mount, so the WinGet uv.exe reparse shim is safe
-       on SAC / profile-mount Cloud PCs.
-
-       Returns [pscustomobject]@{ ExitCode; Output }. #>
     param(
         [Parameter(Mandatory)][string]$VenvPython,
         [Parameter(Mandatory)][string]$PkgName,
         [Parameter(Mandatory)][string]$PkgDir
     )
-
     $uvPath = Get-ApplicationPath -Name @('uv')
-    $uvAvailable = [bool]$uvPath
-    $out = ''
-    $rc = 0
-
-    $prevLoc = Get-Location
-    Set-Location "$env:SystemDrive\"
-    try {
-        if ($uvAvailable) {
-            Ensure-UvIndex
-            # Install-contract: resolved-path equivalent of `uv pip install`.
-            $result = Invoke-NativeCapture {
-                & $uvPath pip install --python $VenvPython `
-                    --reinstall-package $PkgName "$PkgDir" --quiet
-            }
-            $out = $result.Output
-            $rc = $result.ExitCode
+    if (-not $uvPath) {
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output = 'uv is required; unrestricted pip fallback is not supported'
         }
-        if (-not $uvAvailable -or $rc -ne 0) {
-            # Fallback only when uv is absent (or its install failed). pip may
-            # itself fail here on a machine whose PATH carries an untrusted
-            # junction (see the header) -- which is why uv is preferred.
-            $pipVersion = Invoke-NativeCapture { & $VenvPython -m pip --version }
-            $hasPip = $pipVersion.ExitCode -eq 0
-            if ($hasPip) {
-                # 1) Resolve + install dependencies (idempotent once present).
-                $result = Invoke-NativeCapture {
-                    & $VenvPython -m pip install "$PkgDir" --quiet
-                }
-                $pipOut = $result.Output
-                $rc = $result.ExitCode
-                if ($rc -eq 0) {
-                    # 2) Force just the local package's code to refresh (deps are
-                    #    already satisfied) so unchanged dev versions still update.
-                    $result = Invoke-NativeCapture {
-                        & $VenvPython -m pip install --force-reinstall `
-                            --no-deps "$PkgDir" --quiet
-                    }
-                    $pipOut = "$pipOut`n$($result.Output)".Trim()
-                    $rc = $result.ExitCode
-                }
-                $out = if ($out) {
-                    @($out, $pipOut) -join [Environment]::NewLine
-                } else {
-                    $pipOut
-                }
-            }
-        }
-    } finally {
-        Set-Location $prevLoc
     }
-    return [pscustomobject]@{ ExitCode = $rc; Output = $out }
+    Ensure-UvIndex
+    return Invoke-NativeCapture {
+        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') `
+            --uv $uvPath -- --python $VenvPython `
+            --reinstall-package $PkgName "$PkgDir" --quiet
+    }
 }
 
 function Deploy-Package {
@@ -2517,6 +2433,12 @@ function Deploy-Venv {
             Write-ServiceErr "Another process is still building this runtime slot ($SrcVersion) after waiting -- refusing to race it. Re-run update once the other build finishes, or raise AGENT_WORKTREES_SLOT_LEASE_WAIT_SEC if builds routinely take longer."
         }
         return $false
+    }
+
+    [void](Invoke-VersionedSlotClean)
+    if ($script:RuntimeConstructionReuse) {
+        $script:DeployVenvAlreadyComplete = $true
+        return $true
     }
 
     # Re-check completeness NOW, under the just-acquired lease: see the
@@ -3930,6 +3852,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+try {
 switch ($Action) {
     'stamp' {
         Invoke-Stamp
@@ -4410,5 +4333,11 @@ switch ($Action) {
         Write-V3Manifest
 
         Write-ServiceOk "Update complete"
+    }
+}
+
+} finally {
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        Stop-RuntimeConstruction
     }
 }

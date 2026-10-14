@@ -144,26 +144,33 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
     assert "_ensure_engine" not in sh_ensure
 
 
-def test_installers_preserve_two_step_cuda_engine_swap():
-    """`agent-index-engine` (the separate embedding-server package, effort
-    agent-index-server-package-split) is installed in TWO steps into the
-    durable engine venv: the light `agent-index` base package first, then
-    `agent-index-engine` itself (which depends on it) -- mirroring the same
-    zdd/agent-procutil pre-install pattern the main service venv already
-    uses for its own vendored deps."""
+def test_installers_preserve_two_step_cuda_engine_resolution():
+    """Install attributable base/server sources before resolving the full CUDA graph."""
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
 
     assert 'AGENT_INDEX_TORCH_INDEX' in ps
-    assert '--no-deps --reinstall-package torch torch' in ps
+    assert '--no-deps' not in ps
+    assert '--no-build-isolation' not in ps
+    assert '--index-url $torchIdx  --reinstall-package torch torch' in ps
     assert '$baseOut = Invoke-IndexUvPipInstall --python $EngineVenvPython "$PluginDir"' in ps
     assert '"$PluginDir\\server")' in ps
-    assert "'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }" in ps
+    assert ps.index('$baseOut = Invoke-IndexUvPipInstall') < ps.index(
+        '$srvOut = Invoke-IndexUvPipInstall @pipArgs'
+    ) < ps.index('$torchOut = Invoke-IndexUvPipInstall')
+    assert "'engine-update' { if (-not (Install-Engine -Upgrade)) { throw 'Engine runtime update failed' }; Restart-EngineDaemon }" in ps
 
     assert 'AGENT_INDEX_TORCH_INDEX' in sh
-    assert '--no-deps --reinstall-package torch torch' in sh
+    assert '--no-deps' not in sh
+    assert '--no-build-isolation' not in sh
+    assert '--index-url "$torch_idx"  --reinstall-package torch torch' in sh
     assert '_uv_pip_install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?' in sh
     assert '"$PLUGIN_DIR/server")' in sh
+    assert sh.index('_uv_pip_install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR"') < sh.index(
+        '_uv_pip_install "${uv_args[@]}"'
+    ) < sh.index('_uv_pip_install --python "$ENGINE_VENV_PYTHON" --index-url')
+    engine_update = sh.split('    engine-update)', 1)[1].split('    status)', 1)[0]
+    assert '_install_engine upgrade || exit $?' in engine_update
     assert 'engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)' in sh
 
 

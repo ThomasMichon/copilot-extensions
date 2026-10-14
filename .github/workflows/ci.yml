@@ -111,13 +111,43 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
       - name: Install tooling
-        run: python -m pip install --upgrade pip pytest pyyaml ruff
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml ruff packaging
+      - id: dependency-age
+        name: Detect dependency declaration and policy changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+            head="HEAD"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$base" "$head" | grep -Eq \
+            '(^|/)(pyproject\.toml|package(-lock)?\.json|[^/]*requirements[^/]*\.txt)$|^tools/(check-dependency-age\.py|dependency_age\.py|seasoned_uv\.py|seasoned_public_feed\.py)$|^worktree-manager/scripts/picker-snapshot/install\.py$|^libs/installer-engine/|^\.github/(dependabot\.yml|workflows/ci\.yml)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Seasoned dependency declarations
+        if: steps.dependency-age.outputs.run == 'true'
+        timeout-minutes: 5
+        run: python tools/check-dependency-age.py
+      - name: Dependency seasoning contracts
+        if: steps.dependency-age.outputs.run == 'true'
+        run: python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_seasoned_npm_install.py
       - name: Version consistency
         run: python tools/check-version-consistency.py
       - name: Required source metadata contract tests
         run: |
-          npm ci --prefix .github/actions --ignore-scripts --no-audit --no-fund
+          python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions --health-module commonmark --health-module parse5
           node --test .github/actions/required-pr-attribution.test.cjs
           python -m pytest -q tools/test_required_source_attribution_workflow.py
       - name: Changefile presence (touched plugins must have a pending changefile; PR-into-dev only)
@@ -385,7 +415,7 @@ jobs:
         # Procutil's optional metrics fixture must execute in this lane;
         # install its backend explicitly without changing default consumers.
         run: >-
-          python -m pip install pytest-asyncio fastapi uvicorn "psutil>=7.0" &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest-asyncio fastapi uvicorn "psutil>=7.0" &&
           python -m pytest -q libs/work-coalescing-singleton/tests &&
           python -m pytest -q libs/lazy-cli-dispatch/tests &&
           python -m pytest -q libs/credential-relay/tests &&
@@ -580,14 +610,23 @@ jobs:
         if: steps.python-artifact-builder.outputs.run == 'true'
         timeout-minutes: 3
         run: python tools/smoke_public_toolchain.py
+      - uses: actions/setup-python@v5
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        with:
+          python-version: "3.10"
       - name: Promotion artifact compatibility (Python 3.10 floor)
         if: steps.python-artifact-builder.outputs.run == 'true'
         timeout-minutes: 2
         run: >-
-          uv run --python 3.10 --with-requirements tools/artifact_validation_requirements.txt
-          --with pytest --with pyyaml --with tomli
+          python tools/seasoned_uv.py --uv uv -- --system
+          --only-binary :all: --require-hashes -r tools/artifact_validation_requirements.txt &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml tomli &&
           python -m pytest -q tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
           -k "bundle_and_transfer_roundtrip or digest_matches_sha256 or real_export_subprocess or wheel_source_mapping or self_consistent_injected_wheel or runtime_metadata"
+      - uses: actions/setup-python@v5
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        with:
+          python-version: "3.12"
       - name: Asyncio timeout handlers (Python 3.10 daemon)
         # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
         # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --
@@ -690,26 +729,71 @@ jobs:
       - name: Windows-only governed Python artifact builder tests
         if: steps.python-artifact-builder.outputs.run == 'true'
         run: >-
-          uv run --with pytest python -m pytest -q -m windows_only
+          python tools/seasoned_uv.py --uv uv -- --system pytest &&
+          python -m pytest -q -m windows_only
           -W ignore::pytest.PytestUnknownMarkWarning
           tools/test_build_python_artifacts.py
       - name: Explicit public toolchain policy tests (Windows)
         if: steps.python-artifact-builder.outputs.run == 'true'
-        run: uv run --with pytest python -m pytest -q tools/test_public_toolchain_source.py
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q tools/test_public_toolchain_source.py
       - name: Composed promotion artifact contracts (Windows)
         if: steps.python-artifact-builder.outputs.run == 'true'
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q
           tools/test_promotion_control.py tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
           tools/test_promotion_workflow_adapter.py
       - name: Native candidate readiness and retry contracts (Windows)
         if: steps.python-artifact-builder.outputs.run == 'true'
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q
           tools/test_promotion_artifact_readiness.py           tools/test_promotion_candidate_retry.py
           tools/test_verify_promotion_workflows.py
           tools/test_tag_promotion.py
           -k 'native or binary_read'
+
+  construction-macos:
+    name: Runtime construction (stock macOS Bash)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: construction
+        name: Detect construction lifecycle changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA"...HEAD | grep -Eq \
+            '^(libs/versioned-runtime/|plugins/agent-bridge/tests/test_failed_construction\.py$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.construction.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: steps.construction.outputs.run == 'true'
+      - name: Native Bash 3.2 construction and signal settlement
+        if: steps.construction.outputs.run == 'true'
+        env:
+          VERSIONED_RUNTIME_TEST_SOURCE: ${{ github.workspace }}/libs/versioned-runtime/versioned_runtime.py
+          VERSIONED_RUNTIME_TEST_BASH: /bin/bash
+        run: |
+          /bin/bash -c 'printf "Native Bash: %s\n" "$BASH_VERSION"; test "${BASH_VERSINFO[0]}" -eq 3'
+          python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout
+          python -m pytest -q --noconftest -p no:cacheprovider plugins/agent-bridge/tests/test_failed_construction.py
 
   windows-hooks:
     name: Git hooks (Windows)
@@ -721,7 +805,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest
       - run: python -m pytest -q tools/test_hook_interpreter.py
 
   bootstrap-killswitch-powershell-5-1:
@@ -741,7 +828,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest
       - name: Guard tests under Windows PowerShell 5.1
         env:
           BOOTSTRAP_KILLSWITCH_TEST_SHELL: powershell.exe
@@ -823,7 +913,8 @@ jobs:
           PYTHONPATH: libs/single-instance-lease/src
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
@@ -850,8 +941,9 @@ jobs:
         if: steps.payload-cwd-contracts.outputs.run == 'true'
         shell: bash
         run: |
-          uv run --with pytest python -m pytest tools/test_payload_cwd_ci_scope.py -q
-          uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or launch_survives"
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python -m pytest tools/test_payload_cwd_ci_scope.py -q
+          python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or launch_survives"
 
       - id: fleet-contracts
         name: Detect standalone fleet contract changes
@@ -876,7 +968,8 @@ jobs:
         env:
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
         run: |
-          uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python -m pytest -q tools/test_fleet_ci_scope.py
           python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}
 
   agent-index-service-linux:
@@ -948,7 +1041,8 @@ jobs:
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q
           tools/test_installation_context_ci_scope.py
           libs/installation-context/tests/test_installation_mode_governance.py
           libs/installation-context/tests/test_diagnostic_consumers.py
@@ -1005,7 +1099,8 @@ jobs:
           PYTHONPATH: libs/single-instance-lease/src
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
@@ -1030,8 +1125,9 @@ jobs:
         if: steps.payload-cwd-contracts.outputs.run == 'true'
         shell: bash
         run: |
-          uv run --with pytest python -m pytest tools/test_payload_cwd_ci_scope.py -q
-          uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python -m pytest tools/test_payload_cwd_ci_scope.py -q
+          python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
 
       - id: fleet-contracts
         name: Detect standalone fleet contract changes
@@ -1056,7 +1152,8 @@ jobs:
         env:
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
         run: |
-          uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python -m pytest -q tools/test_fleet_ci_scope.py
           python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}
 
   archive-sources-windows:
@@ -1340,7 +1437,8 @@ jobs:
         env:
           CGS_RUN_INTEGRATION_TEST: "1"
         run: >-
-          uv run --with pytest python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest &&
+          python -m pytest -q
           tools/test_coverage_guided_selection.py
 
   promotion-gate:
@@ -1405,6 +1503,7 @@ jobs:
       - checks
       - windows-python-artifact-builder
       - windows-hooks
+      - construction-macos
       - worktree-manager
       - agent-dispatch-service
       - agent-index-service-linux

@@ -383,48 +383,28 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
-    if (-not $VersionedRuntime) { return $true }
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) {
-        if (-not (Test-Path $VenvDir)) { return $true }
-        Write-Fail "Cannot inspect or clean versions/$SrcVersion without a bootstrap Python interpreter"
-        return $false
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
     }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to clean incomplete runtime slot versions/$SrcVersion"
-        return $false
-    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
     return $true
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) {
-        Write-Fail "Cannot mark versions/$SrcVersion complete without a bootstrap Python interpreter"
-        return $false
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    # Reuse the SAME payload hash computed once, before the build -- never
-    # recompute it here. A local-checkout install does not self-stage: the
-    # live source tree can change between the pre-build admission check
-    # and this post-build marker write (e.g. an edit landing mid-install),
-    # and `uv pip install` already consumed whatever bytes were present
-    # earlier. Recomputing here would let the marker describe NEWER
-    # content than what was actually built into the slot, letting a later
-    # install wrongly reuse it as if it matched.
-    $ph = $PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to mark versions/$SrcVersion complete"
-        return $false
-    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 
@@ -626,7 +606,8 @@ try {
         Write-Fail "Could not compute payload fingerprint: $($_.Exception.Message)"
         exit 1
     }
-    $slotAlreadyComplete = $false
+    [void](Invoke-VersionedSlotClean)
+    $slotAlreadyComplete = $script:RuntimeConstructionReuse
     if ($VersionedRuntime) {
         if (Test-VersionedSlotComplete -ExpectedHash $payloadHash) {
             $slotAlreadyComplete = $true
@@ -666,8 +647,8 @@ try {
         Remove-ConsoleTrampolines -VenvDir $VenvDir
         Write-Ok 'Package installed: agent-pull-requests'
 
-        if (-not (Invoke-VersionedActivate -PayloadHash $payloadHash)) { exit 1 }
     }
+    if (-not (Invoke-VersionedActivate -PayloadHash $payloadHash)) { exit 1 }
 
     Write-SimpleBinstub `
         -CommandName 'agent-pull-requests' `
@@ -714,5 +695,8 @@ try {
     Write-Host '  Try: agent-pull-requests --version' -ForegroundColor DarkGray
     exit 0
 } finally {
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        Stop-RuntimeConstruction
+    }
     if ($needsInstallLock) { Exit-InstallLock }
 }

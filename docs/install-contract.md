@@ -1352,6 +1352,14 @@ this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
 
+The attached Bash construction adapter owns `INT` and `TERM` while a candidate
+is held. Both terminate through its `EXIT` settlement, which finishes candidate
+cleanup before chaining the installer's previous exit handler and releasing
+its install lock. A signal must not release that outer lock directly or return
+to a builder that no longer owns it. This transport supports Bash 3.2, including
+the stock macOS shell; the required scoped macOS lane exercises its real native
+construction, interruption and prior-runtime preservation contracts.
+
 ### Hard rules
 
 1. **No file-copy of the package** into `~/.<runtime>/lib`. Install via
@@ -2122,6 +2130,70 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
+### External dependency seasoning
+
+External build, runtime, development and selected optional dependencies must
+have been released for at least **604800 seconds (seven days)** before their
+literal floors/pins are declared or their registry artifacts are installed.
+Attributable repository-owned source dependencies are exempt; their external
+dependency closure is not. Unknown or future upload timestamps never prove age.
+Being a local path is not attribution: local wheels, archives and unattributed
+projects are refused. Source-directory admission verifies project identity,
+resolved containment and the recursive local dependency graph, including
+symlink escapes and hidden requirement-file references.
+
+The CLI authenticates its own canonical repository or materialized payload
+anchor. Other callers provide separately attested absolute roots with repeated
+`--trusted-source-root` options before `--`; the Python API's
+`trusted_source_roots` defaults to empty and does not infer trust from the
+requested path or working directory. Python 3.10 can use the proper TOML parser
+bundled in its standard `ensurepip` wheel without installing bootstrap packages;
+an interpreter without an available parser fails before dependency writes.
+
+`tools/check-dependency-age.py` audits canonical declarations against public
+release metadata; configured-feed availability remains an installation check.
+Dependabot's seven-day cooldown is complementary, not a substitute for that
+guard or the resolver cutoff.
+
+`installer_dependency_policy.py` is the canonical stdlib-only installer policy,
+shipped beside each versioned runtime helper and the shared engine. The native
+UV configuration probe is bounded, captured without printing credential-bearing
+settings, and fail-closed on an unsupported projection. Installation uses the
+stronger of seven days or the configured global cutoff, preserves stricter
+package cutoffs, and refuses disabled/weaker package overrides. Index-specific
+cutoffs are unsupported because UV can assign a synthetic age to artifacts
+without upload timestamps; flat indexes are unsupported because they bypass
+timestamp filtering. UV's exclusive millisecond-resolution cutoff may
+conservatively reject an artifact exactly on the seven-day boundary. The
+installer does not add an epsilon that could admit younger bytes.
+`--reinstall` forces actual resolution rather than
+trusting a previously installed, potentially newer package. Skipping dependency
+or isolated-build resolution is not an age-enforcement fallback.
+
+The policy does not replace the adopter's configured feed, disable TLS
+verification, or retry against a public index. A selected extra's dependency
+failure fails construction; retrying the base package in the same partially
+populated candidate is not successful installation. Unsupported pip fallback
+paths must refuse rather than resolve unseasoned packages.
+
+The repository's locked npm projects, including the rasterizer and workflow
+helpers, use
+`worktree-manager/scripts/picker-snapshot/install.py`. It queries npm's configured
+registry for every locked dependency, including transitive and optional entries,
+checks age and binds the admitted artifact to the lock's integrity before
+`npm ci`. Strong SRI evidence uses a valid SHA-256, SHA-384 or SHA-512 digest;
+matching SHA-1-only metadata and locks are not sufficient. Missing or
+SHA-1-only registry integrity additionally requires npm's tarball verification
+against the strong lock digest. npm's configured default-registry
+host substitution is preserved; private registry identities are never written
+into the shared lock. `npm ci --before` alone is not an age gate for locked
+versions. Installation disables dependency lifecycle scripts and must import
+the explicitly selected health modules successfully. No-argument use installs
+and checks the rasterizer; other projects supply `--directory` and repeat
+`--health-module` for their selected consumers.
+
+### Shared engine delivery
+
 A canonical pair of files, `libs/installer-engine/installer-engine.ps1` and
 `.sh`, carries the installer logic that was mechanically duplicated across
 every Python runtime plugin's own `install.*` before this existed: native
@@ -2141,6 +2213,12 @@ forms**:
   sources `libs/installer-engine/installer-engine.{sh,ps1}` directly while
   working on `dev`, and keeps **no** plugin-local engine copy there.
 
+Adopters that scrub generated build residue before a package attempt must do so
+before every bounded retry, not only before entering the shared helper. The
+PowerShell helper accepts `BeforeAttempt`; Bash accepts a shell-function name
+through `INSTALLER_ENGINE_BEFORE_ATTEMPT` and its source-path argument through
+`INSTALLER_ENGINE_BEFORE_ATTEMPT_ARGUMENT`. A failed callback stops installation.
+
 Regardless of the dev-time form, the **shipped payload is always materialized
 back to a real local `scripts/installer-engine.{ps1,sh}` copy** before release:
 `materialize_main.py` / `preview_release.py` copy canonical into the plugin's
@@ -2150,6 +2228,11 @@ runtime. `tools/sync-installer-engine.py`'s own `unregistered_adopters()`
 check also fails closed if a plugin references or carries installer-engine
 content without being registered in the tool's `ADOPTERS` tuple, so a
 hand-added adopter cannot drift silently forever.
+
+Referenced Python support assets are materialized with the engine. The same
+canonical dependency-policy bytes also fan out through
+`tools/sync-versioned-runtime.py` to runtime plugins that have not adopted the
+shared shell engine; those installers must not invent a second policy.
 
 `agent-worktrees`' packaged non-editable launch fallback follows the same
 contract: the authoritative launch-wrapper scripts live under

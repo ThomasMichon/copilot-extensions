@@ -87,7 +87,9 @@ reporting an apparently empty or partially counted index.
 Complete service cells and standalone explicit-source native services keep
 their independently owned full host runtime; they do not acquire a duplicate
 sibling merely to match the legacy layout. The durable embedding venv retains
-its separate lifecycle. These runtimes retain
+its separate lifecycle, building into immutable engine slots before completed
+selection. Failed selected dependencies cannot replace the healthy engine;
+`engine-update` constructs a distinct repair generation. These runtimes retain
 plugin-owned dependency/signature policy. PowerShell stamps are immutable,
 self-contained snapshots; see the
 [shared installer contract](../../docs/install-contract.md#shared-installer-engine-helpers-libsinstaller-engine)

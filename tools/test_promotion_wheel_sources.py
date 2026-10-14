@@ -5,6 +5,7 @@ import io
 import importlib.machinery
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -246,21 +247,43 @@ def test_runtime_metadata_cannot_change_candidate_install_behavior(tmp_path, mon
             artifacts.validate_wheel(archive, manifest["wheels"][0], source_dir=source)
 
 
-def test_validator_provisioning_never_exposes_release_authority():
+def test_validator_provisioning_never_exposes_release_authority(monkeypatch):
     import yaml
+    from seasoned_uv import prepare_uv_install
+    import installer_dependency_policy as policy
+
     root = Path(__file__).resolve().parent.parent
     jobs = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())["jobs"]
+    probes = []
+
+    def settings_probe(command, **kwargs):
+        probes.append(command)
+        assert command[:4] == ["uv", "pip", "install", "--show-settings"]
+        return subprocess.CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
+            index_locations: IndexLocations { indexes: [], flat_index: [], },
+            exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+        }, }""", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", settings_probe)
     for job in ("build-python-artifacts", "python-artifacts", "promote", "publish-python-artifacts"):
         provision = next(
             step for step in jobs[job]["steps"]
-            if "uv pip install" in step.get("run", "") and "artifact_validation_requirements.txt" in step["run"]
+            if "python tools/seasoned_uv.py --uv uv --" in step.get("run", "")
+            and "artifact_validation_requirements.txt" in step["run"]
         )
         assert "--require-hashes" in provision["run"]
-        assert "--no-deps" in provision["run"] and "--only-binary :all:" in provision["run"]
+        assert "--no-deps" not in provision["run"] and "--no-build-isolation" not in provision["run"]
+        assert "--only-binary :all:" in provision["run"]
         assert '--index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}"' in provision["run"]
+        invocation = provision["run"].replace("\\\n", "").split("python tools/seasoned_uv.py --uv uv --", 1)[1]
+        arguments = shlex.split(invocation)
+        admitted = prepare_uv_install("uv", arguments, cwd=root)
+        assert "--exclude-newer" in admitted and "--reinstall" in admitted
+        assert "--require-hashes" in admitted and "--only-binary" in admitted
         assert "secrets." not in json.dumps(provision)
         if job == "promote":
             assert provision["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert len(probes) == 4
 
 
 def test_promotion_actions_never_receive_or_persist_the_release_pat():

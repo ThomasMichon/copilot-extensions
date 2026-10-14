@@ -3561,8 +3561,10 @@ def test_runtime_dependency_profile_never_installs_host_store(
     )
     monkeypatch.setattr(
         CELL,
-        "_run_checked",
-        lambda command, **_kwargs: commands.append(command),
+        "_install_runtime_dependency",
+        lambda _payload, _uv, _python, source, _cwd: commands.append(
+            ["--python", str(_python), str(source), "--quiet"]
+        ),
     )
     monkeypatch.setattr(
         CELL,
@@ -3723,6 +3725,10 @@ def test_same_payload_version_uses_distinct_immutable_profile_slot(
     def run_context(_payload, action, *arguments):
         if action == "slot-provision":
             observed["slot_arguments"] = list(arguments)
+            _write_runtime_slot_evidence(
+                Path(validated["versionsRoot"]) / target_runtime,
+                runtime_version=target_runtime, role=target_role,
+            )
         return {}
 
     def complete_slot(

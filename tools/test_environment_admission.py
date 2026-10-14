@@ -63,6 +63,11 @@ def probe(root: Path, wait: float = 0) -> int:
 
 EXHAUSTIVE = pytest.mark.runner_exhaustive
 
+UV_SETTINGS = """PipInstallSettings { settings: PipSettings {
+    index_locations: IndexLocations { indexes: [], flat_index: [], },
+    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+}, }"""
+
 
 @pytest.mark.parametrize("other", [
     "same", "other-plugin",
@@ -439,7 +444,9 @@ def test_real_uv_rebuild_preserves_leased_directory_and_exclusion(cache, monkeyp
     def run(command, **kwargs):
         if command[:2] == [uv, "pip"]:
             assert python.is_file()
-            return subprocess.CompletedProcess(command, 0)
+            return subprocess.CompletedProcess(
+                command, 0, stdout=UV_SETTINGS if "--show-settings" in command else "", stderr="",
+            )
         if command[:2] == [uv, "venv"]:
             assert command[2] == "--allow-existing"
             assert "UV_VENV_CLEAR" not in kwargs["env"]
@@ -482,6 +489,20 @@ def test_standalone_real_uv_preparation_preserves_environment_identity(cache, mo
     runner = load_runner("run-standalone-tests.py")
     monkeypatch.setattr(runner, "REPO", cache)
     monkeypatch.setenv("UV_VENV_CLEAR", "true")
+    for relative, name in {
+        "libs/zdd": "agent-zdd",
+        "libs/agent-procutil": "agent-procutil",
+        "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
+        "plugins/agent-index": "agent-index",
+        "services/index": "agent-index-service",
+    }.items():
+        project = cache / relative
+        project.mkdir(parents=True, exist_ok=True)
+        (project / "pyproject.toml").write_text(
+            f'[project]\nname="{name}"\nversion="1.0"\n'
+            '[project.optional-dependencies]\ntest=[]\n',
+            encoding="utf-8",
+        )
     root = cache / ".test-venvs" / "standalone"
     root.mkdir(parents=True)
     python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -493,7 +514,9 @@ def test_standalone_real_uv_preparation_preserves_environment_identity(cache, mo
     def run(command, **kwargs):
         if command[:2] == ["uv", "pip"]:
             assert python.is_file()
-            return subprocess.CompletedProcess(command, 0)
+            return subprocess.CompletedProcess(
+                command, 0, stdout=UV_SETTINGS if "--show-settings" in command else "", stderr="",
+            )
         if command[:2] == ["uv", "venv"]:
             assert command == ["uv", "venv", "--allow-existing", str(root)]
             assert "UV_VENV_CLEAR" not in kwargs["env"]
@@ -562,7 +585,7 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
     outside = cache / "outside"
     outside.mkdir()
     sentinel = outside / "keep"
-    sentinel.touch()
+    sentinel.write_text("preserved")
     link = root / "outside-link"
     if os.name == "nt":
         subprocess.run(
@@ -582,6 +605,9 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
             python = runner._venv_python("alpha")
             python.parent.mkdir()
             python.touch()
+        return subprocess.CompletedProcess(
+            command, 0, stdout=UV_SETTINGS if "--show-settings" in command else "", stderr="",
+        )
 
     monkeypatch.setattr(runner.subprocess, "run", run)
     lease = admission.acquire(0, root)
@@ -589,7 +615,7 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
         runner._ensure_venv("alpha", "uv", reinstall=True)
         after = root.stat()
         assert (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
-        assert sentinel.exists()
+        assert sentinel.read_text() == "preserved"
     finally:
         lease.release()
 

@@ -69,6 +69,7 @@ INSTALLER_ENGINE_SYNC = Path(__file__).resolve().parent / "sync-installer-engine
 # docs/patterns/README.md § "Runtime installs are immutable and versioned".
 VERSIONED_MARKER = "install-contract:v3 versioned-venv"
 VERSIONED_RUNTIME_FILE = "versioned_runtime.py"
+VERSIONED_RUNTIME_COMPONENTS = ("versioned_runtime_leases.py", "versioned_runtime_construction.py")
 # The one canonical source of the primitive. Every Python runtime plugin's
 # scripts/versioned_runtime.py is vendored byte-identically from here by
 # tools/sync-versioned-runtime.py; this check enforces it (drift => run sync).
@@ -619,12 +620,49 @@ def _calls_engine_function(text: str, ext: str, *names: str) -> bool:
 
 
 def _uses_engine_uv_install(text: str, ext: str) -> bool:
-    return _uses_installer_engine(text, ext) and _calls_engine_function(
+    ordinary_call = _calls_engine_function(
         text,
         ext,
         "Invoke-UvPipInstallResilient",
         "invoke_uv_pip_install_resilient",
     )
+    captured_call = ext == "sh" and any(
+        re.search(
+            r'^\s*(?:if\s+)?(?:!\s*)?\w+="?\$\(\s*invoke_uv_pip_install_resilient\s',
+            line,
+        )
+        for line in _non_comment_lines(text)
+    )
+    return _uses_installer_engine(text, ext) and (ordinary_call or captured_call)
+
+
+def _uses_dependency_policy_install(text: str, ext: str) -> bool:
+    if ext != "sh":
+        return False
+    code = "\n".join(_non_comment_lines(text))
+    return bool(re.search(
+        r'(?m)^\s*"\$VENV_PYTHON"\s+-I\s+'
+        r'"\$SCRIPT_DIR/installer_dependency_policy\.py"\s+\\?\s*--uv\s+',
+        code,
+    ))
+
+
+def _incomplete_dependency_policy_calls(text: str) -> int:
+    code = "\n".join(_non_comment_lines(text))
+    code = re.sub(r"(?:\\|`)[ \t]*\n[ \t]*", " ", code)
+    incomplete = 0
+    for line in code.splitlines():
+        calls = list(re.finditer(r"installer_dependency_policy\.py", line))
+        for index, call in enumerate(calls):
+            if "-I" not in line[:call.start()]:
+                continue
+            end = calls[index + 1].start() if index + 1 < len(calls) else len(line)
+            arguments = line[call.end():end]
+            provider = re.search(r"(?:\s--uv(?:\s|=)|['\"]--uv['\"]\s*,)", arguments)
+            separator = re.search(r"(?:\s--(?:\s|$)|['\"]--['\"]\s*,)", arguments)
+            if not provider or not separator:
+                incomplete += 1
+    return incomplete
 
 
 def _uses_engine_manifest_writer(text: str, ext: str) -> bool:
@@ -778,6 +816,16 @@ def check() -> int:
                 )
             else:
                 vrt_hashes[name] = hashlib.sha256(vrt.read_bytes()).hexdigest()
+            for component in VERSIONED_RUNTIME_COMPONENTS:
+                canonical = VERSIONED_RUNTIME_CANONICAL.with_name(component)
+                supplied = plugin / "scripts" / component
+                if (not canonical.is_file() or canonical.is_symlink()
+                        or not supplied.is_file() or supplied.is_symlink()
+                        or supplied.read_bytes() != canonical.read_bytes()):
+                    violations.append(
+                        f"{name}: missing or drifted scripts/{component} "
+                        "-- run 'python tools/sync-versioned-runtime.py'"
+                    )
         # Session-start reconcile invariant (dotfiles#779): a Python runtime plugin
         # must self-reconcile its binstub at launch. Payload runtimes are exempt
         # (no binstub); the baseline set tracks pre-existing gaps.
@@ -796,11 +844,18 @@ def check() -> int:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
 
+            incomplete_policy_calls = _incomplete_dependency_policy_calls(text)
+            if incomplete_policy_calls:
+                violations.append(
+                    f"{name}/{script}: {incomplete_policy_calls} dependency policy "
+                    "call(s) missing the explicit UV provider or argument separator"
+                )
             uses_engine = _uses_installer_engine(text, ext)
             if (
                 not is_payload
                 and "uv pip install" not in text
                 and not (uses_engine and _uses_engine_uv_install(text, ext))
+                and not _uses_dependency_policy_install(text, ext)
             ):
                 violations.append(f"{name}/{script}: no 'uv pip install' (package must not be file-copied)")
             if not is_payload and VERSIONED_MARKER not in text:

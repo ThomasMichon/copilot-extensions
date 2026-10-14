@@ -247,6 +247,14 @@ so a version swap never destroys state. Rollback still re-selects a generation
 only when it is compatible with that state (*state-aware-rollback*). Replacing a
 running version is governed by *zero-downtime-cutover* below.
 
+Explicit development installs retain editable source iteration without mutating
+the previously working dependency environment. Each dependency refresh builds a
+distinct, claim-owned development generation beside its predecessor, validates
+the selected closure, and only then selects it. A failed refresh preserves the
+working development generation and the original release rollback target.
+Development claims gate construction, publication and release; editable source
+is intentionally live, but completed dependency environments remain immutable.
+
 A failed selected-dependency installation never publishes a completed runtime,
 active selection or service cutover. Construction cleans up only its owned,
 incomplete candidate and preserves the previous healthy runtime, completed

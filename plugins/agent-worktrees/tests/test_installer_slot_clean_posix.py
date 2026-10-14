@@ -82,36 +82,35 @@ def _function_body(text: str, name: str) -> str:
 
 
 def test_versioned_slot_clean_propagates_real_exit_code():
-    """`_versioned_slot_clean` must report the underlying `versioned_runtime.py
-    slot` call's real exit code -- never force-succeed via a trailing
-    `|| true`, which silently told every caller the slot was always clean."""
+    """Construction ownership must be acquired or its refusal propagated."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     body = _function_body(text, "_versioned_slot_clean")
 
-    assert "clean-incomplete 2>&1 | sed" in body
-    assert 'return "${PIPESTATUS[0]}"' in body
-    # The old unconditional-success bug: a trailing `|| true` on the pipeline
-    # that fed `sed` made the function's own exit code always 0.
-    assert "| sed 's/^/  ...    /' || true" not in body
+    assert 'construction-shell --shell sh)" || return 1' in body
+    assert '_runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION"' in body
+    assert '"$(_payload_hash)" "$(basename "$LINK_DIR")"' in body
+    assert body.rstrip().endswith('"$(_payload_hash)" "$(basename "$LINK_DIR")"')
+    assert "|| true" not in body
+    assert "return 0" not in body
 
 
 def test_versioned_slot_clean_fails_closed_for_an_existing_slot_without_bootstrap_python():
     """When no bootstrap python can be resolved at all (e.g. a uv-only
     machine with no system python yet and no prior `venv` link to borrow
     from), `_versioned_slot_clean` must fail CLOSED (return 1, "can't
-    verify") for an EXISTING $VENV_DIR -- never silently report "clean"
+    verify") for any candidate -- never silently report "clean"
     and let the caller proceed straight to `uv venv --allow-existing` over
-    a possibly-abandoned, never-actually-validated directory. An ABSENT
-    slot needs no validation at all and is trivially, correctly clean."""
+    a possibly-abandoned, never-actually-validated directory. An absent
+    candidate still requires construction ownership before its first write.
+    The canonical adapter resolves the bootstrap launcher's real base
+    interpreter and refuses one inside the candidate."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     body = _function_body(text, "_versioned_slot_clean")
 
-    assert 'py="$(_bootstrap_python exclude-venv-dir)"' in body
-    no_py_branch = body.split('if [[ -z "$py" ]]; then', 1)[1].split(
-        "\n    fi\n", 1
-    )[0]
-    assert '[[ -e "$VENV_DIR" ]] && return 1' in no_py_branch
-    assert "return 0" in no_py_branch
+    assert 'py="$(_bootstrap_python)" || return 1' in body
+    assert '[[ -n "$py" ]] || return 1' in body
+    assert body.index('[[ -n "$py" ]]') < body.index('_runtime_construction_begin "$py"')
+    assert "return 0" not in body
 
 
 def test_bootstrap_python_excludes_the_target_slot_even_when_link_dir_resolves_into_it():

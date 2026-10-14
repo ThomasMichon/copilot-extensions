@@ -24,6 +24,8 @@ def test_normal_wheel_metadata_and_console_program(distribution_root):
     primitive = distribution_root / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive.parent.mkdir(parents=True)
     shutil.copy2(canonical, primitive)
+    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+        shutil.copy2(canonical.with_name(name), primitive.with_name(name))
     shutil.copy2(canonical.with_name("standalone_build.py"), primitive.with_name("standalone_build.py"))
     shutil.copytree(source / "src", build / "src", ignore=shutil.ignore_patterns("__pycache__"))
     output = distribution_root / "wheel"

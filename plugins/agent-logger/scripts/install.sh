@@ -365,50 +365,28 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    # The freshly built slot's own interpreter: it already passed the health
-    # gate, and an ambient one may be absent or unusable.
-    if [[ -x "${VENV:-}/bin/python" ]]; then py="$VENV/bin/python"; else py="$(_bootstrap_python)" || py=""; fi  # runtime-resolution: allow install-time slot interpreter (VENV is the versioned slot)
-    if [[ -z "$py" ]]; then
-        _fail "Cannot publish the completion marker for versions/$SRC_VERSION without a bootstrap Python interpreter -- not activating"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    local ph
-    if ! ph="$(_payload_hash)" || [[ -z "$ph" ]]; then
-        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
-        return 1
-    fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    local out rc=0
-    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
-    [[ -z "$out" ]] || printf '%s\n' "$out" | sed 's/^/  ...    /'
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to publish the completion marker for versions/$SRC_VERSION (exit $rc) -- not activating"
-        return "$rc"
-    fi
+    _runtime_construction_complete "$actual_hash"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -852,6 +830,9 @@ install_package() {
     exit 1
   fi
 
+    _versioned_slot_clean || return 1
+    [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]] && return 0
+
   if [[ ! -x "${VENV}/bin/python" || ! -f "${VENV}/pyvenv.cfg" ]]; then
     _versioned_slot_clean
     if ! new_signed_venv "${UV_CMD}" "${VENV}" "3.10"; then
@@ -870,17 +851,15 @@ install_package() {
     printf '%s\n' "$pyyaml_out" >&2
     exit 1
   fi
-  # Install vendored first-party dependencies from their local paths before the
-  # main package, then install agent-logger itself with --no-deps so deep
-  # staged payload paths do not force uv to rebuild the same path dependency
-  # graph inside the main wheel build.
+  # Local first-party code still resolves its external and build dependencies
+  # through the configured, seasoned index.
   local cfg_migrate_dir="${PLUGIN_DIR}/libs/config-migrate"
   if [ ! -f "${cfg_migrate_dir}/pyproject.toml" ]; then
     cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
   fi
   if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
     local cfg_migrate_out
-    if ! cfg_migrate_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet); then
+    if ! cfg_migrate_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet); then
       printf '%s\n' "$cfg_migrate_out" >&2
       exit 1
     fi
@@ -891,7 +870,7 @@ install_package() {
   fi
   if [ -f "${procutil_dir}/pyproject.toml" ]; then
     local procutil_out
-    if ! procutil_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet); then
+    if ! procutil_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-procutil "${procutil_dir}" --quiet); then
       printf '%s\n' "$procutil_out" >&2
       exit 1
     fi
@@ -906,7 +885,7 @@ install_package() {
   fi
   if [ -f "${dropin_registry_dir}/pyproject.toml" ]; then
     local dropin_registry_out
-    if ! dropin_registry_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet); then
+    if ! dropin_registry_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet); then
       printf '%s\n' "$dropin_registry_out" >&2
       exit 1
     fi
@@ -917,7 +896,7 @@ install_package() {
   fi
   if [ -f "${plugin_resolve_dir}/pyproject.toml" ]; then
     local plugin_resolve_out
-    if ! plugin_resolve_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet); then
+    if ! plugin_resolve_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet); then
       printf '%s\n' "$plugin_resolve_out" >&2
       exit 1
     fi
@@ -928,14 +907,14 @@ install_package() {
   fi
   if [ -f "${plugin_activation_dir}/pyproject.toml" ]; then
     local plugin_activation_out
-    if ! plugin_activation_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet); then
+    if ! plugin_activation_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet); then
       printf '%s\n' "$plugin_activation_out" >&2
       exit 1
     fi
   fi
   export INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="${PLUGIN_DIR}"
   local install_out
-  if ! install_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet); then
+  if ! install_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" "${PLUGIN_DIR}" --quiet); then
     unset INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB
     printf '%s\n' "$install_out" >&2
     exit 1

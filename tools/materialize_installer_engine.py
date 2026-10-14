@@ -101,6 +101,25 @@ def materialize_ref_into(
         if dest_engine.exists() or dest_engine.is_symlink():
             log.append(f"SKIP {dest_engine}: already exists -- refusing to overwrite")
             continue
+        support_assets = []
+        for name in ier.support_files(canonical.parent):
+            source_asset = canonical.parent / name
+            dest_asset = dest_engine.parent / name
+            if (_find_symlinked_ancestor(source_asset, canonical_root_r) is not None
+                    or not source_asset.is_file()
+                    or _find_symlinked_ancestor(dest_asset, dest_root_r) is not None
+                    or (dest_asset.exists() and dest_asset.read_bytes() != source_asset.read_bytes())):
+                log.append(f"SKIP {dest_script}: required installer support asset unavailable or conflicting: {name}")
+                break
+            support_assets.append((source_asset, dest_asset))
+        else:
+            dest_engine.parent.mkdir(parents=True, exist_ok=True)
+            for source_asset, dest_asset in support_assets:
+                if not dest_asset.exists():
+                    shutil.copyfile(source_asset, dest_asset)
+            support_assets = None
+        if support_assets is not None:
+            continue
 
         dest_engine.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(canonical, dest_engine)

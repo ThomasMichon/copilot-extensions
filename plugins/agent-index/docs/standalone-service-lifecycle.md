@@ -11,9 +11,17 @@ supervision.
   rebuild only that light slot, then cut traffic over with the existing zdd
   active/passive protocol.
 - **Durable engine runtime:** the torch + embedding-model stack stays in the
-  durable engine home (`~/.agent-index/engine/.venv`). Routine service
+  durable engine home (`~/.agent-index/engine/versions/<version-or-repair>`). Routine service
   `install`/`update` never rebuild or restart it. The explicit `engine` /
   `engine-update` verbs remain the only provisioning/update path for that stack.
+  Construction uses a fresh, immutable slot with isolated import checks before
+  completion and marker-only activation. A selected dependency failure is fatal,
+  reclaims only its owned incomplete candidate, and preserves the prior engine.
+  Explicit updates use distinct repair generations rather than mutating a healthy
+  venv. Interpreter selection uses the canonical completion-gated resolver;
+  legacy `.venv` remains selected until activation publishes `current-version`
+  or `last-known-good`. Staging the resolver or completing a candidate alone
+  does not migrate selection; failed first activation preserves the legacy engine.
 - **Tier 1 default:** the default contract is event-driven user-mode convergence. The
   installer verbs `install`, `update`, `start`, and `ensure` all converge on the
   same local start path instead of delegating to another daemon. `update`

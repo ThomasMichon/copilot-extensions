@@ -39,6 +39,8 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 CANONICAL = REPO / "libs" / "versioned-runtime" / "versioned_runtime.py"
 VRT_NAME = "versioned_runtime.py"
+COMPONENT_NAMES = ("versioned_runtime_leases.py", "versioned_runtime_construction.py")
+DEPENDENCY_POLICY = REPO / "libs" / "installer-engine" / "installer_dependency_policy.py"
 
 # Canonical parameterized shell resolvers (uniform-runtime-resolution, #765). The
 # one marker-only way a binstub / hook / service launcher resolves the versioned
@@ -103,6 +105,9 @@ def main() -> int:
     if not CANONICAL.exists():
         print(f"canonical missing: {CANONICAL.relative_to(REPO)}", file=sys.stderr)
         return 1
+    if DEPENDENCY_POLICY.is_symlink() or not DEPENDENCY_POLICY.is_file():
+        print("canonical installer dependency policy missing or linked", file=sys.stderr)
+        return 1
 
     plugins = _runtime_plugins()
     if not plugins:
@@ -113,8 +118,18 @@ def main() -> int:
     # into every runtime plugin, plus each opt-in plugin's resolver copies.
     pairs: list[tuple[bytes, Path]] = []
     canonical_bytes = CANONICAL.read_bytes()
+    policy_bytes = DEPENDENCY_POLICY.read_bytes()
+    component_bytes = {}
+    for name in COMPONENT_NAMES:
+        source = CANONICAL.with_name(name)
+        if source.is_symlink() or not source.is_file():
+            print(f"canonical runtime component missing or linked: {name}", file=sys.stderr)
+            return 1
+        component_bytes[name] = source.read_bytes()
     for plugin in plugins:
         pairs.append((canonical_bytes, plugin / "scripts" / VRT_NAME))
+        pairs.append((policy_bytes, plugin / "scripts" / DEPENDENCY_POLICY.name))
+        pairs.extend((data, plugin / "scripts" / name) for name, data in component_bytes.items())
 
     resolver_plugins = _resolver_plugins()
     resolver_bytes: dict[str, bytes] = {}

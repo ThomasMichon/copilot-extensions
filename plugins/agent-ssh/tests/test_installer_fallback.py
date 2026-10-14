@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -68,7 +69,7 @@ def _shell_function_source(source: str, name: str, next_marker: str) -> str:
     os.name != "nt" or PWSH is None,
     reason="Windows PowerShell installer coverage",
 )
-def test_package_install_falls_back_when_resolved_uv_cannot_launch(
+def test_package_install_refuses_broken_uv_without_unrestricted_fallback(
     tmp_path: Path,
 ) -> None:
     installer = INSTALLER.read_text(encoding="utf-8")
@@ -82,11 +83,13 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
     fake_bin.mkdir()
     (fake_bin / "uv.exe").write_bytes(b"not a Windows executable")
     marker = tmp_path / "pip-fallback-ran"
-    fake_python = fake_bin / "python.cmd"
-    fake_python.write_text(
-        f'@echo %*>"{marker}"\n@exit /b 0\n',
-        encoding="ascii",
+    venv = tmp_path / "venv"
+    subprocess.run(
+        [sys._base_executable, "-I", "-m", "venv", "--without-pip", str(venv)],
+        capture_output=True, text=True, check=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
+    python = venv / "Scripts/python.exe"
     dependency_a = tmp_path / "dependency-a"
     dependency_b = tmp_path / "dependency-b"
     dependency_a.mkdir()
@@ -102,12 +105,13 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
                 "$ErrorActionPreference = 'Stop'",
                 "function Write-Step { param([string]$Msg) Write-Host $Msg }",
                 "function Write-Warn { param([string]$Msg) Write-Host $Msg }",
+                "function Write-Fail { param([string]$Msg) Write-Host $Msg }",
                 f". '{ps_quote(str(ENGINE_PS1))}'",
                 install_package,
                 "function Resolve-VenueCopilot { return '__unused__' }",
                 (
                     "$ok = Install-AgentSshPackage "
-                    f"-Python '{ps_quote(str(fake_python))}' "
+                    f"-Python '{ps_quote(str(python))}' "
                     f"-Source '{ps_quote(str(tmp_path))}' "
                     "-Dependencies @("
                     f"'{ps_quote(str(dependency_a))}',"
@@ -115,7 +119,7 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
                     ") "
                     f"-UvCommand '{ps_quote(str(fake_bin / 'uv.exe'))}'"
                 ),
-                "if (-not $ok) { throw 'fallback install failed' }",
+                "if ($ok) { throw 'broken UV produced a successful dependency install' }",
             ]
         ),
         encoding="utf-8",
@@ -135,12 +139,10 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "falling back to python -m pip" in proc.stdout
-    assert marker.is_file()
-    fallback_args = marker.read_text(encoding="ascii")
-    assert str(dependency_a) in fallback_args
-    assert str(dependency_b) in fallback_args
-    assert str(tmp_path) in fallback_args
+    assert "Selected dependency installation failed" in proc.stdout
+    assert "configuration probe failed" in proc.stdout
+    assert not marker.exists()
+    assert not list((venv / "Lib/site-packages").glob("pyyaml*"))
 
 
 @pytest.mark.skipif(os.name != "nt" or PWSH is None, reason="Windows PowerShell installer coverage")
@@ -166,8 +168,8 @@ def test_uv_receives_the_complete_local_dependency_graph_in_one_call(tmp_path: P
         "  if ($script:calls[0] -notcontains $source) { throw ('missing dependency ' + $source) }",
         "}",
         "if ($script:calls[0] -notcontains 'agent-venue-copilot') { throw 'lost forced venue reinstall' }",
-        "if ($script:calls[1] -notcontains '--no-deps' -or $script:calls[1] -notcontains 'plugin') {",
-        "  throw 'plugin must install only after the dependency batch'",
+        "if ($script:calls[1] -contains '--no-deps' -or $script:calls[1] -notcontains 'plugin') {",
+        "  throw 'plugin must resolve its closure after the dependency batch'",
         "}",
     ]), encoding="utf-8")
     result = subprocess.run(
@@ -181,7 +183,8 @@ def test_uv_receives_the_complete_local_dependency_graph_in_one_call(tmp_path: P
     os.name == "nt" or BASH is None,
     reason="POSIX shell installer coverage",
 )
-def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> None:
+@pytest.mark.parametrize("have_uv", [False, True])
+def test_shell_canonical_install_includes_vendored_dependencies(tmp_path: Path, have_uv: bool) -> None:
     installer = SHELL_INSTALLER.read_text(encoding="utf-8")
     resolve_vendored_lib = _shell_function_source(
         installer, "_resolve_vendored_lib", "\n_resolve_ssh_manager()",
@@ -223,6 +226,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
                 "set -euo pipefail",
                 "_step() { printf '%s\\n' \"$1\"; }",
                 "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                'invoke_uv_pip_install_resilient() { printf "%s\\n" "$*" >> "$TEST_FALLBACK_MARKER"; }',
                 resolve_vendored_lib,
                 "_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }",
                 "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
@@ -232,7 +236,8 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
                 "_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }",
                 "_resolve_machine_transport() { _resolve_vendored_lib machine-transport; }",
                 install_package,
-                "HAVE_UV=0",
+                f"HAVE_UV={1 if have_uv else 0}",
+                f"UV_CMD={'fixture-uv' if have_uv else ''}",
                 f"VENV_PYTHON='{fake_python}'",
                 f"PLUGIN_DIR='{plugin}'",
                 "_install_agent_ssh_package",
@@ -251,6 +256,11 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
         check=False,
     )
 
+    if not have_uv:
+        assert proc.returncode != 0
+        assert "unrestricted pip fallback is not supported" in proc.stderr
+        assert not marker.exists()
+        return
     assert proc.returncode == 0, proc.stdout + proc.stderr
     fallback_args = marker.read_text(encoding="ascii")
     assert str(plugin / "libs" / "agent-procutil") in fallback_args
@@ -268,11 +278,12 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     os.name == "nt" or BASH is None,
     reason="POSIX shell installer coverage",
 )
-def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: Path) -> None:
+@pytest.mark.parametrize("have_uv", [False, True])
+def test_shell_canonical_install_resolves_sources_when_local_copy_absent(tmp_path: Path, have_uv: bool) -> None:
     """vendor-pointer-generalization effort, Phase 1: ssh-manager and
     agent-procutil are `uv`-editable canonical references, so a real
     dev checkout has NO local `plugin/libs/<lib>` copy for either one --
-    the pip fallback must resolve the canonical `../../libs/<lib>` path
+    the canonical install must resolve the `../../libs/<lib>` path
     instead (mirroring `install.ps1`'s own `Resolve-VendoredLib`)."""
     installer = SHELL_INSTALLER.read_text(encoding="utf-8")
     resolve_vendored_lib = _shell_function_source(
@@ -328,6 +339,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
                 "set -euo pipefail",
                 "_step() { printf '%s\\n' \"$1\"; }",
                 "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                'invoke_uv_pip_install_resilient() { printf "%s\\n" "$*" >> "$TEST_FALLBACK_MARKER"; }',
                 resolve_vendored_lib,
                 "_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }",
                 "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
@@ -337,7 +349,8 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
                 "_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }",
                 "_resolve_machine_transport() { _resolve_vendored_lib machine-transport; }",
                 install_package,
-                "HAVE_UV=0",
+                f"HAVE_UV={1 if have_uv else 0}",
+                f"UV_CMD={'fixture-uv' if have_uv else ''}",
                 f"VENV_PYTHON='{fake_python}'",
                 f"PLUGIN_DIR='{plugin}'",
                 "_install_agent_ssh_package",
@@ -356,6 +369,11 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
         check=False,
     )
 
+    if not have_uv:
+        assert proc.returncode != 0
+        assert "unrestricted pip fallback is not supported" in proc.stderr
+        assert not marker.exists()
+        return
     assert proc.returncode == 0, proc.stdout + proc.stderr
     fallback_args = marker.read_text(encoding="ascii")
     assert str(canonical_ssh_manager.resolve()) in fallback_args

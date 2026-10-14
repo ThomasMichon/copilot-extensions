@@ -1,8 +1,8 @@
-"""Guard for install.ps1's non-uv (bare-pip) preinstall loop covering the
+"""Guard for install.ps1's canonical-policy preinstall loop covering the
 `[tool.uv.sources]` workspace path deps: zdd (real local copy),
 agent-procutil, single-instance-lease (both `uv`-editable canonical
 references, vendor-pointer-generalization effort). Exercises the loop via
-real pwsh execution for both the uv path and the bare-pip fallback path --
+real pwsh execution for both the shared UV path and the policy-helper path --
 a regression here would still pass every other installer guard while
 silently reintroducing the bare-pip dependency failure the review on
 PR #4465 caught."""
@@ -57,6 +57,7 @@ function Invoke-StubVenvPython {{
     $global:LASTEXITCODE = 0
 }}
 $VenvPython = 'Invoke-StubVenvPython'
+$PSScriptRoot = '{PLUGIN / "scripts"}'
 $PluginDir = '{plugin_dir}'
 $prevEAP = 'Continue'
 $ErrorActionPreference = 'Continue'
@@ -124,6 +125,10 @@ def test_preinstall_loop_resolves_plugin_local_copy(have_uv: bool, tmp_path: Pat
 
     proc = _run(pwsh, plugin_dir, have_uv, marker=marker)
     assert proc.returncode == 0, proc.stderr
+    if not have_uv:
+        assert "installer_dependency_policy.py" in marker.read_text()
+        assert "--uv uv" in marker.read_text()
+        assert "--python Invoke-StubVenvPython" in marker.read_text()
 
     installs = _installed_paths(marker)
     assert len(installs) == 3
@@ -147,6 +152,10 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
 
     proc = _run(pwsh, plugin_dir, have_uv, marker=marker)
     assert proc.returncode == 0, proc.stderr
+    if not have_uv:
+        assert "installer_dependency_policy.py" in marker.read_text()
+        assert "--uv uv" in marker.read_text()
+        assert "--python Invoke-StubVenvPython" in marker.read_text()
 
     installs = _installed_paths(marker)
     assert len(installs) == 3

@@ -560,6 +560,12 @@ closure event is not by itself evidence that an agent called an issue-close API.
 
 ### Documentation impact (required before opening a PR)
 
+Dependency changes also run `python tools/check-dependency-age.py`: external
+literal floors/pins must be at least seven days old, across build, runtime,
+development and optional declarations. A weekly update schedule alone is not
+an age check. Installation must independently enforce the configured-feed
+artifact cutoff; see `docs/install-contract.md` (*External dependency seasoning*).
+
 Assess the final diff and repeat the assessment after material scope or
 implementation changes. Apply this review to every change classification,
 including bug fixes, compatibility repairs, and below-altitude work.
@@ -1300,14 +1306,15 @@ changes*): even a `source.kind = local` install rebuilds from a **checkout on
 disk**, so it still requires committing (or at least saving) your edit and
 re-running that plugin's installer to pick it up.
 
-**`agent-codespaces` has adopted the mutable-dev-slot pattern
+**`agent-codespaces` uses claim-owned development generations
 (`docs/patterns/mutable-dev-slot.md`, #3376) as the preferred path** for this:
 from your worktree, run `pwsh -File plugins\agent-codespaces\scripts\install.ps1
-dev` (`./scripts/install.sh dev` on POSIX). This claims a protected, mutable
-`versions/dev` slot, builds it as an **editable** install against your
+dev` (`./scripts/install.sh dev` on POSIX). This claims development ownership,
+builds a fresh protected generation as an **editable** install against your
 checkout, and activates it -- a plain source edit is then reflected by the
 deployed `agent-codespaces` CLI immediately, no rebuild needed; re-run `dev`
-only when you change a dependency. Release when done with the DEPLOYED CLI's
+only when you change a dependency. Each refresh preserves the working dependency
+environment until its replacement is healthy. Release with the DEPLOYED CLI's
 own verb: `agent-codespaces dev-release` (works even without a checkout
 present -- see the design doc's "Runtime accessibility" section), which
 restores the machine to whatever version was active before you claimed dev
