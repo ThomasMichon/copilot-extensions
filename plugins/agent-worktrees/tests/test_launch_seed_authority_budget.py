@@ -18,7 +18,7 @@ def test_seed_daemon_transactions_exclude_pr_discovery(tmp_path, kind):
         import sys
         import time
         from pathlib import Path
-        from agent_worktrees import config as cfg, launch_seed_state as state, tracking, tracking_write
+        from agent_worktrees import activity, config as cfg, launch_seed_state as state, tracking, tracking_write
 
         root = Path(sys.argv[1])
         kind = sys.argv[2]
@@ -59,6 +59,18 @@ def test_seed_daemon_transactions_exclude_pr_discovery(tmp_path, kind):
             assert state.finish(path, second)["finished"]
             assert state.peek(path) is None
             assert not discovery, discovery
+            events = [
+                json.loads(line) for line in activity.log_path().read_text(encoding="utf-8").splitlines()
+            ]
+            stages = [event for event in events if event.get("event") == "launch_preparation"]
+            for verb in ("stage", "take", "restore", "finish"):
+                matching = [
+                    event for event in stages if event["phase"] == "Executing launch_seed_" + verb
+                ]
+                assert matching and matching[0]["state"] == "started", matching
+                assert matching[-1]["state"] == "finished", matching
+                assert all(event["worktree_id"] == "wt-a" for event in matching)
+            assert "quoted ' intent" not in activity.log_path().read_text(encoding="utf-8")
             print(json.dumps({"kind": seed.kind, "elapsed": time.monotonic() - started}))
         finally:
             server.close()

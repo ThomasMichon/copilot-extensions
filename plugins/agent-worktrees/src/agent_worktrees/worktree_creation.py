@@ -698,18 +698,20 @@ def _create_worktree_core(
     # longer a reason to skip the carve. `no_pair` is the intentional, explicit per-call
     # opt-out for a registrar/pool with no bound knowledge repo to hand its workers.
     if kind == "session" and not no_pair:
-        core._paired_knowledge_allocation_preflight(config)
+        with step("Validating paired worktree policy", worktree_id=worktree_id):
+            core._paired_knowledge_allocation_preflight(config)
 
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
 
-    prepared = core._prepare_worktree_source(
-        repo.anchor,
-        remote=repo.remote,
-        default_branch=repo.default_branch,
-        fast_forward_anchor=config.auto_fast_forward,
-        label="repository",
-    )
+    with step("Preparing worktree source", worktree_id=worktree_id):
+        prepared = core._prepare_worktree_source(
+            repo.anchor,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
+            fast_forward_anchor=config.auto_fast_forward,
+            label="repository",
+        )
 
     # pr-attribution-codenames Phase 2 (#2838): assign the codename FIRST --
     # before the owner claim is journaled and before the git worktree/branch
@@ -749,7 +751,9 @@ def _create_worktree_core(
         cfg.tracking_dir(config.repo_name) if creation_intent is not None else cfg.tracking_dir()
     )
     tracking_path.mkdir(parents=True, exist_ok=True)
-    with codename_tracking.allocation_lock(tracking_path):
+    with step("Allocating worktree identity", worktree_id=worktree_id), codename_tracking.allocation_lock(
+        tracking_path,
+    ):
         # Second revalidation (round-13/14 finding, sharpened by a PR
         # #3037 review finding) immediately before the first side effect
         # below -- RECOMPUTES from a freshly-loaded config, never reuses
@@ -812,12 +816,13 @@ def _create_worktree_core(
                 raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
 
             print(f"Creating worktree on branch {branch}...", file=sys.stderr)
-            git_ops.create_worktree(
-                repo.anchor,
-                worktree_path,
-                branch,
-                prepared.start_point,
-            )
+            with step("Creating Git worktree", worktree_id=worktree_id):
+                git_ops.create_worktree(
+                    repo.anchor,
+                    worktree_path,
+                    branch,
+                    prepared.start_point,
+                )
 
             # Write tracking YAML
             record = tracking.create_new_record(
@@ -874,7 +879,7 @@ def _create_worktree_core(
     try:
         staged_seed = None
         if pending_seed:
-            with step("Staging launch prompt"):
+            with step("Staging launch prompt", worktree_id=worktree_id):
                 staged_seed = launch_seed_state.stage(
                     record.yaml_path, kind="new", text=pending_seed, seed_id=seed_id,
                 )
@@ -888,10 +893,11 @@ def _create_worktree_core(
         local_cache_refresh.prepare_for_launch(worktree_path)
         if kind == "session" and not no_pair:
             try:
-                pair_stamp = core._carve_paired_knowledge(
-                    config, harness_id=worktree_id, timestamp=timestamp,
-                    suffix=suffix, plat=plat, plat_short=plat_short,
-                )
+                with step("Creating paired worktree", worktree_id=worktree_id):
+                    pair_stamp = core._carve_paired_knowledge(
+                        config, harness_id=worktree_id, timestamp=timestamp,
+                        suffix=suffix, plat=plat, plat_short=plat_short,
+                    )
             except codename_tracking.CodenameAttributionPolicyError:
                 raise
             except Exception as exc:  # pragma: no cover - existing fail-safe pairing policy
@@ -920,6 +926,7 @@ def _create_worktree_core(
             core._build_env(
                 selection.profile, core._repo_session_env(config, worktree_path),
                 work_dir=worktree_path,
+                config=config,
             ), selection,
         )
         result["worktree"] = core._worktree_to_dict(record)

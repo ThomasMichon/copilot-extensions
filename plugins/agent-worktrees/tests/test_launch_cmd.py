@@ -690,6 +690,24 @@ def test_build_env_profile_overrides_session_env(monkeypatch):
     assert env["COPILOT_FEATURE_FLAGS"] == "override"
 
 
+def test_build_env_reuses_launch_policy_for_hooks_and_ownership(monkeypatch):
+    config = cfg.Config(
+        srcroot="/s", machine="host", platform="linux", repo_name="target",
+        repos={"target": cfg.RepoConfig(anchor="/a", worktree_root="/w", pr=cfg.PRConfig(enabled=True))},
+    )
+    monkeypatch.setattr(m, "_worktree_id_from_git", lambda path: "wt-a")
+    monkeypatch.setattr(cfg, "project_name", lambda: "target")
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
+
+    def forbidden():
+        raise AssertionError("launch environment repeated full configuration discovery")
+
+    monkeypatch.setattr(cfg, "load_config", forbidden)
+    env = m._build_env(None, work_dir="/w/wt-a", config=config)
+    assert env["AGENT_WORKTREES_HOOKS"] == "1"
+    assert env["AGENT_WORKTREES_OWNER_REF"] == "host/target/wt-a"
+
+
 def test_repo_session_env_templates_values(monkeypatch):
     """session_env values are templated with {home}/{work_dir}/{machine} etc."""
     cfg_ = cfg.Config(

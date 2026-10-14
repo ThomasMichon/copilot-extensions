@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import platform
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from . import locks, process_table_cache, sessions, tracking
@@ -317,6 +318,7 @@ def resolve_bound_copilots(
     worktree_id: str | None = None,
     worktree_path: str | None = None,
     table: dict[int, dict] | None = None,
+    session_ids: Iterable[str] | None = None,
 ) -> list[dict]:
     """Resolve the live Copilot process(es) bound to a session/worktree.
 
@@ -331,6 +333,8 @@ def resolve_bound_copilots(
     * ``session_id`` -- exact session dir name, or an unambiguous prefix.
     * ``worktree_id`` -- the session's cwd resolves to this worktree id.
     * ``worktree_path`` -- the session's cwd is at/under this path.
+    * ``session_ids`` -- exact registered session directories, without a
+      session-state discovery sweep. An empty registry returns immediately.
 
     With no filter, every bound Copilot on the machine is returned. Each item::
 
@@ -338,16 +342,29 @@ def resolve_bound_copilots(
 
     ``homing`` is ``mux``/``bare``/``unknown`` (see module docstring).
     """
-    table = process_table_cache.cached(build_process_table) if table is None else table
+    if session_ids is None and table is None:
+        table = process_table_cache.cached(build_process_table)
     state_dir = sessions._session_state_dir()
     results: list[dict] = []
     if not state_dir.exists():
         return results
+    if session_ids is None:
+        entries = sorted(state_dir.iterdir())
+    else:
+        from .session_projection import _valid_session_id
+
+        ids = sorted(set(session_ids))
+        if any(not _valid_session_id(sid) for sid in ids):
+            raise ValueError("Invalid registered session identity")
+        if not ids:
+            return results
+        entries = [state_dir / sid for sid in ids]
+    table = process_table_cache.cached(build_process_table) if table is None else table
 
     _posix = platform.system() != "Windows"
     _pane_ttys: list = [None]  # lazy, memoized tmux pane-tty set (POSIX only)
 
-    for entry in sorted(state_dir.iterdir()):
+    for entry in entries:
         if not entry.is_dir():
             continue
 
@@ -373,7 +390,12 @@ def resolve_bound_copilots(
             continue
 
         cwd = _session_cwd(entry)
-        wt_id = _resolve_worktree_id_for_cwd(cwd) if cwd else None
+        if worktree_path and not _cwd_under(cwd, worktree_path):
+            continue
+        if session_ids is not None and worktree_id:
+            wt_id = worktree_id
+        else:
+            wt_id = _resolve_worktree_id_for_cwd(cwd) if cwd else None
         if wt_id is None:
             try:
                 wt_id = tracking.find_worktree_id_by_session(sid)
@@ -381,8 +403,6 @@ def resolve_bound_copilots(
                 wt_id = None
 
         if worktree_id and wt_id != worktree_id:
-            continue
-        if worktree_path and not _cwd_under(cwd, worktree_path):
             continue
 
         for pid in live_pids:

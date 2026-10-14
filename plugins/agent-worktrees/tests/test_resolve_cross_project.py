@@ -17,6 +17,30 @@ mirroring the id-is-globally-unique lookup ``_find_tracking_file_exact`` /
 
 from __future__ import annotations
 
+import pytest
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize(("json_mode", "worktree_id"), [(True, "wt-a"), (True, None), (False, "wt-a")])
+def test_launch_config_preserves_policy_and_loads_once(monkeypatch, json_mode, worktree_id):
+    from agent_worktrees import resolve_cli
+
+    calls = []
+    config = object()
+
+    def load_config(**kwargs):
+        calls.append(kwargs)
+        return config
+
+    monkeypatch.setattr(resolve_cli.cfg, "load_config", load_config)
+    state = resolve_cli.ResolveCommandState(
+        args=object(), use_json=json_mode, use_base=False,
+        use_new=worktree_id is None, requested_machine=None, worktree_id=worktree_id,
+    )
+    assert state.load_config() is config
+    assert state.load_config() is config
+    assert calls == [{}]
+
 
 def _write_record(tracking_dir, wt_id):
     tracking_dir.mkdir(parents=True, exist_ok=True)
@@ -182,4 +206,3 @@ def test_noninteractive_resume_reloads_config_after_relocation(tmp_path, monkeyp
         ("profile", other_config),
         ("resume", other_config),
     ]
-

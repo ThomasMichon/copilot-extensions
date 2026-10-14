@@ -329,6 +329,14 @@ def compute(kind: str, payload: dict) -> dict:
     with _inflight_lock:
         _inflight_writes += 1
     try:
+        if verb.startswith("launch_seed_"):
+            from .launch_progress import step
+
+            with step(
+                f"Executing {verb}", enabled=False,
+                worktree_id=args.get("worktree_id"),
+            ):
+                return fn(args)
         return fn(args)
     finally:
         with _inflight_lock:

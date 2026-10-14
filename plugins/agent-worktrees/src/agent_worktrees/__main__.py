@@ -1954,7 +1954,7 @@ from .worktree_creation import (  # noqa: E402 -- re-export position matches ori
 )
 
 
-def _self_owner_ref(work_dir: str | None) -> str | None:
+def _self_owner_ref(work_dir: str | None, *, config: cfg.Config | None = None) -> str | None:
     """Qualified ClaimRef of the worktree rooted at ``work_dir`` (None if not one).
 
     The identity a launched session advertises via ``AGENT_WORKTREES_OWNER_REF``
@@ -1973,7 +1973,8 @@ def _self_owner_ref(work_dir: str | None) -> str | None:
         wid = _worktree_id_from_git(wd) or tracking.find_worktree_id_by_cwd(str(wd))
         if not wid:
             return None
-        config = cfg.load_config()
+        if config is None:
+            config = cfg.load_config()
         try:
             project = cfg.project_name()
         except Exception:
@@ -1988,6 +1989,8 @@ def _build_env(
     profile: cfg.CopilotProfile | None,
     session_env: dict[str, str] | None = None,
     work_dir: str | None = None,
+    *,
+    config: cfg.Config | None = None,
 ) -> dict[str, str]:
     """Build env dict with auto-injected vars, repo session_env, then profile.
 
@@ -2014,7 +2017,8 @@ def _build_env(
     # it to the launched session env (not a global/user var) so external and
     # recovery git operations stay unguarded by default (#234 defect 1).
     try:
-        if cfg.load_config().default_repo.pr.enabled:
+        launch_config = config if config is not None else cfg.load_config()
+        if launch_config.default_repo.pr.enabled:
             env["AGENT_WORKTREES_HOOKS"] = "1"
     except Exception:
         pass
@@ -2023,7 +2027,10 @@ def _build_env(
     # ClaimRef so a resource it creates inherits it as owner. Each launch stamps
     # SELF (overwriting any inherited value), so a chain A->B->C inherits one hop
     # at each level. Best-effort; omitted for a non-worktree path (anchor).
-    owner_self = _self_owner_ref(work_dir)
+    owner_self = (
+        _self_owner_ref(work_dir, config=config) if config is not None
+        else _self_owner_ref(work_dir)
+    )
     if owner_self:
         env["AGENT_WORKTREES_OWNER_REF"] = owner_self
 

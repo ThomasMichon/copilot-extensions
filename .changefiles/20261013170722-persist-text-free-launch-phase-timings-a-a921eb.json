@@ -1,0 +1,9 @@
+{
+  "comment": "Persist text-free launch phase timings, bound resume liveness to registered sessions, and reuse launch policy for environment construction",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

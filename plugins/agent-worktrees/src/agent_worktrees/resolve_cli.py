@@ -692,7 +692,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     except ExecutionSpaceError as exc:
         return output._json_error(str(exc), exit_code=3)
     try:
-        with step("Preparing launch prompt"):
+        with step("Preparing launch prompt", worktree_id=worktree_id):
             staged_seed = seed_for_attempt(yaml_path, record, state.args)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         return output._json_error(f"Could not stage launch prompt: {exc}", exit_code=3)
@@ -713,7 +713,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
         if not restored.get("ok"):
             return output._json_error(restored.get("reason", "could not restore the session"))
-    verdict = sessions.verify_worktree_active(record)
+    with step("Verifying worktree liveness", worktree_id=worktree_id):
+        verdict = sessions.verify_worktree_active(record)
     if staged_seed is not None and plain_live_open(state.args, verdict):
         staged_seed = None
     if staged_seed is not None and not getattr(state.args, "bare_resume", False):
@@ -726,7 +727,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 "but will not be automatically submitted twice.", exit_code=3,
             )
     try:
-        with tracking._RecordLock(yaml_path, require_sidecar=True):
+        with step("Recording worktree resume", worktree_id=worktree_id), tracking._RecordLock(
+            yaml_path, require_sidecar=True,
+        ):
             record = tracking.load_record(yaml_path)
             require_record_mutation(record, config)
             tracking.mark_resumed(record, save=False)
@@ -749,36 +752,41 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     no_resume = getattr(state.args, "no_resume", False)
     last_session = None
     if not no_resume:
-        last_session = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
+        with step("Resolving resume session", worktree_id=worktree_id):
+            last_session = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
     explicit_profile = _resolve_profile(config, state.args)
     try:
-        selection = _launch_profile_selection(
-            config,
-            state.args,
-            record,
-            lane="new",
-            generation_key=f"new:{record.worktree_id}",
-            explicit_profile=explicit_profile,
-            resume_session=last_session,
-        )
+        with step("Selecting launch profile", worktree_id=worktree_id):
+            selection = _launch_profile_selection(
+                config,
+                state.args,
+                record,
+                lane="new",
+                generation_key=f"new:{record.worktree_id}",
+                explicit_profile=explicit_profile,
+                resume_session=last_session,
+            )
     except profile_assignment.ProfileAssignmentError as exc:
         return output._json_error(str(exc), exit_code=3)
     _reflect_assignment(record, selection)
-    launch_cmd = _build_launch_cmd(
-        config,
-        state.args,
-        record.worktree_path,
-        profile=selection.profile,
-        preflight=launch_preflight,
-    )
-    env = _apply_assignment_env(
-        _build_env(
-            selection.profile,
-            _repo_session_env(config, record.worktree_path),
-            work_dir=record.worktree_path,
-        ),
-        selection,
-    )
+    with step("Building launch command", worktree_id=worktree_id):
+        launch_cmd = _build_launch_cmd(
+            config,
+            state.args,
+            record.worktree_path,
+            profile=selection.profile,
+            preflight=launch_preflight,
+        )
+    with step("Preparing launch environment", worktree_id=worktree_id):
+        env = _apply_assignment_env(
+            _build_env(
+                selection.profile,
+                _repo_session_env(config, record.worktree_path),
+                work_dir=record.worktree_path,
+                config=config,
+            ),
+            selection,
+        )
 
     if last_session:
         launch_cmd.append(f"--resume={last_session}")
@@ -809,7 +817,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     project = config.repo_name
     if project:
         launch["project"] = project
-    output._json_output({"worktree": _worktree_to_dict(record), "launch": launch})
+    with step("Emitting launch plan", worktree_id=worktree_id):
+        output._json_output({"worktree": _worktree_to_dict(record), "launch": launch})
     return 0
 
 

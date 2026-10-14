@@ -222,6 +222,27 @@ Individual Git, transport and mutation failure bounds remain in force, and
 bounded automation may explicitly set a plan timeout. Slow preparation is not
 a reason to abandon a successfully created checkout or skip projection work.
 
+Preparation stages also append `launch_preparation` events to the owning
+installation's rolling `logs/activity.jsonl`, without requiring a trace flag.
+Each stage has a unique `step_id`, `phase`, `state` (`started`, `waiting`,
+`finished`, or `failed`), monotonic `elapsed_ms`, process ID and, once selected,
+worktree ID. Failures record only their exception type, never prompt text,
+exception messages, environment values or command arguments. Seed transaction
+execution records its own start/end in the receiving daemon, so a client
+timeout can be distinguished from a transaction that later committed. Use
+`activity --worktree-id <id>` or filter the JSONL by process and step ID; an
+unmatched `started` event identifies the interrupted stage.
+
+New and exact JSON Resume reuse the selected launch configuration when building
+hook and owner environment values, rather than rediscovering plugin PR overlays
+twice. The selected PR policy, including foreign-repo overlays, remains intact;
+allocation-time locked policy revalidation is never cached or omitted.
+Single-worktree liveness uses only that worktree's registered session IDs,
+including bare sessions resumed from a different cwd, plus the mux probe.
+An empty registry is cheap and does not trigger historical session discovery;
+explicit recovery and the resident reconciliation cursor own registry repair.
+Thus unrelated session history cannot multiply the cost of a resume check.
+
 The Manager requests `resolve --stage-launch-seed` for prompted requests.
 `launch.seed_pending: true`, `launch.seed_id` and `launch.seed_kind` identify
 the saved intent. The second resolve selects it with `--seed-id`, preserving

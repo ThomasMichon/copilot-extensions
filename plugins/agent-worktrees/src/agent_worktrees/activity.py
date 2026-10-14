@@ -19,6 +19,8 @@ Events are intentionally high-level:
                             launcher / resolver path
   worktree_created          a new worktree + branch was created
   worktree_resumed          an existing worktree was resumed via the picker
+  launch_preparation        bounded phase metadata and elapsed times for
+                            create/resume and receiving seed transactions
   launcher_started          the session launcher began a launch flow (carries
                             launch_id + the setup-log path)
   session_started           a Copilot session registered against a worktree

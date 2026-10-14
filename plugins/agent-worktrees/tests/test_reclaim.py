@@ -176,6 +176,42 @@ def _mk_session(tmp_path, sid, cwd, pids):
 
 
 class TestResolveBoundCopilots:
+    def test_exact_registry_never_discovers_sibling_sessions(self, monkeypatch, tmp_path):
+        _mk_session(tmp_path, "registered", "/home/user", [7])
+        _mk_session(tmp_path, "unrelated", "/w/other", [8])
+        self._patch(
+            monkeypatch, tmp_path, alive={7, 8}, copilots={7, 8},
+            wt_map={}, table={7: {"ppid": 0, "name": "copilot"}},
+        )
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("exact registered session lookup entered fleet discovery")
+
+        monkeypatch.setattr(type(tmp_path), "iterdir", forbidden)
+        monkeypatch.setattr(reclaim, "_resolve_worktree_id_for_cwd", forbidden)
+        monkeypatch.setattr(reclaim.tracking, "find_worktree_id_by_session", forbidden)
+        rows = reclaim.resolve_bound_copilots(
+            worktree_id="wtA", session_ids=["registered"],
+        )
+        assert [(row["session_id"], row["worktree_id"], row["homing"]) for row in rows] == [
+            ("registered", "wtA", "bare"),
+        ]
+
+    def test_empty_registry_skips_session_and_process_discovery(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, tmp_path, alive=set(), copilots=set(), wt_map={}, table={})
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("empty registry attempted discovery")
+
+        monkeypatch.setattr(type(tmp_path), "iterdir", forbidden)
+        monkeypatch.setattr(reclaim.process_table_cache, "cached", forbidden)
+        assert reclaim.resolve_bound_copilots(worktree_id="wtA", session_ids=[]) == []
+
+    def test_exact_registry_rejects_path_escape(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, tmp_path, alive=set(), copilots=set(), wt_map={}, table={})
+        with pytest.raises(ValueError, match="Invalid registered session"):
+            reclaim.resolve_bound_copilots(worktree_id="wtA", session_ids=["../other"])
+
     def _patch(self, monkeypatch, tmp_path, *, alive, copilots, wt_map, table):
         monkeypatch.setattr(reclaim.sessions, "_session_state_dir", lambda: tmp_path)
         monkeypatch.setattr(reclaim.sessions, "_is_process_alive", lambda p: p in alive)
