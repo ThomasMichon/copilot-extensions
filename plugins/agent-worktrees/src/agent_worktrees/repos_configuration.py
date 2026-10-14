@@ -184,7 +184,7 @@ def command(argv: list[str]) -> int:
                     if args.command == "preview"
                     else apply(project, name, args.operation, args.login, args.preview_token)
                 )
-    except (ValueError, RepositoryResolutionError, OSError, TimeoutError) as exc:
+    except (ValueError, TypeError, RepositoryResolutionError, OSError, TimeoutError, yaml.YAMLError) as exc:
         code = exc.code if isinstance(exc, ConfigurationError) else "owner-read-or-write-failed"
         message = str(exc) if isinstance(exc, ConfigurationError) else (
             "Native configuration is unavailable or changed; inspect its owner and preview again."

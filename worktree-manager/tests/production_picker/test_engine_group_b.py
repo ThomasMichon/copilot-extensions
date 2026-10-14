@@ -64,7 +64,7 @@ def test_repair_stale_anchor_classifies_unsupported_engine(monkeypatch):
         engine_group_b.repair_stale_anchor("dotfiles")
 
 
-def test_bind_project_bootstrap_records_authoritative_project():
+def test_bind_project_bootstrap_records_authoritative_project(tmp_path):
     context.set_project("requested-project")
 
     binding = context.bind_project_bootstrap(
@@ -74,6 +74,7 @@ def test_bind_project_bootstrap_records_authoritative_project():
             "should_switch_cwd": True,
             "cwd": "/state/resolved-project",
             "default_live": True,
+            "workspace": str(tmp_path / "tracked-workspace"),
         }
     )
 
@@ -82,6 +83,15 @@ def test_bind_project_bootstrap_records_authoritative_project():
     assert binding.cwd == "/state/resolved-project"
     assert binding.should_switch_cwd is True
     assert binding.default_live is True
+    assert binding.workspace == str(tmp_path / "tracked-workspace")
+
+
+@pytest.mark.parametrize("workspace", ["relative", "", [], {}])
+def test_bind_project_bootstrap_rejects_invalid_workspace(workspace):
+    with pytest.raises(ValueError, match="absolute tracked path"):
+        context.bind_project_bootstrap({
+            "project": "sample", "workspace": workspace,
+        })
 
 
 def test_set_project_clears_stale_bootstrap_binding():

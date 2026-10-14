@@ -899,6 +899,7 @@ def test_picker_bootstrap_json_reports_runner_decisions(
         "project": "myproj",
         "should_switch_cwd": True,
         "cwd": str(anchor.resolve()),
+        "workspace": None,
         "default_live": False,
     }
 

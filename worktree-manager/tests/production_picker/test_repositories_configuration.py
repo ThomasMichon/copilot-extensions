@@ -29,7 +29,7 @@ SECRET = "github_pat_SENTINEL_DO_NOT_RENDER"
 def test_configuration_list_context_is_explicit_and_does_not_change_operational_pivots(monkeypatch, placement):
     monkeypatch.setattr(context, "_project", "selected")
     monkeypatch.setattr(context, "_bootstrap", context.ProjectBootstrap(
-        "selected", False, "explicit-workspace", False,
+        "selected", False, "switch-destination", False, workspace="explicit-workspace",
     ))
     reg = pivots.parse_manifest(
         {"label": "Fixture", "placement": placement, "scope": "global",
@@ -45,6 +45,23 @@ def test_configuration_list_context_is_explicit_and_does_not_change_operational_
         expected.update(repo="selected", configuration_workspace="explicit-workspace")
     assert calls == [expected]
     assert runtime.get("operational-machine")[0] == "ready"
+
+
+def test_legacy_bootstrap_switch_destination_is_not_a_configuration_workspace(monkeypatch):
+    monkeypatch.setattr(context, "_project", "selected")
+    monkeypatch.setattr(context, "_bootstrap", context.ProjectBootstrap(
+        "selected", True, "switch-destination", False,
+    ))
+    reg = pivots.parse_manifest(
+        {"label": "Fixture", "placement": "config", "scope": "global",
+         "list": ["unused", "{configuration_workspace}"]},
+        name="fixture", source_path="fixture.json",
+    )
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    calls = []
+    monkeypatch.setattr(runtime, "_exec_list", lambda ctx: (calls.append(ctx) or ("ready", [], "", {})))
+    runtime._run_list("")
+    assert calls == [{"machine": "", "repo": "selected", "configuration_workspace": ""}]
 
 
 def test_unbound_configuration_project_is_visible_error_not_a_hung_load(monkeypatch):
@@ -96,7 +113,10 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
     registry.mkdir()
     platform = "windows" if os.name == "nt" else "linux"
     (registry / "repos.yaml").write_text(yaml.safe_dump({
-        "repos": {"sample": {"class": "worktree", platform: str(native / "repository")}},
+        "repos": {
+            "sample": {"class": "worktree", platform: str(native / "repository")},
+            "knowledge": {"class": "worktree", platform: str(native / "knowledge")},
+        },
     }), encoding="utf-8")
     (registry / "config.yaml").write_text(
         "default_copilot_account: inherited\n", encoding="utf-8",
@@ -104,22 +124,47 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
     monkeypatch.setenv("AGENT_HOME", str(native))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setattr(context, "_project", "sample")
-    monkeypatch.setattr(context, "_bootstrap", context.ProjectBootstrap(
-        "sample", False, str(native / "repository"), False,
-    ))
+    monkeypatch.setattr(context, "_bootstrap", None)
+    workspaces = {name: native / f"{name}-worktree" for name in ("sample", "knowledge")}
+    for name, sibling, role in (("sample", "knowledge", "harness"), ("knowledge", "sample", "knowledge")):
+        workspaces[name].mkdir()
+        project_dir = native / f".{name}"
+        records = project_dir / "worktrees"
+        records.mkdir(parents=True)
+        (records / f"wt-{name}.yaml").write_text(yaml.safe_dump({
+            "worktree_id": f"wt-{name}", "branch": f"worktree/wt-{name}",
+            "worktree_path": str(workspaces[name]), "repo": name, "machine": "fixture",
+            "platform": platform, "status": "active", "started_at": "2026-01-01T00:00:00",
+            "last_resumed_at": "2026-01-01T00:00:00", "resume_count": 0, "sessions": [],
+            "pair_id": "fixture-pair", "pair_role": role,
+            "pair_ref": f"fixture/{sibling}/wt-{sibling}", "pair_kind": "worktree",
+        }), encoding="utf-8")
+    (native / ".sample" / "config.yaml").write_text("knowledge_repo: knowledge\n", encoding="utf-8")
     manifest_path = root / "plugins" / "agent-worktrees" / "pivots" / "repositories-config.json"
     manifest_bytes = manifest_path.read_bytes()
     manifest = json.loads(manifest_bytes)
     prefix = [owner_python, "-m", "agent_worktrees"]
     owner_probe = subprocess.run(
         [owner_python, "-c",
-         "import json,sys,agent_worktrees; print(json.dumps({'executable':sys.executable,'prefix':sys.prefix}))"],
+         "import json,sys; from agent_worktrees import config as cfg,tracking; "
+         "record=tracking.load_record(cfg.project_dir('sample')/'worktrees'/'wt-sample.yaml'); "
+         "print(json.dumps({'prefix':sys.prefix,'workspace':record.worktree_path}))"],
         capture_output=True, text=True, timeout=15, env=tasks._child_process_env(),
         **no_window_kwargs(),
     )
     assert owner_probe.returncode == 0, (owner_python, owner_probe.stdout, owner_probe.stderr)
     assert Path(json.loads(owner_probe.stdout)["prefix"]) == Path(owner_python).parent.parent
+    assert json.loads(owner_probe.stdout)["workspace"] == str(workspaces["sample"])
     assert tasks._resolve_command(prefix)[0] == owner_python
+    bootstrap = subprocess.run(
+        [*prefix, "--project", "sample", "picker-bootstrap", "--json"],
+        capture_output=True, text=True, timeout=15, cwd=workspaces["sample"],
+        env=tasks._child_process_env(), **no_window_kwargs(),
+    )
+    assert bootstrap.returncode == 0, bootstrap.stderr
+    binding = context.bind_project_bootstrap(json.loads(bootstrap.stdout))
+    assert binding.workspace == str(workspaces["sample"])
+    assert binding.workspace != binding.cwd
     manifest["list"] = [*prefix, *manifest["list"][1:]]
     for action in manifest["actions"]:
         for key in ("run", "preview"):
@@ -143,7 +188,7 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
 
     def edit(engine, operation):
         reg = engine._reg_pivot()
-        row = engine._task_rows()[0]
+        row = next(row for row in engine._task_rows() if row["id"] == "sample")
         action = next(action for action in reg.actions if action.key == operation)
         engine._open_pivot_form(reg, action, row, engine._task_action_ctx(reg, row), row["title"])
 
@@ -181,7 +226,11 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
                 await pilot.pause()
             await _wait(pilot, lambda: engine._task_state()[0] in ("ready", "error"))
             assert engine._task_state()[0] == "ready", engine._task_state()
-            assert engine._task_rows()[0]["configuration"]["target"]["resource"] == "sample/sample"
+            sample = next(row for row in engine._task_rows() if row["id"] == "sample")
+            assert sample["configuration"]["target"]["resource"] == "sample/sample"
+            pair = sample["configuration"]["pair"]
+            assert pair["status"] == "present" and pair["writable_workspace"] is True
+            assert pair["workspace"] == str(workspaces["knowledge"])
             assert snapshot(native) == before
             edit(engine, "set")
             await proposed(app, pilot, "chosen")
@@ -199,8 +248,8 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
                 str(Path(".agent-worktrees") / "repos.lock"),
             }
             app.screen.action_close()
-            await _wait(pilot, lambda: bool(engine._task_rows())
-                        and engine._task_rows()[0]["effective"] == "chosen")
+            await _wait(pilot, lambda: any(row["id"] == "sample" and row["effective"] == "chosen"
+                                          for row in engine._task_rows()))
             (registry / "config.yaml").write_text("default_copilot_account: changed-inheritance\n", encoding="utf-8")
             edit(engine, "reset")
             await proposed(app, pilot)
@@ -209,8 +258,10 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
             raw = yaml.safe_load((registry / "repos.yaml").read_text(encoding="utf-8"))
             assert "copilot_account" not in raw["repos"]["sample"]
             app.screen.action_close()
-            await _wait(pilot, lambda: bool(engine._task_rows())
-                        and engine._task_rows()[0]["effective"] == "changed-inheritance")
+            await _wait(pilot, lambda: any(
+                row["id"] == "sample" and row["effective"] == "changed-inheritance"
+                for row in engine._task_rows()
+            ))
             edit(engine, "set")
             await proposed(app, pilot, "stale-choice")
             await asyncio.to_thread(ordinary_write)

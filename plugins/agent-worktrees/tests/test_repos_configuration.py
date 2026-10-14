@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -175,6 +176,8 @@ def test_competing_real_cli_applies_have_one_winner(native):
     f"default_copilot_account: {SECRET}\n",
     'default_copilot_account: first\ndefault_copilot_account: ""\n',
     "copilot_identity_switch_enabled: not-a-boolean\n",
+    f"? [{SECRET}]\n: invalid-key\n",
+    f"? {{{SECRET}: value}}\n: invalid-key\n",
 ])
 @pytest.mark.parametrize("source", ["global", "drop-in"])
 def test_invalid_composition_is_unknown_not_empty_identity_and_sanitized(native, content, source):
@@ -206,6 +209,79 @@ def test_absent_registration_and_fresh_root_are_read_only(tmp_path, monkeypatch)
     row = json.loads(result.stdout)["entries"][0]
     assert row["registration"] == "absent" and row["editable"] == "false"
     assert not (tmp_path / "first-touch").exists()
+
+
+def test_malformed_projects_registry_is_sanitized_native_inspection(native):
+    from agent_worktrees import installer
+
+    installer.projects_yaml_path().write_text(f"projects: [{SECRET}\n", encoding="utf-8")
+    before = tree(native)
+    result = request("catalog")
+    assert result.returncode == 0, result.stderr
+    row = next(row for row in json.loads(result.stdout)["entries"] if row["id"] == "sample")
+    assert row["configuration"]["binding"]["status"] == "unknown"
+    assert row["configuration"]["findings"][0]["code"] == "native-inspection-unavailable"
+    assert SECRET not in result.stdout + result.stderr
+    assert "Traceback" not in result.stdout + result.stderr
+    assert tree(native) == before
+
+
+def test_disabled_managed_dropin_does_not_block_valid_preferences(native):
+    source = "sample@example-marketplace"
+    root = native / "plugin"
+    target = root / "config.yaml"
+    target.write_text("default_copilot_account: disabled-value\n", encoding="utf-8")
+    settings = native / ".copilot" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"enabledPlugins": {source: False}}), encoding="utf-8")
+    directory = cfg.project_dir("sample") / "config.d"
+    directory.mkdir(parents=True)
+    (directory / "managed.json").write_text(json.dumps({
+        "schema_version": 1, "plugin": source, "plugin_root": str(root), "target": str(target),
+    }), encoding="utf-8")
+    before = tree(native)
+    result = request("catalog")
+    assert result.returncode == 0, result.stderr
+    row = next(row for row in json.loads(result.stdout)["entries"] if row["id"] == "sample")
+    assert row["effective"] == "inherited" and row["editable"] == "true"
+    proposed = request("preview", "--login", "chosen")
+    assert proposed.returncode == 0, proposed.stderr
+    assert tree(native) == before
+    result = request("apply", "--login", "chosen", "--preview-token", json.loads(proposed.stdout)["token"])
+    assert result.returncode == 0, result.stderr
+    reset = request("preview", "--operation", "reset")
+    assert reset.returncode == 0, reset.stderr
+    result = request("apply", "--operation", "reset", "--preview-token", json.loads(reset.stdout)["token"])
+    assert result.returncode == 0, result.stderr
+    assert repos.copilot_account_for("sample", project="sample", strict=True) == "inherited"
+    assert target.read_text(encoding="utf-8") == "default_copilot_account: disabled-value\n"
+
+
+@pytest.mark.parametrize("location", ["worktree", "anchor", "outside", "foreign"])
+def test_picker_bootstrap_workspace_is_a_tracked_selected_project_root(native, monkeypatch, capfd, location):
+    from agent_worktrees import context_cli, tracking
+
+    workspace = native / "sample-worktree"
+    nested = workspace / "nested"
+    nested.mkdir(parents=True)
+    record = tracking.WorktreeRecord(
+        worktree_id="wt-sample", branch="worktree/wt-sample", worktree_path=str(workspace),
+        repo="foreign" if location == "foreign" else "sample",
+        machine="fixture", platform=repos._current_platform(),
+        started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0, title=None, status="active", completed_at=None, sessions=[],
+    )
+    tracking.save_record(record, cfg.project_dir("sample") / "worktrees" / "wt-sample.yaml")
+    monkeypatch.chdir(
+        native / "repository" if location == "anchor" else native if location == "outside" else nested,
+    )
+    before = tree(native)
+    assert context_cli.cmd_picker_bootstrap(SimpleNamespace(json=True)) == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["project"] == "sample"
+    assert payload["workspace"] == (str(workspace) if location == "worktree" else None)
+    assert payload["cwd"] != str(workspace)
+    assert tree(native) == before
 
 
 def test_request_errors_never_echo_raw_values(native):

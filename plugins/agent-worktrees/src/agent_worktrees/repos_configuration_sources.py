@@ -43,7 +43,7 @@ def identity(value: object, *, allow_empty: bool = False) -> str:
 def parse_mapping(text: str) -> dict:
     try:
         result = yaml.load(text, Loader=_UniqueRegistryLoader)
-    except (UnicodeError, ValueError, yaml.YAMLError) as exc:
+    except (UnicodeError, ValueError, TypeError, yaml.YAMLError) as exc:
         raise ConfigurationError(
             "invalid-composition", "A configuration source is invalid; repair it with its owner."
         ) from exc
@@ -97,7 +97,11 @@ def defaults(project: str) -> PreferenceDefaults:
     paths = [global_path, machine_path, directory, *[c.target for c in initial.active_configs]]
     before = fingerprint(paths)
     report = scan_config_dropin_registry(directory, project_name=project, previous={})
-    if report.findings or report.authority.value == "indeterminate":
+    invalid = [
+        finding for finding in report.findings
+        if not (finding.status == "inactive" and finding.reason == "not-enabled" and finding.owner)
+    ]
+    if invalid or report.authority.value == "indeterminate":
         raise ConfigurationError(
             "invalid-composition", "Configuration drop-ins need owner repair before editing preferences."
         )

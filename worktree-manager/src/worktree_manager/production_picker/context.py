@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 _project: str | None = None
@@ -17,6 +18,7 @@ class ProjectBootstrap:
     should_switch_cwd: bool
     cwd: str | None
     default_live: bool
+    workspace: str | None = None
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "ProjectBootstrap":
@@ -30,11 +32,17 @@ class ProjectBootstrap:
             cwd = None
         if should_switch and not cwd:
             raise ValueError("bootstrap payload requires cwd when should_switch_cwd is true")
+        workspace = payload.get("workspace")
+        if workspace is not None and (
+            not isinstance(workspace, str) or not Path(workspace).is_absolute()
+        ):
+            raise ValueError("bootstrap workspace must be an absolute tracked path")
         return cls(
             project=project,
             should_switch_cwd=should_switch,
             cwd=cwd,
             default_live=bool(payload.get("default_live")),
+            workspace=workspace,
         )
 
 

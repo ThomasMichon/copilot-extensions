@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 from . import config as cfg, installer, related, repos, state_root
 from .repos_configuration import FUTURE_ONLY, compose_preference, target
 from .repos_configuration_sources import ConfigurationError, defaults, fingerprint, identity, mapping
@@ -93,7 +95,8 @@ def inspect_project(project: str, workspace: str) -> Inspection:
                     ),
                     "reason": "Inspect the native tracked pair before writing personal state.",
                 }
-    except (ValueError, TypeError, AttributeError, KeyError, OSError, RuntimeError, RepositoryResolutionError):
+    except (ValueError, TypeError, AttributeError, KeyError, OSError, RuntimeError,
+            RepositoryResolutionError, yaml.YAMLError):
         result.findings.append({
             "code": "native-inspection-unavailable", "severity": "error",
             "message": "Project composition or native inspection needs owner repair.",

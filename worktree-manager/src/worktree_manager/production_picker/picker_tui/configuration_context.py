@@ -13,7 +13,7 @@ def list_context(pivot, machine: object) -> dict:
         binding = context.project_bootstrap()
         result.update(
             repo=context.project(),
-            configuration_workspace=binding.cwd if binding and binding.cwd else "",
+            configuration_workspace=binding.workspace if binding and binding.workspace else "",
         )
     return result
 

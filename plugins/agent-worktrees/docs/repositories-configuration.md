@@ -12,11 +12,16 @@ The cards show absent, stale, unsupported and unknown/error states explicitly.
 An anchor is never presented as a paired writable checkout. No workspace means
 pair inspection is unsupported, rather than inferred from the CLI's CWD.
 Both tracked checkout directories must still exist for a pair to be writable.
+Manager forwards the engine bootstrap's explicit tracked `workspace`, not its
+optional anchor-directory switch destination. Older engines without that field
+leave pair inspection unsupported rather than falling back to the Manager's CWD.
 Route inspection validates the native selected base and marketplace-overlay
 layers, including duplicate keys, while accepting native bare minimal links.
 Selected repository configuration uses the same committed/fallback source
 selection with failure-aware parsing. Invalid selected sources report unknown
 state; machine routes retain their resolved peer identity.
+Confirmed disabled managed drop-ins do not participate in preference inheritance
+or block editing; invalid or indeterminate contributions still require repair.
 Route/pair editing and plugin enablement remain unsupported: use their owning
 capabilities, not a generic source-file editor.
 
@@ -80,7 +85,9 @@ Native coverage runs through `tools/run-plugin-tests.py agent-worktrees -k
 coverage uses the production Textual editor and the actual native owner CLI,
 not a substitute owner implementation. Set `REPOSITORIES_CONFIG_TEST_PYTHON`
 to the isolated agent-worktrees test interpreter before running the Manager's
-`test_repositories_configuration.py`. The change-scoped Linux CI job prepares
+`test_repositories_configuration.py`. Manager validates executable targets but
+preserves their absolute invocation paths, so symlinked virtual-environment
+interpreters retain the native owner's environment. The change-scoped Linux CI job prepares
 that interpreter and enables the same lane in a separate, required five-minute
 Repositories Configuration job; a normal standalone Manager suite
 without a separately prepared owner reports the integration case as skipped.
