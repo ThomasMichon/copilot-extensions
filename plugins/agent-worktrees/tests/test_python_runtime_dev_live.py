@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -61,6 +62,14 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
             resolution.write_text(source.replace(
                 lookup, f"profile_value = Path({str(home)!r})",
             ), encoding="utf-8")
+        shell_context = plugin / "scripts" / "installation-context" / "installation-context.sh"
+        source = shell_context.read_text(encoding="utf-8")
+        lookup = 'CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"'
+        assert source.count(lookup) == 1
+        shell_context.write_text(source.replace(
+            lookup,
+            f'CURRENT_PROFILE_HOME="$(canonical_path {shlex.quote(str(home))} true)"',
+        ), encoding="utf-8")
     probe_source = plugin / "src" / "agent_worktrees" / "iteration_probe.py"
     probe_source.write_text("VALUE = 1\n", encoding="utf-8")
     git = shutil.which("git")

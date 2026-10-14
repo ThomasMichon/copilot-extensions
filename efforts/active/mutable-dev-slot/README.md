@@ -257,6 +257,31 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Journal
 
+### 2026-10-14 -- Kernel exit fix passes; native shell profile fixture isolated
+
+Exact-head full run 38584999329 passed both native runner jobs, repository
+guards including the shared ZDD suite, all eight other full plugin suites,
+standalone Worktree Manager and service jobs. Automatic PR run 38584869452
+was also green. The Worktrees lifecycle group had 903 passes and one failure:
+the real namespaced development fixture reached its first Bash entrypoint,
+where the independent pure-shell validator still correctly consulted passwd.
+The Python account-lookup isolation did not affect that native consumer.
+The fixture now also pins only the copied shell's final account-home lookup,
+before freezing inputs; production identity and authorization remain unchanged.
+The earlier real monitor drain/retention failure did not recur with native
+pidfd exit evidence. The legacy source-deletion/deployed-release case passed,
+but namespaced and Windows deployed lifecycle acceptance remain incomplete.
+
+A separate temporary nested-build probe exercised real UV/setuptools metadata
+under both outer test containment and inner installer Job custody. Its explicit
+early `platform.system()` calls all returned within 0.83 seconds; after
+metadata and most wheel builds, one backend exited with `0xc0000005`, not the
+prior WMI timeout. Sampled wheel frames progressed through copying and archive
+writing. This altered call ordering is a counterprobe, not a baseline fix or
+proof of why the original backend hangs. The diagnostic was removed and never
+committed. No timeout, interpreter selection, system service or production
+backend workaround was introduced.
+
 ### 2026-10-14 -- Full native matrix reaches the real POSIX adopter
 
 Full candidate run 38576292156 reached the real Worktrees lifecycle group
