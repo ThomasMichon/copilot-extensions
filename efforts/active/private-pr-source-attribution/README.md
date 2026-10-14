@@ -120,28 +120,28 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
 
 ### Phase 5 — Required dev PR source metadata
 
-- [ ] Review and implement the repository-specific required metadata gate,
+- [x] Review and implement the repository-specific required metadata gate,
   automation origins, manual repair guidance and silent operator-only
   exception in [dev-pr-enforcement.md](dev-pr-enforcement.md) (#6295).
 
 ## Validation Plan
 
-- [ ] Root identity round trips from a multi-repo ownership chain while public
+- [x] Root identity round trips from a multi-repo ownership chain while public
   marker fields contain no raw origin identifiers.
-- [ ] Cover opt-outs, malformed/cyclic ancestry, remote or missing ancestors,
+- [x] Cover opt-outs, malformed/cyclic ancestry, remote or missing ancestors,
   handoffs and record recreation; document deliberate limitations.
-- [ ] Existing encrypted tokens remain readable; wrong key or tampered data
+- [x] Existing encrypted tokens remain readable; wrong key or tampered data
   produces an explicit error without publishing plaintext or secret diagnostics.
 - [ ] Prove a synced portable key from a disposable vault/database fixture can
   decode tokens from multiple source machines on another installation identity
   without probing each source machine for a key.
-- [ ] Prove lookup with vault locked after cache population, including a
+- [x] Prove lookup with vault locked after cache population, including a
   process restart; cache miss does not prompt invisibly or fabricate success.
 - [x] Native Windows ARM64 exercises real encryption/decryption and protected
   cache reads, not only mocks or platform skips.
-- [ ] Concurrent key/cache writes, malformed cache, rotation and permissions
+- [x] Concurrent key/cache writes, malformed cache, rotation and permissions
   preserve recoverability and do not overwrite authoritative key material.
-- [ ] Exercise initial, refreshed and foreign-PR publish paths plus provider
+- [x] Exercise initial, refreshed and foreign-PR publish paths plus provider
   fallback behavior with disposable fixtures.
 - [ ] Run focused unit, real subprocess and applicable clean-room checks.
   Live synced-fleet checks use explicit authorization and disposable material;
@@ -266,3 +266,26 @@ No production secret is read or written by the planning slice.
   uncovered incomplete obligation-settlement fixtures, tracked in #6589-#6592
   and owned by #6593. No required release gate was bypassed; the trusted source
   validator is not yet present on main.
+
+### 2026-10-14 — Trusted deployment and mandatory dev gate
+
+- Normal promotion #6631 actually merged at
+  `f5e4e30353a076aec74781e6ef5cfe5df474e939`. The validator, refresh-budget
+  helper, public dependency lock and both trusted source workflows match the
+  reviewed #6356 blobs at that exact main commit.
+- Covering run
+  [38508930963](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38508930963)
+  subsequently failed in post-merge Python artifact publication. This does
+  not erase the verified source/workflow deployment, but neither the run nor
+  this effort claims successful artifact publication or installed fleet rollout.
+- The live missing-marker, same-head body-only repair, shared-head refusal and
+  untouched remaining-PR departure recovery all passed their stated contracts;
+  exact trusted-run evidence is recorded in the enforcement sidecar.
+- Existing active no-bypass ruleset `24152679` now additionally requires
+  `source-attribution`. Fresh readback and effective dev branch rules confirm
+  the requirement; every existing rule, check, condition, enforcement and
+  bypass field was preserved.
+- The whole effort remains Active. The operator explicitly retained actual
+  synced-fleet provisioning/adoption as blocked here, without authorizing
+  remote unlocks, cache population or replacement keys. Local and fixture
+  evidence does not resolve that remaining Plan/Validation gate.
