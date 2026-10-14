@@ -982,15 +982,15 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
-### 2026-10-14 - Phase 6d source merged; promotion and consumer acceptance next
+### 2026-10-14 - Phase 6d promoted; signed publication and consumer acceptance next
 
 PR #6595 merged as `b4dadce47c97adb0c4bdd1a5236cfdeaf83016f1` after
 current-head Copilot review `5513584244` reported zero findings, all eleven
 threads were resolved, and required CI `38516933011` passed. The bounded
 resident projection, held CLI feed, mandatory local/SSH consumer path and
 review corrections below are now landed source, not installed acceptance.
-The current read/feed payloads and their provider capability still require
-normal main promotion and successful signed-artifact publication.
+The containing main promotion recorded below completed separately.
+Successful signed-artifact publication and installed acceptance remain open.
 
 Re-read the Phase 6d and coupled read-side gates after merge. Source
 implementation is no longer the next stretch: continue Phase 6d.3's real
