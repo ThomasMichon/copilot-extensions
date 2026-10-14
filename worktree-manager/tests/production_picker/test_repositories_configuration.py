@@ -111,6 +111,15 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
     manifest_bytes = manifest_path.read_bytes()
     manifest = json.loads(manifest_bytes)
     prefix = [owner_python, "-m", "agent_worktrees"]
+    owner_probe = subprocess.run(
+        [owner_python, "-c",
+         "import json,sys,agent_worktrees; print(json.dumps({'executable':sys.executable,'prefix':sys.prefix}))"],
+        capture_output=True, text=True, timeout=15, env=tasks._child_process_env(),
+        **no_window_kwargs(),
+    )
+    assert owner_probe.returncode == 0, (owner_python, owner_probe.stdout, owner_probe.stderr)
+    assert Path(json.loads(owner_probe.stdout)["prefix"]) == Path(owner_python).parent.parent
+    assert tasks._resolve_command(prefix)[0] == owner_python
     manifest["list"] = [*prefix, *manifest["list"][1:]]
     for action in manifest["actions"]:
         for key in ("run", "preview"):
