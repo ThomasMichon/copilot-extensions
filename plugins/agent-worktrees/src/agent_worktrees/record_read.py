@@ -23,9 +23,20 @@ class RecordReadError(ValueError):
         self.code = code
 
 
-def _json_scalar(value: object) -> str:
+def _json_value(value: object, ancestors: frozenset[int] = frozenset()) -> object:
     if isinstance(value, date):
         return value.isoformat()
+    if isinstance(value, (dict, list)):
+        if id(value) in ancestors:
+            raise ValueError("Record contains a cyclic YAML value")
+        nested = ancestors | {id(value)}
+        if isinstance(value, dict):
+            if any(not isinstance(key, str) for key in value):
+                raise ValueError("Record JSON mappings require string keys")
+            return {key: _json_value(item, nested) for key, item in value.items()}
+        return [_json_value(item, nested) for item in value]
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
     raise TypeError(f"Record contains a non-JSON value: {type(value).__name__}")
 
 
@@ -161,7 +172,7 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
             "checkout_managed",
         ):
             worktree[key] = data.get(key)
-        return json.loads(json.dumps(worktree, default=_json_scalar, allow_nan=False))
+        return json.loads(json.dumps(_json_value(worktree), allow_nan=False))
     except RecordReadError:
         raise
     except (yaml.YAMLError, ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:

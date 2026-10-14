@@ -388,6 +388,49 @@ def test_record_read_normalizes_nested_yaml_timestamps_without_writes(
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize("field", ["execution_leg", "session_backend"])
+@pytest.mark.parametrize("key", [1, True, None, date(2026, 1, 1)])
+def test_record_read_rejects_non_string_opaque_mapping_keys(record_fixture, field, key):
+    data, path = record_fixture
+    data[field] = {"version": 99, "nested": [{"1": "string value", key: "other value"}]}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1 and result["error"]["code"] == "record-malformed"
+    assert "string keys" in result["error"]["message"]
+    assert path.read_bytes() == before
+
+
+def test_record_read_rejects_cyclic_opaque_yaml(record_fixture):
+    data, path = record_fixture
+    cyclic = {}
+    cyclic["self"] = cyclic
+    data["execution_leg"] = {"version": 99, "nested": cyclic}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1 and result["error"]["code"] == "record-malformed"
+    assert "cyclic" in result["error"]["message"]
+
+
+@pytest.mark.parametrize("value", [b"binary", {"set-value"}, float("nan"), float("inf")])
+def test_record_read_rejects_other_non_json_opaque_values(record_fixture, value):
+    data, path = record_fixture
+    data["execution_leg"] = {"version": 99, "nested": value}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1 and result["error"]["code"] == "record-malformed"
+
+
+def test_record_read_preserves_shared_noncyclic_opaque_yaml_values(record_fixture):
+    data, path = record_fixture
+    shared = {"text": "unchanged"}
+    data["execution_leg"] = {"version": 99, "values": [shared, shared]}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["execution_leg"]["values"] == [shared, shared]
+
+
 def test_record_read_legacy_backend_translation_is_not_written(record_fixture):
     data, path = record_fixture
     data["session_backend"] = {
