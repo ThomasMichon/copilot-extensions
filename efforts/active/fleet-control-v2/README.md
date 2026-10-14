@@ -1114,3 +1114,21 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   unchanged 120-second deadline; lint and install-contract gates pass.
   Re-review and current-head hosted CI remain pending; the earlier review is
   not a passing verdict.
+- The corrected verifier head received genuine Copilot APPROVED review with
+  zero open findings. Hosted validation then exposed a reproducible Windows
+  120-second portfolio timeout at the existing 1024-event retention test.
+  One unchanged-head reproduction confirmed it; no further blind rerun or
+  deadline increase was used. The separate index-suite job's eight-minute
+  cancellation recovered on its single targeted rerun.
+- Narrowed the retention test's expensive setup, not its acceptance boundary:
+  generate the valid history through the real API and real in-memory SQLite,
+  back it up to a real temporary database, then exercise the exact last-valid/
+  first-expired cursor, overflow, retry and reopen against ordinary durable
+  disk transactions. The literal 1024 bound, production `synchronous=FULL`,
+  actual crash/process tests, test selection and 120-second deadline remain.
+  An attempted WAL-only fixture did not improve timing and was discarded.
+- Revised focused crypto/retention/crash contracts pass 69 in 4.82 seconds;
+  exact retention preparation/overflow takes 0.75 seconds instead of 10-12
+  on the same local host. Full unchanged-coverage portfolio passes 670 with
+  six skips in 72.23 seconds. This improvement still needs current-head
+  hosted native validation and re-review; local timing is not that proof.
