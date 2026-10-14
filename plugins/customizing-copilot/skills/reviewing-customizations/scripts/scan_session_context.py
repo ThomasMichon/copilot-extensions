@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import re
 from dataclasses import dataclass
@@ -347,11 +348,27 @@ def _script_has_output_free_contract(script: Path) -> bool:
             return nested.is_file() and _script_has_output_free_contract(nested)
         return False
     if suffix == ".py":
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id == "print":
+                streams = [keyword.value for keyword in node.keywords if keyword.arg == "file"]
+                if len(streams) != 1 or not (
+                    isinstance(streams[0], ast.Attribute)
+                    and isinstance(streams[0].value, ast.Name)
+                    and streams[0].value.id == "sys"
+                    and streams[0].attr == "stderr"
+                ):
+                    return False
+            elif isinstance(node.func, ast.Attribute) and node.func.attr == "print":
+                return False
         code_lines = [
             line for line in text.splitlines() if line.lstrip() and not line.lstrip().startswith("#")
         ]
-        if any("print(" in line for line in code_lines):
-            return False
         stdout_lines = [line for line in code_lines if "sys.stdout.write(" in line]
         if not stdout_lines:
             return True

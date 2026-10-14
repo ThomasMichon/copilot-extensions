@@ -64,6 +64,11 @@ connector source changes create new IDs. Canonical content updates maintain
 the projection, and canonical deletes remove corresponding vectors under the
 same participating exclusion. Detached queued workers inherit the selected
 mode; default/unselected writers retain the legacy path.
+Selected canonical-ID lookups propagate query failures instead of treating them
+as absent IDs. A failed immutability preflight leaves the operation dirty before
+destructive intent, with content/vector provenance unchanged; only explicit
+no-effect validation can reopen it. Genuine absent IDs still permit insertion.
+Unselected ID reads retain their existing availability fallback.
 
 FTS subprocesses own a second stable kernel guard, `.source-fts.lock`, until
 their process exits. Before spawning, the parent persists `fts_pending` while
@@ -97,6 +102,12 @@ first-touch preparation returns false availability without spawning a builder
 or leaving the domain dirty; subsequent queued ingestion can write normally.
 Unselected legacy callers retain the existing public availability-bool
 semantics, including true availability of an older index after rebuild failure.
+Selected child failures expose only a bounded exit-code/reason diagnostic, never
+raw stderr or source bodies. The established retryable/commit-conflict classifier
+is shared across the child and parent boundary: both first-build and incremental
+conflicts retry the same build kind, and exhausted conflicts retain uncertainty
+without incorrectly escalating to a full rebuild. Parent receipt-publication
+`OSError`s still propagate unchanged rather than entering this retry path.
 
 The receipt's `fts_coverage` mapping binds each prepared content table to its
 exact covered Lance version. Canonical upserts/deletes invalidate coverage
@@ -207,6 +218,12 @@ chunk-ID ordering within the native candidate window.
 Fusion uses the native configured vector/FTS weights, including
 `AGENT_INDEX_VECTOR_WEIGHT` and `AGENT_INDEX_FTS_WEIGHT`, rather than independent
 backend defaults.
+Repository prefilters use the same first colon-delimited identity as native
+`repo_matches`, before vector/FTS candidate selection and hydration. This
+includes ADO/azure-devops project families and byproducts, bare project names,
+and exact owner/host-qualified identities. Repository names containing `%` or
+`_` remain literal; an omitted repo leaves the authorized families unchanged,
+while `all` is an ordinary repository name, not an authorization wildcard.
 
 Ordinary scoped reads do not create tables, migrate columns or build indexes.
 Unprepared/mismatched projection fails closed. Native API/engine placement and

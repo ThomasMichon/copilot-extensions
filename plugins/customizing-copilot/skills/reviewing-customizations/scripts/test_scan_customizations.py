@@ -2945,6 +2945,27 @@ def test_multiple_possible_outputs_block(
     )
 
 
+def test_python_output_free_contract_distinguishes_stderr_diagnostics(tmp_path):
+    script = tmp_path / "hook_client.py"
+    for statement, expected in (
+        ('print("diagnostic", file=sys.stderr)', True),
+        ('print(\n    "diagnostic",\n    file=sys.stderr,\n)', True),
+        ('diagnostic = "print( is not a call"', True),
+        ('print("context")', False),
+        ('print("context", file=sys.stdout)', False),
+        ('print("context", file=stream)', False),
+        ('builtins.print("context", file=sys.stderr)', False),
+        ('print("diagnostic", file=sys.stderr', False),
+    ):
+        indented = "\n".join("    " + line for line in statement.splitlines())
+        script.write_text(
+            'import sys\nkind = "sessionStart"\nif kind == "sessionStart":\n'
+            + indented + '\n    sys.stdout.write("{}")\n',
+            encoding="utf-8",
+        )
+        assert scan._script_has_output_free_contract(script) is expected, statement
+
+
 def test_suite_session_start_stack_is_output_free_without_authority():
     root = Path(__file__).resolve().parents[5]
     sources = []

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 from agent_procutil import no_window_kwargs as no_window_kwargs
 
-from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin
+from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_retryable
 from agent_index.store.repo_filter import _like_pattern, _sql_str, repo_filter_sql
 from agent_index.store.source_layout import (
     SourceLayoutError,
@@ -185,9 +185,8 @@ class ContentStore(_ContentFtsWorkerMixin):
         """
         table = self._get_or_create_table()
         if self._source_domain is not None:
-            old = self.get_by_ids([c.chunk_id for c in chunks])
-            if any(c.chunk_id in old and old[c.chunk_id].source != c.source for c in chunks):
-                raise SourceLayoutError("existing ID has conflicting canonical source")
+            from .source_projection import check_content_sources
+            check_content_sources(self, chunks)
         now = time.time()
 
         records = [
@@ -497,6 +496,8 @@ class ContentStore(_ContentFtsWorkerMixin):
                 .to_list()
             )
         except Exception:
+            if self._source_domain is not None:
+                raise
             return {}
 
         return {
@@ -790,8 +791,7 @@ class ContentStore(_ContentFtsWorkerMixin):
                     if self._source_domain is not None and isinstance(e, OSError):
                         raise
                     last_err = e
-                    err_msg = str(e).lower()
-                    retryable = "retryable" in err_msg or "commit conflict" in err_msg
+                    retryable = fts_retryable(str(e))
                     last_retryable = retryable
                     if retryable and attempt < max_retries:
                         delay = (2.0 ** attempt) + random.uniform(0, 1)

@@ -12,6 +12,12 @@ from agent_procutil import no_window_kwargs
 from .source_layout import SourceLayoutError
 
 
+def fts_retryable(message: str) -> bool:
+    """The established LanceDB conflict classifier, shared across the child boundary."""
+    message = message.lower()
+    return "retryable" in message or "commit conflict" in message
+
+
 class _ContentFtsWorkerMixin:
     """Own child-process execution and file-lock lifetime; state stays on the store."""
 
@@ -108,7 +114,13 @@ class _ContentFtsWorkerMixin:
                     **no_window_kwargs(),
                 )
                 if proc.returncode != 0:
-                    raise SourceLayoutError("source-aware FTS builder failed")
+                    reason = (
+                        "commit conflict" if fts_retryable(proc.stderr[-4096:])
+                        else "unclassified child failure"
+                    )
+                    raise SourceLayoutError(
+                        f"source-aware FTS builder failed (rc={proc.returncode}): {reason}"
+                    )
             return
         if full:
             body = (

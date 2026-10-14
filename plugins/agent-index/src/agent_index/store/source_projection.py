@@ -10,6 +10,13 @@ from .source_layout import SourceLayoutError
 PAGE_SIZE = 512
 
 
+def check_content_sources(content, chunks) -> None:
+    """Validate immutable canonical identities through the selected strict lookup."""
+    old = content.get_by_ids([chunk.chunk_id for chunk in chunks])
+    if any(chunk.chunk_id in old and old[chunk.chunk_id].source != chunk.source for chunk in chunks):
+        raise SourceLayoutError("existing ID has conflicting canonical source")
+
+
 def delete_canonical(content, predicate: str, *, return_ids: bool = False):
     table = content._get_or_create_table()
     content._source_domain.effect(f"canonical-delete:{content._table_name}")
