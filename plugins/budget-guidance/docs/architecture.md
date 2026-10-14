@@ -14,6 +14,10 @@ layers:
    cue and atomically writes it to the requesting session's instruction folder.
    Its [delivery contract](session-guidance.md) owns the pointer, freshness,
    redaction, byte budget, and hook behavior.
+6. `routing_advice.py` issues optional point-in-time advice with an expiry
+   bounded by the selected fields and reset. The [contract](configuration.md#optional-routing-advice)
+   lets independent routing consumers use it without importing this runtime or
+   reimplementing its arithmetic.
 
 The static adapter is intentionally complete enough for offline operation and
 partial enough to exercise multi-source composition. It performs no I/O beyond
@@ -25,6 +29,14 @@ Repository/configuration data cannot grant execution authority, and the plugin
 does not acquire credentials. An explicit operator grant may authorize a
 repository executable; its location is not itself a trust guarantee.
 The [external-reader contract](external-readers.md) owns bounds and failures.
+
+`github_usage.py` reads personal billing API reports through a caller-owned
+authenticated async transport. It verifies the selected account and reporting
+period before exposing allowlisted quantities. The [provider report contract](github-usage.md)
+keeps those facts separate from a current budget: the API does not establish
+entitlement, reset, provider observation time, or the requesting session's
+account. Its inert budget reading withholds numeric values rather than turning
+an empty or historical billing report into a fresh forecast.
 
 The fast installer stamp copies the exact owning payload into an immutable
 versioned snapshot. Both compatibility and payload-local wrappers provision

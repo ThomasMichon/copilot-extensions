@@ -18,9 +18,13 @@ allowance.
 Configuration is inert JSON. The plugin does not source configuration or execute
 commands from it. [Bounded external readers](docs/external-readers.md) require
 an explicit invocation-owned command grant, separate from configuration.
-The plugin does not itself call a provider network service, store a
-longitudinal ledger, qualify models, or alter routing decisions. Provider
-refresh adapters and routing composition remain later slices.
+Automatic startup does not refresh providers. The plugin does not store a
+longitudinal ledger, qualify models, or alter routing decisions. Status includes
+optional [short-lived routing advice](docs/configuration.md#optional-routing-advice)
+for independent consumers. The opt-in
+[personal GitHub report adapter](docs/github-usage.md) reads usage through a
+host-owned authenticated transport; it does not infer current entitlement,
+reset, or provider freshness from billing reports.
 
 The `sessionStart` hooks are output-free: runtime bootstrap and a bounded
 [exact-session posture cue](docs/session-guidance.md) each emit only `{}`.
@@ -43,4 +47,5 @@ one provider's observation, units, business state, and raw reset separately.
 Qualified incumbent readings reuse posture arithmetic for sustainable pace.
 Compatible monthly usage adds a labeled
 [cycle-average projection and advice-only pacing](docs/provider-pacing.md).
-Provider refresh adapters and routing integration remain later slices.
+Provider-observed entitlement acquisition and requesting-account proof remain
+later slices.
