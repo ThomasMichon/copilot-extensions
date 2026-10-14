@@ -148,7 +148,13 @@ def _run(arguments: list[str], *, cwd: Path) -> None:
 
 
 def _health(python: Path, profile: str, *, cwd: Path) -> None:
-    code = "import agent_containers, credential_relay"
+    modules = ["agent_containers", *(name.replace("-", "_") for name in LIBRARIES)]
+    code = (
+        "import agent_containers, credential_relay, importlib.util, sys; from pathlib import Path"
+        f"; assert all(Path(importlib.util.find_spec(n).origin).resolve().is_relative_to("
+        f"Path(sys.prefix).resolve()) for n in {modules!r}),"
+        " 'dependency escapes immutable runtime slot'"
+    )
     if profile == "provider-exec":
         code += "; import paramiko"
     else:
@@ -222,7 +228,7 @@ def provision(
                     package += "[provider-exec]"
                 targets = [*(str(library) for library in libraries), package]
                 if uv:
-                    install = [uv, "pip", "install", "--python", str(venv_python)]
+                    install = [uv, "pip", "install", "--no-sources", "--python", str(venv_python)]
                 else:
                     install = [str(venv_python), "-m", "pip", "install"]
                 _run([*install, "--quiet", *targets], cwd=payload)

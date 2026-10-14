@@ -382,3 +382,25 @@ shared mutable venv is presumed acceptable.
   recovery: 8 / 8. Focused lint and the install contract pass.
 - These are candidate checks, not a merge, released payload or production
   rollout. Current-head review and hosted CI remain required.
+
+### 2026-10-14 - Immutable helper ownership discovered during measurement
+- Two-consumer closure measurement exposed an installer boundary that unit
+  command mocks had not exercised: uv honored development editable-source
+  declarations even when all canonical library paths were explicit. Those
+  helpers could resolve outside a supposedly immutable runtime slot.
+- Profile construction now disables uv source remapping after explicitly
+  supplying the admitted local libraries. Health rejects any Containers/helper
+  module outside the selected slot. A real isolated Python regression proves
+  that an editable `.pth` escape fails rather than activating a partial runtime.
+- Targeted profile/dependency/transaction coverage: 36 passed / 8 skipped;
+  module ceilings, focused lint and the install contract pass. Both profiles
+  were also freshly provisioned with the registered, signed Windows Python
+  3.11.9 interpreter; both copied runtime interpreters retain valid signatures,
+  own every helper and execute the actual CLI outside the checkout.
+- This supersedes the earlier development-source distribution-record census:
+  the corrected self-contained seeded base has 11 distributions / 25,165,401
+  logical RECORD bytes; provider-exec has 18 / 38,810,561. The difference remains
+  7 distributions / 13,645,160 bytes (13.01 MiB). The full runtime trees allocate
+  29,044,088 and 45,901,048 NTFS file-stream bytes respectively on this test host;
+  filesystem metadata, shared interpreter and retained production slots are
+  excluded. No live rollout is claimed.

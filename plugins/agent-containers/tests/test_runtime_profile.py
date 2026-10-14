@@ -65,6 +65,7 @@ def test_fresh_profile_is_base_and_completed_slot_is_reused(
     assert first["runtimeVersion"] == "1.0.0+base"
     assert not any("[provider-exec]" in arg for call in commands for arg in call)
     install = next(call for call in commands if "install" in call)
+    assert "--no-sources" in install
     assert all(str(payload / "libs" / name) in install for name in profiles.LIBRARIES)
     slot = Path(first["venv"])
     before = {path.name: (path.read_bytes(), path.stat().st_mtime_ns)
@@ -369,3 +370,31 @@ def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_p
     )
     assert Path(origin).resolve() == payload
     assert not (home / "new runtime").exists()
+
+
+@pytest.mark.parametrize("escape", [False, True])
+def test_native_health_requires_all_helper_code_inside_the_immutable_slot(
+    profiles, tmp_path, escape,
+):
+    root = tmp_path / "runtime"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--copies", "--without-pip", str(root)],
+        check=True, capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = root / (
+        "Lib/site-packages" if os.name == "nt"
+        else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    for name in ["agent_containers", *(name.replace("-", "_") for name in profiles.LIBRARIES)]:
+        (site / f"{name}.py").write_text("", encoding="utf-8")
+    if escape:
+        external = tmp_path / "mutable-source"
+        external.mkdir()
+        (site / "credential_relay.py").rename(external / "credential_relay.py")
+        (site / "editable-helper.pth").write_text(str(external) + "\n", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="Runtime command failed"):
+            profiles._health(python, "base", cwd=tmp_path)
+    else:
+        profiles._health(python, "base", cwd=tmp_path)
