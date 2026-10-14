@@ -62,9 +62,10 @@ adapters, with explicit source, freshness, and failure semantics.
 
 The intended implementation is a new independently usable `budget-guidance`
 plugin. It owns budget posture, arithmetic, adapters, current status, and a
-concise context contribution. `delegation-guidance` remains the owner of routing
-strategy and eligibility; it may consume budget-guidance output when both are
-enabled. The checked-in pointer plus exact-session guidance file owns current
+concise context contribution. The delegation module in `agent-conduct-guidance`
+(formerly `delegation-guidance`) owns routing strategy and eligibility; it may
+consume budget-guidance output when both are enabled.
+The checked-in pointer plus exact-session guidance file owns current
 delivery; native host composition may later carry direct plugin output after
 supported-version proof. External accounting systems remain the owners of
 longitudinal ledgers and detailed cost attribution.
@@ -150,14 +151,14 @@ timestamp is not proof that the provider metadata was refreshed.
 
 ### Phase 4 - Routing composition
 
-- [ ] Let delegation-guidance consume budget posture when available without a
-  hard dependency on budget-guidance.
+- [ ] Let the delegation module in agent-conduct-guidance consume budget posture
+  when available without a hard dependency on budget-guidance.
 - [ ] Refine only demonstrated eligible choices; never qualify candidates,
   bypass holds, or weaken trial admission.
 - [ ] Preserve explicit operator model/profile choices as authoritative.
 - [ ] Return legible budget-based recommendation, caution, escalation, and
   no-fit reasons without changing direct-versus-delegate decisions.
-- [ ] Keep standalone budget-guidance useful when delegation-guidance is absent.
+- [ ] Keep standalone budget-guidance useful when the delegation module is absent.
 
 ### Phase 5 - Validation, publication, and adoption
 
@@ -255,15 +256,41 @@ Build `budget-guidance` as a small runtime plugin with four layers:
    state.
 3. **Presentation:** one status command and one concise context contributor
    derived from the same resolved posture.
-4. **Optional routing integration:** delegation-guidance reads posture status and
-   adds budget-based reasons after eligibility resolution; either plugin remains
-   usable alone.
+4. **Optional routing integration:** agent-conduct-guidance's delegation module
+   reads posture status and adds budget-based reasons after eligibility
+   resolution; either plugin remains usable alone.
 
 The plugin stores at most bounded current/cache state needed for freshness and
 resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-14 - Exact-session delivery merged; routing boundary next
+
+- PR #6646 merged as `d29ee82c3dd46a5fe9ad36235903fb0d4f4fad46`
+  after current-head Copilot approval and the required PR gate,
+  source-attribution, and workflow-lockdown checks passed.
+- Closed Phase 3's implementation/publication boundary. Review corrections arm
+  the POSIX deadline before payload path resolution/import, test all five
+  directory levels with synthetic reparse attributes, and include asynchronous
+  PowerShell stdin delivery within the writer's single deadline.
+- The bounded Linux session-delivery lane passed 46 cases with three explicit
+  platform/tool skips and verified cleanup. Earlier full-plugin and source
+  guards remain recorded; no skipped PowerShell/native execution is credited
+  as a pass.
+- Native acceptance remains transferred to #6644. That objective also owns the
+  reviewed witness-only window/focus attribution defect: unrelated desktop
+  processes must not be counted as fixture descendants. The source receipt
+  for the earlier external-reader launch remains source-specific.
+- Re-read the complete Plan and Validation Plan after merge. The effort stays
+  Active; provider acquisition/account proof, routing, release, and authorized
+  rollout remain open.
+- Next: Phase 4 routing composition through the current delegation owner,
+  `agent-conduct-guidance`, not the deprecated `delegation-guidance` placeholder.
+  Keep eligibility and explicit operator choices authoritative, consume the same
+  resolved posture optionally, and do not infer per-task prices or new model
+  eligibility from account totals.
 
 ### 2026-10-13 - Windows acceptance transferred to a tracked objective
 

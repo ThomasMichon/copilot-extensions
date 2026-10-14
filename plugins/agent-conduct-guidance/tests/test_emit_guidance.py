@@ -105,8 +105,8 @@ def test_powershell_falls_back_to_script_location() -> None:
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or shutil.which("bash") is None,
-    reason="POSIX bash payload test",
+    os.name == "nt" or shutil.which("bash") is None or _powershell() is None,
+    reason="POSIX Bash/PowerShell parity requires both interpreters",
 )
 def test_bash_matches_powershell_guidance() -> None:
     assert _context(_run_bash()) == _context(_run_powershell())

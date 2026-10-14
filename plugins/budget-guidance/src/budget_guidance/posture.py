@@ -9,6 +9,7 @@ from typing import Any
 from .math import calculate
 from .models import BudgetConfig, TrailingRate, decimal_text, instant_text
 from .resolve import FieldCandidate, Resolution, candidate_dict, resolve
+from .routing_advice import routing_advice
 
 
 def _value(value: Any) -> Any:
@@ -78,6 +79,7 @@ def build_posture(config: BudgetConfig, at: datetime) -> dict[str, Any]:
         posture["error"] = (
             "required budget fields are unavailable: " + ", ".join(missing)
         )
+        posture["routing_advice"] = routing_advice(posture, resolution, at)
         return posture
 
     required = [resolution.fields[name] for name in required_names]
@@ -134,12 +136,13 @@ def build_posture(config: BudgetConfig, at: datetime) -> dict[str, Any]:
         "projected_overspend": decimal_text(result.projected_overspend),
         "warning_band": result.warning_band,
     }
+    posture["routing_advice"] = routing_advice(posture, resolution, at)
     return posture
 
 
 def unavailable_posture(at: datetime, error: str) -> dict[str, Any]:
     """Build an explicit unavailable result without optimistic defaults."""
-    return {
+    posture = {
         "schema": "copilot-extensions.budget-posture",
         "version": 1,
         "evaluated_at": instant_text(at),
@@ -150,3 +153,5 @@ def unavailable_posture(at: datetime, error: str) -> dict[str, Any]:
         "fields": {},
         "calculated": None,
     }
+    posture["routing_advice"] = routing_advice(posture, None, at)
+    return posture
