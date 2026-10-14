@@ -166,7 +166,7 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
             if not isinstance(entry, dict):
                 raise ValueError(f"invalid instruction declaration: {declaration}")
             if entry.get("customizationKind", "instructions") != "instructions":
-                continue
+                raise ValueError(f"unsupported instruction customization kind: {declaration}")
             source_id = entry.get("id")
             if not isinstance(source_id, str) or not source_id:
                 raise ValueError(f"missing instruction identity: {identity}")

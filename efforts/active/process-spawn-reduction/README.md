@@ -388,6 +388,12 @@ single-final-batch contract.
   unavailable-symlink skip in 178.02s under unchanged budgets, including reparse
   object simulation, relative alias mapping, built-in settings and mixed-case
   Git context isolation. Source review and normal installed rollout still remain.
+- Concurrent review on the prior head found invalid customization kinds were
+  treated as removed sources. Unsupported/malformed kinds now fail the snapshot
+  before copy or cleanup. Numeric, string, null and object cases preserve actual
+  prior bytes. Final publisher selection: 62 passed / 1 unavailable-symlink skip
+  in 36.74s, unchanged budgets; the expanded native/ownership result above still
+  covers the unchanged process seam.
 
 ### 2026-10-14 - Declarations decide static publication
 

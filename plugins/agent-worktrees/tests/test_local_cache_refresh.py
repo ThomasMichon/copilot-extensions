@@ -466,6 +466,20 @@ def test_directory_catalog_identity_requires_explicit_mapping(copy_workspace):
     assert not (root / static.NAMESPACE).exists()
 
 
+@pytest.mark.parametrize("kind", [123, "agents", None, {}])
+def test_invalid_customization_kind_never_authorizes_stale_cleanup(copy_workspace, kind):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    previous = output.read_bytes()
+    declaration = template.parents[1] / "instruction-projections.json"
+    data = json.loads(declaration.read_text())
+    data["projections"][0]["customizationKind"] = kind
+    write_json(declaration, data)
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert output.read_bytes() == previous
+
+
 @pytest.mark.parametrize("node", ["root", "manifest"])
 def test_installed_reparse_objects_rejected_by_shared_root_resolver(copy_workspace, monkeypatch, node):
     import stat
