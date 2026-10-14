@@ -163,7 +163,7 @@ def test_failed_passive_health_keeps_undrained_predecessor_and_started_phase(
     assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "started"
 
 
-@pytest.mark.parametrize("failure", ["health", "drain-journal"])
+@pytest.mark.parametrize("failure", ["health", "drain-journal", "drain-client", "drain-method"])
 @pytest.mark.parametrize("confirms_exit", [False, True])
 @pytest.mark.parametrize("independently_drained", [False, True])
 def test_early_failure_preserves_predecessor_route_and_admission(
@@ -185,6 +185,25 @@ def test_early_failure_preserves_predecessor_route_and_admission(
     monkeypatch.setattr(client, "undrain", reopen)
     if failure == "health":
         healthy.remove(9290)
+    elif failure in {"drain-client", "drain-method"}:
+        make_client = orch.make_client
+        failed = False
+
+        class UnavailableDrain:
+            @property
+            def drain(self):
+                raise OSError("drain method unavailable")
+
+        def fail_before_client_drain(url):
+            nonlocal failed
+            if url == "http://127.0.0.1:9281" and not failed:
+                failed = True
+                if failure == "drain-method":
+                    return UnavailableDrain()
+                raise OSError("drain client unavailable")
+            return make_client(url)
+
+        orch.make_client = fail_before_client_drain
     else:
         write = breadcrumb.write_breadcrumb
         failed = False
@@ -207,6 +226,27 @@ def test_early_failure_preserves_predecessor_route_and_admission(
         ["terminate-new", "confirmed-new-exit"] if confirms_exit
         else ["terminate-new"]
     )
+
+
+@pytest.mark.parametrize("failure", ["incomplete", "raises"])
+def test_attempted_drain_retains_witness_when_call_does_not_complete(
+    tmp_path, monkeypatch, failure,
+):
+    orch, events, _ = orchestrator(tmp_path, monkeypatch)
+    client = orch.make_client("http://127.0.0.1:9281")
+
+    def drain(**kwargs):
+        events.append("drain-9281")
+        if failure == "raises":
+            raise OSError("drain response lost")
+        return {"drained": False, "clean": False, "forced": False}
+
+    monkeypatch.setattr(client, "drain", drain)
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert not result.ok and not result.committed and result.rolled_back
+    assert events.index("drain-9281") < events.index("confirmed-new-exit")
+    assert events.index("confirmed-new-exit") < events.index("undrain-9281")
+    assert "publish-9290" not in events and "shutdown-9281" not in events
 
 
 def test_failed_post_publication_health_keeps_flipped_phase_when_exit_is_uncertain(

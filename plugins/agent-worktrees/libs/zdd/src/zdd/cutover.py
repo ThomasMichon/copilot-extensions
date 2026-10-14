@@ -520,6 +520,11 @@ class CutoverOrchestrator:
         # like started_at.
         flipped = False
         drain_started = False
+
+        def mark_drain_started() -> None:
+            nonlocal drain_started
+            drain_started = True
+
         new_for_cas = None
         phase = "started"
         try:
@@ -553,8 +558,10 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                     requires_writer_reconciliation=self.drain_before_publish,
                 )
-                drain_started = True
-                self._drain_old(old, result, drain_timeout=drain_timeout, force=False)
+                self._drain_old(
+                    old, result, drain_timeout=drain_timeout, force=False,
+                    on_drain=mark_drain_started,
+                )
 
             # Flip the route: new active, old demoted to previous. From here a
             # new CLI resolution lands on the new daemon; long-lived sockets stay
@@ -893,16 +900,18 @@ class CutoverOrchestrator:
     def _drain_old(
         self, old: Endpoint, result: CutoverResult, *, drain_timeout: float, force: bool,
         conditional: PreparedCutover | None = None,
+        on_drain: Callable[[], None] | None = None,
     ) -> None:
         from zdd import lifecycle
 
         self._emit(lifecycle.DRAIN, lifecycle.BEGIN, port=old.port)
-        drain_res = (
-            conditional.drain_predecessor(drain_timeout) if conditional else
-            self.make_client(old.base_url).drain(
-                timeout=drain_timeout, poll=1.0, force=force,
-            )
-        )
+        if conditional:
+            drain_res = conditional.drain_predecessor(drain_timeout)
+        else:
+            drain = self.make_client(old.base_url).drain
+            if on_drain is not None:
+                on_drain()
+            drain_res = drain(timeout=drain_timeout, poll=1.0, force=force)
         result.drain = drain_res
         result.steps.append(
             f"old drained clean={drain_res.get('clean')} forced={drain_res.get('forced')}"

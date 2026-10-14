@@ -253,7 +253,9 @@ its route; forced incomplete drains are refused. That adapter still owns
 exact-instance promotion, final-state adoption, and selection reconciliation.
 On rollback, the orchestrator confirms the successor's exit before restoring
 and undraining the predecessor. It records whether this attempt actually
-invoked predecessor drain. Failures before that invocation only clean up the
+invoked predecessor drain, after constructing the client and resolving its
+drain method. Incomplete or raised drain calls still count as attempted.
+Failures before that invocation only clean up the
 passive: they do not republish or reopen a predecessor, including one that was
 independently drained. If exit cannot be confirmed, it does not resume
 a drained predecessor or change an undrained one's state; the actual unresolved
