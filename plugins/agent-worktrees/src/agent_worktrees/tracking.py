@@ -1555,6 +1555,11 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
     if not isinstance(data, dict):
         raise yaml.YAMLError("worktree tracking record must be a YAML mapping")
 
+    return parse_record_data(data, path=path)
+
+
+def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
+    """Parse an already-read tracking mapping without filesystem effects."""
     title = data.get("title")
     if title == "null" or title is None:
         title = None

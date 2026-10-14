@@ -34,6 +34,50 @@ scoped keys retain their binding and checkout resolution.
 An explicit `--session-id` still selects the session's project before any
 scalar read; the shortcut does not change that targeting contract.
 
+## Exact durable record read
+
+`agent-worktrees record --worktree-id <exact-id> --json` reads one durable
+tracking YAML from the receiving project's configured tracking namespace.
+Use the repository's binstub, its current directory, or explicit `--project`
+to select that project. IDs are exact filename components, not suffixes or
+codenames; the command never searches another project, enumerates records or
+sessions, asks the resident, or computes live facts. A newly created record
+is readable even before the resident publishes it. Ordinary `list` projection
+authority and failure behavior are unchanged.
+
+Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
+The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
+`session_count`, `last_session_id`, `sessions_indexed`, `execution_leg`,
+`execution_leg_opaque`, `session_backend`, `session_backend_opaque`,
+and raw historical `machine`, `platform`, `owner`,
+`owner_ref`, `caller_worktree`, `parent_session`, `checkout_managed` fields
+(absent raw fields are null). `session_count` is null when sessions have not
+been indexed, not zero; an indexed empty list returns zero.
+`last_session_id` uses the existing record-local asserted-head resolution,
+including its transition ledger, without filesystem/session discovery.
+`execution_leg` uses the existing read-only legacy-backend compatibility view,
+preserving an unrecognized explicit leg as opaque data.
+An unrecognized legacy backend likewise remains visible as raw data with its
+opaque flag; a null derived leg does not prove absence of a provider binding.
+Recognized legacy backends use the existing parsed version-1 representation.
+
+The stored ID must match the requested ID, the repository must belong to the
+receiving project's configured repositories, and the stored path must be
+absolute and non-traversing. Historical paths need not exist or be locally
+executable, including paths recorded on another platform. No machine/platform
+identity is rewritten, nonce backfilled, registration created, or process
+started.
+
+Failures exit one with `{"version":1,"ok":false,"worktree":null,
+"error":{"code":"...","message":"..."}}`. Codes are `invalid-id`,
+`project-unavailable`, `record-missing`, `record-unreadable`,
+`record-malformed`, `id-mismatch`, `repository-mismatch`, and `path-invalid`.
+Argparse usage failures exit two. Missing, unreadable, or malformed metadata
+never means terminal/disposed, sessionless, or permission to allocate again.
+Successful reading likewise grants **no local execution, takeover, mutation,
+or launch authorization**. Actual launch APIs retain execution-space,
+locality, head, duplicate and live-holder protections.
+
 ## State-root and paired-worktree resolution
 
 `agent-worktrees state-root --json` resolves the repository that owns personal

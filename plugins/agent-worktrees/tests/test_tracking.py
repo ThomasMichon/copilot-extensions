@@ -2673,7 +2673,13 @@ class TestOwningTrackingDirResolution:
     def test_bare_id_lookup_falls_back_to_owning_project_without_duplicating(
         self, tmp_path: Path, monkeypatch
     ):
+        from agent_worktrees import config as _cfg
+
         harness_dir, knowledge_dir, _t = self._wire_two_projects(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "agent_worktrees.config_authority.load_project_authority_config",
+            _cfg.load_project_config,
+        )
         knowledge_rec = self._rec("wt-k", repo="knowledge-proj")
         save_record(knowledge_rec, knowledge_dir / "wt-k.yaml")
 
@@ -2693,7 +2699,13 @@ class TestOwningTrackingDirResolution:
     ):
         """The fast path stays fast: when the id genuinely belongs to the
         ambient project, no cross-project scan result is needed/used."""
+        from agent_worktrees import config as _cfg
+
         harness_dir, knowledge_dir, _t = self._wire_two_projects(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "agent_worktrees.config_authority.load_project_authority_config",
+            _cfg.load_project_config,
+        )
         own_rec = self._rec("wt-own", repo="harness-proj")
         save_record(own_rec, harness_dir / "wt-own.yaml")
 
@@ -2701,6 +2713,8 @@ class TestOwningTrackingDirResolution:
 
         assert (harness_dir / "wt-own.yaml").exists()
         assert not (knowledge_dir / "wt-own.yaml").exists()
+        updated = load_record(harness_dir / "wt-own.yaml")
+        assert updated.sessions and updated.sessions[-1].session_id == "session-1"
 
 
 class TestRetireRecord:

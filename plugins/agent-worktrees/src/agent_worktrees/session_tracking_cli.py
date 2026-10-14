@@ -30,6 +30,13 @@ def _core_helper(name: str, local):
 
 def add_parsers(sub) -> None:
     """Register parser wiring for cross-project session-tracking commands."""
+    sp = sub.add_parser(
+        "record",
+        help="Read one exact durable worktree record in this project (JSON; no launch authority)",
+    )
+    sp.add_argument("--worktree-id", required=True, help="Exact recorded worktree ID (no suffix lookup)")
+    sp.add_argument("--json", action="store_true", help="Emit JSON (the default)")
+
     # list-sessions -- enumerate a worktree's Copilot sessions as JSON
     sp = sub.add_parser(
         "list-sessions",
@@ -374,6 +381,22 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
             "controller_findings": controller_findings,
         }
     )
+    return 0
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    """Return exact ground-owned metadata without discovery or mutation."""
+    from .record_read import RecordReadError, read_exact_record
+
+    try:
+        worktree = read_exact_record(args.worktree_id)
+    except RecordReadError as exc:
+        output._json_output({
+            "ok": False, "worktree": None,
+            "error": {"code": exc.code, "message": str(exc)},
+        })
+        return 1
+    output._json_output({"ok": True, "worktree": worktree})
     return 0
 
 

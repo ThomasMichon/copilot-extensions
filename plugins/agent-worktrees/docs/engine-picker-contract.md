@@ -46,6 +46,13 @@ locked receipt reload.
 A target without the request capability rejects before mutation.
 ## Resident current-roster reads
 
+The separate [`record --worktree-id <exact-id> --json`](cli-reference.md#exact-durable-record-read)
+API reads one ground-owned durable record in the receiving project's tracking
+namespace. It is metadata, not a roster fallback, resident computation,
+live-state probe, or launch/takeover permission. Consumers needing an exact
+allocation identity may use it before roster publication; ordinary listing
+readers still must not scan tracking YAML or independently compute facts.
+
 The Manager requires `list --json --current`. Ordinary JSON/stream listings
 also select that authority while resident monitoring is enabled; explicit
 profile-history inspection and glance retain their separate workflow paths.
