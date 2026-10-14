@@ -48,6 +48,8 @@ Membership is read from the selected project's machine-local repository
 declarations and registered anchors, not from a global default project or
 Git-backed repository policy. No plugin activation, policy overlays, or Git
 probes are needed to identify these metadata records.
+Project selection for this command reads Git marker and common-directory files
+without running Git or changing the caller's working directory.
 
 Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
 The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
@@ -70,6 +72,9 @@ YAML timestamp scalars, including those nested in opaque bindings or provider
 blobs, are represented as ISO-8601 strings in JSON without rewriting the record.
 Other values must be JSON-compatible: mapping keys must be strings, and
 unsupported scalar types, non-finite numbers, and cyclic YAML are malformed.
+JSON conversion is bounded to 64 nesting levels, 10,000 expanded nodes and
+1 MiB of encoded data. Shared aliases count on every expansion; exceeding any
+budget returns `record-malformed` rather than allocating unbounded output.
 Keys are never silently coerced or collapsed during JSON conversion.
 Recognized legacy backends use the existing parsed version-1 representation.
 Explicit binding schema versions must be integers, not booleans, floats,

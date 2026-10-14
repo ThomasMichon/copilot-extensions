@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import date
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import get_args
@@ -24,19 +25,51 @@ class RecordReadError(ValueError):
         self.code = code
 
 
-def _json_value(value: object, ancestors: frozenset[int] = frozenset()) -> object:
+MAX_JSON_DEPTH = 64
+MAX_JSON_NODES = 10_000
+MAX_JSON_BYTES = 1024 * 1024
+
+
+@dataclass
+class _JsonBudget:
+    nodes: int = 0
+    size: int = 0
+
+    def charge(self, size: int, *, depth: int, node: bool = False) -> None:
+        self.nodes += int(node)
+        self.size += size
+        if depth > MAX_JSON_DEPTH or self.nodes > MAX_JSON_NODES or self.size > MAX_JSON_BYTES:
+            raise ValueError("Record JSON exceeds depth, expanded-node, or output-size limits")
+
+
+def _json_value(
+    value: object, ancestors: frozenset[int] = frozenset(),
+    *, budget: _JsonBudget | None = None, depth: int = 0,
+) -> object:
+    budget = budget if budget is not None else _JsonBudget()
+    budget.charge(0, depth=depth, node=True)
     if isinstance(value, date):
-        return value.isoformat()
+        value = value.isoformat()
     if isinstance(value, (dict, list)):
         if id(value) in ancestors:
             raise ValueError("Record contains a cyclic YAML value")
         nested = ancestors | {id(value)}
+        budget.charge(2 + 2 * max(len(value) - 1, 0), depth=depth)
         if isinstance(value, dict):
             if any(not isinstance(key, str) for key in value):
                 raise ValueError("Record JSON mappings require string keys")
-            return {key: _json_value(item, nested) for key, item in value.items()}
-        return [_json_value(item, nested) for item in value]
+            converted = {}
+            for key, item in value.items():
+                if len(key) > MAX_JSON_BYTES:
+                    raise ValueError("Record JSON key exceeds the output-size limit")
+                budget.charge(len(json.dumps(key)) + 2, depth=depth)
+                converted[key] = _json_value(item, nested, budget=budget, depth=depth + 1)
+            return converted
+        return [_json_value(item, nested, budget=budget, depth=depth + 1) for item in value]
     if value is None or isinstance(value, (str, bool, int, float)):
+        if isinstance(value, str) and len(value) > MAX_JSON_BYTES:
+            raise ValueError("Record JSON string exceeds the output-size limit")
+        budget.charge(len(json.dumps(value, allow_nan=False)), depth=depth)
         return value
     raise TypeError(f"Record contains a non-JSON value: {type(value).__name__}")
 

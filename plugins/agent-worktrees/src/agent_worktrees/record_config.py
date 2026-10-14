@@ -22,6 +22,30 @@ def _mapping(path: Path) -> dict:
     return value
 
 
+def metadata_project(explicit: str | None) -> str | None:
+    """Resolve the metadata project from an explicit name or Git marker files."""
+    if explicit:
+        return explicit
+    from .front_door_cli import _reverse_lookup_project, _safe_cwd
+
+    cwd = _safe_cwd()
+    if cwd is None:
+        return None
+    for root in (cwd, *cwd.parents):
+        marker = root / ".git"
+        if marker.is_dir():
+            return _reverse_lookup_project(root)
+        if marker.is_file():
+            text = marker.read_text(encoding="utf-8").strip()
+            if not text.startswith("gitdir: "):
+                raise ValueError("Invalid Git worktree marker")
+            git_dir = (root / text.removeprefix("gitdir: ")).resolve()
+            common_file = git_dir / "commondir"
+            common = (git_dir / common_file.read_text(encoding="utf-8").strip()).resolve()
+            return _reverse_lookup_project(common.parent)
+    return None
+
+
 def configured_repositories(project: str) -> frozenset[str]:
     """Read declared membership without loading repository policy or Git."""
     machine = _mapping(cfg.project_dir(project) / "config.yaml")

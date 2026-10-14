@@ -13,7 +13,7 @@ import yaml
 
 from agent_worktrees import __main__ as main
 from agent_worktrees import config as cfg
-from agent_worktrees import list_cli, output, record_cli, repos, session_tracking_cli, sessions, tracking
+from agent_worktrees import list_cli, output, record_cli, record_read, repos, session_tracking_cli, sessions, tracking
 from agent_worktrees import worktrees_client as client
 
 
@@ -31,7 +31,6 @@ def record_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(repos, "_repos_yaml_path", lambda: tmp_path / "repos.yaml")
     monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "global.yaml")
     monkeypatch.setattr(cfg.project_state, "project_state_root", lambda project, legacy: legacy)
-    monkeypatch.setattr(main, "_resolve_active_project", lambda _: (project, None))
     data = {
         "worktree_id": "example-worktree",
         "repo": project,
@@ -53,7 +52,7 @@ def record_fixture(tmp_path, monkeypatch):
 
 def invoke(*args):
     with output.capture_json_output() as captured:
-        rc = main.main(["record", "--worktree-id", *args, "--json"])
+        rc = main.main(["--project", "example-project", "record", "--worktree-id", *args, "--json"])
     return rc, json.loads(captured.getvalue())
 
 
@@ -333,11 +332,54 @@ def test_record_read_project_unavailable_explicit(record_fixture, monkeypatch, f
 
 def test_record_read_without_project_uses_structured_error(record_fixture, monkeypatch):
     cfg.set_active_project(None)
-    monkeypatch.setattr(main, "_resolve_active_project", lambda _: (None, None))
-    rc, result = invoke("example-worktree")
+    monkeypatch.chdir(cfg._home())
+    with output.capture_json_output() as captured:
+        rc = main.main(["record", "--worktree-id", "example-worktree", "--json"])
+    result = json.loads(captured.getvalue())
     assert rc == 1
     assert result["error"]["code"] == "project-unavailable"
     assert result["worktree"] is None
+
+
+@pytest.mark.parametrize("selector", ["explicit", "anchor", "worktree"])
+def test_record_dispatch_selects_project_without_processes(
+    record_fixture, monkeypatch, selector,
+):
+    data, path = record_fixture
+    anchor = path.parent.parent / "checkout"
+    git_dir = anchor / ".git"
+    git_dir.mkdir(parents=True)
+    cwd = anchor / "nested"
+    cwd.mkdir()
+    if selector == "worktree":
+        metadata = git_dir / "worktrees" / "example"
+        metadata.mkdir(parents=True)
+        (metadata / "commondir").write_text("../..\n", encoding="utf-8")
+        cwd = path.parent.parent / "task-checkout"
+        cwd.mkdir()
+        (cwd / ".git").write_text(f"gitdir: {metadata}\n", encoding="utf-8")
+    repos.write_registry(repos.ReposRegistry(repos={
+        data["repo"]: repos.RepoEntry(
+            name=data["repo"], repo_class="worktree",
+            paths={cfg.detect_platform(): str(anchor)},
+        ),
+    }))
+    cfg.set_active_project(None)
+    monkeypatch.chdir(cwd)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("metadata project selection invoked a subprocess")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    args = ["record", "--worktree-id", data["worktree_id"], "--json"]
+    if selector == "explicit":
+        args = ["--project", data["repo"], *args]
+    with output.capture_json_output() as captured:
+        rc = main.main(args)
+    result = json.loads(captured.getvalue())
+    assert rc == 0
+    assert result["worktree"]["repo"] == data["repo"]
+    assert Path.cwd() == cwd
 
 
 def test_record_read_registered_project_ignores_other_global_default(
@@ -522,6 +564,26 @@ def test_record_read_preserves_shared_noncyclic_opaque_yaml_values(record_fixtur
     rc, result = invoke(data["worktree_id"])
     assert rc == 0
     assert result["worktree"]["execution_leg"]["values"] == [shared, shared]
+
+
+@pytest.mark.parametrize("kind", ["depth", "expanded-nodes", "output-size"])
+def test_record_read_bounds_json_expansion(record_fixture, kind):
+    data, path = record_fixture
+    if kind == "output-size":
+        value = "\u00e9" * (record_read.MAX_JSON_BYTES // 6 + 1)
+    else:
+        value = ["leaf"]
+        levels = record_read.MAX_JSON_DEPTH + 1 if kind == "depth" else 17
+        for _ in range(levels):
+            value = [value] if kind == "depth" else [value, value]
+    data["execution_leg"] = {"version": 99, "value": value}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1
+    assert result["error"]["code"] == "record-malformed"
+    assert result["worktree"] is None
+    assert path.read_bytes() == before
 
 
 def test_record_read_legacy_backend_translation_is_not_written(record_fixture):

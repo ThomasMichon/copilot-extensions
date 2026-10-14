@@ -6473,7 +6473,10 @@ def main(argv: list[str] | None = None) -> int:
     # after the sibling router (siblings return above).
     _guard_project_scope(_proj, args_list[0] if args_list else None)
 
-    has_project = front_door_cli.resolve_invocation_project(args_list, _proj)
+    has_project = front_door_cli.resolve_invocation_project(
+        args_list, _proj, _resolve_active_project, _cwd_is_inside_project,
+        _is_no_project_invocation,
+    )
 
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
     # invocation is the human-facing path. The Manager now owns the transplanted
