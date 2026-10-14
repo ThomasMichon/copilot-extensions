@@ -257,6 +257,33 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Journal
 
+### 2026-10-14 -- Native dev release passes; combined governance fixture corrected
+
+Full native CI run
+`38593292238` against exact candidate
+`7b1e473a93e99e71c72e502a3e78afef12edc653` passed both native runner
+contracts, all other plugin/service lanes, and Worktrees groups 1-12.
+The POSIX legacy and namespaced native dev/source-free-release cases passed
+in 41 and 61 seconds; real monitor-drain retention passed in 129 seconds.
+The prior group-10 aggregate expiry did not recur. No grouping or budget
+change is justified by that result.
+
+Group 13 exposed the same account-home isolation omission in the separate
+combined construction/repair/cutover/governance fixture. Its cutover worker
+loaded the original source helper instead of the copied payload, while both
+that helper and the installed baseline saw the real passwd home rather than
+the isolated fixture profile. Governance correctly refused the foreign root
+before taking cutover authority. The fixture now shares the native dev test's
+copied OS-lookup isolation, applies it before real construction freezes either
+graph, and launches workers against the copied payload's scripts. Production
+account-home resolution and authority checks are unchanged.
+
+Three focused fixture/budget contracts pass on Windows. The separate real
+Windows governance-race attempt still expired at the unchanged 300-second
+contained aggregate deadline; that is not a completed Windows proof.
+The corrected full POSIX matrix, Windows deployed source-free release,
+canonical portfolio adoption and normal release/installed proof remain open.
+
 ### 2026-10-14 -- Native aggregate timeout needs a current-item witness
 
 Automatic PR run 38588429018 passed against the shell-fixture correction.

@@ -13,10 +13,12 @@ import threading
 import time
 from contextlib import ExitStack
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import tomllib
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from runtime_install_fixture import isolate_account_profile
 from test_status_monitor_cutover_process import _wait_for
 from zdd import diagnostics, routing
 
@@ -111,6 +113,43 @@ def _load(path: Path, name: str):
     return module
 
 
+@pytest.mark.parametrize("platform_name", ["posix", "nt"])
+def test_account_profile_isolation_changes_only_copied_os_lookups(
+    tmp_path, monkeypatch, platform_name,
+):
+    import runtime_install_fixture as fixture
+
+    monkeypatch.setattr(fixture, "os", SimpleNamespace(name=platform_name))
+    payload, home = tmp_path / "payload", tmp_path / "quoted ' profile"
+    paths = (
+        Path("scripts") / "installation-context" / "_installation_context_resolution.py",
+        Path("src") / "agent_worktrees" / "_installation_context_resolution.py",
+        Path("scripts") / "installation-context" / "installation-context.sh",
+    )
+    originals = {path: (PLUGIN / path).read_bytes() for path in paths}
+    for path, source in originals.items():
+        destination = payload / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source)
+    isolate_account_profile(payload, home)
+    assert all((PLUGIN / path).read_bytes() == source for path, source in originals.items())
+    for path, source in originals.items():
+        isolated = (payload / path).read_text(encoding="utf-8")
+        if platform_name == "nt":
+            assert (payload / path).read_bytes() == source
+        elif path.suffix == ".py":
+            import ast
+
+            ast.parse(isolated)
+            assert f"profile_value = Path({str(home)!r})" in isolated
+            assert "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)" not in isolated
+        else:
+            import shlex
+
+            assert f'CURRENT_PROFILE_HOME="$(canonical_path {shlex.quote(str(home))} true)"' in isolated
+            assert 'CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"' not in isolated
+
+
 def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):
     monkeypatch.syspath_prepend(str(PLUGIN / "scripts"))
     driver = _load(PLUGIN / "scripts" / "runtime_install.py", "race_budget_driver")
@@ -128,8 +167,6 @@ def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):
 
         def __exit__(self, *_args):
             pass
-
-    from types import SimpleNamespace
 
     owner.helper = SimpleNamespace(_DirectoryLock=Lock)
     owner.recheck = lambda: None
@@ -166,6 +203,7 @@ def test_real_namespaced_build_repair_cutover_and_governance_do_not_invert(
     environment["POWERSHELL_TELEMETRY_OPTOUT"] = "1"
     frozen = driver.engine.freeze_inputs(PLUGIN, tmp_path / "payload")
     payload = frozen.plugin
+    isolate_account_profile(payload, home)
     old_version = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))[
         "project"
     ]["version"]
@@ -247,7 +285,7 @@ def test_real_namespaced_build_repair_cutover_and_governance_do_not_invert(
         def launch(stage, python=sys.executable, argv=None):
             stream = streams.enter_context((tmp_path / f"{stage}.log").open("w", encoding="utf-8"))
             command = argv or [
-                str(python), "-I", "-B", str(worker), str(PLUGIN / "scripts"), stage,
+                str(python), "-I", "-B", str(worker), str(payload / "scripts"), stage,
                 str(root), str(payload), uv, str(signals),
             ]
             process, job = spawn_sync_in_kill_on_close_job(

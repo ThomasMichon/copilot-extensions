@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -11,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from agent_procutil import no_window_kwargs
+from runtime_install_fixture import isolate_account_profile
 
 
 @pytest.mark.timeout(2400)
@@ -48,28 +48,7 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
     )
     home, result_path = tmp_path / "home", tmp_path / "result.json"
     home.mkdir()
-    if os.name != "nt":
-        # HOME does not redirect passwd. Isolate only that OS lookup in the
-        # bootstrap and installed API, before either graph is frozen.
-        for directory in (
-            plugin / "scripts" / "installation-context",
-            plugin / "src" / "agent_worktrees",
-        ):
-            resolution = directory / "_installation_context_resolution.py"
-            source = resolution.read_text(encoding="utf-8")
-            lookup = "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"
-            assert source.count(lookup) == 1
-            resolution.write_text(source.replace(
-                lookup, f"profile_value = Path({str(home)!r})",
-            ), encoding="utf-8")
-        shell_context = plugin / "scripts" / "installation-context" / "installation-context.sh"
-        source = shell_context.read_text(encoding="utf-8")
-        lookup = 'CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"'
-        assert source.count(lookup) == 1
-        shell_context.write_text(source.replace(
-            lookup,
-            f'CURRENT_PROFILE_HOME="$(canonical_path {shlex.quote(str(home))} true)"',
-        ), encoding="utf-8")
+    isolate_account_profile(plugin, home)
     probe_source = plugin / "src" / "agent_worktrees" / "iteration_probe.py"
     probe_source.write_text("VALUE = 1\n", encoding="utf-8")
     git = shutil.which("git")
