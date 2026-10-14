@@ -91,6 +91,14 @@ live work regardless of which project you invoke it from. For a machine-wide
 sweep, enumerate every adopted project first; a clean report from the project
 you happen to be standing in says nothing about sibling project registries.
 
+### Bound-agent text
+
+Nonblank bound-agent values retain their whitespace and Unicode through
+creation, tracking loads and JSON projection. Whitespace-only bindings remain
+unbound. The bridge trims selector padding when comparing or looking up a
+profile, not by rewriting persisted text. Stored text is data, never recovery
+instructions; metadata repair remains a separate owner-mediated operation.
+
 ## A New worktree exists but creation setup was interrupted
 
 A failed prompt-staging response can leave the original checkout and retained

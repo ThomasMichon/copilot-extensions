@@ -2137,8 +2137,8 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
         creation_nonce=str(data.get("creation_nonce", "") or ""),
         resources=resources_list,
         last_finalize_released=last_finalize_released_list,
-        bound_agent=(str(data["bound_agent"]).strip() or None
-                     if data.get("bound_agent") else None),
+        bound_agent=(str(data["bound_agent"]) if data.get("bound_agent")
+                     and str(data["bound_agent"]).strip() else None),
         pending_seed=(str(data["pending_seed"]) if data.get("pending_seed") else None),
         pending_seed_revision=int(data.get("pending_seed_revision", 0) or 0),
         follow_up=bool(data.get("follow_up", False)),

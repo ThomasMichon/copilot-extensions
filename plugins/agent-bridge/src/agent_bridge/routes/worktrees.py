@@ -808,10 +808,12 @@ def _apply_bound_charter(
     venue's) is borrowed, when the charter name resolves in the registry.
     An unresolvable or managed (non-spawnable) charter degrades to the
     venue default rather than failing the spawn.
+    Selector padding is normalized here, not in persisted worktree text or JSON.
     """
-    if not entry.bound_agent:
+    bound_agent = (entry.bound_agent or "").strip()
+    if not bound_agent:
         return target
-    canonical = resolver.canonical_agent_name(entry.bound_agent)
+    canonical = resolver.canonical_agent_name(bound_agent)
     charter = resolver.agents.get(canonical) if canonical else None
     if charter is None:
         log.warning(

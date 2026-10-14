@@ -3763,7 +3763,8 @@ def test_resolve_local_binstub_skips_ps1_for_directly_launchable_cmd(
     assert os.path.normcase(resolved) == os.path.normcase(str(cmd_shim))
 
 
-def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
+@pytest.mark.parametrize("binding", ["board-sweep-worker", " board-sweep-worker \n"])
+def test_apply_bound_charter_layers_charter_spawn_shape(binding) -> None:
     """agent-bridge-worktree-native-agents (Phase 3): a worktree's bound
     charter borrows its own launch shape (copilot_path/mcp_servers/env, and
     its own copilot_args APPENDED after the venue's) onto the
@@ -3789,10 +3790,12 @@ def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     entry = _WorktreeEntry(
         id="wt1", agent_name="atlas-core-wsl", machine="atlas-core",
         path="/wt/path", branch="b", status="active",
-        bound_agent="board-sweep-worker",
+        bound_agent=binding,
     )
 
     result = _apply_bound_charter(venue_target, resolver, entry, "wt1")
+    resolver.canonical_agent_name.assert_called_once_with("board-sweep-worker")
+    assert entry.bound_agent == binding
 
     assert result.copilot_path == "/opt/special/copilot"
     assert result.copilot_args == [
