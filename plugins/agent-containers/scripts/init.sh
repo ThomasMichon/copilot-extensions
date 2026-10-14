@@ -482,7 +482,7 @@ _create_install_lock_owner() {
 }
 
 _read_install_lock_owner() {
-    local __path="$1" __private __record="" __extra="" __owner="" __result=1
+    local __path="$1" __private __record="" __owner="" __result=1
     if [[ -L "$__path" ]]; then
         # Legacy PID symlinks represent IDs, not references to existing filesystem nodes.
         [[ ! -e "$__path" ]] || return 1
@@ -496,8 +496,11 @@ _read_install_lock_owner() {
     if link "$__path" "$__private/owner" 2>/dev/null &&
        [[ -f "$__private/owner" && ! -L "$__private/owner" && ! -L "$__path" &&
           "$__private/owner" -ef "$__path" ]]; then
-        if { IFS= read -r -n 64 __record &&
-             ! IFS= read -r -n 1 __extra && [[ -z "$__extra" ]]; } < "$__private/owner"; then
+        # A NUL delimiter reports NUL instead of silently dropping it.
+        # Only EOF within the byte bound can yield a complete receipt.
+        if ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
+           [[ "$__record" == *$'\n' ]]; then
+            __record="${__record%$'\n'}"
             case "$__record" in
                 copilot-extensions.install-lock-pid:v1:*)
                     __owner="${__record#copilot-extensions.install-lock-pid:v1:}"

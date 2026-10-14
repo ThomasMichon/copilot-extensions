@@ -34,8 +34,8 @@ host deployment are separate objectives.
 - **Host (owns PRs):** Integration coordinator.
 - **Delegates:** Correctness worker owns local changes; no child agents.
 - **Handoff:** validated local changes return to the coordinator before commit
-  or publication. Reviewer-owned code remains unchanged during this binding-only
-  correction.
+  or publication. The NUL-validation follow-up is locally validated and awaits
+  independent review; integration retains publication authority.
 - **Binding replacement:** explicitly replace the worker's broad Phase 3a
   binding with this canonical effort, participant `Correctness worker`, slice
   `Repair and validation`. The parent remains Active and retains all telemetry
@@ -99,6 +99,10 @@ or host changes are authorized; integration retains final review and publication
 - [x] Update the install contract and generate patch change intent for all four plugins.
 - [x] Correct directory-shaped owner/admission nodes with atomic exact-path creation
   and validate the same four consumers without widening the task.
+- [x] Reproduce the actual review's NUL corruption across all four consumers,
+  then validate raw receipt bytes before any lossy Bash text parsing.
+- [x] Add mirrored NUL, newline/byte-bound, typed-owner compatibility and EXIT
+  regressions; repeat the complete targeted suites and real transaction stress.
 
 ### Integration and released-source proof
 
@@ -116,7 +120,7 @@ or host changes are authorized; integration retains final review and publication
 - [x] Before-fix actual-script regression fails with overlapping starts and successful children.
 - [x] After-fix suites cover deterministic overlap, fresh/stale contention, malformed owners,
   dead admission mutexes, timeouts, release failures and EXIT ownership.
-- [x] Four final targeted suites: 128 passed; 12 unchanged PowerShell behavior tests skipped
+- [x] Four current targeted suites: 208 passed; 12 unchanged PowerShell behavior tests skipped
   because the isolated Linux image has no PowerShell.
 - [x] Real-script stress: 24 six-child fresh/stale schedules, 144 serialized transactions.
 - [x] Ruff F/E9, four shell syntax checks, install contract (13 plugins), module guard
@@ -125,6 +129,11 @@ or host changes are authorized; integration retains final review and publication
   at both paths are refused, preserved and never populated with child locks.
 - [x] Controlled creation-race and typed-receipt snapshot/FIFO tests pass; prior
   overlap, ordinary/stale/flock, timeout, exit-ownership and stress evidence is revalidated.
+- [x] NUL at six prefix/body/newline-sensitive positions is refused at both
+  shared paths, preserving bytes and inode identity without admission or stale
+  deletion; NUL-corrupted current-owner receipts also survive EXIT cleanup.
+- [x] Positive regular live/dead owners, legacy dangling PID symlinks, exact
+  64-byte receipts and strict newline framing pass in all four matching consumers.
 - [ ] Independent coordinator validation and required CI confirm the final reviewed repair head.
 - [ ] Released-source proof confirms every repaired installer, not merely an unrelated green run.
 
@@ -132,10 +141,146 @@ or host changes are authorized; integration retains final review and publication
 
 This records an already-authorized bounded correctness slice, not a new
 architecture or policy campaign. Review and publication remain coordinator-owned.
-The documentation/binding correction itself leaves code, tests and change intent
-unchanged.
+The NUL follow-up changes only the four matching receipt readers, their mirrored
+tests, the install contract and this effort. Existing four-plugin patch change
+intent and version metadata remain unchanged.
 
 ## Journal
+
+### 2026-10-14 - Independent NUL correction verification closed the named findings
+
+- Independent review reran the unchanged four suites in two bounded Linux
+  selections: 208 passed and 12 unchanged PowerShell skips. Supplemental
+  verification passed 300 byte-boundary reader checks, 48 actual admission
+  checks and 16 EXIT checks, including every NUL insertion position, high
+  bytes, newline framing, length limits and preserved malformed bytes/inodes.
+- Typed live/dead receipts, legacy dangling links and existing directory/FIFO
+  guards remain valid. The four readers are byte-identical; no significant
+  residual was found within the named corruption scope.
+- Initial launcher errors, a combined supplemental timeout and a one-second
+  positive-acquisition timeout are not counted as passing evidence. Corrected
+  bounded selections and the five-second positive rerun passed. All owned
+  containers were removed; no source or host settings changed during review.
+- Current-head provider review, required CI, merge and released-source proof
+  remain outstanding. Native BSD/macOS and PowerShell behavioral validation
+  remain unproved, and no adopter rollout is authorized by this repair.
+
+### 2026-10-14 - Linux lane restored; NUL correction locally validated
+
+- At the next authorized read-only startup diagnosis, Desktop reported
+  `running`. The actual Docker API returned `linux`, and the existing
+  `copilot-cleanroom:base` image was verified as
+  `sha256:428d6339a0a18126af5fe35805583212e6b18cb3d7ee4023323fe672aef11656`.
+  Startup logs now reported the Linux daemon ready. This worker issued no
+  restart, PID termination, WSL termination, privileged service operation,
+  data reset, software update or image provisioning. Earlier failed startup
+  deadlines remain recorded below; a later healthy API does not erase them.
+- Before changing the parser, actual Bash consumers reproduced **24 of 24**
+  negatives: NUL at prefix start/body, PID start/body, immediately before the
+  terminating newline and immediately after it was accepted as a dead PID,
+  stale-unlinked and followed by successful transaction admission.
+- The four byte-identical readers now use one `LC_ALL=C read -r -d '' -n 65`
+  against the already type-checked private snapshot. A successful read means
+  a NUL or the byte limit was reached and is rejected. Only EOF within the
+  bound proceeds to exact newline/prefix/digit validation. There is no second
+  read that can discard NUL or observe different bytes between validation and
+  parsing. The primitive follows existing bounded NUL-read prior art in
+  `plugins/ai-attribution/scripts/emit-policy.sh`; no GNU-only flag, interpreter
+  or dependency was added.
+- All four complete transaction-lock modules passed: **208 passed, 12 unchanged
+  PowerShell skips**. The additional 80 cases cover six NUL positions at both
+  shared paths, preserved bytes/inodes and no transaction entry, current-owner
+  EXIT refusal, regular live/dead compatibility, the exact byte bound, and
+  missing/extra newlines. Existing flock, legacy dangling links, timeout,
+  empty-read overlap, directory/FIFO races and dead-mutex contracts still pass.
+- The original four-module invocation exhausted its 240-second container
+  budget; it is not counted as passing evidence. Without changing tests or
+  increasing that budget, the same selection was divided into two complete
+  two-module runs: agent-mcp plus agent-containers reported 104 passed and
+  6 skipped in 125.04 seconds; agent-vault plus agent-ssh reported 104 passed
+  and 6 skipped in 158.56 seconds. Both runs returned zero.
+- The pytest command shape was `python3 -u -m pytest -q --tb=short -c /dev/null
+  --noconftest --import-mode=importlib -p no:cacheprovider -o
+  'markers=guard: static installer guard'`, selecting the named plugins'
+  `tests/test_install_transaction_lock.py` files. Every Linux invocation used
+  the existing image with `--pull=never`, `--rm`, no network, read-only source
+  and root, dropped capabilities, 128 PIDs, 512 MiB memory, a 128 MiB temporary
+  filesystem, and an explicit timeout; no credentials or Docker socket were
+  mounted.
+- Repeated actual-script stress passed **24 fresh/stale schedules and 144
+  serialized transactions**, with each transaction root completely empty
+  afterward. Four `bash -n` checks and byte-identical reader comparison passed.
+- Existing Ruff `check --select F,E9` passed for the four changed tests.
+  `python -B tools/check-install-contract.py` reported all 13 plugins conformant;
+  `check-effort-vision-structure.py` accepted this canonical effort;
+  `check-module-size.py` passed without baseline changes; `git diff --check`
+  passed. An initial combined Linux static-check invocation exhausted its
+  120-second budget; focused native static checks and the separate actual
+  Linux shell/reader checks above subsequently completed successfully.
+- **Documentation impact:** the authoritative install contract now states raw
+  NUL refusal, exact newline framing and the byte bound. This effort records
+  current evidence and gates. This is below-altitude enforcement of the existing
+  malformed-record contract, not a vision or lifecycle redesign. The existing
+  four-plugin patch changefile was verified and left intact.
+- **Validation tiers:** unit/static and actual Linux consumer integration passed;
+  fresh temporary roots exercised first-touch lock admission. Full runtime
+  provisioning and host installation were not run because they are unchanged
+  and unauthorized. No remote external venue was authorized. Native macOS/BSD
+  and PowerShell execution are not claimed.
+- Local source remains uncommitted and unpublished at the previously published
+  repair head. Independent review of this material NUL correction, publication,
+  current-head required CI, merge and released-source fingerprints remain
+  integration-owned and open. The earlier green published-head CI does not
+  validate these uncommitted changes. This bounded effort and its broader
+  parent objectives remain **Active**; native continuity evidence and adopter
+  rollout remain outside this slice.
+
+### 2026-10-13 - Authorized Desktop startup did not restore the Linux lane
+
+- The operator explicitly authorized starting the existing Docker Desktop
+  application, without installation, updates, provisioning or other system
+  changes. The existing GUI executable was launched using a window-suppressed
+  process start; no service configuration or administrator operation was used.
+- The actual Linux Docker API did not become ready within the 180-second
+  startup deadline. A subsequent bounded 20-second API probe also timed out.
+  `docker desktop status` reported `starting`; its backend state likewise
+  reported Linux mode with Docker and Docker API still `starting`.
+- Docker's startup log repeatedly reported the missing guest-services
+  `socketforwarder-receive-fds.sock`, alongside an IPC request deadline.
+  Desktop/backend processes were present, but process presence did not prove
+  an available container engine. No additional restart, repair, service start,
+  image change or privileged system mutation was attempted.
+- The authorized startup therefore did not yet restore the validation lane.
+  No NUL reproduction or consumer test ran, and installer/test sources remain
+  unchanged. The effort remains **Active**, with the same NUL correction,
+  independent review, required CI, merge and released-source gates open.
+  The historical pre-startup blocker below is retained rather than erased.
+
+### 2026-10-13 - NUL-record follow-up blocked before reproduction
+
+- The current published repair is #6551 at
+  `e35a4078110cb8bd6e90f9ff9e5bf6f9654cadc3`. Its previously reported full CI
+  run `38437426233` and required PR gate passed, but those checks do not
+  establish acceptance of a subsequent NUL-validation fix.
+- The actual Copilot review comments `4261885824`, `4261885901`,
+  `4261885985` and `4261886059` were read directly. All four identify one
+  blocking defect: Bash text reads discard embedded NUL bytes, potentially
+  accepting malformed typed PID receipts as stale-owner evidence.
+- The authorized all-four-consumer, six-position pre-fix reproduction could
+  not start: the local Docker Linux endpoint was unavailable. A read-only
+  check of the alternate local Docker endpoint also failed; the Docker service
+  was stopped and no Docker backend process was present. No consumer executed,
+  so this continuation claims neither a reproduced negative nor a passing fix.
+- Host runtime changes are outside this worker's authorization. No engine was
+  started, no installer or test source was changed, and no Git publication,
+  PR mutation, native continuity trial or host deployment occurred.
+- The effort remains **Active**. Integration must restore the authorized
+  disposable Linux validation lane before the ordered NUL reproduction,
+  bounded parser correction and mirrored regression work can proceed.
+  Independent review of that material correction, current-head required CI,
+  merge and released-source proof remain open; earlier 128-pass and stress
+  evidence applies only to the earlier repair. The parent objectives remain
+  unchanged.
 
 ### 2026-10-13 - Independent local verification closed the named residual
 

@@ -543,6 +543,120 @@ def test_posix_pid_fallback_record_reader_refuses_unknown_content(tmp_path: Path
     assert sorted(path.name for path in install_dir.iterdir()) == [".install.lock.pid"]
 
 
+@pytest.mark.parametrize("leaf", [".install.lock.pid", ".install.lock.pid.reap"])
+@pytest.mark.parametrize("position", [
+    "prefix-start", "prefix-body", "pid-start", "pid-body", "before-newline", "after-newline",
+])
+def test_posix_pid_fallback_nul_record_never_admits_or_mutates(
+    tmp_path: Path, leaf: str, position: str,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    path = install_dir / leaf
+    prefix = b"copilot-extensions.install-lock-pid:v1:"
+    record = prefix + str(_dead_pid()).encode("ascii") + b"\n"
+    index = {
+        "prefix-start": 0, "prefix-body": 12, "pid-start": len(prefix),
+        "pid-body": len(prefix) + 1, "before-newline": len(record) - 1,
+        "after-newline": len(record),
+    }[position]
+    record = record[:index] + b"\0" + record[index:]
+    path.write_bytes(record)
+    identity = path.stat()
+    result = _run_sh_block(
+        bash, install_dir,
+        f'if _read_install_lock_owner "{path}"; then echo trusted; else echo untrusted; fi\n'
+        "if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi",
+        env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["untrusted", "refused"]
+    assert path.read_bytes() == record
+    assert (path.stat().st_dev, path.stat().st_ino) == (identity.st_dev, identity.st_ino)
+    assert sorted(node.name for node in install_dir.iterdir()) == [leaf]
+
+
+@pytest.mark.parametrize("after_newline", [False, True])
+def test_posix_pid_fallback_nul_record_never_authorizes_exit_cleanup(
+    tmp_path: Path, after_newline: bool,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    path = install_dir / ".install.lock.pid"
+    ending = r"\n\0" if after_newline else r"\0\n"
+    result = _run_sh_block(
+        bash, install_dir,
+        "_enter_install_lock 1 || exit 3\n"
+        f'printf "copilot-extensions.install-lock-pid:v1:%s{ending}" "$$" > "{path}"\n'
+        '_exit_install_lock\necho "$$"',
+        env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert path.read_bytes() == (
+        b"copilot-extensions.install-lock-pid:v1:" + result.stdout.strip().encode("ascii")
+        + (b"\n\0" if after_newline else b"\0\n")
+    )
+    assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_posix_pid_fallback_typed_receipt_preserves_live_and_reaps_dead_owner(
+    tmp_path: Path, live: bool,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    path = install_dir / ".install.lock.pid"
+    owner = os.getpid() if live else _dead_pid()
+    record = f"copilot-extensions.install-lock-pid:v1:{owner}\n".encode("ascii")
+    path.write_bytes(record)
+    result = _run_sh_block(
+        bash, install_dir,
+        "if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi",
+        env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ("refused" if live else "entered")
+    if live:
+        assert path.read_bytes() == record
+    else:
+        assert not path.exists()
+    assert sorted(node.name for node in install_dir.iterdir()) == ([path.name] if live else [])
+
+
+@pytest.mark.parametrize(("size", "ending", "trusted"), [
+    (64, b"\n", True), (65, b"\n", False), (63, b"", False), (64, b"\n\n", False),
+])
+def test_posix_pid_fallback_record_reader_enforces_byte_bound_and_newline(
+    tmp_path: Path, size: int, ending: bytes, trusted: bool,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    path = install_dir / ".install.lock.pid"
+    prefix = b"copilot-extensions.install-lock-pid:v1:"
+    owner = b"1" * (size - len(prefix) - len(ending))
+    record = prefix + owner + ending
+    path.write_bytes(record)
+    result = _run_sh_block(
+        bash, install_dir,
+        f'if ! _read_install_lock_owner "{path}"; then echo refused; fi',
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (owner.decode("ascii") if trusted else "refused")
+    assert path.read_bytes() == record
+    assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
+
+
 def test_posix_pid_fallback_record_snapshot_refuses_raced_fifo_without_opening(tmp_path: Path) -> None:
     bash = _posix_bash()
     if bash is None:
