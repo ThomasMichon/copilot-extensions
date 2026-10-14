@@ -84,6 +84,9 @@ class WorktreeRefreshOwner:
         self.sources: dict[str, SourceEvidence] = {}
         self.task: asyncio.Task[None] | None = None
         self._live_task: asyncio.Task[None] | None = None
+        self._holder_epoch = 0
+        self._queued_epoch = 0
+        self._queued_live = False
         self._holder_live = False
         self.closed = False
         self.available = False
@@ -140,37 +143,51 @@ class WorktreeRefreshOwner:
     def current(self, epoch: int) -> bool:
         return not self.closed and epoch == self.epoch
 
+    @property
+    def current_pending(self) -> bool:
+        return any(
+            task is not None and not task.done() and epoch == self.epoch
+            for task, epoch in (
+                (self.task, self._holder_epoch), (self._live_task, self._queued_epoch),
+            )
+        )
+
     def ensure(
         self, operation: Callable[[int], Awaitable[None]], *, live: bool = False,
     ) -> asyncio.Task[None] | None:
+        if self.closed or not self.available:
+            return None
         if self._live_task is not None and not self._live_task.done():
-            return self._live_task
-        if self.task is not None and not self.task.done():
-            if live and not self._holder_live:
-                previous = self.task
+            previous, epoch, requested_live = (
+                self._live_task, self._queued_epoch, self._queued_live,
+            )
+        else:
+            previous, epoch, requested_live = self.task, self._holder_epoch, self._holder_live
+        if previous is not None and not previous.done():
+            if epoch != self.epoch or (live and not requested_live):
                 epoch = self.epoch
                 started = time.monotonic()
 
-                async def after_cached_read() -> None:
+                async def after_previous_read() -> None:
                     try:
                         await asyncio.shield(previous)
                     except Exception:
-                        # The previous holder logs its failure; the live read
-                        # still has to establish its own source evidence.
+                        # The previous holder logs its failure; its successor
+                        # still has to establish current source evidence.
                         pass
                     if self.current(epoch):
-                        holder = self._admit(operation, epoch=epoch, live=True)
+                        holder = self._admit(operation, epoch=epoch, live=live)
                         await asyncio.shield(holder)
 
                 queued = asyncio.create_task(
-                    after_cached_read(), name="worktree-live-refresh-wait",
+                    after_previous_read(), name="worktree-refresh-wait",
                 )
                 self._live_task = queued
+                self._queued_epoch = epoch
+                self._queued_live = live
                 self._observe(queued, epoch=epoch, started=started)
                 return queued
-            return self.task
-        if self.closed or not self.available:
-            return None
+            return previous
         return self._admit(operation, epoch=self.epoch, live=live)
 
     def _admit(
@@ -180,6 +197,7 @@ class WorktreeRefreshOwner:
         self.last_attempt = started
         task = asyncio.create_task(operation(epoch), name="worktree-discovery-refresh")
         self.task = task
+        self._holder_epoch = epoch
         self._holder_live = live
         self._observe(task, epoch=epoch, started=started)
         return task
@@ -212,7 +230,7 @@ class WorktreeRefreshOwner:
         task.add_done_callback(finished)
 
     def needs_refresh(self, *, max_age: float = FRESH_SECONDS) -> bool:
-        if self.pending or self.closed or not self.available:
+        if self.current_pending or self.closed or not self.available:
             return False
         now = time.monotonic()
         if self.last_attempt is not None and now - self.last_attempt < RETRY_SECONDS:
@@ -227,7 +245,7 @@ class WorktreeRefreshOwner:
         self, operation: Callable[[int], Awaitable[None]],
         backfill: Callable[[], Awaitable[None]], wrappers: set[asyncio.Task[None]],
     ) -> asyncio.Task[None] | None:
-        joined = self.pending
+        joined = self.current_pending
         task = self.ensure(operation)
         if task is not None and not joined and task is not self._warm_holder:
             self._warm_holder = task

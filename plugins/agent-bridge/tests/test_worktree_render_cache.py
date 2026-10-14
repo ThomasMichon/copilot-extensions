@@ -19,9 +19,6 @@ from agent_bridge.routes.worktree_entry import WorktreeEntry
 from agent_bridge.routes import worktrees as wt
 from agent_bridge.routes import worktree_refresh as refresh
 
-pytestmark = pytest.mark.guard
-
-
 def resolver(*names: str):
     return SimpleNamespace(agents={
         name: AgentConfig(name=name, project="sample")
@@ -36,6 +33,7 @@ def entry(name="local", ident="w1"):
     )
 
 
+@pytest.mark.guard
 def test_stable_row_owner_preserves_the_complete_serialized_fixture():
     fixture = json.loads((
         Path(__file__).parents[1] / "contract" / "fixtures" / "http" / "current"
@@ -54,6 +52,7 @@ def route_client(cache, monkeypatch):
     )
 
 
+@pytest.mark.guard
 @pytest.mark.asyncio
 async def test_real_route_cold_render_under_two_seconds(monkeypatch):
     cache = wt.WorktreeDiscoveryCache()
@@ -221,8 +220,9 @@ async def test_live_route_real_ten_second_wait_and_cancelled_caller_keep_holder(
         assert cache._refresh.metadata()["last_refresh"]["goal_met"] is False
 
 
+@pytest.mark.guard
 @pytest.mark.asyncio
-async def test_provider_swap_before_scheduled_holder_starts_performs_no_old_read(monkeypatch):
+async def test_provider_swap_before_scheduled_holder_starts_warms_replacement(monkeypatch):
     cache = wt.WorktreeDiscoveryCache()
     cache._resolver = resolver("old")
     calls = []
@@ -236,13 +236,14 @@ async def test_provider_swap_before_scheduled_holder_starts_performs_no_old_read
     holder = cache._refresh.task
     cache._resolver = resolver("new")
     cache.render_snapshot()
+    queued = cache._refresh._live_task
     assert cache._refresh.task is holder
-    await holder
-    assert calls == []
-    assert cache.get_all() == {}
-    await cache.refresh_live()
-    assert calls == ["new"]
+    assert queued is not None
+    await queued
+    assert "old" not in calls
+    assert calls[0] == "new"
     assert list(cache.get_all()) == ["new"]
+    await cache.stop()
 
 
 @pytest.mark.asyncio
@@ -280,6 +281,104 @@ async def test_provider_replacement_and_bounded_shutdown_fence_publication(monke
     assert cache._refresh.metadata()["freshness"] == "unavailable"
 
 
+@pytest.mark.guard
+@pytest.mark.asyncio
+@pytest.mark.parametrize("live", [False, True])
+async def test_single_replacement_render_warms_after_retired_holder_without_overlap(monkeypatch, live):
+    cache = wt.WorktreeDiscoveryCache()
+    cache._resolver = resolver("old")
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+    active = 0
+
+    async def read(name, cfg, res, *, classify=True, fresh=False):
+        nonlocal active
+        active += 1
+        assert active == 1
+        calls.append((name, fresh))
+        if name == "old":
+            started.set()
+            await release.wait()
+        active -= 1
+        return [entry(name, name)]
+
+    async def no_backfill(*args):
+        pass
+
+    monkeypatch.setattr(cache, "_crawl_agent", read)
+    monkeypatch.setattr(cache, "_backfill_classify", no_backfill)
+    old = asyncio.create_task(cache.refresh_live()) if live else None
+    if not live:
+        cache.render_snapshot()
+    await started.wait()
+    holder = cache._refresh.task
+    cache._resolver = resolver("new")
+    async with route_client(cache, monkeypatch) as client:
+        response = await client.get("/api/v1/worktrees?render=true")
+    assert response.json()["discovery"]["warming"]
+    queued = cache._refresh._live_task
+    assert queued is not None
+    for _ in range(8):
+        cache.render_snapshot()
+        assert cache._refresh._live_task is queued
+    assert cache._refresh.task is holder
+    assert calls == [("old", live)]
+    release.set()
+    await queued
+    if old is not None:
+        assert (await old)["outcome"] == "superseded"
+    assert calls == [("old", live), ("new", False)]
+    assert cache.get_all()["new"][0].id == "new"
+    assert cache._refresh.generation == 1
+    await cache.stop()
+
+
+@pytest.mark.guard
+@pytest.mark.asyncio
+@pytest.mark.parametrize("close", [False, True])
+async def test_repeated_replacement_retains_queued_chain_until_actual_completion(close):
+    owner = refresh.WorktreeRefreshOwner()
+    owner.bind(("old",), ["old"], available=True)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    async def read(epoch):
+        calls.append(epoch)
+        if len(calls) == 1:
+            started.set()
+            await release.wait()
+        owner.published(epoch, {name: None for name in owner.sources})
+
+    holder = owner.ensure(read)
+    await started.wait()
+    owner.bind(("middle",), ["middle"], available=True)
+    middle = owner.ensure(read, live=True)
+    owner.bind(("new",), ["new"], available=True)
+    assert owner.needs_refresh()
+    newest = owner.ensure(read)
+    assert newest is not middle
+    assert owner.ensure(read) is newest
+    assert owner.task is holder
+    waiter = asyncio.create_task(owner.wait(newest))
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert not newest.cancelled()
+    if close:
+        await owner.close()
+        assert owner.pending
+    release.set()
+    await newest
+    assert middle.done() and holder.done()
+    assert calls == ([1] if close else [1, 3])
+    assert owner.generation == (0 if close else 1)
+    assert not owner.pending
+
+
+@pytest.mark.guard
 @pytest.mark.asyncio
 async def test_source_routing_change_fences_the_existing_holder(monkeypatch):
     cache = wt.WorktreeDiscoveryCache()
@@ -299,11 +398,13 @@ async def test_source_routing_change_fences_the_existing_holder(monkeypatch):
     holder = cache._refresh.task
     cache._resolver.agents["local"].ssh_environment = "alternate"
     cache.render_snapshot()
+    queued = cache._refresh._live_task
     assert cache._refresh.epoch > epoch
     assert cache._refresh.task is holder
     release.set()
-    await holder
-    assert cache.get_all() == {}
+    await queued
+    assert cache.get_all()["local"][0].id == "w1"
+    await cache.stop()
 
 
 @pytest.mark.asyncio
@@ -350,6 +451,7 @@ async def test_unavailable_stale_and_empty_sources_are_distinct(monkeypatch):
     assert cache._refresh.metadata()["freshness"] == "stale"
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("raw,diagnostic", [
     ('{"version":9,"worktrees":[]}', "source-incompatible"),
     ('{"version":1,"worktrees":[],"incomplete":true}', "source-incomplete"),
@@ -366,6 +468,7 @@ def test_invalid_inventory_is_not_confirmed_empty(raw, diagnostic):
         refresh.validate_inventory(raw)
 
 
+@pytest.mark.guard
 def test_unsupported_option_detection_does_not_confuse_usage_with_rejection():
     stderr = "usage: sample list [--fresh]\nerror: unrecognized arguments: --classify"
     assert refresh.is_classify_unsupported(stderr)
@@ -397,6 +500,7 @@ async def test_native_source_budgets_and_optional_classify_fallback_unchanged(mo
     assert "local" in cache._classify_unsupported
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("version", [0, 35, 36])
 @pytest.mark.parametrize("live", [False, True])
 def test_client_version_gate_and_unknown_legacy_metadata(version, live):
@@ -419,6 +523,7 @@ def test_client_version_gate_and_unknown_legacy_metadata(version, live):
             assert result["refresh"]["outcome"] == "unsupported"
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("metadata", [
     None, {}, {"version": 2, "completeness": "complete"},
     {"version": True, "completeness": "complete"},
@@ -573,7 +678,6 @@ async def test_retired_source_option_verdict_cannot_poison_replacement(monkeypat
     old = asyncio.create_task(cache.refresh_live())
     await started.wait()
     cache._resolver.agents["local"].project = "new"
-    cache.render_snapshot()
     release.set()
     assert (await old)["outcome"] == "superseded"
     assert "local" not in cache._fresh_unsupported
