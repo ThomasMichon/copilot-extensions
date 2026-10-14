@@ -102,6 +102,12 @@ local prerequisite, not an authenticated push endpoint, complete fleet roster,
 resident subscription service or a new domain writer. Default CLI commands do
 not open the store, and no installed service or producer is enrolled by it.
 
+The explicit [runtime identity verifier](docs/runtime-authentication.md) adds
+optional maintained-library JWT/DPoP checks and a bounded single-owner replay
+fence. It is not enrollment, scoped policy authorization or a Gateway listener.
+Its `runtime-authentication` extra does not change default client dependencies,
+select a provider, acquire credentials or impose a human-presence timer.
+
 ## Thin client artifacts and local diagnostics
 
 `fleet-manager` builds as a dependency-free runtime wheel. Its wheel carries the

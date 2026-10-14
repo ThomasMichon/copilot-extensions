@@ -82,13 +82,19 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         assert all(requirement.marker is not None
                    and not requirement.marker.evaluate({"extra": ""})
                    and (requirement.marker.evaluate({"extra": "dev"})
-                        or requirement.marker.evaluate({"extra": "release-verification"}))
+                        or requirement.marker.evaluate({"extra": "release-verification"})
+                        or requirement.marker.evaluate({"extra": "runtime-authentication"}))
                    for requirement in requirements)
         verification = [requirement for requirement in requirements
                         if requirement.marker.evaluate({"extra": "release-verification"})]
         assert len(verification) == 1
         assert canonicalize_name(verification[0].name) == "cryptography"
         assert verification[0].specifier == SpecifierSet(">=46,<47")
+        identity = [requirement for requirement in requirements
+                    if requirement.marker.evaluate({"extra": "runtime-authentication"})]
+        assert len(identity) == 1
+        assert canonicalize_name(identity[0].name) == "joserfc"
+        assert identity[0].specifier == SpecifierSet(">=1.7.5,<2")
         assert not any(name.endswith("/_standalone_runtime_build.py") for name in archive.namelist())
 
 
@@ -215,7 +221,8 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
         # -S excludes the runner's installed fleet package; only this target is evidence.
         return run([
             sys.executable, "-I", "-S", "-B", "-c",
-            "import sys; sys.path.insert(0, sys.argv.pop(1)); "
+            "import sys, importlib.util; sys.path.insert(0, sys.argv.pop(1)); "
+            "assert importlib.util.find_spec('joserfc') is None; "
             "from importlib.metadata import distribution; "
             "entry = next(e for e in distribution('fleet-manager').entry_points "
             "if e.group == 'console_scripts' and e.name == 'fleet-manager'); "

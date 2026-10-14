@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; runtime auth interface proposed, isolated storage merged; integration/lifecycle open
+- **Status:** Active; isolated runtime identity verifier in review preparation; policy/integration/lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -174,6 +174,14 @@ the underlying provider session permits it; it is not periodic human presence
 validation. Actual provider challenges and revocation remain binding, and the
 dead-man switch is explicit opt-in rather than a default session timeout.
 
+After the reviewed proposal actually merged, the operator directed verbatim:
+
+> Great. Start driving the work
+
+This authorizes driving the reviewed implementation, beginning with an isolated
+verifier prerequisite. It does not select live trust roots, enroll principals,
+transfer another campaign's active source ownership or authorize deployment.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -231,9 +239,14 @@ All detailed slices are **agent-recommended** and remain subject to review.
 ### Phase 2a - Gateway/index vertical slice
 - [ ] Review the [slice contract](gateway-index-slice.md) and coordinate #6443,
   #6383 and retained fleet/auth/deployment owners before runtime changes.
-- [ ] Review the shared [runtime authentication interface](runtime-authentication.md)
-  under #5789/#6443, then agree exact records/provider support and exclusive
-  implementation scopes before wiring consumers.
+- [x] Review the shared [runtime authentication interface](runtime-authentication.md)
+  under #5789/#6443.
+- [ ] Agree exact auth records/provider support and exclusive implementation
+  scopes before wiring consumers.
+  The first isolated verification prerequisite has its own new module, optional
+  JOSE dependency and proof tests; enrollment, scoped policy and resident
+  consumers remain separate gates. See the
+  [implemented API boundary](../../../fleet-manager/docs/runtime-authentication.md).
 - [ ] Supply the resident role-selected Gateway and fixed-service index route
   using the existing release, offer/request and operation/receipt contracts.
 - [ ] Authenticate and authorize client/node/controller principals, service
@@ -1029,3 +1042,64 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   lock/sleep and reconnect are not invented human-presence requirements.
   Captured the full clarification verbatim and added longevity/challenge/
   revocation/opt-in validation obligations.
+- #6732 actually merged at `2026-10-14T19:32:26Z`, commit
+  `f660fcb02adda309bfbfe59f3e39daf3945b633b`. Its final head
+  `dc51c7b66d3a04044b2d61c6da9a5a3bfe1f16d4` received actual Copilot APPROVED
+  review `5523090951`, zero findings (Balanced effort) and no inline comments.
+  Natural CI `38618214730` completed successfully before merge; all 25 observed
+  checks succeeded or legitimately skipped. Queued jobs were waited out without
+  rerun, cancellation, runner repair or CI/review bypass.
+- Re-read the full parent Plan/Validation after actual merge. Only the shared
+  auth proposal review item closes; exact provider/record/source assignments,
+  implementation, integration and every full validation/adoption gate stay open.
+  The default long-lived provider-session presence and opt-in/off dead-man
+  behavior are reviewed intent, not implemented or deployed authentication.
+- Managed pull-forward safely aborted on the two-commit squash-history conflict.
+  Verified a clean workspace, only published commits and exact owned-file equality
+  with the confirmed merge; retained a backup and dropped only that published
+  prefix onto the fetched base. No unpublished work or claim was discarded.
+  Continuing work remains in the full effort's owned worktree, not finalized.
+- Next is agreement on the proposed DTO/provider support and exclusive source
+  scopes with #5789/#6443/#3761/#352, followed by the bounded verifier/admission
+  contract slice. Proposal review does not enroll a principal, select live keys,
+  change a provider session policy or authorize a Gateway deployment.
+
+### 2026-10-14 - Isolated identity verifier implementation started
+- The operator authorized driving implementation after actual proposal merge.
+  Rechecked current #5789/#6443 reservations, open fleet PRs and #6424 shared
+  metadata ownership, then reserved only new verifier/test/doc paths and the
+  directly coupled optional dependency/isolation assertions. No reserved
+  resident Gateway, enrollment, provider, index or lifecycle source was edited.
+- Implemented explicit `jwt-pop-v1` ES256/P-256 access-token and DPoP
+  verification using maintained `joserfc`, including public-key thumbprints,
+  strict token/proof parsing, request/key/token binding and an atomic bounded
+  nonce-epoch replay fence. It returns immutable non-secret request evidence,
+  not a principal enrollment, grant or reusable authorization token.
+- Default client dependencies remain empty. The optional capability is loaded
+  only when explicitly requested. Real fresh installed-wheel diagnostics prove
+  that the default client runs without JOSE; explicit verification without the
+  capability refuses rather than downgrading.
+- Unit and simple process E2E: focused identity/client-isolation selection
+  passes 64; the full contained native portfolio passes 666 with six platform
+  skips in 74.69 seconds under the unchanged 120-second deadline. Tests exercise
+  real synthetic issuer/proof keys, invalid signatures/claims/bindings,
+  concurrent replay, live-capacity refusal, expiry/rollback and a replacement
+  process rejecting the old nonce epoch. Many-day valid token/proof renewal
+  introduces no Gateway presence timer. Touched lint and install-contract
+  validation pass.
+- The first full run exposed the metadata test's prior two-extra whitelist;
+  updated it for the explicit new extra while preserving empty default
+  requirements and independently checking both crypto extras. A subsequent
+  candidate refresh prevents a cached installed test package from masking
+  source changes. No test deadline or assertion was waived.
+- Clean-room/live external deployment tiers were not exercised: this is an
+  unintegrated verification library with no installer, listener, trust
+  enrollment or selected identity-provider adapter. Existing fresh-wheel
+  install/removal and a standard-library-only capability refusal are exercised;
+  hosted native-platform validation and actual PR review remain pending.
+- This closes part of machine-fleet `authenticated-scoped-and-revocable`
+  intent, using the reviewed common boundary without a daemon or per-UX auth
+  engine. Policy/enrollment, provider challenge/revocation semantics, scoped
+  query/delegation/credential delivery and encrypted role transport still need
+  their own owner-agreed implementation and proofs. No full Plan/Validation
+  item closes; the parent effort stays Active.
