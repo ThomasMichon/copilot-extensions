@@ -463,3 +463,71 @@ hiding the problem or silently dropping text.
   The complete contained obligation-settlement and independent execution-space
   suites pass all 122 cases. The four settlement contracts also run in the
   fast guard lane; production code and fence behavior are unchanged.
+- **2026-10-13** -- The obligation fixture repair merged as #6588 after an
+  Approved current-head review with zero findings, successful CI and the
+  workflow guard. Review correctly required ownership to be passed into
+  record construction, not assigned afterward. The regression now reloads
+  the child and asserts persisted ownership and derived controller provenance;
+  all 122 contained settlement/execution-space cases pass with that correction.
+  Await the containing full release; installed rollout and real Picker proof
+  are not yet established.
+- **2026-10-13** -- The containing release run `38479483177` passed all
+  nine full plugin suites, including Agent Worktrees. Promotion then refused
+  because the enrolled Agent Bridge coverage baseline was missing. That
+  distinct evidence-transfer blocker is already routed through the existing
+  #6535/#4876 release driver. Do not waive the coverage gate or treat the
+  successful suites as a completed promotion; installed proof remains pending.
+- **2026-10-13** -- The operator clarified that no release driver was active;
+  this session took release stewardship instead of relying on stale claims.
+  Prepared the exact reviewed #6611 workflow-only main bootstrap and exercised
+  its ten adapter contracts against the actual main-based workflow. Publication
+  found the pre-push hook's hardcoded dev comparison range; the operator
+  explicitly authorized a temporary main-range correction retaining both
+  unchanged identifier and pushed-blob checks. No review/CI bypass was allowed.
+  Before publication completed, canonical #6619 merged that exact bootstrap.
+  No duplicate PR or remote branch was opened. The unused bootstrap child was
+  aligned and finalized through managed commands using the actual #6619 landing
+  receipt; temporary tooling and hook overrides were removed. Continue driving
+  the real containing release and the original rollout/Picker completion gates.
+- **2026-10-14** -- Release candidate #6631 merged as
+  `f5e4e30353a076aec74781e6ef5cfe5df474e939`, composed from validated dev
+  `e22e05cc54be20f5438a460cb6b192de238e569c`. The engine admission/transport
+  and both Manager prompt-action source blobs match that snapshot exactly.
+  Artifact publication then failed in the content-only tree comparison,
+  tracked and claimed in #6632. A real Git regression reproduces its failure
+  when the merged tree's bookkeeping differs from the trusted checkout.
+  A local index-plumbing candidate fixed the comparison without touching
+  caller files or the real index and kept publisher errors explicit.
+  Rollout stays blocked until actual artifact publication succeeds.
+  The complete affected promotion/publisher portfolio passes all 212 cases.
+  Initial whole-file native runs exceeded local budgets; reran the actual
+  root-tool CI invocation in bounded eight-function groups, each retaining
+  its 300-second containment limit, with no omitted cases or changed assertions.
+  The original failure is reproduced before the index-plumbing correction.
+- **2026-10-14** -- During local validation, the canonical publisher driver
+  independently merged the same root-cause repair as #6633. No competing PR
+  was opened. The operator explicitly chose the merged canonical repair;
+  the alternative implementation and diagnostics remain on a local backup,
+  not in the release path. Continue from the canonical source and drive
+  actual immutable asset publication before installed adoption. Local
+  validation of an unpublished alternative is not shipped evidence.
+- **2026-10-14** -- Canonical #6633 reached main through promotion #6642,
+  but that run's publisher still executed its older pinned trusted checkout
+  and repeated the already-fixed refusal. The operator explicitly authorized
+  one fresh normal validation/promotion run from repaired trusted main.
+  Dispatched run `38524772148`, pinned to
+  `f327cf44793c60321bc205eddadccaeda3d5ee43`; every normal validation and
+  evidence gate remains enabled. No failed-job retry or force promotion was
+  used. Await its actual artifact-publication receipt before rollout.
+- **2026-10-14** -- GitHub coalesced the authorized pending manual run into
+  automatic run `38525777621`, pinned to the same repaired trusted main;
+  no second manual dispatch was requested. The older active run exposed six
+  profile-assignment registration fixture failures, grouped in #6657 with
+  signatures #6651 through #6656. The fixture now supplies the same test data
+  to registration's dedicated config reader while retaining the real mutation
+  fence and original lifecycle/call-count assertions. All 211 assignment,
+  registration and execution-space cases pass; all six registration contracts
+  are also selected and pass in the fast guard lane. One initial unchanged
+  native contention case hit its existing lock deadline, then passed alone and
+  in the complete rerun; #6663 records that intermittent evidence without a
+  timeout increase or CI waiver. Actual artifact publication remains required.
