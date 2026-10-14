@@ -1,9 +1,0 @@
-{
-  "comment": "Add authoritative registered-only repository resolution without discovery or acquisition side effects.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

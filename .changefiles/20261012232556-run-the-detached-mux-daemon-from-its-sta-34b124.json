@@ -1,9 +1,0 @@
-{
-  "comment": "Run the detached mux daemon from its stable root (or home), never the caller's working directory",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
