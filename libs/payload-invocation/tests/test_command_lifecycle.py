@@ -13,7 +13,7 @@ import pytest
 from test_command_binding import (
     PLUGIN_ID, POWERSHELL, ROOT, _catalog_environment, _load, _prepare_catalog,
     _resolve, _snapshot, _write, binding_fixture as binding_fixture,
-    _publish,
+    _publish, _lifecycle_lock_path,
 )
 
 
@@ -29,7 +29,7 @@ def test_command_binding_pending_failure_keeps_owner_and_never_selects(binding_f
             (binding_fixture["legacy"] / "runtime-slot").write_text("partial", encoding="utf-8")
             assert _resolve(binding_fixture)["reason"] == "legacy-lifecycle-incomplete"
             raise RuntimeError("fixture failure")
-    assert not (binding_fixture["legacy"] / ".command-binding-publication.lock").exists()
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
     assert _resolve(binding_fixture)["reason"] == "legacy-lifecycle-incomplete"
     _write(binding_fixture["home"] / ".copilot/settings.json", {
         "extraKnownMarketplaces": {
@@ -67,6 +67,7 @@ def test_command_binding_teardown_lock_survives_runtime_removal(binding_fixture:
     with lifecycle.legacy_lifecycle(
         binding, primitive, reserve=False, teardown=True, **binding_fixture["arguments"],
     ) as lease:
+        assert lease.lock.path == _lifecycle_lock_path(binding_fixture["legacy"])
         assert not lease.lock.path.is_relative_to(binding_fixture["legacy"])
         shutil.rmtree(binding_fixture["legacy"])
         lease.lock.assert_owned()
@@ -92,6 +93,28 @@ def test_command_binding_teardown_foreign_owner_refuses_without_writes(binding_f
             **binding_fixture["arguments"],
         ):
             pytest.fail("Foreign teardown reached runtime removal")
+    assert _snapshot(binding_fixture["home"]) == before
+
+
+@pytest.mark.parametrize("interpreter", ["parent", "child"])
+def test_command_binding_teardown_refuses_interpreters_in_erased_runtime(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, interpreter: str,
+) -> None:
+    _publish(binding_fixture)
+    binding = binding_fixture["binding"]
+    lifecycle = binding._load_lifecycle()
+    excluded = binding_fixture["legacy"] / "interpreter"
+    command = [sys.executable]
+    if interpreter == "parent":
+        monkeypatch.setattr(lifecycle.sys, "executable", str(excluded))
+    else:
+        command = [str(excluded)]
+    before = _snapshot(binding_fixture["home"])
+    with pytest.raises(ValueError, match="interpreters outside the runtime"):
+        lifecycle.run_lifecycle(
+            binding, binding_fixture["primitive"], command, teardown=True,
+            **binding_fixture["arguments"],
+        )
     assert _snapshot(binding_fixture["home"]) == before
 
 
@@ -420,7 +443,7 @@ def test_command_binding_native_teardown_refuses_foreign_then_removes_owned_runt
     assert not (runtime / "deploy-manifest.json").exists()
     assert not (runtime / "versions").exists()
     assert not (runtime / "lib").exists()
-    assert not runtime.with_name(runtime.name + ".command-binding-publication.lock").exists()
+    assert not _lifecycle_lock_path(runtime).exists()
 
 
 @pytest.mark.parametrize("shell", [
@@ -468,7 +491,7 @@ def test_command_binding_native_stamp_defers_without_stuck_reservation(
         assert manifest["commandLifecycle"]["state"] == "complete"
     else:
         assert "commandLifecycle" not in manifest
-    assert not (runtime / ".command-binding-publication.lock").exists()
+    assert not _lifecycle_lock_path(runtime).exists()
 
 
 @pytest.mark.parametrize("shell", [

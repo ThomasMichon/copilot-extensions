@@ -48,6 +48,11 @@ def _snapshot(root: Path) -> dict:
     }
 
 
+def _lifecycle_lock_path(root: Path) -> Path:
+    root = root.resolve()
+    return root.with_name(root.name + ".command-binding-publication.lock")
+
+
 @pytest.fixture
 def binding_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     home = tmp_path / "home"
@@ -685,10 +690,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
     if host:
         host.close()
     after = _snapshot(binding_fixture["home"])
-    assert after.keys() == before.keys()
-    for path, metadata in before.items():
-        if path != ".agent-worktrees":
-            assert after[path] == metadata, path
+    assert after == before
 
 
 def test_command_binding_concurrent_lifecycle_publishers_keep_one_owner(binding_fixture: dict) -> None:
@@ -747,7 +749,7 @@ print(json.dumps(result))
     outputs = [process.communicate(timeout=30) for process in processes]
     assert sorted(process.returncode for process in processes) == [0, 1], outputs
     assert any("CommandOwnershipConflict" in stderr for _, stderr in outputs)
-    assert not (binding_fixture["legacy"] / ".command-binding-publication.lock").exists()
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
     selected = []
     for payload in (binding_fixture["payload"], other):
         binding_fixture["arguments"]["payload_root"] = payload

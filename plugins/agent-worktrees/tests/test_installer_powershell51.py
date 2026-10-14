@@ -406,7 +406,11 @@ def test_slot_clean_uses_an_interpreter_outside_the_target_slot():
     assert "if (-not $py) { return -not (Test-Path $VenvDir) }" in clean_fn
 
     assert "[switch]$ExcludeVenvDir" in bootstrap_fn
-    assert "$dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }" in bootstrap_fn
+    assert "[switch]$ExcludeRuntimeRoot" in bootstrap_fn
+    assert (
+        "$dirs = if ($ExcludeRuntimeRoot) { @() } elseif ($ExcludeVenvDir) "
+        "{ @($LinkDir) } else { @($VenvDir, $LinkDir) }"
+    ) in bootstrap_fn
     # $LinkDir is not guaranteed to differ from $VenvDir (in the current
     # versioned-runtime wiring they are in fact always the same path), so
     # the exclude branch must not simply trust $LinkDir as a safe stand-in

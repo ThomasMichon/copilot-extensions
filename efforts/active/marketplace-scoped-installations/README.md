@@ -495,6 +495,30 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Native teardown accepted; cleanup assertions and coupled guard correction
+
+- Native job
+  [115669961542](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38506725448/job/115669961542)
+  completed in five minutes nineteen seconds under the seven-minute aggregate
+  bound. It executed 226 source/diagnostic/lifecycle cases, two Manager cases,
+  eight reconciliation/publisher cases, and the complete fleet selection
+  (493 passed, six skipped). Individual diagnostic/wrapper limits remained
+  unchanged. This is executed native evidence, not an aggregate hint.
+- Review resolved both teardown High findings but found three obsolete
+  in-runtime lock cleanup assertions. Those assertions now check the real
+  sibling path; the held-lock case also proves its path matches that expected
+  location before deletion. Foreign manifest refusal now compares the complete
+  profile without the previously necessary runtime-directory mtime exception.
+- The required installer guard exposed one coupled textual assertion that
+  still expected the earlier bootstrap candidate list. It now checks both
+  runtime and slot exclusions without dropping the original slot-safety
+  assertions. Complete shared binding/lifecycle and both bootstrap test files
+  passed 107 cases locally, with seven platform skips, including explicit
+  parent/child interpreter refusals that preserve the complete profile.
+- Fresh current-head review and all required checks remain necessary. No
+  broader diagnostic prerequisite, release, deployment, Phase 8, or original
+  Validation Plan item is closed by this test-only correction.
+
 ### 2026-10-13 — Ownership-safe teardown and complete install refusal boundary
 
 - Current-head review found that the native uninstall branches bypassed the
