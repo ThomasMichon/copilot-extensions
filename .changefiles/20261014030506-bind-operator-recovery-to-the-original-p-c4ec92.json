@@ -1,0 +1,9 @@
+{
+  "comment": "Bind operator recovery to the original publication and agreed live head; prefer proven bookkeeping settlement and enforce exact recovery CAS.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

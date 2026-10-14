@@ -17,13 +17,13 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Run exhaustive owned-PR replay contracts
+      - name: Run owned-PR replay and guarded recovery contracts
         env:
           AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE: "1"
           AGENT_WORKTREES_NATIVE_HEADLESS_TEST: "1"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          -k owned_pr_rebase
+          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard"
           --allow-explicit-tiers
           --subsuite-timeout 1800 --plugin-timeout 1800
   windows:
@@ -36,12 +36,12 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Run exhaustive owned-PR replay contracts
+      - name: Run owned-PR replay and guarded recovery contracts
         env:
           AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE: "1"
           AGENT_WORKTREES_NATIVE_HEADLESS_TEST: "1"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          -k owned_pr_rebase
+          -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard"
           --allow-explicit-tiers
           --subsuite-timeout 1800 --plugin-timeout 1800
