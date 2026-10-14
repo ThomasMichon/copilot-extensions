@@ -1180,8 +1180,15 @@ def test_session_start_catalog_preserves_unavailable_commands(monkeypatch, missi
 
 def test_session_start_catalog_reports_missing_binding_helper(monkeypatch, capsys):
     monkeypatch.setattr(hook_client, "_load_sibling", lambda _: None)
+    original_bytecode = sys.dont_write_bytecode
     assert hook_client._command_catalog_context() == ""
-    assert "Command catalog unavailable" in capsys.readouterr().err
+    assert sys.dont_write_bytecode == original_bytecode
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "[agent-worktrees] Command catalog unavailable: "
+        "Payload command binding helper is unavailable\n"
+    )
 
 
 def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):

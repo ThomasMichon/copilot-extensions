@@ -1135,3 +1135,128 @@ hosted checks, review and a containing full validation remain required.
   this is not the separate native-desktop acceptance deferred under #6644.
   The repair still needs ordinary dev review/checks, merge and a containing
   release before the original main-PR invocation proof can finish.
+
+### 2026-10-14 - Coupled hook repair merged; containing release pending
+
+- #6701 merged at `10:29:26Z` as
+  `b03852f590f1443fd33a0849b22cd1b287c312d8`. Current-head Copilot
+  review `5516515382` approved with zero findings; all three same-head
+  check suites completed successfully. The source required-check verifier
+  independently accepted the exact published head immediately before merge.
+- PR CI `38547642918` passes the actual Linux customizing-copilot and
+  budget-guidance suites (`115798946602` and `115798946951`), closing the
+  hosted obligations recorded above. Windows runner contracts and the
+  required aggregate also pass. No review or CI bypass was used.
+- Normal dev CI `38549929226` starts on the repair's merge commit.
+  Follow normal containing validation and promotion, then prove that main
+  PR events allocate no legacy CI invocation while the trusted admission
+  and identifier checks remain and full main-push CI still runs.
+  This source merge does not complete that release proof or the parent effort.
+
+### 2026-10-14 - Containing validation admitted; policy snapshot refreshed
+
+- The merge-tip CI was superseded without allocating jobs; it was cancelled,
+  not a failing validation. Normal validation `38551356685` is admitted and
+  its actual guards job `115810220872` checks out dev
+  `2ebdc595c00f97508bbad632e367e1bbdac540c8`, which contains both #6661
+  and #6701. The workflow API's `f327cf44793c` head identifies the main
+  workflow definition, not the validated dev snapshot. No extra dispatch
+  or retry was needed.
+- Read-only policy snapshot: main ruleset `18553911` requires `main source
+  gate`, non-strict; dev classic protection requires `PR gate (required
+  check)` from Actions app `15368`, non-strict and admin-enforced.
+  Dev ruleset `24152679` independently requires `workflow-lockdown-guard`
+  and `source-attribution`, with no bypass actors. Ruleset `23904550`
+  requires a PR without bypass; `24069919` requires one approval and
+  code-owner review with the existing maintainer pull-request bypass.
+  `24412577` blocks creation of `worktree/**` branches on origin.
+- Both branches also retain non-fast-forward/deletion ruleset protection.
+  The classic force-push setting alone does not describe that effective
+  policy. Nothing here adds strict freshness or changes any rule.
+- The current workflow catalog has 22 entries: 21 active, including three
+  dynamic platform entries, and the existing manually disabled failure-fix
+  workflow. The `copilot` environment has no protection rules;
+  `main-promotion` uses protected-branch deployment policy only.
+  This snapshot does not claim a credential audit or complete dependency
+  classification, and it does not authorize a policy mutation.
+
+### 2026-10-14 - Later fixture group has a retained repair owner
+
+- Containing full validation `38551356685` reaches sub-suite 15/15, then
+  agent-worktrees job `115810221047` fails three receiving-authority
+  fixture cases: the terminal-managed registration assertion (#6212)
+  and two owning-tracking-directory cases (#6693). That group reports
+  3 failed, 721 passed and 2 skipped. The previously repaired exact-session
+  group passes 634 cases with one skip; the old #6675 failure is not repeated.
+- The existing #6696 executor already owns all three corrections and has
+  published the narrow fixture updates with 405 contained cases passing.
+  Confirmed that custody on #6212 rather than opening a competing repair,
+  weakening authority, retrying the failed run or waiving its result.
+- #6701 remains merged and its hosted checks remain proven. The release
+  proof is now waiting for #6696 and the next normally admitted containing
+  validation; this is a distinct, tracked blocker, not a release success.
+
+### 2026-10-14 - Authorized fixture split deduplicated to existing break-fix
+
+- The retained #6696 API PR is still open with two Medium findings in its
+  latest review body; its zero headline count does not make that a clean
+  verdict. Repeated bounded waits and cooperative comments did not establish
+  advancement. No verified live owner contact was found; that does not
+  establish abandonment.
+- The operator explicitly authorized a separately reviewed repair of only
+  the three fixtures, without changing or superseding the API work. Fresh
+  pre-edit deduplication found #6726 already implements exactly that split,
+  under its own explicit operator authorization and current-head approval.
+  Retained #6726 as the sole writer rather than publishing a duplicate.
+- Its two fixture builders use the registration-specific authority resolver
+  introduced by #6586, keeping all original assertions and production source
+  unchanged. The owner's isolated reproduction reports three failures before
+  the repair and 76 passing cases afterward; hosted checks and the normal
+  containing release remain required.
+- Shared the deduplication and separate #6237 release-proof ownership on
+  #6726. Main is still `f327cf44793c60321bc205eddadccaeda3d5ee43`;
+  no containing release or main-PR invocation reduction is claimed yet.
+
+### 2026-10-14 - Fixture-only repair merged; distinct scanner repair retained
+
+- #6726 merged at `18:25:48Z` as
+  `028fc2e08803ca446d64b163b7795e4f8bb53924`. No competing fixture PR was
+  created here. Normal merge-tip dev CI is `38615086423`.
+- Earlier dev CI `38607818951` exposes a distinct scanner failure in job
+  `116017320517`: the complete stack classifies agent-worktrees as a
+  possible output after #6716 adds a stderr-only diagnostic. Budget-guidance
+  remains proven output-free, so this does not repeat #6699.
+- Fresh deduplication finds #6729 already owns that scanner correction.
+  Shared the exact failure and retained its normal review/check flow;
+  no second scanner implementation or retry was started here.
+- Also notified the concurrent #6730 fixture driver that the three
+  overlapping cases have already merged through #6726. Its distinct fast
+  guards and negative-Resume work remain with that driver; this session
+  neither closes nor mutates their PR.
+- Follow the normal containing release after both repairs reach dev.
+  Main-push coverage and trusted admission/scanner publication remain
+  required; no partial release or invocation-reduction success is claimed.
+
+### 2026-10-14 - Authorized producer-only compatibility repair
+
+- #6729 still has a Medium finding: its scanner exemption can admit compound
+  or nested stdout prints. Do not waive that finding or take over its proposal.
+- The operator explicitly authorized a smaller producer-only break-fix:
+  use hook_client.py's existing stderr-write convention for the new catalog
+  diagnostic, retaining its exact message, newline, empty catalog fallback
+  and stdout behavior. Reserved #6740 and explained the non-overlapping scope
+  on #6729 before editing.
+- The unchanged whole-stack contract reproduces the current dev failure
+  locally. The repair changes no scanner code, classifier rule, stdout
+  refusal, ownership/admission behavior, shell path or installer lifecycle.
+  A strengthened existing regression checks exact stderr, empty stdout
+  and restoration of the bytecode setting on the missing-helper path.
+- The complete contained hook IPC module passes 119 cases; the complete
+  unchanged customizing-copilot suite passes 496. A fresh subprocess/home
+  and partial payload with the actual binding helper absent reproduces the
+  exact stderr diagnostic with empty stdout, no runtime provisioning and
+  no bytecode. Ruff, docs, install-contract, headless and whitespace
+  checks pass. The required patch changefile is tool-generated.
+- Ordinary current-head review/required CI, merge and a containing release
+  remain outstanding. This below-altitude compatibility repair does not
+  complete #6729's separate scanner-improvement proposal or #6237.

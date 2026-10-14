@@ -198,7 +198,9 @@ payload declaration and the payload's read-only installation-binding helper.
 It preserves the native catalog emitter's exact command paths, availability,
 source provenance, and ownership decisions without starting a shell or a second
 Python interpreter. Catalog construction errors are reported on stderr; they
-do not produce a ready-looking replacement catalog.
+do not produce a ready-looking replacement catalog. The hook uses its existing
+stderr-write convention so diagnostics preserve the structural output-free
+session-start contract without relaxing the scanner's stdout refusals.
 
 On Windows, the cold hook checks the shared bootstrap killswitch before entering
 the canonical ownership lifecycle with its existing Python interpreter and one

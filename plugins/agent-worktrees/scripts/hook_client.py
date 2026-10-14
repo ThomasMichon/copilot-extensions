@@ -334,7 +334,7 @@ def _command_catalog_context() -> str:
             ),
         }
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, StopIteration) as error:
-        print(f"[agent-worktrees] Command catalog unavailable: {error}", file=sys.stderr)
+        sys.stderr.write(f"[agent-worktrees] Command catalog unavailable: {error}\n")
         return ""
     finally:
         sys.dont_write_bytecode = previous_bytecode

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve the output-free hook convention for command-catalog stderr diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
