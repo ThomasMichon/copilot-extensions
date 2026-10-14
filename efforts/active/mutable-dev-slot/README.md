@@ -288,6 +288,24 @@ the measured enclosing ten-minute job while preserving its three- and
 two-minute step bounds. None of these results closes the complete native
 adopter or portfolio gates.
 
+The fourth full run,
+[38572893150](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38572893150),
+passed every job except Worktrees, including the complete Windows runner/fleet
+lane and the full guards. Worktrees reached sub-suite six, where four bootstrap
+fixtures still returned a literal sentinel instead of the interpreter-resolution
+probe's executable path, or allowed an ambient second Python candidate to
+interfere with a deliberately chosen fallback. Their fake interpreters now
+answer that probe, and the fallback fixture controls its candidate PATH while
+retaining real path/symlink exclusion. The local selection passed nineteen
+contracts with one platform skip. This does not substitute for the remaining
+native sub-suites.
+
+Twelve concurrent standalone platform queries also completed normally, both
+without and with owned Jobs. Thus neither Job custody nor concurrent queries
+alone reproduced the sampled nested backend blockage. The signed automatic
+base selected by the native installer is the newest registered Python; its
+selection was not changed merely to evade that unresolved diagnosis.
+
 ### 2026-10-14 -- Native bootstrap reached; remaining CI failures classified
 
 The second full candidate run,
