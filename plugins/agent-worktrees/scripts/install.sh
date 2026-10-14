@@ -69,8 +69,11 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             }
             __aw_admission_source="$PLUGIN_DIR"
             if [[ "$PLUGIN_DIR" != */.copilot/installed-plugins/* &&
+                  -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" &&
                   -n "${COPILOT_PLUGIN_STAGED_FROM:-}" ]]; then
                 __aw_admission_source="$COPILOT_PLUGIN_STAGED_FROM"
+            elif [[ -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+                unset COPILOT_PLUGIN_STAGED_FROM
             fi
             __aw_admission_args=(
                 -I -B -X utf8 "$PLUGIN_DIR/scripts/command_binding.py"

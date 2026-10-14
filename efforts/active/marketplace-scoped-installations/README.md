@@ -495,6 +495,24 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Authenticate staged-origin inheritance
+
+- Current-head review found that both native preambles could attribute a
+  directly invoked local payload to an ambient staged-origin override.
+  A staged-origin hint now requires an inherited lifecycle ticket, which the
+  existing live parent-lease validation authenticates. Direct callers discard
+  unauthenticated origin hints before entering the ownership transaction.
+- The real full-installer refusal matrix now includes a local payload copy
+  pretending to be the incumbent source. Both native installers refuse all
+  five mutation actions without changing any profile byte, directory, or
+  modification time. A separate live-parent-lease case admits that same
+  staged copy with its authenticated origin, preserving supported staging.
+  The original real self-stage smoke case still runs for the owning payload.
+- The binding/lifecycle selection passed 65 cases; the final authenticated
+  inheritance matrix passed all four native cases. Current-head review, native
+  Windows execution, and required aggregate/lockdown checks remain necessary.
+  No broader effort or rollout gate is closed.
+
 ### 2026-10-13 — Isolate both PowerShell discovery processes
 
 - The next current-head review identified the same import-isolation class in

@@ -404,8 +404,9 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
     pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
+@pytest.mark.parametrize("location", ["installed", "local-copy"])
 def test_command_binding_real_installer_refuses_before_self_staging(
-    binding_fixture: dict, shell: str, powershell_host,
+    binding_fixture: dict, shell: str, location: str, powershell_host,
 ) -> None:
     _prepare_catalog(binding_fixture)
     payload = binding_fixture["payload"]
@@ -413,6 +414,10 @@ def test_command_binding_real_installer_refuses_before_self_staging(
     installer = payload / f"scripts/install.{suffix}"
     shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/install.{suffix}", installer)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
+    if location == "local-copy":
+        copied_payload = binding_fixture["home"] / "local-payload"
+        shutil.copytree(payload, copied_payload)
+        installer = copied_payload / f"scripts/install.{suffix}"
     _publish(binding_fixture)
     stage = binding_fixture["legacy"] / ".install-stage/retained-0"
     stage.mkdir(parents=True)
@@ -421,14 +426,15 @@ def test_command_binding_real_installer_refuses_before_self_staging(
         **_catalog_environment(binding_fixture),
         "COPILOT_PLUGIN_INSTALL_SMOKE": "1", "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "0",
         "COPILOT_PLUGIN_INSTALL_STAGED": "1",
-        "COPILOT_PLUGIN_STAGED_FROM": str(binding_fixture["home"] / "unrelated-payload"),
+        "COPILOT_PLUGIN_STAGED_FROM": str(payload),
     }
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
     settings = binding_fixture["home"] / ".copilot/settings.json"
     original = settings.read_bytes()
-    _write(settings, {"extraKnownMarketplaces": {
-        "example": {"source": {"source": "github", "repo": "Other/Plugins"}},
-    }})
+    if location == "installed":
+        _write(settings, {"extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Other/Plugins"}},
+        }})
     before = _snapshot(binding_fixture["home"])
     for action in ("install", "update", "provision", "stamp", "uninstall"):
         command = (
@@ -446,7 +452,30 @@ def test_command_binding_real_installer_refuses_before_self_staging(
         host.close()
         assert _snapshot(binding_fixture["home"]) == before
     settings.write_bytes(original)
+    if location == "local-copy":
+        binding = binding_fixture["binding"]
+        with binding._load_lifecycle().legacy_lifecycle(
+            binding, binding_fixture["primitive"], reserve=False,
+            **binding_fixture["arguments"],
+        ) as lease:
+            command = (
+                ["bash", str(installer), "stamp"] if shell == "bash" else
+                [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
+            )
+            admitted = subprocess.run(
+                command, env={
+                    **environment, "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE": json.dumps(lease.ticket),
+                },
+                cwd=binding_fixture["home"], capture_output=True, text=True, timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            assert admitted.returncode == 0, admitted.stdout + admitted.stderr
+            smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text())
+            assert Path(smoke["ran_from"]) == installer.parent
+            assert Path(smoke["staged_from"]) == payload
+            lease.lock.assert_owned()
     # The unchanged self-stage block still runs under the admitted parent lease.
+    installer = payload / f"scripts/install.{suffix}"
     command = (
         ["bash", str(installer), "stamp"] if shell == "bash" else
         [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]

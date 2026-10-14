@@ -120,10 +120,14 @@ $ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT
 # === command-lifecycle: admission before staging ===
 if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall')) {
     $admissionPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-    $admissionSource = if ($env:COPILOT_PLUGIN_STAGED_FROM -and
+    $admissionSource = if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -and
+        $env:COPILOT_PLUGIN_STAGED_FROM -and
         (($PSScriptRoot -replace '\\', '/') -notmatch '/\.copilot/installed-plugins/')) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else { $admissionPayload }
+    if (-not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+        $env:COPILOT_PLUGIN_STAGED_FROM = $null
+    }
     $admissionPython = $null
     $admissionLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1

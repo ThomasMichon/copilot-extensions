@@ -72,7 +72,10 @@ runtime writes and hold it through activation and publication. Native admission
 precedes self-staging, including stage creation and sibling-stage reclamation.
 The admitting parent holds the same lease through the staged child, which
 revalidates the inherited ticket before its own staging decision; an inherited
-stage flag does not waive ownership. Runtime-building
+stage flag does not waive ownership. A staged-origin hint is used only by a
+child whose live parent lease authenticates that source. Direct callers discard
+an unauthenticated origin override and derive provenance from their own payload.
+Runtime-building
 actions reserve a
 `pending` lifecycle owner in the existing manifest. Partial failures retain
 the reservation and cannot produce a selected binding. Native children borrow
