@@ -28,6 +28,7 @@ class IndexState:
     sources: dict[str, SourceState] = field(default_factory=dict)
     total_chunks: int = 0
     last_full_reindex: float | None = None
+    stored_families: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> IndexState:
@@ -35,11 +36,18 @@ class IndexState:
         if not path.exists():
             return cls()
         data = json.loads(path.read_text())
+        families = data.get("stored_families", {})
+        if not isinstance(families, dict) or any(
+            not isinstance(name, str) or not name or not isinstance(family, str) or not family
+            for name, family in families.items()
+        ):
+            raise ValueError("invalid persisted canonical source identities")
         sources = {name: SourceState(**src) for name, src in data.get("sources", {}).items()}
         return cls(
             sources=sources,
             total_chunks=data.get("total_chunks", 0),
             last_full_reindex=data.get("last_full_reindex"),
+            stored_families=families,
         )
 
     def save(self, path: Path) -> None:
@@ -50,6 +58,8 @@ class IndexState:
             "total_chunks": self.total_chunks,
             "last_full_reindex": self.last_full_reindex,
         }
+        if self.stored_families:
+            data["stored_families"] = self.stored_families
         path.write_text(json.dumps(data, indent=2) + "\n")
 
     def mark_source_indexed(self, name: str, commit: str | None, chunk_count: int) -> None:

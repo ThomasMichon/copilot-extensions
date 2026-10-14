@@ -78,8 +78,9 @@ The receipt's `fts_coverage` mapping binds each prepared content table to its
 exact covered Lance version. Canonical upserts/deletes invalidate coverage
 before mutation. The owning writer publishes coverage only after actual FTS
 success (or an empty-table no-op) and settled child ownership. Queued full and
-incremental ingestion refresh FTS after final content changes/compaction and
-before publishing task completion. Writer completion preserves this newly
+incremental ingestion refresh FTS after all source garbage collection and
+compaction, including omitted-source/all-source runs, and before publishing
+task completion. Writer completion preserves this newly
 recorded coverage rather than restoring an older receipt snapshot.
 
 Selected FTS and hybrid serving, including ordinary native retrieval, require
@@ -93,9 +94,13 @@ Before mutation the receipt becomes dirty; success records the resulting
 versions and clean state. Interruption or a write exception leaves scoped
 reads closed. Out-of-band table version changes close them too.
 `validate_source_store(store)` is explicit recovery for **this new domain**:
-it performs bounded canonical/projection checks, refuses missing/orphaned/
-conflicting provenance, and only then records a clean current version set
-**when no destructive effect was attempted**. Before destructive content/vector
+it first requires the current table versions to match the retained receipt,
+then performs bounded canonical/projection checks and refuses missing/orphaned/
+conflicting provenance. It can clear a no-effect interruption only **when no
+destructive effect was attempted and no unexplained version drift occurred**.
+Surviving canonical rows cannot prove that an external writer did not delete
+required vectors; unexplained drift is refused without changing the receipt.
+Before destructive content/vector
 or canonical-delete steps the receipt records `uncertain_effect` and the
 operation/model-table identity. Validation conservatively retains uncertainty
 after such an interrupted operation: checking surviving rows cannot prove that
@@ -111,6 +116,24 @@ owning writer/task recovery or re-create separately isolated fresh state.
 Rollback to an unselected current binary is refused. An old binary that ignores
 the format is an unsupported downgrade and must not be deployed onto the
 directory. No automated data rollback/old-writer restoration is provided.
+
+## Canonical ingestion families and garbage collection
+
+Selected queued ingestion records each constructed connector's actual
+`source_name` in `IndexState.stored_families`, keyed by the configured crawl
+name. A configured alias such as `git:fixture` can therefore retain its actual
+`git:repo` family and exact colon descendants such as `git:repo:commits`.
+Neither aliases nor arbitrary string prefixes are guessed into canonical
+identities: `git:repository` is not a descendant of `git:repo`.
+
+All-source configured GC uses that connector-derived evidence, including
+cached identities for still-configured sources that were not crawled this run.
+Mappings for removed configuration entries do not retain their old families.
+If a configured source has no known canonical identity, destructive configured
+GC is explicitly deferred (warning plus `source_gc_deferred` in the indexing
+result), rather than risking a configured but unindexed family. Unselected
+legacy GC behavior is unchanged. Full stale-generation GC and compaction still
+precede the final owning FTS refresh.
 
 ## Scoped reads
 

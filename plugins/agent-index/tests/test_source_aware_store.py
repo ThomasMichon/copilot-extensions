@@ -174,7 +174,10 @@ def run_git(repo: Path, *args):
 
 
 @pytest.mark.timeout(120)
-def test_real_queued_git_ingestion_incremental_delete_and_restart(tmp_path, monkeypatch):
+@pytest.mark.parametrize("all_sources", [False, True], ids=["explicit", "all"])
+def test_real_queued_git_ingestion_incremental_delete_and_restart(
+    tmp_path, monkeypatch, all_sources,
+):
     repo = tmp_path / "repo"
     repo.mkdir()
     run_git(repo, "init", "--quiet")
@@ -207,11 +210,17 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(tmp_path, monk
         vectors[:, 0] = 1
         return vectors
 
+    class QueryInference:
+        def embed_query(self, query):
+            return inference(None, [query])[0]
+
     monkeypatch.setattr(EngineClient, "embed_texts", inference)  # Inference only.
     queue = TaskStore(data / "tasks.db")
 
     def queued(full):
-        task = queue.enqueue("git:fixture", full=full, trigger_source="fixture")
+        task = queue.enqueue(
+            "all" if all_sources else "git:fixture", full=full, trigger_source="fixture",
+        )
         claimed = queue.dequeue_next()
         assert claimed.id == task.id
         assert run_worker(task.id) == 0
@@ -221,28 +230,68 @@ def test_real_queued_git_ingestion_incremental_delete_and_restart(tmp_path, monk
     empty = initialize_source_store(IndexConfig())
     assert empty.ensure_fts_index() is False
     assert empty._source_domain.receipt()["state"] == "clean"
+    empty.upsert(
+        "code", [chunk("monorepo", "staleterm", path="stale.md")],
+        inference(None, ["stale"]),
+    )
+    if all_sources:
+        retired = [
+            chunk("git:retired", "retiredterm", path="retired.md"),
+            chunk("git:repository", "prefixterm", path="prefix.md"),
+        ]
+        empty.upsert("code", retired, inference(None, ["a", "b"]))
     queued(True)
     config = IndexConfig()
     store = initialize_source_store(config)
     initial = store.content_store.get_chunks_for_file("git:repo", "guide.md")
     assert initial
+    assert "monorepo" not in store.distinct_sources()
+    if all_sources:
+        from agent_index.indexing.state import IndexState
+
+        persisted = IndexState.load(config.state_file)
+        assert persisted.stored_families["git:fixture"] == "git:repo"
+        assert "git:repo:commits" in store.distinct_sources()
+        assert "git:retired" not in store.distinct_sources()
+        assert "git:repository" not in store.distinct_sources()
+    assert store._source_domain.receipt()["fts_coverage"]["chunks"] == (
+        store._source_domain.receipt()["versions"]["chunks"]
+    )
     assert store.content_store.fts_search(
         "independently", source="git:repo", file_path_glob="guide.md",
+    )
+    assert SearchEngine({"code": QueryInference()}, store).search_authorized(
+        "independently", families=("git:repo",), mode="hybrid",
     )
     file.write_text("# Needle\n\nreplacement autonomous ingestion\n", encoding="utf-8")
     run_git(repo, "add", "--", "guide.md")
     run_git(repo, "commit", "--quiet", "-m", "fixture update")
+    if all_sources:
+        store.upsert(
+            "code", [chunk("git:retired", "incrementalretired", path="retired.md")],
+            inference(None, ["x"]),
+        )
     queued(False)
     restarted = initialize_source_store(config)
     current = restarted.content_store.get_chunks_for_file("git:repo", "guide.md")
     assert current and any("replacement" in r.content for r in current)
     assert not any("first independently" in r.content for r in current)
+    assert restarted._source_domain.receipt()["fts_coverage"]["chunks"] == (
+        restarted._source_domain.receipt()["versions"]["chunks"]
+    )
+    if all_sources:
+        assert "git:retired" not in restarted.distinct_sources()
     assert restarted.content_store.fts_search(
         "replacement", source="git:repo", file_path_glob="guide.md",
     )
     assert restarted.content_store.fts_search(
         "independently", source="git:repo", file_path_glob="guide.md",
     ) == []
+    hybrid = SearchEngine({"code": QueryInference()}, restarted).search_authorized(
+        "replacement", families=("git:repo",), mode="hybrid",
+    )
+    assert any("replacement autonomous" in row.content for row in hybrid)
+    assert all("first independently" not in row.content for row in hybrid)
     queued(False)
     assert {r.chunk_id for r in current} == {
         r.chunk_id for r in restarted.content_store.get_chunks_for_file("git:repo", "guide.md")
@@ -278,6 +327,47 @@ def test_orphan_out_of_band_and_unknown_layout_stay_closed(cold):
     marker.write_text(json.dumps(value), encoding="utf-8")
     with pytest.raises(SourceLayoutError):
         MultiModelStore(config.lance_dir)
+
+
+def test_external_vector_loss_cannot_be_accepted_as_recovery(cold):
+    _config, store = cold
+    item = chunk()
+    store.upsert("small", [item], np.array([[1, 0]], dtype=np.float32))
+    before = store._source_domain.receipt()
+    table = store.get_vector_table("small")._get_or_create_table()
+    table.delete(f"chunk_id = '{item.chunk_id}'")  # Simulated unexplained external writer.
+    assert table.count_rows() == 0
+    assert store.content_store._get_or_create_table().count_rows() == 1
+    with pytest.raises(SourceLayoutError, match="version drift"):
+        validate_source_store(store)
+    assert store._source_domain.receipt() == before
+    with pytest.raises(SourceLayoutError):
+        store.stats()
+    with pytest.raises(SourceLayoutError):
+        store.get_document("git:alpha", "a.md")
+
+
+def test_configured_canonical_gc_retains_cached_and_defers_unknown(cold, tmp_path):
+    from agent_index.indexing.gc import gc_configured_snapshot
+    from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.state import IndexState
+
+    _config, store = cold
+    items = [chunk("git:cached", "cached"), chunk("git:cached:commits", "commit"),
+             chunk("git:cachedlookalike", "retire"), chunk("git:removed", "retire too")]
+    store.upsert("small", items, np.tile(np.array([[1, 0]], dtype=np.float32), (4, 1)))
+    state = IndexState(stored_families={"git:configured-alias": "git:cached"})
+    paths = PathIndex(tmp_path / "paths.db")
+    deferred = gc_configured_snapshot(
+        store, paths, state, configured_names=frozenset({"git:unknown"}), source_aware=True,
+    )
+    assert deferred["deferred"] == ["git:unknown"] and deferred["purged"] == {}
+    result = gc_configured_snapshot(
+        store, paths, state, configured_names=frozenset({"git:configured-alias"}),
+        source_aware=True,
+    )
+    assert set(result["purged"]) == {"git:cachedlookalike", "git:removed"}
+    assert store.distinct_sources() == {"git:cached", "git:cached:commits"}
 
 
 def test_selected_fts_failed_rebuild_is_not_old_index_availability(cold, monkeypatch):

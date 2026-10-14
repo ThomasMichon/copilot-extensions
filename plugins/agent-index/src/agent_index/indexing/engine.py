@@ -331,6 +331,7 @@ def run_reindex(
     total_files_crawled = 0
     failed_sources: list[dict[str, str]] = []
     sources_purged: list[str] = []
+    gc_deferred: list[str] = []
     start = time.monotonic()
 
     try:
@@ -383,9 +384,6 @@ def run_reindex(
                 progress_cb.source_complete(src_name, total_chunks)
 
             # Save state after each source so progress isn't lost
-            if selected_layout():
-                # Publish queued completion only after the owning FTS writer covers final content.
-                multi_store.ensure_fts_index()
             state.save(config.state_file)
     finally:
         for c in multi_clients.values():
@@ -413,12 +411,14 @@ def run_reindex(
     # reindex and no service restart required.
     if source is None and os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0":
         try:
-            from agent_index.indexing.gc import gc_unconfigured_sources
+            from agent_index.indexing.gc import gc_configured_snapshot
 
             configured_names = frozenset(spec.name for spec in sources_to_index)
-            gc_summary = gc_unconfigured_sources(
+            gc_summary = gc_configured_snapshot(
                 multi_store, path_index, state, configured_names=configured_names,
+                source_aware=bool(selected_layout()),
             )
+            gc_deferred = gc_summary.get("deferred", [])
             purged = gc_summary["purged"]
             if purged:
                 print("\nPurging sources removed from config...")
@@ -471,6 +471,9 @@ def run_reindex(
             logger.warning("Post-reindex compaction failed", exc_info=True)
             print("  WARNING: compaction failed (see logs)")
 
+    if selected_layout():
+        # Cover the final content version, including all post-index GC and compaction.
+        multi_store.ensure_fts_index()
     state.save(config.state_file)
 
     elapsed = time.monotonic() - start
@@ -486,6 +489,8 @@ def run_reindex(
         result["sources_failed"] = failed_sources
     if sources_purged:
         result["sources_purged"] = sources_purged
+    if gc_deferred:
+        result["source_gc_deferred"] = gc_deferred
 
     # Refresh the similarity-cluster artifact from the just-updated vectors.
     # Reuses stored embeddings (no re-embedding), so it runs post-index in the
@@ -672,14 +677,19 @@ def _crawl_source(
     from agent_index.sources import get_connector
 
     connector = get_connector(source_name, **(connector_kwargs or {}))
+    from agent_index.store.source_layout import selected_layout
+
+    if selected_layout():
+        canonical = connector.source_name
+        if not isinstance(canonical, str) or not canonical:
+            raise RuntimeError("connector has no canonical stored family")
+        state.stored_families[source_name] = canonical
     commit = connector.current_commit()
 
     # Build a cancel checker from the progress callback
     cancel_check = progress_cb.check_cancelled if progress_cb else None
 
     # Get what's currently in our index for deletion detection
-    from agent_index.store.source_layout import selected_layout
-
     stored_family = connector.source_name if selected_layout() else source_name
     stored_by_source = path_index.get_paths_by_prefix(stored_family)
 

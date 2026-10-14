@@ -55,6 +55,10 @@ class GCSummary(TypedDict):
     chunks_deleted: int
     dry_run: bool
 
+
+class GCDecision(GCSummary, total=False):
+    deferred: list[str]
+
 _FORGE_SUBTYPES = frozenset({"code", "issues", "pulls", "commits"})
 _SERVICE_SOURCES = frozenset({"service-feed:clips", "analysis-feed:videos"})
 
@@ -133,6 +137,26 @@ def is_configured_source(
     if source in configured_names:
         return True
     return any(source.startswith(f"{name}:") for name in configured_names)
+
+
+def gc_configured_snapshot(
+    multi_store: MultiModelStore, path_index: PathIndex, state: IndexState, *,
+    configured_names: frozenset[str], source_aware: bool,
+) -> GCDecision:
+    """Use only configured names plus actual connector-derived stored-family evidence."""
+    if not source_aware:
+        return gc_unconfigured_sources(
+            multi_store, path_index, state, configured_names=configured_names,
+        )
+    missing = sorted(name for name in configured_names if not state.stored_families.get(name))
+    if missing:
+        log.warning("Unconfigured-source GC deferred: canonical identities unresolved: %s", missing)
+        return {"purged": {}, "kept": [], "chunks_deleted": 0,
+                "dry_run": False, "deferred": missing}
+    canonical = frozenset(state.stored_families[name] for name in configured_names)
+    return gc_unconfigured_sources(
+        multi_store, path_index, state, configured_names=configured_names | canonical,
+    )
 
 
 def gc_unconfigured_sources(

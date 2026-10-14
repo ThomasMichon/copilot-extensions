@@ -297,6 +297,10 @@ def validate_source_store(store) -> dict:
                 "uncertain effect requires owner repair or fresh isolated reindex"
             )
         versions = _versions(db)
+        if versions != receipt["versions"]:
+            raise SourceLayoutError(
+                "unexplained version drift requires retained intent or fresh reindex"
+            )
         content = store.content_store._get_or_create_table()
         for name in versions:
             table = db.open_table(name)
