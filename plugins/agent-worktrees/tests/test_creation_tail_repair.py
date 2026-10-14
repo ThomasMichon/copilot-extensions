@@ -20,6 +20,7 @@ from agent_worktrees import status_monitor_runtime, tracking, worktree_creation
 
 
 def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
+    native_load_config = cfg.load_config
     platform = cfg.detect_platform()
     short = "win" if platform == "windows" else platform
     identity = f"host-{short}-20261013-100000-abcd"
@@ -58,9 +59,6 @@ def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
         }), encoding="utf-8")
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: projects[name or "harness"])
-    monkeypatch.setattr(
-        cfg, "tracking_dir", lambda project=None: projects[project or "harness"] / "worktrees",
-    )
     def load_config(config_file=None, *, project=None, **kwargs):
         name = project or (Path(config_file).parent.name.lstrip(".") if config_file else "harness")
         return configs[name]
@@ -105,6 +103,7 @@ def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
     return SimpleNamespace(
         record=record, seed=seed, configs=configs, anchors=anchors, roots=roots,
         projects=projects, root=root, copilot=copilot, short=short,
+        native_load_config=native_load_config,
     )
 
 
@@ -204,6 +203,7 @@ def test_creation_restores_native_pair_permissions_and_is_idempotent(
     native_creation, capsys, repeat,
 ):
     creation = native_creation
+    assert cfg.tracking_dir.__module__ == cfg.__name__
     path = creation.record.yaml_path
     seed_before = launch_seed_state.state_path(path).read_bytes()
     code, report = _run(creation, capsys, fix=True)
@@ -555,6 +555,50 @@ def test_creation_refuses_companion_removed_before_knowledge_lock(
     )
     code, report = _run(creation, capsys, fix=True)
     assert code == 1 and "companion disappeared" in report["error"]
+    assert not tracking.load_record(creation.record.yaml_path).is_paired
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.guard
+def test_creation_uses_companion_machine_config_for_its_native_lifecycle_lock(
+    creation, monkeypatch, capsys,
+):
+    knowledge_root = creation.projects["knowledge"] / "custom-checkouts"
+    config_path = creation.projects["knowledge"] / "config.yaml"
+    settings = json.loads(config_path.read_text())
+    settings["repos"]["knowledge"]["worktree_root"] = str(knowledge_root)
+    config_path.write_text(json.dumps(settings))
+    monkeypatch.setattr(cfg, "load_config", creation.native_load_config)
+    child_id = creation.record.worktree_id + "-k"
+    checkout = creation.roots["knowledge"] / child_id
+    checkout.mkdir(parents=True)
+    child = tracking.create_new_record(
+        child_id, f"worktree/{child_id}", str(checkout), "knowledge", "host",
+        cfg.detect_platform(), creation.projects["knowledge"] / "worktrees",
+        pair_id="20261013-100000-abcd", pair_role="knowledge",
+        pair_ref=tracking.format_claim_ref("host", "harness", creation.record.worktree_id),
+        pair_kind="worktree",
+    )
+    real_lock = repair.fin.FinalizeLock
+    locks = []
+
+    @contextmanager
+    def lock(path, **kwargs):
+        locks.append(path)
+        with real_lock(path, **kwargs):
+            if path.parent == knowledge_root:
+                child.yaml_path.unlink()
+                checkout.rmdir()
+            yield
+
+    monkeypatch.setattr(repair.fin, "FinalizeLock", lock)
+    monkeypatch.setattr(
+        worktree_creation, "_stamp_and_compose_paired_knowledge",
+        lambda *a, **kw: pytest.fail("removed companion received a pair stamp"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and "companion disappeared" in report["error"]
+    assert knowledge_root / ".finalize.lock" in locks
     assert not tracking.load_record(creation.record.yaml_path).is_paired
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 

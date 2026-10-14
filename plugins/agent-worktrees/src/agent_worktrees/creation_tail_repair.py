@@ -240,7 +240,7 @@ def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) ->
             )
             if stamp is None:
                 raise ValueError("paired creation did not establish its required companion")
-    knowledge_config = cfg.load_config(project=root.repo)
+    knowledge_config = cfg.load_project_config(root.repo)
     entry = repos.find_repo(root.repo)
     if entry is None:
         raise ValueError("knowledge repository registration is missing")
@@ -343,7 +343,7 @@ def targeted_doctor(args) -> int:
                     if repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
                         timestamp, suffix, platform = allocation
                         child_id = f"{record.machine}-{platform}-{timestamp}-{suffix}-k"
-                        child_path = cfg.tracking_dir(project=root.repo) / f"{child_id}.yaml"
+                        child_path = cfg.tracking_dir(root.repo) / f"{child_id}.yaml"
                         admission.enter_context(launch_admission.guard(child_path))
                         plan = _pair_plan(config, record)
                 with step("Restoring creation permissions", worktree_id=identity):

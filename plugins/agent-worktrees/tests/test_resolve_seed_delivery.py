@@ -149,7 +149,8 @@ def test_live_open_held_backend_admission_preserves_intent_and_refuses_mutation(
             config, record, monkeypatch, capfd, surface=surface, **changes,
         )
     if intent == "plain":
-        assert code == 0 and plan["cmd"] == ["copilot"] and not plan["seed_pending"]
+        assert code == 0 and not plan["seed_pending"]
+        assert "--admission-only" in plan["cmd"] and plan["cmd"][-2:] == ["--", "copilot"]
     else:
         assert code == 3 and "launch admission is busy" in plan["error"]
     assert launch_seed_state.state_path(record.yaml_path).read_bytes() == before
@@ -195,6 +196,65 @@ def test_preplanned_bare_launch_is_fenced_and_preserves_retained_seed(
     assert admitted.stdout.strip() == "bare-backend-started"
     assert launch_seed_state.state_path(record.yaml_path).read_bytes() == before
     assert launch_seed_state.peek(record.yaml_path) == before_seed
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+def test_live_plan_cannot_start_backend_after_original_exits_during_repair(
+    tmp_path, monkeypatch, capfd, surface,
+):
+    from agent_worktrees import launch_admission, launch_seed_exec
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path, codename="already-set",
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    options = {
+        "env": {
+            **os.environ,
+            "PYTHONPATH": str(Path(resolve_cli.__file__).resolve().parents[1]),
+        },
+        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    }
+    original = subprocess.Popen(
+        launch_seed_exec.deferred_command(
+            [sys.executable, "-c", "print('backend-ready',flush=True); input()"],
+            record.yaml_path, admission_only=True,
+        ),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, **options,
+    )
+    try:
+        assert original.stdout.readline().strip() == "backend-ready"
+        monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict(active=True))
+        consumer = [sys.executable, "-c", "print('replacement-started')"]
+        code, plan = _resume_plan(
+            config, record, monkeypatch, capfd, surface=surface, command=consumer,
+        )
+        assert code == 0 and "--admission-only" in plan["cmd"]
+        original.stdin.write("\n")
+        original.stdin.flush()
+        assert original.wait(timeout=10) == 0
+        monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict())
+        with launch_admission.guard(record.yaml_path):
+            blocked = subprocess.run(
+                plan["cmd"], capture_output=True, text=True, timeout=15, **options,
+            )
+        assert blocked.returncode == 3 and "launch admission is busy" in blocked.stderr
+        assert "replacement-started" not in blocked.stdout
+        admitted = subprocess.run(
+            plan["cmd"], capture_output=True, text=True, timeout=15, **options,
+        )
+        assert admitted.returncode == 0, admitted.stderr
+        assert admitted.stdout.strip() == "replacement-started"
+    finally:
+        if original.poll() is None:
+            original.kill()
+            original.wait(timeout=10)
+        for stream in (original.stdin, original.stdout, original.stderr):
+            stream.close()
 
 
 @pytest.mark.parametrize("no_mux", [False, True])
@@ -268,11 +328,8 @@ def test_no_seed_cold_launch_has_execution_admission_fence(
     assert rc == 0
     payload = json.loads(capfd.readouterr().out)
     assert "--interactive" not in payload["launch"]["cmd"]
-    if live:
-        assert payload["launch"]["cmd"] == ["copilot"]
-    else:
-        assert "--admission-only" in payload["launch"]["cmd"]
-        assert payload["launch"]["cmd"][-2:] == ["--", "copilot"]
+    assert "--admission-only" in payload["launch"]["cmd"]
+    assert payload["launch"]["cmd"][-2:] == ["--", "copilot"]
     assert not payload["launch"]["seed_pending"]
 
 
@@ -614,5 +671,6 @@ def test_positive_live_open_keeps_staged_prompt_despite_secondary_probe_failure(
     monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: verdict)
     assert resolve_cli.cmd_resolve(_args()) == 0
     plan = json.loads(capfd.readouterr().out)["launch"]
-    assert not plan["seed_pending"] and plan["cmd"] == ["copilot"]
+    assert not plan["seed_pending"] and "--admission-only" in plan["cmd"]
+    assert plan["cmd"][-2:] == ["--", "copilot"]
     assert launch_seed_state.peek(record.yaml_path) == saved

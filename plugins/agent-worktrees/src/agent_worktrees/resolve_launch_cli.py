@@ -601,7 +601,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
         )
         print("   Launch prompt staged until Copilot handoff.")
-    elif not (verdict and verdict.active):
+    else:
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, admission_only=True,
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
