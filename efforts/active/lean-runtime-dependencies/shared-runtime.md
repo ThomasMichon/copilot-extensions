@@ -147,5 +147,6 @@ dependency-extra parity, actual CLI processes and first-consumer/cache
 retirement. It favors immutable helper artifacts in separate owned runtimes,
 not a reusable mutable venv or routing-read broker. The scripts reproduce a
 disposable experiment, not the artifact authority's production admission path.
-The decision table and compatibility/lifecycle boundary require review before
-any reuse implementation. Existing #4876 / #6697 custody remains unchanged.
+The decision table and compatibility/lifecycle boundary cleared review in
+#6767. Production artifact/profile admission is not implemented or enabled by
+that evidence review. Existing #4876 / #6697 custody remains unchanged.

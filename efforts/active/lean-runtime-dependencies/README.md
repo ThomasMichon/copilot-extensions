@@ -117,9 +117,9 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   benefit; retain supported fallback installation. _(agent-recommended)_
 
 ### Phase 5 - Installer de-vendoring and shared helpers
-- [ ] Execute the [shared-runtime investigation](shared-runtime.md), including
+- [x] Execute the [shared-runtime investigation](shared-runtime.md), including
   separate-process reuse and a shared ZDD front candidate.
-- [ ] Review the chosen compatibility, lifecycle and installation-cell design
+- [x] Review the chosen compatibility, lifecycle and installation-cell design
   before implementing a reuse mechanism.
 - [ ] Implement the smallest accepted reuse slice, or explicitly transfer an
   accepted-but-deferred design to a named tracked objective. If evidence rejects
@@ -127,7 +127,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   measured costs and the rejection decision; do not transfer rejected work.
 
 ### Phase 6 - Close the measured delta
-- [ ] Publish before/after profile footprint and fresh-install evidence, with
+- [x] Publish before/after profile footprint and fresh-install evidence, with
   running-state proof for any authorized rollout.
 - [ ] Resolve or explicitly transfer every implementation and validation item;
   experimental ONNX/storage replacements remain separately tracked decisions.
@@ -135,9 +135,9 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 
 ## Validation Plan
 
-- [ ] Unit and dependency-contract tests cover each changed declaration,
+- [x] Unit and dependency-contract tests cover each changed declaration,
   optional extra, import boundary and helper compatibility rule.
-- [ ] Simple end-to-end checks exercise actual client/Manager/worker process
+- [x] Simple end-to-end checks exercise actual client/Manager/worker process
   boundaries in dependency-minimal environments, not only mocked imports.
 - [ ] Clean-room first installation proves each affected solo plugin/profile,
   combined installations, reuse and missing/incompatible helper outcomes.
@@ -149,9 +149,9 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   two installers and two independent marketplace installations.
 - [ ] Index integration preserves authenticated routing, HTTP/SSE/MCP contracts,
   background jobs, retrieval semantics and durable state across upgrades.
-- [ ] Every slice records applicable unit, integration, clean-room and available
+- [x] Every slice records applicable unit, integration, clean-room and available
   live-venue evidence, or a specific reason a tier is unavailable.
-- [ ] Measurement separates compressed downloads, unpacked logical files,
+- [x] Measurement separates compressed downloads, unpacked logical files,
   hardlink-aware physical allocation, model/cache data and retained version slots.
 - [ ] Publication checks, changefiles, review, merge and release attribution are
   satisfied; rollout authorization and its completion owner are explicit.
@@ -161,6 +161,23 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 Approved and merged in #6235. Implementation proceeds in reviewed slices.
 Shared reuse is a design investigation; neither one global ZDD process nor one
 shared mutable venv is presumed acceptable.
+
+### Current execution boundary
+
+The delivered dependency reductions, helper investigation and compatibility
+boundary have cleared review. This is not approval to enable a production
+artifact fast path. The remaining engine-profile application (#6737) depends on
+#4876's still-open Phase 2 item to design and publish authority-approved exact
+profiles and their selection/feed-compatibility contract. Its Phase 3 consumer
+admission is also unimplemented; do not invent a substitute resolver here.
+The overlapping held-construction change (#6598) remains open.
+
+The existing owners have the concrete acceptance requests; no reply or accepted
+transfer is assumed. Native/standalone queue, schema, canary, warm-engine and
+Darwin acceptance remain with #5768. The next implementation step is to apply
+the approved profile contract under #6737 once available, composing the owning
+construction path. Until then preserve current runtime/state and the open
+effort binding rather than declaring the campaign Done.
 
 ## Journal
 
@@ -497,3 +514,24 @@ shared mutable venv is presumed acceptable.
   the original 9/30 source environments and surviving 30-package artifact
   environment pass the stronger checks. The retired first artifact consumer
   was not reconstructed merely to claim a new installation measurement.
+
+### 2026-10-14 - Helper decision and profile matrix merged
+- #6767 merged to `dev` as `9c5ce3bd4` after exact-head Copilot approval and
+  successful complete required CI run `38648816562`. The import-origin finding
+  is fixed across both measurement lanes and the survivor check; its thread
+  is resolved. The fresh review, not the author's own reply review, supplied
+  approval. Required CI completed normally before the authorized self-merge.
+- Re-read this effort after merge and closed the delivered investigation,
+  design-boundary review, measured-profile publication and corresponding
+  changed-code/process/measurement records. The artifact implementation,
+  engine profile, native/service, platform and release/rollout gates remain
+  open. No unacknowledged owner transfer was used to clear them.
+- The accepted choice retains separate owned venvs/processes and prefers
+  immutable helper artifacts under #4876. Reject the measured routing-read
+  broker; do not create a reusable helper runtime without an actual matching
+  closure and a measured end-to-end benefit.
+- Confirmed the remaining dependency in the artifact owner's canonical Plan:
+  exact authority-approved profile design/publication and consumer admission
+  are still unchecked. Requested its selected-contract/acceptance response
+  before applying CPU/accelerator profiles under #6737; no response is
+  presumed. The campaign remains Active at that explicit external gate.
