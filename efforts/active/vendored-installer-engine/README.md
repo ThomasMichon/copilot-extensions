@@ -578,6 +578,27 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-14 — Registry-rooted Docker ownership continuation
+
+- Operator direction, verbatim:
+  > Got it. Continue driving. Come up with a system which ensures we can track what owns what.
+- The scoped Docker plan captures that direction without adding a second
+  ownership registry or changing reusable fleet leases. The existing ledger
+  records creator/current-owner obligations before allocation; exact resource
+  binding, retained-volume reporting and accepted transfer remain its authority.
+- **Agent-recommended implementation refinement:** use one explicitly admitted
+  daemon-bound session for identity, inventory and mutation. A contained actual
+  fixture-process regression shows that separate CLI calls can observe A/B/A
+  and falsely report absence. Ordinary snapshots cannot discharge ownership.
+  Stream loss, reconnect or unadmitted proxy/remote routing must remain unknown.
+- The [scoped implementation contract](temporary-container-obligations.md#registry-rooted-ownership-and-daemon-session-proof)
+  also calls for read-only ownership views of that same ledger and bounded
+  transport-child cleanup. These refinements remain under normal source review;
+  they are not implemented/live evidence or a new allocation-quiescence proof.
+- Named volumes remain owned and held under `retain-volumes`. Docker producer
+  integration and all live, rollout and parent completion gates remain open.
+  No Docker resource or production system was changed by this continuation.
+
 ### 2026-10-13 — Qualified Docker callback prerequisite merged
 
 - PR #6614 merged to `dev` as

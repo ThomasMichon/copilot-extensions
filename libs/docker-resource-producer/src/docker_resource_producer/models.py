@@ -154,3 +154,25 @@ class Identity:
         if not isinstance(value, dict) or set(value) != set(cls.__dataclass_fields__):
             raise VerificationError("Invalid Docker identity fields")
         return cls(**value)
+
+
+@dataclass(frozen=True)
+class DiagnosticObservation:
+    """A CLI snapshot, never an authoritative presence or closeout receipt."""
+
+    identity: Identity
+    observed_exists: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, Identity) or type(self.observed_exists) is not bool:
+            raise VerificationError("Invalid diagnostic observation")
+
+    def __bool__(self) -> bool:
+        raise VerificationError("Diagnostic observations cannot authorize presence, absence or cleanup")
+
+    def to_json(self) -> dict[str, Any]:
+        """Use distinct fields that cannot masquerade as provider verification."""
+        return {
+            "authority": "diagnostic-only", "observed_exists": self.observed_exists,
+            "identity": self.identity.to_json(),
+        }

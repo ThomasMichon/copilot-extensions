@@ -60,6 +60,7 @@ def main() -> int:
     kind, action = args[:2]
     resources = state[kind]
     if action == "ls":
+        resources = state.get("inventory_on_other_daemon", state)[kind]
         selected = list(resources)
         if "--filter" in args:
             expected = args[args.index("--filter") + 1].split("=", 2)[2]

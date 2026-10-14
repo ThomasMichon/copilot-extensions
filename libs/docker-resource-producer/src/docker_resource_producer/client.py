@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .models import (
-    LABEL_CREATOR, LABEL_GENERATION, LABEL_TOKEN, Endpoint, Identity,
+    LABEL_CREATOR, LABEL_GENERATION, LABEL_TOKEN, DiagnosticObservation, Endpoint, Identity,
     VerificationError, birth_labels, daemon_id, generation, text,
 )
 
@@ -216,8 +216,8 @@ class DockerClient:
         return Identity(resource_type, identifier, result.get("Created" if resource_type == "container" else "CreatedAt"),
                         self.endpoint.daemon_id, token, creator, generation(int(epoch)))
 
-    def probe(self, identity: Identity) -> bool:
-        """Return existence only after exact identity and daemon verification."""
+    def diagnostic_observation(self, identity: Identity) -> DiagnosticObservation:
+        """Read a non-authoritative snapshot; CLI connections can observe ABA."""
         if identity.daemon_id != self.endpoint.daemon_id:
             raise VerificationError("Resource belongs to a different Docker daemon")
         self._verify_daemon()
@@ -225,10 +225,10 @@ class DockerClient:
         if exists and self._identity(identity.resource_type, identity.resource_id, identity.token, identity.creator) != identity:
             raise VerificationError("Docker birth identity changed")
         self._verify_daemon()
-        return exists
+        return DiagnosticObservation(identity, exists)
 
-    def find_reservation(self, token: str, creator: str) -> list[Identity]:
-        """Inspect all labeled allocations, across resource kinds and epochs."""
+    def diagnostic_reservations(self, token: str, creator: str) -> list[DiagnosticObservation]:
+        """Read labeled candidates without claiming authoritative coverage."""
         birth_labels(token, creator, 1)
         self._verify_daemon()
         identities = [
@@ -236,22 +236,22 @@ class DockerClient:
             for kind in _FORMATS for identifier in self._inventory(kind, token=token)
         ]
         self._verify_daemon()
-        return identities
+        return [DiagnosticObservation(identity, True) for identity in identities]
+
+    def probe(self, identity: Identity) -> bool:
+        """Refuse authoritative proof until a daemon-bound session is admitted."""
+        raise VerificationError("Authoritative daemon-bound session unavailable; CLI snapshots are diagnostic only")
+
+    def find_reservation(self, token: str, creator: str) -> list[Identity]:
+        """Refuse authoritative reservation coverage without daemon binding."""
+        raise VerificationError("Authoritative daemon-bound session unavailable; CLI snapshots are diagnostic only")
 
     def remove(self, identity: Identity, *, authorized: bool = False) -> bool:
-        """Remove only an explicitly authorized, freshly verified exact resource."""
+        """Refuse mutation when no authoritative daemon-bound session exists."""
         if authorized is not True:
             raise VerificationError("Exact resource cleanup is not authorized")
         if identity.resource_type == "volume":
             raise VerificationError(
                 "Docker has no birth-conditional volume deletion; automatic cleanup remains blocked"
             )
-        if not self.probe(identity):
-            return False
-        args = [identity.resource_type, "rm"]
-        if identity.resource_type == "container":
-            args.append("--force")
-        self._checked([*args, "--", identity.resource_id])
-        if self.probe(identity):
-            raise VerificationError("Docker removal did not establish resource absence")
-        return True
+        raise VerificationError("Authoritative daemon-bound session unavailable; automatic removal remains blocked")

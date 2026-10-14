@@ -1,10 +1,10 @@
-# Disposable Docker identity primitive
+# Disposable Docker identity and diagnostic foundation
 
-This dependency-free source library pins a Docker endpoint and daemon identity,
-verifies born-at-creation reservation labels, and distinguishes authoritative
-inventory absence from failed or malformed probes. It does not install plugins,
-bootstrap authentication, allocate resources, keep an ownership ledger, or
-assert allocation quiescence.
+This dependency-free source library records explicit Docker transport and
+expected birth identity and provides clearly non-authoritative CLI diagnostics.
+It does not install plugins, bootstrap authentication, allocate resources, keep
+an ownership ledger, assert allocation quiescence, or authorize cleanup.
+The existing worktree claims ledger remains the sole ownership authority.
 
 `DockerClient.pin()` resolves CLI context/host/TLS settings once. Subsequent
 operations use explicit host and TLS flags rather than ambient context selection.
@@ -31,26 +31,37 @@ Inaccessible files remain a verification error, not a CA-only fallback.
 
 `Identity` binds a full container ID, or a unique volume name plus creation
 evidence, to daemon identity and reservation/creator/generation labels.
-`probe()` verifies the daemon before and after complete inventory and exact
-inspection. Running, stopped and renamed containers still exist. Label,
-creation, daemon and malformed-response mismatches raise `VerificationError`;
-an inspect failure never proves absence. `find_reservation()` searches both
-resource kinds across all allocation generations.
+`diagnostic_observation()` samples daemon information, complete inventory and
+birth metadata. Label, creation, daemon and malformed-response mismatches raise
+`VerificationError`; an inspect failure never becomes a missing-resource result.
+`diagnostic_reservations()` returns labeled candidates across resource kinds and
+generations. Both return `DiagnosticObservation` values with
+`authority: diagnostic-only` and `observed_exists`, not provider `exists` or
+`producer_verification` fields; boolean coercion refuses.
 Calendar validation normalizes fractional precision for Python 3.10 without
 changing the original nanosecond birth-identity string.
 
-`remove()` requires explicit cleanup authority and freshly verified identity.
-Container removal addresses the full immutable ID, then verifies absence.
-**Automatic volume deletion is blocked:** Docker's volume-removal API accepts
-only a name and force option, not birth identity or a compare-and-delete
-precondition. Inspection followed by name deletion cannot prevent an unrelated
-replacement in between. Volume probes remain read-only, and this library never
-claims to provide atomic name-based deletion.
+**Authoritative proof and all automatic removal are unavailable.** Separate CLI
+connections can observe daemon A, inventory on B and A again, reporting an
+observational absence even though A still owns the resource. Before/after checks
+do not bind those reads to one daemon. `probe()`, `find_reservation()` and
+authorized container `remove()` therefore refuse before further invocation.
+Diagnostics cannot settle a claim or discharge a finalize obligation.
+
+**Automatic volume deletion also has an independent restriction:** Docker's
+volume-removal API accepts only a name and force option, not birth identity or a
+compare-and-delete precondition. Inspection followed by name deletion cannot
+prevent an unrelated replacement in between. Named volumes remain owned and
+held; this library never claims atomic name-based deletion.
 
 The active [temporary-resource plan](../../efforts/active/vendored-installer-engine/temporary-container-obligations.md)
 owns provider/ledger integration, producer allocation, lost-fence quiescence,
-cleanup strategy and live acceptance. Those guarantees are not delivered by
-this primitive alone.
+cleanup strategy and live acceptance. Its
+[daemon-session refinement](../../efforts/active/vendored-installer-engine/temporary-container-obligations.md#registry-rooted-ownership-and-daemon-session-proof)
+requires admitted, non-reconnecting single-daemon operation sessions before
+authoritative provider or producer enablement. That adapter is not implemented
+by this diagnostic foundation. Ownership views derive from the existing ledger,
+not a second resource registry.
 
 ## Validation
 

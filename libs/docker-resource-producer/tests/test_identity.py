@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from docker_resource_producer import DockerClient, Endpoint, Identity, VerificationError, birth_labels
+from docker_resource_producer import DiagnosticObservation, DockerClient, Endpoint, Identity, VerificationError, birth_labels
 
 TOKEN = "r" * 43
 CREATOR = "machine/project/creator"
@@ -56,20 +56,46 @@ def logs(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.with_suffix(".log").read_text().splitlines()]
 
 
-def test_probe_and_authorized_exact_removal(fixture: tuple) -> None:
+def test_diagnostic_snapshot_cannot_authorize_proof_or_removal(fixture: tuple) -> None:
     client, path, _state = fixture
     kind = "container"
-    assert client.probe(identity(kind)) is True
-    assert client.remove(identity(kind), authorized=True) is True
-    assert client.probe(identity(kind)) is False
-    assert client.remove(identity(kind), authorized=True) is False
+    observation = client.diagnostic_observation(identity(kind))
+    assert observation.observed_exists is True
+    assert observation.to_json()["authority"] == "diagnostic-only"
+    assert "exists" not in observation.to_json() and "producer_verification" not in observation.to_json()
+    with pytest.raises(VerificationError, match="cannot authorize"):
+        bool(observation)
+    before = len(logs(path))
+    with pytest.raises(VerificationError, match="daemon-bound"):
+        client.probe(identity(kind))
+    with pytest.raises(VerificationError, match="daemon-bound"):
+        client.remove(identity(kind), authorized=True)
+    with pytest.raises(VerificationError, match="daemon-bound"):
+        client.find_reservation(TOKEN, CREATOR)
+    assert len(logs(path)) == before
     calls = logs(path)
     removes = [c["args"] for c in calls if "rm" in c["args"]]
-    assert len(removes) == 1 and removes[0][-2:] == ["--", identity(kind).resource_id]
+    assert removes == []
     for call in calls:
         assert call["args"][:2] == ["--host", "unix:///fixture.sock"]
         assert not any(arg.startswith("--tlsverify") for arg in call["args"])
         assert set(call["routing"].values()) == {None}
+
+
+@pytest.mark.parametrize("kind", ["container", "volume"])
+def test_authoritative_probe_refuses_before_any_transport(fixture: tuple, kind: str) -> None:
+    client, path, _state = fixture
+    with pytest.raises(VerificationError, match="daemon-bound"):
+        client.probe(identity(kind))
+    assert not path.with_suffix(".log").exists()
+
+
+@pytest.mark.parametrize("observed", [False, True])
+def test_diagnostic_coercion_is_not_presence_or_absence_authority(observed: bool) -> None:
+    observation = DiagnosticObservation(identity(), observed)
+    with pytest.raises(VerificationError, match="cannot authorize"):
+        bool(observation)
+    assert set(observation.to_json()) == {"authority", "observed_exists", "identity"}
 
 
 @pytest.mark.parametrize("state_name", ["running", "exited", "created"])
@@ -78,7 +104,7 @@ def test_container_rename_and_stopped_state_preserve_identity(fixture: tuple, st
     state["container"][CONTAINER]["Name"] = "/renamed"
     state["container"][CONTAINER]["State"]["Status"] = state_name
     path.write_text(json.dumps(state), encoding="utf-8")
-    assert client.probe(identity()) is True
+    assert client.diagnostic_observation(identity()).observed_exists is True
 
 
 @pytest.mark.parametrize("change", ["birth", "creator", "token", "generation", "daemon", "inspect-id"])
@@ -97,25 +123,18 @@ def test_changed_birth_identity_never_removes(fixture: tuple, change: str) -> No
         )] = {"creator": "other/owner/id", "token": "x" * 43, "generation": "2"}[change]
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(VerificationError):
-        client.probe(identity("volume"))
+        client.diagnostic_observation(identity("volume"))
     assert all("rm" not in call["args"] for call in logs(path))
 
 
 @pytest.mark.parametrize("kind", ["container", "volume"])
-@pytest.mark.parametrize("failure", ["ls", "inspect", "rm"])
+@pytest.mark.parametrize("failure", ["ls", "inspect"])
 def test_permission_or_backend_failure_is_never_absence(fixture: tuple, kind: str, failure: str) -> None:
     client, path, state = fixture
     state["fail"] = f"{kind} {failure}"
     path.write_text(json.dumps(state), encoding="utf-8")
-    if kind == "volume" and failure == "rm":
-        with pytest.raises(VerificationError, match="birth-conditional"):
-            client.remove(identity(kind), authorized=True)
-    else:
-        with pytest.raises(VerificationError, match="exit 7"):
-            if failure == "rm":
-                client.remove(identity(kind), authorized=True)
-            else:
-                client.probe(identity(kind))
+    with pytest.raises(VerificationError, match="exit 7"):
+        client.diagnostic_observation(identity(kind))
 
 
 @pytest.mark.parametrize("operation", ["info", "container ls", "container inspect", "volume ls", "volume inspect"])
@@ -124,7 +143,7 @@ def test_malformed_response_keeps_identity_unknown(fixture: tuple, operation: st
     state["malformed"] = operation
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(VerificationError):
-        client.probe(identity("volume" if operation.startswith("volume") else "container"))
+        client.diagnostic_observation(identity("volume" if operation.startswith("volume") else "container"))
 
 
 def test_absence_needs_same_daemon_after_inventory(fixture: tuple) -> None:
@@ -133,14 +152,34 @@ def test_absence_needs_same_daemon_after_inventory(fixture: tuple) -> None:
     state["change_daemon_after"] = "container ls"
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(VerificationError, match="daemon identity changed"):
+        client.diagnostic_observation(identity())
+
+
+def test_daemon_aba_routing_cannot_prove_absence(fixture: tuple) -> None:
+    client, path, state = fixture
+    state["inventory_on_other_daemon"] = {
+        "daemon_id": "another-daemon", "container": {}, "volume": {},
+    }
+    path.write_text(json.dumps(state), encoding="utf-8")
+    observation = client.diagnostic_observation(identity())
+    assert observation.observed_exists is False
+    assert CONTAINER in json.loads(path.read_text())["container"]
+    assert observation.to_json()["authority"] == "diagnostic-only"
+    before = len(logs(path))
+    with pytest.raises(VerificationError, match="daemon-bound"):
         client.probe(identity())
+    with pytest.raises(VerificationError, match="daemon-bound"):
+        client.remove(identity(), authorized=True)
+    assert len(logs(path)) == before
 
 
 def test_reservation_search_covers_all_resource_types_and_attempts(fixture: tuple) -> None:
     client, path, state = fixture
     state["volume"]["unique-volume"]["Labels"]["copilot-extensions.disposable.generation"] = "2"
     path.write_text(json.dumps(state), encoding="utf-8")
-    assert client.find_reservation(TOKEN, CREATOR) == [identity(), replace(identity("volume"), generation=2)]
+    observations = client.diagnostic_reservations(TOKEN, CREATOR)
+    assert [o.identity for o in observations] == [identity(), replace(identity("volume"), generation=2)]
+    assert all(o.to_json()["authority"] == "diagnostic-only" for o in observations)
 
 
 def test_cleanup_requires_explicit_authority_before_any_probe(fixture: tuple) -> None:
@@ -150,12 +189,14 @@ def test_cleanup_requires_explicit_authority_before_any_probe(fixture: tuple) ->
     assert not path.with_suffix(".log").exists()
 
 
-def test_success_shaped_remove_without_absence_fails(fixture: tuple) -> None:
+def test_retained_resource_does_not_receive_a_cleanup_success(fixture: tuple) -> None:
     client, path, state = fixture
     state["retain"] = True
     path.write_text(json.dumps(state), encoding="utf-8")
-    with pytest.raises(VerificationError, match="did not establish"):
+    with pytest.raises(VerificationError, match="daemon-bound"):
         client.remove(identity(), authorized=True)
+    assert CONTAINER in json.loads(path.read_text())["container"]
+    assert not path.with_suffix(".log").exists()
 
 
 def test_pin_resolves_context_once_then_ignores_ambient_host(fixture: tuple) -> None:
@@ -164,7 +205,7 @@ def test_pin_resolves_context_once_then_ignores_ambient_host(fixture: tuple) -> 
     env.pop("DOCKER_HOST")
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint == Endpoint("unix:///fixture.sock", "fixture-daemon", context="fixture")
-    assert pinned.probe(identity()) is True
+    assert pinned.diagnostic_observation(identity()).observed_exists is True
     assert logs(path)[0]["args"] == ["context", "inspect", "--", "fixture"]
     assert all(c["args"][0] == "--host" for c in logs(path)[1:])
 
@@ -175,7 +216,7 @@ def test_explicit_host_environment_wins_over_context_environment(fixture: tuple)
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.host == env["DOCKER_HOST"]
     assert pinned.endpoint.context == "default" and pinned.endpoint.tls is False
-    assert pinned.probe(identity()) is True
+    assert pinned.diagnostic_observation(identity()).observed_exists is True
     assert logs(path)[0]["args"] == ["context", "inspect", "--", "default"]
     assert all(call["args"][:2] == ["--host", env["DOCKER_HOST"]] for call in logs(path)[1:])
 
@@ -193,7 +234,7 @@ def test_host_shorthand_uses_cli_resolved_default_endpoint(fixture: tuple, confi
     env = {**client.environment, "DOCKER_HOST": configured, "DOCKER_TLS": "", "DOCKER_TLS_VERIFY": ""}
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.host == resolved
-    assert pinned.probe(identity()) is True
+    assert pinned.diagnostic_observation(identity()).observed_exists is True
     assert logs(path)[0]["args"] == ["context", "inspect", "--", "default"]
     assert all(call["args"][:2] == ["--host", resolved] for call in logs(path)[1:])
 
@@ -207,7 +248,7 @@ def test_socket_context_does_not_replay_unused_tls_material(fixture: tuple) -> N
     env["DOCKER_CONTEXT"] = "fixture"
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.tls is False and pinned.endpoint.tls_ca is None
-    assert pinned.probe(identity()) is True
+    assert pinned.diagnostic_observation(identity()).observed_exists is True
 
 
 @pytest.mark.parametrize("verify", [True, False])
@@ -230,7 +271,7 @@ def test_default_context_in_memory_tls_uses_default_files(fixture: tuple, verify
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.context == "default" and pinned.endpoint.tls_verify is verify
     assert pinned.endpoint.tls_ca == str(certs / "ca.pem")
-    assert pinned.probe(identity()) is True
+    assert pinned.diagnostic_observation(identity()).observed_exists is True
     for call in logs(path)[2:]:
         assert "--tls=true" in call["args"]
         assert call["tls_files"] == {"ca.pem": str(certs / "ca.pem"), "cert.pem": "", "key.pem": ""}
@@ -264,7 +305,7 @@ def test_tls_home_fallback_uses_supplied_environment_not_ambient(fixture: tuple,
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.tls_ca == str(isolated / ".docker" / "ca.pem")
     assert pinned.endpoint.tls_cert is None and pinned.endpoint.tls_key is None
-    assert pinned.probe(identity()) is True
+    assert pinned.diagnostic_observation(identity()).observed_exists is True
     for call in logs(path):
         if call["args"][0] == "--host":
             assert call["tls_files"] == {"ca.pem": str(isolated / ".docker" / "ca.pem"), "cert.pem": "", "key.pem": ""}
@@ -329,7 +370,9 @@ def test_reused_container_name_never_selects_the_replacement(fixture: tuple) -> 
     replacement["Id"] = replacement_id
     state["container"][replacement_id] = replacement
     path.write_text(json.dumps(state), encoding="utf-8")
-    assert client.remove(identity(), authorized=True) is False
+    assert client.diagnostic_observation(identity()).observed_exists is False
+    with pytest.raises(VerificationError, match="daemon-bound"):
+        client.remove(identity(), authorized=True)
     assert replacement_id in json.loads(path.read_text())["container"]
     assert all("rm" not in call["args"] for call in logs(path))
 
@@ -339,6 +382,8 @@ def test_container_cleanup_refuses_changed_creator_labels(fixture: tuple) -> Non
     state["container"][CONTAINER]["Config"]["Labels"]["copilot-extensions.disposable.creator"] = "another/owner/id"
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(VerificationError, match="ownership labels"):
+        client.diagnostic_observation(identity())
+    with pytest.raises(VerificationError, match="daemon-bound"):
         client.remove(identity(), authorized=True)
     assert all("rm" not in call["args"] for call in logs(path))
 
@@ -390,7 +435,7 @@ def test_explicit_host_ca_only_tls_omits_absent_client_identity(fixture: tuple) 
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert pinned.endpoint.tls_ca == str(certs / "ca.pem")
     assert pinned.endpoint.tls_cert is None and pinned.endpoint.tls_key is None
-    assert pinned.probe(identity()) is True
+    assert pinned.diagnostic_observation(identity()).observed_exists is True
     for call in logs(path):
         if call["args"][0] != "--host":
             continue
@@ -419,7 +464,7 @@ def test_context_without_ca_preserves_tls_and_system_roots(fixture: tuple, mater
     )
     assert pinned.endpoint.tls is True and pinned.endpoint.tls_verify is not skip_verify
     assert pinned.endpoint.tls_ca is None
-    assert pinned.probe(identity()) is True
+    assert pinned.diagnostic_observation(identity()).observed_exists is True
     for call in logs(path)[1:]:
         assert "--tls=true" in call["args"]
         assert f"--tlsverify={'false' if skip_verify else 'true'}" in call["args"]
