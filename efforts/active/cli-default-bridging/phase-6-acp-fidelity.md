@@ -142,7 +142,7 @@ An in-process probe used the actual ACP 0.12.1 router/schema and current
 | Enclosing notification metadata reaches callback kwargs | Confirmed |
 | Nested update metadata remains on the typed update | Confirmed |
 | The registered vendor route dispatches synthetic sub-agent lifecycle data | Confirmed |
-| Current idle/background-snapshot notifications are ignored | Confirmed |
+| Current idle/background-state notifications are ignored | Confirmed |
 | Generic underscore extension dispatch removes its prefix | Confirmed |
 
 Existing reproducible receiver coverage is in

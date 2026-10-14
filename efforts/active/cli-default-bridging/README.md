@@ -965,6 +965,13 @@ The detailed, source-grounded findings and future proof obligations are in
 [`phase-6-acp-fidelity.md`](phase-6-acp-fidelity.md); the Phase 6 Plan is now a
 summary pointing there instead of retaining a superseded receiver premise.
 
+**Execution-status decision:** the operator's instruction, "Great. Continue
+driving your main effort", resumes execution of the reviewed plan. This effort
+therefore records `Active`, superseding the `Draft` intake snapshot in #5930
+and this effort's old header/Proposal. That is an execution-status correction,
+not a change to the governing vision's `Draft` status, the opt-in default,
+the promotion gate, or the SDK-migration boundary.
+
 Current dev already has the vendor-event route added by #5279 and corrected
 by #5666. An actual ACP 0.12.1 in-process routing probe confirmed enclosing
 metadata propagation, nested metadata preservation, lifecycle dispatch, the
