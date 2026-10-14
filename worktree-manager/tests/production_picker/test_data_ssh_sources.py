@@ -725,6 +725,35 @@ def test_provider_routes_reads_but_suppresses_mutations(monkeypatch):
     )
 
 
+def test_provider_claims_capability_is_admitted_and_routes_with_live_identity(monkeypatch):
+    _install_roster(monkeypatch, {}, machine="local", local_id=("local", "linux"))
+    registered = provider_sources._parse_source(
+        _provider_descriptor(capabilities={"list": True, "claims": True}),
+        "agent-containers",
+    )
+    monkeypatch.setattr(data_ssh.provider_sources, "load", lambda _project: [registered])
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", lambda *_args: False)
+    fingerprint = data_ssh._provider_transport_fingerprint(registered)
+    argv = data_ssh.claims_argv(
+        "", "", "wt-1", source_id=registered.source_id,
+        expected_instance_id=registered.instance_id, expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    )
+    assert argv and "claims wt-1 --json" in argv[-1]
+    proxy = next(part for part in argv if part.startswith("ProxyCommand="))
+    assert "--expected-instance-id instance-1" in proxy
+    assert "--expected-target-id container:one" in proxy
+    assert "example-effort" in proxy
+    assert data_ssh.claims_argv(
+        "", "", "wt-1", source_id=registered.source_id,
+        expected_instance_id="replaced", expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    ) is None
+    assert data_ssh.remote_op_argv(
+        "", "", "cleanup", "wt-1", source_id=registered.source_id,
+    ) is None
+
+
 def test_provider_read_route_requires_matching_live_instance(monkeypatch):
     _install_roster(
         monkeypatch,

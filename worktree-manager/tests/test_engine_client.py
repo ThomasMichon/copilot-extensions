@@ -130,6 +130,23 @@ def test_title_null_is_none(monkeypatch):
     assert w.id4 == "aaaa"
 
 
+@pytest.mark.parametrize("dirty", [0, 1, 4, 1100])
+def test_list_worktrees_preserves_current_dirty_count_and_converts_typed_indicator(monkeypatch, dirty):
+    payload = _current_envelope({
+        "worktrees": [{"id": "one", "dirty": dirty, "state": "wip"}],
+    })
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout=json.dumps(payload)))
+    (row,) = ec.list_worktrees("project")
+    assert row.dirty is (dirty > 0)
+    assert row.raw["dirty"] == dirty
+    assert type(row.raw["dirty"]) is int
+
+
+def test_worktree_model_rejects_negative_dirty_counts():
+    with pytest.raises(ValueError, match="nonnegative"):
+        ec.worktree_from_dict({"id": "one", "dirty": -1})
+
+
 def test_engine_absent_raises_install_hint(monkeypatch):
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
     monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)

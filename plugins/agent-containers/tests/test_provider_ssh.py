@@ -330,6 +330,7 @@ def test_profile_spec_can_describe_project_scoped_picker_source(monkeypatch, tmp
         "acquired_at": 1_700_000_000.0,
     }
     assert source["capabilities"]["messages"] is True
+    assert source["capabilities"]["claims"] is True
     assert source["capabilities"]["resume"] is False
     assert Path(result["registry"]["proxy_command_binary"]) == Path(
         "/payload/bin/agent-containers"

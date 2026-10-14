@@ -297,6 +297,7 @@ def ssh_profile_spec(
                 "messages": True,
                 "sessions": True,
                 "refresh": True,
+                "claims": True,
                 "open": False,
                 "resume": False,
                 "stop": False,

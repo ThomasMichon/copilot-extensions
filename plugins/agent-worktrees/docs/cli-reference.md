@@ -405,21 +405,30 @@ Flags: `--path PATH` (classify another worktree), `--fetch` (refresh
 behind-counts from the remote -- off by default so the poll stays cheap),
 `--plain` (no `#[style]` directives), `--no-title` (state block only).
 
-### Machine-readable state: `list --json --classify`
+### Machine-readable current state: `list --json --current`
 
-`list --json --classify` enriches each worktree record with its git-derived
-classification (`state`, `ahead`, `behind`, `dirty`) so a consumer -- notably
-the multi-machine picker -- gets canonical state per machine (a remote's own
-state travels in its `list` output over SSH; the local picker cannot
-git-classify a remote worktree). Classification is **opt-in** because it costs
-~5 git calls per worktree; a bare `list --json` stays fast.
+`list --json --current` reads the resident's maintained, bounded Worktrees
+publication, including `state`, `ahead`, `behind`, and integer `dirty` counts.
+Ordinary production JSON/stream listings use this authority by default when
+the resident is enabled; `--classify`, `--cache-only`, and `--fresh` do not
+authorize caller-side git/session/mux reconstruction. The Manager explicitly
+requires `--current`, and incompatible engines report an upgrade error rather
+than dropping that requirement.
+
+Responses include complete generation/revision/count provenance. A failed
+producer preserves last-good rows with explicit stale availability. An
+unreachable or incompatible resident permits only independently indexed,
+labeled advisory data or an unavailable error, never direct recomputation.
+`--stream --follow` holds the engine-owned snapshot/update feed. See the
+[engine/Picker contract](engine-picker-contract.md) for barriers, order,
+selection, recovery and cutover rules.
 
 The emitted `state` draws from the **same `WorktreeState` vocabulary the status
 bar uses**, including the session-derived `convo` (a clean, commit-less
 worktree whose session held conversation turns -- the lowercase data-contract
 form of the bar's teal `CONVO` block). Centralized in
 `git_ops.refine_state_with_session` so the bar and the picker can never drift
-apart. Without `--classify`, records carry no `state` key.
+apart. State is part of the current publication even without `--classify`.
 
 Every row carries an additive `reciprocal_relation` object for presentation.
 Its `binding` and `control` axes preserve the difference between an
@@ -439,8 +448,8 @@ path, and tracking status. Every such delegate row also carries
 `delegate_finalizable` + `delegate_finalizable_reason`, encoding the manual
 inheritance rule now made programmatic: a delegate becomes finalizable once its
 host is `finalized`, `complete(d)`, or gone. The reverse edge is surfaced on
-host rows as `delegates` (the delegate worktree ids plus their own
-finalizable/not-finalizable verdicts).
+explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
+their own finalizable/not-finalizable verdicts); current rows omit that graph.
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment

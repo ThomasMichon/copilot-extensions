@@ -1013,6 +1013,18 @@ The timing variability is not a live performance pass or a reason to raise
 the budget. Normal promotion, deployment, installed full-roster timing,
 rendering and CPU/preservation evidence remain required.
 
+The next review caught the typed non-Picker consumer rejecting integer dirty
+counts greater than one. Its Boolean indicator now accepts nonnegative counts
+while preserving the exact count in the raw current row and rejecting negatives.
+Provider-exec claim inspection now negotiates a supported read-only capability:
+the Manager registry admits `claims`, and the container source descriptor
+advertises it. Existing live instance, target, lease and transport checks still
+gate the explicit read; mutation capabilities remain disabled. The changefile
+also covers that provider payload. Manager typed-client, source and detail
+contracts pass 206 with one platform skip; provider SSH contracts pass 28 with
+two platform skips. The older README and CLI descriptions now consistently
+state the mandatory current-authority/upgrade contract.
+
 ### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
 
 The existing authenticated status-monitor control endpoint now offers the

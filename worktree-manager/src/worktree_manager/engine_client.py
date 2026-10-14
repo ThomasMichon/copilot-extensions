@@ -437,7 +437,7 @@ _EXECUTION_LEG_NAMES = frozenset({
 
 @dataclass(frozen=True)
 class Worktree:
-    """A worktree row derived from ``list --json --classify`` (contract v1).
+    """A worktree row derived from ``list --json --current`` (contract v1).
 
     Only the fields the Manager renders are lifted into typed attributes; the
     raw dict is kept on ``raw`` so a newer contract field is reachable without a
@@ -449,7 +449,7 @@ class Worktree:
     machine: str
     branch: str
     title: str | None
-    state: str | None          # git-derived (present with --classify)
+    state: str | None          # resident-published git-derived state
     ahead: int
     behind: int
     dirty: bool
@@ -510,11 +510,19 @@ def worktree_from_dict(d: dict) -> Worktree:
         state=d.get("state"),
         ahead=_int_field(d.get("ahead"), name="ahead"),
         behind=_int_field(d.get("behind"), name="behind"),
-        dirty=_bool_field(d.get("dirty"), name="dirty"),
+        dirty=_dirty_field(d.get("dirty")),
         status=d.get("status"),
         path=d.get("path"),
         raw=d,
     )
+
+
+def _dirty_field(value: object) -> bool:
+    if type(value) is int:
+        if value < 0:
+            raise ValueError("dirty must be a nonnegative count")
+        return value > 0
+    return _bool_field(value, name="dirty")
 
 
 @dataclass(frozen=True)

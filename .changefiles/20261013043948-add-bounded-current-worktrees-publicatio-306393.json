@@ -8,6 +8,10 @@
     {
       "plugin": "worktree-manager",
       "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
     }
   ]
 }

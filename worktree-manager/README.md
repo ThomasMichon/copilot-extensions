@@ -307,12 +307,15 @@ uv run python -m worktree_manager contracts --project <name> # contributed pivot
 
 The **worktrees** views are the first slice of the extracted Picker: they read
 **live** worktrees by shelling out to the `agent-worktrees` engine
-(`agent-worktrees --project <p> list --json --classify`) — the **process
+(`agent-worktrees --project <p> list --json --current`) — the **process
 boundary** the Textual Picker will sit on. The Manager never imports the plugin;
 the only coupling is the engine's stable `--json` verbs (the pinned
 [engine ↔ Picker contract](../plugins/agent-worktrees/docs/engine-picker-contract.md)),
 and the client ([`engine_client.py`](src/worktree_manager/engine_client.py))
-tolerates an older engine by degrading a request rather than failing.
+requires the current-roster authority contract. Older or incompatible engines
+produce an actionable upgrade error rather than silently dropping authority.
+Unreachable residents permit only explicitly labeled, independently indexed
+advisory rows or an unavailable error, never caller-side reconstruction.
 
 Plugin-contributed interactive surfaces are discovered independently from each
 enabled plugin's installed payload. `worktree-manager contracts` validates the
