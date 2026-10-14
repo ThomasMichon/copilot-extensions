@@ -106,7 +106,9 @@ def test_diff_error_is_not_reported_as_unrelated(monkeypatch, capsys) -> None:
 def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
     job = workflow["jobs"]["test-runner-windows"]
-    assert job["timeout-minutes"] == "${{ github.event_name == 'workflow_dispatch' && 15 || 7 }}"
+    assert job["timeout-minutes"] == (
+        "${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}"
+    )
     steps = job["steps"]
     detection = next(step for step in steps if step.get("id") == "installation-context")
     smoke = next(

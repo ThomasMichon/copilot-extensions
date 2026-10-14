@@ -595,7 +595,7 @@ def test_ci_runner_portfolio_keeps_smoke_path_gated_and_manual_exhaustive():
         assert tests["run"].split().count("tools/test_environment_admission.py") == 1
         assert tests["if"] == "steps.runner-contracts.outputs.run == 'true'"
         assert tests["env"]["PYTEST_ADDOPTS"] == (
-            """${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}"""
+            """${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}"""
         )
         assert '"$EVENT_NAME" = "workflow_dispatch"' in detector["run"]
         assert "run=true" in detector["run"] and "run=false" in detector["run"]
