@@ -268,6 +268,39 @@ def test_creation_reports_projection_failure_without_claiming_seed(native_creati
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 
+@pytest.mark.parametrize("result", ["pair_error", "swallowed"])
+def test_creation_new_pair_requires_successful_composition(
+    native_creation, monkeypatch, capsys, result,
+):
+    creation = native_creation
+    calls = []
+
+    def compose(**kwargs):
+        calls.append(kwargs)
+        if result == "swallowed":
+            raise repair.knowledge_plugins.KnowledgePluginError("fixture composition failed")
+        return {"action": "retired", "pair_error": "fixture composition failed"}
+
+    monkeypatch.setattr(repair.knowledge_plugins, "compose_from_pair", compose)
+    if result == "swallowed":
+        stamp = worktree_creation._stamp_and_compose_paired_knowledge
+
+        def swallowed(*args, **kwargs):
+            stamp(*args, **kwargs)
+            return None
+
+        monkeypatch.setattr(worktree_creation, "_stamp_and_compose_paired_knowledge", swallowed)
+    monkeypatch.setattr(
+        local_cache_refresh, "prepare_for_launch",
+        lambda *a: pytest.fail("failed composition reached projection/prepared"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and "fixture composition failed" in report["error"]
+    assert not report["repaired"] and "prepared" not in report
+    assert len(calls) == (2 if result == "swallowed" else 1)
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
 def test_creation_refuses_untracked_companion_before_permissions(creation, monkeypatch, capsys):
     target = creation.roots["knowledge"] / (
         f"host-{creation.short}-20261013-100000-abcd-k"

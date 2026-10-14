@@ -205,6 +205,12 @@ def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord):
     return root, existing, allocation, child
 
 
+def _require_composition(result: dict) -> None:
+    error = result.get("pair_error")
+    if error is not None or result.get("action") == "error":
+        raise ValueError(error or result.get("error") or "knowledge composition failed")
+
+
 def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) -> None:
     root, existing, allocation, child = plan
     config = cfg.load_config()
@@ -260,8 +266,7 @@ def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) ->
             }
         if existing is not None:
             result = knowledge_plugins.compose_from_pair(cwd=current.worktree_path, config=fresh)
-            if result.get("pair_error"):
-                raise ValueError(result["pair_error"])
+            _require_composition(result)
             return
         fresh = cfg.load_config()
         current, _ = _validate(fresh, path, seed_id)
@@ -273,8 +278,9 @@ def _prepare_pair(config: cfg.Config, record, path: Path, seed_id: str, plan) ->
         result = worktree_creation._stamp_and_compose_paired_knowledge(
             fresh, current, current.worktree_path, stamp,
         )
-        if result and result.get("action") == "error":
-            raise ValueError(result["error"])
+        if result is None:
+            result = knowledge_plugins.compose_from_pair(cwd=current.worktree_path, config=fresh)
+        _require_composition(result)
 
 
 def _checks(record, plan) -> dict:

@@ -134,7 +134,9 @@ Lock failures warn and do not write. A missing Copilot configuration or unusable
 knowledge binding fails closed instead of reporting a partial setup as ready.
 
 Only `prepared: true` with all checks true and `projection_status: ready`
-confirms complete setup. Failures retain the intent and name the missing step.
+confirms complete setup. Knowledge composition errors also refuse before
+projection; a swallowed result requires a strict composition retry, never an
+assumed success. Failures retain the intent and name the missing step.
 After that result, use the normal existing-worktree `copilot` or detached
 `embody` flow to deliver the **actual original task once**, without another
 `--new` or replacement `--seed`. Never edit tracking YAML or deployed code.
