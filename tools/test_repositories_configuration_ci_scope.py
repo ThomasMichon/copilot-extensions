@@ -43,6 +43,7 @@ def test_real_native_consumer_is_separate_bounded_and_required():
     ("plugins/agent-worktrees/src/agent_worktrees/repos_registry_transaction.py", True),
     ("plugins/agent-worktrees/src/agent_worktrees/related.py", True),
     ("plugins/agent-worktrees/src/agent_worktrees/config_dropins.py", True),
+    ("plugins/agent-worktrees/src/agent_worktrees/inrepo_config_source.py", True),
     ("plugins/agent-worktrees/src/agent_worktrees/state_root.py", True),
     ("plugins/agent-worktrees/tests/test_repos_configuration.py", True),
     ("plugins/agent-worktrees/tests/test_repos_registry_transaction.py", True),

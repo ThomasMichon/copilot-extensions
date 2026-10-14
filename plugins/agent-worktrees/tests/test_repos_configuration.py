@@ -247,6 +247,8 @@ def route_policy(native, monkeypatch, request):
 @pytest.mark.parametrize("route", [
     "related: [broken", "related:\n  external: 42\n",
     "related:\n  external:\n  external:\n",
+    "related:\n  external: {role: 42}\n",
+    "related:\n  external: {delegate: {via: 42}}\n",
 ])
 def test_invalid_native_route_inspection_stays_unknown_not_valid_empty(native, route_policy, route):
     from agent_worktrees.repos_configuration_catalog import catalog
@@ -270,6 +272,60 @@ def test_native_minimal_related_link_is_valid(native, route_policy):
     assert not rows["sample"]["configuration"]["findings"]
     assert rows["external"]["participation"] == "related"
     assert rows["external"]["configuration"]["route"]["status"] == "present"
+    assert tree(native) == before
+
+
+@pytest.mark.parametrize("content", ["[broken", "stateless: true\nstateless: false\n", "42\n"])
+def test_invalid_selected_repository_configuration_is_unknown(native, route_policy, content):
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    route_policy.with_name("config.yaml").write_text(content, encoding="utf-8")
+    before = tree(native)
+    row = next(row for row in catalog("sample")["entries"] if row["id"] == "sample")
+    assert row["configuration"]["binding"]["status"] == "unknown"
+    assert row["configuration"]["findings"][0]["code"] == "native-inspection-unavailable"
+    assert tree(native) == before
+
+
+def test_machine_route_keeps_the_resolved_peer(native):
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    policy = native / "repository" / ".copilot-extensions" / "agent-worktrees"
+    policy.mkdir(parents=True)
+    (policy / "related.yaml").write_text(
+        "related:\n  external: {locus: {preferred: 'machine:peer-one'}}\n", encoding="utf-8",
+    )
+    row = next(row for row in catalog("sample")["entries"] if row["id"] == "external")
+    assert row["configuration"]["route"]["preferred"] == "machine"
+    assert row["configuration"]["route"]["target_machine"] == "peer-one"
+
+
+def test_invalid_committed_configuration_cannot_hide_behind_valid_disk_copy(native):
+    from agent_worktrees import git_ops
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    root = native / "repository"
+
+    def git(*args):
+        return git_ops.git(*args, cwd=root, capture=True, timeout=15)
+
+    git("init", "-q", "-b", "main")
+    git("config", "core.hooksPath", str(root / "no-hooks"))
+    git("config", "user.name", "Fixture")
+    git("config", "user.email", "fixture@example.test")
+    policy = root / ".copilot-extensions" / "agent-worktrees"
+    policy.mkdir(parents=True)
+    source = policy / "config.yaml"
+    source.write_text("[broken", encoding="utf-8")
+    git("add", ".")
+    git("-c", "commit.gpgSign=false", "commit", "-qm", "fixture")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    source.write_text("stateless: true\n", encoding="utf-8")
+    before = tree(native)
+    row = next(row for row in catalog("sample")["entries"] if row["id"] == "sample")
+    assert row["configuration"]["binding"]["status"] == "unknown"
+    assert row["configuration"]["findings"][0]["code"] == "native-inspection-unavailable"
     assert tree(native) == before
 
 
@@ -304,6 +360,27 @@ def test_catalog_source_winners_are_independent_per_repository(native):
     assert [source["masked"] for source in overridden] == [True, False]
     assert [source["wins"] for source in inherited] == [True]
     assert [source["masked"] for source in inherited] == [False]
+
+
+@pytest.mark.parametrize("operation", ["set", "reset"])
+def test_preference_edit_does_not_modify_aliased_unselected_data(native, operation):
+    path = repos._repos_yaml_path()
+    path.write_text(
+        "metadata: &shared\n  copilot_account: existing\n  custom: unchanged\n"
+        "repos: &registrations\n  sample: *shared\n  other: *shared\n"
+        "registry_metadata: *registrations\n",
+        encoding="utf-8",
+    )
+    before = yaml.safe_load(path.read_text(encoding="utf-8"))
+    login = "chosen" if operation == "set" else ""
+    token = preview("sample", "sample", operation, login)["token"]
+    apply("sample", "sample", operation, login, token)
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert after["metadata"] == before["metadata"]
+    assert after["registry_metadata"] == before["registry_metadata"]
+    assert after["repos"]["other"] == before["repos"]["other"]
+    assert after["repos"]["sample"]["custom"] == "unchanged"
+    assert after["repos"]["sample"].get("copilot_account", "") == login
 
 
 def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native):

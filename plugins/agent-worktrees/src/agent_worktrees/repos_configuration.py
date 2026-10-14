@@ -130,6 +130,8 @@ def apply(project: str, name: str, operation: str, login: str, token: str) -> di
         entry = registry.repos.get(name)
         if entry is None or not isinstance(raw.get("repos", {}).get(name), dict):
             raise ConfigurationError("not-registered", "The repository is not registered.")
+        raw["repos"] = dict(raw["repos"])
+        raw["repos"][name] = dict(raw["repos"][name])
         normalized = identity(login) if operation == "set" else ""
         if operation == "set":
             raw["repos"][name]["copilot_account"] = normalized

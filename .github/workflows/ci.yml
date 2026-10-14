@@ -996,7 +996,7 @@ jobs:
           if ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           elif git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(\.github/workflows/ci\.yml|tools/(test_repositories_configuration_ci_scope|run-plugin-tests|run-standalone-tests|standalone_consumers|plugin_test_containment)\.py|plugins/agent-worktrees/(src/agent_worktrees/(repos[^/]*|config[^/]*|related[^/]*|state_root[^/]*|installer[^/]*|registry_paths)\.py|pivots/repositories-config\.json|tests/test_repos_configuration\.py|tests/test_repos_registry_transaction\.py)|worktree-manager/(src/worktree_manager/production_picker/picker_tui/(configuration[^/]*|engine_configuration_preview|tasks)\.py|tests/production_picker/test_repositories_configuration\.py))$'; then
+            '^(\.github/workflows/ci\.yml|tools/(test_repositories_configuration_ci_scope|run-plugin-tests|run-standalone-tests|standalone_consumers|plugin_test_containment)\.py|plugins/agent-worktrees/(src/agent_worktrees/(repos[^/]*|config[^/]*|related[^/]*|state_root[^/]*|installer[^/]*|registry_paths|inrepo_config_source)\.py|pivots/repositories-config\.json|tests/test_repos_configuration\.py|tests/test_repos_registry_transaction\.py)|worktree-manager/(src/worktree_manager/production_picker/picker_tui/(configuration[^/]*|engine_configuration_preview|tasks)\.py|tests/production_picker/test_repositories_configuration\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

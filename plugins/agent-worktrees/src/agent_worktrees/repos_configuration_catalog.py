@@ -38,6 +38,8 @@ def inspect_project(project: str, workspace: str) -> Inspection:
             *related.installed_plugin_related_anchors(),
             *[related.config_contribution_anchor(s.anchor, s.origin) for s in sources],
         ]
+        for source in sources:
+            cfg._load_inrepo_config(str(source.anchor), strict=True)
         for source in anchors:
             paths = (
                 (related.legacy_related_path(source),)
@@ -91,7 +93,7 @@ def inspect_project(project: str, workspace: str) -> Inspection:
                     ),
                     "reason": "Inspect the native tracked pair before writing personal state.",
                 }
-    except (ValueError, KeyError, OSError, RuntimeError, RepositoryResolutionError):
+    except (ValueError, TypeError, AttributeError, KeyError, OSError, RuntimeError, RepositoryResolutionError):
         result.findings.append({
             "code": "native-inspection-unavailable", "severity": "error",
             "message": "Project composition or native inspection needs owner repair.",
@@ -151,6 +153,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             )
             route.update(
                 status="present", preferred=resolved.locus_kind,
+                target_machine=resolved.target_machine,
                 available_here=resolved.available_here,
                 delegate=resolved.delegate_via, source=route_entry.origin_layer,
             )

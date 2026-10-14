@@ -1227,7 +1227,7 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
         return {}
 
 
-def _load_inrepo_config(anchor: str) -> dict[str, Any]:
+def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
     """Return the repo's in-repo flat settings dict, or ``{}``.
 
     Prefers the config as **committed** on the resolved default branch
@@ -1244,12 +1244,7 @@ def _load_inrepo_config(anchor: str) -> dict[str, Any]:
         Path(INREPO_CONFIG_FILENAME),
     )
 
-    merged = inrepo_config_source.load_inrepo_config_from_committed_ref(
-        root, rel_candidates
-    )
-    if not merged:
-        base_path = next((root / rel for rel in rel_candidates if (root / rel).exists()), None)
-        merged = _load_yaml_safe(base_path) if base_path is not None else {}
+    merged = inrepo_config_source.load_config_base(root, rel_candidates, strict=strict)
 
     context = registry_paths.installation_context()
     marketplace_id = (
@@ -1265,7 +1260,7 @@ def _load_inrepo_config(anchor: str) -> dict[str, Any]:
             / GLOBAL_CONFIG_FILENAME
         )
         if overlay_path.exists():
-            merged = _deep_merge(merged, _load_yaml_safe(overlay_path))
+            merged = _deep_merge(merged, inrepo_config_source.load_config_file(overlay_path, strict=strict))
     return merged
 
 

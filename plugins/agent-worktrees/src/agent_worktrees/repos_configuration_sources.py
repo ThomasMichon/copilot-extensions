@@ -40,12 +40,9 @@ def identity(value: object, *, allow_empty: bool = False) -> str:
     return value
 
 
-def mapping(path: Path) -> dict:
-    content = read_bytes(path)
-    if content is None:
-        return {}
+def parse_mapping(text: str) -> dict:
     try:
-        result = yaml.load(content.decode("utf-8"), Loader=_UniqueRegistryLoader)
+        result = yaml.load(text, Loader=_UniqueRegistryLoader)
     except (UnicodeError, ValueError, yaml.YAMLError) as exc:
         raise ConfigurationError(
             "invalid-composition", "A configuration source is invalid; repair it with its owner."
@@ -55,6 +52,17 @@ def mapping(path: Path) -> dict:
     if not isinstance(result, dict):
         raise ConfigurationError("invalid-composition", "A configuration source must be a mapping.")
     return result
+
+
+def mapping(path: Path) -> dict:
+    content = read_bytes(path)
+    if content is None:
+        return {}
+    try:
+        text = content.decode("utf-8")
+    except UnicodeError as exc:
+        raise ConfigurationError("invalid-composition", "A configuration source is invalid.") from exc
+    return parse_mapping(text)
 
 
 def fingerprint(paths: list[Path]) -> str:

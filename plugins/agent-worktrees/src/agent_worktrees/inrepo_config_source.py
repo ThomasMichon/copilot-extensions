@@ -21,6 +21,7 @@ import contextlib
 import contextvars
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 import yaml
@@ -135,7 +136,8 @@ def _read_committed_blob(
 
 
 def load_inrepo_config_from_committed_ref(
-    anchor: Path, rel_path_candidates: tuple[Path, ...], remote: str = "origin"
+    anchor: Path, rel_path_candidates: tuple[Path, ...], remote: str = "origin",
+    *, parser: Callable[[str], dict[str, Any]] = parse_yaml_text_safe,
 ) -> dict[str, Any]:
     """The in-repo config as actually **committed** on the resolved default
     branch, checked in ``rel_path_candidates`` order (first match wins) --
@@ -166,7 +168,7 @@ def load_inrepo_config_from_committed_ref(
         for rel_path in rel_path_candidates:
             text = _read_committed_blob(anchor, remote, branch, rel_path, deadline)
             if text is not None:
-                return parse_yaml_text_safe(text)
+                return parser(text)
         return None
 
     data = _read_config_on(head_branch)
@@ -184,3 +186,28 @@ def load_inrepo_config_from_committed_ref(
         if hopped is not None:
             data = hopped
     return data
+
+
+def load_config_file(path: Path, *, strict: bool = False) -> dict[str, Any]:
+    if strict:
+        from .repos_configuration_sources import mapping
+
+        return mapping(path)
+    from .config import _load_yaml_safe
+
+    return _load_yaml_safe(path)
+
+
+def load_config_base(
+    anchor: Path, candidates: tuple[Path, ...], *, strict: bool = False,
+) -> dict[str, Any]:
+    parser = parse_yaml_text_safe
+    if strict:
+        from .repos_configuration_sources import parse_mapping
+
+        parser = parse_mapping
+    merged = load_inrepo_config_from_committed_ref(anchor, candidates, parser=parser)
+    if not merged:
+        base = next((anchor / rel for rel in candidates if (anchor / rel).exists()), None)
+        merged = load_config_file(base, strict=strict) if base is not None else {}
+    return merged

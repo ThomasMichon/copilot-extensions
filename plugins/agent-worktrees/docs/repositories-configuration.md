@@ -14,6 +14,9 @@ pair inspection is unsupported, rather than inferred from the CLI's CWD.
 Both tracked checkout directories must still exist for a pair to be writable.
 Route inspection validates the native selected base and marketplace-overlay
 layers, including duplicate keys, while accepting native bare minimal links.
+Selected repository configuration uses the same committed/fallback source
+selection with failure-aware parsing. Invalid selected sources report unknown
+state; machine routes retain their resolved peer identity.
 Route/pair editing and plugin enablement remain unsupported: use their owning
 capabilities, not a generic source-file editor.
 
@@ -67,6 +70,8 @@ empty token substitution) fail before a write. No lock or state directory is
 created by catalog or preview. Successful writes may create the registry's
 local `repos.lock` sidecar; no repository/knowledge/plugin/preset source is
 written. Unrecognized local registry metadata is preserved by this API.
+YAML aliases are detached at the selected registration before an edit, so
+unselected registrations and metadata cannot change through shared mappings.
 
 ## Validation
 
