@@ -92,6 +92,8 @@ contract or authorize a stop/start exemption.
 _Agent-recommended design and validation, explicitly selected for review._
 
 - [x] Review and merge the [watch-owner lifecycle plan](watch-owner-cutover.md) before implementing the service transaction (confirmed by #6291).
+- [x] Land the canonical pre-adoption drain, full-transaction borrowed authority and custody-preserving rollback prerequisite before the owner adapter (confirmed by #6396).
+- [ ] Land inactive watch-state construction, final read-ready reload and bounded complete quiescence as internal groundwork, without enabling a production service or installation-cell adapter.
 - [ ] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery.
 - [ ] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery.
 - [ ] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and first upgrade from a lease-only owner on Windows and Linux before landing the cutover prerequisite.
@@ -173,6 +175,19 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-14 - Inactive watch-state and bounded quiescence groundwork
+
+- Implemented the internal state-core boundary under the reviewed lifecycle design, not an installer or service opt-in. Passive construction reads no subscriptions and starts no effects. Final state reload and effect authorization are separate operations. Mutation admission/counters drain accepted registration/cancellation calls while the authenticated lifecycle listener and foreground wait remain available.
+- Budget-bound worker quiescence retains live callbacks and queued legacy batches on timeout, waits for ACK persistence, and requires the final state-write acknowledgement before reporting quiescence. Same-owner abort resumes retained objects instead of replacing a registry with accepted work. Strict read-ready adoption rejects malformed legacy/acknowledged state; failed or late reads cannot activate a stale cached registry. Partial or late startup leaves admission closed and resources attributable for cleanup/retry.
+- Thirty-six focused cases exercise passive no-effects startup, final-snapshot selection, real authenticated control RPC, handler/callback/ACK drain, lossless incomplete-drain resume, deadline refusal, serialized lifecycle contention and partial-start retry. The initial twelve cases failed against the missing API; two additional late-I/O regressions reproduced false completion before deadline checks were added. A logical-clock teardown defect was corrected by restoring the real clock before fixture cleanup rather than weakening production joining. The complete contained Windows suite passes 210 tests with two existing shell-availability skips on Python 3.14.7; fatal lint, module size, headless-launch and install-contract gates pass.
+- The owner still owes exact installation/instance authorization, native writer-lease transfer, receipt/governance checks, the durable activation/selection journal, recovery, installer/cell wiring and actual shipped-payload validation. Those remain open. The saved dispatch implementation is unchanged.
+
+### 2026-10-14 - Shared prerequisite merged; owner adoption continues
+
+- #6396 merged into `dev` at `c29eca6f51f326752a70c55ed9fdd275b1e25316` after exact-head clean owner-authored Copilot review `5517868277`, all required checks and resolved review threads. CI run `38562889167` passed. Its native Ubuntu canonical ZDD lane exercised `python -m pytest -q libs/zdd/tests` with the canonical source path and smoke containment: 581 passed, four stress-lane skips, including the native fork lease-retention case. Windows source validation passed 538 tests with 25 platform skips; the actual materialized vendor passed 113 with four skips.
+- Pulled the source worktree onto the merged contribution branch. The initial multi-commit replay conflicted and was safely aborted; a retained local backup protected the exact published tip. Reconciled the source PR's actual merged state and completed the supported managed sync. No unmerged work was discarded, no remote history was rewritten, and the saved dispatch worktree remains unchanged.
+- This closes only the shared-library prerequisite. No service opts into it yet. The next work is the reviewed watch-owner adapter and installation transaction: passive no-effects startup, bounded complete writer drain, exact lease transfer/final reload, owner-led crash reconciliation and installer/cell wiring. Adoption, release/deployment, dispatch integration, live evidence and parent close-out remain unchecked.
 
 ### 2026-10-14 - Released repair and shared prerequisite publication
 
