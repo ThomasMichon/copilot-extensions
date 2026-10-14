@@ -154,13 +154,19 @@ def _ensure_serve(socket_path: str | None):
     """
     import time
 
-    handle = _serve_handle(socket_path)
+    # Path resolution here (and in the spawn's environment) can fail on a
+    # symlink loop with RuntimeError rather than OSError; any such failure
+    # must still fall back to the direct bridge rather than abort forwarding.
+    try:
+        handle = _serve_handle(socket_path)
+    except (OSError, RuntimeError, ValueError):
+        return None
     existing = sockio.serve_socket_if_available(handle)
     if existing is not None:
         return existing
     try:
         _spawn_serve_host(handle)
-    except (OSError, ValueError):
+    except (OSError, RuntimeError, ValueError):
         return None
     deadline = time.monotonic() + _ENSURE_SERVE_TIMEOUT
     while time.monotonic() < deadline:

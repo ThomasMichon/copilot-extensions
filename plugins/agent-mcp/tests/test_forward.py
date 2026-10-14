@@ -433,6 +433,44 @@ def test_ensure_serve_falls_back_when_the_spawn_is_refused(tmp_path, monkeypatch
     assert forward._ensure_serve(str(tmp_path / "serve.sock")) is None
 
 
+def _symlink_loop_at(monkeypatch, looped: str) -> None:
+    """Make ``Path.resolve`` fail on ``looped`` the way a symlink loop does
+    (``RuntimeError`` on most supported Pythons, not ``OSError``)."""
+    import pathlib
+
+    real_resolve = pathlib.Path.resolve
+
+    def resolve(self, *args, **kwargs):
+        if str(self) == looped:
+            raise RuntimeError(f"Symlink loop from {looped!r}")
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "resolve", resolve)
+
+
+@pytest.mark.parametrize("site", ["serve-handle", "spawn-env"])
+def test_unresolvable_serve_path_falls_back_to_the_direct_bridge(tmp_path, monkeypatch, site):
+    """A symlink loop in the forwarder's own handle, or in the ambient
+    AGENT_MCP_SERVE_SOCKET the spawned host inherits, must not abort
+    forwarding: the session runs on the direct bridge instead."""
+    import agent_procutil
+
+    looped = str(tmp_path / "loop.sock")
+    socket_arg = looped if site == "serve-handle" else str(tmp_path / "serve.sock")
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", looped)
+    for name in ("AGENT_MCP_NO_SERVE", "AGENT_MCP_NO_ENSURE_SERVE", "AGENT_MCP_NO_MULTIPLEX"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(forward.sockio, "serve_socket_if_available", lambda handle=None: None)
+    monkeypatch.setattr(agent_procutil, "spawn_daemon",
+                        lambda *_a, **_k: pytest.fail("no host may spawn on an unresolved path"))
+    monkeypatch.setattr(forward, "_run_direct", lambda bridge: 42)
+    _symlink_loop_at(monkeypatch, looped)
+
+    assert forward._ensure_serve(socket_arg) is None
+    assert forward.run("echo", socket_arg) == 42
+
+
 def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
     """With no host up, _ensure_serve spawns a detached `agent-mcp serve`, waits
     for its socket, and returns it; the spawned host answers a ping."""
