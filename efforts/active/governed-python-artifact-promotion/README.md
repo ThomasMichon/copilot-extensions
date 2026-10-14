@@ -162,11 +162,6 @@ wheels and offline resolution; it does not relax the original feed-only rule.
       disposable checkout with one shared public-runner toolchain. The
       builder remains independently usable. Actual trusted-main signing
       and publication evidence is tracked explicitly in Validation Plan.
-- [ ] Resolve and pin a dependency closure for the third-party portion only,
-      using the consumer's actual governed-feed availability and applicable
-      machine policy. Record the admitted closure in an installation-local
-      receipt bound to the signed first-party manifest, not in a globally
-      promoted manifest that cannot know a consumer's private feed.
 - [x] **Contract implemented (2026-10-12).** Native GitHub OIDC attestations
       authenticate both the transfer index and first-party bundles.
       Signing runs without release-write credentials. Verification constrains
@@ -215,8 +210,10 @@ locked-down hosts without themselves proving the package-source contract.
       stands in for feed availability.
 - [ ] Persist the selected versions and wheel hashes in a local admission
       receipt binding manifest digest, target interpreter/platform, feed
-      identity and effective policy. Cached reuse must revalidate that
-      binding; successful resolution alone never activates a slot.
+      identity and effective policy. This consumer-specific closure is not
+      written into a globally promoted manifest that cannot know the
+      consumer's private feed. Cached reuse must revalidate that binding;
+      successful resolution alone never activates a slot.
 - [ ] Refuse an unavailable compatible wheel or inadmissible closure with a
       specific diagnostic. This first lane does not execute third-party
       source backends or silently reinterpret refusal as permission to use
@@ -386,6 +383,24 @@ answer against the actual repository/CI configuration:
 - [ ] Feed-lag tests prove the consumer-side admission check blocks
       consumption of a closure not yet available on the local governed
       feed, and never silently substitutes a public-index candidate.
+- [ ] Controlled feed/redirect tests admit only explicitly trusted download
+      chains and reject untrusted hosts or insecure redirects before their
+      endpoints receive a request. Named-index authentication and OS trust
+      settings work without credential exposure in argv, logs or receipts.
+- [ ] Real wheel fixtures with direct URL, VCS and external-path requirements
+      prove rejection before those targets are acquired or passed to the
+      resolver. Altered metadata, mismatched distribution/tag identity and
+      forged sidecar hints fail against the actual wheel bytes.
+- [ ] Offline subprocess tests poison ambient indexes, caches, overrides and
+      backend discovery, and observe zero network requests or source-backend
+      execution during resolution/installation. A backtracking closure with
+      extras, markers and target-tag differences proves the standard resolver
+      still selects a compatible feed-carried set. A source-only dependency
+      produces a specific refusal with no public or source-build fallback.
+- [ ] Receipt-reuse tests change manifest digest, wheel bytes, target
+      interpreter/platform, feed identity and effective policy independently;
+      each mismatch refuses reuse before slot activation. Matching reuse
+      preserves the selected pins and hashes without trusting ambient caches.
 - [ ] Manifest/trust-root tests reject a wrong payload/ABI/platform, an
       altered artifact digest, or a mismatched dependency closure before
       activation.
@@ -530,8 +545,8 @@ win grows with build complexity.
   two unpublished files. The duplicate child then finalized normally and its
   parent obligation settled at rest; no competing implementation was landed.
   Automatic promotion `38479483177` is the next native-evidence candidate.
-- Native signing/publication proof still awaits the canonical repair's
-  actual merge and a subsequent genuine promotion. Consumer closure/admission,
+- Native signing/publication proof still awaits a subsequent genuine
+  promotion after the canonical repair's merge. Consumer closure/admission,
   shared-engine consumption, cross-platform clean-room validation, measured
   network/storage behavior and retention remain unresolved. No installed
   runtime or shared service was changed.
