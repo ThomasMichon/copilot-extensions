@@ -723,8 +723,46 @@ def test_readonly_cleanup_allows_hardlinks_only_when_every_link_is_owned(tmp_pat
     os.link(blob, second)
     blob.chmod(stat.S_IREAD)
     error = _access_denied(blob)
-    runner._remove_readonly_file(root.resolve(), os.unlink, str(blob), (type(error), error, None))
+    link_counts = {}
+    runner._remove_readonly_file(
+        root.resolve(), os.unlink, str(blob), (type(error), error, None), link_counts=link_counts,
+    )
     assert not blob.exists() and second.read_text() == "fixture"
+    assert second.stat().st_nlink == 1
+    second.chmod(stat.S_IREAD)
+    second_error = _access_denied(second)
+    runner._remove_readonly_file(
+        root.resolve(), os.unlink, str(second),
+        (type(second_error), second_error, None), link_counts=link_counts,
+    )
+    assert not second.exists()
+
+
+@pytest.mark.skipif(runner.os.name != "nt", reason="Windows read-only hardlink cleanup")
+@pytest.mark.parametrize("link_count", [2, 3, 16])
+def test_real_sandbox_cleanup_removes_all_owned_readonly_hardlinks(link_count):
+    temporary = runner.tempfile.TemporaryDirectory(prefix="standalone-hardlink-cleanup-test-")
+    root = Path(temporary.name)
+    first = root / "object"
+    first.write_text("fixture")
+    links = [first]
+    for index in range(1, link_count):
+        folder = root / f"directory-{index}"
+        folder.mkdir()
+        link = folder / "object"
+        os.link(first, link)
+        links.append(link)
+    first.chmod(stat.S_IREAD)
+    assert first.stat().st_nlink == link_count
+    assert all(not link.stat().st_mode & stat.S_IWRITE for link in links)
+    try:
+        runner.cleanup_sandbox(temporary)
+        assert not root.exists()
+    finally:
+        for link in links:
+            if link.exists():
+                link.chmod(stat.S_IREAD | stat.S_IWRITE)
+        temporary.cleanup()
 
 
 @pytest.mark.skipif(runner.os.name != "nt", reason="Windows redirected cleanup root")

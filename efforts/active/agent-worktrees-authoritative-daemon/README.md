@@ -1025,6 +1025,15 @@ contracts pass 206 with one platform skip; provider SSH contracts pass 28 with
 two platform skips. The older README and CLI descriptions now consistently
 state the mandatory current-authority/upgrade contract.
 
+A subsequent review alleged that the second of two owned read-only hardlinks
+fails against a stale cached count. The exact shared-cache callback sequence
+does not reproduce that claim: the last link has `st_nlink == 1` and skips the
+multi-link comparison. Native complete cleanup also passes with two, three
+and sixteen read-only hardlinks across separate directories; chmod clears
+the shared file's read-only attribute. The runner contract suite passes 62
+with one platform skip. Added these regressions without weakening ownership
+checks or inventing a counter change for an unobserved failure.
+
 ### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
 
 The existing authenticated status-monitor control endpoint now offers the
