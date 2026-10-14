@@ -17,19 +17,21 @@ from agent_worktrees import push_timeout
 @pytest.mark.guard
 @pytest.mark.parametrize("windows", [True, False])
 @pytest.mark.parametrize("outcome", ["success", "timeout", "error"])
-def test_captured_tree_launch_and_cleanup(monkeypatch, windows, outcome):
+@pytest.mark.parametrize("binary", [False, True])
+def test_captured_tree_launch_and_cleanup(monkeypatch, windows, outcome, binary):
     events = []
     launch = {}
     job = SimpleNamespace(close=lambda: events.append("job-close"))
     proc = SimpleNamespace(returncode=7)
 
-    def communicate(*, timeout):
+    def communicate(*, timeout, input=None):
+        assert input == (b"\0\xff" if binary and timeout == 0.5 else None)
         events.append(("communicate", timeout))
         if outcome == "timeout" and timeout == 0.5:
             raise subprocess.TimeoutExpired(["fixture"], timeout, "partial", "diagnostic")
         if outcome == "error":
             raise OSError("capture failed")
-        return "output", "error output"
+        return (b"output", b"error output") if binary else ("output", "error output")
 
     proc.communicate = communicate
 
@@ -44,24 +46,41 @@ def test_captured_tree_launch_and_cleanup(monkeypatch, windows, outcome):
     monkeypatch.setattr(push_timeout, "_kill_tree", lambda child: events.append("group-kill"))
     env = {"fixture": "value"}
     if outcome == "success":
-        result = push_timeout.run_bounded(["fixture"], cwd="workspace", env=env, timeout=0.5)
-        assert (result.returncode, result.stdout, result.stderr) == (7, "output", "error output")
+        result = push_timeout.run_bounded(
+            ["fixture"], cwd="workspace", env=env, timeout=0.5,
+            binary=binary, input=b"\0\xff" if binary else None,
+        )
+        assert (result.returncode, result.stdout, result.stderr) == (
+            (7, b"output", b"error output") if binary else (7, "output", "error output")
+        )
     elif outcome == "timeout":
         with pytest.raises(subprocess.TimeoutExpired) as raised:
-            push_timeout.run_bounded(["fixture"], cwd="workspace", env=env, timeout=0.5)
-        assert (raised.value.stdout, raised.value.stderr) == ("output", "error output")
+            push_timeout.run_bounded(
+                ["fixture"], cwd="workspace", env=env, timeout=0.5,
+                binary=binary, input=b"\0\xff" if binary else None,
+            )
+        assert (raised.value.stdout, raised.value.stderr) == (
+            (b"output", b"error output") if binary else ("output", "error output")
+        )
         assert events[1] == ("job-close" if windows else "group-kill")
         assert events[2] == ("communicate", 5)
     else:
         with pytest.raises(OSError, match="capture failed"):
-            push_timeout.run_bounded(["fixture"], cwd="workspace", env=env, timeout=0.5)
+            push_timeout.run_bounded(
+                ["fixture"], cwd="workspace", env=env, timeout=0.5,
+                binary=binary, input=b"\0\xff" if binary else None,
+            )
     assert launch["require_job"] is windows
     assert launch["allow_breakaway"] is False
     assert launch.get("headless", False) is windows
     assert launch.get("own_group", False) is not windows
     assert launch["env"] is env and launch["cwd"] == "workspace"
     assert launch["stdout"] == subprocess.PIPE and launch["stderr"] == subprocess.PIPE
-    assert launch["encoding"] == "utf-8" and launch["text"] is True
+    assert launch["text"] is not binary
+    if binary:
+        assert "encoding" not in launch and launch["stdin"] == subprocess.PIPE
+    else:
+        assert launch["encoding"] == "utf-8"
     if windows:
         assert events[-1] == "job-close"
         assert "group-kill" not in events

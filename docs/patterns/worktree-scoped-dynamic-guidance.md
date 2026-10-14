@@ -134,6 +134,11 @@ that preparation during `resolve`, then call
 `knowledge compose-plugins --prepare-projections` after their update/maintenance
 barrier, before mux or Copilot startup. SessionStart retains its asynchronous
 backup; it shares the same per-worktree publication lock and copy backend.
+Known failed paired allocation or composition leaves a pending marker in the
+worktree's existing Git-administrative guidance metadata. Both final preparation
+and the backup refuse publication while it remains. Successful paired
+composition clears it under the same publication gate; an unpaired no-op cannot
+clear a failed allocation. Explicit no-pair creation does not create the marker.
 Foreground preparation has no overall deadline. Explicitly bounded callers,
 including the backup, share their remaining budget across discovery and Git
 preflights and check it before publication mutations; operation-specific Git

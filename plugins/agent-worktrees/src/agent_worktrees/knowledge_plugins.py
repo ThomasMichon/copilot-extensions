@@ -750,13 +750,17 @@ def compose(
     _ensure_distinct_checkouts(harness, knowledge)
     output_path = harness / ".github" / "copilot" / "settings.local.json"
     with _overlay_transaction(output_path):
-        return _compose_locked(
+        summary = _compose_locked(
             harness,
             knowledge,
             pair_id=pair_id,
             pair_kind=pair_kind,
             legacy_knowledge_path=legacy_knowledge_path,
         )
+    from .local_cache_refresh import complete_pair_composition
+
+    complete_pair_composition(harness, summary)
+    return summary
 
 
 def _resolve_pair_state(
@@ -956,6 +960,9 @@ def compose_from_pair(
         # pairing stays valid; only the plugin overlay is retired/withheld.
         summary = _retire_disabled_overlay(pair.harness_path)
         summary["knowledge_repo"] = pair.knowledge_repo
+        from .local_cache_refresh import complete_pair_composition
+
+        complete_pair_composition(pair.harness_path, summary)
         return summary
 
     legacy_anchor: str | None = None

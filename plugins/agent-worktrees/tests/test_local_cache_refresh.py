@@ -264,6 +264,49 @@ def test_repository_ignore_negation_cannot_publish_unignored_files(copy_workspac
     assert not output.exists()
 
 
+def test_recursive_json_errors_remain_failed_diagnostics(copy_workspace, monkeypatch):
+    root, home = copy_workspace
+    provider(root, home)
+
+    def recursive_json(*args, **kwargs):
+        raise RecursionError("recursive JSON input")
+
+    monkeypatch.setattr(static.json, "loads", recursive_json)
+    result = lcr.refresh_local_cache(root)
+    assert result.status == "failed"
+    assert "recursive JSON input" in result.detail
+
+
+def test_pending_pair_blocks_final_noop_and_backup_without_cleanup(copy_workspace, monkeypatch, capsys):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    lcr.mark_pair_pending(root)
+    template.write_bytes(b"new source not yet publishable")
+    monkeypatch.setattr(context_cli, "_core_helper", lambda *a: lambda path: None)
+    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **kw: {"action": "no-op", "paired": False})
+    assert context_cli.cmd_knowledge_dispatch([
+        "compose-plugins", "--cwd", str(root), "--prepare-projections", "--json",
+    ]) == 3
+    assert json.loads(capsys.readouterr().out)["projections"]["status"] == "failed"
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert output.read_bytes() != template.read_bytes()
+    assert static.pair_pending_path(root).exists()
+
+
+def test_portable_unicode_and_internal_space_destinations_are_not_filtered(copy_workspace):
+    root, home = copy_workspace
+    template, _ = provider(root, home)
+    declaration = template.parents[1] / "instruction-projections.json"
+    data = json.loads(declaration.read_text())
+    data["projections"][0]["destination"] = ".github/instructions/demo/caf\u00e9 notes/body name.instructions.md"
+    write_json(declaration, data)
+    result = lcr.refresh_local_cache(root)
+    assert result.status == "ready", result.diagnostic
+    output = root / static.NAMESPACE / "market" / "demo" / "caf\u00e9 notes" / "body name.local.instructions.md"
+    assert output.read_bytes() == template.read_bytes()
+
+
 def test_user_directory_marketplace_is_relative_to_copilot_settings(copy_workspace):
     root, home = copy_workspace
     template, _ = provider(root, home)
@@ -286,6 +329,8 @@ def test_user_directory_marketplace_is_relative_to_copilot_settings(copy_workspa
 
 
 def test_each_git_operation_uses_only_remaining_explicit_budget(tmp_path, monkeypatch):
+    from agent_worktrees import push_timeout
+
     clock = [100.0]
     timeouts = []
     monkeypatch.setattr(static, "time", SimpleNamespace(monotonic=lambda: clock[0]))
@@ -295,7 +340,7 @@ def test_each_git_operation_uses_only_remaining_explicit_budget(tmp_path, monkey
         clock[0] += 2
         return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
 
-    monkeypatch.setattr(static.subprocess, "run", run)
+    monkeypatch.setattr(push_timeout, "run_bounded", run)
     static._git(tmp_path, "ls-files", deadline=105)
     static._git(tmp_path, "diff", deadline=105)
     assert timeouts == [5, 3]
@@ -324,10 +369,13 @@ def test_expired_late_preflight_never_starts_copy(copy_workspace, monkeypatch, p
     assert not output.exists()
 
 
-def test_real_knowledge_only_provider_copied_after_composition(copy_workspace, tmp_path, capsys):
+@pytest.mark.parametrize("pending_pair", [False, True])
+def test_real_knowledge_only_provider_copied_after_composition(copy_workspace, tmp_path, capsys, pending_pair):
     harness, home = copy_workspace
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
+    if pending_pair:
+        lcr.mark_pair_pending(harness)
     template, _ = provider(knowledge, home)
     # A real local marketplace carried only by the knowledge checkout.
     plugin = template.parents[1]
@@ -342,6 +390,8 @@ def test_real_knowledge_only_provider_copied_after_composition(copy_workspace, t
         "enabledPlugins": {"demo@private": True},
         "extraKnownMarketplaces": {"private": {"source": {"source": "directory", "path": "./.ai"}}},
     })
+    if pending_pair:
+        knowledge_plugins.compose(harness, knowledge, pair_id="repaired-pair", pair_kind="worktree")
     assert context_cli.cmd_knowledge_dispatch([
         "compose-plugins", "--harness-path", str(harness),
         "--knowledge-path", str(knowledge), "--prepare-projections", "--json",
@@ -350,6 +400,7 @@ def test_real_knowledge_only_provider_copied_after_composition(copy_workspace, t
     assert summary["projections"]["changed"] == 1
     output = harness / static.NAMESPACE / "private" / "demo" / "fallback.local.instructions.md"
     assert output.read_bytes() == template.read_bytes()
+    assert not static.pair_pending_path(harness).exists()
 
 
 @pytest.mark.parametrize("deferred", [False, True])
@@ -390,6 +441,7 @@ def test_interactive_base_prepares_before_emitting_direct_plan(tmp_path, monkeyp
     assert events == (["plan"] if deferred or dry_run else ["copy", "plan"])
 
 
+@pytest.mark.guard
 def test_launcher_deferral_and_final_batch_order():
     root = Path(__file__).resolve().parents[3]
     for name, defer, final, mux in (

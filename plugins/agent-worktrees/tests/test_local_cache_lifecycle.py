@@ -239,8 +239,9 @@ class TestCreateWiring:
     @pytest.mark.parametrize("no_pair", [False, True])
     @pytest.mark.parametrize("deferred", [False, True])
     @pytest.mark.parametrize("recovery", [False, True])
+    @pytest.mark.parametrize("pair_failure", [False, True])
     def test_create_refreshes_the_local_cache_for_the_new_worktree(
-        self, tmp_path: Path, monkeypatch, no_pair, deferred, recovery,
+        self, tmp_path: Path, monkeypatch, no_pair, deferred, recovery, pair_failure,
     ) -> None:
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda name=None: tmp_path / "tracking")
         monkeypatch.setattr(m.permissions, "clone_permissions", lambda *a: False)
@@ -265,7 +266,14 @@ class TestCreateWiring:
 
         calls = []
         monkeypatch.setattr(m, "_paired_knowledge_allocation_preflight", lambda config: None)
-        monkeypatch.setattr(m, "_carve_paired_knowledge", lambda *a, **kw: calls.append("pair") or {})
+        def carve(*a, **kw):
+            calls.append("pair")
+            if pair_failure:
+                raise OSError("pair allocation failed")
+            return {}
+
+        monkeypatch.setattr(m, "_carve_paired_knowledge", carve)
+        monkeypatch.setattr(lcr, "mark_pair_pending", lambda root: calls.append("pair-pending"))
         monkeypatch.setattr(
             m, "_stamp_and_compose_paired_knowledge",
             lambda *a, **kw: calls.append("compose") or {"action": "composed"},
@@ -281,7 +289,8 @@ class TestCreateWiring:
 
         assert calls == (
             ([] if no_pair else ["pair", "compose"])
-            + ([] if deferred else [result["worktree"]["path"]])
+            + (["pair-pending"] if pair_failure and not no_pair else [])
+            + ([] if deferred or pair_failure and not no_pair else [result["worktree"]["path"]])
         )
 
 

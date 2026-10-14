@@ -130,7 +130,7 @@ for explicit selection, compatibility and lifecycle fences.
 
 ## Captured child ownership
 
-Bounded Git publication and local-guidance discovery/rendering use a headless
+Bounded Git publication and static-guidance Git preflights use a headless
 captured child on Windows, assigned to a kill-on-close Job before execution.
 Job admission failure is explicit; there is no detached fallback. Timeout or
 caller exit reaps descendants while preserving captured diagnostics.
@@ -138,6 +138,24 @@ Explicit descendant escape is prevented by this bounded Job; durable-service
 launchers retain the shared helper's permissive default outside this seam.
 POSIX retains its process-group timeout cleanup. This is not a durable-daemon
 launch or an interactive terminal.
+
+## Static instruction preparation
+
+Startup copies every declared instruction unchanged in process, after applicable
+worktree allocation and complete paired-plugin composition. The outer launchers
+defer resolve-time copies and run
+`knowledge compose-plugins --prepare-projections` after maintenance, before
+starting Copilot. No packaged projection engine or authoring plugin is required.
+Generated instructions live under the ignored
+`.github/instructions/agent-worktrees-generated/` namespace; tracked and staged
+paths are protected before any batch copy or cleanup.
+
+A failed paired allocation retains a small pending marker in this worktree's
+existing Git-administrative guidance metadata. Both the final preflight and hook
+backup refuse partial publication until successful paired composition clears
+that marker. Explicit no-pair creation does not set it. Existing worktree
+identities and checked-in guidance remain usable; pair repair is separate from
+static copying.
 
 ## PowerShell post-tool hook
 

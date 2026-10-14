@@ -910,6 +910,8 @@ def _create_worktree_core(
             composition_ready = composition_ready and (
                 not composition or composition.get("action") != "error"
             )
+        if not composition_ready:
+            local_cache_refresh.mark_pair_pending(worktree_path)
         if not defer_projections and composition_ready:
             local_cache_refresh.prepare_for_launch(worktree_path)
         result = {"worktree": core._worktree_to_dict(record)}

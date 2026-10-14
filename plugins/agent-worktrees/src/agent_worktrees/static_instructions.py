@@ -6,19 +6,20 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import stat
-import subprocess
 import tempfile
 import time
 
 from plugin_resolve import (
     PLUGIN_MANIFEST_RELS, SETTINGS_RELS, load_marketplace, plugin_dir, split_source,
 )
-from agent_procutil import no_window_kwargs
 
 NAMESPACE = ".github/instructions/agent-worktrees-generated"
-_COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+_RESERVED_NAMES = {
+    "con", "prn", "aux", "nul",
+    *(f"com{index}" for index in range(1, 10)),
+    *(f"lpt{index}" for index in range(1, 10)),
+}
 
 
 def _remaining(deadline: float | None, ceiling: float | None = None) -> float | None:
@@ -49,7 +50,12 @@ def _optional_object(path: Path) -> dict | None:
 
 
 def _component(value: object) -> str:
-    if not isinstance(value, str) or not _COMPONENT.fullmatch(value) or value.endswith("."):
+    if (
+        not isinstance(value, str) or not value or value in (".", "..")
+        or value.endswith((" ", "."))
+        or any(ord(character) < 32 or character in '<>:"/\\|?*' for character in value)
+        or value.split(".", 1)[0].casefold() in _RESERVED_NAMES
+    ):
         raise ValueError(f"invalid instruction path component: {value!r}")
     return value
 
@@ -188,11 +194,12 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
 def _git(
     root: Path, *args: str, input: bytes | None = None, deadline: float | None = None,
 ) -> bytes:
-    result = subprocess.run(
-        ["git", "-C", str(root), *args], input=input, capture_output=True,
+    from .push_timeout import run_bounded
+
+    result = run_bounded(
+        ["git", "-C", str(root), *args], cwd=None, input=input, binary=True,
         timeout=_remaining(deadline, 15.0),
         env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
-        **no_window_kwargs(),
     )
     if result.returncode:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
@@ -202,6 +209,23 @@ def _git(
 
 def _walk_error(error: OSError) -> None:
     raise error
+
+
+def pair_pending_path(root: Path) -> Path:
+    from .local_cache_worker import metadata_directory
+
+    directory = metadata_directory(root)
+    if directory is None:
+        raise ValueError("cannot resolve Git metadata for pending paired preparation")
+    return directory / "pair-pending"
+
+
+def publication_lock(root: Path, *, deadline: float | None = None):
+    from .tracking import _RecordLock
+
+    digest = hashlib.sha256(os.fsencode(os.path.normcase(str(root)))).hexdigest()
+    lock = Path(tempfile.gettempdir()) / "agent-worktrees" / "static-instructions" / digest
+    return _RecordLock(lock, timeout=_remaining(deadline, 30.0), require_sidecar=True)
 
 
 def _safe_path(root: Path, path: Path) -> None:
@@ -221,11 +245,13 @@ def _safe_path(root: Path, path: Path) -> None:
 
 def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[int, int, int]:
     """Resolve inside the publication lock; preflight the whole set before copying."""
-    from .tracking import _RecordLock
-
-    digest = hashlib.sha256(os.fsencode(os.path.normcase(str(root)))).hexdigest()
-    lock = Path(tempfile.gettempdir()) / "agent-worktrees" / "static-instructions" / digest
-    with _RecordLock(lock, timeout=_remaining(deadline, 30.0), require_sidecar=True):
+    with publication_lock(root, deadline=deadline):
+        try:
+            pair_pending_path(root).lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValueError("paired worktree preparation is incomplete; repair the pair before publishing instructions")
         desired = _snapshot(root, home, deadline=deadline)
         output = root / NAMESPACE
         _safe_path(root, output)

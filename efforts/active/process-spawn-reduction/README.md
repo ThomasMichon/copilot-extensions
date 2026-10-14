@@ -332,6 +332,25 @@ single-final-batch contract.
   deadline-free. Late-preflight expiry and exact remaining-child-budget cases
   pass. Final focused source/native selection: 202 passed / 1 unavailable-symlink
   skip, with unchanged test limits.
+- Third review found a deferred carve failure could lose its incomplete-pair
+  state before final preflight. Failed allocation/composition now marks pending
+  preparation in the existing Git-administrative guidance directory, under the
+  same publication gate. Final preflight, direct refresh and hook backup all
+  refuse partial publication; successful paired composition clears the marker
+  for every caller. No-pair creation remains unaffected. Real marker/output
+  tests cover unpaired no-op retention and repaired paired composition.
+- Aligned destination components with canonical portable-path rules, including
+  Unicode and internal spaces, without importing the authoring manager.
+  `RecursionError` already falls under the retained `RuntimeError` diagnostic
+  boundary; an explicit regression verifies that failure remains reported, not
+  thrown into create/resume. The structural ordering test is now a fast guard.
+- Retained captured-child ownership for the new Git preflights through the
+  existing bounded runner, adding opaque bytes/stdin support rather than a
+  separate process wrapper. Native consoleless-parent proof covers binary
+  round-trip, required Job admission, timeout descendants and no new visible
+  windows or foreground transitions. Final expanded contained source/native/
+  Git/deadline selection: 380 passed / 1 unavailable-symlink skip in 162.93s.
+  Headless, lint, install and documentation guards pass without budget changes.
 
 ### 2026-10-14 - Declarations decide static publication
 

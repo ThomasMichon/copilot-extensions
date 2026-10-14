@@ -53,6 +53,31 @@ def _checkout_root(path: str | Path) -> Path:
     return candidate
 
 
+def mark_pair_pending(repo_root: str | Path) -> None:
+    from .static_instructions import pair_pending_path, publication_lock
+
+    root = _checkout_root(repo_root).resolve()
+    with publication_lock(root):
+        marker = pair_pending_path(root)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+
+
+def complete_pair_composition(repo_root: str | Path, summary: dict) -> None:
+    if not summary.get("paired") or summary.get("action") not in ("composed", "disabled"):
+        return
+    root = Path(repo_root).resolve()
+    if not (root / ".git").exists():
+        return
+    from .static_instructions import pair_pending_path, publication_lock
+
+    marker = pair_pending_path(root)
+    if not marker.exists():
+        return
+    with publication_lock(root):
+        marker.unlink(missing_ok=True)
+
+
 def prepare_for_launch(
     repo_root: str | Path, *, dry_run: bool = False,
     compose_pair: bool = False, config: Config | None = None,
