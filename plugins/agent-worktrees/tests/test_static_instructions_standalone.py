@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -78,6 +79,89 @@ def test_standalone_module_copies_without_projection_engine(standalone_workspace
     assert not (home / ".copilot" / "installed-plugins" / "example" / "customizing-copilot").exists()
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux" or not hasattr(os, "pidfd_open"),
+    reason="native Linux process-group and identity-safe cleanup unavailable",
+)
+@pytest.mark.parametrize("failure", ["cancellation", "operation-timeout"])
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_manager_reaps_foreground_git_descendants(tmp_path, failure):
+    import importlib.util
+    import signal
+
+    root = Path(__file__).resolve().parents[3]
+    spec = importlib.util.spec_from_file_location(
+        "engine_posix_process", root / "worktree-manager/src/worktree_manager/engine_posix_process.py",
+    )
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    receipt = tmp_path / "descendants.json"
+    fixture = (
+        "import json,os,pathlib,subprocess,sys,time; "
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(12)']); "
+        "pathlib.Path(sys.argv[1]).write_text(json.dumps({"
+        "'group':os.getpgrp(),'members':[(pid,pathlib.Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()[19]) "
+        "for pid in (os.getpid(),child.pid)]})); time.sleep(12)"
+    )
+    driver = (
+        "import pathlib,sys; "
+        "from agent_worktrees import static_instructions as s,push_timeout as p; "
+        "original=p.run_bounded\n"
+        "def run(cmd,**kwargs):\n"
+        " assert kwargs['inherit_process_group'] is True\n"
+        " return original([sys.executable,'-c',sys.argv[1],sys.argv[2]],**kwargs)\n"
+        "p.run_bounded=run\n"
+        "s._remaining=lambda deadline,ceiling=None:1\n"
+        "s._git(pathlib.Path.cwd(),'status')\n"
+        "raise AssertionError('timed-out foreground operation continued')\n"
+    )
+    env = dict(os.environ, WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP="1")
+    env["PYTHONPATH"] = str(root / "plugins/agent-worktrees/src")
+    members = []
+
+    def live(pid, started):
+        try:
+            fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+        except FileNotFoundError:
+            return False
+        return fields[19] == started and fields[0] != "Z"
+
+    try:
+        args = [sys.executable, "-c", driver, fixture, str(receipt)]
+        if failure == "cancellation":
+            with pytest.raises(subprocess.TimeoutExpired):
+                owner.run(args, env=env, timeout=0.8)
+        else:
+            result = owner.run(args, env=env, timeout=10)
+            assert result.returncode != 0
+        data = json.loads(receipt.read_text())
+        members = data["members"]
+        assert data["group"] not in (os.getpgrp(), *(pid for pid, _ in members))
+        until = time.monotonic() + 2
+        while True:
+            alive = [pid for pid, started in members if live(pid, started)]
+            if not alive or time.monotonic() >= until:
+                break
+            time.sleep(0.02)
+        assert not alive, "foreground Git descendants escaped the Manager owner"
+    finally:
+        if not members and receipt.exists():
+            members = json.loads(receipt.read_text())["members"]
+        for pid, started in members:
+            try:
+                descriptor = os.pidfd_open(pid)
+            except ProcessLookupError:
+                pass
+            else:
+                try:
+                    if live(pid, started):
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                finally:
+                    os.close(descriptor)
+
+
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
@@ -143,6 +227,7 @@ def test_native_final_preflight_copies_knowledge_only_provider(
             "resolve_runtime_python() { printf '%s' \"$PYTHON\"; }\n"
             "setup_log() { shift; local prefix='Knowledge plugin preflight completed: ';\n"
             f" if [[ \"$1\" == \"$prefix\"* ]]; then printf '%s' \"${{1#\"$prefix\"}}\" > '{bash_path(executable, report)}'; fi\n"
+            " printf '%s\\n' \"$1\" >&2\n"
             "}\n" + source[function_start:function_end] + "\n" + block
         )
         command = [executable, "-c", script]

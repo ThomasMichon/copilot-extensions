@@ -149,6 +149,11 @@ starting Copilot. No packaged projection engine or authoring plugin is required.
 Generated instructions live under the ignored
 `.github/instructions/agent-worktrees-generated/` namespace; tracked and staged
 paths are protected before any batch copy or cleanup.
+Inputs must be regular files; a FIFO or other nonregular input fails before it
+can block the in-process publisher. On POSIX, foreground Git preflights retain
+the Manager's owned group. An operation timeout exits that preparation so the
+outer owner reaps remaining descendants before the launcher can continue.
+Bounded backup workers keep independent process-group ownership.
 
 Failed paired allocation or composition retains a small pending marker in this
 worktree's existing Git-administrative guidance metadata. Both the final preflight and hook

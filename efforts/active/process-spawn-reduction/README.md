@@ -273,6 +273,19 @@ single-final-batch contract.
 
 ### 2026-10-14 - In-process startup copy implementation
 
+- Final review rejects nonregular settings, declarations, templates and exclude
+  inputs before opening them, without inspecting instruction content. Declaration
+  versions must be integers; malformed boolean/float versions cannot authorize
+  stale cleanup. Foreground POSIX Git keeps the Manager-owned group; a Git
+  operation timeout exits preparation so the outer owner can reap descendants
+  before continuation. Backups retain independent ownership and existing bounds.
+  Focused source/native/Git/deadline selection: 432 passed / 7 skips in 181.59s
+  under unchanged limits. Skips cover unavailable symlinks, POSIX FIFOs and native
+  Linux identity-safe cancellation/timeout proof on this Windows host. Those
+  native cases are checked in for supported CI. One preceding Bash native run
+  failed transiently; standalone rerun and the final combined run passed, with
+  fixture diagnostics retained rather than hidden. Installed deployment proof
+  remains pending promotion; no external Linux execution is claimed.
 - Implemented the declaration-driven contract reviewed in #6676. Startup now
   copies opaque template bytes in process into the dedicated ignored
   `agent-worktrees-generated` namespace, preserving declared nested destinations.

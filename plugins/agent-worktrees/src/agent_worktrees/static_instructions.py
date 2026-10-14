@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import tempfile
 import time
 import unicodedata
@@ -40,8 +41,14 @@ def _remaining(deadline: float | None, ceiling: float | None = None) -> float | 
     return min(remaining, ceiling) if ceiling is not None else remaining
 
 
+def _read_regular_bytes(path: Path) -> bytes:
+    if not stat.S_ISREG(path.stat().st_mode):
+        raise ValueError(f"instruction input is not a regular file: {path}")
+    return path.read_bytes()
+
+
 def _object(path: Path, *, jsonc_header: bool = False) -> dict:
-    raw = path.read_text(encoding="utf-8-sig")
+    raw = _read_regular_bytes(path).decode("utf-8-sig")
     if jsonc_header:
         _, raw = _split_jsonc_header(raw)
     value = json.loads(raw, object_pairs_hook=_reject_duplicates)
@@ -169,7 +176,8 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
             continue
         if (
             data.get("schema") != "copilot-extensions.instruction-projections"
-            or data.get("version") != 1 or not isinstance(data.get("projections"), list)
+            or type(data.get("version")) is not int or data["version"] != 1
+            or not isinstance(data.get("projections"), list)
         ):
             raise ValueError(f"invalid instruction declarations: {declaration}")
         for entry in data["projections"]:
@@ -207,7 +215,7 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
             if any(key == previous or key.startswith(previous + "/") or previous.startswith(key + "/") for previous in folded):
                 raise ValueError(f"colliding instruction destination: {relative}")
             folded.add(key)
-            result[relative] = source.read_bytes()
+            result[relative] = _read_regular_bytes(source)
     _remaining(deadline)
     return result
 
@@ -222,11 +230,24 @@ def _git(
         key: value for key, value in repository_identity_env().items()
         if key.upper() not in _PATHSPEC_ENV
     }
-    result = run_bounded(
-        ["git", "-C", str(root), *args], cwd=None, input=input, binary=True,
-        timeout=_remaining(deadline, 15.0),
-        env=env,
+    owned_group = (
+        deadline is None and os.name != "nt"
+        and os.environ.get("WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP") == "1"
     )
+    try:
+        result = run_bounded(
+            ["git", "-C", str(root), *args], cwd=None, input=input, binary=True,
+            timeout=_remaining(deadline, 15.0), env=env,
+            inherit_process_group=owned_group,
+        )
+    except subprocess.TimeoutExpired as exc:
+        if owned_group:
+            # Only the outer owner can sweep this shared group safely.
+            raise SystemExit(
+                "instruction Git preflight timed out; exiting Manager preparation "
+                "so its owner can reap remaining descendants"
+            ) from exc
+        raise
     if result.returncode:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
         raise ValueError(f"instruction Git preflight {' '.join(args)} failed ({result.returncode}): {detail}")
@@ -320,7 +341,7 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
         if not exclude.is_absolute():
             exclude = root / exclude
         rule = f"/{NAMESPACE}/"
-        previous = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        previous = _read_regular_bytes(exclude).decode("utf-8") if exclude.exists() else ""
         if rule not in previous.splitlines():
             _remaining(deadline)
             exclude.parent.mkdir(parents=True, exist_ok=True)
@@ -350,7 +371,7 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
         for relative, content in desired.items():
             _remaining(deadline)
             path = output / relative
-            if path.exists() and path.read_bytes() == content:
+            if path.exists() and _read_regular_bytes(path) == content:
                 unchanged += 1
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)

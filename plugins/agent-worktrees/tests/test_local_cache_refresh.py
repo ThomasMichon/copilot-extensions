@@ -3,7 +3,9 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import threading
 import time
@@ -178,6 +180,127 @@ def test_incomplete_discovery_never_removes_existing_output(copy_workspace, faul
         write_json(declaration, data)
     assert lcr.refresh_local_cache(root).status == "failed"
     assert output.exists()
+
+
+@pytest.mark.parametrize("version", [True, 1.0])
+def test_invalid_declaration_version_preserves_previous_output(copy_workspace, version):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    previous = output.read_bytes()
+    declaration = template.parents[1] / "instruction-projections.json"
+    data = json.loads(declaration.read_text())
+    data.update(version=version, projections=[])
+    write_json(declaration, data)
+    result = lcr.refresh_local_cache(root)
+    assert result.status == "failed"
+    assert "invalid instruction declarations" in result.detail
+    assert output.read_bytes() == previous
+
+
+@pytest.mark.parametrize("kind", ["settings", "declaration", "template", "exclude", "output"])
+def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, kind):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    paths = {
+        "settings": root / ".github" / "copilot" / "settings.json",
+        "declaration": template.parents[1] / "instruction-projections.json",
+        "template": template,
+        "exclude": root / ".git" / "info" / "exclude",
+        "output": output,
+    }
+    target = paths[kind]
+    original_stat, original_read = Path.stat, Path.read_bytes
+
+    def file_stat(path, *args, **kwargs):
+        value = original_stat(path, *args, **kwargs)
+        if path == target:
+            return os.stat_result((stat.S_IFIFO | 0o600, *value[1:]))
+        return value
+
+    def read_bytes(path):
+        assert path != target, "opened a nonregular input"
+        return original_read(path)
+
+    monkeypatch.setattr(Path, "stat", file_stat)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    result = lcr.refresh_local_cache(root)
+    assert result.status == "failed"
+    assert "not a regular file" in result.detail
+    assert original_read(output) == original_read(template)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native POSIX FIFO unavailable")
+@pytest.mark.parametrize("kind", ["settings", "declaration", "template", "exclude"])
+def test_fifo_input_fails_without_waiting_for_a_writer(copy_workspace, kind):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    target = {
+        "settings": root / ".github" / "copilot" / "settings.json",
+        "declaration": template.parents[1] / "instruction-projections.json",
+        "template": template,
+        "exclude": root / ".git" / "info" / "exclude",
+    }[kind]
+    previous = output.read_bytes()
+    target.unlink()
+    os.mkfifo(target)
+    result = lcr.refresh_local_cache(root)
+    assert result.status == "failed"
+    assert "not a regular file" in result.detail
+    assert output.read_bytes() == previous
+
+
+@pytest.mark.parametrize(
+    ("platform", "flag", "bounded", "expected"),
+    [
+        ("posix", "1", False, True),
+        ("posix", "1", True, False),
+        ("posix", None, False, False),
+        ("nt", "1", False, False),
+    ],
+)
+def test_git_retains_only_foreground_manager_process_group(
+    tmp_path, monkeypatch, platform, flag, bounded, expected,
+):
+    from agent_worktrees import push_timeout
+
+    calls = []
+    fake_os = SimpleNamespace(name=platform, environ=dict(os.environ))
+    if flag is None:
+        fake_os.environ.pop("WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP", None)
+    else:
+        fake_os.environ["WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP"] = flag
+    monkeypatch.setattr(static, "os", fake_os)
+
+    def run(cmd, **kwargs):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, b"result", b"")
+
+    monkeypatch.setattr(push_timeout, "run_bounded", run)
+    deadline = time.monotonic() + 30 if bounded else None
+    assert static._git(tmp_path, "status", deadline=deadline) == b"result"
+    assert calls[0]["inherit_process_group"] is expected
+    assert 0 < calls[0]["timeout"] <= 15
+
+
+@pytest.mark.parametrize("owned", [False, True])
+def test_git_timeout_cannot_continue_inside_manager_group(tmp_path, monkeypatch, owned):
+    from agent_worktrees import push_timeout
+
+    monkeypatch.setattr(static, "os", SimpleNamespace(
+        name="posix",
+        environ={"WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP": "1"} if owned else {},
+    ))
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired("git", 15)
+
+    monkeypatch.setattr(push_timeout, "run_bounded", timeout)
+    expected = SystemExit if owned else subprocess.TimeoutExpired
+    with pytest.raises(expected):
+        static._git(tmp_path, "status")
 
 
 def test_linked_output_is_refused(copy_workspace):
