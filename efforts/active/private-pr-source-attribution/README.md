@@ -124,6 +124,13 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
   automation origins, manual repair guidance and silent operator-only
   exception in [dev-pr-enforcement.md](dev-pr-enforcement.md) (#6295).
 
+### Phase 6 — Standardized configured-vault setup
+
+- [ ] Review and deliver the reusable local-agent setup/status/verification
+  contract in [standardized-vault-setup.md](standardized-vault-setup.md).
+  An existing configured agent-vault KeePass database is the starting point;
+  private adopter scripts and remote transport are not required.
+
 ## Validation Plan
 
 - [x] Root identity round trips from a multi-repo ownership chain while public
