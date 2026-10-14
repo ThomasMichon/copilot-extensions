@@ -57,6 +57,98 @@ def creation_rig(rig, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing_read", [1, 2])
+@pytest.mark.parametrize("projected", [False, True])
+async def test_missing_workspace_observation_retains_allocation_for_exact_replay(
+    creation_rig, monkeypatch, missing_read, projected,
+):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+    reads = 0
+
+    async def lagging_owner(args, project):
+        nonlocal reads
+        result = await command(args, project)
+        if args[0] == "list":
+            reads += 1
+            if reads == missing_read:
+                result["worktrees"] = []
+            if projected:
+                result["projection"] = {"quality": "current"}
+        return result
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", lagging_owner)
+    with pytest.raises(AcquisitionRefused) as refused:
+        await workspace_creation.start(
+            rig.manager, rig.target, key="logical-work", prompt="Do the work",
+        )
+    assert refused.value.code == "workspace_identity_unknown"
+    saved = rig.db.execute_read("SELECT state,session_id,worktree_json FROM workspace_embodiments")[0]
+    assert saved["state"] == "allocated"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    session, receipt = await workspace_creation.start(
+        rig.manager, rig.target, key="logical-work", prompt="Do the work",
+    )
+    assert session.session_id == saved["session_id"]
+    assert receipt["worktree"]["id"] == rig.row["id"]
+    assert receipt["native_session_id"] == rig.head["id"]
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert len(rig.manager.list_sessions()) == len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"projection": {"quality": "advisory"}},
+        {"projection": {"quality": "current"}, "availability": {"status": "stale"}},
+        {"projection": {}},
+        {"projection": "invalid"},
+    ],
+)
+async def test_noncurrent_workspace_observation_cannot_launch_or_terminalize(
+    creation_rig, monkeypatch, metadata,
+):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+
+    async def stale_owner(args, project):
+        result = await command(args, project)
+        if args[0] == "list":
+            result.update(metadata)
+        return result
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", stale_owner)
+    for _ in range(2):
+        with pytest.raises(AcquisitionRefused) as refused:
+            await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+        assert refused.value.code == "workspace_identity_unknown"
+    assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "allocated"
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    assert not any(args[0] == "head-session" for args, _ in rig.calls)
+
+
+@pytest.mark.asyncio
+async def test_known_terminal_workspace_still_permanently_refuses_replay(creation_rig):
+    rig = creation_rig
+    rig.row["status"] = "finalized"
+    for _ in range(2):
+        with pytest.raises(AcquisitionRefused) as refused:
+            await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+        assert refused.value.code == "creation_terminal"
+    assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "terminal"
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
 async def test_exact_lost_response_replay_keeps_workspace_session_and_turn(creation_rig):
     rig = creation_rig
     first, result = await workspace_creation.start(

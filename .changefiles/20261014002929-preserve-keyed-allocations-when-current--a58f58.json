@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve keyed allocations when current-roster observation is missing or advisory; never infer permanent terminal disposal from projected absence",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

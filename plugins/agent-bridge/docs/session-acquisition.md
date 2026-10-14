@@ -51,6 +51,13 @@ replays only the ground owner's same key; ambiguous native start requires
 reconciliation of the recorded session, never another `session/new`.
 Changed facts conflict. Removed/retired workspace or native results refuse,
 not fresh-create. Standalone embodiment grants no task/claim authority.
+An absent workspace observation does not prove disposal: a resident roster can
+precede the ground allocation. Missing rows and advisory, stale or malformed
+projection observations explicitly refuse while retaining the same allocation
+and creation key for reconciliation. They never permanently terminalize it or
+authorize another create. A positively observed terminal workspace or retired
+native result still permanently refuses replay. Previously terminalized
+journals are not automatically reopened by this rule.
 The qualified caller worktree, not its current session fragment, qualifies
 ownership facts, matching ground allocation across a caller restart.
 
