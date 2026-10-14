@@ -540,3 +540,28 @@ requested contract.
   The coupled recovery/conclusion portfolio passed 107 tests. This is a source
   correction only; adopter release, migration, live validation and schema
   custody gates remain open.
+
+- **Rebased integration validation remains open (PR #6542):** The category and
+  recovery client mixins now compose, with shared error re-exports retained.
+  The bounded cleanup/native-consumer portfolio passed 20 cases and ordinary
+  completion/category compatibility passed two. The additional native category
+  fixture timed out at its second CLI list call under the existing 30-second
+  item budget. Its original leader/descendant and socket evidence was not
+  retained, so the cause remains unproven, separate from the earlier Git timeout
+  tracked on #6471. One observation-only, unchanged-budget reproduction passed
+  in 24.79 seconds: the second leader and Python child stayed live until a
+  successful request, then exited with complete stdio and no descendants. That
+  reproduction does not settle the original failed gate. The exact pre-rebase
+  source does not contain this category fixture; the runner has no alternate-ref
+  execution mode, so a same-test comparison against that source is unavailable
+  without synthesizing a different baseline.
+  The category owner corroborated earlier second-list timeouts and the already
+  integrated smoke reduction to four native startups (commit `2d7c6f30b8`,
+  evidence comment `6153092854` on PR #6543). Its earlier unchanged-budget pass
+  retained neither original process nor socket instrumentation and does not
+  clear this integration gate or establish a cause. No additional fixture
+  reduction is proposed by the cleanup owner.
+  - [ ] Integration coordinator and category owner: resolve the original native
+    category failure's disposition before accepting the integrated source and
+    normally publishing PR #6542. No timeout increase, fixture change, accepted
+    flake exception or publication bypass has been taken.
