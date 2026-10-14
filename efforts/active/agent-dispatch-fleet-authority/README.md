@@ -344,6 +344,13 @@ recorded against each open fork._
   at 7m5s. Extend only that job's overall allowance to nine minutes, retaining
   each selected diagnostic/wrapper/payload/fleet step's own limit. This
   remains part of #6733; the required aggregate is not waived.
+- Run 38625257770 completed the bounded jobs but correctly failed both
+  platform payload-CWD scope checks: their independent contract still
+  expected the old seven-minute Windows aggregate. Update that coupled
+  assertion to nine while preserving Linux's five-minute bound, exact path
+  selection, native selectors and required aggregate membership.
+- All affected post-CI, installation-context scope and payload-CWD scope
+  contracts passed together: 115 native tests, plus touched-code lint.
 
 ### 2026-10-14 -- Trusted renewal and private credential-file boundary
 - Added control-only `POST /tasks/{id}/task-grant` and
