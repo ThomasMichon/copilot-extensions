@@ -489,3 +489,8 @@ not to the vision. This effort does not acquire or migrate live capacity.
   validation must prove a signed but unselected release leaves state untouched.
   The minimal SQLite row retains that supplied decision's identity and digest,
   without adding a selector, ledger framework or runtime behavior before review.
+- Re-review confirmed the selection finding resolved and identified one useful
+  low-severity omission in the construction follow-on. The plan now names the
+  established client-closure/API/data-schema compatibility gate before execution
+  and activation, with an incompatible-candidate refusal case that preserves
+  the prior active client/configuration and the monotonic admission floor.

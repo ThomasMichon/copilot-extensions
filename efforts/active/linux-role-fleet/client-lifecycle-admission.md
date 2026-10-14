@@ -101,8 +101,11 @@ running as the same OS principal; do not claim that threat boundary.
 After the admission slice passes, construct only from authenticated immutable
 snapshots into a separately owned canonical candidate slot. Pin construction
 and retention using the existing primitive, recheck policy/identity immediately
-before execution, and bind completion markers to actual candidate bytes and
-the installation receipt. Never execute from the ephemeral stage.
+before execution, enforce the selected client closure's API/data-schema
+compatibility against explicit target configuration and retained state, and bind
+completion markers to actual candidate bytes and the installation receipt.
+Revalidate compatibility before activation; authentication and candidate health
+are not compatibility evidence. Never execute from the ephemeral stage.
 
 Prove the installed client's real console entry point and local diagnostics
 outside the checkout without starting a hosting role. Publication is a separate
@@ -135,9 +138,12 @@ possible reinstall require their own tested generation/fencing contract.
   binds the same selected intent rather than choosing a replacement.
 - Construction follow-on: actual independently signed artifacts, immutable
   snapshot consumption, fresh installed wheel/client, failed build and failed
-  health, retry/recovery, live held leases, preserved user config and no server
-  effects. Native Windows and Linux are required; first-touch clean-room and
-  an available real external venue remain distinct evidence tiers.
+  health, incompatible client closure/API/data-schema refusal before execution
+  or activation, retry/recovery, live held leases, preserved user config and no
+  server effects. Incompatibility preserves the prior active client/configuration
+  and does not lower durable admission. Native Windows and Linux are required;
+  first-touch clean-room and an available real external venue remain distinct
+  evidence tiers.
 - Activation/removal follow-on: real selector and attributed registration
   ownership, retained-good recovery, current policy revalidation, foreign
   content refusal and explicit uncertainty. Capture every skipped evidence
