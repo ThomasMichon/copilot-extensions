@@ -98,6 +98,41 @@ def test_current_incompatible_and_malformed_rows_fail_explicitly(value):
         parse_current_rows(value)
 
 
+@pytest.mark.parametrize("frame", [None, [], [1], "invalid", 1, True])
+@pytest.mark.parametrize("started", [False, True])
+def test_current_snapshot_rejects_non_object_frames_explicitly(frame, started):
+    snapshot = CurrentSnapshot()
+    if started:
+        owner = envelope([{"id": "one"}])
+        snapshot.receive({
+            "type": "begin", "contract_version": 1, "projection": owner["projection"],
+            "selected_count": 1,
+        })
+    with pytest.raises(TypeError, match="non-object frame"):
+        snapshot.receive(frame)
+    assert snapshot._rows == []
+    assert snapshot._complete is False
+
+
+def test_current_snapshot_loader_reports_non_object_decode_instead_of_dying(monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+    source = data_ssh.Source("peer", "Linux", [], alias="peer", shell="bash")
+    loader = data_ssh.LiveLoader([source])
+    process = SimpleNamespace(
+        stdout=iter(["[]\n"]), returncode=0, communicate=lambda **kwargs: ("", ""),
+    )
+    monkeypatch.setattr(loader, "_spawn_stream", lambda argv: process)
+    monkeypatch.setattr(data_ssh, "_parse_ndjson_line", json.loads)
+    assert loader._load_remote_stream(source, 0) is True
+    assert loader.state_for_source(source.source_id) == "failed"
+    assert "non-object frame" in loader.error_for_source(source.source_id)
+    assert loader.records_for_source(source.source_id) == []
+
+
 def test_current_snapshot_commits_only_after_its_complete_publication():
     owner = envelope([{"id": "one"}, {"id": "two"}])
     snapshot = CurrentSnapshot()

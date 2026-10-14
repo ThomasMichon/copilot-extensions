@@ -132,6 +132,8 @@ class CurrentSnapshot:
         self._complete = False
 
     def receive(self, frame: dict) -> list[dict] | None:
+        if not isinstance(frame, dict):
+            raise TypeError("current-roster stream emitted a non-object frame")
         kind = frame.get("type")
         if kind == "begin":
             if self._begin is not None:

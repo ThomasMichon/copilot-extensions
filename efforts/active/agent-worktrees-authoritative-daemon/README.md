@@ -1053,6 +1053,12 @@ The detail card no longer promises a provider error after closing when the
 quiet background contract cannot deliver one. Its existing visible failure
 state remains explicit; 50 detail/current-roster/feed cases pass.
 
+Snapshot admission now explicitly rejects non-object decoded frames before
+field access. Scalar/array cases before and inside a publication barrier, plus
+the actual one-shot loader error path, verify a visible failed source rather
+than an uncaught thread exception. The current-roster/feed/SSH selection passes
+171 cases with one platform skip.
+
 ### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
 
 The existing authenticated status-monitor control endpoint now offers the
