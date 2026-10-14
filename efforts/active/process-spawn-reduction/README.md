@@ -190,8 +190,9 @@ registration remain unchanged.
   transitions; deliberate interactive launch semantics are unchanged.
 - [ ] Release/deploy behavior is verified after caller cleanup, not inferred
   from merged PRs or updated payload versions.
-- [ ] Startup order tests prove no projection before paired allocation and
-  final combined settings, and exactly one final batch for each cold launch.
+- [ ] Startup order tests prove no projection before all applicable allocations
+  and final combined settings, and exactly one final batch for each cold launch.
+  No-pair launches require only their own allocation, not a knowledge sibling.
 - [ ] A plugin enabled only by the paired knowledge worktree appears in the
   actual resulting projection, not just in a mocked call-order assertion.
 - [ ] Direct create/resolve, cold Resume, no-pair/recovery and Windows/POSIX
