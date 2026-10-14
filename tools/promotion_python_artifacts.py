@@ -732,12 +732,10 @@ def validate_composed_artifacts(
     source_policy: str | None = None, min_age_days: int | None = None,
 ) -> dict:
     """Validate a composed index through its canonical checkout representation."""
-    import promote_release as promotion
-
     with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
         candidate = Path(temporary).resolve()
-        promotion._git(
-            ["checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
+        _run(
+            ["git", "checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
         )
         return validate_artifacts(
             directory, content_tree=content_tree,

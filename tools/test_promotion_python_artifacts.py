@@ -8,6 +8,7 @@ import io
 import inspect
 import json
 import os
+import runpy
 import shutil
 import stat
 import subprocess
@@ -845,6 +846,35 @@ def test_missing_artifacts_fail_before_candidate_push(repo, tmp_path, monkeypatc
             candidate_branch="release/test", python_artifacts_dir=tmp_path / "missing",
         )
     assert not pushes
+
+
+def test_promoter_script_reports_canonical_checkout_failure(repo, tmp_path, monkeypatch, capsys):
+    _git(["checkout", "-q", "dev"], repo)
+    _fake_builder(repo, monkeypatch)
+    _commit(repo, "candidate")
+    directory = tmp_path / "export"
+    promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
+    )
+    run = subprocess.run
+
+    def fail_checkout(argv, *args, **kwargs):
+        if argv[0] == "git" and "checkout-index" in argv:
+            return subprocess.CompletedProcess(argv, 128, "", "forced canonical checkout failure")
+        return run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fail_checkout)
+    monkeypatch.setattr(sys, "argv", [
+        str(promotion.__file__), "--repo", str(repo), "--dev-ref", "dev",
+        "--main-ref", "main", "--python-artifacts-dir", str(directory),
+    ])
+    with pytest.raises(SystemExit) as exited:
+        runpy.run_path(str(promotion.__file__), run_name="__main__")
+    assert exited.value.code == 1
+    captured = capsys.readouterr()
+    assert "forced canonical checkout failure" in captured.err
+    assert "Traceback" not in captured.out + captured.err
+    assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
 def test_noop_does_not_build_or_require_artifacts(repo, tmp_path):
