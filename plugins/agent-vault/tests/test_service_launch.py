@@ -80,3 +80,29 @@ def test_unset_home_override_stays_unset(monkeypatch, tmp_path):
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
     assert config.HOME_ENV not in seen["env_overrides"]
+
+
+def test_relative_path_overrides_are_passed_resolved(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launch, "service_root", lambda: tmp_path / "root")
+    relative = {
+        config.CONFIG_ENV: "settings.json", config.RUN_DIR_ENV: "run",
+        config.PID_ENV: "vault.pid", config.LOG_ENV: "vault.log", config.SOCKET_ENV: "vault.sock",
+    }
+    for name, value in relative.items():
+        monkeypatch.setenv(name, value)
+    seen: dict = {}
+    monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
+    launch.spawn_service(["--foreground"])
+    for name, value in relative.items():
+        assert seen["env_overrides"][name] == str(tmp_path / value)
+
+
+def test_unset_path_overrides_stay_unset(monkeypatch, tmp_path):
+    for name in launch._PATH_OVERRIDES:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(launch, "service_root", lambda: tmp_path)
+    seen: dict = {}
+    monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
+    launch.spawn_service(["--foreground"])
+    assert not set(launch._PATH_OVERRIDES) & set(seen["env_overrides"])

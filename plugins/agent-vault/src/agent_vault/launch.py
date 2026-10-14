@@ -17,6 +17,9 @@ from agent_procutil import spawn_daemon, windowless_python, windowless_python_en
 from . import config
 
 SERVICE_STDIO_LOG = "service-stdio.log"
+_PATH_OVERRIDES = (
+    config.CONFIG_ENV, config.RUN_DIR_ENV, config.PID_ENV, config.LOG_ENV, config.SOCKET_ENV,
+)
 
 
 def service_root() -> Path:
@@ -40,11 +43,16 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
     python = sys.executable
     root = service_root()
     overrides = dict(windowless_python_env(python))
+    # The child runs from ``root``: a relative path override would resolve a
+    # second time there, apart from the clients' copy. Pass each one resolved
+    # against the caller's cwd; unset ones stay unset (the home override's
+    # presence selects the cache location).
     if os.environ.get(config.HOME_ENV):
-        # The child runs from ``root``: a relative override would resolve a
-        # second time there. Left unset otherwise (its presence selects the
-        # cache location).
         overrides[config.HOME_ENV] = str(root)
+    for name in _PATH_OVERRIDES:
+        value = os.environ.get(name)
+        if value:
+            overrides[name] = os.path.abspath(value)
     return spawn_daemon(
         [windowless_python(python), "-m", "agent_vault.service", *args],
         cwd=root,
