@@ -397,6 +397,8 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         ("nonzero", "cannot read committed authority"),
         ("absent", "committed authority config is absent"),
         ("remote_error", "cannot verify committed authority ref"),
+        ("head_error", "cannot resolve committed authority HEAD"),
+        ("head_malformed", "committed authority HEAD is malformed"),
     ],
 )
 def test_registration_authority_fails_closed_when_committed_config_is_unreadable(
@@ -440,6 +442,15 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
     def failed_git(*_args, **kwargs):
         assert kwargs["isolated_repository"] is True
         assert "timeout" not in kwargs
+        if _args[0] == "symbolic-ref":
+            if failure == "head_error":
+                return SimpleNamespace(returncode=128, stdout="")
+            if failure == "head_malformed":
+                return SimpleNamespace(returncode=0, stdout="refs/tags/main\n")
+            if failure == "absent":
+                return SimpleNamespace(
+                    returncode=0, stdout="refs/remotes/origin/main\n",
+                )
         if failure == "remote_error" and _args[0] == "show-ref":
             return SimpleNamespace(returncode=2, stdout="")
         if failure == "absent":

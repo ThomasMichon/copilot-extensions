@@ -112,8 +112,19 @@ def _load_state_root_authority(
         f"refs/remotes/{remote_name}/"
         if remote_name else "refs/heads/"
     )
-    ref = head.stdout.strip() if head.returncode == 0 else ""
-    branch = ref[len(prefix):] if ref.startswith(prefix) else ""
+    if head.returncode == 0:
+        ref = head.stdout.strip()
+        if not ref.startswith(prefix) or not ref[len(prefix):]:
+            raise ValueError(
+                f"committed authority HEAD is malformed for project {name!r}"
+            )
+        branch = ref[len(prefix):]
+    elif head.returncode == 1:
+        branch = ""
+    else:
+        raise ValueError(
+            f"cannot resolve committed authority HEAD for project {name!r}"
+        )
     if not branch:
         entry = repos.read_registry().repos.get(name)
         branch = entry.default_branch if entry is not None else ""
