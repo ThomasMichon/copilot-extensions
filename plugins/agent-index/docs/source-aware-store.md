@@ -43,6 +43,14 @@ Concurrent participating processes refuse busy access; they do not use PID
 or an idle-status snapshot as authority. Marker replacement never replaces
 the lock file. A missing lock on an initialized domain fails closed.
 
+HTTP `/status`, including `?sources=true`, holds that same read guard across
+table inventory, counts and the optional source histogram. A refused domain
+returns explicit unknown inventory (`available: null`, `chunks: null`, empty
+tables/sources and a `SourceLayoutError` diagnostic), never measured-empty
+counts or an available index. Status does not initialize tables, repair receipts
+or build indexes. Legacy unselected status measurement and lazy optional-store
+imports are unchanged.
+
 **This does not fence older immutable binaries that do not implement the
 protocol.** Deployment must allocate an isolated new directory and allow only
 participating new binaries to access it. Do not mount an incumbent volume,
