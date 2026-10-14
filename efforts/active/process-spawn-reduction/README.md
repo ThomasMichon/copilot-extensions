@@ -167,6 +167,43 @@ small and explicit while unit policy tests remain in-process.
 
 ## Journal
 
+### 2026-10-13 - Real listing workload and request-budget boundary
+
+- #6498 merged after exact-head Copilot approval with zero open findings and
+  successful required CI. #6459 also merged. Normal generated `main` still
+  excludes both source slices; neither the collection claim nor the parent
+  campaign is complete. No deployment was inferred from those merges.
+- Measured source `34301ec39c4c1983c3797576b47a34643b65bd72` through a contained
+  native listing fixture: real YAML records/config, production session scan
+  and renderer, four non-mux-detail shapes, warm loop, classify IPC and Git.
+  Classifier fallback was explicitly refused; clocks and request budgets were
+  not changed. Fixture setup and Git commits are outside the pass counts.
+- One divergent record used 9 Git starts and one read-only `psmux` start in
+  each of two unchanged passes (1.068/1.102 seconds). Four records used 33 Git
+  starts and one `psmux` start (3.565/3.669 seconds). After a dirty edit, the
+  next pass rendered Dirty and used 6/30 Git starts for one/four records,
+  respectively. These are direct Popen-boundary counts, not sampled estimates.
+- The earlier eight-Git fixture modeled its config/render/session surfaces.
+  This real consumer includes one committed-config `symbolic-ref` probe per
+  pass in addition to eight Git starts per clean divergent record. It also
+  includes the production active-path `list-sessions` query even without
+  `--mux-details`: that is a real read of the host mux, not an isolated mux
+  fixture or a modeled zero-child result. No host mux/session mutation ran.
+- At eight divergent records, the first request did not complete without the
+  ordinary classifier fallback. The strict diagnostic failed after 6.291
+  seconds, with 65 Git starts and one `psmux` start observed by that boundary.
+  This is excluded from successful native-consumer proof. It identifies a
+  workload-size/request-budget constraint for the next coalescing slice, not
+  authority to enlarge deadlines or discard correctness fallback.
+- Measurements exclude the full monitor lifecycle/sweep, installed-runtime
+  execution, peak descendants and stationary host-wide improvement. No
+  broad workload or lifecycle checklist item is marked complete from them.
+- The normal promotion gates changed while this work resumed: index and
+  full plugin validation passed in run 38502638232, but publication then
+  refused `manifest payload hash differs from candidate`, already tracked
+  in #6535. No forced release, integrity bypass, competing repair PR or
+  workflow retry was attempted.
+
 ### 2026-10-13 - Explicit native shell admission
 
 - Claimed #6087 after checking for an existing owner and competing PR.
