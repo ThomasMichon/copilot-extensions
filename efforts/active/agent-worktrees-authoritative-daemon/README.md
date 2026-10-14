@@ -1044,6 +1044,15 @@ adds exactly one held-feed flag. The full current-feed/current-roster/SSH-source
 selection passes 158 with one platform skip; whole-tree Ruff and all 29 changed
 source-module ceilings pass. This is source evidence, not deployed SSH proof.
 
+The producer failure boundary now marks every ordinary exception stale before
+re-raising to the monitor's logging boundary, including SQLite operational and
+lookup failures formerly outside its explicit exception tuple. Real owner
+serialization/publication tests retain the last-good row and notify held
+readers of the same failure; 54 producer/runtime/projection cases pass.
+The detail card no longer promises a provider error after closing when the
+quiet background contract cannot deliver one. Its existing visible failure
+state remains explicit; 50 detail/current-roster/feed cases pass.
+
 ### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
 
 The existing authenticated status-monitor control endpoint now offers the

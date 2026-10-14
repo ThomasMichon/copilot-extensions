@@ -1,6 +1,9 @@
 """The resident enrolls existing facts once, without admitting growing ledgers."""
 
 import json
+import sqlite3
+
+import pytest
 
 from agent_worktrees import __main__ as core
 from agent_worktrees import git_ops, reclaim, sessions, tracking
@@ -8,7 +11,10 @@ from agent_worktrees import worktrees_producer as producer
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
 
-def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", [None, sqlite3.OperationalError, KeyError])
+def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
+    tmp_path, monkeypatch, failure,
+):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     (checkout / ".git").write_text("gitdir: fixture")
@@ -62,4 +68,28 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(tmp_
     assert len(row["claims_links"]) <= 8 and "resources" not in row
     assert row["checkout_present"] is True
     assert row["fact_provenance"]["git"]["quality"] == "current"
+    if failure is not None:
+        error = failure("fixture producer publication failure")
+        stream = owner.feed.stream({"contract_version": 1, "project": "project"}, lambda: False)
+        try:
+            for frame in stream:
+                if frame["type"] == "done":
+                    break
+
+            def fail_publish(*args, **kwargs):
+                raise error
+
+            monkeypatch.setattr(owner.store, "publish", fail_publish)
+            with pytest.raises(failure) as raised:
+                producer.publish_active_project(owner)
+            assert raised.value is error
+            stale = owner.handle({"contract_version": 1, "project": "project"})
+            assert stale["worktrees"] == [row]
+            assert stale["projection"] == result["projection"]
+            assert stale["availability"] == {"status": "stale", "reason": str(error)}
+            notice = next(stream)
+            assert notice["type"] == "availability"
+            assert notice["availability"] == stale["availability"]
+        finally:
+            stream.close()
     owner.shutdown()

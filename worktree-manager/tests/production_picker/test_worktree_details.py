@@ -51,6 +51,7 @@ def test_worktree_details_opens_before_full_claim_io_and_surfaces_result(failed)
             await pilot.pause()
             body = screen._body().plain
             assert ("inspection failed" in body) if failed else ("last-child" in body)
+            assert "close to see the provider error" not in body
             assert rec["asset_hints"]["details"] == []
             assert rec["asset_hints"]["held_count"] == 1100
 

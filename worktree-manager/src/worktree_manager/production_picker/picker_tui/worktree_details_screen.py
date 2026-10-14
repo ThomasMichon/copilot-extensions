@@ -56,7 +56,7 @@ class WtDetailsScreen(ModalScreen[None]):
                 return
             self._loading = False
             if result is None:
-                self._error = "Full claim inspection failed; close to see the provider error."
+                self._error = "Full claim inspection failed."
             else:
                 self._details = result
             self.query_one("#details-content", Static).update(self._body())

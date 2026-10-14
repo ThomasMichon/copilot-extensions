@@ -13,7 +13,7 @@ def publish_active_project(runtime) -> int:
     project = cfg.project_name()
     try:
         return _publish_active_project(runtime, project)
-    except (OSError, ValueError, RuntimeError, TypeError) as exc:
+    except Exception as exc:
         runtime.publication_failed(project, exc)
         raise
 
