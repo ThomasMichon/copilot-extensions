@@ -181,8 +181,11 @@ Lifecycle operations use serialized admission and a finite positive completion
 budget. Late
 I/O or worker startup is not reported as successful completion or reopened
 mutation admission. Partially started workers remain attributable to the owner
-for cleanup/retry. The installation transaction, exact-instance control and
-retirement, writer-lease handoff, crash journal and governed installer activation
+for cleanup/retry. Activation's terminal-state recheck and worker-stop clearing
+are atomic with shutdown and close, so a terminal acknowledgement cannot be
+followed by activation erasing the stop signal. Invalid close budgets are
+rejected before changing owner state. The installation transaction,
+exact-instance control and retirement, writer-lease handoff, crash journal and governed installer activation
 remain the adopter's separate obligations.
 
 ## Current constraint

@@ -360,13 +360,14 @@ def test_final_persistence_failure_is_not_successful_quiescence(make, monkeypatc
     assert daemon.compute("health", {})["persistence_error"] == "state_write_failed"
 
 
-@pytest.mark.parametrize("operation", ["quiesce", "reload_state", "resume_effects"])
+@pytest.mark.parametrize("operation", ["quiesce", "reload_state", "resume_effects", "close"])
 @pytest.mark.parametrize("timeout", [0, -1, True, "1", float("nan"), float("inf")])
 def test_invalid_lifecycle_budget_refuses_before_changing_owner(make, operation, timeout):
     daemon = make()
     with pytest.raises(ValueError, match="finite positive"):
         getattr(daemon, operation)(timeout=timeout)
     assert daemon._accepting_mutations and not daemon._shutdown_event.is_set()
+    assert not daemon._lifecycle_shutdown_event.is_set()
     assert not subscriptions_path().exists()
 
 
@@ -443,6 +444,64 @@ def test_late_worker_start_keeps_mutation_admission_closed(make, monkeypatch):
             daemon.resume_effects(timeout=1)
     assert not daemon._accepting_mutations and not daemon.quiescent
     assert daemon.compute("register", registration("late"))["retryable"] is True
+
+
+@pytest.mark.parametrize("terminal", ["shutdown", "close"])
+def test_terminal_request_during_resume_cannot_restart_worker_effects(
+    make, monkeypatch, terminal,
+):
+    daemon = make()
+    daemon._deliveries.resume()
+    daemon.quiesce(timeout=1)
+    scheduler = daemon._deliveries.scheduler
+    paused, proceed = threading.Event(), threading.Event()
+    joined = scheduler.join
+    resume = daemon._deliveries.resume
+    effects, resumed, resume_errors, closed, close_errors = [], [], [], [], []
+    first_join = True
+
+    def join_before_clear(timeout=None):
+        nonlocal first_join
+        joined(timeout)
+        if first_join:
+            first_join = False
+            paused.set()
+            assert proceed.wait(3)
+
+    def observe_effect_start():
+        if daemon._lifecycle_shutdown_event.is_set():
+            effects.append("activation after terminal request")
+        return resume()
+
+    monkeypatch.setattr(scheduler, "join", join_before_clear)
+    monkeypatch.setattr(daemon._deliveries, "resume", observe_effect_start)
+    activation = threading.Thread(target=invoke, args=(
+        lambda: daemon.resume_effects(timeout=2), resumed, resume_errors,
+    ))
+    cleanup = None
+    activation.start()
+    try:
+        assert paused.wait(2)
+        if terminal == "shutdown":
+            assert daemon.compute("shutdown", {}) == {"shutting_down": True}
+        else:
+            cleanup = threading.Thread(target=invoke, args=(
+                lambda: daemon.close(timeout=2), closed, close_errors,
+            ))
+            cleanup.start()
+            wait(daemon._lifecycle_shutdown_event.is_set)
+    finally:
+        proceed.set()
+        activation.join(timeout=3)
+        if cleanup is not None:
+            cleanup.join(timeout=3)
+    assert not activation.is_alive() and resumed == []
+    assert len(resume_errors) == 1 and isinstance(resume_errors[0], RuntimeError)
+    assert effects == [] and daemon._shutdown_event.is_set()
+    assert not daemon._accepting_mutations and not scheduler.is_alive()
+    assert not any(thread.is_alive() for thread in daemon._pollers.values())
+    if cleanup is not None:
+        assert not cleanup.is_alive() and closed == [None] and close_errors == []
 
 
 def test_competing_lifecycle_request_has_a_bounded_wait_without_reopening_owner(make):

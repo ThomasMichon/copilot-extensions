@@ -378,9 +378,12 @@ class WatchDaemon:
                     scheduler.join(max(0.0, deadline - time.monotonic()))
                     if scheduler.is_alive():
                         raise TimeoutError("PR watch delivery scheduler did not stop")
-            self._check_lifecycle_deadline(deadline)
-            self._quiescent = False
-            self._shutdown_event.clear()
+            with self._admission:
+                self._check_lifecycle_deadline(deadline)
+                if self._lifecycle_shutdown_event.is_set():
+                    raise RuntimeError("PR watch owner is shutting down")
+                self._quiescent = False
+                self._shutdown_event.clear()
             self._deliveries.resume()
             for key in self._registry.active_keys():
                 self._check_lifecycle_deadline(deadline)
@@ -393,7 +396,11 @@ class WatchDaemon:
 
     def close(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
         """Stop polling and join in-flight ticks without discarding subscriptions."""
-        self._lifecycle_shutdown_event.set()
+        positive_seconds(timeout)
+        with self._admission:
+            self._accepting_mutations = False
+            self._lifecycle_shutdown_event.set()
+            self._shutdown_event.set()
         with self._lifecycle_operation(timeout) as deadline:
             self._close_mutation_admission(deadline)
             self._stop_workers(deadline, bounded=False)
