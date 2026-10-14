@@ -528,9 +528,11 @@ def _daemon_problems(problems):
      "    sp.Popen(['svc'], **detached_kwargs())\nimport subprocess as sp\n"),
     ("from agent_procutil import detached_kwargs\ndef start():\n"
      "    P(['svc'], **detached_kwargs())\nfrom subprocess import Popen as P\n"),
+    ("import subprocess\nfrom agent_procutil import detached_kwargs as daemon_flags\n"
+     "def start():\n    subprocess.Popen(['svc'], **daemon_flags())\n"),
 ], ids=[
     "kwargs-update", "attribute-helper-in-method", "imported-popen-alias", "module-alias",
-    "module-alias-imported-after-use", "popen-alias-imported-after-use",
+    "module-alias-imported-after-use", "popen-alias-imported-after-use", "aliased-detach-helper",
 ])
 def test_hand_rolled_detached_popen_is_flagged(repo, body):
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
@@ -635,3 +637,18 @@ def test_enclosing_function_alias_reaches_a_nested_function(repo):
     )
     problems = _daemon_problems(guard.verify())
     assert len(problems) == 1 and "outer.inner" in problems[0]
+
+def test_inline_allowance_never_consumes_a_baseline_entry(repo):
+    one_shot = "    subprocess.Popen(['waiter'], **detached_kwargs())  # daemon-spawn: allow waiter\n"
+    resident = "    subprocess.Popen(['svc'], **detached_kwargs())\n"
+    head = "import subprocess\nfrom agent_procutil import detached_kwargs\ndef start():\n"
+    key = "plugins/agent-daemon/src/agent_daemon/mod.py::start"
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=head + one_shot + resident)
+    _write_daemon_allow(repo, f"{key}  resident daemon, migration pending\n")
+    assert _daemon_problems(guard.verify()) == []
+    # Once the resident launch is gone, the inline-allowed one can't keep the
+    # entry alive: it is reported stale.
+    module = repo / "plugins" / "agent-daemon" / "src" / "agent_daemon" / "mod.py"
+    module.write_text(head + one_shot, encoding="utf-8")
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "stale entry" in problems[0]

@@ -301,19 +301,23 @@ def _own_scope_nodes(node: ast.AST):
         pending.extend(ast.iter_child_nodes(sub))
 
 
-def _subprocess_aliases(scope: ast.AST) -> tuple[set[str], set[str]]:
-    """(module aliases, ``Popen`` aliases) imported in ``scope``'s own body."""
+def _subprocess_aliases(scope: ast.AST) -> tuple[set[str], set[str], set[str]]:
+    """(``subprocess`` aliases, ``Popen`` aliases, detach-helper aliases)
+    imported in ``scope``'s own body."""
     modules: set[str] = set()
     popens: set[str] = set()
+    helpers: set[str] = set()
     for node in _own_scope_nodes(scope):
         if isinstance(node, ast.Import):
             modules.update(a.asname for a in node.names if a.name == "subprocess" and a.asname)
-        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-            popens.update(a.asname or a.name for a in node.names if a.name == "Popen")
-    return modules, popens
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "subprocess":
+                popens.update(a.asname or a.name for a in node.names if a.name == "Popen")
+            helpers.update(a.asname for a in node.names if a.name in _DETACH_HELPERS and a.asname)
+    return modules, popens, helpers
 
 
-def _calls_detach_helper(node: ast.AST) -> bool:
+def _calls_detach_helper(node: ast.AST, helpers: frozenset[str] = _DETACH_HELPERS) -> bool:
     """Whether ``node``'s own scope calls a detach helper.
 
     Nested function and class bodies are separate scopes and are not searched,
@@ -323,7 +327,7 @@ def _calls_detach_helper(node: ast.AST) -> bool:
         if isinstance(sub, ast.Call):
             func = sub.func
             name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-            if name in _DETACH_HELPERS:
+            if name in helpers:
                 return True
     return False
 
@@ -338,8 +342,10 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
         # Aliases per lexical scope, each indexed before its body is visited (a
         # function may precede the import it uses); a function sees its own and
         # its enclosing functions' imports, never a sibling's.
-        modules, popens = _subprocess_aliases(tree)
-        self._alias_stack: list[tuple[set[str], set[str]]] = [({"subprocess", *modules}, popens)]
+        modules, popens, helpers = _subprocess_aliases(tree)
+        self._alias_stack: list[tuple[set[str], set[str], set[str]]] = [
+            ({"subprocess", *modules}, popens, {*_DETACH_HELPERS, *helpers})
+        ]
 
     def _scoped(self, node: ast.AST, *, func: bool) -> None:
         self._names.append(node.name)  # type: ignore[attr-defined]
@@ -365,6 +371,7 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
         func = node.func
         modules = set().union(*(scope[0] for scope in self._alias_stack))
         popens = set().union(*(scope[1] for scope in self._alias_stack))
+        helpers = frozenset().union(*(scope[2] for scope in self._alias_stack))
         is_popen = (
             (isinstance(func, ast.Attribute) and func.attr == "Popen"
              and isinstance(func.value, ast.Name) and func.value.id in modules)
@@ -372,7 +379,8 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
         )
         scope = self._funcs[-1] if self._funcs else None
         if is_popen and (
-            _calls_detach_helper(node) or (scope is not None and _calls_detach_helper(scope))
+            _calls_detach_helper(node, helpers)
+            or (scope is not None and _calls_detach_helper(scope, helpers))
         ):
             self.hits.append((node.lineno, ".".join(self._names) or "<module>"))
         self.generic_visit(node)
@@ -744,10 +752,11 @@ def verify() -> list[str]:
             rel = f.relative_to(REPO).as_posix()
             for lineno, qualname in detached.get(f, []):
                 key = f"{rel}::{qualname}"
+                # An inline allowance never consumes a baseline entry.
+                if _allowed(lines, lineno, _DAEMON_ALLOW):
+                    continue
                 if unmatched[key] > 0:
                     unmatched[key] -= 1
-                    continue
-                if _allowed(lines, lineno, _DAEMON_ALLOW):
                     continue
                 problems.append(
                     f"{rel}:{lineno}: hand-rolled detached Popen in {qualname} -- launch a "
