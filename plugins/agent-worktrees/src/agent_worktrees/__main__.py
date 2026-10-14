@@ -4471,6 +4471,7 @@ def reap_one(
     include_unused: bool = False,
     include_conversations: bool = False,
     reconcile_prs: bool = False,
+    automatic: bool = False,
 ) -> dict:
     """Reap a single worktree by ID and return a JSON-ready result dict.
 
@@ -4480,11 +4481,7 @@ def reap_one(
     result-returning core shared by the ``cleanup --worktree-id`` CLI and the
     picker's in-process local Cleanup executor.
     """
-    # Stage D: _revalidate_cleanup_safety's real implementation lives in
-    # cleanup_gc_cli (which itself calls back into this function via
-    # `_core_helper`); importing it directly here -- instead of the bare
-    # global name only bound during `_load_full_command_surface()` -- is
-    # what lets `cleanup`/`gc` (cleanup_gc_cli) stay cluster-free.
+    # Import the owner directly so cleanup stays cluster-free.
     from . import cleanup_gc_cli as _cleanup_gc_cli
 
     _revalidate_cleanup_safety = _self_override("_revalidate_cleanup_safety", _cleanup_gc_cli._revalidate_cleanup_safety)
@@ -4618,6 +4615,7 @@ def reap_one(
             force=force,
             include_unused=include_unused,
             include_conversations=include_conversations,
+            **({"automatic": True} if automatic else {}),
             reap=lambda latest, fresh_info: _reap_worktree(
                 latest, fresh_info, repo, tracking_path),
         )

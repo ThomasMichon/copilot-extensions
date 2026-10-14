@@ -222,7 +222,7 @@ async def test_actual_resolver_environment_credentials_are_redacted_locally_and_
         returncode=7,
         communicate=AsyncMock(return_value=(stdout.encode(), stderr.encode())),
     )
-    with patch("agent_bridge.transport._agent_worktrees_python", return_value="python"), \
+    with patch("agent_bridge.transport._agent_worktrees_launch_prefix", return_value=["owner-command"]), \
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
         with pytest.raises(RuntimeError, match="exit 7") as local:
             await _resolve_worktree(
@@ -307,7 +307,7 @@ async def test_local_and_remote_report_identical_structured_failure():
         returncode=7,
         communicate=AsyncMock(return_value=(stdout.encode(), stderr.encode())),
     )
-    with patch("agent_bridge.transport._agent_worktrees_python", return_value="python"), \
+    with patch("agent_bridge.transport._agent_worktrees_launch_prefix", return_value=["owner-command"]), \
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
         with pytest.raises(RuntimeError, match="exit 7") as local:
             await _resolve_worktree(SpawnTarget(type="local", project="project"), {})

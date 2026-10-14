@@ -54,6 +54,37 @@ protocol-30 task-bound CLI/ACP acquisition, native identity verification and
 durable retry reconciliation. Local dispatch launch callers use it; remote/
 fleet migration and native integration proof remain in the Phase 6 effort.
 
+### Workspace command ownership
+
+Local managed-project transport resolves new or retained workspaces through the
+same owner execution boundary as acquisition and handoff checks. Same-cell
+installations validate the Worktrees peer and invoke its canonical resolver;
+legacy installations use the installed owner's completed-runtime resolver.
+Bridge never treats its own `AGENT_RT_ROOT` as a sibling runtime, adds a sibling
+package to its interpreter, or injects a sibling source directory on `PYTHONPATH`.
+The owner receives the exact project/worktree and caller ownership metadata.
+An unavailable or refused owner fails managed launch before a worker starts.
+Zero-turn cleanup likewise addresses only the session's exact worktree through
+that boundary using `cleanup --worktree-id <id> --automatic --include-unused`.
+The owner rechecks dispatch provenance under its record lock: pending/retrying
+allocations remain for owner conclusion, and concluded managed worktrees retain
+their managed-GC route. An older owner that does not support automatic mode
+refuses cleanup; bridge never retries without the protection.
+
+An existing-checkout CodeSpace command target is a separate provider-owned
+workspace, not a request to allocate a local managed worktree. Its spawn spec
+and persisted resume target retain the provider command and remote workspace
+without requiring Worktrees. CodeSpace claim, launch-policy, provenance and
+session-ownership checks still apply; standalone routing does not waive them.
+
+The contained `test_transport_owner_boundary` subprocess proof can additionally
+exercise the real Worktrees cleanup harness by setting
+`COPILOT_EXTENSIONS_WORKTREE_OWNER_TEST_PYTHON` to an independently prepared
+Worktrees test interpreter. That optional lane runs the production bridge
+zero-turn callback against the owner's actual parser, record locks and cleanup
+decision. Pending/retrying and ordinary-unused cases intercept every removal;
+neither plugin is imported into its sibling's interpreter.
+
 ## Single-Instance Guard
 
 At most **one daemon may run per config dir + port**. On startup (`_cmd_start` in
