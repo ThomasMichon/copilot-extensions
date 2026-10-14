@@ -17,16 +17,13 @@ def recorded_spawns(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize(("windows", "expected"), [
-    (True, ["--tcp-port", "4242", "--foreground"]),
-    (False, ["--tcp-port", "4242"]),
-])
-def test_start_service_launches_through_spawn_service(
-    monkeypatch, recorded_spawns, windows, expected
-):
+@pytest.mark.parametrize("windows", [True, False])
+def test_start_service_launches_through_spawn_service(monkeypatch, recorded_spawns, windows):
     monkeypatch.setattr(cli, "IS_WINDOWS", windows)
     assert cli.start_service(4242) is True
-    assert recorded_spawns == [expected]
+    # Always in the foreground: spawn_daemon already detached it, and POSIX's
+    # self-daemonize would move it to HOME with its output on /dev/null.
+    assert recorded_spawns == [["--tcp-port", "4242", "--foreground"]]
 
 
 def test_windows_self_daemonize_launches_through_spawn_service(monkeypatch):

@@ -10,7 +10,6 @@ import socket
 import socketserver
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -349,13 +348,14 @@ MONITOR_LOG_NAME = "status-monitor.log"
 def monitor_log_path(cwd: str) -> Path:
     """Where a resident monitor generation appends its stdout/stderr.
 
-    ``<install root>/logs/status-monitor.log``; when the install root is not
-    materialized yet (the daemon then runs from HOME), the temp directory, so
-    the fallback never litters the home directory.
+    ``<install root>/logs/status-monitor.log``. When the install root is not
+    materialized yet the daemon runs from HOME; its log is then a hidden file
+    in that (owner-only) directory, never a predictable name in a shared temp
+    directory that another user could pre-create.
     """
     home = os.path.normcase(os.path.expanduser("~"))
     if os.path.normcase(os.path.abspath(cwd)) == home:
-        return Path(tempfile.gettempdir()).absolute() / f"agent-worktrees-{MONITOR_LOG_NAME}"
+        return Path(os.path.abspath(cwd)) / f".agent-worktrees-{MONITOR_LOG_NAME}"
     return Path(os.path.abspath(cwd)) / "logs" / MONITOR_LOG_NAME
 
 

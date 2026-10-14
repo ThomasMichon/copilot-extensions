@@ -521,7 +521,10 @@ def _daemon_problems(problems):
      "        subprocess.Popen(['svc'], **core.windowless_daemon_kwargs(breakaway=True))\n"),
     ("from subprocess import Popen as P\nfrom agent_procutil import detached_kwargs\n"
      "def start():\n    P(['svc'], **detached_kwargs())\n"),
-], ids=["kwargs-update", "attribute-helper-in-method", "imported-popen-alias"])
+    ("from agent_procutil import windowless_daemon_kwargs\ndef start():\n"
+     "    import subprocess as _subprocess\n"
+     "    _subprocess.Popen(['svc'], **windowless_daemon_kwargs(breakaway=True))\n"),
+], ids=["kwargs-update", "attribute-helper-in-method", "imported-popen-alias", "module-alias"])
 def test_hand_rolled_detached_popen_is_flagged(repo, body):
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
     problems = _daemon_problems(guard.verify())

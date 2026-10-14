@@ -6,9 +6,7 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -132,11 +130,11 @@ def test_posix_passive_monitor_is_a_detached_daemon(tmp_path, monkeypatch):
     assert captured["log_path"] == tmp_path / "logs" / "status-monitor.log"
 
 
-def test_monitor_log_never_lands_in_the_home_directory(monkeypatch, tmp_path):
+def test_monitor_log_never_lands_in_a_shared_temp_directory(monkeypatch, tmp_path):
     monkeypatch.setattr(cutover.os.path, "expanduser", lambda _p: str(tmp_path))
     path = cutover.monitor_log_path(str(tmp_path))
-    assert path.parent == Path(tempfile.gettempdir()).absolute()
-    assert path.name.endswith("status-monitor.log")
+    assert path.parent == tmp_path
+    assert path.name == ".agent-worktrees-status-monitor.log"
 
 
 @pytest.mark.parametrize("passive", [False, True])

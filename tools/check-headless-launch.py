@@ -307,6 +307,12 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
         self._names: list[str] = []
         self._funcs: list[ast.AST] = []
         self._popen_aliases: set[str] = set()
+        self._subprocess_aliases: set[str] = {"subprocess"}
+
+    def visit_Import(self, node: ast.Import) -> None:
+        self._subprocess_aliases.update(
+            alias.asname for alias in node.names if alias.name == "subprocess" and alias.asname
+        )
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module == "subprocess":
@@ -336,7 +342,8 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
         func = node.func
         is_popen = (
             (isinstance(func, ast.Attribute) and func.attr == "Popen"
-             and isinstance(func.value, ast.Name) and func.value.id == "subprocess")
+             and isinstance(func.value, ast.Name)
+             and func.value.id in self._subprocess_aliases)
             or (isinstance(func, ast.Name) and func.id in self._popen_aliases)
         )
         scope = self._funcs[-1] if self._funcs else node

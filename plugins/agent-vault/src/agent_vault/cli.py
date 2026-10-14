@@ -355,11 +355,10 @@ def start_service(tcp_port: int | None = None) -> bool:
             return True
         tcp_port = context.port
 
+    # spawn_daemon already detaches the service; --foreground keeps POSIX's
+    # self-daemonize (cwd HOME, stdio to /dev/null) from undoing that launch.
     args = ["--tcp-port", str(tcp_port)] if tcp_port else []
-    if IS_WINDOWS:
-        # On POSIX the service double-forks into the background itself.
-        args.append("--foreground")
-    launch.spawn_service(args)
+    launch.spawn_service([*args, "--foreground"])
 
     for _ in range(20):
         time.sleep(0.25)
