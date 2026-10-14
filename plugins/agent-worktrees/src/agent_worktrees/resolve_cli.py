@@ -796,6 +796,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
     if seed_pending:
         launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
+    elif staged_seed is None and not verdict.active:
+        launch_cmd = deferred_command(launch_cmd, yaml_path, admission_only=True)
 
     launch = {
         "action": "exec",

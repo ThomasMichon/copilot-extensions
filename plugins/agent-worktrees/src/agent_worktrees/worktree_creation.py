@@ -922,6 +922,8 @@ def _create_worktree_core(
             launch_cmd = deferred_command(
                 launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
             )
+        else:
+            launch_cmd = deferred_command(launch_cmd, record.yaml_path, admission_only=True)
         env = _apply_assignment_env(
             core._build_env(
                 selection.profile, core._repo_session_env(config, worktree_path),

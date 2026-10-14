@@ -140,7 +140,11 @@ def test_pending_seed_is_retained_until_the_returned_command_executes(
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "queued at creation"
 
 
-def test_no_seed_at_all_leaves_launch_cmd_unchanged(tmp_path: Path, monkeypatch, capfd):
+@pytest.mark.parametrize("bare_resume", [False, True])
+@pytest.mark.parametrize("live", [False, True])
+def test_no_seed_cold_launch_has_execution_admission_fence(
+    tmp_path: Path, monkeypatch, capfd, bare_resume, live,
+):
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     config = _create_config(tmp_path)
     tracking.create_new_record(
@@ -148,12 +152,19 @@ def test_no_seed_at_all_leaves_launch_cmd_unchanged(tmp_path: Path, monkeypatch,
         "windows", tmp_path,
     )
     _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict(active=live))
 
-    rc = resolve_cli.cmd_resolve(_args(seed=None))
+    rc = resolve_cli.cmd_resolve(_args(seed=None, bare_resume=bare_resume))
 
     assert rc == 0
     payload = json.loads(capfd.readouterr().out)
     assert "--interactive" not in payload["launch"]["cmd"]
+    if live:
+        assert payload["launch"]["cmd"] == ["copilot"]
+    else:
+        assert "--admission-only" in payload["launch"]["cmd"]
+        assert payload["launch"]["cmd"][-2:] == ["--", "copilot"]
+    assert not payload["launch"]["seed_pending"]
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell consumer unavailable")

@@ -118,10 +118,15 @@ existing reciprocal companion is reused, never recreated; an untracked,
 conflicting, moved, lifecycle-advanced, or live retained companion refuses. Other doctor
 repair scopes and GC cannot be combined with it.
 
-Reports do not render guidance (`projection_status: not_checked`). Fix verifies
+Reports do not render guidance (`projection_status: not_checked`), so report mode
+keeps every valid target `repairable: true` even when only guidance might be
+incomplete. Fix verifies
 the parent and companion permissions, rechecking cold state under their native
 lifecycle locks. A kernel-owned admission lease excludes prompt mutation and
 handoff throughout recovery; normal launch planning refuses a held lease too.
+The companion's admission lease is held from before allocation through the final
+readiness check. Cold launches without a staged prompt hold that same lease
+across setup and the backend lifetime, so an earlier launch plan cannot race repair.
 The kernel releases it after process exit, without guessing that a PID is stale.
 Direct seed-mutating clients require receiving verb version 4; structured request
 staging requires version 3, so an older daemon cannot silently omit this fence.

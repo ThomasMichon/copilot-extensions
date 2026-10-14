@@ -268,6 +268,117 @@ def test_creation_reports_projection_failure_without_claiming_seed(native_creati
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 
+def test_creation_reports_guidance_only_interruption_as_repairable(
+    native_creation, monkeypatch, capsys,
+):
+    creation = native_creation
+    code, prepared = _run(creation, capsys, fix=True)
+    assert code == 0 and prepared["prepared"]
+    monkeypatch.setattr(
+        local_cache_refresh, "prepare_for_launch",
+        lambda *a: pytest.fail("report rendered guidance"),
+    )
+    before = launch_seed_state.state_path(creation.record.yaml_path).read_bytes()
+    code, report = _run(creation, capsys)
+    assert code == 0 and report["repairable"] and not report["repaired"]
+    assert all(report["checks"].values()) and report["projection_status"] == "not_checked"
+    assert launch_seed_state.state_path(creation.record.yaml_path).read_bytes() == before
+
+
+@pytest.mark.parametrize("phase", ["permissions", "guidance"])
+def test_creation_fences_companion_no_seed_launch_through_final_readiness(
+    native_creation, monkeypatch, capsys, phase,
+):
+    from agent_worktrees import launch_seed_exec
+
+    creation = native_creation
+    child_path = creation.projects["knowledge"] / "worktrees" / (
+        f"{creation.record.worktree_id}-k.yaml"
+    )
+    command = launch_seed_exec.deferred_command(["copilot"], child_path, admission_only=True)
+    assert "--admission-only" in command
+    original = repair._prepare_permissions
+    blocked = []
+
+    def try_launch():
+        with monkeypatch.context() as launch_patch:
+            launch_patch.setattr(
+                launch_seed_exec.subprocess, "Popen",
+                lambda *a, **kw: pytest.fail("companion launched during repair"),
+            )
+            with pytest.raises(ValueError, match="launch admission is busy"):
+                launch_seed_exec.launch(child_path, ["copilot"], admission_only=True)
+        blocked.append(True)
+
+    def permissions(*args):
+        if phase == "permissions":
+            try_launch()
+        original(*args)
+
+    def guidance(*args):
+        if phase == "guidance":
+            try_launch()
+        return local_cache_refresh.RefreshResult("ready")
+
+    monkeypatch.setattr(repair, "_prepare_permissions", permissions)
+    monkeypatch.setattr(local_cache_refresh, "prepare_for_launch", guidance)
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0 and report["prepared"] and blocked
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+    with launch_admission.guard(child_path):
+        pass
+
+
+@pytest.mark.guard
+def test_creation_refuses_companion_launch_before_any_permissions(creation, monkeypatch, capsys):
+    child_path = creation.projects["knowledge"] / "worktrees" / (
+        f"{creation.record.worktree_id}-k.yaml"
+    )
+    monkeypatch.setattr(
+        repair, "_prepare_permissions", lambda *a: pytest.fail("busy companion mutated permissions"),
+    )
+    with launch_admission.guard(child_path):
+        code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and "launch admission is busy" in report["error"]
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.guard
+def test_no_seed_launch_holds_admission_through_backend_wait(creation, monkeypatch):
+    from agent_worktrees import launch_seed_exec
+
+    path = creation.record.yaml_path
+    launch_seed_state.remove(path)
+
+    def excluded():
+        with pytest.raises(ValueError, match="launch admission is busy"):
+            with launch_admission.guard(path):
+                pytest.fail("launch released admission before backend exit")
+
+    def spawn(*args, **kwargs):
+        excluded()
+        return SimpleNamespace(wait=lambda: (excluded(), 0)[1])
+
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
+    assert launch_seed_exec.launch(path, ["copilot"], admission_only=True) == 0
+    with launch_admission.guard(path):
+        pass
+
+
+@pytest.mark.guard
+def test_no_seed_plan_refuses_new_intent_without_consuming_it(creation, monkeypatch):
+    from agent_worktrees import launch_seed_exec
+
+    monkeypatch.setattr(
+        launch_seed_exec.subprocess, "Popen",
+        lambda *a, **kw: pytest.fail("stale no-seed plan launched"),
+    )
+    assert launch_seed_exec.launch(
+        creation.record.yaml_path, ["copilot"], admission_only=True,
+    ) == 3
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
 @pytest.mark.parametrize("result", ["pair_error", "swallowed"])
 def test_creation_new_pair_requires_successful_composition(
     native_creation, monkeypatch, capsys, result,
@@ -521,6 +632,32 @@ def test_creation_lease_excludes_real_process_seed_take(creation):
     assert admitted.returncode == 0, admitted.stderr
     assert launch_seed_state.peek(creation.record.yaml_path).handoff_id
     assert creation.seed.text not in blocked.stdout + blocked.stderr + admitted.stdout + admitted.stderr
+
+
+def test_creation_lease_excludes_preplanned_real_process_no_seed_backend(creation):
+    from agent_worktrees import launch_seed_exec
+
+    path = creation.record.yaml_path
+    launch_seed_state.remove(path)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(repair.__file__).resolve().parents[1])
+    command = launch_seed_exec.deferred_command(
+        [sys.executable, "-c", "print('backend-started')"], path, admission_only=True,
+    )
+    options = {
+        "env": env, "capture_output": True, "text": True, "timeout": 15,
+        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    }
+    with launch_admission.guard(path):
+        blocked = subprocess.run(command, **options)
+        assert blocked.returncode == 3 and "launch admission is busy" in blocked.stderr
+        assert "backend-started" not in blocked.stdout
+    admitted = subprocess.run(command, **options)
+    assert admitted.returncode == 0, admitted.stderr
+    assert admitted.stdout.strip() == "backend-started"
+    assert launch_seed_state.peek(path) is None
+    with launch_admission.guard(path):
+        pass
 
 
 def test_creation_lease_is_released_by_kernel_after_process_exit(creation):

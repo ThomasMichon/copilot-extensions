@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from contextlib import ExitStack
 from pathlib import Path
 
 import yaml
@@ -324,15 +325,27 @@ def targeted_doctor(args) -> int:
         plan = _pair_plan(config, record)
         checks = _checks(record, plan)
         report.update(seed_id=seed.seed_id, seed_kind=seed.kind, checks=checks)
-        report["repairable"] = not all(checks.values())
+        report["repairable"] = True
+        setup_incomplete = not all(checks.values())
         if apply:
             with fin.FinalizeLock(
                 Path(config.default_repo.worktree_root) / ".finalize.lock",
                 timeout=300, stale_after=3600,
-            ), launch_admission.guard(path):
+            ), launch_admission.guard(path), ExitStack() as admission:
                 config = cfg.load_config()
                 record, seed = _validate(config, path, expected)
                 plan = _pair_plan(config, record)
+                root, _, allocation, _ = plan
+                if root.requires_external:
+                    entry = repos.find_repo(root.repo)
+                    if entry is None:
+                        raise ValueError("knowledge repository registration is missing")
+                    if repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
+                        timestamp, suffix, platform = allocation
+                        child_id = f"{record.machine}-{platform}-{timestamp}-{suffix}-k"
+                        child_path = cfg.tracking_dir(project=root.repo) / f"{child_id}.yaml"
+                        admission.enter_context(launch_admission.guard(child_path))
+                        plan = _pair_plan(config, record)
                 with step("Restoring creation permissions", worktree_id=identity):
                     _prepare_permissions(config.default_repo.anchor, record.worktree_path)
                 with step("Restoring creation pair", worktree_id=identity):
@@ -351,7 +364,7 @@ def targeted_doctor(args) -> int:
                     raise ValueError("creation setup remains incomplete")
                 report.update(
                     checks=checks, prepared=True,
-                    repaired=report["repairable"] or bool(refreshed.changed),
+                    repaired=setup_incomplete or bool(refreshed.changed),
                     projection_status=refreshed.status,
                 )
     except (
