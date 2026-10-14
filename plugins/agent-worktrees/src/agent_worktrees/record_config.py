@@ -32,6 +32,10 @@ def metadata_project(explicit: str | None) -> str | None:
     if cwd is None:
         return None
     for root in (cwd, *cwd.parents):
+        if (root / "HEAD").is_file() and (root / "objects").is_dir():
+            registered = _reverse_lookup_project(root)
+            if registered:
+                return registered
         marker = root / ".git"
         if marker.is_dir():
             return _reverse_lookup_project(root)
@@ -48,7 +52,7 @@ def metadata_project(explicit: str | None) -> str | None:
             if not common_text:
                 raise ValueError("Empty Git common-directory marker")
             common = (git_dir / common_text).resolve()
-            return _reverse_lookup_project(common.parent)
+            return _reverse_lookup_project(common) or _reverse_lookup_project(common.parent)
     return None
 
 

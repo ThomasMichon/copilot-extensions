@@ -54,6 +54,8 @@ Git-file layouts without a common-directory marker (including submodules and
 separate Git directories) use the registered checkout root. Malformed or
 unreadable selection metadata returns `project-unavailable` JSON with the
 underlying diagnostic, not an unstructured traceback.
+Registered bare anchors and their linked worktrees resolve the common Git
+directory itself before considering a non-bare checkout's parent.
 
 Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
 The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,

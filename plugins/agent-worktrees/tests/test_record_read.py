@@ -341,20 +341,28 @@ def test_record_read_without_project_uses_structured_error(record_fixture, monke
     assert result["worktree"] is None
 
 
-@pytest.mark.parametrize("selector", ["explicit", "anchor", "worktree", "separate-git-dir"])
+@pytest.mark.parametrize("selector", [
+    "explicit", "anchor", "worktree", "separate-git-dir", "bare-anchor", "bare-worktree",
+])
 def test_record_dispatch_selects_project_without_processes(
     record_fixture, monkeypatch, selector,
 ):
     data, path = record_fixture
     anchor = path.parent.parent / "checkout"
+    if selector in {"bare-anchor", "bare-worktree"}:
+        anchor = path.parent.parent / "example.git"
     git_dir = anchor / ".git"
+    if selector in {"bare-anchor", "bare-worktree"}:
+        git_dir = anchor
     git_dir.mkdir(parents=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (git_dir / "objects").mkdir()
     cwd = anchor / "nested"
     cwd.mkdir()
-    if selector in {"worktree", "separate-git-dir"}:
+    if selector in {"worktree", "separate-git-dir", "bare-worktree"}:
         metadata = git_dir / "worktrees" / "example"
         metadata.mkdir(parents=True)
-        if selector == "worktree":
+        if selector in {"worktree", "bare-worktree"}:
             (metadata / "commondir").write_text("../..\n", encoding="utf-8")
         cwd = path.parent.parent / "task-checkout"
         cwd.mkdir()
