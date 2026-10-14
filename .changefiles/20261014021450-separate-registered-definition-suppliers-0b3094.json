@@ -1,0 +1,9 @@
+{
+  "comment": "Separate registered definition suppliers from explicitly named execution contexts",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

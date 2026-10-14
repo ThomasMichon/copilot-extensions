@@ -168,6 +168,10 @@ class RepositoryResourceSnapshot:
             raise RegistrarError(f"repository resource {value!r} must be a directory")
         return str(path)
 
+    def is_read_only(self, name: str) -> bool:
+        self.root(name, execution=False)
+        return self._roots[name][1] in {"reference", "knowledge"}
+
 
 def execution_root(
     repository: object, cwd: str | Path | None, *,
@@ -193,8 +197,11 @@ def resolve_execution_resources(
     argv: Sequence[str], cwd: str | None, *,
     snapshot: RepositoryResourceSnapshot | None = None,
 ) -> tuple[list[str], str | None]:
-    """Use one transient registered-root snapshot for a single invocation."""
+    """Resolve source arguments separately from an explicitly named execution cwd."""
     snapshot = snapshot or RepositoryResourceSnapshot()
-    resolved_argv = [snapshot.resolve(part, execution=True) for part in argv]
     resolved_cwd = snapshot.resolve(cwd, directory=True, execution=True) if cwd is not None else None
+    # Without an independently fenced cwd, preserve the legacy refusal to
+    # execute resources from a read-only repository in an implicit context.
+    source_only = is_repository_resource(cwd)
+    resolved_argv = [snapshot.resolve(part, execution=not source_only) for part in argv]
     return resolved_argv, resolved_cwd

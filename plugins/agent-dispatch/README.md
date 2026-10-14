@@ -884,10 +884,42 @@ duplicate registrations, absent local checkouts and older peers fail explicitly;
 no PATH/ancestor/srcroot discovery substitutes for registration. Acquire or
 adopt an absent checkout through its owner's standard `repos clone`/adoption
 flow before retrying. Read-only discovery never clones or registers it.
-Reference and knowledge registrations may supply read-only recipes and effort
-state, but cannot supply execution context. Active named registrar pointers must
-use worktree or singleton registrations: discovery refuses read-only classes
-before expanding declarations into executable units or implicit checkout paths.
+Reference and knowledge registrations may supply definitions, recipes, script
+files and effort state, but cannot supply execution context. Named registrar
+pointers enumerate the complete valid declaration corpus, independently of
+execution admission or machine placement. For a read-only supplier, discovery
+qualifies implicit and supplier-local emitter cwd values and script-evaluator
+`spec.evaluator_spec.cwd` values as `repo:<supplier>:<relative-path>` rather
+than losing their authority in bare checkout paths. Supplier-local absolute
+script-forge cwd values retain the same qualification. This lets an old,
+inapplicable profile coexist with explicitly harness-bound profiles without
+silently dropping either. Worktree/singleton suppliers retain their legacy
+cwd behavior.
+
+Enumeration grants no execution authority. Repository/effort loops generate
+an explicit named `spec.cwd` from `execution_repo`; script evaluators declare
+their execution cwd in `spec.evaluator_spec.cwd`. Runtime checks the
+named execution cwd against its registered class before resolving source argv:
+read-only source arguments require that independently fenced named cwd.
+Omitting cwd, using an ordinary path, or naming a knowledge/reference cwd does
+not grant permission to execute from a read-only repository.
+
+For example, definitions registered with
+`registrar add-pointer state-notes --kind repo --repository state-notes`
+can declare `execution_repo: control-harness`, script-forge
+`command: ["repo:state-notes:scripts/backlog.py"]`, and
+`cwd: "repo:control-harness:."` in their `forge` mapping. Evaluator scripts use
+the same source URI and harness cwd shape in `spec.evaluator_spec`. Effort
+state can remain `state_root: "repo:state-notes:."`.
+
+`execution_repo` selects the producer's context, **not** its workers'
+workspace. `repo`/worker `repos` remains the queue lane. Select an existing
+harness-bound Bridge agent/namespace in `pool.body.agent` for headless workers;
+do not target the state supplier. Keep `pool.body.no_pair: false` (the default)
+to retain canonical paired-knowledge allocation. CLI workers likewise require
+their execution project to resolve to the harness through existing allocation
+routing. No second root store or supplier checkout path is persisted.
+Discovery/shape validation is not proof of allocation, pairing, or live launch.
 Existing standalone non-repository commands and legacy
 path declarations remain compatible; migration is explicit, not a startup rewrite.
 

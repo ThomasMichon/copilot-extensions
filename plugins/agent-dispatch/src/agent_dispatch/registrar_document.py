@@ -3,9 +3,53 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
+import os
 from pathlib import Path
 
 from .registrar import ProfileDeclaration, RegistrarError, load_declaration
+
+
+def qualify_supplier_context(
+    declaration: ProfileDeclaration, repository: str, root: Path,
+) -> ProfileDeclaration:
+    """Keep read-only supplier context named until execution admission."""
+    from .repository_resources import is_repository_resource
+
+    def qualify(value: str | None, *, implicit: bool = True) -> str | None:
+        if is_repository_resource(value):
+            return value
+        if value is None and not implicit:
+            return value
+        path = Path(value) if value is not None else root
+        if not path.is_absolute():
+            if not implicit:
+                return value
+            path = root / path
+        path = Path(os.path.normpath(path))
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            return value  # An explicit cwd outside the supplier is not its context.
+        return f"repo:{repository}:{relative.as_posix()}"
+
+    spec = dict(declaration.spec)
+    if declaration.kind == "emitter":
+        spec["cwd"] = qualify(spec.get("cwd"))
+        loop = spec.get("repository_issue_loop")
+        if isinstance(loop, Mapping) and isinstance(loop.get("forge"), Mapping):
+            forge = dict(loop["forge"])
+            if "cwd" in forge:
+                forge["cwd"] = qualify(forge["cwd"], implicit=False)
+                spec["repository_issue_loop"] = {**loop, "forge": forge}
+    elif declaration.kind == "evaluator":
+        evaluator = spec.get("evaluator_spec")
+        if not isinstance(evaluator, Mapping) or "scripts" not in evaluator:
+            return declaration
+        spec["evaluator_spec"] = {**evaluator, "cwd": qualify(evaluator.get("cwd"))}
+    else:
+        return declaration
+    return replace(declaration, spec=spec)
 
 
 def expand_declaration_document(
