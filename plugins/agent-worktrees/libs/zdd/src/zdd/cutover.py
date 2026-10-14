@@ -425,6 +425,16 @@ class CutoverOrchestrator:
                 pass
         if self._refuse_current_old(result):
             return result
+        if self.routing is routing and conditional is None:
+            try:
+                publication_witness = routing.publication_witness(
+                    self.config_dir, deadline=time.monotonic() + 5.0,
+                )
+            except (routing.ActivePublicationRefused, OSError, ValueError) as exc:
+                result.error = f"native publication custody unavailable ({type(exc).__name__})"
+                result.steps.append(f"refused: {result.error}")
+                log.error(result.error)
+                return result
         # The CAS expectation is the raw ``active`` row only: a clean shutdown
         # leaves active absent with the old claim demoted to ``previous``, and
         # the guarded publish compares against the raw row. Only the guarded
@@ -468,17 +478,6 @@ class CutoverOrchestrator:
             result.error = "candidate port must differ from predecessor"
             result.steps.append(f"refused: {result.error}")
             return result
-        if self.routing is routing and conditional is None:
-            try:
-                publication_witness = routing.publication_witness(
-                    self.config_dir, deadline=time.monotonic() + 5.0,
-                )
-            except (routing.ActivePublicationRefused, OSError, ValueError) as exc:
-                result.error = f"native publication custody unavailable ({type(exc).__name__})"
-                result.steps.append(f"refused: {result.error}")
-                log.error(result.error)
-                return result
-
         # Durable breadcrumb (#1756): written *before* the drain gate is ever
         # touched, so if this orchestrator dies mid-cutover the aborted attempt
         # leaves an attributable trace on disk (and recover_stale_cutover can
@@ -529,6 +528,8 @@ class CutoverOrchestrator:
 
         def mark_drain_started() -> None:
             nonlocal drain_started
+            if self.routing.read_table(self.config_dir) != selection_table:
+                raise CutoverError("predecessor route changed before drain")
             drain_started = True
 
         new_for_cas = None

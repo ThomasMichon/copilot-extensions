@@ -637,9 +637,57 @@ def test_predecessor_selection_race_refuses_before_any_writer_is_drained(
     )
 
 
+@pytest.mark.parametrize("phase", ["port", "spawn", "health", "client"])
+@pytest.mark.parametrize("confirms_exit", [False, True])
+def test_route_change_after_selection_never_drains_stale_predecessor(
+    tmp_path, monkeypatch, phase, confirms_exit,
+):
+    orch, events, _ = orchestrator(tmp_path, monkeypatch, confirms_exit=confirms_exit)
+    changed = None
+
+    def replace_once():
+        nonlocal changed
+        if changed is None:
+            routing.publish_active(tmp_path, bind="127.0.0.1", port=9300, pid=555)
+            changed = routing.read_table(tmp_path)
+
+    if phase == "port":
+        orch.pick_free_port = lambda: replace_once() or 9290
+    elif phase == "spawn":
+        spawn = orch.spawn_passive
+        orch.spawn_passive = lambda port: replace_once() or spawn(port)
+    elif phase == "health":
+        healthy = orch.health_check
+        orch.health_check = lambda host, port: replace_once() or healthy(host, port)
+    else:
+        make_client = orch.make_client
+        orch.make_client = lambda url: replace_once() or make_client(url)
+
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert not result.ok and not result.committed
+    assert "drain-9281" not in events and "undrain-9281" not in events
+    assert "before drain" in result.error
+    assert result.rolled_back is confirms_exit
+    assert routing.read_table(tmp_path) == changed
+    assert events == [
+        "publish-9300", "terminate-new",
+        *(["confirmed-new-exit"] if confirms_exit else []),
+    ]
+
+
 def test_pre_adoption_accepts_consistent_previous_only_selection(tmp_path, monkeypatch):
     orch, events, _ = orchestrator(tmp_path, monkeypatch)
     routing.clear_if_owner(tmp_path, pid=111)
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert result.ok and result.committed
+    assert events.index("drain-9281") < events.index("publish-9290")
+
+
+def test_pre_adoption_initializes_legacy_history_before_selection(tmp_path, monkeypatch):
+    orch, events, _ = orchestrator(tmp_path, monkeypatch)
+    table = routing.read_table(tmp_path)
+    del table["publication_history"]
+    routing.routing_table_path(tmp_path).write_text(json.dumps(table), encoding="utf-8")
     result = orch.run(health_timeout=1, drain_timeout=1)
     assert result.ok and result.committed
     assert events.index("drain-9281") < events.index("publish-9290")
@@ -681,7 +729,7 @@ def test_pre_adoption_refuses_malformed_endpoint_rows_before_any_mutation(
 
     result = orch.run(health_timeout=1, drain_timeout=1)
 
-    assert not result.ok and "endpoint" in result.error
+    assert not result.ok and result.error
     assert not spawned and events == []
     assert path.read_bytes() == original
     assert breadcrumb.read_breadcrumb(tmp_path) is None

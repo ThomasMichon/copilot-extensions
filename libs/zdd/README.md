@@ -266,6 +266,13 @@ exact-instance promotion, final-state adoption, and selection reconciliation.
 This ordering skips legacy watchdog route healing and validates both endpoint
 rows before spawning or draining; unattributable custody requires owner-led
 recovery rather than fallback predecessor selection.
+The full captured table is revalidated after control-client/method resolution,
+immediately before invoking drain. Changes during port selection, passive
+startup or health waiting only clean up the passive, never drain or reopen
+the stale predecessor. Native publication-witness initialization precedes
+selection capture so adding custody history to a legacy table is not mistaken
+for a later route replacement. Cooperating publishers must share the same
+full-transaction cutover guard.
 On rollback, the orchestrator confirms the successor's exit before restoring
 and undraining the predecessor. It records whether this attempt actually
 invoked predecessor drain, after constructing the client and resolving its
