@@ -1121,7 +1121,7 @@ jobs:
     name: test runner (windows-latest)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
-    timeout-minutes: 7
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 7 }}
     steps:
       - uses: actions/checkout@v4
         with:

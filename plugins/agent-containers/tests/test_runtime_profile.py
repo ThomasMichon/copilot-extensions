@@ -52,7 +52,15 @@ def commands(monkeypatch, profiles):
 
 
 def _provision(profiles, root, payload, **kwargs):
+    kwargs.setdefault("uv", "fixture-uv")
     return profiles.provision(root, payload, python=sys.executable, **kwargs)
+
+
+def _install_command(commands):
+    return next(
+        call for call in commands
+        if any(Path(argument).name == "installer_dependency_policy.py" for argument in call)
+    )
 
 
 @pytest.mark.guard
@@ -64,7 +72,11 @@ def test_fresh_profile_is_base_and_completed_slot_is_reused(
     assert first["profile"] == "base"
     assert first["runtimeVersion"] == "1.0.0+base"
     assert not any("[provider-exec]" in arg for call in commands for arg in call)
-    install = next(call for call in commands if "install" in call)
+    install = _install_command(commands)
+    assert install[:4] == [
+        first["python"], "-I", str(SCRIPTS / "installer_dependency_policy.py"), "--uv",
+    ]
+    assert install[4:6] == ["fixture-uv", "--"]
     assert "--no-sources" in install
     assert all(str(payload / "libs" / name) in install for name in profiles.LIBRARIES)
     slot = Path(first["venv"])
@@ -101,19 +113,17 @@ def test_windows_uv_profile_preserves_copies_without_seeding(
     create = next(call for call in commands if "venv" in call)
     assert create[:5] == [sys.executable, "-m", "venv", "--copies", "--without-pip"]
     assert all(call[:2] != ["fixture-uv", "venv"] for call in commands)
-    install = next(call for call in commands if "install" in call)
-    assert install[:3] == ["fixture-uv", "pip", "install"]
+    assert _install_command(commands)[4:6] == ["fixture-uv", "--"]
 
 
-def test_ordinary_pip_profile_keeps_seed_packages(
+def test_missing_uv_refuses_before_runtime_or_profile_changes(
     profiles, payload, commands, tmp_path,
 ):
-    _provision(profiles, tmp_path / "runtime", payload)
-    create = next(call for call in commands if "venv" in call)
-    assert create[:4] == [sys.executable, "-m", "venv", "--copies"]
-    assert "--without-pip" not in create
-    install = next(call for call in commands if "install" in call)
-    assert install[1:4] == ["-m", "pip", "install"]
+    root = tmp_path / "runtime"
+    with pytest.raises(RuntimeError, match="unrestricted pip fallback"):
+        _provision(profiles, root, payload, uv=None)
+    assert not root.exists()
+    assert commands == []
 
 
 def test_switch_back_to_base_reuses_unchanged_slot(profiles, payload, commands, tmp_path):
@@ -148,6 +158,64 @@ def test_requested_provider_failure_never_falls_back_or_changes_active_slot(
     assert not (root / "versions" / "1.0.0+provider-exec" / ".install-complete.json").exists()
 
 
+def test_native_profile_policy_refusal_retains_selected_runtime(
+    profiles, tmp_path,
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native UV is unavailable")
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (
+        "runtime_profile.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_construction.py", "installer_dependency_policy.py",
+        "installer_dependency_config.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    (payload / "plugin.json").write_text(
+        json.dumps({
+            "name": "agent-containers", "version": "1.0.0",
+            "repository": "https://github.com/ThomasMichon/copilot-extensions",
+        }),
+        encoding="utf-8",
+    )
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname="agent-containers"\nversion = "1.0.0"\n'
+        '[project.optional-dependencies]\n'
+        'provider-exec=["unseasoned @ https://example.invalid/unseasoned.whl"]\n',
+        encoding="utf-8",
+    )
+    for name in profiles.LIBRARIES:
+        library = payload / "libs" / name
+        library.mkdir(parents=True)
+        (library / "pyproject.toml").write_text(
+            f'[project]\nname="fixture-{name}"\nversion="1.0.0"\n', encoding="utf-8",
+        )
+    root = tmp_path / "runtime"
+    previous = profiles.runtime.slot(root, "0.9.0+base")
+    profiles.runtime.mark_complete(root, "0.9.0+base")
+    profiles.runtime.activate(root, "0.9.0+base", link_free=True)
+    selector = (root / "current-version").read_bytes()
+    marker = (previous / ".install-complete.json").read_bytes()
+    completed = subprocess.run(
+        [
+            sys.executable, str(scripts / "runtime_profile.py"),
+            "--root", str(root), "--payload", str(payload),
+            "--python", sys.executable, "--uv", uv, "--profile", "provider-exec",
+        ],
+        capture_output=True, text=True, timeout=30, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert completed.returncode != 0
+    assert "direct remote dependencies lack release-age evidence" in completed.stderr
+    assert completed.stdout == ""
+    assert (root / "current-version").read_bytes() == selector
+    assert (previous / ".install-complete.json").read_bytes() == marker
+    assert profiles.selected_profile(root) == "provider-exec"
+    assert not (root / "versions" / "1.0.0+provider-exec" / ".install-complete.json").exists()
+
+
 def test_same_version_source_change_refuses_immutable_rebuild(
     profiles, payload, commands, tmp_path
 ):
@@ -171,7 +239,7 @@ def test_relative_install_root_and_payload_use_the_callers_directory(
     assert Path(result["venv"]).is_relative_to(caller / "runtime")
     create = next(call for call in commands if "venv" in call)
     assert Path(create[-1]).is_absolute()
-    install = next(call for call in commands if "install" in call)
+    install = _install_command(commands)
     assert str(payload) in install
     assert (caller / "runtime" / "current-version").is_file()
     assert not (payload / "runtime").exists()

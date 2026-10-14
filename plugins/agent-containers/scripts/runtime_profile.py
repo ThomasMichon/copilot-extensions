@@ -175,6 +175,8 @@ def provision(
     requested: str | None = None,
 ) -> dict:
     """Called under the installer's installation-wide transaction lock."""
+    if not uv:
+        raise RuntimeError("uv is required; unrestricted pip fallback is not supported")
     root = Path(os.path.abspath(root.expanduser()))
     payload = Path(os.path.abspath(payload.expanduser()))
     version_match = re.search(
@@ -209,9 +211,11 @@ def provision(
                 slot = runtime.slot(
                     root, runtime_version, clean_incomplete=True, link_name=".venv"
                 )
-                if os.name == "nt" or uv is None:
-                    seed = ["--without-pip"] if uv else []
-                    _run([python, "-m", "venv", "--copies", *seed, str(slot)], cwd=payload)
+                if os.name == "nt":
+                    _run(
+                        [python, "-m", "venv", "--copies", "--without-pip", str(slot)],
+                        cwd=payload,
+                    )
                 else:
                     try:
                         _run([uv, "venv", "--python", python, str(slot)], cwd=payload)
@@ -223,16 +227,23 @@ def provision(
                         runtime.slot(
                             root, runtime_version, clean_incomplete=True, link_name=".venv"
                         )
-                        _run([python, "-m", "venv", "--copies", str(slot)], cwd=payload)
+                        _run(
+                            [python, "-m", "venv", "--copies", "--without-pip", str(slot)],
+                            cwd=payload,
+                        )
                 package = str(payload)
                 if profile == "provider-exec":
                     package += "[provider-exec]"
                 targets = [*(str(library) for library in libraries), package]
-                if uv:
-                    install = [uv, "pip", "install", "--no-sources", "--python", str(venv_python)]
-                else:
-                    install = [str(venv_python), "-m", "pip", "install"]
-                _run([*install, "--quiet", *targets], cwd=payload)
+                _run(
+                    [
+                        str(venv_python), "-I",
+                        str(Path(__file__).with_name("installer_dependency_policy.py")),
+                        "--uv", uv, "--", "--no-sources",
+                        "--python", str(venv_python), "--quiet", *targets,
+                    ],
+                    cwd=payload,
+                )
                 if os.name == "nt":
                     for trampoline in (slot / "Scripts").glob("agent-*.exe"):
                         trampoline.unlink()

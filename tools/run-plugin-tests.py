@@ -396,9 +396,6 @@ def run_plugin(
         return 0
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
-    groups = _test_file_groups(
-        name, max_files_per_subsuite, filtered=bool(guards or kexpr), test_files=test_files,
-    )
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
@@ -604,8 +601,6 @@ def main(argv: list[str] | None = None) -> int:
     if not targets:
         print("No plugin suites to run.")
         return 0
-    if args.test_file and (len(targets) != 1 or args.prepare_only):
-        ap.error("--test-file requires exactly one plugin and cannot be used with --prepare-only")
 
     uv = shutil.which("uv")
     if not uv:

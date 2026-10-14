@@ -97,9 +97,7 @@ def test_powershell_lock_fails_closed_and_releases_in_finally() -> None:
     tail = text[acquire:]
     assert "\ntry {\n" in tail
     cleanup = _ps_cleanup()
-    assert cleanup.startswith("    try {\n")
-    assert cleanup.endswith("    } finally {\n        Exit-InstallLock\n    }\n")
-    assert cleanup.index("Stop-RuntimeConstruction") < cleanup.index("Exit-InstallLock")
+    assert cleanup == "    Exit-InstallLock\n"
     assert cleanup.count("Exit-InstallLock") == 1
     block = _block(PS_SCRIPT)
     assert "[System.IO.FileShare]::None" in block
@@ -161,19 +159,19 @@ def test_powershell_lock_acquires_releases_and_reacquires(tmp_path: Path) -> Non
     assert (tmp_path / "rt" / ".install.lock").is_file()
 
 
-def test_powershell_lock_releases_when_construction_cleanup_throws(tmp_path: Path) -> None:
+def test_powershell_lock_releases_when_profile_command_fails(tmp_path: Path) -> None:
     pwsh = _pwsh()
     if pwsh is None:
         pytest.skip("pwsh not available")
     result = _run_ps_block(pwsh, tmp_path / "rt", f"""
-function Stop-RuntimeConstruction {{
-    if (-not $script:InstallLockHandle) {{ throw 'lock-released-before-construction' }}
-    Write-Output 'cleanup-held=True'
-    throw 'construction-cleanup-failure'
-}}
 if (-not (Enter-InstallLock -TimeoutSec 1)) {{ throw 'lock-not-acquired' }}
 try {{
-    try {{ throw 'install-body-failure' }} finally {{
+    try {{
+        & '{sys.executable}' -I -c 'raise SystemExit(23)'
+        if ($LASTEXITCODE -ne 23) {{ throw 'wrong-profile-result' }}
+        Write-Output "profile-held=$($null -ne $script:InstallLockHandle)"
+        throw 'profile-provision-failure'
+    }} finally {{
 {_ps_cleanup()}
     }}
 }} catch {{ Write-Output "caught=$($_.Exception.Message)" }}
@@ -184,7 +182,7 @@ Write-Output "reacquired=$reacquired"
 """)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().splitlines() == [
-        "cleanup-held=True", "caught=construction-cleanup-failure",
+        "profile-held=True", "caught=profile-provision-failure",
         "released=True", "reacquired=True",
     ]
 

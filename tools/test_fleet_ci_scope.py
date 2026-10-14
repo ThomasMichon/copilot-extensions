@@ -28,7 +28,10 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
             f"{timeout}" + " }}"
         ) in job
         if job_id == "test-runner-windows":
-            assert re.search(r"(?m)^    timeout-minutes: 7$", job)
+            assert (
+                "    timeout-minutes: "
+                "${{ github.event_name == 'workflow_dispatch' && 15 || 7 }}\n"
+            ) in job
 
 
 @pytest.mark.parametrize("path,selected", [

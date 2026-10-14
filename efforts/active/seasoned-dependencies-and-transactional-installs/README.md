@@ -610,3 +610,23 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   pre-existing full-distribution deselections in 158.75 seconds. No selection
   was reduced. All 72 workflow contracts passed in a stable interpreter.
   Fresh-head native CI and confirmation of the two review fixes remain open.
+- A subsequent source-owned replay preserved fourteen implementation commits
+  while integrating the new persistent Containers profile coordinator and
+  upstream bounded bootstrap fixtures. Both selected profiles now invoke the
+  canonical seasoned resolver; missing UV refuses before mutation, signed
+  Windows copies remain unseeded, and no unrestricted pip fallback survives.
+  A real subprocess refusal reaches the dependency-age boundary and leaves the
+  previous active selector and completion marker unchanged. Native profile,
+  dependency and transaction-lock contracts passed 40 tests with eight platform
+  skips; the reconciled Worktrees bootstrap passed 22 with three platform skips.
+- Strict test-file admission retains both upstream and original regression
+  coverage, without duplicate preparation. The upstream production-retention
+  exclusions on ordinary PR runs and ten-minute manual-dispatch Fleet budget are
+  preserved, alongside the approved ordinary Windows five-minute suite.
+  Both workflow event modes propagate native admission failure. All 218
+  focused runner, workflow, finalizer and fan-out tests passed with two platform
+  skips. The complete canonical policy pass was green; two new workflow-expression
+  fixture failures were corrected and included in the passing focused run.
+  All thirteen installer contracts, canonical fan-out, touched-code lint and
+  unchanged source-size ceilings passed. Required current-head CI and a fresh
+  genuine review remain unresolved; no merge, promotion or rollout has occurred.

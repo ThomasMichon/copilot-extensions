@@ -187,8 +187,9 @@ def test_native_vault_snapshot_lane_preserves_bounded_first_use_proof() -> None:
     ("installation-context-acceptance.yml", "derived-diagnostics-windows",
      "All derived native copies", "tools/seasoned_uv.py"),
 ])
+@pytest.mark.parametrize("event_name", ["pull_request", "workflow_dispatch"])
 def test_windows_step_does_not_mask_native_admission_failure(
-    tmp_path, workflow_file, job_id, step_name, fail_on,
+    tmp_path, workflow_file, job_id, step_name, fail_on, event_name,
 ) -> None:
     shell = shutil.which("pwsh") or shutil.which("powershell")
     if not shell:
@@ -198,6 +199,13 @@ def test_windows_step_does_not_mask_native_admission_failure(
     body = step["run"].replace("${{ matrix.mode }}", "fixture").replace(
         "${{ matrix.pointer }}", "fixture",
     )
+    for ordinary in (120, 300):
+        expression = (
+            "${{ github.event_name == 'workflow_dispatch' && 600 || "
+            f"{ordinary}" + " }}"
+        )
+        body = body.replace(expression, "600" if event_name == "workflow_dispatch" else str(ordinary))
+    assert "${{" not in body
     log = tmp_path / "commands"
     prefix = """
 $ErrorActionPreference = 'Stop'
