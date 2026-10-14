@@ -6473,38 +6473,7 @@ def main(argv: list[str] | None = None) -> int:
     # after the sibling router (siblings return above).
     _guard_project_scope(_proj, args_list[0] if args_list else None)
 
-    # Only auto-derive from CWD for project-requiring commands (skip the git
-    # subprocess for global no-project commands and bare flags).
-    _needs_project = not _is_no_project_invocation(args_list)
-    _optional_project = (
-        bool(args_list) and args_list[0] == "config-root" and _is_no_project_invocation(args_list)
-    )
-
-    if _proj:
-        _project, _assumed = _resolve_active_project(_proj)
-    elif _needs_project or _optional_project:
-        _project, _assumed = _resolve_active_project(None)
-    else:
-        _project, _assumed = None, None
-
-    if _project:
-        cfg.set_active_project(_project)
-        # git-like `-C`: when --project targets a project the caller is NOT
-        # already inside, change to its anchor so every downstream path
-        # (worktree-id inference, repo discovery, git subprocesses) resolves
-        # consistently. When the caller IS inside one of the project's
-        # worktrees, keep the current directory so the binstub acts on THAT
-        # worktree (the common sign-off case: `<project> push-changes`).
-        if _proj and _assumed is not None and not _cwd_is_inside_project(_assumed):
-            try:
-                os.chdir(_assumed)
-            except OSError:
-                pass
-
-    # Identity is a pure function of CWD + optional --project (threaded in
-    # process via set_active_project); no ambient $WORKTREE_PROJECT is consulted
-    # (cwd-resolution Phase 3).
-    has_project = bool(cfg.active_project())
+    has_project = front_door_cli.resolve_invocation_project(args_list, _proj)
 
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
     # invocation is the human-facing path. The Manager now owns the transplanted

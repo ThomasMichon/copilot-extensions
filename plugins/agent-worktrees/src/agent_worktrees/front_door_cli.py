@@ -28,6 +28,31 @@ def _core_helper(name: str, local):
     return local
 
 
+def resolve_invocation_project(args_list: list[str], explicit: str | None) -> bool:
+    """Select project identity and assumed CWD before structured dispatch."""
+    core = _core()
+    needs_project = not core._is_no_project_invocation(args_list)
+    optional_project = (
+        bool(args_list) and args_list[0] == "config-root"
+        and core._is_no_project_invocation(args_list)
+    )
+    if explicit:
+        project, assumed = core._resolve_active_project(explicit)
+    elif needs_project or optional_project:
+        project, assumed = core._resolve_active_project(None)
+    else:
+        project, assumed = None, None
+    if project:
+        cfg.set_active_project(project)
+        # An explicit project acts like Git -C; an existing task CWD wins.
+        if explicit and assumed is not None and not core._cwd_is_inside_project(assumed):
+            try:
+                os.chdir(assumed)
+            except OSError:
+                pass
+    return bool(cfg.active_project())
+
+
 def _extract_project_flag(args_list: list[str]) -> tuple[list[str], str | None]:
     """Pop a global --project/-p flag from args, returning (remaining, value).
 
