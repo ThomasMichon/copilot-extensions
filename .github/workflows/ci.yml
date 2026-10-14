@@ -704,6 +704,7 @@ jobs:
           uv run --with pytest --with pyyaml python -m pytest -q
           tools/test_promotion_artifact_readiness.py           tools/test_promotion_candidate_retry.py
           tools/test_verify_promotion_workflows.py
+          tools/test_tag_promotion.py
           -k 'native or binary_read'
 
   windows-hooks:

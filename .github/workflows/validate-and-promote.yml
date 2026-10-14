@@ -1454,6 +1454,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          gh auth setup-git --hostname github.com
           python tools/tag_promotion.py --merge-sha "$MERGE_SHA" --dev-sha "$DEV_SHA" \
             --github-output "$GITHUB_OUTPUT" \
             --message "release: promote dev to main ($MERGE_SHA)"

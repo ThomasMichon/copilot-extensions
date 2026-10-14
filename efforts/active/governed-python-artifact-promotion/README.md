@@ -677,6 +677,20 @@ win grows with build complexity.
   Hosted exact-head review/checks, containing release, new trusted-flow
   publication proof, strict-rule activation and authorized rollout remain
   open; Windows local evidence is not Linux-hosted evidence.
+- Source-owned rebase onto current dev preserves the independently merged
+  small/production retention tiers and manual exhaustive budgets. Promotion
+  dispatch still selects the current push tiers and 120-second fleet bound,
+  not the manual exhaustive lane. The integrated workflow contracts passed
+  116 cases; real contained fleet admission/equivalence and both retention
+  windows passed three cases without widening their bound.
+- Native review found the relocated tag step had lost its former job's Git
+  identity and authentication setup. The writer step now configures the bot
+  identity and non-persisted GitHub CLI credential helper before the actual
+  tagger. A fresh native Git-repository execution of that exact shell step
+  creates the annotated remote tag and output receipt with no ambient Git
+  identity and no persisted token. That contract and its coupled credential/
+  CI-selector checks passed four cases; the Windows changed-path lane now
+  selects it as well.
 
 ### 2026-10-14 - Candidate-scoped readiness before merge
 
