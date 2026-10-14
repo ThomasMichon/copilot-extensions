@@ -1,0 +1,9 @@
+{
+  "comment": "Find the freshly built slot's interpreter in the POSIX venv layout when the PowerShell installer runs off Windows",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

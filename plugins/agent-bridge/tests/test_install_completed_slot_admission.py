@@ -1211,3 +1211,38 @@ def test_ps1_lock_fault_fails_closed(tmp_path: Path) -> None:
     assert result.returncode == 1, detail
     assert "RESULT=" not in result.stdout, detail
     assert "refusing to proceed unlocked" in result.stdout + result.stderr, detail
+
+def _sh_real_lock_harness(tmp_path: Path, action: str) -> Path:
+    harness = _sh_harness(tmp_path, "incomplete", action, extra=("_enter_install_lock",))
+    text = harness.read_text(encoding="utf-8").replace("_enter_install_lock() { return 0; }\n", "")
+    harness.write_text(text, encoding="utf-8", newline="\n")
+    return harness
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize(("flock_rc", "expected"), [(75, 75), (1, 1), (66, 1)],
+                         ids=["conflict", "flock-error", "flock-oserr"])
+def test_sh_only_a_flock_conflict_is_contention(tmp_path: Path, flock_rc: int, expected: int) -> None:
+    """flock is asked to exit 75 on a conflict; any other failure is a fault."""
+    action = (
+        f'flock() {{ [[ " $* " == *" -E 75 "* ]] || return 99; return {flock_rc}; }}\n'
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    assert f"RC={expected}" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_pid_fallback_unattributable_lock_path_is_a_fault(tmp_path: Path) -> None:
+    """A lock path that can never be created or attributed (here a regular
+    file) is a lock fault, not another install holding the lock."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        'echo not-a-link > "$INSTALL_DIR/.install.lock.pid"\n'
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    assert "RC=1" in result.stdout, result.stdout + result.stderr

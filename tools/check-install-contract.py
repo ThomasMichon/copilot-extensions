@@ -309,28 +309,39 @@ def _exec_stderr_swallow_violations(plugins_dir: Path) -> list[str]:
 
 # A completion marker is the published proof that a slot is complete: a refused
 # or failed `mark-complete` must stop activation, never be swallowed. The helper
-# must not end its writer pipeline in `|| true`, and no caller may invoke it as
-# a bare statement whose result is ignored.
+# must not end its writer pipeline in `|| true` (on one line or across line
+# continuations), and no caller may invoke it -- with or without arguments -- as
+# a statement whose result is ignored.
 _MARK_COMPLETE_SWALLOW = re.compile(r"mark-complete.*\|\|\s*true|\|\s*sed\b.*\|\|\s*true")
-_MARK_COMPLETE_BARE_CALL = re.compile(r"^\s*(?:_versioned_mark_complete|Invoke-VersionedMarkComplete)\s*$")
+_MARK_COMPLETE_CALL = re.compile(r"^\s*(?:_versioned_mark_complete|Invoke-VersionedMarkComplete)(?:\s|$)")
+_LINE_CONTINUATION = re.compile(r"(?:\\|`)[ \t]*\n[ \t]*")
 
 
 def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
     violations: list[str] = []
     for path in sorted([*plugins_dir.glob("*/scripts/*.sh"), *plugins_dir.glob("*/scripts/*.ps1")]):
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
         helper = re.search(
             r"^(?:_versioned_mark_complete\(\) \{|function Invoke-VersionedMarkComplete \{)\n(.*?)^\}",
-            text.replace("\r\n", "\n"), re.M | re.S,
+            text, re.M | re.S,
         )
         rel = path.relative_to(plugins_dir.parent).as_posix()
         if helper and any(
             _MARK_COMPLETE_SWALLOW.search(line)
-            for line in helper.group(1).splitlines() if not line.lstrip().startswith("#")
+            for line in _LINE_CONTINUATION.sub(" ", helper.group(1)).splitlines()
+            if not line.lstrip().startswith("#")
         ):
             violations.append(f"{rel}: the completion-marker helper swallows a failed mark-complete")
-        for lineno, line in enumerate(text.splitlines(), 1):
-            if _MARK_COMPLETE_BARE_CALL.match(line):
+        lines = text.split("\n")
+        for lineno, line in enumerate(lines, 1):
+            if not _MARK_COMPLETE_CALL.match(line):
+                continue
+            statement = line
+            index = lineno
+            while re.search(r"(?:\\|`)[ \t]*$", statement) and index < len(lines):
+                statement = statement.rstrip()[:-1] + " " + lines[index]
+                index += 1
+            if "||" not in statement:
                 violations.append(
                     f"{rel}:{lineno}: completion-marker publication result is ignored; "
                     "stop activation when it fails"

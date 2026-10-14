@@ -234,8 +234,26 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         ("install.sh", "_versioned_mark_complete() {\n    \"$py\" \"${args[@]}\" 2>&1 | sed 's/^/  /' || true\n}\n"),
         ("install.sh", "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n    _versioned_mark_complete\n}\n"),
         ("install.ps1", "function Invoke-VersionedMarkComplete {\n    return $true\n}\n    Invoke-VersionedMarkComplete\n"),
+        (
+            "install.sh",
+            "_versioned_mark_complete() {\n    \"$py\" \"${args[@]}\" 2>&1 | sed 's/^/  /' \\\n"
+            "        || true\n}\n",
+        ),
+        (
+            "install.ps1",
+            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
+            "    Invoke-VersionedMarkComplete -PayloadHash $payloadHash\n",
+        ),
+        (
+            "install.ps1",
+            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
+            "    Invoke-VersionedMarkComplete `\n        -PayloadHash $payloadHash\n",
+        ),
     ],
-    ids=["sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call"],
+    ids=[
+        "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
+        "sh-multiline-swallow", "ps1-ignored-call-with-arguments", "ps1-continued-ignored-call",
+    ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:
     assert checker._mark_complete_result_violations(_scripts(tmp_path, name, text))

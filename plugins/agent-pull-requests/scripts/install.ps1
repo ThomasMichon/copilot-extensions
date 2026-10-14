@@ -278,7 +278,8 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
+        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
+        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()

@@ -1583,18 +1583,26 @@ _enter_install_lock() {
     mkdir -p "$INSTALL_DIR" 2>/dev/null || return 1
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
         { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
-        if ! flock -w "$__timeout" 8; then
+        # Only a lock conflict maps to 75; any other flock failure is a fault.
+        local __frc=0
+        flock -E 75 -w "$__timeout" 8 || __frc=$?
+        if [[ "$__frc" -ne 0 ]]; then
             exec 8>&-
-            return 75
+            [[ "$__frc" -eq 75 ]] && return 75
+            return 1
         fi
         __install_lock_fd=8
         return 0
     fi
-    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __now
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __now __held=0
     __deadline=$(( $(date +%s) + __timeout ))
     until ln -s "$$" "$__link" 2>/dev/null; do
         if [[ "$(date +%s)" -ge "$__deadline" ]]; then
-            return 75
+            # Contention only when another install was actually seen holding
+            # the lock; a path that could never be created or attributed is a
+            # lock fault.
+            [[ "$__held" -eq 1 ]] && return 75
+            return 1
         fi
         __owner="$(readlink "$__link" 2>/dev/null || true)"
         if [[ -z "$__owner" ]]; then
@@ -1605,6 +1613,7 @@ _enter_install_lock() {
             sleep 0.1
             continue
         fi
+        __held=1
         case "$__owner" in
             *[!0-9]*) __live=0 ;;
             *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
