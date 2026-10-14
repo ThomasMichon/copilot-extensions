@@ -343,6 +343,10 @@ recorded against each open fork._
   control-issued renewal through atomic replacement and completes the task.
   Expanded issuance/epoch/binding and ordinary coordinator/client regression
   selection passed 203 tests. Ruff and the install-contract check passed.
+- A final file-consumption check refuses non-regular files without opening
+  a blocking named pipe and rejects non-ASCII/control bytes before HTTP
+  header construction. Its native selection passed 14 tests with the POSIX
+  FIFO case skipped on Windows; both real CLI credential modes passed again.
 - This closes only the issuance/consumption contract, not provider delivery.
   Container placement, per-incarnation file isolation, trusted supervisor
   renewal, real restricted-container proof, central/local projections and

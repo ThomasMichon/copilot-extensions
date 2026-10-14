@@ -63,7 +63,8 @@ four explicit projection fields: `AGENT_DISPATCH_TASK_TOKEN`,
 `--task-token`, `--task-scope`, `--task-url`, and `--task-worker`).
 For renewable projections, substitute `AGENT_DISPATCH_TASK_TOKEN_FILE`
 (`--task-token-file`) for the token value. It must name an absolute path to
-a private UTF-8 file containing only the token (at most 8192 bytes). Each CLI
+a private regular UTF-8 file containing only the printable ASCII token
+(at most 8192 bytes). Directories and named pipes are refused. Each CLI
 invocation reloads it; the trusted supervisor should replace it atomically.
 Direct and file credentials cannot be combined, even if one is empty.
 Any supplied field selects task-only mode; an incomplete projection fails

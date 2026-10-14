@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -88,12 +89,17 @@ def _read_task_token(filename: str) -> str:
     if not isinstance(filename, str) or not filename or not Path(filename).is_absolute():
         raise DispatchError(403, "task credential file must have an absolute path")
     try:
-        with Path(filename).open("rb") as source:
+        if not Path(filename).is_file():
+            raise DispatchError(403, "task credential file must be a regular file")
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(filename, flags), "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise DispatchError(403, "task credential file must be a regular file")
             raw = source.read(8193)
         token = raw.decode("utf-8").strip()
     except (OSError, UnicodeError, ValueError) as exc:
         raise DispatchError(403, "cannot read private task credential file") from exc
-    if not token or len(raw) > 8192 or any(char.isspace() for char in token):
+    if not token or len(raw) > 8192 or any(not 33 <= ord(char) <= 126 for char in token):
         raise DispatchError(403, "invalid private task credential file")
     return token
 

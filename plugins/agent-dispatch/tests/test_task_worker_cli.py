@@ -278,7 +278,10 @@ def test_task_worker_token_file_reloads_without_fleet_fallback(worker, monkeypat
     assert len(requests) == 1
 
 
-@pytest.mark.parametrize("content", ["", "x" * 8193, "two tokens", "one\ntwo", "\udcff"])
+@pytest.mark.parametrize("content", [
+    "", "x" * 8193, "two tokens", "one\ntwo", "\udcff", "\u00e9", "hidden\x00control",
+    "hidden\x7fcontrol",
+])
 def test_task_worker_token_file_invalid_is_closed(worker, monkeypatch, tmp_path, content, capsys):
     task_id, _queue, requests = worker
     secret_file = tmp_path / "task-token"
@@ -304,6 +307,25 @@ def test_task_worker_direct_and_file_credentials_conflict(worker, monkeypatch, t
     monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", str(tmp_path / "not-read"))
     assert cli.main(["show", task_id]) == 1
     monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN", "")
+    assert cli.main(["show", task_id]) == 1
+    assert not requests
+
+
+def test_task_worker_token_file_directory_is_closed(worker, monkeypatch, tmp_path):
+    task_id, _queue, requests = worker
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_TOKEN")
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", str(tmp_path))
+    assert cli.main(["show", task_id]) == 1
+    assert not requests
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX named-pipe contract")
+def test_task_worker_token_file_fifo_cannot_block(worker, monkeypatch, tmp_path):
+    task_id, _queue, requests = worker
+    fifo = tmp_path / "token-pipe"
+    os.mkfifo(fifo)
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_TOKEN")
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", str(fifo))
     assert cli.main(["show", task_id]) == 1
     assert not requests
 
