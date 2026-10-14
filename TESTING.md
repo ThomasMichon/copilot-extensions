@@ -9,6 +9,27 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+### Native category view contracts
+
+`plugins/agent-dispatch/tests/test_task_categories.py` gives each native view
+contract its own function-scoped coordinator/database and pytest item:
+`test_native_cli_category_view_contract[default-work|all-categories|maintenance-board|evidence]`.
+Each item makes one real cold CLI invocation with the existing 20-second
+subprocess bound under the unchanged 30-second item budget. Producer creation
+still crosses real loopback HTTP; evidence inspection retains result, progress,
+statistics and session/worktree attachment assertions.
+
+Do not combine these into one serial multi-CLI item: four individually permitted
+20-second calls allow 80 seconds before setup/teardown, which cannot fit a
+30-second item. This granularity fix addresses test-contract budget composition,
+not a diagnosis of an observed process hang. The original unknown-cause timeout
+tracking remains open; an isolated or instrumented pass is not flake acceptance.
+
+```powershell
+python tools\run-plugin-tests.py agent-dispatch -k native_cli_category_view_contract
+python tools\run-plugin-tests.py agent-dispatch --guards -k one_cold_cli_boundary
+```
+
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and
 `services/dispatch`, respectively. It normalizes aliases before environment

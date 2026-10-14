@@ -1,0 +1,9 @@
+{
+  "comment": "Align native category integration contract granularity with one cold CLI per unchanged-budget item while preserving real HTTP and evidence assertions",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
