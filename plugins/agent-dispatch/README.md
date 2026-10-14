@@ -2675,7 +2675,10 @@ configuration over token flags where process arguments may be observable.
 - `scripts/install.{sh,ps1} status` reports the deployed version/manifest, the
   coordinator service, and every supervisor profile. Runtime logs live under
   `~/.agent-dispatch/` (`serve-service.log`, `reconcile.err.log`,
-  `running-version.json`, `current-version`).
+  `running-version.json`, `current-version`). The stdio of detached launches
+  is appended under `logs/`: `coordinator-generation.log` (a cutover's
+  replacement coordinator), `supervisor-daemon.log`,
+  `supervisor-successor.log` (a self-update respawn) and `self-deploy.log`.
 - Version drift is intentionally fail-loud: the session-start hook compares the
   installed payload version with `deploy-manifest.json` / `current-version` and
   reconciles in the background; a running coordinator writes

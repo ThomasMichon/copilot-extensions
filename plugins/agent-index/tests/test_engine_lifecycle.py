@@ -131,7 +131,7 @@ def test_subprocess_early_exit_raises(monkeypatch):
 
 
 @pytest.mark.skipif(not sys.platform.startswith("win"), reason="Windows priority-class spawn flag")
-def test_spawn_engine_forces_normal_priority_class_on_windows(monkeypatch):
+def test_spawn_engine_forces_normal_priority_class_on_windows(monkeypatch, tmp_path):
     """A worker that spawns a missing engine may itself be niced down (e.g.
     AGENT_INDEX_INDEXER_NICE) -- Windows child processes inherit the
     spawning process's priority class by default, which would otherwise
@@ -150,16 +150,35 @@ def test_spawn_engine_forces_normal_priority_class_on_windows(monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(lifecycle.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(lifecycle, "detached_kwargs", lambda: {"creationflags": 0x00000008})
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path))
 
     lifecycle._spawn_engine(_profile())
 
     _NORMAL_PRIORITY_CLASS = 0x00000020
     _DETACHED_PROCESS = 0x00000008
     assert captured["creationflags"] & _NORMAL_PRIORITY_CLASS
-    # Still ORed with whatever detached_kwargs() itself contributed, not
-    # overwritten.
+    # Still ORed with the shared launch's own detach flags, not overwritten.
     assert captured["creationflags"] & _DETACHED_PROCESS
+
+
+def test_spawn_engine_launches_through_spawn_daemon(monkeypatch, tmp_path):
+    """The per-reindex engine runs from the index data dir (never the caller's
+    cwd), logs its stdio per model at warning level, and does not break away:
+    the indexer that started it stops it."""
+    captured: dict = {}
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("AGENT_INDEX_ENGINE_LOG_LEVEL", raising=False)
+    monkeypatch.setattr(
+        lifecycle, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or object()
+    )
+
+    lifecycle._spawn_engine(_profile())
+
+    assert captured["cwd"] == tmp_path
+    assert captured["log_path"].parent == tmp_path / "logs"
+    assert captured["log_path"].name.startswith("engine-")
+    assert captured["breakaway"] is False
+    assert captured["env"]["AGENT_INDEX_ENGINE_LOG_LEVEL"] == "warning"
 
 
 def test_systemd_without_unit_raises():

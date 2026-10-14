@@ -109,7 +109,7 @@ def test_resolve_plan_only_runs_nothing(capsys, monkeypatch):
     def _boom(*a, **k):  # pragma: no cover - must never be reached
         raise AssertionError("plan-only must not shell out")
 
-    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", _boom)
+    monkeypatch.setattr("subprocess.run", _boom)
     rc = _cmd_resolve(_args(["resolve", "--outcome", "abandoned", "--base", "main"]))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
@@ -135,7 +135,7 @@ def test_resolve_execute_runs_steps_and_reports(capsys, monkeypatch):
         calls.append(list(argv))
         return _FakeProc(returncode=0)
 
-    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     rc = _cmd_resolve(
         _args(["resolve", "--outcome", "abandoned", "--base", "main", "--execute"])
     )
@@ -155,7 +155,7 @@ def test_resolve_execute_stops_on_failed_unwind(capsys, monkeypatch):
             return _FakeProc(returncode=1, stderr="reset failed")
         raise AssertionError("must stop after the failed destructive unwind")
 
-    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     rc = _cmd_resolve(_args(["resolve", "--outcome", "abandoned", "--execute"]))
     assert rc == 1
     out = json.loads(capsys.readouterr().out)

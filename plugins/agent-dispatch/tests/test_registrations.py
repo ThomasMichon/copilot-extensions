@@ -16,6 +16,7 @@ Three surfaces are covered:
 from __future__ import annotations
 
 import math
+import subprocess
 import threading
 
 import pytest
@@ -1088,7 +1089,6 @@ def test_supervisor_daemon_root_hosts_recurring_children_windowlessly(
     monkeypatch, tmp_path,
 ):
     from agent_dispatch import __main__ as cli
-    from agent_dispatch import procutil
 
     observed = {}
     # No installed runtime under this fake home -> resolve_own_runtime_python
@@ -1098,12 +1098,11 @@ def test_supervisor_daemon_root_hosts_recurring_children_windowlessly(
     monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(cli.sys, "executable", "python.exe")
     monkeypatch.setattr(
-        procutil,
-        "windowless_daemon_kwargs",
+        "agent_procutil.windowless_daemon_kwargs",
         lambda **options: {"creationflags": 0x08000000},
     )
     monkeypatch.setattr(
-        cli.subprocess,
+        subprocess,
         "Popen",
         lambda argv, **kwargs: observed.update(argv=argv, kwargs=kwargs),
     )
@@ -1121,7 +1120,6 @@ def test_supervisor_daemon_root_resolves_installed_slot_not_sys_executable(
     sys.executable, so it can never diverge from what the daemon it is meant to
     replace/join is actually running."""
     from agent_dispatch import __main__ as cli
-    from agent_dispatch import procutil
 
     # This suite's own hermeticity fixture now pins AGENT_DISPATCH_INSTALL_DIR
     # suite-wide (isolating against a real machine's installed service.env);
@@ -1135,10 +1133,10 @@ def test_supervisor_daemon_root_resolves_installed_slot_not_sys_executable(
     slot_py.write_text("")
     (install_dir / "current-version").write_text("0.1.2-dev49")
     monkeypatch.setattr(cli.sys, "executable", "WRONG-INTERPRETER")
-    monkeypatch.setattr(procutil, "windowless_daemon_kwargs", lambda **options: {})
+    monkeypatch.setattr("agent_procutil.windowless_daemon_kwargs", lambda **options: {})
     observed = {}
     monkeypatch.setattr(
-        cli.subprocess,
+        subprocess,
         "Popen",
         lambda argv, **kwargs: observed.update(argv=argv),
     )

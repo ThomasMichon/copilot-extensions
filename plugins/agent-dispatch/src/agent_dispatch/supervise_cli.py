@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -332,7 +331,7 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
     single-instance election stands it down cleanly (pin-not-failover), so a double
     launch is self-correcting. Returns whether the spawn was issued.
     """
-    from .procutil import resolve_own_runtime_python, runtime_root, windowless_daemon_kwargs
+    from .procutil import resolve_own_runtime_python, spawn_dispatch_daemon
 
     # Canonically-resolved current-version slot, not sys.executable -- see
     # resolve_own_runtime_python's docstring for why a raw sys.executable here is
@@ -343,15 +342,9 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
     if env:
         argv += ["--env", env]
     try:
-        subprocess.Popen(  # noqa: S603
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            # Launch from the runtime root, never an inherited (possibly payload) CWD.
-            cwd=str(runtime_root()),
-            **windowless_daemon_kwargs(breakaway=True),
-        )
+        # Console children: the supervisor embodies workers through console
+        # programs, which inherit its one hidden console.
+        spawn_dispatch_daemon(argv, log_name="logs/supervisor-daemon.log")
         return True
     except OSError as exc:  # pragma: no cover -- launch failure is environmental
         print(f"supervise register: could not ensure daemon: {exc}", file=sys.stderr)

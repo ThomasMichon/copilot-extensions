@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 from agent_procutil import (
-    windowless_daemon_kwargs,
+    spawn_daemon,
     windowless_python,
     windowless_python_env,
 )
@@ -126,24 +126,39 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+#: Uvicorn log level for the engine. Spawned engines default to ``warning`` so
+#: their append-only stdio log carries startup failures, not one access line
+#: per embedding request; a foreground ``engine run`` keeps ``info``.
+ENGINE_LOG_LEVEL_ENV = "AGENT_INDEX_ENGINE_LOG_LEVEL"
+
+
+def engine_log_path(home: Path | None = None) -> Path:
+    """Append-only stdout/stderr log of a spawned persistent engine."""
+    return Path(os.path.abspath(home or engine_home())) / "logs" / "engine-stdio.log"
+
+
 def _spawn(cmd: list[str], *, python: str, home: Path) -> subprocess.Popen:
-    kwargs: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "env": os.environ.copy(),
-        # Never the caller's ambient cwd: this is a long-lived, detached
-        # daemon that may outlive whatever repo/worktree checkout the
-        # caller happened to be running `agent-index engine start` from
-        # (service-lifecycle-supervision's "nothing pins the plugin
-        # payload" rule, generalized to every deletable checkout). Its own
-        # durable engine home is already a stable, versioned-runtime-
-        # independent location -- root it there.
-        "cwd": str(home),
-    }
-    kwargs["env"].update(windowless_python_env(python))
-    kwargs.update(windowless_daemon_kwargs())
-    return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
+    """Launch the persistent engine through ``spawn_daemon``.
+
+    Runs from its durable engine home, never the caller's cwd (a checkout that
+    may be deleted, or the plugin payload), breaks away from a kill-on-close
+    Job around the caller where allowed (otherwise it starts inside it, as it
+    always did), and appends stdout/stderr to :func:`engine_log_path`.
+    """
+    root = Path(os.path.abspath(home))
+    root.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env.update(windowless_python_env(python))
+    env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
+    return spawn_daemon(
+        cmd,
+        cwd=root,
+        log_path=engine_log_path(root),
+        env=env,
+        console_children=True,
+        contained_fallback=True,
+        display="agent_index_engine.app",
+    )
 
 
 def engine_command(home: Path | None = None) -> list[str]:
@@ -206,7 +221,8 @@ def start(home: Path | None = None, *, wait_timeout: float | None = None) -> str
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             raise RuntimeError(
-                f"engine daemon exited early (code {proc.returncode}) at {host}:{port}"
+                f"engine daemon exited early (code {proc.returncode}) at {host}:{port}; "
+                f"see {engine_log_path(home)}"
             )
         if is_healthy(host, port):
             return f"started (pid {proc.pid}) at {host}:{port}"

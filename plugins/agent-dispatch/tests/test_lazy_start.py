@@ -10,6 +10,8 @@ a live coordinator already answers.
 
 from __future__ import annotations
 
+import subprocess
+
 import agent_dispatch.__main__ as m
 
 
@@ -113,10 +115,10 @@ def test_coordinator_spawn_uses_console_interpreter_and_no_window_flag(monkeypat
     daemon_kwargs_calls = []
     monkeypatch.setattr(m.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(
-        "agent_dispatch.procutil.windowless_daemon_kwargs",
+        "agent_procutil.windowless_daemon_kwargs",
         lambda **kw: daemon_kwargs_calls.append(kw) or {"creationflags": "NO_WINDOW"},
     )
-    monkeypatch.setattr(m.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
 
     m._spawn_coordinator_process()
 
@@ -158,7 +160,7 @@ def test_coordinator_spawn_resolves_installed_slot_not_sys_executable(
     monkeypatch.setattr(
         "agent_dispatch.procutil.windowless_python", lambda python: python
     )
-    monkeypatch.setattr(m.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
 
     m._spawn_coordinator_process()
 

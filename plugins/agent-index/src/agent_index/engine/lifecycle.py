@@ -31,15 +31,19 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
+from agent_index.config import data_dir
 from agent_index.engine.client import EngineUnavailableError
+from agent_index.engine.daemon import ENGINE_LOG_LEVEL_ENV
 
 if TYPE_CHECKING:
     from agent_index.engine.client import EngineClient
@@ -51,6 +55,7 @@ log = logging.getLogger(__name__)
 # embed call, so we only wait for the HTTP server to answer /health here.
 _START_TIMEOUT = 60.0
 _POLL_INTERVAL = 1.0
+_NORMAL_PRIORITY_CLASS = 0x00000020
 
 # Child engine processes this module spawned (subprocess mode), keyed by
 # model_id. ``ensure_engine`` and ``stop_engine`` run in the same process (the
@@ -145,29 +150,29 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
         "--port",
         str(profile.engine_port),
     ]
-    kwargs: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "env": os.environ.copy(),
-    }
-    kwargs["env"].update(windowless_python_env(python))
-    # Detach from the parent console so the engine is independent.
-    kwargs.update(detached_kwargs())
-    if sys.platform.startswith("win"):
-        # The spawning process (e.g. the index-worker, itself niced down via
-        # AGENT_INDEX_INDEXER_NICE) must not leak its own lowered priority
-        # class onto this child via normal Windows priority-class
-        # inheritance -- that would defeat the engine's own deferred-
-        # throttle sequencing (agent_index_engine.app._get_pipeline): the
-        # child would start its one-time model load already throttled,
-        # reproducing the load-stall bug through a different path. Force
-        # NORMAL_PRIORITY_CLASS explicitly at spawn (ORed in, not
-        # overwriting detached_kwargs()'s own flags); the engine's own
-        # startup sequencing takes over the throttle decision from there.
-        _NORMAL_PRIORITY_CLASS = 0x00000020
-        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _NORMAL_PRIORITY_CLASS
-    return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
+    env = os.environ.copy()
+    env.update(windowless_python_env(python))
+    env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
+    root = Path(os.path.abspath(data_dir()))
+    root.mkdir(parents=True, exist_ok=True)
+    model = re.sub(r"[^A-Za-z0-9._-]", "_", str(profile.model_id)) or "engine"
+    # The spawning process (e.g. the index-worker, itself niced down via
+    # AGENT_INDEX_INDEXER_NICE) must not leak its own lowered priority class
+    # onto this child via normal Windows priority-class inheritance -- that
+    # would defeat the engine's own deferred-throttle sequencing
+    # (agent_index_engine.app._get_pipeline): the child would start its
+    # one-time model load already throttled. NORMAL_PRIORITY_CLASS is applied
+    # on Windows only; the engine's startup sequencing takes over from there.
+    # No breakaway: this engine is owned by the indexer that stops it.
+    return spawn_daemon(
+        cmd,
+        cwd=root,
+        log_path=root / "logs" / f"engine-{model}.log",
+        env=env,
+        breakaway=False,
+        extra_creationflags=_NORMAL_PRIORITY_CLASS,
+        display="agent_index_engine.app",
+    )
 
 
 def ensure_engine(profile: ModelProfile, client: EngineClient) -> bool:

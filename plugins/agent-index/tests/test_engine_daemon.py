@@ -205,16 +205,12 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
     assert daemon._read_pid(tmp_path) == 5150
 
 
-def test_spawn_uses_windowless_daemon_contract(monkeypatch, tmp_path):
+def test_spawn_launches_through_spawn_daemon(monkeypatch, tmp_path):
     captured = {}
+    monkeypatch.delenv(daemon.ENGINE_LOG_LEVEL_ENV, raising=False)
     monkeypatch.setattr(
         daemon,
-        "windowless_daemon_kwargs",
-        lambda: {"creationflags": 0x08000000},
-    )
-    monkeypatch.setattr(
-        daemon.subprocess,
-        "Popen",
+        "spawn_daemon",
         lambda cmd, **kwargs: captured.update(cmd=cmd, kwargs=kwargs) or FakeProc(),
     )
 
@@ -222,13 +218,26 @@ def test_spawn_uses_windowless_daemon_contract(monkeypatch, tmp_path):
         ["pythonw.exe", "-m", "agent_index_engine.app"], python="python.exe", home=tmp_path
     )
 
-    assert captured["kwargs"]["creationflags"] == 0x08000000
-    assert captured["kwargs"]["stdin"] is daemon.subprocess.DEVNULL
-    assert captured["kwargs"]["stdout"] is daemon.subprocess.DEVNULL
-    assert captured["kwargs"]["stderr"] is daemon.subprocess.DEVNULL
+    kwargs = captured["kwargs"]
     # Never the caller's ambient cwd -- this is a long-lived, detached
     # daemon rooted at its own durable engine home instead.
-    assert captured["kwargs"]["cwd"] == str(tmp_path)
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs["log_path"] == tmp_path / "logs" / "engine-stdio.log"
+    assert kwargs["console_children"] is True
+    # It used to start inside a caller's Job; that stays the fallback.
+    assert kwargs["contained_fallback"] is True
+    # One stdio log line per embedding request would grow without bound.
+    assert kwargs["env"][daemon.ENGINE_LOG_LEVEL_ENV] == "warning"
+
+
+def test_spawn_keeps_an_explicit_engine_log_level(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setenv(daemon.ENGINE_LOG_LEVEL_ENV, "debug")
+    monkeypatch.setattr(
+        daemon, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or FakeProc()
+    )
+    daemon._spawn(["pythonw.exe"], python="python.exe", home=tmp_path)
+    assert captured["env"][daemon.ENGINE_LOG_LEVEL_ENV] == "debug"
 
 
 def test_start_raises_on_early_exit(monkeypatch, tmp_path):

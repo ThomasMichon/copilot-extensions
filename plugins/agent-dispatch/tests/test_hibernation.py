@@ -260,7 +260,7 @@ def test_run_foreground_executes_then_nudges(capsys, monkeypatch):
         ran["cmd"] = cmd
         return _FakeProc(0)
 
-    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr(
         "agent_dispatch.bridge.send_nudge",
         lambda wt, msg, **k: nudged.update(wt=wt, msg=msg) or True,
@@ -296,7 +296,7 @@ def test_run_foreground_wait_runs_windowless(capsys, monkeypatch):
         calls.append({"cmd": cmd, "kwargs": kwargs})
         return _FakeProc(0)
 
-    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr(
         "agent_dispatch.execution_cli.no_window_kwargs",
         lambda: {"creationflags": 0x08000000},
@@ -334,7 +334,7 @@ def test_run_detach_spawns_waiter_without_executing_the_wait(capsys, monkeypatch
     def _boom(*a, **k):  # pragma: no cover - the wait must not run in this process
         raise AssertionError("--detach must not run the wait inline")
 
-    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", _boom)
+    monkeypatch.setattr("subprocess.run", _boom)
 
     rc = _cmd_run(_args(["run", "--detach", "--resume", "m/wt-1", "--", "sleep", "99"]))
     assert rc == 0
@@ -669,7 +669,7 @@ def test_waiter_child_reattempts_timeout_and_queues_finish(capsys, monkeypatch, 
             returncode = 124 if len(calls) < 3 else 0
         return _Proc()
 
-    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr(companion, "process_start_token", lambda _pid: "token-123")
     monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "test-host")
     fake = _FakeWaiterFinishClient()

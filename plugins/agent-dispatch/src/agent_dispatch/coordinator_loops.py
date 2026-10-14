@@ -187,24 +187,22 @@ def _self_update_settings() -> tuple[bool, float, int, float]:
 
 def _spawn_self_deploy(python_path: Any) -> None:
     """Fire-and-forget a self-triggered ``deploy`` using *python_path*."""
-    import subprocess
+    from pathlib import Path
 
-    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+    from agent_procutil import windowless_python, windowless_python_env
+
+    from .procutil import spawn_dispatch_daemon
 
     cmd = [windowless_python(python_path), "-m", "agent_dispatch", "deploy", "--json"]
-    kwargs: dict[str, Any] = {
-        "env": {**os.environ, **windowless_python_env(python_path)},
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        # Never the caller's ambient cwd -- fire-and-forget + detached means
-        # this process's actual lifetime is not bounded to this call, so it
-        # must not pin whatever repo/worktree checkout happened to be
-        # current when the self-update check fired.
-        "cwd": os.path.expanduser("~"),
-    }
-    kwargs.update(detached_kwargs(breakaway=True))
-    subprocess.Popen(cmd, **kwargs)  # noqa: S603
+    # Never the caller's ambient cwd: this detached deploy outlives this call,
+    # so it must not pin whatever checkout was current when the check fired.
+    spawn_dispatch_daemon(
+        cmd,
+        log_name="logs/self-deploy.log",
+        env={**os.environ, **windowless_python_env(python_path)},
+        console_children=False,
+        cwd=Path(os.path.expanduser("~")),
+    )
 
 
 class DrainGate:
