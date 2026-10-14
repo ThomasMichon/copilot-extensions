@@ -289,8 +289,7 @@ class FastForwardResult:
     - ``gone``        -- the worktree path/.git is missing; skipped.
     - ``ff-failed``   -- the fast-forward merge itself failed; skipped.
 
-    ``fetch_error`` is set when the requested fetch failed (the comparison
-    then used the last-known upstream ref).
+    ``fetch_error``: the requested fetch failed (compared to the last-known ref).
     """
 
     updated: bool
@@ -692,10 +691,9 @@ def fetch(
 ) -> None:
     """Fetch from a remote (auto-authenticating cross-account remotes; #29).
 
-    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`) so an unreachable
-    remote can't hang the caller: a stall past the bound is surfaced as a
-    :class:`GitError` (returncode 124), which every caller handles as a best-effort
-    fetch failure; ``timeout=None`` is unbounded.
+    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`): a stall past it is a
+    :class:`GitError` (returncode 124), a best-effort fetch failure to every caller;
+    ``timeout=None`` is unbounded.
     """
     try:
         git(
@@ -750,9 +748,8 @@ def fast_forward_worktree(
     function never rebases, never creates a merge commit, and never discards
     local commits.  When ``do_fetch`` is True the remote is fetched first so
     the ahead/behind comparison and fast-forward target are against the
-    freshest upstream; a fetch failure (e.g. offline) is non-fatal: the
-    comparison falls back to the already-known upstream ref and the result
-    carries ``fetch_error``.
+    freshest upstream; a fetch failure (e.g. offline) is non-fatal: it falls back to
+    the already-known upstream ref and the result carries ``fetch_error``.
     """
     path = Path(worktree_path)
     if not path.exists() or not (path / ".git").exists():
