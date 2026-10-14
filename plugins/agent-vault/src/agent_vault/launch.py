@@ -6,6 +6,7 @@ start the same resident daemon, so both go through :func:`spawn_service`.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -38,11 +39,17 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
     """
     python = sys.executable
     root = service_root()
+    overrides = dict(windowless_python_env(python))
+    if os.environ.get(config.HOME_ENV):
+        # The child runs from ``root``: a relative override would resolve a
+        # second time there. Left unset otherwise (its presence selects the
+        # cache location).
+        overrides[config.HOME_ENV] = str(root)
     return spawn_daemon(
         [windowless_python(python), "-m", "agent_vault.service", *args],
         cwd=root,
         log_path=root / SERVICE_STDIO_LOG,
-        env_overrides=windowless_python_env(python),
+        env_overrides=overrides,
         contained_fallback=True,
         display="agent_vault.service",
     )

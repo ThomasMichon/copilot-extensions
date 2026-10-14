@@ -57,3 +57,26 @@ def test_spawn_service_runs_from_the_runtime_root_with_a_log(monkeypatch, tmp_pa
 
 def test_spawn_service_is_the_shared_primitive():
     assert launch.spawn_daemon is agent_procutil.spawn_daemon
+
+
+def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):
+    # The service runs from its root: a relative override inherited as-is
+    # would resolve to <home>/<home> there, apart from the clients' copy.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(config.HOME_ENV, "state")
+    seen: dict = {}
+    monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
+    launch.spawn_service(["--foreground"])
+    root = (tmp_path / "state").resolve()
+    assert seen["cwd"] == root
+    assert seen["env_overrides"][config.HOME_ENV] == str(root)
+
+
+def test_unset_home_override_stays_unset(monkeypatch, tmp_path):
+    # Its presence selects the cache location, so legacy mode must not gain it.
+    monkeypatch.delenv(config.HOME_ENV, raising=False)
+    monkeypatch.setattr(launch, "service_root", lambda: tmp_path)
+    seen: dict = {}
+    monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
+    launch.spawn_service(["--foreground"])
+    assert config.HOME_ENV not in seen["env_overrides"]

@@ -643,7 +643,7 @@ def verify() -> list[str]:
             spawns.visit(tree)
             daemons = _DetachedSpawnFinder(tree)
             daemons.visit(tree)
-            detached[f] = sorted(set(daemons.hits))
+            detached[f] = sorted(daemons.hits)  # one hit per launch, even on one line
             result = (text, sorted(set(flags.hits)), sorted(set(spawns.hits)))
         except SyntaxError as exc:
             result = (text, [], [])

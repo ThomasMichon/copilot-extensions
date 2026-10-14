@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -474,10 +475,13 @@ def _watch_boot() -> None:
 
     root = state_dir().resolve()
     root.mkdir(parents=True, exist_ok=True)
+    # The child runs from ``root``: a relative override would resolve again there.
+    home = "AGENT_PULL_REQUESTS_HOME"
     spawn_daemon(
         [sys.executable, "-m", "agent_pull_requests", "serve"],
         cwd=root,
         log_path=root / "watch-daemon.log",
+        env_overrides={home: str(root)} if os.environ.get(home, "").strip() else None,
         contained_fallback=True,
         display="agent_pull_requests serve",
     )

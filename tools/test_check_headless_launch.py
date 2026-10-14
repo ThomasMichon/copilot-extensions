@@ -664,3 +664,17 @@ def test_inline_allowance_never_consumes_a_baseline_entry(repo):
     module.write_text(head + one_shot, encoding="utf-8")
     problems = _daemon_problems(guard.verify())
     assert len(problems) == 1 and "stale entry" in problems[0]
+
+
+def test_two_launches_on_one_line_need_two_baseline_entries(repo):
+    _mk_plugin(
+        repo, "agent-daemon", adopts=True,
+        body=("import subprocess\nfrom agent_procutil import detached_kwargs\ndef start():\n"
+              "    a, b = subprocess.Popen(['a'], **detached_kwargs()), "
+              "subprocess.Popen(['b'], **detached_kwargs())\n"),
+    )
+    key = "plugins/agent-daemon/src/agent_daemon/mod.py::start"
+    _write_daemon_allow(repo, f"{key}  one launch, migration pending\n")
+    assert len(_daemon_problems(guard.verify())) == 1
+    _write_daemon_allow(repo, f"{key}  first\n{key}  second\n")
+    assert _daemon_problems(guard.verify()) == []
