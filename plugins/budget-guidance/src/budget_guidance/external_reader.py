@@ -11,7 +11,6 @@ import math
 import os
 from pathlib import Path
 from queue import Empty, Queue
-import signal
 import subprocess
 import sys
 from threading import Thread
@@ -81,13 +80,9 @@ def _read_output(stream: BufferedReader, limit: int, result: Queue[bytes | Reade
 def _run(reader: CommandReader) -> bytes:
     windows = os.name == "nt"
     posix_capabilities = (
-        "waitid", "WNOWAIT", "WEXITED", "WNOHANG", "P_PID", "CLD_EXITED",
-        "waitstatus_to_exitcode", "setpgid", "execv", "kill", "killpg",
+        "setpgid", "getpgrp", "killpg",
     )
-    if not windows and (
-        not all(hasattr(os, name) for name in posix_capabilities)
-        or not all(hasattr(signal, name) for name in ("SIGSTOP", "SIGKILL"))
-    ):
+    if not windows and not all(hasattr(os, name) for name in posix_capabilities):
         raise ReaderFailure("bounded reader execution is unsupported on this runtime")
     if not windows and (
         not sys.executable or not Path(sys.executable).is_absolute()
@@ -101,8 +96,8 @@ def _run(reader: CommandReader) -> bytes:
             str(Path(__file__).resolve().with_name("_command_host.py")), *reader.argv,
         ]
         process, job = spawn_sync_in_kill_on_close_job(
-            argv, cwd=reader.cwd, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            argv, cwd=reader.cwd, stdin=subprocess.DEVNULL if windows else subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL if windows else subprocess.PIPE,
             require_job=windows, allow_breakaway=False,
             **no_window_kwargs(),
         )
@@ -114,10 +109,19 @@ def _run(reader: CommandReader) -> bytes:
         target=_read_output, args=(process.stdout, reader.max_output_bytes, result),
         daemon=True,
     )
+    status_result: Queue[bytes | ReaderFailure] = Queue(maxsize=1)
+    status_thread: Thread | None = None
+    if not windows:
+        assert process.stderr is not None
+        status_thread = Thread(
+            target=_read_output, args=(process.stderr, 64, status_result), daemon=True,
+        )
     primary_error: ReaderFailure | None = None
     try:
         try:
             thread.start()
+            if status_thread is not None:
+                status_thread.start()
         except RuntimeError:
             raise ReaderFailure("reader output worker could not start") from None
         try:
@@ -126,22 +130,26 @@ def _run(reader: CommandReader) -> bytes:
             raise ReaderFailure("reader deadline exceeded") from None
         if isinstance(output, ReaderFailure):
             raise output
+        if not windows:
+            try:
+                status = status_result.get(timeout=max(0, deadline - time.monotonic()))
+            except Empty:
+                raise ReaderFailure("reader deadline exceeded") from None
+            if isinstance(status, ReaderFailure):
+                raise ReaderFailure("reader host status could not be read")
+            try:
+                returncode = int(status.decode("ascii").strip())
+            except (UnicodeDecodeError, ValueError):
+                raise ReaderFailure("reader host returned invalid process status") from None
+            if time.monotonic() >= deadline:
+                raise ReaderFailure("reader deadline exceeded")
+            if returncode != 0:
+                raise ReaderFailure("reader exited unsuccessfully")
+            return output
         while True:
             if time.monotonic() >= deadline:
                 raise ReaderFailure("reader deadline exceeded")
-            if windows:
-                returncode = process.poll()
-            else:
-                # Keep the root unreaped until group cleanup: its PID cannot be reused.
-                status = os.waitid(
-                    os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT,
-                )
-                returncode = (
-                    None if status is None else os.waitstatus_to_exitcode(
-                        status.si_status << 8 if status.si_code == os.CLD_EXITED
-                        else status.si_status,
-                    )
-                )
+            returncode = process.poll()
             if returncode is not None:
                 if time.monotonic() >= deadline:
                     raise ReaderFailure("reader deadline exceeded")
@@ -160,23 +168,28 @@ def _run(reader: CommandReader) -> bytes:
         raise primary_error from None
     finally:
         try:
+            ownership_lost = False
             if job is not None:
                 job.terminate_and_wait(5)
             else:
-                # Freeze startup before testing its group: no race can fork outside cleanup.
-                os.kill(process.pid, signal.SIGSTOP)
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    process.kill()
+                ownership_lost = process.poll() is not None
+                assert process.stdin is not None
+                process.stdin.close()
             process.wait(timeout=5)
-            if thread.ident is not None:
-                thread.join(timeout=5)
-                if thread.is_alive():
-                    raise ReaderFailure("reader output cleanup could not be confirmed")
+            for worker in (thread, status_thread):
+                if worker is not None and worker.ident is not None:
+                    worker.join(timeout=5)
+                    if worker.is_alive():
+                        raise ReaderFailure("reader output cleanup could not be confirmed")
             process.stdout.close()
-        except (ReaderFailure, OSError, RuntimeError, TimeoutError, subprocess.TimeoutExpired):
+            if process.stderr is not None:
+                process.stderr.close()
+            if ownership_lost:
+                raise ReaderFailure("reader host ownership was lost")
+        except (ReaderFailure, OSError, RuntimeError, TimeoutError, subprocess.TimeoutExpired) as exc:
             cleanup_error = "reader process cleanup could not be confirmed"
+            if isinstance(exc, ReaderFailure):
+                cleanup_error = f"{exc}; {cleanup_error}"
             if primary_error is not None:
                 cleanup_error = f"{primary_error}; {cleanup_error}"
             raise ReaderFailure(cleanup_error) from None

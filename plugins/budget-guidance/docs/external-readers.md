@@ -84,28 +84,36 @@ share a deadline beginning before process creation. Native process creation
 itself is synchronous and not interruptible by this deadline; after it returns,
 an already-expired deadline fails acquisition even if output and successful
 completion are already queued. Cleanup has a
-separate bounded wait. Stdin and stderr go to the null device; stderr floods
+separate bounded wait. Reader stdin and stderr go to the null device; stderr floods
 cannot fill a captured pipe, and diagnostic output never forwards reader
 stdout, stderr, arguments, paths, or opaque reader error text.
 
 Windows uses the canonical headless process helper and a required,
 non-breakaway, kill-on-close Job before the executable can run. POSIX uses a
-small isolated, no-site Python host (`-I -S`) that establishes an owned process group without leaving the
-caller's session, preserving contained-test supervision. It retains the root
-PID until group cleanup to avoid signaling a reused process identity.
+small isolated, no-site Python host (`-I -S`) that establishes an owned process
+group without leaving the caller's session, preserving contained-test supervision.
+The host stays alive while its granted reader runs and after reporting that
+reader's status. Closing the caller-owned control pipe triggers the live host
+to terminate its own group, including itself; the caller never signals a
+numeric PID/group that an external waiter could have reaped and reused.
+The host resets only its own `SIGCHLD` disposition for its private reader wait,
+not the caller's signal policy.
 Descendants are terminated after success as well as on timeout or output
 overflow. The contract is for one-shot readers, never detached services.
-POSIX platforms lacking `setpgid` or non-reaping `waitid` report unsupported
+POSIX platforms lacking the group primitives report unsupported
 execution, rather than silently falling back to unbounded spawning.
 The host does not run ambient `.pth`/`sitecustomize` code or honor Python
-startup overrides before containment. Its `execv` preserves the original
-environment for the explicitly authorized reader.
+startup overrides before containment. It preserves the original environment
+for the explicitly authorized reader. Reader stdin/stderr remain null; the
+host's separate stderr pipe carries only its bounded 64-byte internal exit-status
+protocol. Caller termination closes the control pipe and triggers the same
+group teardown. Unexpected host exit refuses cleanup confirmation.
 
 | Platform | Implementation and validation status |
 |----------|--------------------------------------|
 | Windows | Strict headless Job containment is implemented through the canonical helper; native reader lifecycle/window-suppression validation is not yet recorded. |
 | Linux | The capability-gated group host is implemented; contained native regressions exercise timeout, output bounds, and descendant termination after root exit. |
-| macOS | The same group host is conditional on the complete Python/OS capability gate, including non-reaping `waitid`. Missing capabilities explicitly refuse reader execution; native macOS lifecycle validation is not yet recorded. No Linux `/proc` witness is claimed as macOS proof. |
+| macOS | The same group/control-pipe host is conditional on the Python/OS group capability gate; it no longer requires non-reaping `waitid`. Missing capabilities explicitly refuse reader execution; native macOS lifecycle validation is not yet recorded. No Linux `/proc` witness is claimed as macOS proof. |
 
 The focused native Windows witness is opt-in and excluded from the ordinary
 Linux/fast guard lane. From an interactive Windows desktop, set

@@ -84,6 +84,7 @@ def main() -> None:
                 "source": "native-fixture",
             }],
         })
+        started_at = time.monotonic()
         acquired = acquire_config(config, {"native": CommandReader(
             (console_python, __file__, "reader", str(current), console_python),
             current, timeout_seconds=1.5,
@@ -92,6 +93,7 @@ def main() -> None:
         results.append({
             "availability": reading.availability, "error": reading.error,
             "consumption": str(reading.consumption) if reading.consumption is not None else None,
+            "elapsed_seconds": time.monotonic() - started_at,
         })
     (root / "result.json").write_text(json.dumps(results), encoding="utf-8")
 

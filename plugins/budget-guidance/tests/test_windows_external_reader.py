@@ -158,7 +158,7 @@ def test_native_windowless_parent_two_cycles_and_timeout_cleanup(tmp_path, recor
                 time.sleep(0.01)
             assert parent.poll() == 0, (tmp_path / "parent.log").read_text(errors="replace")
             results = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
-            assert [result["availability"] for result in results] == ["available", "available", "error"]
+            assert [result["availability"] for result in results] == ["available", "available", "error"], results
             assert [result["consumption"] for result in results] == ["7", "7", None]
             assert results[2]["error"] == "reader deadline exceeded"
             assert len(handles) == 6, "must witness root and console descendant in every cycle"

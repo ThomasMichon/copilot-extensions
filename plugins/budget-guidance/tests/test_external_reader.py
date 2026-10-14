@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 import os
+import signal
 from pathlib import Path
 import sys
 import time
@@ -284,8 +285,7 @@ def test_cli_requires_explicit_authority_and_renders_same_posture(tmp_path, caps
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX capability refusal")
 @pytest.mark.parametrize("capability", [
-    "WNOHANG", "CLD_EXITED", "waitid", "WNOWAIT", "WEXITED", "P_PID",
-    "waitstatus_to_exitcode", "setpgid", "execv", "kill", "killpg",
+    "setpgid", "getpgrp", "killpg",
 ])
 def test_missing_posix_capability_is_a_redacted_error(tmp_path, monkeypatch, capability):
     import budget_guidance.external_reader as module
@@ -310,14 +310,19 @@ def test_invalid_reader_options_are_not_labeled_invalid_configuration(capsys):
 def test_status_read_failure_is_explicit_not_a_raw_exception(tmp_path, monkeypatch):
     import budget_guidance.external_reader as module
 
-    def fail_status(*args):
-        raise ChildProcessError("private-status-detail")
+    read_output = module._read_output
 
-    monkeypatch.setattr(module.os, "waitid", fail_status)
+    def fail_status(stream, limit, result):
+        if limit == 64:
+            result.put(module.ReaderFailure("private-status-detail"))
+        else:
+            read_output(stream, limit, result)
+
+    monkeypatch.setattr(module, "_read_output", fail_status)
     reader = _reader(tmp_path, f"print({json.dumps(_reading())!r})")
     posture = _posture(acquire_config(_config(), {"report": reader}))
     assert posture["calculated"] is None
-    assert posture["adapters"][0]["error"] == "reader process status could not be read"
+    assert posture["adapters"][0]["error"] == "reader host status could not be read"
     assert "private-status-detail" not in json.dumps(posture)
 
 
@@ -448,8 +453,6 @@ def test_completed_output_after_spawn_exhausts_deadline_is_not_success(tmp_path,
         process, job = spawn(*args, **kwargs)
         if os.name == "nt":
             process.wait(timeout=5)
-        else:
-            os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
         clock[0] = 2.0
         return process, job
 
@@ -475,3 +478,68 @@ def test_completed_output_after_spawn_exhausts_deadline_is_not_success(tmp_path,
     posture = _posture(acquire_config(_config(), {"report": reader}))
     assert posture["calculated"] is None
     assert posture["adapters"][0]["error"] == "reader deadline exceeded"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX auto-reaping ownership")
+def test_ignored_sigchld_never_causes_parent_numeric_pid_signaling(tmp_path, monkeypatch):
+    import budget_guidance.external_reader as module
+
+    def forbidden_signal(*args):
+        pytest.fail("caller signaled a numeric PID/group instead of closing its owned pipe")
+
+    monkeypatch.setattr(module.os, "kill", forbidden_signal)
+    monkeypatch.setattr(module.os, "killpg", forbidden_signal)
+    previous = signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+    try:
+        reader = _reader(tmp_path, f"print({json.dumps(_reading())!r})")
+        posture = _posture(acquire_config(_config(), {"report": reader}))
+        assert posture["availability"] == "available"
+    finally:
+        signal.signal(signal.SIGCHLD, previous)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native Linux descendant witness")
+def test_caller_closing_control_pipe_reaps_running_reader_and_descendant(tmp_path):
+    pid_file = tmp_path / "child.pid"
+    code = (
+        "import subprocess,sys,time; from pathlib import Path; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(10)'],"
+        "stdout=subprocess.DEVNULL); "
+        f"Path({str(pid_file)!r}).write_text(str(child.pid)); time.sleep(10)"
+    )
+    reader = _reader(tmp_path, code, timeout_seconds=0.5)
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["adapters"][0]["error"] == "reader deadline exceeded"
+    status = Path(f"/proc/{int(pid_file.read_text())}/stat")
+    for _ in range(50):
+        try:
+            state = status.read_text().split(") ", 1)[1].split()[0]
+        except (FileNotFoundError, ProcessLookupError):
+            return
+        if state == "Z":
+            return
+        time.sleep(0.01)
+    pytest.fail("running reader descendant survived owned control-pipe cleanup")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX lost-root identity")
+def test_lost_root_ownership_never_signals_a_numeric_pid(tmp_path, monkeypatch):
+    import budget_guidance.external_reader as module
+
+    spawn = module.spawn_sync_in_kill_on_close_job
+
+    def spawn_with_reaped_observation(*args, **kwargs):
+        process, job = spawn(*args, **kwargs)
+        process.poll = lambda: 0
+        return process, job
+
+    def forbidden_signal(*args):
+        pytest.fail("caller signaled a possibly reused numeric identity")
+
+    monkeypatch.setattr(module, "spawn_sync_in_kill_on_close_job", spawn_with_reaped_observation)
+    monkeypatch.setattr(module.os, "kill", forbidden_signal)
+    monkeypatch.setattr(module.os, "killpg", forbidden_signal)
+    reader = _reader(tmp_path, f"print({json.dumps(_reading())!r})")
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["calculated"] is None
+    assert "reader host ownership was lost" in posture["adapters"][0]["error"]
