@@ -138,6 +138,26 @@ def test_index_protects_staged_outputs_before_any_copy(copy_workspace, stale, in
     assert not second.exists()
 
 
+def test_index_case_alias_is_protected_despite_inherited_pathspec_flags(copy_workspace, monkeypatch):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    previous = output.read_bytes()
+    blob = subprocess.check_output(
+        ["git", "-C", str(root), "hash-object", "-w", str(output)], text=True,
+    ).strip()
+    relative = output.relative_to(root).as_posix()
+    alias = relative.replace(".github/instructions/agent-worktrees-generated", ".GITHUB/INSTRUCTIONS/AGENT-WORKTREES-GENERATED")
+    subprocess.run(
+        ["git", "-C", str(root), "update-index", "--add", "--cacheinfo", f"100644,{blob},{alias}"],
+        check=True, capture_output=True,
+    )
+    template.write_bytes(b"must not overwrite a staged case alias")
+    monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "1")
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert output.read_bytes() == previous
+
+
 @pytest.mark.parametrize("fault", ["settings", "declaration", "missing-plugin", "missing-template", "collision"])
 def test_incomplete_discovery_never_removes_existing_output(copy_workspace, fault):
     root, home = copy_workspace
@@ -616,14 +636,18 @@ def test_git_preflights_reuse_case_insensitive_repository_environment_isolation(
 
     captured = []
     monkeypatch.setattr(static.os, "environ", {
-        "git_dir": "foreign", "Git_Index_File": "foreign-index", "PATH": "preserved",
+        "git_dir": "foreign", "Git_Index_File": "foreign-index",
+        "git_literal_pathspecs": "1", "GIT_GLOB_PATHSPECS": "1", "PATH": "preserved",
     })
     monkeypatch.setattr(
         push_timeout, "run_bounded",
         lambda argv, **kwargs: captured.append(kwargs["env"]) or subprocess.CompletedProcess(argv, 0, b"", b""),
     )
     static._git(tmp_path, "ls-files")
-    assert not any(key.upper() in ("GIT_DIR", "GIT_INDEX_FILE") for key in captured[0])
+    assert not any(
+        key.upper() in {"GIT_DIR", "GIT_INDEX_FILE", *static._PATHSPEC_ENV}
+        for key in captured[0]
+    )
     assert captured[0]["PATH"] == "preserved"
     assert captured[0]["GIT_TERMINAL_PROMPT"] == "0"
 

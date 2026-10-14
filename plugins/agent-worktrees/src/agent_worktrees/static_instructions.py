@@ -25,6 +25,10 @@ _RESERVED_NAMES = {
     *(f"com{index}" for index in range(1, 10)),
     *(f"lpt{index}" for index in range(1, 10)),
 }
+_PATHSPEC_ENV = {
+    "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS",
+}
 
 
 def _remaining(deadline: float | None, ceiling: float | None = None) -> float | None:
@@ -214,10 +218,14 @@ def _git(
     from .push_timeout import run_bounded
     from .git_ops import repository_identity_env
 
+    env = {
+        key: value for key, value in repository_identity_env().items()
+        if key.upper() not in _PATHSPEC_ENV
+    }
     result = run_bounded(
         ["git", "-C", str(root), *args], cwd=None, input=input, binary=True,
         timeout=_remaining(deadline, 15.0),
-        env=repository_identity_env(),
+        env=env,
     )
     if result.returncode:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
@@ -293,8 +301,8 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
         removable_files = {output / relative for relative in stale}
         # Include staged removals, even when Git could classify one as a rename.
         tracked = (
-            _git(root, "ls-files", "-z", "--", ".github", deadline=deadline)
-            + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ".github", deadline=deadline)
+            _git(root, "ls-files", "-z", "--", ":(icase).github", deadline=deadline)
+            + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ":(icase).github", deadline=deadline)
         ).split(b"\0")
         namespace = NAMESPACE.casefold()
         for raw in tracked:

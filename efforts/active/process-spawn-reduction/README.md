@@ -421,6 +421,11 @@ single-final-batch contract.
   2 passed / 2 native skips; explicit selection all 4 passed; the 3 structural/
   environment guards pass separately. No runtime behavior changed in this
   classification follow-up.
+- Closed the corresponding index case-alias gap: both tracked/staged-removal
+  queries use an explicit case-insensitive scope, independent of inherited Git
+  pathspec flags. A real index fixture stages an uppercase namespace alias with
+  inherited literal-pathspec behavior, then proves no output is overwritten.
+  All 10 index/environment cases pass; lint passes, with unchanged budgets.
 
 ### 2026-10-14 - Declarations decide static publication
 
