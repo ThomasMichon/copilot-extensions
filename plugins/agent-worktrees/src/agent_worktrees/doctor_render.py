@@ -11,6 +11,11 @@ def _cutover_blocked(report: dict[str, object]) -> bool:
 
 
 def _census(report: dict[str, object]) -> dict[str, object]:
+    # An apply report's fresh re-census can become uncertain even when the
+    # pre-repair census was not; show the census that explains the refusal.
+    after = report.get("after")
+    if isinstance(after, dict) and after.get("grouping_uncertain"):
+        return after
     before = report.get("before")
     return before if isinstance(before, dict) else report
 

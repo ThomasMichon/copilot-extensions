@@ -379,6 +379,48 @@ def test_backstop_terminates_nothing_for_a_launcher_whose_worker_was_missed(
     assert "terminations skipped" in out
     assert "launcher candidate 303 has no captured worker" in out
 
+
+@pytest.mark.guard
+def test_backstop_never_logs_a_refused_repair_as_applied(tmp_path, monkeypatch, capsys):
+    terminated = _windows_backstop(
+        tmp_path, monkeypatch, {101: (1, "worker"), 303: (None, "worker")},
+        lock_pid=101, abandoned_pid=303,
+    )
+
+    assert terminated == []
+    out = capsys.readouterr().out
+    logged = (tmp_path / "logs" / "reap-stale.log").read_text(encoding="utf-8")
+    for text in (out, logged):
+        assert "terminations skipped -- generation grouping uncertain" in text
+        assert "applied daemon-health repair" not in text
+
+
+@pytest.mark.guard
+def test_doctor_shows_the_reason_when_only_the_re_census_is_uncertain(capsys):
+    from agent_worktrees import doctor_render
+
+    finding = {"kind": "abandoned_passive", "targets": [{"pid": 303, "role": "worker"}]}
+    report = {
+        "mode": "apply",
+        "findings": [finding],
+        "remaining_findings": [finding],
+        "before": {"findings": [finding], "grouping_uncertain": False},
+        "after": {
+            "findings": [finding],
+            "grouping_uncertain": True,
+            "grouping_uncertain_reason": "parent of candidate 303 unreadable",
+        },
+        "actions": [{
+            "kind": "generation_grouping", "blocked": True,
+            "reason": "generation grouping uncertain",
+        }],
+    }
+
+    doctor_render.render_daemon_health_report(report)
+
+    out = capsys.readouterr().out
+    assert "generation grouping uncertain; terminations refused" in out
+    assert "parent of candidate 303 unreadable" in out
 @pytest.mark.guard
 def test_backstop_log_lives_under_the_runtime_install_root(tmp_path, monkeypatch):
     from agent_worktrees import config as cfg

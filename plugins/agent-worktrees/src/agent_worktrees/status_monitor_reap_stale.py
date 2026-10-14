@@ -359,27 +359,34 @@ def cmd_status_monitor_reap_stale(args: argparse.Namespace) -> int:
     else:
         findings = report.get("findings") if isinstance(report, dict) else None
         count = len(findings) if isinstance(findings, list) else 0
-        _record(f"status-monitor-reap-stale: applied daemon-health repair ({count} finding(s))")
         # The doctor itself refuses every termination when it cannot group a
         # launcher/worker census into generations with confidence (it never
         # guesses which half of a pair is a duplicate); record that here so an
-        # unattended run leaves evidence of what it declined to touch.
+        # unattended run leaves evidence of what it declined to touch, and
+        # never also record the refused repair as applied.
         actions = report.get("actions") if isinstance(report, dict) else None
-        for action in actions if isinstance(actions, list) else []:
-            if isinstance(action, dict) and action.get("kind") == "generation_grouping":
-                detail = next(
-                    (
-                        census.get("grouping_uncertain_reason")
-                        for census in (report.get("after"), report.get("before"))
-                        if isinstance(census, dict) and census.get("grouping_uncertain_reason")
-                    ),
-                    action.get("reason"),
-                )
-                _record(
-                    "status-monitor-reap-stale: terminations skipped -- "
-                    f"generation grouping uncertain ({detail})"
-                )
-                break
+        refusal = next(
+            (
+                action for action in (actions if isinstance(actions, list) else [])
+                if isinstance(action, dict) and action.get("kind") == "generation_grouping"
+            ),
+            None,
+        )
+        if refusal is None:
+            _record(f"status-monitor-reap-stale: applied daemon-health repair ({count} finding(s))")
+        else:
+            detail = next(
+                (
+                    census.get("grouping_uncertain_reason")
+                    for census in (report.get("after"), report.get("before"))
+                    if isinstance(census, dict) and census.get("grouping_uncertain_reason")
+                ),
+                refusal.get("reason"),
+            )
+            _record(
+                "status-monitor-reap-stale: terminations skipped -- "
+                f"generation grouping uncertain ({detail}; {count} finding(s))"
+            )
 
     # The repair above only audits/terminates EXISTING live candidates -- a
     # rollback that left ZERO live monitors (the other documented ambiguous
