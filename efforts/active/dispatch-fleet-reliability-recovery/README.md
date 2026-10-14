@@ -565,3 +565,18 @@ requested contract.
     category failure's disposition before accepting the integrated source and
     normally publishing PR #6542. No timeout increase, fixture change, accepted
     flake exception or publication bypass has been taken.
+
+- **Coupled thin-client import correction (PR #6542):** Direct source tracing
+  proved that `client_verification` eagerly imported `coordinator_auth` solely
+  for the pure sender-proof HMAC helper, loading FastAPI/Pydantic/native core in
+  every client-only process. Three fresh-process regressions reproduced this
+  contract violation after actual client/CLI list and cleanup-history HTTP
+  calls; pre-fix HMAC vectors and real HTTP event-note proof remained correct.
+  Move the unchanged helper into the standard-library-only `control_token`
+  module, retaining the old server export and all auth policy. The corrected
+  import graph, helper compatibility and event-note portfolio passed 14 tests.
+  This is a below-altitude dependency-boundary fix, covered by this PR's existing
+  `agent-dispatch` patch changefile, not a competing capability or version bump.
+  Original native/Git uncertainties and diagnostic-only crash contamination
+  remain explicitly unproven; the original uninstrumented native integration
+  portfolio and normal publication gates are still owed.

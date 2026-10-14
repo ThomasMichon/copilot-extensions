@@ -5,6 +5,12 @@ retries are exhausted. `reservations retry-cleanup` schedules housekeeping
 through the existing supervisor; it does **not** rearm execution, restart work,
 remove a checkout, or bypass the ground layer's disposal decision.
 
+Thin client commands share the server-independent `control_token` HMAC helper
+with the coordinator. They do not load FastAPI, Pydantic or uvicorn merely to
+derive event-note sender proofs. The `coordinator_auth.scoped_control_token`
+export remains compatible; token bytes, proof headers and authorization policy
+are unchanged.
+
 Use the owning host and a configured control token. First inspect the exact
 reservation and task generation, correct the fault through its owning tool,
 then preview:

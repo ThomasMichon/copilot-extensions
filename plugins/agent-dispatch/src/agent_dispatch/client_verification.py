@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .coordinator_auth import scoped_control_token
+from .control_token import scoped_control_token
 
 
 class VerificationClientMixin:
