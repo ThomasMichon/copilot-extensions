@@ -100,11 +100,11 @@ async def _get(
         raise ModelError("github-response-exceeds-65536-bytes")
     if response.status_code != 200:
         reason = {
-            401: "github-unauthorized", 403: "github-forbidden",
+            401: "github-unauthorized", 403: "github-forbidden-or-rate-limited",
             404: "github-report-unsupported-or-inaccessible",
             429: "github-rate-limited-no-automatic-retry",
         }.get(response.status_code, "github-http-error")
-        result["availability"] = "unavailable" if response.status_code in {401, 403, 404} else "error"
+        result["availability"] = "unavailable" if response.status_code in {401, 404} else "error"
         result["diagnostics"].append(reason)
         return None
     return _decode(response.body)

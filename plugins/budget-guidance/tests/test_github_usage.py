@@ -99,6 +99,18 @@ def test_user_failure_prevents_billing_request(status: int) -> None:
 
 
 @pytest.mark.parametrize("endpoint", [0, 1])
+def test_ambiguous_403_remains_an_error_without_claiming_permission_denial(endpoint: int) -> None:
+    client = Client()
+    client.responses[endpoint] = GitHubResponse(403, b"do-not-render")
+    result = _read(client)
+    assert len(client.paths) == endpoint + 1
+    assert result["availability"] == "error"
+    assert result["budget_reading"]["availability"] == "error"
+    assert result["diagnostics"] == ["github-forbidden-or-rate-limited"]
+    assert result["reported_usage"] is None
+
+
+@pytest.mark.parametrize("endpoint", [0, 1])
 @pytest.mark.parametrize("status", [200, 401, 403, 404, 429, 500])
 def test_byte_bound_precedes_status_handling_on_every_endpoint(
     endpoint: int, status: int,
