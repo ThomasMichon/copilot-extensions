@@ -485,8 +485,15 @@ shared mutable venv is presumed acceptable.
   production runtime update or warm-engine/corpus mutation occurred.
 - Consolidated the [profile/validation matrix](profile-results.md) for that
   same evidence review. Measurement and retirement guards remain effective
-  under optimized Python; all eight retained-probe controls pass with `-O`.
+  under optimized Python; all eleven retained-probe controls pass with `-O`.
   The artifact owner has been asked to acknowledge the existing acceptance
   boundary and name the exact approved profile contract needed by #6737.
   Pending replies and native/service gates remain open, not completed by
   relabeling them as another owner's work.
+- Evidence review identified that in-runtime metadata alone could conceal a
+  `.pth` helper import outside the measured environment. Both measurement
+  lanes now check required first-party module origins and refuse escaping
+  RECORD entries. Real disposable-venv regressions cover both failures;
+  the original 9/30 source environments and surviving 30-package artifact
+  environment pass the stronger checks. The retired first artifact consumer
+  was not reconstructed merely to claim a new installation measurement.

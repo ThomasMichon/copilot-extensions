@@ -10,7 +10,16 @@ artifact trust authority, shared service or rollout. The measured source snapsho
 is `89dbda89750237aca7bf6c685ee06df71e9ad855`. Two real plugin closures,
 Containers base and Bridge, execute their actual CLI in separate processes
 outside the checkout. First-party helpers must resolve inside each measured
-environment; editable-source escape is not accepted.
+environment; editable-source escape is not accepted. The retained probe derives
+required first-party module names from each measured source, checks the actual
+isolated interpreter's module origins and rejects escaping RECORD paths.
+An in-runtime metadata directory alone is not evidence of owned helper code.
+Real disposable-venv controls cover an in-runtime `.dist-info` plus `.pth`
+that imports external code, and an escaping RECORD entry that must not be
+silently omitted. The stronger checks were also applied to the retained
+9/30 source environments and the surviving 30-package artifact environment.
+The already-retired first artifact consumer was not recreated for that recheck;
+the original lifetime operation and measurements remain identified below.
 
 The retained probes require Python 3.11+, uv, the source checkout and disposable
 directories. They use configured package acquisition, but do **not** establish

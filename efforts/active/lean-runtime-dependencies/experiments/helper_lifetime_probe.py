@@ -42,9 +42,12 @@ def main():
             "disposable experiment directories are linked")
     require(all(path.resolve().parent == root for path in (cache, first, second)),
             "disposable experiment directories escape selected root")
-    expected = packages(second)
+    modules = report["consumers"][1]["required_modules"]
+    first_modules = report["consumers"][0]["required_modules"]
+    require(bool(modules) and bool(first_modules), "required module inventories are missing")
+    expected = packages(second, modules)
     require(expected == report["consumers"][1]["packages"], "second closure changed")
-    first_packages = packages(first)
+    first_packages = packages(first, first_modules)
     require(first_packages == report["consumers"][0]["packages"], "first closure changed")
     fixture = root / "routing-fixtures"
     fixture.mkdir()
@@ -61,7 +64,7 @@ def main():
     ])
     require(packages(first) == [], "first consumer still has distributions")
     run([args.uv, "--cache-dir", cache, "cache", "clean"])
-    require(packages(second) == expected, "remaining closure changed after retirement")
+    require(packages(second, modules) == expected, "remaining closure changed after retirement")
     after, _ = run([python_at(second), "-I", "-B", "-c", PROBE, fixture], cwd=root)
     require(before == after, "remaining ZDD module changed after retirement")
     output, elapsed = run(

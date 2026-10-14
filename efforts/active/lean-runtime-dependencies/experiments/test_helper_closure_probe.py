@@ -5,11 +5,33 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+import venv
 
-from helper_closure_probe import allocation_proof, inventory, sources, wheel_requirements
+from helper_closure_probe import (
+    allocation_proof, inventory, packages, python_at, run, sources, wheel_requirements,
+)
 
 
 class ClosureProbeTests(unittest.TestCase):
+    def runtime_fixture(self, root):
+        runtime = root / "runtime"
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(runtime)
+        output, _ = run([
+            python_at(runtime), "-I", "-c",
+            "import sysconfig; print(sysconfig.get_path('purelib'))",
+        ])
+        site = Path(output.strip())
+        metadata = site / "fixture_helper-1.0.dist-info"
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: fixture-helper\nVersion: 1.0\n",
+            encoding="utf-8",
+        )
+        (metadata / "RECORD").write_text(
+            "fixture_helper-1.0.dist-info/METADATA,,\n", encoding="utf-8"
+        )
+        return runtime, site, metadata
+
     def test_hardlinks_do_not_increase_unique_allocation(self):
         with TemporaryDirectory() as directory:
             proof = allocation_proof(Path(directory))
@@ -111,6 +133,32 @@ class ClosureProbeTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("reject false evidence", result.stderr)
+
+    def test_in_runtime_metadata_cannot_hide_external_helper_import(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime, site, _ = self.runtime_fixture(root)
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "fixture_helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (site / "fixture-helper.pth").write_text(str(outside) + "\n", encoding="utf-8")
+            self.assertEqual(packages(runtime)[0]["name"], "fixture-helper")
+            with self.assertRaisesRegex(RuntimeError, "required module escapes runtime"):
+                packages(runtime, ["fixture_helper"])
+
+    def test_escaping_recorded_file_is_refused_not_filtered(self):
+        with TemporaryDirectory() as directory:
+            runtime, _, metadata = self.runtime_fixture(Path(directory))
+            with (metadata / "RECORD").open("a", encoding="utf-8") as record:
+                record.write("../../../../omitted.py,,\n")
+            with self.assertRaisesRegex(RuntimeError, "recorded payload escapes runtime"):
+                packages(runtime)
+
+    def test_owned_helper_module_is_accepted(self):
+        with TemporaryDirectory() as directory:
+            runtime, site, _ = self.runtime_fixture(Path(directory))
+            (site / "fixture_helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+            self.assertEqual(packages(runtime, ["fixture_helper"])[0]["name"], "fixture-helper")
 
 
 if __name__ == "__main__":

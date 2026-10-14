@@ -114,26 +114,48 @@ def python_at(root):
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+def source_modules(repo, project):
+    modules = set()
+    for source in sources(repo, project):
+        src = source / "src"
+        names = {
+            path.parent.name for path in src.glob("*/__init__.py")
+        } | {path.stem for path in src.glob("*.py")}
+        require(bool(names), "no supported first-party modules: " + str(source))
+        require(all(name.isidentifier() for name in names), "invalid first-party module name")
+        modules.update(names)
+    return sorted(modules)
+
+
 PACKAGE_PROBE = """
 from importlib.metadata import distributions
+from importlib.util import find_spec
 import json
 from pathlib import Path
 import sys
 root = Path(sys.prefix).resolve()
+for module in json.loads(sys.argv[1]):
+    spec = find_spec(module)
+    if spec is None or spec.origin is None or not Path(spec.origin).resolve().is_relative_to(root):
+        raise RuntimeError("required module escapes runtime: " + module)
 packages = []
 for dist in distributions():
     if not Path(dist.locate_file("")).resolve().is_relative_to(root):
         raise RuntimeError("distribution escapes runtime: " + dist.metadata["Name"])
     paths = [dist.locate_file(item).resolve() for item in dist.files or []]
-    paths = [path for path in paths if path.is_file() and path.is_relative_to(root)]
+    if any(not path.is_relative_to(root) for path in paths):
+        raise RuntimeError("recorded payload escapes runtime: " + dist.metadata["Name"])
+    paths = [path for path in paths if path.is_file()]
     packages.append(dict(name=dist.metadata["Name"], version=dist.version,
                          files=len(paths), logical_bytes=sum(path.stat().st_size for path in paths)))
 print(json.dumps(sorted(packages, key=lambda item: item["name"])))
 """
 
 
-def packages(root):
-    output, _ = run([python_at(root), "-I", "-B", "-c", PACKAGE_PROBE])
+def packages(root, modules=()):
+    output, _ = run([
+        python_at(root), "-I", "-B", "-c", PACKAGE_PROBE, json.dumps(list(modules)),
+    ])
     return json.loads(output)
 
 
@@ -235,6 +257,7 @@ def main():
     runtime_roots = []
     for name in consumers:
         project = repo / "plugins" / name
+        modules = source_modules(repo, project)
         runtime = root / name
         before = inventory(roots)
         override = []
@@ -263,7 +286,8 @@ def main():
             cold_help_seconds=cold_help,
             libraries=[path.relative_to(repo).as_posix() for path in sources(repo, project)
                        if path != project],
-            packages=packages(runtime), runtime_files=inventory([runtime]),
+            required_modules=modules, packages=packages(runtime, modules),
+            runtime_files=inventory([runtime]),
             cache_and_runtimes=after,
             incremental_allocated_bytes=after["unique_allocated_bytes"] - before["unique_allocated_bytes"],
         ))
