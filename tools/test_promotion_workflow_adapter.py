@@ -164,6 +164,7 @@ def test_adapter_isolates_trusted_imports_and_preserves_arguments(tmp_path):
          "--push", "--candidate-branch", "release/example"],
         cwd=hostile, env={**os.environ, "PYTHONPATH": str(hostile)},
         capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 23, result.stdout + result.stderr
 
