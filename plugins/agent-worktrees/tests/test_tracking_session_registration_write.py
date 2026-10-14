@@ -174,8 +174,12 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
     assert record.session_entry("sess-1") is None
 
 
+@pytest.mark.parametrize(
+    ("default_branch", "expected_probes"),
+    [("main", 2), ("", 3)],
+)
 def test_session_register_uses_knowledge_backed_receiving_authority(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, default_branch, expected_probes,
 ):
     """Registration skips full project policy while preserving its authority."""
     from agent_worktrees import git_ops, repos as repos_mod
@@ -204,7 +208,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
             name: repos_mod.RepoEntry(
                 name=name,
                 repo_class="worktree",
-                default_branch="main",
+                default_branch=default_branch,
                 paths={
                     "windows": str(anchor),
                     "wsl": str(anchor),
@@ -223,6 +227,11 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
 
     def committed_config(*args, **kwargs):
         timeouts.append(kwargs["timeout"])
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(
+                returncode=0,
+                stdout="refs/remotes/origin/main\n",
+            )
         if args[0] == "ls-tree":
             return SimpleNamespace(returncode=0, stdout=f"{committed_path}\n")
         if args[0] == "show":
@@ -292,9 +301,8 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     assert accepted == {"ok": True, "linked_handoff": None}
     assert elapsed < 1.0
     assert timeouts == [
-        config_authority._GIT_PROBE_TIMEOUT_S,
-        config_authority._GIT_PROBE_TIMEOUT_S,
-    ]
+        config_authority._GIT_PROBE_TIMEOUT_S
+    ] * expected_probes
     assert tracking.load_record(local_path).session_entry("sess-local") is not None
 
     before = foreign_path.read_bytes()

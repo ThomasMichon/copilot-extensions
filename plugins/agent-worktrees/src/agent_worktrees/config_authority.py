@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_GIT_PROBE_TIMEOUT_S = 0.4
+_GIT_PROBE_TIMEOUT_S = 0.3
 
 
-def _load_state_root_authority(name: str, anchor: str) -> dict:
+def _load_state_root_authority(
+    name: str, anchor: str, platform_name: str,
+) -> dict:
     """Read only state-root gates from the registered committed config."""
     from . import config as cfg, git_ops, repos
 
@@ -20,9 +22,21 @@ def _load_state_root_authority(name: str, anchor: str) -> dict:
     entry = repos.read_registry().repos.get(name)
     branch = entry.default_branch if entry is not None else ""
     if not branch:
-        raise ValueError(
-            f"registered default branch is required for project {name!r}"
+        branch = str(
+            cfg._resolve_adoption_defaults_from_registry(
+                name, platform_name,
+            ).get("default_branch", "")
         )
+    if not branch:
+        head = git_ops.git(
+            "symbolic-ref", "-q", "refs/remotes/origin/HEAD",
+            cwd=root, check=False, capture=True, timeout=_GIT_PROBE_TIMEOUT_S,
+        )
+        prefix = "refs/remotes/origin/"
+        ref = head.stdout.strip() if head.returncode == 0 else ""
+        branch = ref[len(prefix):] if ref.startswith(prefix) else ""
+    if not branch:
+        raise ValueError(f"cannot resolve committed branch for project {name!r}")
     ref = f"origin/{branch}"
     listing = git_ops.git(
         "ls-tree", "-r", "--name-only", ref, "--",
@@ -97,7 +111,9 @@ def load_project_authority_config(
             f"{path} or the repos registry"
         )
 
-    inrepo_authority = _load_state_root_authority(name, str(anchor))
+    inrepo_authority = _load_state_root_authority(
+        name, str(anchor), platform_name,
+    )
     stateless = bool(
         machine_repo.get("stateless", inrepo_authority.get("stateless", False))
     )
