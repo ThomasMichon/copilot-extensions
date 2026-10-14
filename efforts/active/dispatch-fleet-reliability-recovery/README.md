@@ -561,10 +561,11 @@ requested contract.
   retained neither original process nor socket instrumentation and does not
   clear this integration gate or establish a cause. No additional fixture
   reduction is proposed by the cleanup owner.
-  - [ ] Integration coordinator and category owner: resolve the original native
-    category failure's disposition before accepting the integrated source and
-    normally publishing PR #6542. No timeout increase, fixture change, accepted
-    flake exception or publication bypass has been taken.
+  - [ ] Integration coordinator and category owner: retain causal disposition
+    of the original native-category failures as a separate tracked diagnostic
+    objective. The validated source correction below does not establish their
+    original cause. No timeout increase, accepted flake exception or publication
+    bypass has been taken.
 
 - **Coupled thin-client import correction (PR #6542):** Direct source tracing
   proved that `client_verification` eagerly imported `coordinator_auth` solely
@@ -580,3 +581,18 @@ requested contract.
   Original native/Git uncertainties and diagnostic-only crash contamination
   remain explicitly unproven; the original uninstrumented native integration
   portfolio and normal publication gates are still owed.
+
+- **Thin-client source validation after correction:** The original 25-case
+  integration selection passed uninstrumented, with unchanged 15/20-second child
+  and 30-second item limits. After safely integrating current `dev`, the only
+  conflict was the pure-helper relocation alongside already-merged task-scoped
+  server auth; retain that auth policy unchanged. The revalidated HMAC/import,
+  event-note and task-scope portfolio passed 32 cases, then the same original
+  uninstrumented native selection passed all 25 again. The source contract is now
+  demonstrated: real client/CLI calls do not import server frameworks, sender
+  proofs and the old export remain identical, and actual leased cleanup consumers
+  finish within their existing deadlines. This closes the changed source's
+  native-validation criterion, not the original uncertain timing/crash cause.
+  Clean-room provisioning and live rollout were not exercised: this correction
+  changes neither installation nor runtime deployment, and this worker has no
+  rollout authorization. Review, CI, merge and release remain coordinator-owned.
