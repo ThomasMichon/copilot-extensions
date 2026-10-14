@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from agent_procutil import no_window_kwargs
-from runtime_install_fixture import isolate_account_profile
+from runtime_install_fixture import isolate_account_profile, remove_fixture_worktree
 
 
 @pytest.mark.timeout(2400)
@@ -286,7 +286,7 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
     bootstrap = root / "versions" / "dev" / ".runtime-bootstrap"
     assert (bootstrap / "runtime_install_modes.py").is_file()
     # The owning source can disappear; release consumes only retained installed code.
-    shutil.rmtree(owner)
+    remove_fixture_worktree(owner)
     assert not owner.exists()
     status = json.loads(run([*deployed, "dev-status", "--json"], "deployed-status"))
     assert status["claim"]["owner"] == str(owner.resolve())

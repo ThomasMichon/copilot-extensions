@@ -4,7 +4,23 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
+import stat
 from pathlib import Path
+
+
+def remove_fixture_worktree(owner: Path) -> None:
+    def clear_git_readonly(function, path, error):
+        if (
+            os.name != "nt"
+            or not isinstance(error[1], PermissionError)
+            or not Path(path).is_relative_to(owner / ".git")
+        ):
+            raise error[1]
+        os.chmod(path, stat.S_IWRITE)
+        function(path)
+
+    shutil.rmtree(owner, onerror=clear_git_readonly)
 
 
 def isolate_account_profile(plugin: Path, home: Path) -> None:

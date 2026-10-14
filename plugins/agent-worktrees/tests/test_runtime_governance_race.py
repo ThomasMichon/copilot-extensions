@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -18,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 import tomllib
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
-from runtime_install_fixture import isolate_account_profile
+from runtime_install_fixture import isolate_account_profile, remove_fixture_worktree
 from test_status_monitor_cutover_process import _wait_for
 from zdd import diagnostics, routing
 
@@ -148,6 +149,20 @@ def test_account_profile_isolation_changes_only_copied_os_lookups(
 
             assert f'CURRENT_PROFILE_HOME="$(canonical_path {shlex.quote(str(home))} true)"' in isolated
             assert 'CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"' not in isolated
+
+
+def test_fixture_worktree_deletion_handles_readonly_git_objects(tmp_path):
+    owner = tmp_path / "owner"
+    pack = owner / ".git" / "objects" / "pack" / "fixture.idx"
+    pack.parent.mkdir(parents=True)
+    pack.write_bytes(b"git object")
+    pack.chmod(stat.S_IREAD)
+    published = tmp_path / "published"
+    published.mkdir()
+    (published / "marker").write_bytes(b"original")
+    remove_fixture_worktree(owner)
+    assert not owner.exists()
+    assert (published / "marker").read_bytes() == b"original"
 
 
 def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):

@@ -257,6 +257,54 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Journal
 
+### 2026-10-14 -- Partition the measured native aggregate, not its deadlines
+
+Exact-head full native CI run `38599001689` against
+`b49e69a9261643e541d05149850bfb4b653b6f70` passed every other lane.
+Worktrees' old 25-file group started at 17:07:49 UTC; both POSIX native dev
+cycles and intervening contracts had passed by 17:11:05. Its unchanged
+300-second aggregate expired during real monitor drain, leaving that item only
+104 seconds, versus its independently observed 129-second passing call in the
+previous matrix. This is now a measured grouping problem, not a reason to
+increase a deadline or omit a test.
+
+The runner partitions the two heavy native lifecycle files into independent
+groups while preserving sorted full membership and all existing item, group
+and plugin budgets. Filtered invocations keep their existing single-group
+behavior; a missing declared independent file fails explicitly. Grouping
+contracts cover both modes and exact membership.
+
+Unmodified real construction under the nested Windows ownership boundaries
+passed once on both registered Python 3.12 and cached Python 3.14, in 117 and
+127 seconds. That counterprobe does not reproduce the native refresh path or
+establish a Python-version fix. The uninstrumented native namespaced cycle
+again passed the first dev install but expired the unchanged 180-second UV
+deadline during its second dev refresh, before source-free release.
+
+A separate copied-fixture-only newer-base diagnostic advanced through both
+native dev installs, then exposed Windows read-only Git pack files during
+fixture source deletion. Fixture cleanup now clears only a Windows
+`PermissionError` beneath that copied owner's `.git` before retrying the exact
+operation; other errors still propagate. Four profile/cleanup/budget contracts
+pass. No installed source or host Python selection was changed, and this
+diagnostic is not deployed-runtime acceptance.
+
+After the fixture-only Git cleanup correction, the newer-base diagnostic
+completed the entire namespaced native cycle, source deletion and deployed
+release with original UUID, manifest, marker and origin restoration in
+927 seconds. The temporary probe was removed without publication. This
+exercises retained installed lifecycle code but bypasses normal signed-base
+selection in the copied fixture; it does not close the unmodified Windows
+deployment gate or establish the cause of the Python 3.12 backend timeout.
+No host interpreter upgrade is authorized or performed.
+
+The full local runner contracts initially reported a missing descendant
+startup receipt in their separate five-second Windows timeout-tree fixture
+while the native cycle was constructing packages. After all native workers
+settled, the unchanged complete runner contracts passed 25 tests with one
+POSIX-only skip. The earlier missing-receipt observation remains an
+unclassified startup-boundary failure, not a claimed grouping regression fix.
+
 ### 2026-10-14 -- Native dev release passes; combined governance fixture corrected
 
 Full native CI run

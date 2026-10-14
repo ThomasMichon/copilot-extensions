@@ -76,6 +76,15 @@ TOOLS_DIR = REPO / "tools"
 # alongside any change, not merely when their own files are touched.
 _CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
 
+# Full native dev cycles and monitor drain cannot share one 300-second
+# aggregate under matrix load. Each keeps the same independently enforced cap.
+_INDEPENDENT_SUBSUITE_FILES = {
+    "agent-worktrees": {
+        "test_python_runtime_dev_live.py",
+        "test_python_runtime_install.py",
+    },
+}
+
 # Per-plugin wall-clock budget overrides, applied only when the caller does
 # NOT pass an explicit --timeout/--plugin-timeout (so a deliberate manual
 # override always wins). agent-dispatch's own full suite genuinely needs more
@@ -331,7 +340,21 @@ def _test_file_groups(
     files = sorted(tests.rglob("test_*.py"))
     if filtered and files:
         return [files]
-    return partition(files, max_files) or [[]]
+    independent = {tests / path for path in _INDEPENDENT_SUBSUITE_FILES.get(name, ())}
+    missing = independent.difference(files)
+    if missing:
+        raise ValueError(f"Independent sub-suite files are missing: {sorted(map(str, missing))}")
+    groups: list[list[Path]] = []
+    pending: list[Path] = []
+    for path in files:
+        if path in independent:
+            groups.extend(partition(pending, max_files))
+            pending = []
+            groups.append([path])
+        else:
+            pending.append(path)
+    groups.extend(partition(pending, max_files))
+    return groups or [[]]
 
 
 def run_plugin(
