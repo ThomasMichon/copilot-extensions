@@ -91,7 +91,10 @@ def test_worktrees_current_rows_materialization_is_producer_only_and_marks_unkno
     assert calls == []
 
 
-def test_worktrees_current_rows_real_engine_serialization_preserves_counts_and_git_state(tmp_path):
+@pytest.mark.parametrize("yielded", [False, True])
+def test_worktrees_current_rows_real_engine_serialization_preserves_counts_and_git_state(
+    tmp_path, yielded,
+):
     record = tracking.WorktreeRecord(
         worktree_id="one", branch="worktree/one", worktree_path=str(tmp_path),
         repo="project", machine="host", platform="windows",
@@ -99,7 +102,18 @@ def test_worktrees_current_rows_real_engine_serialization_preserves_counts_and_g
         resume_count=0, title="Current task", status="active", completed_at=None,
         sessions=None, prs=[tracking.PRRecord(state="open", branch="worktree/one", number=7)],
         resources=[tracking.ResourceClaim(kind="worktree", ref=f"child-{i}") for i in range(1000)],
+        creation_nonce="current-creation",
     )
+    if yielded:
+        record.sessions = [
+            tracking.SessionEntry(
+                session_id="yielded-head", started_at=record.started_at, state="yielded",
+            ),
+        ]
+        record.head_transitions = [
+            tracking.HeadTransition(1, "yielded-head", "handoff", record.started_at),
+        ]
+        assert record.resolved_head_session is None
     info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.WIP, ahead=3, behind=2, dirty=4)
     row = core._worktree_to_dict(record, state_info=info, current_only=True)
     assert "resources" not in row and "prs" not in row and "sessions" not in row
@@ -107,6 +121,24 @@ def test_worktrees_current_rows_real_engine_serialization_preserves_counts_and_g
     assert row["claims_assets"]["by_kind"] == {"worktree": 1000}
     assert row["pr_count"] == 1 and row["pr"]["number"] == 7
     assert row["dirty"] == 4
+    assert row["creation_nonce"] == "current-creation"
+    if yielded:
+        assert row["head_yielded"] is True
+        assert row["last_session_id"] == "yielded-head"
+    else:
+        assert "head_yielded" not in row
     store = projection.WorktreesProjection(tmp_path / "current.sqlite3")
     store.publish("project", [row], observed_at=123)
     assert store.read("project", worktree_id="one")["worktrees"] == [row]
+    assert projection.read_advisory(
+        tmp_path / "current.sqlite3", "project", worktree_id="one",
+    )["worktrees"] == [row]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [("creation_nonce", True), ("head_yielded", "true")],
+)
+def test_worktrees_current_rows_reject_invalid_current_identity_field_types(tmp_path, field, value):
+    store = projection.WorktreesProjection(tmp_path / "current.sqlite3")
+    with pytest.raises(projection.ProjectionError, match=f"field type: {field}"):
+        store.publish("project", [{"id": "one", field: value}], observed_at=123)

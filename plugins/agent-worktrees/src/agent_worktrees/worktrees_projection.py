@@ -34,7 +34,7 @@ MAX_COLLECTION_ITEMS = 128
 MAX_DEPTH = 6
 ROW_FIELDS = frozenset("""
 id branch path repo machine platform status started_at title resume_count
-last_resumed_at codename session_count last_session_id execution_leg
+last_resumed_at codename creation_nonce session_count last_session_id head_yielded execution_leg
 execution_leg_live completed_at kind owner interface origin checkout_managed checkout_present
 picker_hidden bound_agent dispatch_attempt active_effort follow_up paused
 summary status_note_at activity activity_at caller_worktree controller_revision
@@ -53,7 +53,7 @@ _BOOL_FIELDS = frozenset("""
 execution_leg_live checkout_managed checkout_present picker_hidden follow_up paused
 branch_drift ff_eligible mux_session mux_attached session_head_mismatch
 session_lock_live session_lock_stale live_intent_idle session_bare_orphan
-session_bound_live session_bridge_live
+session_bound_live session_bridge_live head_yielded
 claims_links_complete
 delegate_finalizable
 """.split())

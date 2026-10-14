@@ -61,6 +61,9 @@ schema version, generation, revision, observation timestamp, complete-roster
 and selected-row counts, and quality. Current rows are independently bounded to 64 KiB and omit
 growing resources, PR/session/profile histories and graphs. Exact claim totals
 and kinds remain in `claims_assets`; full claims use explicit on-demand details.
+The bounded current identity fields include string `creation_nonce` and Boolean
+`head_yielded`, preserving creation identity and resumable yielded-head semantics
+without carrying the creation or session-transition histories.
 
 The resident publishes complete project replacements into its SQLite WAL
 store, then swaps the in-memory publication. It claims the writer generation
