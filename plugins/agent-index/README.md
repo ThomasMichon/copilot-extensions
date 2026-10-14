@@ -79,6 +79,11 @@ endpoint discovery. Do not add packages to an already completed managed runtime
 slot; source-development environments and versioned production slots have
 different ownership.
 
+Content statistics scan only the source/language columns in batches of at most
+1,024 rows; they do not materialize chunk text or require pandas. Counts exclude
+null metadata while retaining empty strings. Storage errors propagate instead of
+reporting an apparently empty or partially counted index.
+
 Complete service cells and standalone explicit-source native services keep
 their independently owned full host runtime; they do not acquire a duplicate
 sibling merely to match the legacy layout. The durable embedding venv retains

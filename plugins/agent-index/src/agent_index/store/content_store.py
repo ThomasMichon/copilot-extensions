@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -986,32 +987,31 @@ class ContentStore:
         return sorted(items)
 
     def stats(self) -> dict[str, Any]:
-        """Return content store statistics."""
+        """Count projected metadata in bounded batches, without loading content."""
         table = self._get_or_create_table()
-        try:
-            total = table.count_rows()
-        except Exception:
-            total = 0
-
+        total = table.count_rows()
         info: dict[str, Any] = {
             "total_chunks": total,
             "table_name": self._table_name,
         }
 
         if total > 0:
-            try:
-                df = table.to_pandas()
-                info["sources"] = df["source"].value_counts().to_dict()
-                info["languages"] = df["language"].value_counts().to_dict()
-            except Exception:
-                pass
-
+            sources: Counter[str] = Counter()
+            languages: Counter[str] = Counter()
+            with table.search().select(["source", "language"]).limit(None).to_batches(
+                batch_size=1024
+            ) as batches:
+                for batch in batches:
+                    sources.update(value for value in batch.column("source").to_pylist()
+                                   if value is not None)
+                    languages.update(value for value in batch.column("language").to_pylist()
+                                     if value is not None)
+            info["sources"] = dict(sources.most_common())
+            info["languages"] = dict(languages.most_common())
         return info
 
 
 # -- helpers -----------------------------------------------------------------
-
-
 
 
 def sanitize_fts_query(query: str) -> str:

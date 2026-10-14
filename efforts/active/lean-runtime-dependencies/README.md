@@ -89,7 +89,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 - [x] Remove Textual from agent-worktrees while retaining Worktree Manager's UI.
 - [x] Preserve version comparison and Manager process dispatch without relying
   accidentally on removed transitive packages.
-- [ ] Add dependency-minimal regression evidence, update directly related docs
+- [x] Add dependency-minimal regression evidence, update directly related docs
   and ship the slice with a changefile.
 
 ### Phase 3 - Index client and hosted-runtime separation
@@ -99,7 +99,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   primary-runtime fallback with a supported explicit outcome.
 - [ ] Preserve native and standalone-service contracts, configuration, queue,
   corpus state and the separately managed warm embedding engine.
-- [ ] Isolate legacy stdio MCP in its own opt-in extra without removing
+- [x] Isolate legacy stdio MCP in its own opt-in extra without removing
   agent-facing tool capabilities. _(agent-recommended)_
 
 ### Phase 4 - Largest optional installation costs
@@ -272,3 +272,34 @@ shared mutable venv is presumed acceptable.
 - Focused Python lint and the 13-plugin installer contract pass. Linux behavior
   remains subject to PR CI; no local macOS lane or Docker daemon is available.
   No managed runtime slot, service, model or production endpoint was changed.
+
+### 2026-10-14 - Optional MCP slice merged
+- #6658 merged to `dev` as `0976e89aa` after a current-head approval and green
+  Linux/Windows checks. Review also removed MCP from both launcher provisioning
+  allowlists, aligned the solo clean-room witness with honest SDK absence, and
+  declared the Python 3.10 test backport.
+- Linux CI exposed premature EOF in a pipelined protocol fixture. The final
+  test uses the actual SDK client to await initialize and list-tools responses
+  before closing its caller-owned transport. No sleep or retry hides the race.
+- This completes the explicit optional-MCP implementation item. Release/rollout
+  and broader native-state validation remain separate outstanding obligations.
+
+### 2026-10-14 - Bounded statistics implementation
+- Confirmed Textual removal in released `main` snapshot `f327cf447` (#6642):
+  required `packaging`, absent Textual and the normalized UI dependency guard
+  are all present. Phase 2 publication is complete; this does not prove local
+  installation or authorize runtime rollout.
+- Replaced full-table pandas materialization with a source/language-only Arrow
+  scan requesting 1,024-row batches. Histograms omit nulls, retain empty strings
+  and preserve the existing empty-store shape. Count and mid-scan failures now
+  propagate rather than manufacturing zero or partial success.
+- A real LanceDB fixture with 2,502 rows proves complete counts beyond the
+  default query limit and across multiple batches without `to_pandas`.
+  Structural coverage pins projection and batch size; failure tests reject both
+  count errors and partial scans.
+- The full contained Windows suite passed: 858 tests, 180 platform/explicit-tier
+  skips. Focused content/statistics checks passed 16 tests. The implementation
+  stays within the existing shrink-only module ceiling; no baseline was widened.
+- This changes status-query execution, not storage layout or service ownership.
+  No fresh installer, production endpoint, embedding model or live deployment
+  was exercised. Linux validation remains a PR CI obligation.

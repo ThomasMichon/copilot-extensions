@@ -1,0 +1,9 @@
+{
+  "comment": "Count content statistics with projected bounded Arrow batches rather than full-table pandas materialization",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
