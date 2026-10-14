@@ -38,12 +38,13 @@ from .live_peer_address import (
     validate_live_handle as _validate_live_handle,
 )
 
-REMOTE_OPERATION_VERSION = 4
+REMOTE_OPERATION_VERSION = 5
 #: Versions below this reject a request naming ``copilot_args`` (a charter
 #: overlay) rather than silently dropping it on an older carrier.
 REMOTE_COPILOT_ARGS_MIN_VERSION = 3
 REMOTE_PEER_REPLY_MIN_VERSION = 4
-_REMOTE_OPERATION_VERSIONS = {1, 2, 3, REMOTE_OPERATION_VERSION}
+REMOTE_RECEIPT_REPLY_MIN_VERSION = 5
+_REMOTE_OPERATION_VERSIONS = {1, 2, 3, 4, REMOTE_OPERATION_VERSION}
 MAX_CALLER_ID_LENGTH = 128
 MAX_HOST_LENGTH = 128
 MAX_SESSION_ID_LENGTH = 256
@@ -905,7 +906,9 @@ class RemoteOperationService:
                     # copilot_args (a charter overlay) -- send the lowest version
                     # that still satisfies the request so a not-yet-upgraded remote
                     # carrier keeps working for every call that doesn't need it.
-                    if _peer_reply_requested(payload):
+                    if operation == "live_session.send" and payload.get("wait") is True:
+                        version = REMOTE_RECEIPT_REPLY_MIN_VERSION
+                    elif _peer_reply_requested(payload):
                         version = REMOTE_PEER_REPLY_MIN_VERSION
                     elif payload.get("copilot_args") is not None:
                         version = REMOTE_COPILOT_ARGS_MIN_VERSION

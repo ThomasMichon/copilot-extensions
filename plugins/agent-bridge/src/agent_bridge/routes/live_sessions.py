@@ -48,7 +48,7 @@ from ..live_controls import (
     SetModeResult,
 )
 from .. import live_backfill as _backfill
-from ..live_message_receipts import admission_evidence, receipt, record_consumption
+from ..live_message_receipts import admission_evidence, record_consumption
 from ..live_representation import (
     progress_from_events,
     await_turn_reply,
@@ -68,6 +68,7 @@ from ..result_snapshot import (
     expand_represented_result_ref,
 )
 from .sessions import _sse_event_stream
+from .live_message_receipts import router as receipt_router
 
 #: A running turn with no activity for longer than this reads as "stalled".
 _TURN_STALL_SECONDS = 90.0
@@ -78,6 +79,7 @@ if TYPE_CHECKING:
     from ..live_representation import LiveEventStore
 
 router = APIRouter(prefix="/api/v1/live-sessions", tags=["live-sessions"])
+router.include_router(receipt_router)
 
 
 class _RepresentedSession:
@@ -812,15 +814,6 @@ async def post_live_message(
         receipt_error=None if current_receipt else "live-message receipt is no longer retained",
         reply_correlation="post_consumption_turn",
     )
-
-
-@router.get("/{session_id}/messages/{message_id}/receipt", response_model=LiveMessageReceipt)
-def get_live_message_receipt(session_id: str, message_id: int, request: Request):
-    """Inspect an admitted message without redelivering it or moving a cursor."""
-    try:
-        return receipt(_db(request), session_id, message_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 #: How often ``POST /mode`` checks whether the extension applied the change.

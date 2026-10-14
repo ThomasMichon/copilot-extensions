@@ -20,29 +20,35 @@ from agent_bridge.db import Database
 from agent_bridge.live_peer_address import LivePeerAddress
 from agent_bridge.live_representation import LiveEventStore
 from agent_bridge.remote_operations import CarrierRequestRouter, RemoteOperationService
+from agent_bridge.protocol import HTTP_PROTOCOL_VERSION, HTTP_PROTOCOL_MIN_SUPPORTED
 from agent_bridge.routes import live_sessions, remote
 
 
 class _HttpClient(BridgeClient):
     def __init__(self, app):
+        super().__init__("http://testserver", "fixture-token", connect_grace=0)
         self.http = TestClient(app)
 
-    def daemon_supports(self, version):
-        return version <= 35
-
-    def _request(self, method, path, data=None, *, params=None, request_timeout=None):
+    def _request(self, method, path, data=None, *, params=None, request_timeout=None, allow_retry=True):
         response = self.http.request(method, path, json=data, params=params)
         if response.status_code >= 400:
             raise BridgeClientError(response.status_code, response.json().get("detail"))
         return response.json()
 
 
-def _bridge(db):
+def _bridge(db, *, protocol_version=HTTP_PROTOCOL_VERSION):
     app = FastAPI()
     app.state.db = db
     app.state.live_event_store = LiveEventStore()
+    app.state.protocol_version = protocol_version
     app.include_router(live_sessions.router)
     app.include_router(remote.router)
+
+    @app.get("/health")
+    def health():
+        return {"protocol_version": app.state.protocol_version,
+                "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED}
+
     return app, _HttpClient(app)
 
 
@@ -182,10 +188,31 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
 
         original_wait = live_sessions.await_turn_reply
 
-        async def reply(log, *, after, timeout):
+        async def reply(log, *, after, timeout, message_id):
+            for app, db, client in ((a_app, a_db, a_client), (b_app, b_db, b_client)):
+                for sid in ("a-old", "a-new", "b-current"):
+                    if app.state.live_event_store.get(sid) is not log:
+                        continue
+                    consumed = await asyncio.to_thread(
+                        client.http.post, f"/api/v1/live-sessions/{sid}/events",
+                        json={"events": [{
+                            "type": "user.message",
+                            "data": {"source": "agent-bridge", "content": "Message from peer",
+                                     "transformedContent":
+                                     f'<agent-message from="peer" msg-id="{message_id}">call</agent-message>'},
+                        }]},
+                    )
+                    assert consumed.status_code == 200, consumed.text
+                    assert db.live_message_receipt(sid, message_id)["stage"] == "consumed"
+                    break
+                else:
+                    continue
+                break
+            else:
+                raise AssertionError("reply log does not belong to a fixture recipient")
             log.append("agent_message", {"text": "peer response"})
             log.append("turn_complete", {"stop_reason": "end_turn"})
-            return await original_wait(log, after=after, timeout=timeout)
+            return await original_wait(log, after=after, timeout=timeout, message_id=message_id)
 
         monkeypatch.setattr(live_sessions, "await_turn_reply", reply)
         monkeypatch.setattr(cli, "_get_client", lambda: a_client)
@@ -194,7 +221,7 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "a-old")
         args = argparse.Namespace(
             target=f"live:{machine_b}:{project}:wt-b", prompt="call", json=True,
-            no_wait=False, reply_timeout=2.0, idempotency_key=idempotency_key,
+            no_wait=False, wait_reply=True, reply_timeout=2.0, idempotency_key=idempotency_key,
         )
         assert a_client.resolve_remote_live_session(machine_b, args.target)["session_id"] == "b-current"
         cli._cmd_send(args)
@@ -205,7 +232,12 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         expected = json.loads(fixture_path.read_text(encoding="utf-8"))["response"]
         observed = json.loads(output)
         assert {key: observed[key] for key in expected} == expected
-        received = b_db.list_pending_live_messages("b-current")
+        assert observed["receipt"]["stage"] == "consumed"
+        assert observed["reply_correlation"] == "post_consumption_turn"
+        assert b_db.list_pending_live_messages("b-current") == []
+        received = b_db.execute_read(
+            "SELECT * FROM live_messages WHERE session_id=? ORDER BY id", ("b-current",),
+        )
         if not caller_qualified:
             assert received[0]["reply_to"] is None
             assert b_db.list_pending_live_messages("b-colliding-source-handle") == []
@@ -223,21 +255,31 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         assert '"replied": true' in output and '"reply": "peer response"' in output
         assert a_db.list_pending_live_messages("a-old") == []
         assert a_db.list_pending_live_messages("a-other-machine") == []
-        assert a_db.list_pending_live_messages("a-new")[0]["body"] == "reverse reply"
+        assert a_db.list_pending_live_messages("a-new") == []
+        assert a_db.execute_read(
+            "SELECT body FROM live_messages WHERE session_id=?", ("a-new",),
+        )[0]["body"] == "reverse reply"
         if idempotency_key:
             cli._cmd_send(args)
-            assert len(a_db.list_pending_live_messages("a-new")) == 1
+            assert len(a_db.execute_read(
+                "SELECT id FROM live_messages WHERE session_id=?", ("a-new",),
+            )) == 1
         args.expected_session_id, args.idempotency_key = "a-old", None
         with pytest.raises(SystemExit) as refused:
             cli._cmd_send(args)
         assert refused.value.code == 69
-        assert len(a_db.list_pending_live_messages("a-new")) == 1
+        assert len(a_db.execute_read(
+            "SELECT id FROM live_messages WHERE session_id=?", ("a-new",),
+        )) == 1
         args.expected_session_id = None
         args.no_wait, args.reply_timeout, args.prompt = True, 0, "no-wait reply"
         monkeypatch.setattr(live_sessions, "await_turn_reply", lambda *_a, **_k: pytest.fail("no-wait"))
         cli._cmd_send(args)
-        received = a_db.list_pending_live_messages("a-new")
+        received = a_db.execute_read(
+            "SELECT * FROM live_messages WHERE session_id=? ORDER BY id", ("a-new",),
+        )
         assert len(received) == 2 and received[-1]["body"] == "no-wait reply"
+        assert a_db.list_pending_live_messages("a-new")[0]["body"] == "no-wait reply"
     finally:
         a_db.close()
         b_db.close()
@@ -245,6 +287,59 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
 
 async def _release():
     pass
+
+
+@pytest.mark.guard
+def test_qualified_peer_default_does_not_wait_for_a_reply():
+    from agent_bridge.live_peer_address import send_remote_peer
+
+    calls = []
+    client = SimpleNamespace(send_remote_live_message=lambda *_a, **kwargs:
+                             calls.append(kwargs) or {"message_id": 1})
+    result = send_remote_peer(
+        client, argparse.Namespace(no_wait=False), LivePeerAddress.parse("live:host-b:project-a:wt-b"),
+        sender="peer", reply_to=None, kind="prompt", delivery="steer", prompt="hello",
+    )
+    assert result["message_id"] == 1
+    assert calls[0]["wait"] is False
+
+
+@pytest.mark.parametrize(("wait", "version"), [(False, 4), (True, 5)])
+@pytest.mark.guard
+@pytest.mark.asyncio
+async def test_remote_receipt_wait_selects_its_carrier_version(wait, version):
+    requests = []
+
+    class Carrier:
+        async def request(self, payload, **_kwargs):
+            requests.append(payload)
+            return Envelope(EnvelopeType.RESPONSE, payload={"result": {"message_id": 1}})
+
+    service = RemoteOperationService(SimpleNamespace())
+
+    async def lease(_host):
+        return SimpleNamespace(carrier=Carrier(), release=_release)
+
+    service._lease = lease
+    await service.send_live_message(
+        "host-b", "live:host-b:project-a:wt-b", sender="peer", message="hello",
+        kind="prompt", wait=wait, qualified_peer=True,
+    )
+    assert requests[0]["version"] == version
+
+
+@pytest.mark.asyncio
+@pytest.mark.guard
+async def test_old_carrier_refuses_receipt_wait_before_delivery(monkeypatch):
+    monkeypatch.setattr("agent_bridge.remote_operations._REMOTE_OPERATION_VERSIONS", {1, 2, 3, 4})
+    router = CarrierRequestRouter(lambda: pytest.fail("legacy carrier must not deliver"))
+    response = await router(Envelope(EnvelopeType.REQUEST, payload={
+        "version": 5, "operation": "live_session.send",
+        "target": "live:host-b:project-a:wt-b", "sender": "peer", "message": "hello",
+        "qualified_peer": True, "wait": True,
+    }))
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "unsupported_version"
 
 
 @pytest.mark.guard
@@ -356,6 +451,50 @@ def _route_through_versioned_carrier(app, hosting_client, carrier_version):
     service._lease = lease
     app.state.remote_operations = service
     return packets
+
+
+@pytest.mark.parametrize("wait", [False, True])
+@pytest.mark.parametrize("source_version", [35, HTTP_PROTOCOL_VERSION])
+@pytest.mark.parametrize("hosting_version", [35, HTTP_PROTOCOL_VERSION])
+@pytest.mark.parametrize("carrier_version", [4, 5])
+@pytest.mark.guard
+def test_receipt_wait_skew_refuses_before_remote_admission(
+    tmp_path, wait, source_version, hosting_version, carrier_version,
+):
+    source, hosting = Database(tmp_path / "source.db"), Database(tmp_path / "hosting.db")
+    try:
+        _register(hosting, "recipient", "host-b", worktree="wt-b")
+        source_app, source_client = _bridge(source, protocol_version=source_version)
+        _hosting_app, hosting_client = _bridge(hosting, protocol_version=hosting_version)
+        packets = _route_through_versioned_carrier(source_app, hosting_client, carrier_version)
+        supported = not wait or (
+            source_version >= HTTP_PROTOCOL_VERSION
+            and hosting_version >= HTTP_PROTOCOL_VERSION and carrier_version >= 5
+        )
+
+        def send():
+            return source_client.send_remote_live_message(
+                "host-b", "live:host-b:project-a:wt-b", sender="peer", message="hello",
+                wait=wait, wait_timeout=1.0, qualified_peer=True,
+            )
+
+        if not supported:
+            with pytest.raises(BridgeClientError) as refused:
+                send()
+            assert refused.value.status == 426
+            assert hosting.list_pending_live_messages("recipient") == []
+            if source_version < HTTP_PROTOCOL_VERSION:
+                assert packets == []
+            else:
+                assert packets[0]["version"] == 5
+        else:
+            result = send()
+            assert result["message_id"] == 1 and result["replied"] is False
+            assert len(hosting.list_pending_live_messages("recipient")) == 1
+            assert packets[0]["version"] == (5 if wait else 4)
+    finally:
+        source.close()
+        hosting.close()
 
 
 @pytest.mark.parametrize("handle", ["live:host", "live:host:project:wt", "live:host:project:wt:extra"])
@@ -523,11 +662,14 @@ def test_new_payload_old_daemon_keeps_legacy_automatic_reply(
 @pytest.mark.parametrize("wait_timeout,timeout", [(120.0, 135.0), (600.0, 615.0), (1.0, 20.0)])
 def test_waited_client_defaults_cover_operation_and_read_deadlines(monkeypatch, wait_timeout, timeout):
     captured = {}
-    client = BridgeClient.__new__(BridgeClient)
-    monkeypatch.setattr(client, "daemon_supports", lambda _: True)
+    client = BridgeClient("http://testserver", "fixture-token", connect_grace=0)
 
-    def request(method, path, data, *, request_timeout):
+    def request(method, path, data=None, *, request_timeout=None, allow_retry=True):
+        if path == "/health":
+            return {"protocol_version": HTTP_PROTOCOL_VERSION,
+                    "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED}
         captured.update(data=data, read_timeout=request_timeout)
+        assert allow_retry is False
         return {"message_id": 1}
 
     monkeypatch.setattr(client, "_request", request)

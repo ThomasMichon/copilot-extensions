@@ -1425,10 +1425,17 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
         from .live_peer_address import peer_operation_timeout
         from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
         timeout = peer_operation_timeout(timeout, wait=wait, wait_timeout=wait_timeout)
+        request = self._request
+        if wait:
+            from .client_protocol_floor import protocol_floored_request
+            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+
+            self._require_live_message_receipts()
+            request = protocol_floored_request(self, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
         if (qualified_peer or reply_to is not None or wait):
             if not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
                 raise BridgeClientError(426, f"remote peer replies require HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}")
-        return self._request(
+        return request(
             "POST",
             self._remote_path(
                 host,

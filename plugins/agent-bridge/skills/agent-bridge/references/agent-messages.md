@@ -106,7 +106,9 @@ turn return through it. Remote waits are bounded to 1-600 seconds.
 Client, HTTP and carrier operation deadlines cover the requested reply wait
 plus transport margin, including when their defaults are used without the CLI.
 Qualified addressing requires HTTP protocol 35 and remote carrier operation
-version 4. An older hosting bridge/carrier refuses explicitly rather than
+version 4. Receipt-backed remote reply waits require HTTP protocol 36 and
+carrier operation version 5; they are opt-in with `--wait-reply`, just like
+local represented sends. An older hosting bridge/carrier refuses explicitly rather than
 silently dropping the reply fields. An unavailable qualified peer is never
 interpreted as an agent to create: restore its registration or resume its
 existing session through the normal owner flow. An offline address does not
