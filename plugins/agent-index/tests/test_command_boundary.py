@@ -19,6 +19,7 @@ except ModuleNotFoundError:
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.guard
 def test_legacy_stdio_dependency_is_not_part_of_host_profile():
     project = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     extras = project["optional-dependencies"]

@@ -19,8 +19,8 @@ for local git files + commits, GitHub issues/PRs, and Azure DevOps work
 items/PRs. `--full` is explicit.
 - **Search surfaces**: the `agent-index` **CLI** (the primary, agent-facing
 surface — every agent calls it directly) and HTTP. The optional `agent-index mcp`
-stdio adapter requires the host dependency profile and reports unavailable in
-the base-only client runtime without installing anything. agent-index is a uniform retrieval capability every agent may use, so it
+stdio adapter requires the explicit `[stdio-mcp]` extra and reports unavailable
+without it on either role, without installing anything. agent-index is a uniform retrieval capability every agent may use, so it
 is deliberately **not** wrapped in a sub-agent or an MCP tool; agents learn how
 to search from the sessionStart scope-binding hook's `additionalContext`.
 - **Engine split**: the light service runtime is torch-free by default; embedding
