@@ -173,11 +173,15 @@ admission is also unimplemented; do not invent a substitute resolver here.
 The overlapping held-construction change (#6598) remains open.
 
 The existing owners have the concrete acceptance requests; no reply or accepted
-transfer is assumed. Native/standalone queue, schema, canary, warm-engine and
-Darwin acceptance remain with #5768. The next implementation step is to apply
-the approved profile contract under #6737 once available, composing the owning
-construction path. Until then preserve current runtime/state and the open
-effort binding rather than declaring the campaign Done.
+transfer is assumed. To drive rather than merely wait on that prerequisite,
+this campaign contributes the bounded
+[exact-profile contract proposal](../governed-python-artifact-promotion/exact-profile-contract.md)
+to #4876's existing authority design. Review precedes any selector or engine
+consumer implementation; the contribution does not take over its publication
+or acquisition work. Native/standalone queue, schema, canary, warm-engine and
+Darwin acceptance remain with #5768. Apply the reviewed profile contract under
+#6737, composing #6598 construction and #6707 admission rather than overlapping
+their open implementations. The effort and retained runtime/state stay open.
 
 ## Journal
 
@@ -535,3 +539,17 @@ effort binding rather than declaring the campaign Done.
   are still unchecked. Requested its selected-contract/acceptance response
   before applying CPU/accelerator profiles under #6737; no response is
   presumed. The campaign remains Active at that explicit external gate.
+
+### 2026-10-15 - Driving the authority-profile prerequisite
+- Resumed upstream work after explicit direction to drive blockers. The source
+  worktree advanced to current `dev`; #6697 is now merged, while its new-trusted-
+  workflow publication proof is blocked by the existing #6551 PID-admission
+  repair. Preserve that original repair rather than creating a competing PR.
+- Reserved a proposal-only contribution to #4876's unchecked exact-profile
+  contract and inspected its schema-3 manifest/build-toolchain prior art.
+  Prepared the linked authority/selection/closure/fallback and engine-consumer
+  contract for review. It names concrete acceptance and composes the still-open
+  #6598 construction and #6707 admission owners.
+- Native context management preserves this session's responsibility. No manual
+  handoff, profile implementation, engine/model download or rollout is part of
+  this proposal.

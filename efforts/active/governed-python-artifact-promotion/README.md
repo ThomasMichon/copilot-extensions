@@ -221,6 +221,9 @@ refusals and the installation authority's explicit path selection.
       evidence before enabling it. Public CI cannot certify a private feed;
       this does not extend the public build-tooling exception to runtime
       dependencies, add another trust root or distribute third-party bytes.
+      The bounded [exact-profile contract proposal](exact-profile-contract.md)
+      contributes the authority/selection and engine-consumer seam from #6234;
+      it is proposed, not approved, published or implemented.
 
 
 
