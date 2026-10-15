@@ -2230,7 +2230,7 @@ Dependabot's seven-day cooldown is complementary, not a substitute for that
 guard or the resolver cutoff.
 
 `installer_dependency_policy.py` is the canonical stdlib-only installer policy,
-with private configuration-retention primitives in
+with private settings-projection and configuration-retention primitives in
 `installer_dependency_config.py`; both ship beside each versioned runtime helper
 and the shared engine. The native
 UV configuration probe is bounded, captured without printing credential-bearing
@@ -2242,6 +2242,11 @@ without upload timestamps; flat indexes are unsupported because they bypass
 timestamp filtering. UV's exclusive millisecond-resolution cutoff may
 conservatively reject an artifact exactly on the seven-day boundary. The
 installer does not add an epsilon that could admit younger bytes.
+Supported UV cutoff projections include legacy absolute/relative values and
+structured timestamps with an optional relative span. The structured form
+retains the earlier of its captured timestamp and the span evaluated against
+one admission clock; retained package-cutoff comparison uses that same clock
+without discarding a stricter timestamp or changing any other resolver setting.
 `--reinstall` forces actual resolution rather than
 trusting a previously installed, potentially newer package. Skipping dependency
 or isolated-build resolution is not an age-enforcement fallback.

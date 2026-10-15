@@ -367,39 +367,6 @@ def _balanced(text: str, start: int, opening: str, closing: str) -> tuple[str, i
     raise DependencyPolicyError("UV settings projection is incomplete")
 
 
-def _cutoff_value(value: str, now: datetime) -> datetime:
-    value = value.strip().removesuffix(",").strip()
-    absolute = re.fullmatch(r"Absolute\(\s*([^,\s]+),?\s*\)", value)
-    if absolute:
-        timestamp = re.sub(
-            r"\.(\d{1,9})(?=Z$|[+-]\d{2}:\d{2}$)",
-            lambda match: "." + match[1][:6].ljust(6, "0"), absolute[1],
-        )
-        try:
-            result = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise DependencyPolicyError("UV returned an invalid cutoff timestamp") from exc
-        if result.tzinfo is None:
-            raise DependencyPolicyError("UV returned a cutoff without a timezone")
-        return result.astimezone(timezone.utc)
-    relative = re.fullmatch(
-        r"Relative\(\s*ExcludeNewerSpan\(\s*([^,\s]+),?\s*\),?\s*\)",
-        value,
-    )
-    if relative:
-        span = relative[1]
-        parts = re.findall(r"(\d+)(w|d|h|m|s)", span)
-        if not parts or "".join(number + unit for number, unit in parts) != span:
-            raise DependencyPolicyError("unsupported UV relative cutoff; use an RFC3339 timestamp")
-        seconds = sum(int(number) * {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
-                      for number, unit in parts)
-        try:
-            return now - timedelta(seconds=seconds)
-        except OverflowError as exc:
-            raise DependencyPolicyError("UV relative cutoff exceeds the supported range") from exc
-    raise DependencyPolicyError("unsupported UV cutoff representation")
-
-
 def cutoff_arguments(settings: str, *, now: datetime | None = None) -> list[str]:
     """Honor a stronger global cutoff; reject package/index escape hatches."""
     now = datetime.now(timezone.utc) if now is None else now
@@ -661,6 +628,7 @@ exec(compile(_configuration_path.read_bytes(), str(_configuration_path), "exec")
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
 _private_retained_root = partial(_configuration.private_retained_root, error_type=DependencyPolicyError)
 _merge_config = _configuration.merge_config
+_cutoff_value = partial(_configuration.cutoff_value, error_type=DependencyPolicyError)
 _resolver_configuration = partial(
     _configuration.resolver_configuration, balanced=_balanced, error_type=DependencyPolicyError,
 )
@@ -744,6 +712,7 @@ def run_uv_install(
     retained_resource_roots: tuple[Path, ...] = (), **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
+    now = datetime.now(timezone.utc) if now is None else now
     environment = _captured_environment(env)
     base, projects, files, editables = _source_inputs(arguments, environment, cwd, trusted_source_roots)
     resources = []
@@ -791,7 +760,7 @@ def run_uv_install(
         uv, arguments, env=environment, cwd=cwd, now=now,
         trusted_source_roots=trusted_source_roots, _projection=original_projection,
     )
-    if editables and re.search(r'"editable_mode"\s*:', _resolver_configuration(original_projection[0])):
+    if editables and re.search(r'"editable_mode"\s*:', _resolver_configuration(original_projection[0], now=now)):
         raise DependencyPolicyError("retained editable metadata owns the setuptools editable mode")
     temporary_parent = None
     if os.name == "nt" and editables:
@@ -955,7 +924,9 @@ def run_uv_install(
             uv, retained, env=retained_environment, cwd=retained_base, now=now,
             trusted_source_roots=retained_roots, _projection=retained_projection,
         )
-        if _resolver_configuration(original_projection[0], remap) != _resolver_configuration(retained_projection[0]):
+        original_configuration = _resolver_configuration(original_projection[0], remap, now=now)
+        retained_configuration = _resolver_configuration(retained_projection[0], now=now)
+        if original_configuration != retained_configuration:
             raise DependencyPolicyError("retained UV configuration differs from the configured resolver")
         if editables:
             admitted.extend(["--config-setting", "editable_mode=compat"])

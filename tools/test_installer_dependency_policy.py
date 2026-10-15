@@ -139,6 +139,68 @@ def test_stricter_relative_is_honored():
     )[1] == "2026-10-03T00:00:00Z"
 
 
+def projected_cutoff(timestamp, span="None"):
+    return f"ExcludeNewerValue {{ timestamp: {timestamp}, span: {span}, }}"
+
+
+@pytest.mark.parametrize("timestamp,span,expected", [
+    ("2026-10-03T00:00:00Z", "None", "2026-10-03T00:00:00Z"),
+    ("2026-10-13T00:00:00Z", "None", "2026-10-06T00:00:00Z"),
+    ("2026-10-06T00:00:00.123456789Z", "None", "2026-10-06T00:00:00Z"),
+    ("2026-10-03T00:00:01Z", "Some(ExcludeNewerSpan(10d,),)", "2026-10-03T00:00:00Z"),
+    ("2026-10-02T23:59:59Z", "Some(ExcludeNewerSpan(10d,),)", "2026-10-02T23:59:59Z"),
+    ("2026-10-12T00:00:00Z", "Some(ExcludeNewerSpan(1d,),)", "2026-10-06T00:00:00Z"),
+])
+def test_structured_uv_cutoff_preserves_the_strongest_boundary(timestamp, span, expected):
+    value = projected_cutoff(timestamp, span)
+    assert policy.cutoff_arguments(settings(f"Some({value},)"), now=NOW)[1] == expected
+
+
+@pytest.mark.parametrize("timestamp,span,accepted", [
+    ("2026-10-06T00:00:00Z", "None", True),
+    ("2026-10-06T00:00:01Z", "None", False),
+    ("2026-10-03T00:00:01Z", "Some(ExcludeNewerSpan(10d,),)", True),
+])
+def test_structured_uv_package_cutoff_cannot_weaken_seasoning(timestamp, span, accepted):
+    projection = settings(packages=package("demo", projected_cutoff(timestamp, span)))
+    if accepted:
+        assert policy.cutoff_arguments(projection, now=NOW)[1] == "2026-10-06T00:00:00Z"
+    else:
+        with pytest.raises(policy.DependencyPolicyError, match="weakens seasoning"):
+            policy.cutoff_arguments(projection, now=NOW)
+
+
+@pytest.mark.parametrize("value", [
+    "ExcludeNewerValue { timestamp: 2026-10-03T00:00:00Z }",
+    "ExcludeNewerValue { timestamp: 2026-10-03T00:00:00Z, span: None, extra: None }",
+    projected_cutoff("invalid"),
+    projected_cutoff("2026-10-03T00:00:00"),
+    projected_cutoff("2026-10-03T00:00:00Z", "Some(Unknown(10d))"),
+    projected_cutoff("2026-10-03T00:00:00Z", "Some(ExcludeNewerSpan(1month))"),
+])
+def test_structured_uv_cutoff_unknown_or_malformed_fields_refuse(value):
+    with pytest.raises(policy.DependencyPolicyError):
+        policy.cutoff_arguments(settings(f"Some({value},)"), now=NOW)
+
+
+@pytest.mark.parametrize("timestamp,span,equivalent", [
+    ("2026-10-02T00:00:01Z", "Some(ExcludeNewerSpan(11d))", True),
+    ("2026-10-02T00:00:01Z", "Some(ExcludeNewerSpan(10d))", False),
+    ("2026-10-02T00:00:00Z", "Some(ExcludeNewerSpan(10d))", False),
+    ("2026-10-01T23:59:59Z", "Some(ExcludeNewerSpan(11d))", False),
+    ("2026-10-02T00:00:01Z", "None", False),
+])
+def test_structured_package_comparison_preserves_stricter_timestamps(timestamp, span, equivalent):
+    original = settings(packages=package("demo", projected_cutoff(
+        "2026-10-02T00:00:00Z", "Some(ExcludeNewerSpan(11d))",
+    )))
+    retained = settings(packages=package("demo", projected_cutoff(timestamp, span)))
+    assert (
+        policy._resolver_configuration(original, now=NOW)
+        == policy._resolver_configuration(retained, now=NOW)
+    ) is equivalent
+
+
 def test_stricter_package_is_preserved():
     date = NOW - timedelta(days=10)
     assert policy.cutoff_arguments(settings(packages=package("demo", absolute(date))), now=NOW)[1] == "2026-10-06T00:00:00Z"
@@ -330,6 +392,19 @@ def test_real_uv_settings_consumer_preserves_stricter_cutoff(tmp_path):
     result = policy.prepare_uv_install(uv, arguments, cwd=tmp_path, now=NOW)
     assert result.count("--exclude-newer") == 1
     assert result[-3:] == ["--exclude-newer", "2020-01-01T00:00:00Z", "--reinstall"]
+
+
+def test_real_uv_settings_consumer_preserves_relative_cutoffs(tmp_path):
+    uv = shutil.which("uv")
+    assert uv, "native UV is required for relative cutoff coverage"
+    now = datetime.now(timezone.utc)
+    arguments = [
+        "--no-config", "--python", sys.executable,
+        "--exclude-newer", "10 days", "--exclude-newer-package", "demo=11 days", "demo",
+    ]
+    result = policy.prepare_uv_install(uv, arguments, cwd=tmp_path, now=now)
+    expected = (now - timedelta(days=10)).isoformat().replace("+00:00", "Z")
+    assert result[-3:] == ["--exclude-newer", expected, "--reinstall"]
 
 
 @pytest.mark.parametrize("missing_timestamp,url_dependency,exact_boundary", [

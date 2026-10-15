@@ -845,3 +845,65 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   versions. All 160 policy cases passed with that stronger consumer assertion.
   The production correction is unchanged; fresh current-head review and CI
   remain necessary before merge.
+- #6849 merged as `29cae581e4a38f4c9190a2d33c49d051b36425d8`
+  after actual current-head Copilot approval with zero open findings and
+  successful required CI `38729343792`. The corrected transitive-installation
+  finding was explicitly resolved before merge. Post-merge CI `38732312682`
+  owns the next normal release trigger. The other materialized-consumer owners
+  retain their repairs; this source fix alone does not qualify the full release
+  or authorize skipping a failed consumer gate.
+- Post-merge development CI `38732312682` passed, but the next natural
+  promotion `38733426857` failed before artifact construction in job
+  `116427340554`: trusted validator tooling still checks out the older
+  materialized main and hits the already-fixed attribution refusal (#6848).
+  The existing incident owner independently identified this bootstrap
+  deadlock: the development fix cannot promote itself while the old trusted
+  control copy is broken. No unchanged retry, direct main change, gate waiver
+  or local rollout was attempted. A narrowly scoped main bootstrap requires
+  explicit operator authorization under the documented pipeline exception;
+  other materialized-consumer repairs remain with their existing owners.
+- The operator explicitly authorized a narrow reviewed main-bootstrap PR,
+  preserving required checks and dependency policy. Fresh discovery found the
+  already-owned #6867 recovery and its active execution-custody messages;
+  no competing PR or branch mutation was attempted. Its source-copy head is
+  correctly refused by the main source-shape gate. Relayed a compliant
+  registry-only approach using the existing trusted policy API with no
+  local-source roots, and retained the containing-release and local-rollout
+  acceptance here. The existing writer must publish a workflow-only recovery
+  and pass genuine current-head review and required checks before merge.
+- The retained bootstrap writer published workflow-only #6867 at
+  `0292be0a33d8009ebad08d40b637d9df146a8c2f`. Its main source gate and
+  fresh hosted production-block proof `38813975248` passed: incorrect helper
+  identity refuses before provisioning, injected UV failure restores the
+  trusted checkout with nonzero status, and actual fresh hash-pinned seasoned
+  provisioning succeeds. The helper is pinned to the reviewed #6849 commit
+  and exact blob; current-head review and the owner's merge remain open.
+  No competing writer or installed edit was introduced.
+- The independent materialized-consumer prevention #6851 and standalone
+  source-selection #6854 are merged, not yet naturally qualified. Latest
+  normal promotion `38810806057` still failed two Worktrees launch-modifier
+  contracts before artifact construction. The existing #5689 owner already
+  has the exact failure report; no deadline, assertion or release gate was
+  waived. The containing release, immutable-main proof and authorized local
+  rollout remain outstanding despite the separately proven local creation
+  and native-session resumption.
+- Confirmed the separately reported UV 0.11.7 compatibility failure against its
+  official source and actual native executable: both absolute and relative
+  configuration probes refused its structured `ExcludeNewerValue` projection.
+  Nine new positive/boundary assertions also failed before the correction.
+  The parser now admits only the exact supported structure, conservatively
+  retaining the earlier captured timestamp or relative boundary. Malformed,
+  unknown and weaker package settings still refuse.
+- The complete native UV 0.11.7 portfolio then exposed a second real boundary:
+  relative package projections embed a fresh timestamp in each probe, making
+  unchanged retained configuration appear different. One admission clock now
+  governs both probes and their package-cutoff comparison, preserving the
+  relative span itself and any stricter captured timestamp. Moved cohesive
+  settings parsing into the existing private configuration helper to keep
+  every shipped module under its unchanged 1,000-line cap.
+- Final native policy coverage passed 198 cases with actual UV 0.11.7;
+  legacy UV 0.12.5 policy and synchronization coverage passed 285 cases.
+  The originally failing governed Worktrees test-runner preparation also
+  succeeded with UV 0.11.7 through the configured feed and seven-day policy.
+  All thirteen runtime copies and release entries are synchronized; real
+  review, required CI, containing promotion and rollout remain open.

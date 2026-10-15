@@ -1,10 +1,57 @@
-"""Private configuration-retention primitives for the UV dependency policy."""
+"""Private UV settings-projection and configuration-retention primitives."""
 from __future__ import annotations
 
 import json
 import os
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
+
+_STRUCTURED_CUTOFF = re.compile(
+    r"ExcludeNewerValue\s*\{\s*timestamp:\s*([^,\s]+),\s*span:\s*"
+    r"(?:None|Some\(\s*ExcludeNewerSpan\(\s*([^,\s]+),?\s*\),?\s*\)),?\s*\}"
+)
+
+
+def cutoff_value(value: str, now: datetime, *, error_type) -> datetime:
+    value = value.strip().removesuffix(",").strip()
+    structured = _STRUCTURED_CUTOFF.fullmatch(value)
+    if structured:
+        cutoff = cutoff_value(f"Absolute({structured[1]})", now, error_type=error_type)
+        if structured[2] is not None:
+            relative = cutoff_value(
+                f"Relative(ExcludeNewerSpan({structured[2]}))", now, error_type=error_type,
+            )
+            cutoff = min(cutoff, relative)
+        return cutoff
+    absolute = re.fullmatch(r"Absolute\(\s*([^,\s]+),?\s*\)", value)
+    if absolute:
+        timestamp = re.sub(
+            r"\.(\d{1,9})(?=Z$|[+-]\d{2}:\d{2}$)",
+            lambda match: "." + match[1][:6].ljust(6, "0"), absolute[1],
+        )
+        try:
+            result = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise error_type("UV returned an invalid cutoff timestamp") from exc
+        if result.tzinfo is None:
+            raise error_type("UV returned a cutoff without a timezone")
+        return result.astimezone(timezone.utc)
+    relative = re.fullmatch(
+        r"Relative\(\s*ExcludeNewerSpan\(\s*([^,\s]+),?\s*\),?\s*\)",
+        value,
+    )
+    if relative:
+        span = relative[1]
+        parts = re.findall(r"(\d+)(w|d|h|m|s)", span)
+        if not parts or "".join(number + unit for number, unit in parts) != span:
+            raise error_type("unsupported UV relative cutoff; use an RFC3339 timestamp")
+        seconds = sum(int(number) * {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
+                      for number, unit in parts)
+        try:
+            return now - timedelta(seconds=seconds)
+        except OverflowError as exc:
+            raise error_type("UV relative cutoff exceeds the supported range") from exc
+    raise error_type("unsupported UV cutoff representation")
 
 
 def _toml_value(value, error_type):
@@ -87,7 +134,10 @@ def merge_config(high, low):
     return result
 
 
-def resolver_configuration(projection, remapper=None, *, balanced, error_type):
+def resolver_configuration(
+    projection, remapper=None, *, balanced, error_type, now=None,
+):
+    now = datetime.now(timezone.utc) if now is None else now
     match = re.search(r"\bsettings: PipSettings \{", projection)
     if match is None:
         raise error_type("UV resolver configuration cannot be compared")
@@ -100,6 +150,12 @@ def resolver_configuration(projection, remapper=None, *, balanced, error_type):
     if package is None:
         raise error_type("UV package cutoffs cannot be compared")
     package_body, _ = balanced(cutoff_body, package.end() - 1, "(", ")")
+    # Relative spans embed a new timestamp per probe; retain their identity
+    # and any stricter captured timestamp against the shared admission clock.
+    package_body = _STRUCTURED_CUTOFF.sub(
+        lambda match: f"Cutoff({cutoff_value(match[0], now, error_type=error_type).isoformat()}, {match[2]!r})",
+        package_body,
+    )
     body = body[:cutoff.start()] + "package_cutoffs:" + package_body + "\n" + body[end:]
     if remapper is not None:
         for field in ("dependency_metadata", "extra_build_dependencies", "sources"):
