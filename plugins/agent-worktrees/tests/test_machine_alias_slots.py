@@ -70,6 +70,68 @@ def _topology(world, explicit):
 
 
 @pytest.mark.parametrize("actual", ["windows", "wsl"])
+@pytest.mark.parametrize("name", ["example-host", "EXAMPLE-HOST"])
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.guard
+def test_overlapping_key_profile_config_load_and_automatic_detection(
+    world, monkeypatch, actual, name, configured,
+):
+    (world.anchor / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "example-host": {"ssh": {"environments": [
+            {"name": "windows", "alias": name},
+            {"name": "wsl", "alias": "guest-login"},
+        ]}},
+    }}), encoding="utf-8")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: name)
+    document = {
+        "repo_name": "example", "platform": actual,
+        "repos": {"example": {
+            "anchor": str(world.anchor), "worktree_root": str(world.namespace),
+        }},
+    }
+    if configured:
+        document["machine"] = name
+    world.config_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    before = world.config_path.read_bytes()
+    config = cfg.load_config(world.config_path, include_control_plane_related_pr=False)
+    expected = "example-host-wsl" if actual == "wsl" else "example-host"
+    assert config.machine == expected
+    assert cfg.detect_machine(world.anchor) == expected
+    assert cfg.detect_machine(world.anchor, value=name) == expected
+    execution_spaces.require_current_execution_space(config)
+    assert world.config_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("actual,configured", [
+    ("wsl", "example-host"), ("windows", "guest-login"),
+])
+@pytest.mark.guard
+def test_overlapping_key_profile_does_not_relax_explicit_configured_space(world, monkeypatch, actual, configured):
+    (world.anchor / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "example-host": {
+            "execution_platform": "windows", "physical_host": "example-host",
+            "ssh": {"environments": [{"name": "windows", "alias": "example-host"}]},
+        },
+        "example-host-wsl": {
+            "execution_platform": "wsl", "physical_host": "example-host",
+            "ssh": {"environments": [{"name": "wsl", "alias": "guest-login"}]},
+        },
+    }}), encoding="utf-8")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    world.config_path.write_text(yaml.safe_dump({
+        "repo_name": "example", "machine": configured, "platform": actual,
+        "repos": {"example": {
+            "anchor": str(world.anchor), "worktree_root": str(world.namespace),
+        }},
+    }), encoding="utf-8")
+    before = world.config_path.read_bytes()
+    with pytest.raises(ValueError, match="conflicts"):
+        cfg.load_config(world.config_path, include_control_plane_related_pr=False)
+    assert world.config_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("actual", ["windows", "wsl"])
 @pytest.mark.parametrize("observed", ["Observed-Host", "oBSERVED-hOST"])
 @pytest.mark.guard
 def test_observed_hostname_without_metadata_keeps_record_and_launch_local(

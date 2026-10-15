@@ -621,14 +621,16 @@ def resolve_machine_selection(
         declared = getattr(direct, "execution_platform", "")
         implied = declared or split_machine_environment(direct.key).environment
         if wanted and implied and implied != wanted:
-            profile = any(raw.casefold() == env.alias.casefold()
-                          for env in getattr(direct, "ssh_environments", ()))
+            profile_only = raw.casefold() != direct.key.casefold() and any(
+                raw.casefold() == env.alias.casefold()
+                for env in getattr(direct, "ssh_environments", ())
+            )
             physical = raw.casefold() == entry_physical_host(direct).casefold()
             historical_host = (
                 getattr(direct, "legacy_key", "") == direct.key
                 and declared == "windows" and wanted == "wsl"
             )
-            if profile or not (
+            if profile_only or not (
                 historical_host or (allow_physical_context and physical)
             ):
                 raise ValueError(f"registered machine {raw!r} conflicts with the requested environment")

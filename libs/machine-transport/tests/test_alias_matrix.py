@@ -78,6 +78,60 @@ def entries(explicit: bool):
     }
 
 
+@pytest.mark.parametrize("actual", ["windows", "wsl"])
+@pytest.mark.parametrize("name", ["example-host", "EXAMPLE-HOST"])
+@pytest.mark.parametrize("automatic", [False, True])
+def test_overlapping_legacy_key_and_profile_keep_historical_host_selection(actual, name, automatic):
+    registry = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "example-host": {"ssh": {"environments": [
+            {"name": "windows", "alias": name},
+            {"name": "wsl", "alias": "guest-login"},
+        ]}},
+    }}))
+    selected = resolve_machine_selection(registry, name, actual, allow_physical_context=automatic)
+    assert selected.entry.key == ("example-host-wsl" if actual == "wsl" else "example-host")
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_overlapping_scoped_key_retains_manual_authority_and_automatic_physical_context(automatic):
+    native = MachineEntry(
+        key="example-host", display_name="Native", execution_platform="windows",
+        physical_host="example-host", ssh_environments=[SSHEnvironment("windows", "example-host")],
+    )
+    guest = MachineEntry(
+        key="example-host-wsl", display_name="Guest", execution_platform="wsl",
+        physical_host="example-host", ssh_environments=[SSHEnvironment("wsl", "guest-login")],
+    )
+    registry = {native.key: native, guest.key: guest}
+    if automatic:
+        assert resolve_machine_selection(
+            registry, native.key, "wsl", allow_physical_context=True,
+        ).entry is guest
+    else:
+        with pytest.raises(ValueError, match="conflicts"):
+            resolve_machine_selection(registry, native.key, "wsl")
+    foreign = replace(native, physical_host="foreign-host")
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_machine_selection(
+            {foreign.key: foreign, guest.key: guest}, native.key, "wsl",
+            allow_physical_context=automatic,
+        )
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_profile_only_match_cannot_borrow_the_overlapping_key_exception(automatic):
+    registry = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "example-host": {"ssh": {"environments": [
+            {"name": "windows", "alias": "native-login"},
+            {"name": "wsl", "alias": "guest-login"},
+        ]}},
+    }}))
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_machine_selection(
+            registry, "native-login", "wsl", allow_physical_context=automatic,
+        )
+
+
 CELLS = [
     (platform, base, form, variant)
     for platform in ("windows", "wsl")
