@@ -539,6 +539,27 @@ _materialize_snapshot_vendored_libs() {
             return 1
         fi
     done
+    local manifest
+    for manifest in "$snapshot_dir/pyproject.toml" "$snapshot_dir"/libs/*/pyproject.toml; do
+        if ! awk '
+        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport", libs, " ") }
+        /^\[/ { sources = ($0 ~ /^\[tool\.uv\.sources\][[:space:]]*$/) }
+        sources && $0 !~ /^[[:space:]]*#/ {
+            for (i in libs) {
+                pattern = "path[[:space:]]*=[[:space:]]*\"\\.\\./\\.\\./libs/" libs[i] "\""
+                gsub(pattern, "path = \"libs/" libs[i] "\"")
+            }
+            if ($0 ~ /path[[:space:]]*=[[:space:]]*"/) {
+                sub(/,[[:space:]]*editable[[:space:]]*=[[:space:]]*true/, "")
+            }
+        }
+        { print }
+        ' "$manifest" > "$manifest.tmp"; then
+            _fail 'Failed to materialize snapshot dependency sources'
+            return 1
+        fi
+        mv -f "$manifest.tmp" "$manifest" || return 1
+    done
 }
 
 _materialize_snapshot_installer_engine() {

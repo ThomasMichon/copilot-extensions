@@ -621,6 +621,31 @@ function Materialize-SnapshotLibs {
         Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
     }
+    $manifests = @((Join-Path $SnapshotDir 'pyproject.toml')) + @(
+        Get-ChildItem -LiteralPath $libsDir -Directory | ForEach-Object {
+            Join-Path $_.FullName 'pyproject.toml'
+        }
+    )
+    foreach ($manifest in $manifests) {
+        $text = [System.IO.File]::ReadAllText($manifest)
+        $text = [regex]::Replace($text, '(?ms)(^\[tool\.uv\.sources\][ \t]*\r?\n)(.*?)(?=^\[|\z)', {
+            param($table)
+            $body = $table.Groups[2].Value
+            foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport')) {
+                $pattern = '(?m)^(?![ \t]*#)([^\r\n]*?)path\s*=\s*"\.\./\.\./libs/' + [regex]::Escape($lib) + '"([^\r\n]*)(\r?)$'
+                $body = [regex]::Replace($body, $pattern, {
+                    param($entry)
+                    return $entry.Groups[1].Value + 'path = "libs/' + $lib + '"' + $entry.Groups[2].Value + $entry.Groups[3].Value
+                })
+            }
+            $body = [regex]::Replace($body, '(?m)^(?![ \t]*#)([^\r\n]*\bpath\s*=\s*"[^"\r\n]*"[^\r\n]*)(\r?)$', {
+                param($entry)
+                return ($entry.Groups[1].Value -replace ',\s*editable\s*=\s*true', '') + $entry.Groups[2].Value
+            })
+            return $table.Groups[1].Value + $body
+        })
+        [System.IO.File]::WriteAllText($manifest, $text, $utf8NoBom)
+    }
 }
 
 function Materialize-SnapshotInstallerEngine {

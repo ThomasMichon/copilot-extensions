@@ -101,6 +101,21 @@ def _assert_snapshot_transport(snapshot: Path) -> None:
         assert (snapshot / "libs" / "machine-transport" / "src" / "machine_transport" / filename).is_file()
 
 
+def _assert_snapshot_dependency_sources(snapshot: Path) -> None:
+    import importlib.util
+
+    helper = snapshot / "scripts" / "installer_dependency_policy.py"
+    spec = importlib.util.spec_from_file_location("snapshot_dependency_policy", helper)
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    for manifest in [snapshot / "pyproject.toml", *snapshot.glob("libs/*/pyproject.toml")]:
+        sources = policy._toml(manifest).get("tool", {}).get("uv", {}).get("sources", {})
+        for source in sources.values():
+            assert not source.get("editable", False)
+            assert (manifest.parent / source["path"]).resolve().is_relative_to(snapshot)
+    policy._check_project(snapshot, (snapshot,), set())
+
+
 def _assert_snapshot_transport_install(root: Path, env: dict[str, str]) -> None:
     """Read the actual dependency in the new runtime, never the cached test venv."""
     runtime = root / "versions" / _source_version()
@@ -215,6 +230,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     for lib in _RUNTIME_LIBS:
         assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
     _assert_snapshot_transport(snapshot)
+    _assert_snapshot_dependency_sources(snapshot)
     assert not (home / ".agent-ssh" / "versions" / _source_version()).exists()
 
     shutil.rmtree(payload)
@@ -941,6 +957,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
     for lib in _RUNTIME_LIBS:
         assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
     _assert_snapshot_transport(snapshot)
+    _assert_snapshot_dependency_sources(snapshot)
     assert not (home / ".agent-ssh" / "versions" / _source_version()).exists()
 
     shutil.rmtree(payload)

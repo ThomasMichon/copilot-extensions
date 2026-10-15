@@ -2197,6 +2197,10 @@ configured resolver, including index order/authentication, TLS, workspace
 constraints and stricter package cutoffs; an unsupported merge or mismatch
 refuses installation. `prepare_uv_install` is only a preflight API, not an
 installation boundary.
+Agent SSH's deferred-runtime snapshots materialize development source pointers
+to the libraries copied inside the snapshot before publication. Both stamp
+implementations keep this metadata transformation runtime-free; first use must
+not depend on the original checkout or references outside the retained payload.
 
 Editable source retention supports static `setuptools.build_meta` projects
 using the repository's `src` layout. Retained metadata selects compatibility
