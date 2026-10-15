@@ -8,6 +8,7 @@ import errno
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,69 @@ def test_failed_step_keeps_legacy_failure_exit(wired, monkeypatch, _update_home)
     monkeypatch.setattr(m, "_update_modules", lambda *a, **k: False)
     assert m.cmd_update(_args()) == 1
     assert _status(_update_home)["last_failure"]["outcome"] == ut.COMMAND_FAILED
+
+
+@pytest.mark.parametrize("failure", ["engine-exit", "engine-timeout", "engine-os", "registered"])
+def test_required_acquisition_failure_precedes_all_runtime_mutation(
+    wired, monkeypatch, _update_home, failure,
+):
+    run = subprocess.run
+
+    def acquisition(argv, *args, **kwargs):
+        if "plugin" in argv:
+            if failure == "engine-timeout":
+                raise subprocess.TimeoutExpired(argv, 120)
+            if failure == "engine-os":
+                raise PermissionError(errno.EACCES, "fixture acquisition denied")
+            if failure == "engine-exit":
+                return subprocess.CompletedProcess(argv, 1, "", "fixture acquisition failed")
+        return run(argv, *args, **kwargs)
+
+    def registered(targets):
+        if failure == "registered":
+            update_events.record("payload_refresh", "required-example", "plugin update failed")
+            return False
+        return True
+
+    def mutation(*args, **kwargs):
+        pytest.fail("Acquisition failure reached runtime planning or local mutation")
+
+    monkeypatch.setattr(subprocess, "run", acquisition)
+    monkeypatch.setattr(m, "_update_registered_plugins", registered)
+    for name in ("_find_installed_plugin_dir", "_update_modules",
+                 "_reconcile_registered_runtimes", "_fast_forward_project_anchors",
+                 "_prune_stale_pivots_after_update"):
+        monkeypatch.setattr(m, name, mutation)
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", mutation)
+    from agent_worktrees import update_integration
+
+    monkeypatch.setattr(update_integration, "finish", mutation)
+    assert m.cmd_update(_args(no_anchor_sync=False, no_prune_pivots=False)) != 0
+    status = _status(_update_home)
+    assert [phase["phase"] for phase in status["run"]["phases"]] == ["payload_refresh"]
+    assert status["run"]["outcome"] != ut.VERIFIED_CURRENT
+
+
+def test_real_failed_acquisition_process_never_enters_runtime_stage(
+    monkeypatch, tmp_path, _update_home,
+):
+    marker = tmp_path / "acquired"
+    (tmp_path / "plugin").write_text(
+        "from pathlib import Path\n"
+        "Path('acquired').write_text('attempted')\n"
+        "raise SystemExit(1)\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(m, "_resolve_copilot", lambda: sys.executable)
+    monkeypatch.setattr(m, "_invocation_update_context", lambda: tmp_path)
+    monkeypatch.setattr(m, "_registered_plugin_targets", lambda: {})
+    monkeypatch.setattr(m, "_update_registered_plugins", lambda targets: True)
+    monkeypatch.setattr(
+        m, "_find_installed_plugin_dir",
+        lambda: pytest.fail("Real acquisition failure reached runtime planning"),
+    )
+    assert m.cmd_update(_args()) == 1
+    assert marker.read_text(encoding="utf-8") == "attempted"
+    assert _status(_update_home)["run"]["outcome"] == ut.COMMAND_FAILED
 
 
 def test_auth_required_exit_4(_update_home):

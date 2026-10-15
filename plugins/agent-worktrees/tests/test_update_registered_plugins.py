@@ -848,8 +848,10 @@ def test_ordering_plugins_before_services(monkeypatch, payload_result, expected_
     assert rc == expected_rc
     assert run_cwds[0] == Path("/repo/anchor")
 
-    # Registered plugin payloads happen before modules (services/runtimes).
-    assert order.index("registered-plugins") < order.index("modules")
+    if payload_result:
+        assert order.index("registered-plugins") < order.index("modules")
+    else:
+        assert order == ["aw-plugin-update", "registered-plugins"]
     # And the agent-worktrees payload update precedes the registered loop.
     assert order.index("aw-plugin-update") < order.index("registered-plugins")
     assert collections == ["collected"]

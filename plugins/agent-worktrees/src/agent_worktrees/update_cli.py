@@ -280,7 +280,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         output.warn(f"{message} -- skipping plugin update")
         payloads_ok, payload_status = False, f"plugin update failed: {message}"
     except subprocess.TimeoutExpired:
-        output.warn("Plugin update timed out -- continuing with installed version")
+        output.warn("Plugin update timed out -- runtime installation is blocked")
         payloads_ok, payload_status = False, "timed out"
     _events.record("payload_refresh", plugin_ref, payload_status)
 
@@ -294,6 +294,13 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         is False
     ):
         payloads_ok = False
+
+    if not payloads_ok:
+        output.err(
+            "Required payload acquisition failed; no runtime installers or local "
+            "integration will run. Resolve the reported failure and retry update."
+        )
+        return 1
 
     plugin_dir = _core_helper("_find_installed_plugin_dir", _find_installed_plugin_dir)()
     if not plugin_dir:

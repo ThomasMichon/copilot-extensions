@@ -844,6 +844,15 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 ### `update` results: exit codes, events, and status
 
+Required payload acquisition is a barrier before the engine's runtime work:
+if its own payload refresh or an active/activation-unknown target refresh
+fails, the engine returns that failure without running runtime installers,
+anchor synchronization, pruning or local command/profile finishing. Successfully
+refreshed payloads remain available for a retry; the error names the cause and
+asks the caller to resolve it and retry `update`. Inactive inventory failures
+remain advisory. This barrier does not make the existing combined installers
+prepare-only or undo Manager's earlier self-update.
+
 `update` (and `worktree-manager update`, which drives it) records each run
 through the shared [`update-telemetry`](../../../libs/update-telemetry/README.md)
 library: phase and per-plugin events go to

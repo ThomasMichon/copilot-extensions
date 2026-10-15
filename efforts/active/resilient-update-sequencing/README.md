@@ -92,18 +92,18 @@ fulfilling that direction, not additional operator requirements.
   effort ownership explicitly.
 
 ### Phase 2 - Historical command migration and cheap local finishing
-- [ ] Recognize attributable historical generated command/receipt generations,
+- [x] Recognize attributable historical generated command/receipt generations,
   refresh same-lineage launchers and retire obsolete owned project commands
   automatically, preserving foreign, edited and ambiguous artifacts.
-- [ ] Make command/receipt transitions recoverable and idempotent under the
+- [x] Make command/receipt transitions recoverable and idempotent under the
   existing ownership locks; test Windows sibling files and POSIX launchers.
-- [ ] Make unresolved required command reconciliation explicit in update status
+- [x] Make unresolved required command reconciliation explicit in update status
   and exit behavior; never call a preserved conflict "in sync."
-- [ ] Replace the profile install/stage detour with the Manager's narrow owning
+- [x] Replace the profile install/stage detour with the Manager's narrow owning
   surface, preserving fragments, state/settings reconciliation and shortcuts.
-- [ ] Run local finishing once after relevant update inputs stabilize; avoid
+- [x] Run local finishing once after relevant update inputs stabilize; avoid
   unchanged writes and unnecessary repeated discovery.
-- [ ] Publish measured no-change and migration/profile-repair results, with
+- [x] Publish measured no-change and migration/profile-repair results, with
   changefiles, review and source/release distinction intact.
 
 ### Phase 3 - Risk-first, resumable update execution
@@ -130,13 +130,13 @@ fulfilling that direction, not additional operator requirements.
 
 ## Validation Plan
 
-- [ ] Historical receipt/template fixtures cover same-lineage payload relocation,
+- [x] Historical receipt/template fixtures cover same-lineage payload relocation,
   known pre-receipt formats, missing/retired projects and knowledge-only commands.
-- [ ] Foreign/cross-cell owners, edited bytes, corrupt receipts, ambiguous source
+- [x] Foreign/cross-cell owners, edited bytes, corrupt receipts, ambiguous source
   lineage and case collisions remain protected and explicitly reported.
-- [ ] Failure between command and receipt publication, concurrent reconcilers,
+- [x] Failure between command and receipt publication, concurrent reconcilers,
   partial Windows siblings, cancellation and retry preserve recoverability.
-- [ ] Profile integration crosses the real Manager command boundary without
+- [x] Profile integration crosses the real Manager command boundary without
   installer/self-stage invocation; unchanged inputs preserve output bytes and
   timestamps, and changed selections retain stable GUID and shortcut behavior.
 - [ ] Update failure propagation distinguishes intentional exclusions from
@@ -446,3 +446,40 @@ achieved by rearranging today's combined installer invocations.
   Touched-code lint and all thirteen installation contracts pass. Fresh
   current-head review and hosted CI still gate the source merge; nothing has
   been rolled out.
+
+### 2026-10-15 - Phase 2 source merge and continuing gate
+- #6836 squash-merged into `dev` at
+  `e2c74d2423f945a56d51ae4d2898a170d2f03753`. Exact-head Copilot review
+  reported zero open findings, all four latest high-severity findings resolved,
+  and every required hosted CI lane passed. This is a source merge, not an
+  installed-state claim.
+- Phase 2 implementation and its first four validation rows are complete.
+  Native fixture profile measurements are recorded above; production profile
+  and total-update timing still belong to the release/running-state gate.
+- Next slice: collect the update's attributable target plan and front-load
+  deterministic blockers/acquisition before any combined runtime mutation.
+  Preparation/readiness/activation and retry remain open. The canonical
+  installer-owner request on #6707 has no accepted adapter handoff yet; its
+  current draft still combines construction and activation. Do not substitute
+  that combined action for a prepare-only contract or mark Phase 3 complete.
+
+### 2026-10-15 - First acquisition barrier
+- Started Phase 3 with a deliberately bounded safety improvement: after the
+  existing payload acquisition pass, any required failure now stops before
+  engine runtime planning/installers, modules, registered runtime deployment,
+  anchor synchronization, pruning or command/profile finishing. Successfully
+  acquired peers remain in place for retry. Inactive inventory failures retain
+  their existing advisory treatment.
+- This is not the complete frozen desired-state plan, a prepare-only runtime
+  lane, a readiness barrier or automatic retry. Manager self-update still
+  precedes engine entry. Those broader contracts remain open rather than being
+  implied by an early return.
+- Focused update coverage passed 234 cases, including explicit engine failure,
+  timeout, OS-denial and registered-target failure before any downstream
+  mutation, plus a real failed acquisition subprocess. Successful update,
+  version-skip, inactive inventory, telemetry and final integration behavior
+  remain covered. Touched-code lint passes.
+- The completed migration delegate's managed finalization currently refuses
+  landing proof even with the merged #6836 association. Its committed work is
+  preserved; no reset, forced gate or manual removal is used. Cleanup evidence
+  is being narrowed separately while the parent effort stays active.
