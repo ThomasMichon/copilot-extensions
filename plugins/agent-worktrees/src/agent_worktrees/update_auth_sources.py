@@ -14,21 +14,22 @@ from .update_auth import Source, source
 
 def settings(context: Path | None) -> RepoPluginSettings:
     enabled, marketplaces = {}, {}
-    path = Path.home() / ".copilot" / "settings.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        data = {}
-    if not isinstance(data, dict):
-        raise ValueError("user Copilot settings must be an object")
-    for key, destination in (
-        ("enabledPlugins", enabled),
-        ("extraKnownMarketplaces", marketplaces),
-    ):
-        value = data.get(key, {})
-        if not isinstance(value, dict):
-            raise ValueError(f"user Copilot {key} must be an object")
-        destination.update(value)
+    for filename in ("settings.json", "settings.local.json"):
+        path = Path.home() / ".copilot" / filename
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+        if not isinstance(data, dict):
+            raise ValueError(f"user Copilot {filename} must be an object")
+        for key, destination in (
+            ("enabledPlugins", enabled),
+            ("extraKnownMarketplaces", marketplaces),
+        ):
+            value = data.get(key, {})
+            if not isinstance(value, dict):
+                raise ValueError(f"user Copilot {key} must be an object")
+            destination.update(value)
     if context is not None:
         repo = read_repo_settings(context)
         enabled.update(repo.enabled)

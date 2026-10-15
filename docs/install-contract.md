@@ -1565,13 +1565,19 @@ that read-only report; it does not update payloads, install runtimes, write
 telemetry, or change saved credentials. `--json` returns the sanitized report.
 Sources and account mappings come from effective user/repository settings and
 the repository registry, not an updater-specific credential configuration.
+User `settings.local.json` overrides `settings.json` before repository overrides;
+an exact registered repository keeps its own account override, not a sibling's.
 
 Public sources short-circuit anonymously. Other sources first exercise the
 caller's configured credentials through a read-only router, then try an
-environment token, the mapped `gh` account, and `git credential fill`. Each
+environment token, the mapped `gh` account, and `git credential fill`. A candidate
+must pass both its mapped-account check and a read-only Git contents probe;
+repository metadata permission alone does not establish fetch permission. Each
 subprocess is bounded, non-interactive, headless on Windows, and retains at
 most 1 MiB per output stream. Windows requires a no-breakaway Job; POSIX probes
 own their session and nested helper children remain inside that boundary.
+Owned sessions are swept after success too, including redirected descendants;
+inherited sessions are never swept by an inner helper.
 Contained tests retain their test runner's ownership instead of detaching.
 
 A working setup gets no environment overlay. Only failed sources acquire an
@@ -1594,11 +1600,16 @@ There is no persistent configuration cleanup or cleanup-consent flag.
 The Worktree Manager consumes the same report through its existing engine JSON
 process seam before its own Git fetch. Its engine environment preserves an
 overlay when present while still discarding parent Python runtime variables.
+Reused staging checkouts supply their own acquisition cwd to the report, so
+local helpers and conditional includes are observed in the right checkout.
 The internal `--auth-source`/`--auth-environment` report options transport only
 child environment differences over that pipe; never persist or publish that
 environment. Repository-isolated engine Git calls continue to discard arbitrary
-inherited Git selectors and receive only the updater's explicitly scoped auth
-overlay.
+inherited Git selectors, including inherited updater snapshots, and receive only
+the updater's explicitly scoped auth overlay. Anchor preflight uses that same
+isolation. Auth-managed anchors suppress legacy injected headers even when
+configured credentials passed, so acquisition cannot override the report's
+credential authority.
 
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 

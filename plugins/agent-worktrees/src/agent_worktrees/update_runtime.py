@@ -635,7 +635,8 @@ def _fast_forward_project_anchors() -> None:
             )
             continue
 
-        current = git_ops.current_branch(anchor_path)
+        with _auth.repository_scope(anchor_path):
+            current = git_ops.current_branch(anchor_path)
         if current is None:
             output.info(f"{anchor}: detached HEAD -- skipped")
             continue

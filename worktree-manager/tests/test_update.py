@@ -763,7 +763,7 @@ def test_fetch_remote_version_non_github_source_is_none(tmp_path):
 
 def test_self_update_reports_updated(monkeypatch, tmp_path):
     from worktree_manager.self_install import SelfInstallResult
-    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda _: None)
+    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda _, **kwargs: None)
     monkeypatch.setattr(self_install.shutil, "which", lambda name: "/usr/bin/git")
     monkeypatch.setattr(self_install.subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 0))
@@ -790,7 +790,7 @@ def test_self_update_reports_updated(monkeypatch, tmp_path):
 
 def test_self_update_runs_cutover_even_when_already_current(monkeypatch, tmp_path):
     from worktree_manager.self_install import SelfInstallResult
-    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda _: None)
+    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda _, **kwargs: None)
 
     monkeypatch.setattr(self_install.shutil, "which", lambda name: "/usr/bin/git")
     monkeypatch.setattr(

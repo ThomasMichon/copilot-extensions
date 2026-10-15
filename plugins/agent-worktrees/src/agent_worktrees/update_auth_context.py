@@ -18,6 +18,9 @@ _current: contextvars.ContextVar[Session | None] = contextvars.ContextVar(
 _repository: contextvars.ContextVar[auth.RunOverlay | None] = contextvars.ContextVar(
     "update_auth_repository", default=None
 )
+_managed: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "update_auth_managed", default=False
+)
 
 
 def mode() -> str:
@@ -144,6 +147,7 @@ def anchor_failure(anchor: str, error: str) -> None:
 def repository_scope(anchor: Path):
     value = _current.get()
     overlay = None
+    managed = False
     if value is not None:
         for context, report in value.reports.items():
             if any(
@@ -151,16 +155,30 @@ def repository_scope(anchor: Path):
                 for item in report.results
             ):
                 overlay = value.overlays[context]
+                managed = True
                 break
     token = _repository.set(overlay)
+    managed_token = _managed.set(managed)
     try:
         yield
     finally:
         _repository.reset(token)
+        _managed.reset(managed_token)
+
+
+def managed_repository() -> bool:
+    return _managed.get() or _repository.get() is not None
 
 
 def repository_environment(env: Mapping[str, str]) -> dict[str, str]:
+    from . import git_ops
+
     overlay = _repository.get()
+    if managed_repository():
+        env = git_ops.repository_identity_env(dict(env))
+        # An inherited snapshot is untrusted command configuration too; restoring
+        # it would undo the isolation that just removed its counted entries.
+        env.pop("CE_UPDATE_AUTH_BASE_CONFIG", None)
     return overlay.environment(env) if overlay is not None else dict(env)
 
 
@@ -185,11 +203,12 @@ def run_update(args: argparse.Namespace, steps) -> int:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
+    cwd = Path(getattr(args, "auth_cwd", None) or Path.cwd())
     selected = [] if getattr(args, "auth_source", None) else sources.marketplaces(Path.cwd())
     if not getattr(args, "no_anchor_sync", False):
         selected += sources.anchors()
     for index, url in enumerate(getattr(args, "auth_source", None) or []):
-        item = auth.source(f"source:{index}", url, purpose="manager")
+        item = auth.source(f"source:{index}", url, purpose="manager", cwd=cwd)
         if item is None:
             output.err("--auth-source requires an HTTPS repository URL")
             return 3

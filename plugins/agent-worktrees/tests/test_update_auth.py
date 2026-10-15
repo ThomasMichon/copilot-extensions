@@ -7,7 +7,9 @@ import json
 import os
 import subprocess
 import sys
+import io
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -42,6 +44,8 @@ class Probe:
         if argv[:2] == ["git", "config"]:
             return process.Result(0, "one\0\0two\0")
         if argv[:2] == ["git", "ls-remote"]:
+            if json.loads(env.get("CE_UPDATE_AUTH_ROUTES", "{}")):
+                return process.Result(0)
             count = int(env["GIT_CONFIG_COUNT"])
             helper = env[f"GIT_CONFIG_VALUE_{count - 1}"]
             ok = self.configured if helper else self.anonymous
@@ -86,7 +90,7 @@ def test_fallback_preserves_inherited_command_scope_and_contains_no_token():
         }
     )
     assert env["GIT_CONFIG_KEY_0"] == "user.name"
-    assert int(env["GIT_CONFIG_COUNT"]) == 5
+    assert int(env["GIT_CONFIG_COUNT"]) == 6
     assert probe.secret not in json.dumps(env)
     assert overlay.applies_to == ["marketplace:example"]
     assert overlay.denies == []
@@ -268,7 +272,8 @@ def test_scoped_overlay_survives_repository_isolation_but_hostile_config_does_no
         env = context.repository_environment(git_ops.repository_identity_env())
     finally:
         context._repository.reset(token)
-    assert "core.bare" not in env.values()
+    poisoned = "core.bare" in env.values()
+    assert not poisoned
     assert env["GIT_CONFIG_COUNT"] == "4"
     assert "CE_UPDATE_AUTH_ROUTES" in env
     assert "GIT_CONFIG_COUNT" not in git_ops.repository_identity_env()
@@ -447,3 +452,231 @@ def test_helper_configuration_failure_is_local_and_missing_git_is_explicit():
     assert auth.fallback(report).denies == ["marketplace:example"]
     with pytest.raises(auth.ResolverUnavailable, match="git is not available"):
         auth.report([_source()], env={}, runner=lambda *a, **k: process.Result(None, missing=True))
+
+
+def test_inherited_updater_snapshot_cannot_restore_repository_selectors(tmp_path, monkeypatch):
+    _clean_git_env(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "CE_UPDATE_AUTH_BASE_CONFIG",
+        json.dumps(
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "core.bare",
+                "GIT_CONFIG_VALUE_0": "true",
+            }
+        ),
+    )
+    token = context._repository.set(
+        auth.fallback(auth.AuthReport([auth.SourceAuth(_source(), [], status="auth_required")]))
+    )
+    try:
+        env = context.repository_environment(git_ops.repository_identity_env())
+    finally:
+        context._repository.reset(token)
+    poisoned = "core.bare" in env.values()
+    assert not poisoned
+    assert env["GIT_CONFIG_COUNT"] == "4"
+
+
+def test_metadata_only_token_does_not_stop_discovery_before_working_git_credential():
+    class CandidateProbe(Probe):
+        def __call__(self, argv, **kwargs):
+            if argv[:2] == ["git", "ls-remote"]:
+                self.calls.append((argv, kwargs))
+                routes = json.loads(kwargs["env"].get("CE_UPDATE_AUTH_ROUTES", "{}"))
+                if routes:
+                    key = "GH_TOKEN_TEAM"
+                    return process.Result(0 if kwargs["env"].get(key) == self.secret else 1)
+                return process.Result(1)
+            return super().__call__(argv, **kwargs)
+
+    probe = CandidateProbe()
+    report = auth.report(
+        [_source()],
+        env={
+            "GH_TOKEN": "metadata-only",
+            "GH_HOST": "example.test",
+        },
+        account_for=lambda _: "mapped",
+        runner=probe,
+    )
+    assert report.results[0].alternative["method"] == "gh"
+    candidate_calls = [
+        kwargs
+        for argv, kwargs in probe.calls
+        if argv[:2] == ["git", "ls-remote"]
+        and json.loads(kwargs["env"].get("CE_UPDATE_AUTH_ROUTES", "{}"))
+    ]
+    assert len(candidate_calls) == 2
+    assert all(call["env"]["CE_UPDATE_AUTH_READONLY"] == "1" for call in candidate_calls)
+
+
+def test_anchor_preflight_uses_isolated_environment_for_every_probe():
+    probe = Probe(configured=True)
+    item = auth.source(
+        "anchor:test", "https://example.test/team/repo", purpose="anchor", cwd=Path.cwd()
+    )
+    auth.report(
+        [item],
+        env={
+            "GIT_DIR": "other-checkout",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "credential.helper",
+            "GIT_CONFIG_VALUE_0": "wrong-helper",
+        },
+        runner=probe,
+        account_for=lambda _: "mapped",
+    )
+    assert all("GIT_DIR" not in kwargs["env"] for _, kwargs in probe.calls)
+    assert all("wrong-helper" not in kwargs["env"].values() for _, kwargs in probe.calls)
+
+
+def test_registered_siblings_keep_their_own_account_overrides(monkeypatch):
+    from agent_worktrees import repos
+
+    registry = repos.ReposRegistry(
+        repos={
+            name: repos.RepoEntry(
+                name=name, remote=f"https://github.com/team/{name}", account=f"account-{name}"
+            )
+            for name in ("one", "two")
+        }
+    )
+    monkeypatch.setattr(repos, "read_registry", lambda: registry)
+    report = auth.report(
+        [auth.source(name, f"https://github.com/team/{name}") for name in ("one", "two")],
+        env={},
+        runner=Probe(),
+    )
+    assert [item.expected_account for item in report.results] == ["account-one", "account-two"]
+
+
+def test_managed_anchor_does_not_inject_legacy_header_even_without_fallback(monkeypatch, tmp_path):
+    item = auth.source(
+        "anchor:test", "https://github.com/team/repo", purpose="anchor", cwd=tmp_path
+    )
+    monkeypatch.setattr(git_ops, "_remote_url", lambda *a, **k: item.url)
+    monkeypatch.setattr(
+        git_ops,
+        "_auth_config_args_for_url",
+        lambda _: pytest.fail("legacy header bypassed the auth report"),
+    )
+    with context.session() as session:
+        session.reports[None] = auth.AuthReport([auth.SourceAuth(item, [], status="ok")])
+        session.overlays[None] = None
+        with context.repository_scope(tmp_path):
+            assert git_ops._auth_config_args("origin", cwd=tmp_path) == []
+
+
+def test_success_sweeps_owned_posix_session_without_touching_inherited_sessions(monkeypatch):
+    captured = []
+    monkeypatch.setattr(process, "os", SimpleNamespace(name="posix", getpgrp=lambda: 123))
+    monkeypatch.setattr(process, "contained_test_mode", lambda: False)
+    monkeypatch.setattr(
+        process.installer_run, "_sweep_exited_session", lambda child: captured.append(child.pid)
+    )
+
+    def spawn(*args, **kwargs):
+        child = SimpleNamespace(
+            pid=456,
+            returncode=0,
+            stdin=io.BytesIO(),
+            stdout=io.BytesIO(b"ok"),
+            stderr=io.BytesIO(),
+            wait=lambda **k: 0,
+            poll=lambda: 0,
+        )
+        return child, None
+
+    monkeypatch.setattr(process, "spawn_sync_in_kill_on_close_job", spawn)
+    assert process.run(["fixture"], env={}).status == 0
+    assert captured == [456]
+    captured.clear()
+    assert process.run(["fixture"], env={"CE_UPDATE_AUTH_PROCESS_GROUP": "123"}).status == 0
+    assert captured == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX session lifetime")
+def test_successful_posix_helper_cannot_leave_a_redirected_descendant(tmp_path, monkeypatch):
+    from agent_worktrees import installer_run
+    import time
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    child_code = (
+        "import subprocess,sys; "
+        "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        "print(p.pid,flush=True)"
+    )
+    result = process.run([sys.executable, "-c", child_code], env=os.environ)
+    pid = int(result.stdout.strip())
+    try:
+        assert result.status == 0
+        until = time.monotonic() + 5
+        while installer_run._start_time(pid) is not None and time.monotonic() < until:
+            time.sleep(0.05)
+        assert installer_run._start_time(pid) is None, "successful probe left a live helper"
+    finally:
+        if installer_run._start_time(pid) is not None:
+            os.kill(pid, 9)
+
+
+def test_user_local_settings_override_marketplace_source_and_activation(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    user = tmp_path / ".copilot"
+    user.mkdir()
+    (user / "settings.json").write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {"tool@private": True},
+                "extraKnownMarketplaces": {
+                    "private": {"source": {"source": "github", "repo": "team/old"}}
+                },
+            }
+        )
+    )
+    (user / "settings.local.json").write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {"tool@private": False},
+                "extraKnownMarketplaces": {
+                    "private": {"source": {"source": "github", "repo": "team/current"}}
+                },
+            }
+        )
+    )
+    selected = sources.marketplaces(None)
+    assert selected[0].repo == "current"
+    assert not selected[0].required
+
+
+def test_report_seam_preserves_manager_acquisition_cwd(tmp_path, monkeypatch, capsys):
+    seen = []
+
+    def report(items):
+        seen.extend(items)
+        return auth.AuthReport([])
+
+    monkeypatch.setattr(auth, "report", report)
+    args = argparse.Namespace(
+        auth_source=["https://github.com/team/repo"],
+        auth_cwd=str(tmp_path),
+        no_anchor_sync=True,
+        auth_environment=False,
+        json=True,
+    )
+    assert context.cmd_report(args) == 0
+    assert seen[0].cwd == tmp_path
+
+
+def test_fallback_resets_only_the_failed_repositories_http_headers():
+    item = auth.SourceAuth(
+        _source(),
+        [],
+        expected_account="mapped",
+        status="fixable_by_fallback",
+        alternative={"method": "gh"},
+    )
+    overlay = auth.fallback(auth.AuthReport([item]))
+    assert (f"http.{item.source.url}.extraHeader", "") in overlay.entries
+    assert not any(key.lower() == "http.extraheader" for key, _ in overlay.entries)

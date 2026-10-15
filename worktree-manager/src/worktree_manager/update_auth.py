@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from . import engine_client as ec
 
@@ -11,7 +12,7 @@ class AuthRequired(ec.EngineError):
     pass
 
 
-def environment(source: str) -> dict[str, str] | None:
+def environment(source: str, *, cwd: Path | None = None) -> dict[str, str] | None:
     """Return a failure-only environment, or raise before a known-failing fetch.
 
     The Manager does not import the independently installed engine or implement
@@ -19,6 +20,7 @@ def environment(source: str) -> dict[str, str] | None:
     """
     if os.environ.get("CE_UPDATE_AUTH") == "off" or not source.startswith("https://"):
         return None
+    location = ["--auth-cwd", str(cwd)] if cwd is not None else []
     result = ec.run_json(
         None,
         [
@@ -30,6 +32,7 @@ def environment(source: str) -> dict[str, str] | None:
             source,
             "--auth-environment",
             "--json",
+            *location,
         ],
         allow_nonzero=True,
         timeout=90,

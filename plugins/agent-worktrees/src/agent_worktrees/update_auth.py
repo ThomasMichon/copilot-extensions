@@ -165,10 +165,18 @@ def helper_chain(source: Source, env: Mapping[str, str], runner=run) -> list[str
     return helpers
 
 
-def _probe(item: SourceAuth, env: Mapping[str, str], anonymous: bool, runner) -> str:
+def _probe(
+    item: SourceAuth,
+    env: Mapping[str, str],
+    anonymous: bool,
+    runner,
+    *,
+    candidate: str | None = None,
+    account: str | None = None,
+) -> str:
     src = item.source
     helper = "" if anonymous else router_helper()
-    entries = [
+    entries = ([(f"http.{src.url}.extraHeader", "")] if candidate is not None else []) + [
         (f"credential.https://{src.host}.useHttpPath", "true"),
         ("credential.helper", ""),
         (f"credential.https://{src.host}.helper", ""),
@@ -182,8 +190,13 @@ def _probe(item: SourceAuth, env: Mapping[str, str], anonymous: bool, runner) ->
         "SSH_ASKPASS": "",
         "CE_UPDATE_AUTH_READONLY": "1",
         "CE_UPDATE_AUTH_BASE_CONFIG": base_config(env),
-        "CE_UPDATE_AUTH_ROUTES": "{}",
+        "CE_UPDATE_AUTH_ROUTES": json.dumps({src.route_key: {"method": "env", "account": account}})
+        if candidate is not None
+        else "{}",
     }
+    if candidate is not None:
+        key = "GH_TOKEN_" + re.sub(r"[^A-Z0-9]", "_", src.owner.upper())
+        probe_env[key] = candidate
     result = runner(
         ["git", "ls-remote", "--exit-code", src.url, "HEAD"], cwd=src.cwd, env=probe_env
     )
@@ -208,14 +221,13 @@ def _check_token(secret: str, src: Source, expected: str | None, env, runner) ->
         return {"status": "denied"}
     if expected and observed.casefold() != expected.casefold():
         return {"status": "mismatch", "observed_login": observed}
-    repo = runner(
-        ["gh", "api", "--hostname", src.host, f"repos/{src.owner}/{src.repo}", "--jq", ".id"],
-        env=token_env,
+    git_status = _probe(
+        SourceAuth(src, []), env, False, runner, candidate=secret, account=expected
     )
     return {
         "status": "timeout"
-        if repo.timed_out
-        else ("ok" if repo.status == 0 and not repo.truncated else "denied"),
+        if git_status == "timeout"
+        else ("ok" if git_status == "ok" else "denied"),
         "observed_login": observed,
     }
 
@@ -290,30 +302,34 @@ def report(
     account_for: Callable[[str], str | None] | None = None,
     runner=run,
 ) -> AuthReport:
-    from . import repos
+    from . import git_ops, repos
 
     environment = original_environment(os.environ if env is None else env)
     account_for = account_for or repos.account_for_github_slug
     results = []
     for src in sources:
         started = time.monotonic()
+        probe_env = dict(environment)
+        if src.purpose == "anchor":
+            probe_env = git_ops.repository_identity_env(probe_env)
+            probe_env.pop("CE_UPDATE_AUTH_BASE_CONFIG", None)
         try:
-            chain = helper_chain(src, environment, runner)
+            chain = helper_chain(src, probe_env, runner)
         except ProbeUnavailable as error:
             item = SourceAuth(src, [], status="unavailable", fix=str(error))
             item.duration_ms = round((time.monotonic() - started) * 1000)
             results.append(item)
             continue
         item = SourceAuth(src, chain)
-        if _probe(item, environment, True, runner) == "ok":
+        if _probe(item, probe_env, True, runner) == "ok":
             item.visibility, item.status = "public", "anonymous"
         else:
             item.expected_account = account_for(f"{src.owner}/{src.repo}")
-            item.as_configured = _probe(item, environment, False, runner)
+            item.as_configured = _probe(item, probe_env, False, runner)
             if item.as_configured == "ok":
                 item.visibility, item.status = "private", "ok"
             else:
-                attempts = _alternatives(item, environment, runner)
+                attempts = _alternatives(item, probe_env, runner)
                 item.alternative = next((a for a in attempts if a["status"] == "ok"), None)
                 if item.alternative:
                     item.status = "fixable_by_fallback"
@@ -372,6 +388,8 @@ def fallback(
                 ]
             )
         fix = apply_fixes and item.status == "fixable_by_fallback"
+        if fix:
+            entries.append((f"http.{src.url}.extraHeader", ""))
         route = (
             {"account": item.expected_account, "method": item.alternative["method"]}
             if (fix)

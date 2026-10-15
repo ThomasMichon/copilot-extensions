@@ -50,11 +50,11 @@ _REPOSITORY_CONTEXT_ENV = frozenset({
 })
 
 
-def repository_identity_env() -> dict[str, str]:
+def repository_identity_env(environment: dict[str, str] | None = None) -> dict[str, str]:
     """Remove inherited Git context; probes supply their checkout via ``git -C``.
     Other environment variables remain unchanged.
     """
-    env = env_scrub.scrub_python_runtime_env(os.environ.copy())
+    env = env_scrub.scrub_python_runtime_env(dict(os.environ if environment is None else environment))
     for name in list(env):
         upper = name.upper()
         if (
@@ -1368,20 +1368,10 @@ def _auth_config_args_for_url(url: str) -> list[str]:
 
 
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
-    """Build ``-c http.extraheader=...`` args to auth as the remote's owner.
-
-    Returns ``[]`` when no override is needed or possible (non-GitHub remote,
-    ``gh`` unavailable, owner is not an authenticated ``gh`` account, or the
-    owner **is** the active ``gh`` account).
-
-    The override exists for the cross-account case: the repo is owned by a
-    different account than the active ``gh`` account, so a plain push would
-    403. But when the owner *is* the active account, the default credential
-    helper already authenticates correctly; injecting the active account's
-    ``gh`` OAuth token would *override* that helper with a token that may lack
-    push scope, turning a working push into a 403 (#900). So skip injection in
-    that case and let the credential helper do its job.
-    """
+    """Use legacy cross-account headers only outside auth-managed update scopes."""
+    from .update_auth_context import managed_repository
+    if managed_repository():
+        return []
     url = _remote_url(remote, cwd=cwd)
     if not url:
         return []

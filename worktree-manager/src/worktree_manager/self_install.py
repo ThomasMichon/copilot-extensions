@@ -1019,7 +1019,6 @@ def self_update(
     """Fetch and version-install the Manager through its existing source authority.
 
     A newer payload publishes a new slot and marker; a matching version is a no-op.
-
     Fetch uses Git when available, enabling a lightweight in-place refetch; otherwise it falls
     back to a GitHub codeload tarball (:func:`manager_tarball_url`), so a bare machine can still
     update. The tarball fallback needs a GitHub source; a non-GitHub remote (local
@@ -1042,7 +1041,8 @@ def self_update(
     try:
         from . import engine_client, update_auth
 
-        auth_env = update_auth.environment(repo) if use_git else None
+        auth_env = update_auth.environment(
+            repo, cwd=staging if (staging / ".git").is_dir() else None) if use_git else None
         environment = {"env": auth_env} if auth_env is not None else {}
         staging.mkdir(parents=True, exist_ok=True)
         if use_git:

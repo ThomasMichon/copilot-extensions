@@ -154,6 +154,8 @@ def run(
     finally:
         if job is not None:
             job.close()
+        elif own_session and proc.poll() is not None:
+            installer_run._sweep_exited_session(proc)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
 
