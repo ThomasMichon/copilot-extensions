@@ -79,6 +79,16 @@ def _stage_payload(tmp_path: Path) -> Path:
     return payload
 
 
+def _remove_required_library(payload: Path, library: str) -> None:
+    """Remove both resolver inputs: embedded release copy and checkout fallback."""
+    candidates = (payload / "libs" / library, payload.parents[1] / "libs" / library)
+    assert any((candidate / "pyproject.toml").is_file() for candidate in candidates)
+    for candidate in candidates:
+        if candidate.exists():
+            shutil.rmtree(candidate)
+    assert all(not candidate.exists() for candidate in candidates)
+
+
 def _host_pip_index_url() -> str | None:
     candidates = (
         Path(r"C:\ProgramData\pip\pip.ini"),
@@ -448,7 +458,7 @@ def test_stamp_fails_before_publish_when_required_library_missing(
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
-    shutil.rmtree(tmp_path / "libs" / missing_library)
+    _remove_required_library(payload, missing_library)
 
     stamp = subprocess.run(
         [
@@ -529,7 +539,7 @@ def test_powershell_stamp_fails_before_publish_when_required_library_missing(
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
-    shutil.rmtree(tmp_path / "libs" / missing_library)
+    _remove_required_library(payload, missing_library)
 
     stamp = subprocess.run(
         [

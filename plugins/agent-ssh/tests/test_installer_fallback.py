@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pytest
 
+import installer_engine_ref as ier
+import materialize_main as mm
+
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "install.ps1"
@@ -65,6 +68,25 @@ def _shell_function_source(source: str, name: str, next_marker: str) -> str:
     return source[start:end]
 
 
+def _release_payload(tmp_path: Path) -> Path:
+    """Keep dependency admission real, with a publisher-owned local source graph."""
+    payload = tmp_path / "payload"
+    shutil.copytree(
+        PLUGIN, payload,
+        ignore=shutil.ignore_patterns("tests", "__pycache__", ".pytest_cache", ".venv"),
+    )
+    for materializer in (
+        mm.materialize_uv_editable_ref_into,
+        mm.materialize_installer_engine_ref_into,
+    ):
+        log = materializer(
+            source_consumer_dir=PLUGIN, dest_consumer_dir=payload,
+            canonical_root=PLUGIN.parents[1],
+        )
+        assert not any(entry.startswith("SKIP") for entry in log), log
+    return payload
+
+
 @pytest.mark.skipif(
     os.name != "nt" or PWSH is None,
     reason="Windows PowerShell installer coverage",
@@ -90,10 +112,9 @@ def test_package_install_refuses_broken_uv_without_unrestricted_fallback(
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     python = venv / "Scripts/python.exe"
-    dependency_a = tmp_path / "dependency-a"
-    dependency_b = tmp_path / "dependency-b"
-    dependency_a.mkdir()
-    dependency_b.mkdir()
+    payload = _release_payload(tmp_path)
+    dependency_a = payload / "libs" / "ssh-manager"
+    dependency_b = payload / "libs" / "agent-procutil"
 
     def ps_quote(value: str) -> str:
         return value.replace("'", "''")
@@ -106,13 +127,13 @@ def test_package_install_refuses_broken_uv_without_unrestricted_fallback(
                 "function Write-Step { param([string]$Msg) Write-Host $Msg }",
                 "function Write-Warn { param([string]$Msg) Write-Host $Msg }",
                 "function Write-Fail { param([string]$Msg) Write-Host $Msg }",
-                f". '{ps_quote(str(ENGINE_PS1))}'",
+                f". '{ps_quote(str(payload / 'scripts' / 'installer-engine.ps1'))}'",
                 install_package,
                 "function Resolve-VenueCopilot { return '__unused__' }",
                 (
                     "$ok = Install-AgentSshPackage "
                     f"-Python '{ps_quote(str(python))}' "
-                    f"-Source '{ps_quote(str(tmp_path))}' "
+                    f"-Source '{ps_quote(str(payload))}' "
                     "-Dependencies @("
                     f"'{ps_quote(str(dependency_a))}',"
                     f"'{ps_quote(str(dependency_b))}'"
@@ -131,6 +152,7 @@ def test_package_install_refuses_broken_uv_without_unrestricted_fallback(
 
     proc = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(script)],
+        cwd=payload,
         capture_output=True,
         text=True,
         env=env,
@@ -388,7 +410,13 @@ def test_shell_canonical_install_resolves_sources_when_local_copy_absent(tmp_pat
 def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> None:
     installer = INSTALLER.read_text(encoding="utf-8")
 
-    assert ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" in installer
+    ref = ier.find_engine_ref(INSTALLER, "ps1")
+    assert ref is not None, "installer must source exactly one shared engine"
+    if (PLUGIN / "scripts" / "installer-engine.ps1").is_file():
+        assert ier.is_local_ref(ref, PLUGIN), "release must source its embedded engine"
+    else:
+        assert ier.is_canonical_ref(ref, PLUGIN, repo_root=PLUGIN.parents[1])
+    assert ref.resolved().read_bytes() == ENGINE_PS1.read_bytes()
     assert "function Resolve-VenueCopilot" in installer
     assert "Resolve-VendoredLib -LibName 'venue-copilot'" in installer
     assert "$venueCopilotDir = Resolve-VenueCopilot" in installer
