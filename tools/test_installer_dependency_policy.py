@@ -158,8 +158,10 @@ def test_structured_uv_cutoff_preserves_the_strongest_boundary(timestamp, span, 
 
 @pytest.mark.parametrize("timestamp,span,accepted", [
     ("2026-10-06T00:00:00Z", "None", True),
+    ("2026-10-06T00:00:00Z", "Some(ExcludeNewerSpan(7d))", True),
     ("2026-10-06T00:00:01Z", "None", False),
     ("2026-10-03T00:00:01Z", "Some(ExcludeNewerSpan(10d,),)", True),
+    ("2026-10-12T00:00:00Z", "Some(ExcludeNewerSpan(10d,),)", False),
 ])
 def test_structured_uv_package_cutoff_cannot_weaken_seasoning(timestamp, span, accepted):
     projection = settings(packages=package("demo", projected_cutoff(timestamp, span)))
@@ -405,6 +407,30 @@ def test_real_uv_settings_consumer_preserves_relative_cutoffs(tmp_path):
     result = policy.prepare_uv_install(uv, arguments, cwd=tmp_path, now=now)
     expected = (now - timedelta(days=10)).isoformat().replace("+00:00", "Z")
     assert result[-3:] == ["--exclude-newer", expected, "--reinstall"]
+
+
+def test_real_uv_package_span_cannot_mask_a_weaker_timestamp(tmp_path):
+    uv = shutil.which("uv")
+    assert uv, "native UV is required for structured package cutoff coverage"
+    (tmp_path / "uv.toml").write_text(
+        'exclude-newer-package={demo={timestamp="2099-01-01T00:00:00Z",span="11 days"}}\n',
+        encoding="utf-8",
+    )
+    arguments = ["--python", sys.executable, "demo"]
+    environment = offline_environment(tmp_path)
+    projection = subprocess.run(
+        [uv, "pip", "install", "--show-settings", *arguments], cwd=tmp_path,
+        env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=policy._HEADLESS,
+    )
+    assert projection.returncode == 0, projection.stderr
+    if "ExcludeNewerValue {" in projection.stdout:
+        with pytest.raises(policy.DependencyPolicyError, match="weakens seasoning"):
+            policy.prepare_uv_install(uv, arguments, cwd=tmp_path, env=environment, now=NOW)
+    else:
+        assert "Relative(" in projection.stdout and "2099-01-01" not in projection.stdout
+        admitted = policy.prepare_uv_install(uv, arguments, cwd=tmp_path, env=environment, now=NOW)
+        assert admitted[-3:] == ["--exclude-newer", "2026-10-06T00:00:00Z", "--reinstall"]
 
 
 @pytest.mark.parametrize("missing_timestamp,url_dependency,exact_boundary", [
@@ -760,6 +786,7 @@ def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_
     import subprocess
 
     environment = offline_environment(tmp_path)
+    environment["UV_TEST_CURRENT_TIMESTAMP"] = NOW.isoformat().replace("+00:00", "Z")
     if os.name == "nt":
         environment["APPDATA"] = str(tmp_path / "user")
         environment["SYSTEMDRIVE"] = str(tmp_path / "system")

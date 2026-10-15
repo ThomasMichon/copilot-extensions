@@ -2244,9 +2244,11 @@ conservatively reject an artifact exactly on the seven-day boundary. The
 installer does not add an epsilon that could admit younger bytes.
 Supported UV cutoff projections include legacy absolute/relative values and
 structured timestamps with an optional relative span. The structured form
-retains the earlier of its captured timestamp and the span evaluated against
-one admission clock; retained package-cutoff comparison uses that same clock
-without discarding a stricter timestamp or changing any other resolver setting.
+uses the earlier captured timestamp or relative boundary for the enforced
+global cutoff. A retained package override's actual timestamp must independently
+pass the global boundary; span metadata cannot justify a younger override.
+Package-cutoff comparison uses one admission clock without discarding its span,
+a stricter timestamp or any other resolver setting.
 `--reinstall` forces actual resolution rather than
 trusting a previously installed, potentially newer package. Skipping dependency
 or isolated-build resolution is not an age-enforcement fallback.

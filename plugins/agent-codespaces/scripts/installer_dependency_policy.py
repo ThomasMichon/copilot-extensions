@@ -426,7 +426,8 @@ def cutoff_arguments(settings: str, *, now: datetime | None = None) -> list[str]
         if entry is None:
             raise DependencyPolicyError("disabled or unsupported package-specific seasoning")
         value, stop = _balanced(entries, entry.end() - 1, "(", ")")
-        if _cutoff_value(value, now) > floor:
+        # Package overrides remain in UV's input, so their actual timestamp must pass.
+        if _cutoff_value(value, now, clamp_relative=False) > floor:
             raise DependencyPolicyError(f"package-specific cutoff weakens seasoning: {entry[1]}")
         entries = entries[stop:].lstrip(", \r\n\t")
     return ["--exclude-newer", floor.isoformat().replace("+00:00", "Z"), "--reinstall"]

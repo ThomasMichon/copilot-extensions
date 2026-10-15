@@ -12,7 +12,7 @@ _STRUCTURED_CUTOFF = re.compile(
 )
 
 
-def cutoff_value(value: str, now: datetime, *, error_type) -> datetime:
+def cutoff_value(value: str, now: datetime, *, error_type, clamp_relative=True) -> datetime:
     value = value.strip().removesuffix(",").strip()
     structured = _STRUCTURED_CUTOFF.fullmatch(value)
     if structured:
@@ -21,7 +21,8 @@ def cutoff_value(value: str, now: datetime, *, error_type) -> datetime:
             relative = cutoff_value(
                 f"Relative(ExcludeNewerSpan({structured[2]}))", now, error_type=error_type,
             )
-            cutoff = min(cutoff, relative)
+            if clamp_relative:
+                cutoff = min(cutoff, relative)
         return cutoff
     absolute = re.fullmatch(r"Absolute\(\s*([^,\s]+),?\s*\)", value)
     if absolute:

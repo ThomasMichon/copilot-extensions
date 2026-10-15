@@ -901,9 +901,18 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   relative span itself and any stricter captured timestamp. Moved cohesive
   settings parsing into the existing private configuration helper to keep
   every shipped module under its unchanged 1,000-line cap.
-- Final native policy coverage passed 198 cases with actual UV 0.11.7;
-  legacy UV 0.12.5 policy and synchronization coverage passed 285 cases.
+- Final native policy coverage passed 201 cases with actual UV 0.11.7;
+  legacy UV 0.12.5 policy and synchronization coverage passed 288 cases.
   The originally failing governed Worktrees test-runner preparation also
   succeeded with UV 0.11.7 through the configured feed and seven-day policy.
   All thirteen runtime copies and release entries are synchronized; real
   review, required CI, containing promotion and rollout remain open.
+- Before merge, an additional actual UV 0.11.7 counterexample proved that a
+  package table can project a younger timestamp alongside an older span.
+  Both its native and unit regressions failed first. Package admission now
+  independently checks the actual timestamp that remains in UV's input;
+  global clamping and comparison normalization cannot justify a weaker
+  package override. The native precedence fixture also gives UV the same
+  fixed test clock as the policy rather than comparing captured wall-clock
+  timestamps against a different injected date. The final complete portfolios
+  and governed preparation above include these corrections.
