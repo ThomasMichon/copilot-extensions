@@ -1078,6 +1078,7 @@ jobs:
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q
           libs/payload-invocation/tests/test_command_binding.py
           -k "command_binding"
@@ -1087,6 +1088,7 @@ jobs:
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q
           libs/payload-invocation/tests/test_command_lifecycle.py
           libs/payload-invocation/tests/test_command_lifecycle_stdio.py
@@ -1097,6 +1099,7 @@ jobs:
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q
           libs/payload-invocation/tests/test_command_lifecycle.py
           -k "command_binding and (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"

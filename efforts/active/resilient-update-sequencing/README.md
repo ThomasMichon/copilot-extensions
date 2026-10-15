@@ -397,3 +397,11 @@ achieved by rearranging today's combined installer invocations.
 - Rebased finishing coverage passed 123 cases with two platform skips; Manager
   coverage passed 227. Lint, module ceilings and all thirteen install contracts
   pass. The branch still owes current-head hosted CI/review and actual rollout.
+
+### 2026-10-15 - Same-step governed test prerequisites
+- Required CI caught the workflow contract requiring each host-pytest step to
+  declare its seasoned prerequisite admission, rather than relying on an
+  earlier step. Added the existing governed prerequisite command to each new
+  partition; did not weaken the policy guard or use an alternate resolver.
+- All 140 public-toolchain and native-workflow composition contracts passed.
+  Test selection and the existing step/job deadlines remain unchanged.
