@@ -47,6 +47,8 @@ agent-codespaces) import this library instead of spawning SSH directly.
   metadata lasts only as long as the corresponding pending request. Retirement
   uses the existing transport-failure path, preserving subscription termination,
   eligible subscription restoration, reconnect backoff and automatic recovery.
+  Existing reconnect/idle-retirement ownership is established before cancellable
+  process cleanup so interruption cannot orphan live owners.
 
 ## Usage
 

@@ -334,7 +334,10 @@ async def test_native_descendant_held_stderr_read_transport_is_closed(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "replacement_mode", ["ensure", "request", "failed", "cancel", "submitted-cancel", "recover"],
+    "replacement_mode", [
+        "ensure", "request", "failed", "cancel", "submitted-cancel", "recover",
+        "heartbeat-failed", "heartbeat-cleanup-cancel",
+    ],
 )
 @pytest.mark.parametrize("old_request", [False, True])
 async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
@@ -354,11 +357,14 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
         "finished.write_text('finished')\n"
     )
     frame = encode_envelope(hello_envelope())
+    has_subscriptions = replacement_mode in (
+        "recover", "heartbeat-failed", "heartbeat-cleanup-cancel",
+    )
     receive_old_request = (
         "n=struct.unpack('!I',sys.stdin.buffer.read(4))[0];sys.stdin.buffer.read(n);"
     ) * (
-        1 + int(old_request) + (2 if replacement_mode == "recover" else 0)
-        if old_request or replacement_mode == "recover" else 0
+        1 + int(old_request) + (2 if has_subscriptions else 0)
+        if old_request or has_subscriptions else 0
     )
     parent = (
         "import os,struct,subprocess,sys;"
@@ -371,6 +377,10 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
     carrier, processes = await _native_carrier([sys.executable, "-u", "-c", parent])
     old_tasks = set()
     pending_request = fresh_request = None
+    heartbeat = None
+    original_closer = carrier._process_closer
+    cleanup_entered = asyncio.Event()
+    cleanup_release = asyncio.Event()
 
     async def wait_until(predicate):
         while not predicate():
@@ -379,7 +389,7 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
     try:
         lease = await carrier.acquire()
         process = processes[0]
-        if replacement_mode == "recover":
+        if has_subscriptions:
             replayable = await carrier.subscribe(
                 {"operation": "synthetic-events"}, subscription_id="replayable",
             )
@@ -444,7 +454,7 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
             assert transport.is_closing()
             opening.set()
             opens += 1
-            if replacement_mode == "recover" and opens == 1:
+            if replacement_mode in ("recover", "heartbeat-failed") and opens == 1:
                 return failed_replacement
             if replacement_mode == "cancel" and opens > 1:
                 replacement = _FailedProcess(b"", returncode=None)
@@ -494,8 +504,37 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
                 await fresh_request
             assert len(submitted) == 1
         else:
-            with pytest.raises(CarrierUnavailable):
-                await asyncio.wait_for(carrier.ensure_started(), timeout=2)
+            if replacement_mode == "recover":
+                with pytest.raises(CarrierUnavailable):
+                    await asyncio.wait_for(carrier.ensure_started(), timeout=2)
+            else:
+                if replacement_mode == "heartbeat-cleanup-cancel":
+                    async def paused_closer(value):
+                        if value is process:
+                            cleanup_entered.set()
+                            await cleanup_release.wait()
+                        await original_closer(value)
+
+                    carrier._process_closer = paused_closer
+                carrier._heartbeat_interval = 0.01
+                carrier._start_task(
+                    carrier._heartbeat_loop(carrier._transport_epoch),
+                    "fixture-heartbeat",
+                )
+                heartbeat = next(
+                    task for task in carrier._tasks
+                    if task.get_name() == "fixture-heartbeat"
+                )
+                old_tasks.add(heartbeat)
+                if replacement_mode == "heartbeat-cleanup-cancel":
+                    await asyncio.wait_for(cleanup_entered.wait(), timeout=2)
+                    assert carrier._reconnect_task is not None
+                    assert not carrier._reconnect_task.done()
+                    heartbeat.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await heartbeat
+                    cleanup_release.set()
+                    carrier._process_closer = original_closer
             await asyncio.wait_for(
                 wait_until(lambda: carrier._process is replacement
                            and carrier.diagnostics()["state"] == "healthy"),
@@ -507,7 +546,8 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
             with pytest.raises(CarrierUnavailable, match="non-replayable subscription"):
                 await one_shot.get()
             assert not submitted
-            assert opens == 2
+            assert opens == (1 if replacement_mode == "heartbeat-cleanup-cancel" else 2)
+            assert any(task.get_name() == "ssh-carrier-stale" for task in carrier._tasks)
         if pending_request is not None:
             with pytest.raises(CarrierUnavailable, match="carrier transport was lost"):
                 await asyncio.wait_for(asyncio.shield(pending_request), timeout=2)
@@ -522,6 +562,11 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
         await lease.release()
     finally:
         release.write_text("release")
+        cleanup_release.set()
+        if heartbeat is not None:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+        carrier._process_closer = original_closer
         await carrier.close()
         for request in (pending_request, fresh_request):
             if request is not None:
