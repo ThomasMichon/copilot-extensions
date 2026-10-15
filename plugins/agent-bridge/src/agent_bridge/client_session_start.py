@@ -31,6 +31,7 @@ class SessionStartClientMixin(_Base):
         request_timeout: float | None = None,
         creation_key: str | None = None,
         creation_prompt: str | None = None,
+        provider_instance: bool = False,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
@@ -49,6 +50,14 @@ class SessionStartClientMixin(_Base):
         from .client import BridgeClientError
 
         body: dict[str, Any] = {}
+        if provider_instance:
+            from .protocol import PROVIDER_CREATION_PROTOCOL_VERSION
+
+            if creation_key is None:
+                raise ValueError("provider_instance requires creation_key")
+            if not self.daemon_supports(PROVIDER_CREATION_PROTOCOL_VERSION):
+                raise BridgeClientError(426, "daemon does not support replay-safe provider creation")
+            body["provider_instance"] = True
         if creation_key is not None:
             from .protocol import WORKSPACE_CREATION_PROTOCOL_VERSION
 

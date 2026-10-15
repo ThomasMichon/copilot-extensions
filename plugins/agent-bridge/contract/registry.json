@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 35,
+        "current": 36,
         "minimum": 1,
-        "previous_generation": 34,
+        "previous_generation": 35,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -41,7 +41,8 @@
           32,
           33,
           34,
-          35
+          35,
+          36
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -94,13 +95,14 @@
         "native_bound_prompt": 33,
         "owner_qualified_acquisition": 34,
         "workspace_creation": 34,
-        "qualified_live_peer": 35
+        "qualified_live_peer": 35,
+        "provider_creation": 36
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "be3b892314c276413057a50c10456ba65b5226c4310d3a22f8a066624c308d58",
+          "sha256": "c35e3becec7ad678a5cc574f220d71df8dfd4ff5e9f4b1d24f504ac2a068173a",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -154,7 +156,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
-          "sha256": "8c9cdf4bee879d348779b5589077845887b50f22a0e8a60ea81d11de61bed903",
+          "sha256": "8f4b971f65a46584b4038e407ac73a92316091a519ec610fc6fbccd505695d81",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -167,6 +169,18 @@
         {
           "path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "sha256": "212ba2f30dfc0c1cdfe788b379f473620b48a1e5a4f6fd5b20fb211074e1f88d",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "sha256": "de9a07f254c508a21483b5599ed8ba66410ceea0e35e1d20c48e976628908a6f",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "sha256": "a363ce3e21610bd93ffb664922a67a933c5a3115eb42a4b70b9761267758726a",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -495,6 +509,66 @@
           "sha256": "c20a5dac95eaa941b63344f04533a2a9344807ba601011b93d2679b1b40df2ea",
           "role": "Generation-35 workspace-creation-routes evidence; prior capability floors retained",
           "generation": 35
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-36.json",
+          "sha256": "2c528b2b277478f00bb649cdda502094e0c8dff54b944280619d52a6d97082a3",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-36.json",
+          "sha256": "271cea4715f17018ee5d71b9266b70a9a71bc249d69a1e7e7a9b5362a3d158ea",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-36.json",
+          "sha256": "7e2956bff9d4a143966bcba848baa08b5079f8ae54642d27c56301a270980040",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-36.json",
+          "sha256": "3811285342608356602eba9ed8f7edec711e5af86113950a93d8c6296587014e",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-36.json",
+          "sha256": "1fcfb666530a7c4a5f6883d4764815aaecdbeba381dcfc0f991f7f1666d94892",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-36.json",
+          "sha256": "358179c2ceadb6105d0951bb88ff3c989abd5725fdced4831991ad880e17658b",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-36.json",
+          "sha256": "9cd342636129145c786781d08b33e3bbd8444ba62f387334d33153666d6bb59e",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-36.json",
+          "sha256": "c8c64c794fd5f9f40700541fd92e33ae1acf553a60597110b1bb2fd45f373ff2",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-36.json",
+          "sha256": "490771321726ff8974660df17bcccc528d6754825a43c4e9510c8c2e54cb78fa",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-36.json",
+          "sha256": "9ad633005334a266118edd8f841191504e4ca45cdd47dc852570160e9cbae7ad",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
         }
       ],
       "provenance": [
@@ -1425,6 +1499,94 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
           "capture_method": "Exact rebased producer source; independent peer round-trip, native prompt and workspace fixture assertions retain prior capability floors."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "0ea5edff1c18e4f16264a8988526bd29ba5b52e8",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "4c366724eabfec7d69b556bbe7654d2f3575de54",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "332e5d36e42bfef8b1f1d5849bb75cc1c5b9b18f",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "c867e7e037e7534f8066d353c2dbd086c889cdbd",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "fe5a893ab7d0057bc4948a7cf5dc134c89ecec97",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "7947752cdd158f3888cd23778bfc3feeb43e71a7",
+          "capture_method": "Recapture provider native admission after opaque JSON key encoding correction; native Unicode/surrogate replay and real ACP subprocess tests retain one original native start."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",

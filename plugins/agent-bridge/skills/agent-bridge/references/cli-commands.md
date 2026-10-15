@@ -143,6 +143,11 @@ blocks, and tool call summaries.
 # Orchestration seam: atomically capture the exact session this create owns
 <agent-bridge catalog argv[0]> create <agent-name> --prompt-file ./dispatch.md \
   --session-id-file ./created-session-id
+
+# Replay-safe native creation on an exact prepared provider-exec instance.
+# Requires protocol 36; establishes native identity without a first prompt.
+<agent-bridge catalog argv[0]> create <prepared-agent> \
+  --creation-key <opaque-key> --provider-instance
 ```
 
 `--session-id-file` is written immediately after the fresh session is created
@@ -150,7 +155,12 @@ and before the first prompt is streamed. Use it when a caller must bind later
 status, model, or result reads to this exact create rather than selecting a
 same-agent session from a broad listing.
 
-`create` always spawns a fresh session, bypassing caller reuse. For agents
+Without `--creation-key`, `create` spawns a fresh session, bypassing caller reuse.
+Keyed creation retains the original result; `--provider-instance` explicitly
+selects the no-worktree provider contract and requires that key. It cannot carry
+a creation prompt. See [session creation contracts](../../../docs/session-acquisition.md)
+for pending, changed-facts and terminal refusal behavior.
+For agents
 that allow only **one session at a time** — CodeSpaces share a single
 checkout — `create` **refuses** if a session already exists rather than
 silently latching onto it, and tells you to end the existing one first:

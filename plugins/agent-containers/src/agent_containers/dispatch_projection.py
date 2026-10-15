@@ -713,7 +713,7 @@ def add_exec_subparser(sub) -> None:
 def _command(args, action) -> int:
     import sys
 
-    from ._invoke import payload_command_argv
+    from .dispatch_target import launch_spec
 
     raw = sys.stdin.read(16385)
     try:
@@ -729,11 +729,7 @@ def _command(args, action) -> int:
     binding = action(args.name, args.expected_container_id, request)
     result = {
         **binding, "task_token_file": TOKEN_FILE,
-        "spawn_command": [
-            *payload_command_argv(), "exec", "--stdio",
-            "--dispatch-binding-id", binding["binding_id"],
-            "--expected-container-id", binding["container_id"], args.name,
-        ],
+        **launch_spec(args.name, binding),
     }
     print(json.dumps(result))
     return 0

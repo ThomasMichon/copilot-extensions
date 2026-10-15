@@ -118,6 +118,13 @@ restart. Bad entries warn but do not block valid peers. `agent-bridge doctor`
 lists every provider finding with the exact entry, target, and cleanup or
 re-registration remedy.
 
+An exact ready provider-exec instance can opt into replay-safe native creation
+with `create <agent> --creation-key <key> --provider-instance` (HTTP protocol
+36). It retains one native result without allocating or fabricating a worktree.
+Ordinary keyed creation remains local-worktree-only. See
+[session creation contracts](docs/session-acquisition.md#exact-provider-instance-creation)
+for pending/terminal recovery and the separate first-prompt boundary.
+
 ### Namespace reader observations
 
 Only CLI `namespace-list` reads use optional procutil CPU metrics. Agent Bridge

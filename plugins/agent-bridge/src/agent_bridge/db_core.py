@@ -151,6 +151,14 @@ CREATE TABLE IF NOT EXISTS workspace_embodiments (
     turn_index INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS provider_embodiments (
+    key_digest TEXT PRIMARY KEY,
+    facts_digest TEXT NOT NULL,
+    state TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    native_session_id TEXT
+);
+
 CREATE TABLE IF NOT EXISTS turns (
     session_id TEXT NOT NULL,
     turn_index INTEGER NOT NULL,

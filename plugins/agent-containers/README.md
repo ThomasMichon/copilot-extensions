@@ -52,6 +52,17 @@ a time. Admission, lifecycle and projection writers share a kernel-owned
 host lock that is never stolen based on file age. Task execution additionally
 holds a guest `flock` on a stable root-owned file for the worker's lifetime:
 terminating only the host wrapper does not admit a duplicate surviving worker.
+
+Preparation also returns an explicit, nonsecret `agent` address:
+`container:dispatch/<full-physical-id>/<birth-binding-id>/<name>`. Only this
+prepared address participates in namespace readiness and resolution for a
+dispatch-only member; ordinary `container:<name>` remains refused. Every
+resolution rechecks the retained birth binding, exact physical member, live
+restricted posture and lifecycle hold without changing task ownership.
+Use Bridge's protocol-36 `create <agent> --creation-key <key>
+--provider-instance` to establish a replay-safe native session without
+inventing a worktree or sending a first prompt. A missing binding or replaced
+member refuses; neither resolution nor a new borrow clears the incarnation.
 Destructive lifecycle probes that guest lock under its provider hold, both
 before rescue and immediately before stop/removal/recreation; an active or
 unreadable lock defers the action even without host admission or Copilot markers.

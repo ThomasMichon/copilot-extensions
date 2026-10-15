@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve explicit prepared dispatch binding addresses through the provider namespace while preserving ordinary launch refusal.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

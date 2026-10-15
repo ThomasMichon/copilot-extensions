@@ -8,14 +8,17 @@ import argparse
 def create(args: argparse.Namespace, client, *, caller_id: str | None) -> None:
     from . import __main__ as core
     from .client import BridgeClientError
-    from .protocol import WORKSPACE_CREATION_PROTOCOL_VERSION
+    from .protocol import PROVIDER_CREATION_PROTOCOL_VERSION, WORKSPACE_CREATION_PROTOCOL_VERSION
     from .session_start_cli import _prepare_sender_preference, _read_agent_inventory
     from .session_targeting_cli import (
         _companion_seed_prompt, _hold_protocol_floor, _resolve_prompt,
         _write_session_id_file,
     )
 
-    _hold_protocol_floor(client, WORKSPACE_CREATION_PROTOCOL_VERSION)
+    provider_instance = getattr(args, "provider_instance", False)
+    _hold_protocol_floor(
+        client, PROVIDER_CREATION_PROTOCOL_VERSION if provider_instance else WORKSPACE_CREATION_PROTOCOL_VERSION,
+    )
     inventory = _read_agent_inventory(client)
     preference = _prepare_sender_preference(client, args.target, agent_inventory=inventory)
     prompt = _companion_seed_prompt(_resolve_prompt(args, required=False))
@@ -28,6 +31,7 @@ def create(args: argparse.Namespace, client, *, caller_id: str | None) -> None:
         charter=getattr(args, "charter", None), model=getattr(args, "model", None),
         effort=getattr(args, "effort", None), force_new=True,
         creation_key=args.creation_key, creation_prompt=prompt,
+        provider_instance=provider_instance,
         request_timeout=core._startup_request_timeout(),
     )
     creation = result.get("creation")
@@ -45,11 +49,18 @@ def create(args: argparse.Namespace, client, *, caller_id: str | None) -> None:
         session = client.get_session(session_id)
         ident = core._connection_identity(client, session_id)
         ident["native_session_id"] = creation["native_session_id"]
-        ident["target_dir"] = creation["worktree"]["path"]
+        if "worktree" in creation:
+            ident["target_dir"] = creation["worktree"]["path"]
+        else:
+            ident["venue"] = creation["venue"]
         ready = session.get("status") == "idle" and session.get("turn_count") == 0
         core._json_out({
             **result, "connection": ident, "ready": ready,
             "status": "awaiting_first_prompt" if ready else session.get("status"),
         })
     else:
-        print(f"[OK] Session {session_id} -- workspace {creation['worktree']['id']}")
+        identity = (
+            f"workspace {creation['worktree']['id']}" if "worktree" in creation
+            else f"provider instance {creation['venue']['instance_id']}"
+        )
+        print(f"[OK] Session {session_id} -- {identity}")

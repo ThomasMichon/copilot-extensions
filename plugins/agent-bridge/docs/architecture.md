@@ -54,6 +54,15 @@ protocol-30 task-bound CLI/ACP acquisition, native identity verification and
 durable retry reconciliation. Local dispatch launch callers use it; remote/
 fleet migration and native integration proof remain in the Phase 6 effort.
 
+Protocol-36 provider-instance creation is a separate, explicit native-only
+composition on the existing keyed sessions endpoint. `provider_creation.py`
+retains the exact ready provider-exec target, launch intent and native result
+in `provider_embodiments`, using the existing OS executor lease. It creates no
+worktree and sends no prompt. Lost acknowledgement or restart can replay only
+the retained session; missing or changed native history refuses rather than
+repeating `session/new`. Ordinary local workspace creation and task acquisition
+keep their existing owner and authority checks.
+
 ### Workspace command ownership
 
 Local managed-project transport resolves new or retained workspaces through the

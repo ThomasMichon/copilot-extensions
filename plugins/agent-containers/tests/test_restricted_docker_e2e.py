@@ -9,7 +9,11 @@ import subprocess
 import sys
 import time
 import uuid
+import shutil
 from dataclasses import asdict
+from datetime import datetime, timezone
+from importlib.metadata import version
+from pathlib import Path
 
 import pytest
 import yaml
@@ -118,7 +122,7 @@ def test_restricted_container_is_writable_only_on_bounded_tmpfs():
 
 def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp_path):
     from agent_containers import dispatch_projection as projection
-    from agent_containers import lease, lifecycle, replacement, resolver
+    from agent_containers import dispatch_target, lease, lifecycle, replacement, resolver
     from agent_containers.config import ContainersConfig
 
     name = f"agent-containers-dispatch-{uuid.uuid4().hex[:8]}"
@@ -214,15 +218,55 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
         config_path.write_text(
             yaml.safe_dump({"fleets": {"dispatch-e2e": cli_fleet}}), encoding="utf-8",
         )
+        # The emitted payload shim requires a completed runtime in this fixture's
+        # own state root; do not let this transport proof self-provision a host.
+        runtime_version = version("agent-containers")
+        slot = tmp_path / "versions" / runtime_version
+        shutil.copytree(Path(sys.prefix), slot, symlinks=True)
+        runtime_python = slot / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        probe = subprocess.run(
+            [str(runtime_python), "-c",
+             "import agent_containers;print(agent_containers.__file__)"],
+            capture_output=True, text=True, timeout=30, creationflags=no_window_flags(),
+        )
+        assert probe.returncode == 0, probe.stderr
+        assert Path(probe.stdout.strip()).resolve() == Path(projection.__file__).with_name("__init__.py").resolve()
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": runtime_version, "completed_at": datetime.now(timezone.utc).isoformat(),
+            "pid": os.getpid(),
+        }), encoding="utf-8")
+        (tmp_path / "current-version").write_text(runtime_version, encoding="utf-8")
         env = {
             **os.environ, "AGENT_CONTAINERS_CONFIG": str(config_path),
             "AGENT_CONTAINERS_STATE_DIR": str(tmp_path),
-            "AGENT_CONTAINERS_HOME": str(tmp_path / "runtime"),
+            "AGENT_CONTAINERS_HOME": str(tmp_path), "AGENT_CONTAINERS_NO_SELFPROVISION": "1",
         }
         cli = [sys.executable, "-m", "agent_containers"]
+        prepared = dispatch_target.reference(name, physical_id, binding["binding_id"])
+        ready = subprocess.run(
+            [*cli, "namespace-ensure-ready", prepared],
+            capture_output=True, text=True, timeout=30, env=env,
+            creationflags=no_window_flags(),
+        )
+        assert ready.returncode == 0, ready.stderr
+        resolved = subprocess.run(
+            [*cli, "namespace-resolve", prepared],
+            capture_output=True, text=True, timeout=30, env=env,
+            creationflags=no_window_flags(),
+        )
+        assert resolved.returncode == 0, resolved.stderr
+        spec = json.loads(resolved.stdout)
+        assert spec["venue"]["instance_id"] == physical_id
+        assert spec["venue"]["ready"] is True and spec["venue"]["dispatch_only"] is True
+        assert not {"worktree_id", "repo"} & spec.keys()
+        ordinary = subprocess.run(
+            [*cli, "namespace-ensure-ready", name],
+            capture_output=True, text=True, timeout=30, env=env,
+            creationflags=no_window_flags(),
+        )
+        assert ordinary.returncode != 0 and "explicit task preparation" in ordinary.stderr
         launch = subprocess.run(
-            [*cli, "exec", "--stdio", name, "--dispatch-binding-id", binding["binding_id"],
-             "--expected-container-id", physical_id],
+            spec["spawn_command"],
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=45,
             env=env, creationflags=no_window_flags(),
         )

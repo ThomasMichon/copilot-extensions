@@ -18,6 +18,7 @@ class StartSessionRequest(PreferenceRequestFields):
     worktree_id: str | None = None  # agent-worktrees worktree ID for session roll
     creation_key: str | None = Field(default=None, min_length=1, max_length=1024)
     creation_prompt: str | None = None
+    provider_instance: bool = False  # explicit keyed provider-native creation, never a worktree
     caller_id: str | None = None  # caller identity for session affinity
     caller_session_id: str | None = None  # creating Copilot session's id; invalid -> dropped
     sender_repo: str | None = None  # caller's repo (agent-worktrees `get project`

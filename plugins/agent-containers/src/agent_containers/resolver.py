@@ -619,6 +619,10 @@ class ContainerResolver:
         trust posture (``trusted``/``restricted``) that gates any host->venue
         projection. Raises ``KeyError`` when the container is not in the fleet.
         """
+        from .dispatch_target import parse, resolve
+
+        if parse(name) is not None:
+            return await asyncio.to_thread(resolve, name)
         config = load_config()
         info = await asyncio.to_thread(get_container, config, name)
         if info is None:
@@ -786,6 +790,11 @@ class ContainerResolver:
 
     async def ensure_ready(self, name: str) -> None:
         """Ensure the container exists and is running (start if stopped)."""
+        from .dispatch_target import parse, resolve
+
+        if parse(name) is not None:
+            await asyncio.to_thread(resolve, name)
+            return
         config = load_config()
         info = await asyncio.to_thread(get_container, config, name)
         if info is None:

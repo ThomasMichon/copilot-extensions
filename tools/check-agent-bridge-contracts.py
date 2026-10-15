@@ -76,6 +76,7 @@ _DEFERRED_KEYS = {
     "reference_sha256",
 }
 _HTTP_CAPABILITY_CONSTANTS = {
+    "provider_creation": "PROVIDER_CREATION_PROTOCOL_VERSION",
     "qualified_live_peer": "QUALIFIED_LIVE_PEER_PROTOCOL_VERSION",
     "acquisition_retirement_recovery": "ACQUISITION_RETIREMENT_RECOVERY_PROTOCOL_VERSION",
     "acquisition_retirement_revalidation": "ACQUISITION_RETIREMENT_REVALIDATION_PROTOCOL_VERSION",

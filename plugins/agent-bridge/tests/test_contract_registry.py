@@ -55,13 +55,23 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/peer-replies-generation-35.json")
+    fixture = _fixture("fixtures/http/current/provider-creation-generation-36.json")
     body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
         == bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED
     )
+
+def test_provider_creation_fixture_requires_explicit_capability() -> None:
+    fixture = _fixture("fixtures/http/current/provider-creation-generation-36.json")
+    request = StartSessionRequest.model_validate(fixture["request"]["json"])
+    assert request.provider_instance and request.creation_key
+    assert fixture["capability"]["provider_creation"] == bridge_protocol.PROVIDER_CREATION_PROTOCOL_VERSION
+    response = StartSessionResponse.model_validate(fixture["response"])
+    assert response.creation["native_session_id"] and response.creation["venue"]["instance_id"]
+    assert "worktree" not in response.creation
+    assert StartSessionRequest(creation_key="ordinary").provider_instance is False
 
 def test_workspace_creation_fixture_matches_additive_models_and_capability_floors() -> None:
     fixture = _fixture("fixtures/http/current/workspace-creation-generation-34.json")
@@ -109,7 +119,7 @@ def test_native_bound_wire_is_preserved_at_the_new_peer_generation(owner) -> Non
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
 
     previous = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-33.json")
-    current = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-35.json")
+    current = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-36.json")
     assert current["request"] == previous["request"]
     assert current["response"] == previous["response"]
     assert current["capability"] == previous["capability"]
@@ -266,6 +276,7 @@ def test_session_create_request_fixture_proves_unknown_field_tolerance() -> None
     request = StartSessionRequest.model_validate(fixture["request"])
     assert request.model_dump(mode="json") == {
         **fixture["accepted_model"], "creation_key": None, "creation_prompt": None,
+        "provider_instance": False,
     }
     assert "future_option" not in request.model_fields_set
 
