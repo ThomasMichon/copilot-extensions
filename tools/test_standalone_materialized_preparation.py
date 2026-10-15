@@ -4,6 +4,10 @@ Native probes retain real admission and only add dry-run/offline at the physical
 resolver boundary. A timestamped loopback fixture registry supplies synthetic
 external metadata, never real tools or packages. This isolates first-party
 source resolution; it does not prove real installation or consumer behavior.
+
+Required runner contracts retain mapping guards and the materialized Index
+smoke. The existing manual full runner lane also selects the three expanded
+native cases marked runner_exhaustive.
 """
 from __future__ import annotations
 
@@ -119,10 +123,22 @@ def resolver_registry():
         assert not thread.is_alive()
 
 
-@pytest.mark.parametrize("materialized", [False, True], ids=["dev", "materialized"])
-@pytest.mark.parametrize("component,plugin", [
-    ("services/dispatch", "agent-dispatch"),
-    ("services/index", "agent-index"),
+@pytest.mark.parametrize("component,plugin,materialized", [
+    pytest.param(
+        "services/dispatch", "agent-dispatch", False,
+        marks=pytest.mark.runner_exhaustive, id="services/dispatch-agent-dispatch-dev",
+    ),
+    pytest.param(
+        "services/dispatch", "agent-dispatch", True,
+        marks=pytest.mark.runner_exhaustive, id="services/dispatch-agent-dispatch-materialized",
+    ),
+    pytest.param(
+        "services/index", "agent-index", False,
+        marks=pytest.mark.runner_exhaustive, id="services/index-agent-index-dev",
+    ),
+    pytest.param(
+        "services/index", "agent-index", True, id="services/index-agent-index-materialized",
+    ),
 ])
 def test_materialized_preparation_has_one_real_source_per_distribution(
     preparation_root, resolver_registry, monkeypatch, component, plugin, materialized,
