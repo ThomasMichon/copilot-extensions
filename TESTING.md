@@ -9,6 +9,13 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The registered-repository Git-probe guard follows the real `repos._git` to
+`git_ops.git` call chain. It checks headless options at that subprocess owner,
+the existing 60-second bound and UTF-8 capture policy, and removal of inherited
+repository/config selectors while retaining unrelated environment state.
+The companion real-Git identity test and native registered-only first-touch
+CLI test remain process-boundary coverage rather than mocked-runner evidence.
+
 The optional profile-assignment-state failure guard follows both real command
 layers returned by worktree creation: exact record-bound execution admission,
 then the installed setup launcher. It checks the underlying model arguments,

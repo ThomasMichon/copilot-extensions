@@ -1,0 +1,9 @@
+{
+  "comment": "Guard repository Git probes at their shared headless and identity-isolating subprocess owner.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
