@@ -15,6 +15,7 @@ from machine_transport import (
     machine_identity_names,
     normalize_machine_entries,
     parse_machines_yaml,
+    qualify_guest,
 )
 
 from .manifest import ManifestError
@@ -32,15 +33,7 @@ class MachineIdentity:
 
 
 def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        cleaned = value.strip()
-        folded = cleaned.casefold()
-        if cleaned and folded not in seen:
-            seen.add(folded)
-            out.append(cleaned)
-    return tuple(out)
+    return tuple(dict((value.casefold(), value) for value in values if value).values())
 
 
 def _topology_paths(repos: Iterable[Path]) -> list[Path]:
@@ -72,11 +65,14 @@ def resolve_machine(
     An explicitly supplied value remains platform-neutral unless the caller
     supplies execution_platform. Physical association never becomes a WSL gate alias.
     """
-    raw = (value or platform.node()).strip()
+    selected = value if value is not None else platform.node()
+    if not isinstance(selected, str):
+        raise ManifestError("machine identity must be a string")
+    raw = selected.strip()
     if not raw:
         raise ManifestError("machine identity is empty")
     context = execution_platform
-    if not value and context is None:
+    if value is None and context is None:
         context = local_execution_platform()
     entries: dict[str, MachineEntry] = {}
     entry_paths: dict[str, Path] = {}
@@ -119,16 +115,23 @@ def resolve_machine(
 
     try:
         entries = normalize_machine_entries(entries)
-        entry = find_machine_entry(
-            entries, raw, reject_ambiguous=True, execution_platform=context,
-        )
+        name = raw.casefold() if value is None else raw
+        entry = find_machine_entry(entries, name, reject_ambiguous=True, execution_platform=context)
+        if context == "wsl" and (entry is None or not entry.execution_platform):
+            native = entry
+            name = qualify_guest(native.key if native else name)
+            entry = find_machine_entry(entries, name, reject_ambiguous=True)
+            if entry is None and entries:
+                warnings.append(
+                    f"machine topology has no guest entry for {name!r}; using qualified identity"
+                )
     except ValueError as exc:
         raise ManifestError(str(exc)) from exc
     if entry is None:
         return MachineIdentity(
             raw=raw,
-            canonical=raw,
-            accepted=(raw,),
+            canonical=name,
+            accepted=(name,),
             warnings=tuple(warnings),
         )
     accepted = machine_identity_names(entry)

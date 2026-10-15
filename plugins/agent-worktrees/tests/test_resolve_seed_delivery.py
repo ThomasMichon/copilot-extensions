@@ -333,6 +333,45 @@ def test_no_seed_cold_launch_has_execution_admission_fence(
     assert not payload["launch"]["seed_pending"]
 
 
+@pytest.mark.parametrize(("machine", "environment"), [
+    ("Example-Host", "WSL"),
+    ("example-host-wsl", None),
+])
+def test_resume_preserves_historical_host_and_separate_wsl_platform(
+    tmp_path: Path, monkeypatch, capfd, machine: str, environment: str | None,
+) -> None:
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    config = _create_config(tmp_path, machine="example-host-wsl", platform="wsl")
+    work_dir = Path(config.default_repo.worktree_root) / "wt-a"
+    work_dir.mkdir(parents=True)
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+        "machines:\n"
+        "  example-host:\n"
+        "    ssh:\n"
+        "      environments:\n"
+        "        - {name: windows, alias: native-ssh}\n"
+        "        - {name: wsl, alias: guest-ssh}\n",
+        encoding="utf-8",
+    )
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(work_dir), "demo-repo", "example-host",
+        "wsl", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *_args, **_kwargs: pytest.fail("The local WSL record must not dispatch through SSH"),
+    )
+
+    assert resolve_cli.cmd_resolve(_args(machine=machine, environment=environment)) == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["launch"]["action"] == "exec"
+    assert payload["launch"]["work_dir"] == str(work_dir)
+    record = tracking.load_record(tmp_path / "wt-a.yaml")
+    assert (record.machine, record.platform, record.resume_count) == ("example-host", "wsl", 1)
+
+
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell consumer unavailable")
 def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     tmp_path: Path, monkeypatch,

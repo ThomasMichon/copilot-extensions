@@ -104,6 +104,8 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
     ]
     assert len(installs) == 6
     order = [Path(p).name for p in installs]
+    assert "machine-transport" in order
+    assert order.index("remote-login-shell") < order.index("machine-transport")
     assert order.index("plugin-activation") > order.index("dropin-registry")
     assert order.index("plugin-activation") > order.index("plugin-resolve")
     assert order.index("machine-transport") > order.index("remote-login-shell")
@@ -130,5 +132,7 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
     assert len(installs) == 6
+    order = [Path(p).name for p in installs]
+    assert order.index("remote-login-shell") < order.index("machine-transport")
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

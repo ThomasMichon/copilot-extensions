@@ -508,7 +508,7 @@ def test_parent_record_authority_is_rechecked_before_settlement(
         owner_ref=parent_ref, owner_claim_ref=tracking.parse_claim_ref(parent_ref),
     )
     parent = SimpleNamespace(
-        machine="workstation-wsl", worktree_id="wt-parent", owner_ref=None,
+        machine="workstation-wsl", worktree_id="wt-parent", owner_ref=None, repo="project",
     )
     parent_dir = tmp_path / "project"
     (parent_dir / "worktrees").mkdir(parents=True)

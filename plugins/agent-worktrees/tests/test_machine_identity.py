@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import config as cfg
 from agent_worktrees import machine_identity
 
@@ -91,3 +93,29 @@ class TestIsLocalMachine:
         config = self._config(tmp_path, "tmichon-cloud2")
         assert machine_identity.is_local_machine("tmichon-cloud2", config) is True
         assert machine_identity.is_local_machine("some-other-box", config) is False
+
+
+@pytest.mark.parametrize(("actual", "configured", "guest"), [
+    ("wsl", "windows", True),
+    ("windows", "wsl", False),
+    ("linux", "wsl", False),
+])
+def test_locality_uses_execution_platform_not_path_override(
+    tmp_path: Path, monkeypatch, actual: str, configured: str, guest: bool,
+) -> None:
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="example-host", platform=configured,
+        repo_name="proj", repos={"proj": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "wt"),
+        )},
+    )
+    captured = {}
+
+    def check(name, **kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(machine_identity, "_mt_is_local_machine", check)
+    assert machine_identity.is_local_machine("example-host", config)
+    assert captured["guest"] is guest

@@ -69,6 +69,11 @@ PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
+EXTERNAL_TEST_ROOTS = {
+    "worktree-manager": Path("worktree-manager"),
+    "payload-invocation": Path("libs/payload-invocation"),
+}
+EXTERNAL_TEST_DEPENDENCIES = {"payload-invocation": ("pyyaml>=6.0.3",)}
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
 
@@ -142,6 +147,8 @@ from _admission_protocol import acquire as _acquire_admission  # noqa: E402
 
 
 def _plugin_dir(name: str) -> Path:
+    if name in EXTERNAL_TEST_ROOTS:
+        return REPO / EXTERNAL_TEST_ROOTS[name]
     return PLUGINS / name
 
 
@@ -242,7 +249,7 @@ def _dep_fingerprint(name: str) -> str:
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
     h = hashlib.sha256()
-    for dependency in RUNNER_DEPENDENCIES:
+    for dependency in (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())):
         h.update(f"runner:{dependency}\n".encode())
     for p in parts:
         try:
@@ -311,7 +318,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 cmd.append("--reinstall")
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
-            cmd.extend(RUNNER_DEPENDENCIES)
+            cmd.extend((*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())))
             run_uv_install(
                 uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
@@ -321,7 +328,8 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # tests import the scripts directly (importlib). Just ensure a
             # pytest runner is present in the venv.
             run_uv_install(
-                uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES],
+                uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
+                     *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
                 cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")

@@ -1,0 +1,9 @@
+{
+  "comment": "Declare and stage the portable identity dependency for isolated Worktree Manager runtimes.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -69,7 +69,7 @@ def canonicalize_legacy_config(config: Any) -> Any:
 
 
 def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None, str, str | None]:
-    from . import config as cfg, tracking
+    from . import config as cfg, legacy_wsl_record_locality, tracking
 
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None or not parsed.is_qualified:
@@ -77,6 +77,9 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
             None, "",
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
         )
+    legacy = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config)
+    if legacy is not None:
+        return legacy, parsed.worktree_id, None
     try:
         local = require_owner_identity(parsed.machine, config)
     except ExecutionSpaceError as exc:
@@ -95,23 +98,41 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
 
 
 def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, output: Any) -> None:
-    from . import config as cfg, obligations, tracking
+    from . import config as cfg, legacy_wsl_record_locality, obligations, tracking
 
     require_record_mutation(record, config)
     try:
         owner = record.owner_claim_ref
-        if owner is None or not owner.is_qualified or owner.machine != config.machine:
+        if owner is None or not owner.is_qualified:
             return
-        parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
+        if owner.machine == config.machine:
+            parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
+            legacy_parent = False
+        else:
+            parent_path = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
+            legacy_parent = parent_path is not None
+            if parent_path is None:
+                return
         if not parent_path.exists():
             return
         with tracking._RecordLock(parent_path, require_sidecar=True):
             parent = tracking.load_record(parent_path)
-            require_record_mutation(parent, config)
+            if legacy_parent and legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(
+                owner, config,
+            ) != parent_path:
+                return
+            require_record_mutation(parent, project_record_config(parent))
             child_ref = tracking.format_claim_ref(config.machine, config.repo_name, worktree_id)
             settled = tracking.settle_resource_claim(
                 parent, child_ref, obligations.AT_REST, save=False,
             )
+            if settled is None and legacy_parent:
+                legacy_child_ref = tracking.format_claim_ref(
+                    owner.machine, config.repo_name, worktree_id,
+                )
+                settled = tracking.settle_resource_claim(
+                    parent, legacy_child_ref, obligations.AT_REST, save=False,
+                )
             if settled is not None:
                 tracking.save_record(parent, parent_path)
         if settled is not None:
@@ -194,6 +215,28 @@ def require_record_mutation(record: Any, config: Any) -> None:
     from . import tracking
 
     if record is None:
+        return
+    from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
+
+    legacy_ref = tracking.parse_claim_ref(
+        tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+    )
+    legacy_path = resolve_legacy_wsl_owner_ref(legacy_ref, config)
+    if (
+        legacy_path is not None and record.platform == "wsl"
+        and record.worktree_path == tracking.load_record(legacy_path).worktree_path
+    ):
+        if record.owner_ref:
+            owner = tracking.parse_claim_ref(record.owner_ref)
+            if owner is None or not owner.is_qualified:
+                raise ExecutionSpaceError("owned record has an unqualified owner reference")
+            if (
+                resolve_legacy_wsl_owner_ref(owner, config) is None
+                and not require_owner_identity(owner.machine, config)
+            ):
+                raise ExecutionSpaceError(
+                    "cross-space parent ownership remains unsupported; settlement is blocked"
+                )
         return
     if not _requires_scoped_identity(registry_for_config(config), config.machine, record.machine):
         return

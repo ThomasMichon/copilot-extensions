@@ -17,30 +17,7 @@ MAX_RELATED_ENTRIES = 4
 
 
 def render_legacy_machine_context(entry: cfg.MachineEntry, project: str = "") -> str:
-    plat = cfg.detect_platform()
-    deploy_env = next(
-        (env.alias for env in entry.ssh_environments if env.name == plat), "",
-    )
-    lines = [
-        f"Machine: {entry.display_name}",
-        f"Hostname: {socket.gethostname()}",
-        f"Machine name: {cfg.machine_name(entry)}",
-        f"Alias/friendly name: {entry.display_name}",
-        f"Environment: {entry.environment}",
-        f"Platform: {plat}",
-    ]
-    if deploy_env:
-        lines.append(f"Deployment environment: {deploy_env}")
-    if entry.role:
-        lines.append(f"Role: {entry.role}")
-    if entry.description:
-        lines.append(f"Description: {entry.description}")
-    if entry.capabilities:
-        lines.append(f"Capabilities: {', '.join(entry.capabilities)}")
-    if project:
-        lines.append(f"Project: {project}")
-        lines.append(f"Binstub: {project}")
-    return "\n".join(lines) + "\n"
+    return cfg.render_copilot_instructions(entry, project)
 
 
 def publish_machine_context(payload: dict) -> str:

@@ -7,6 +7,7 @@ from dataclasses import replace
 
 from machine_transport import default_shell_for_env_name as _default_shell_for_env_name
 from machine_transport import find_machine_entry
+from machine_transport import split_machine_environment
 from machine_transport import resolve_ssh_target as _resolve_ssh_target
 from machine_transport import wrap_remote_command as _wrap_remote_command
 
@@ -27,6 +28,17 @@ def _emit_plan(*args, **kwargs):
 # Picker env labels (engine: "Win" | "WSL" | "Linux") -> machines.yaml ssh
 # environment names.
 _ENV_LABEL_TO_NAME = {"win": "windows", "wsl": "wsl", "linux": "linux"}
+
+
+def _entry_for_environment(
+    entries: dict[str, cfg.MachineEntry], name: str, environment: str | None = None,
+) -> cfg.MachineEntry | None:
+    target = split_machine_environment(name, environment)
+    if not target.environment:
+        return find_machine_entry(entries, name, reject_ambiguous=True)
+    return find_machine_entry(
+        entries, name, reject_ambiguous=True, execution_platform=target.environment,
+    )
 
 
 def _load_remote_machines(
@@ -165,17 +177,17 @@ def _emit_remote_plan_for_env(
     except (FileNotFoundError, ValueError):
         return None
 
+    requested_environment = bool((env_label or "").strip())
+    want = _ENV_LABEL_TO_NAME.get((env_label or "").lower())
+    if requested_environment and not want:
+        return None
     try:
-        entry = find_machine_entry(entries, machine_display, reject_ambiguous=True)
+        entry = _entry_for_environment(entries, machine_display, env_label)
     except ValueError as exc:
         return output._json_error(str(exc))
     if entry is None or not entry.ssh_environments:
         return None
 
-    requested_environment = bool((env_label or "").strip())
-    want = _ENV_LABEL_TO_NAME.get((env_label or "").lower())
-    if requested_environment and not want:
-        return None
     ssh_alias = ""
     shell = ""
     if want:
@@ -220,12 +232,14 @@ def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
     return _resolve_ssh_target(entry)[0]
 
 
-def _machine_key_for_display(config: cfg.Config, name: str) -> str:
+def _machine_key_for_display(
+    config: cfg.Config, name: str, environment: str | None = None,
+) -> str:
     """Resolve a picker machine label (display name / key / alias / hostname) to its key."""
     repo = config.default_repo
     try:
         entries = cfg.load_machines_yaml(repo.anchor)
     except (FileNotFoundError, ValueError):
         return name
-    entry = find_machine_entry(entries, name, reject_ambiguous=True)
+    entry = _entry_for_environment(entries, name, environment)
     return entry.key if entry is not None else name

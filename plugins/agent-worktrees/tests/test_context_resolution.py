@@ -610,6 +610,8 @@ def test_get_worktree_dir_session_unresolvable_stays_empty(
 def test_get_worktree_state_dir_resolves_anchor_from_session_cwd(
     adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
 ):
+    from agent_worktrees import context_cli
+
     anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
     home = tmp_path / "home-anchor-session"
     home.mkdir()
@@ -624,6 +626,18 @@ def test_get_worktree_state_dir_resolves_anchor_from_session_cwd(
         m.tracking, "find_worktree_id_by_cwd", lambda cwd: None,
     )
     monkeypatch.setattr(m.sessions, "session_cwd", lambda sid: anchor)
+    monkeypatch.setattr(context_cli, "no_window_kwargs", lambda: {"creationflags": 123})
+    real_run = context_cli.subprocess.run
+    probes = []
+
+    def capture_probe(command, *args, **kwargs):
+        if command == ["git", "-C", str(anchor), "rev-parse", "--show-toplevel"]:
+            if kwargs.get("creationflags") == 123:
+                probes.append(kwargs.copy())
+                kwargs.pop("creationflags")
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(context_cli.subprocess, "run", capture_probe)
 
     rc = m.cmd_get(types.SimpleNamespace(
         key="worktree-state-dir", session_id="anchor-session",
@@ -633,6 +647,24 @@ def test_get_worktree_state_dir_resolves_anchor_from_session_cwd(
     assert rc == 0
     assert Path(out) == project_dir / "worktrees" / "@anchor"
     assert Path(out).is_dir()
+    assert probes
+    assert probes[-1]["creationflags"] == 123
+
+
+def test_related_anchor_suppresses_git_probe_console(monkeypatch, tmp_path):
+    from agent_worktrees import related_cli
+
+    calls = []
+    monkeypatch.setattr(related_cli, "no_window_kwargs", lambda: {"creationflags": 123})
+
+    def capture_probe(command, **kwargs):
+        calls.append((command, kwargs))
+        return types.SimpleNamespace(returncode=0, stdout=f"{tmp_path}\n")
+
+    monkeypatch.setattr(related_cli.subprocess, "run", capture_probe)
+    assert related_cli._related_anchor([]) == str(tmp_path)
+    assert calls[0][0] == ["git", "rev-parse", "--show-toplevel"]
+    assert calls[0][1]["creationflags"] == 123
 
 
 def test_get_worktree_state_dir_falls_back_to_the_callers_project(

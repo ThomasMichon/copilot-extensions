@@ -51,7 +51,13 @@ class TestDetectPlatform:
             return real_open(f, *args, **kwargs)
 
         monkeypatch.setattr("builtins.open", fake_open)
-        monkeypatch.setattr(cfg.sys, "platform", "linux")
+        monkeypatch.setattr("platform.system", lambda: "Linux")
+        real_is_file = Path.is_file
+        monkeypatch.setattr(
+            Path, "is_file",
+            lambda path: False if str(path) in ("/.dockerenv", "/run/.containerenv")
+            else real_is_file(path),
+        )
         assert cfg.detect_platform() == "wsl"
 
 
@@ -2071,6 +2077,10 @@ class TestFindMachineEntry:
 # ---------------------------------------------------------------------------
 
 class TestDetectMachine:
+    @pytest.fixture(autouse=True)
+    def _native_platform(self, monkeypatch):
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+
     def _write(self, tmp_path: Path, body: str) -> Path:
         (tmp_path / "machines.yaml").write_text(body, encoding="utf-8")
         return tmp_path

@@ -221,6 +221,13 @@ it retains the usual containment and time budgets and fails if no selected
 tests run. Combine it with `-k` to preserve a diagnostic lane's exact test
 roster without collecting the full plugin suite.
 
+Explicit out-of-plugin targets use the same bounded runner and admission lease:
+`worktree-manager` selects that product's tests, and `payload-invocation` selects
+`libs/payload-invocation/tests`. `--all` remains scoped to plugin suites.
+The payload suite's PowerShell contracts require a real `pwsh`; when it is absent
+from the isolation container, run that target through the host's contained runner
+rather than counting skipped PowerShell contracts as validation.
+
 > **A cached venv is not editable.** A vendored path dependency (e.g.
 > `agent-ssh-manager` under `plugins/<p>/libs/<lib>/`) installs into
 > `.test-venvs/<platform>/<p>` as a normal copy, not an editable link —

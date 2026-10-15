@@ -14,14 +14,47 @@ This is a thin, agent-worktrees-flavored wrapper over the shared
 ``machine_transport.is_local_machine`` (vendored, not duplicated -- see its
 own module docstring for the full canonicalization algorithm): it supplies
 this plugin's own ``Config``/``load_machines_yaml`` shapes so every existing
-call site keeps its original ``(name, config)`` signature.
+call site keeps its original ``(name, config)`` signature, and passes
+``guest=True`` on a WSL guest so a guest execution identity can never
+silently resolve local against its own native-host registry entry.
 """
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Callable
+
+from machine_transport import MachineEntry, machine_entries_to_topology, machine_name, resolve_identity
 from machine_transport import is_local_machine as _mt_is_local_machine
 
 from . import config as cfg
+
+
+def resolve_execution_machine(
+    name: str, *, guest: bool, configured: bool,
+    load_entries: Callable[[], dict[str, MachineEntry]] | None,
+) -> str:
+    """Resolve local identity without inferring registered-space authority."""
+    if configured and not guest:
+        return resolve_identity(name).canonical
+    entries: dict[str, MachineEntry] = {}
+    if load_entries is not None:
+        try:
+            entries = load_entries()
+        except FileNotFoundError:
+            pass
+    if any(entry.execution_platform for entry in entries.values()):
+        if configured:
+            return resolve_identity(name).canonical
+        from .execution_spaces import detect_legacy_machine
+
+        return detect_legacy_machine(entries, name)
+    resolved = resolve_identity(name, machine_entries_to_topology(entries), guest=guest)
+    for warning in resolved.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    if not guest and resolved.topology_key is not None:
+        return machine_name(entries[resolved.topology_key])
+    return resolved.canonical
 
 
 def is_local_machine(name: str, config: cfg.Config) -> bool:
@@ -40,4 +73,5 @@ def is_local_machine(name: str, config: cfg.Config) -> bool:
         name,
         config_machine=config.machine,
         load_entries=lambda: cfg.load_machines_yaml(config.default_repo.anchor),
+        guest=cfg.detect_platform() == "wsl",
     )

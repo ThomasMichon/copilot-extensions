@@ -32,6 +32,20 @@ resolved -- network call to reach a host that is actually the caller itself.
   local machine?" check, checking a direct `config_machine` match BEFORE
   ever loading the registry (so a registry outage doesn't mask a known local
   alias), with every comparison gated on a non-empty value.
+- **`machine_environment`** -- `split_machine_environment()`: converts
+  `<host>-wsl` and `<host>` plus `WSL` into the same physical-host/environment
+  pair. It normalizes environment labels and rejects conflicting requests.
+  This is a compatibility/presentation adapter, not ownership or filesystem
+  authority: Windows and WSL still have distinct logical execution keys.
+- **`execution_identity`** -- `resolve_identity()` /
+  `resolve_machine_identity()`: ambiguity-checked execution-key resolution
+  that qualifies WSL guests as `<host>-wsl`, treats `display_name` as
+  metadata rather than identity authority, and warns when a guest falls back
+  to a qualified explicit identity because topology has no dedicated guest
+  entry. Its platform detector also treats container roots identified by
+  Docker/Podman markers or `/proc/1/cgroup` as plain `linux` even when the
+  shared kernel string mentions Microsoft/WSL, so containerized work on a
+  WSL host never acquires a spurious guest identity.
 - **`transport`** -- `resolve_ssh_target()` (pick the best SSH alias/shell
   for an entry), `wrap_remote_command()` (POSIX login-shell wrapping via
   `remote_login_shell`, non-POSIX shells passed through untouched), and

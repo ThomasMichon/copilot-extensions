@@ -52,6 +52,74 @@ def _mark_external_state(repo):
     config.write_text("stateless: true\n", encoding="utf-8")
 
 
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("hostname", ["example-host", "example-host-wsl"])
+def test_current_machine_is_execution_identity(monkeypatch, environment, hostname):
+    from agent_machines import identity
+
+    monkeypatch.setattr(discover.platform, "node", lambda: hostname)
+    monkeypatch.setattr(identity, "detect_platform", lambda: environment)
+    monkeypatch.setattr(discover, "candidate_repos", lambda *_args, **_kwargs: [])
+    expected = "example-host-wsl" if environment == "wsl" else hostname
+    assert discover.current_machine() == expected
+
+
+@pytest.fixture
+def execution_packages(tmp_path, monkeypatch):
+    from agent_machines import identity
+
+    repo = tmp_path / "acme"
+    write_package(repo, "shared.yaml", base_package(name="acme/shared", gate=["*"]))
+    write_package(
+        repo, "host.yaml", base_package(name="acme/host", gate=["example-host"]),
+        machine="example-host",
+    )
+    write_package(
+        repo, "guest.yaml", base_package(name="acme/guest", gate=["guest-label"]),
+        machine="example-host-wsl",
+    )
+    (repo / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "example-host": {"hostname": "generated-host"},
+        "example-host-wsl": {"hostname": "generated-host", "alias": "guest-label"},
+    }}), encoding="utf-8")
+    registry = _registry(tmp_path, acme={"class": "worktree"})
+    projects = _projects("acme")
+    monkeypatch.setattr(discover, "read_registry", lambda *_args: registry)
+    monkeypatch.setattr(discover, "read_projects", lambda *_args: projects)
+    monkeypatch.setattr(discover.platform, "node", lambda: "generated-host")
+    monkeypatch.setattr(identity, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(discover, "current_platform", lambda: "wsl")
+    return repo, registry, projects
+
+
+@pytest.mark.parametrize("hostname", ["generated-host", "example-host"])
+def test_default_discovery_uses_guest_topology_and_gates(execution_packages, monkeypatch, hostname):
+    _repo, registry, projects = execution_packages
+    monkeypatch.setattr(discover.platform, "node", lambda: hostname)
+    found = discover.discover(registry=registry, projects=projects)
+    assert [package.name for item in found for package in item.packages] == (
+        ["acme/shared", "acme/guest"]
+    )
+    assert discover.current_machine() == "example-host-wsl"
+
+
+def test_explicit_discovery_target_is_not_guest_qualified(execution_packages):
+    _repo, registry, projects = execution_packages
+    found = discover.discover(machine="example-host", registry=registry, projects=projects)
+    assert [package.name for item in found for package in item.packages] == (
+        ["acme/shared", "acme/host"]
+    )
+
+
+def test_direct_discovery_output_reports_execution_not_hardware(execution_packages, capsys):
+    assert discover._main() == 0
+    output = capsys.readouterr().out
+    assert "machine: example-host-wsl" in output
+    assert "raw: generated-host" in output
+    assert "package acme/guest" in output
+    assert "package acme/host" not in output
+
+
 def test_discover_finds_gated_packages(tmp_path, monkeypatch):
     srcroot = tmp_path / "Src"
     repo = srcroot / "acme"

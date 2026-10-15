@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rich.text import Text
 from textual.app import ComposeResult
+from machine_transport import split_machine_environment
 
 from .deferred_row import DeferredRow
 from .engine_helpers import C_BAND, C_BTN_SEL, C_DIM, C_DISABLED, C_ENV, C_FAINT, C_HINT, C_HINT_ON, C_LABEL, C_LOAD, C_META, C_PULSE, C_READY, C_SECTION, C_SPIN, C_TAB_ACTIVE, C_TAB_FOCUS_ON, C_TABOFF, C_WARN, VERSION, VRow, _size_mb
@@ -325,7 +326,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
         all_disabled = all(self.machine_state(i) == "disabled" for i in group)
         name_base = (C_DISABLED if all_disabled
                      else "bold white" if group_sel else C_TABOFF)
-        t.append(tab0.get("machine_label") or m0,
+        t.append(tab0.get("machine_label") or split_machine_environment(m0).machine,
                  style=self._hl(name_base, group_sel, focused))
         for n, i in enumerate(group):
             e = self.machines[i][2]

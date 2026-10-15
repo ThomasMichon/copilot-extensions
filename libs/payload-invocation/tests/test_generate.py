@@ -480,14 +480,14 @@ def _copied_agent_machines_payload(tmp_path: Path) -> Path:
             "*.egg-info",
         ),
     )
+    _stage_payload_dependencies(payload)
     return payload
 
 
 def _agent_library_src(payload: Path, name: str) -> Path:
     local = payload / "libs" / name / "src"
-    if local.is_dir():
-        return local
-    return REPO / "libs" / name / "src"
+    assert local.is_dir(), f"the copied payload must contain its own {name} dependency"
+    return local
 
 
 def _agent_machines_import_sources(payload: Path) -> list[str]:
@@ -495,6 +495,24 @@ def _agent_machines_import_sources(payload: Path) -> list[str]:
         str(_agent_library_src(payload, name))
         for name in ("plugin-resolve", "agent-procutil", "machine-transport", "remote-login-shell")
     ]
+def _stage_payload_dependencies(payload: Path) -> None:
+    helper = (
+        REPO / "worktree-manager" / "src" / "worktree_manager"
+        / "_trusted_pointer_materializer.py"
+    )
+    spec = importlib.util.spec_from_file_location("payload_dependency_materializer", helper)
+    assert spec and spec.loader
+    materializer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(materializer)
+    result = materializer.materialize_uv_editable_ref_into(
+        source_consumer_dir=REPO / "plugins" / "agent-machines",
+        dest_consumer_dir=payload,
+        canonical_root=REPO,
+        dest_root=payload,
+    )
+    assert not any(line.startswith("SKIP ") for line in result), result
+    assert (payload / "libs" / "machine-transport" / "src" / "machine_transport").is_dir()
+    assert (payload / "libs" / "remote-login-shell" / "src" / "remote_login_shell").is_dir()
 
 
 def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
@@ -511,6 +529,7 @@ def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
             "*.egg-info",
         ),
     )
+    _stage_payload_dependencies(payload)
     write_json = {
         "name": "example",
         "owner": {"name": "Example"},

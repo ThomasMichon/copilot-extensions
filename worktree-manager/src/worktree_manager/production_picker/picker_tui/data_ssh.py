@@ -35,7 +35,7 @@ import subprocess
 import threading
 
 from agent_procutil import no_window_flags
-from machine_transport import local_execution_platform
+from machine_transport import local_execution_platform, split_machine_environment
 
 from .. import project_config as cfg
 from . import data_local, derive, provider_sources, roster, source_identity
@@ -88,7 +88,9 @@ class Source:
                  venue=None, capabilities=None, resolve_argv=None,
                  connect_argv=None, display_machine=None):
         self.machine = machine        # canonical logical key from machines.yaml
-        self.display_machine = display_machine or machine
+        self.display_machine = display_machine or (
+            split_machine_environment(machine).machine if machine else machine
+        )
         self.env = env                # Win | WSL | Linux
         self.argv = argv              # subprocess argv (None for the local src)
         self.local = local
@@ -801,6 +803,8 @@ def source_tabs(sources=None):
                 else source.source_label
             ),
             "machine": source.machine,
+            "physical_machine": source.display_machine,
+            "machine_label": source.display_machine,
             "env": source.env,
             "ready": source.ready,
             "local": source.local,

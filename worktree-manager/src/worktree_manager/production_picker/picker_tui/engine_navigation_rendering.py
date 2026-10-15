@@ -1,6 +1,7 @@
 """Navigation-band rendering for operational machines and Config sections."""
 
 from rich.text import Text
+from machine_transport import split_machine_environment
 
 from .engine_helpers import C_DIM, C_HINT
 
@@ -16,7 +17,7 @@ class PickerNavigationRenderingMixin:
         for i, (label, m, e, ok) in enumerate(self.machines):
             tab = self.source_tabs[i] if self.source_tabs else {}
             group_key = (
-                m
+                (tab.get("physical_machine") or split_machine_environment(m).machine).casefold()
                 if tab.get("source_kind") in (None, "machine-ssh")
                 else tab.get("source_id")
             )

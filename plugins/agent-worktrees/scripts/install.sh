@@ -1793,10 +1793,13 @@ deploy_package() {
     fi
 
     # Vendored machine-transport lib (agent-machine-transport / module
-    # machine_transport). Same materialized-release guard as
-    # remote-login-shell above -- installed after it since machine-transport
-    # itself depends on remote-login-shell.
+    # machine_transport); local release payload or canonical dev source.
+    # Installed after remote-login-shell since machine-transport itself
+    # depends on remote-login-shell.
     local machine_transport_dir="$PLUGIN_DIR/libs/machine-transport"
+    if [[ ! -f "$machine_transport_dir/pyproject.toml" ]]; then
+        machine_transport_dir="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/machine-transport"
+    fi
     if [[ -f "$machine_transport_dir/pyproject.toml" ]]; then
         if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-machine-transport \
                 "$machine_transport_dir" --quiet; then

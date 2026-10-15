@@ -28,7 +28,7 @@ from agent_procutil import no_window_flags
 
 from . import claimant as _claimant
 from . import config as cfg
-from . import git_ops, obligations, tracking, tracking_claims
+from . import git_ops, legacy_wsl_record_locality, obligations, tracking, tracking_claims
 
 log = logging.getLogger(__name__)
 
@@ -85,8 +85,11 @@ def load_claim_child_record(
     if parsed is None:
         return (None, False)
     if parsed.machine and parsed.machine != config.machine:
-        return (None, False)  # cross-machine -> not judgeable here
-    if parsed.machine and parsed.project:
+        legacy_path = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config)
+        if legacy_path is None:
+            return (None, False)  # cross-machine -> not judgeable here
+        path = legacy_path
+    elif parsed.machine and parsed.project:
         path = (cfg.project_dir(parsed.project) / "worktrees"
                 / f"{parsed.worktree_id}.yaml")
     else:  # bare/same-repo ref

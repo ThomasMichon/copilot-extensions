@@ -19,6 +19,7 @@ from __future__ import annotations
 from machine_transport import (
     find_machine_entry,
     local_execution_platform,
+    split_machine_environment,
 )
 
 from .. import project_config as cfg
@@ -29,6 +30,11 @@ _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
 _HOST_ENVS = {"windows", "wsl", "linux"}
 # Compact host-column env suffix.
 _HOST_SHORT = {"Win": "Win", "WSL": "WSL", "Linux": "Lx"}
+
+
+def display_machine(entry: cfg.MachineEntry) -> str:
+    """Group execution siblings without changing their routing keys."""
+    return entry.physical_host or split_machine_environment(entry.key).machine
 
 
 def _entries():
@@ -54,11 +60,6 @@ def _copilot_envs():
         if m.execution_platform and not m.ssh_environments:
             name = m.execution_platform
             yield m, name, _ENV_LABEL.get(name, name.title())
-
-
-def display_machine(entry):
-    """Physical association is cosmetic; all matrix keys stay logical."""
-    return entry.physical_host or entry.key
 
 
 def apply_display_machine(sources, entry):

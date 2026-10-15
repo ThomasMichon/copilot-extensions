@@ -9,6 +9,8 @@ import platform
 import sys
 import threading
 
+from machine_transport import split_machine_environment
+
 from . import activity, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
 from . import codename_tracking, config as cfg, machine_identity
 from .launch_trace import append_launch_event
@@ -25,14 +27,23 @@ def _core():
     return core
 
 
-def _target_is_local(config: cfg.Config, name: str | None) -> bool:
+def _target_is_local(
+    config: cfg.Config, name: str | None, environment: str | None = None,
+) -> bool:
     if not name:
         return False
-    if config.machine and name.casefold() == config.machine.casefold():
+    target = split_machine_environment(name, environment)
+    if target.environment and config.machine:
+        current = split_machine_environment(config.machine, cfg.detect_platform())
+        if target.machine.casefold() == current.machine.casefold():
+            return target.environment == current.environment
+    if not target.environment and config.machine and name.casefold() == config.machine.casefold():
         return True
     from .resolve_machine_cli import _machine_key_for_display
 
-    return machine_identity.is_local_machine(_machine_key_for_display(config, name), config)
+    return machine_identity.is_local_machine(
+        _machine_key_for_display(config, name, environment), config,
+    )
 
 
 def _apply_assignment_env(*args, **kwargs):
@@ -484,7 +495,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         if state.requested_machine:
             config = state.load_config()
             try:
-                target_is_local = _target_is_local(config, state.requested_machine)
+                target_is_local = _target_is_local(
+                    config, state.requested_machine, getattr(args, "environment", None),
+                )
             except ValueError as exc:
                 output.err(str(exc))
                 return 1
@@ -582,7 +595,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # WSL worktree) fail closed with a bogus "Worktree not found" instead of
     # SSHing into the requested environment -- confirmed live.
     try:
-        same_machine = _target_is_local(config, state.requested_machine)
+        same_machine = _target_is_local(
+            config, state.requested_machine, getattr(state.args, "environment", None),
+        )
     except ValueError as exc:
         return output._json_error(str(exc))
     requested_environment = getattr(state.args, "environment", None) or ""
