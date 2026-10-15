@@ -177,6 +177,28 @@ def test_captured_output_reaches_the_log_after_a_deadline_kill(tmp_path, stub):
     assert "stub installer running" in lines
 
 
+@pytest.mark.parametrize("deadline", [False, True])
+def test_live_output_fd_retains_deadline_and_receipt_judgment(tmp_path, stub, deadline):
+    with (tmp_path / "output").open("wb") as stream:
+        run = installer_run.run_installer(
+            stub(sleep=60 if deadline else 0),
+            cwd=tmp_path, env=os.environ, deadline_s=2 if deadline else 10,
+            target_version="2.0.0", receipt=lambda: "1.0.0",
+            output_fd=stream.fileno(),
+        )
+    assert b"stub installer running" in (tmp_path / "output").read_bytes()
+    assert run.status.startswith("timed out" if deadline else "runtime not at target")
+    assert run.rc is None if deadline else run.rc == 0
+    assert not run.receipt_complete and run.receipt_version == "1.0.0"
+
+
+def test_live_output_fd_cannot_silently_discard_log(tmp_path):
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        installer_run.run_installer(
+            [], cwd=tmp_path, env={}, deadline_s=1, log=lambda line: None, output_fd=1,
+        )
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 def test_posix_group_killed(tmp_path, stub):
     run = installer_run.run_installer(

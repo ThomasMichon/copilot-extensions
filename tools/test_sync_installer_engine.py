@@ -68,7 +68,8 @@ def test_materialized_human_declaration_binds_rewritten_entrypoint(tmp_path):
         )
 
 
-def test_whole_payload_human_contract(tmp_path, monkeypatch):
+@pytest.mark.parametrize("in_place", [False, True])
+def test_whole_payload_human_contract(tmp_path, monkeypatch, in_place):
     import materialize_main
 
     contract = sync_installer_engine.ier
@@ -115,7 +116,11 @@ def test_whole_payload_human_contract(tmp_path, monkeypatch):
         return result
 
     monkeypatch.setattr(materialize_main, "materialize_launch_wrapper_assets", later_owner)
-    report = materialize_main.build(destination, source_root=source_root)
+    if in_place:
+        shutil.copytree(source_root, destination)
+        report = materialize_main.materialize(destination, canonical_root=destination)
+    else:
+        report = materialize_main.build(destination, source_root=source_root)
     assert not [line for line in report if line.startswith("SKIP")], report
     supports = _human_admission()
     assert len(names) == 9
@@ -125,6 +130,33 @@ def test_whole_payload_human_contract(tmp_path, monkeypatch):
         assert (script.parent / contract.HUMAN_HELPER).read_bytes() == (
             REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
         ).read_bytes()
+
+
+@pytest.mark.parametrize("asset", [
+    "install.ps1", "install.human-output.json", "installer-human-output.ps1",
+])
+def test_same_root_invalid_human_source_fails_before_any_rewrite(tmp_path, monkeypatch, asset):
+    import materialize_main
+
+    root = tmp_path / "source"
+    source = REPO / "plugins" / "agent-bridge" / "scripts"
+    scripts = root / "plugins" / "agent-bridge" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("install.ps1", "install.human-output.json", "installer-human-output.ps1"):
+        shutil.copyfile(source / name, scripts / name)
+    canonical = root / "libs" / "installer-engine"
+    canonical.mkdir(parents=True)
+    shutil.copyfile(source / "installer-human-output.ps1", canonical / "installer-human-output.ps1")
+    with (scripts / asset).open("a", encoding="ascii") as stream:
+        stream.write("\n# invalid original source\n")
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    monkeypatch.setattr(
+        materialize_main, "materialize_file_pointers",
+        lambda *args, **kwargs: pytest.fail("rewrites must not precede source validation"),
+    )
+    with pytest.raises(ValueError, match="conflicting native human-output assets"):
+        materialize_main.materialize(root, canonical_root=root)
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
 
 
 @pytest.fixture

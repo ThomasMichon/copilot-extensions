@@ -48,11 +48,16 @@ class InstallerRun:
     duration_s: float
 
 
-def _spawn(argv: Sequence[str], cwd: Path | None, env: Mapping[str, str], capture: bool):
+def _spawn(
+    argv: Sequence[str], cwd: Path | None, env: Mapping[str, str], capture: bool,
+    output_fd: int | None = None,
+):
     # Captured output is merged into one text stream; otherwise stdio stays
     # inherited (the installer reports to the updater's console).
     stdio = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True,
              "encoding": "utf-8", "errors": "replace"} if capture else {}
+    if output_fd is not None:
+        stdio = {"stdout": output_fd, "stderr": output_fd}
     if os.name == "nt":
         # Without a Job the deadline could not own the tree, so refuse to run.
         return spawn_sync_in_kill_on_close_job(
@@ -234,6 +239,7 @@ def run_installer(
     target_version: str | None = None,
     receipt: Callable[[], str | None] | None = None,
     log: Callable[[str], None] | None = None,
+    output_fd: int | None = None,
 ) -> InstallerRun:
     """Run ``argv`` until it exits or ``deadline_s`` passes; never raises for a
     spawn failure (it becomes the status).
@@ -242,11 +248,18 @@ def run_installer(
     none); with ``target_version`` it decides success. Without a target the
     exit code alone decides, as before. With ``log``, stdout and stderr are
     captured and passed to it line by line once the run ends (also after a
-    deadline kill); otherwise they stay inherited.
+    deadline kill); otherwise they stay inherited. ``output_fd`` streams both
+    channels to an owning human-output adapter without bypassing containment
+    or receipt judgment. It cannot be combined with ``log``.
     """
     started = time.monotonic()
+    if log is not None and output_fd is not None:
+        raise ValueError("installer output_fd and log are mutually exclusive")
     try:
-        proc, job = _spawn(argv, cwd, env, log is not None)
+        if output_fd is None:
+            proc, job = _spawn(argv, cwd, env, log is not None)
+        else:
+            proc, job = _spawn(argv, cwd, env, False, output_fd=output_fd)
     except (OSError, RuntimeError) as exc:
         return InstallerRun(str(exc)[:120], None, None, False, time.monotonic() - started)
     expired, out = False, ""

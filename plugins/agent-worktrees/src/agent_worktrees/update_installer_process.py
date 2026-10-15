@@ -11,7 +11,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_flags
 
-from . import output
+from . import installer_run, output
 from .installer_capabilities import (
     HUMAN_UTF8_ENV,
     powershell_file_target,
@@ -59,8 +59,16 @@ def installer_deadline_status(error: Exception) -> str:
     return f"invalid installer deadline: {error}"
 
 
-def _run_human_installer(argv, *, label: str, **kwargs):
+def _run_human_installer(argv, *, label: str, receipt_owned: bool = False, **kwargs):
     """Adapt only known-human installer streams, never a parsed JSON command."""
+    run = installer_run.run_installer if receipt_owned else subprocess.run
+
+    def complete(human, result):
+        if human is not None:
+            status = result.status if receipt_owned else f"exit {result.returncode}"
+            succeeded = status == "OK" if receipt_owned else result.returncode == 0
+            human.complete("done" if succeeded else "failed", status)
+
     with output.human_operation(
         label, enabled=output.current_operation() is not None,
     ) as human:
@@ -85,19 +93,19 @@ def _run_human_installer(argv, *, label: str, **kwargs):
                     "native UTF-8 output contract unavailable; retaining inherited installer streams",
                     state="warning",
                 )
-                result = subprocess.run(argv, **kwargs)
-                human.complete("done" if result.returncode == 0 else "failed",
-                               f"exit {result.returncode}")
+                result = run(argv, **kwargs)
+                complete(human, result)
                 return result
             if captured_powershell:
                 environment[HUMAN_UTF8_ENV] = "1"
         with output.native_output() as fd:
             if fd is not None:
-                kwargs.update(stdout=fd, stderr=fd)
-                if os.name == "nt":
+                if receipt_owned:
+                    kwargs["output_fd"] = fd
+                else:
+                    kwargs.update(stdout=fd, stderr=fd)
+                if os.name == "nt" and not receipt_owned:
                     kwargs.setdefault("creationflags", no_window_flags())
-            result = subprocess.run(argv, **kwargs)
-        if human is not None:
-            human.complete("done" if result.returncode == 0 else "failed",
-                           f"exit {result.returncode}")
+            result = run(argv, **kwargs)
+        complete(human, result)
         return result

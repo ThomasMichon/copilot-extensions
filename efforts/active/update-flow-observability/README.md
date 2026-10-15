@@ -213,6 +213,35 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-15 - Preserve in-place promotion and receipt-owned execution
+
+- Current-head #6869 review reproduced a same-root promotion failure:
+  rewriting an installer invalidated the original declaration before its
+  validation. Materialization now validates all original contracts before
+  any owner mutates the tree, then regenerates digests after all owners
+  finish. Separate-tree and same-root whole-payload tests cover all nine
+  producers; invalid original script, declaration and helper inputs fail
+  before any rewrite.
+- Reconciled the newer process-tree/receipt installer owner rather than
+  restoring exit-code-only execution. Its live output descriptor retains
+  the existing kill-on-close job/session, deadline and receipt judgment.
+  Native PowerShell `-File` arguments, policy refusal and exit behavior
+  are exercised with both raw and receipt-owned execution.
+- Windows focused validation: 282 passed, six platform skips across the
+  six Agent Worktrees files; 110 materializer/generator tests; 46 Manager
+  update tests; 93 headless-guard tests. Install contract, actual headless
+  adopter scan and PR-scoped module-size guard pass without changing caps.
+  The exact committed native Linux candidate passed 264 Agent Worktrees
+  tests (24 platform skips), 46 Manager tests, 93 headless-guard tests and
+  110 materializer/generator tests. Both OS runs retain the original
+  item/suite limits; real native tests opt out of the subprocess stand-in,
+  while fake installer tests forward the same output-descriptor argument.
+  Current-head review and CI remain merge gates.
+- The separately owned Bridge serving-state slice is held draft #6877.
+  Its merge remains dependent on #6869's actual merge, synchronization,
+  declaration regeneration and its own resulting-head review and CI.
+  This transfers no production rollout or recovery responsibility.
+
 ### 2026-10-15 - Fix the review's privacy and completion fault class
 
 - Current-head review of #6869 identified multiline credential exposure

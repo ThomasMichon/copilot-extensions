@@ -578,19 +578,21 @@ class _SubprocessRunInstaller:
     process-tree behavior opt out with ``@pytest.mark.real_installer_processes``.
     """
 
-    def __init__(self, argv, cwd, env, capture):
-        self._call = (list(argv), cwd, env, capture)
+    def __init__(self, argv, cwd, env, capture, output_fd=None):
+        self._call = (list(argv), cwd, env, capture, output_fd)
         self.returncode = None
         self.pid = 0
 
     def communicate(self, timeout=None):
         import subprocess
 
-        argv, cwd, env, capture = self._call
+        argv, cwd, env, capture, output_fd = self._call
         stdio = (
             {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
             if capture else {}
         )
+        if output_fd is not None:
+            stdio = {"stdout": output_fd, "stderr": output_fd}
         result = subprocess.run(argv, cwd=cwd, timeout=timeout, env=env, **stdio)
         self.returncode = result.returncode
         return (getattr(result, "stdout", None) if capture else None), None
@@ -604,7 +606,9 @@ def _installer_processes_through_subprocess_run(request, monkeypatch):
 
     monkeypatch.setattr(
         installer_run, "_spawn",
-        lambda argv, cwd, env, capture: (_SubprocessRunInstaller(argv, cwd, env, capture), None),
+        lambda argv, cwd, env, capture, output_fd=None: (
+            _SubprocessRunInstaller(argv, cwd, env, capture, output_fd), None,
+        ),
     )
     monkeypatch.setattr(installer_run, "_kill_tree", lambda proc, job: "")
     if request.node.get_closest_marker("installer_receipts"):

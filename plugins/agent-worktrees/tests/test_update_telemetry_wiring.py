@@ -79,6 +79,7 @@ def test_installer_process_extraction_preserves_runtime_seams():
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh", "bash"])
+@pytest.mark.real_installer_processes
 def test_human_installer_frames_native_streams_once_and_retains_failure(
     shell, tmp_path, capsys, declare_human_producer,
 ):
@@ -146,14 +147,16 @@ def test_human_installer_frames_native_streams_once_and_retains_failure(
         [ord(character) for character in captured.err if ord(character) > 127],
     )
     assert "diagnostic [elapsed " in captured.err
-    assert "failed exit 23 [duration " in captured.err
+    assert "failed installer exited 23 [duration " in captured.err
     assert "done exit 0" not in captured.err
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
 @pytest.mark.parametrize("ending", ["explicit", "native-failure", "throw", "policy-refused"])
+@pytest.mark.parametrize("receipt_owned", [False, True])
+@pytest.mark.real_installer_processes
 def test_human_producer_preserves_file_invocation(
-    shell, ending, tmp_path, capsys, declare_human_producer,
+    shell, ending, receipt_owned, tmp_path, capsys, declare_human_producer,
 ):
     from agent_worktrees.installer_capabilities import HUMAN_UTF8_ENV
     from update_telemetry.human import HumanOperation
@@ -199,17 +202,23 @@ def test_human_producer_preserves_file_invocation(
     if receipt.is_file():
         receipt.unlink()
     with HumanOperation("update") as flow:
-        candidate = runtime._run_human_installer(
-            argv, label="producer", env=environment, timeout=10,
+        options = (
+            {"receipt_owned": True, "deadline_s": 10, "cwd": tmp_path,
+             "target_version": "2.0.0", "receipt": lambda: "1.0.0"}
+            if receipt_owned else {"timeout": 10}
         )
-        flow.complete("done" if candidate.returncode == 0 else "failed")
+        candidate = runtime._run_human_installer(
+            argv, label="producer", env=environment, **options,
+        )
+        code = candidate.rc if receipt_owned else candidate.returncode
+        flow.complete("done" if code == 0 and not receipt_owned else "failed")
     if ending == "policy-refused":
-        assert candidate.returncode == baseline.returncode != 0
+        assert code == baseline.returncode != 0
         assert original is None and not receipt.exists()
         assert HUMAN_UTF8_ENV not in environment
         assert capsys.readouterr().out == ""
         return
-    assert candidate.returncode == baseline.returncode == {
+    assert code == baseline.returncode == {
         "explicit": 23, "native-failure": 0, "throw": 1,
     }[ending]
     assert json.loads(receipt.read_text(encoding="utf-8-sig")) == original
@@ -218,7 +227,11 @@ def test_human_producer_preserves_file_invocation(
         "remaining": 0, "policy": "Bypass",
     }
     assert HUMAN_UTF8_ENV not in environment
-    assert capsys.readouterr().out == ""
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    if receipt_owned:
+        assert candidate.status != "OK" and not candidate.receipt_complete
+        assert "done exit 0" not in captured.err
 
 
 @pytest.mark.parametrize("declaration", ["absent", "stale"])
