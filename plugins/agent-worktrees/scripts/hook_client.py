@@ -217,34 +217,8 @@ def _session_launch_key(payload: dict) -> str:
     return _RUNTIME.session_launch_key(payload)
 
 
-def _additional_context(raw: str) -> str:
-    try:
-        value = json.loads(raw)
-    except (TypeError, ValueError):
-        return ""
-    context = value.get("additionalContext") if isinstance(value, dict) else None
-    return context.strip() if isinstance(context, str) else ""
-
-
 def _read_bounded_text(path: Path, limit: int = _MAX_RESPONSE) -> str | None:
-    try:
-        metadata = path.lstat()
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size > limit
-            or _is_link_or_reparse(path)
-        ):
-            return None
-        with path.open("rb") as handle:
-            raw = handle.read(limit + 1)
-    except OSError:
-        return None
-    if len(raw) > limit:
-        return None
-    try:
-        return raw.decode("utf-8-sig")
-    except UnicodeError:
-        return None
+    return _RUNTIME.read_bounded_text(path, limit=limit)
 
 
 def _snapshot_context(
@@ -266,7 +240,7 @@ def _snapshot_context(
             and state.get("launchKey") == launch_key
             and isinstance(state.get("output"), str)
         ):
-            return _additional_context(state["output"])
+            return _RUNTIME.additional_context(state["output"])
     except (OSError, UnicodeError, ValueError, TypeError):
         pass
 
@@ -276,7 +250,7 @@ def _snapshot_context(
         return ""
     stored_key, separator, output = raw.partition("\n")
     return (
-        _additional_context(output)
+        _RUNTIME.additional_context(output)
         if separator and stored_key == launch_key
         else ""
     )

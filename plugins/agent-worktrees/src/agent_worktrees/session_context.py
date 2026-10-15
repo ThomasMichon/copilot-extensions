@@ -16,6 +16,54 @@ MAX_TOPOLOGY_BYTES = 1_250
 MAX_RELATED_ENTRIES = 4
 
 
+def render_legacy_machine_context(entry: cfg.MachineEntry, project: str = "") -> str:
+    plat = cfg.detect_platform()
+    deploy_env = next(
+        (env.alias for env in entry.ssh_environments if env.name == plat), "",
+    )
+    lines = [
+        f"Machine: {entry.display_name}",
+        f"Hostname: {socket.gethostname()}",
+        f"Machine name: {cfg.machine_name(entry)}",
+        f"Alias/friendly name: {entry.display_name}",
+        f"Environment: {entry.environment}",
+        f"Platform: {plat}",
+    ]
+    if deploy_env:
+        lines.append(f"Deployment environment: {deploy_env}")
+    if entry.role:
+        lines.append(f"Role: {entry.role}")
+    if entry.description:
+        lines.append(f"Description: {entry.description}")
+    if entry.capabilities:
+        lines.append(f"Capabilities: {', '.join(entry.capabilities)}")
+    if project:
+        lines.append(f"Project: {project}")
+        lines.append(f"Binstub: {project}")
+    return "\n".join(lines) + "\n"
+
+
+def publish_machine_context(payload: dict) -> str:
+    from . import __main__ as core
+
+    try:
+        config = (
+            cfg.load_config(include_control_plane_related_pr=False)
+            if cfg.active_project() else None
+        )
+        context = render_machine_context(config)
+        core._write_session_lifecycle_snapshot(
+            "machine-context", payload,
+            json.dumps({"additionalContext": context}),
+        )
+        hook_client = core._load_hook_client_module()
+        if hook_client is None or not hook_client._write_session_guidance(payload):
+            return "[agent-worktrees] Machine guidance file unavailable.\n"
+    except Exception as exc:
+        return f"[agent-worktrees] Machine guidance failed: {type(exc).__name__}\n"
+    return ""
+
+
 def render_machine_context(config: Any) -> str:
     hostname = socket.gethostname()
     facts = {

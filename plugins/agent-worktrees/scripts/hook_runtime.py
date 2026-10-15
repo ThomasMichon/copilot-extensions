@@ -6,8 +6,40 @@ import hashlib
 import math
 import os
 import re
+import stat
 import struct
 from pathlib import Path
+
+
+def additional_context(raw: str) -> str:
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return ""
+    context = value.get("additionalContext") if isinstance(value, dict) else None
+    return context.strip() if isinstance(context, str) else ""
+
+
+def read_bounded_text(path: Path, *, limit: int) -> str | None:
+    try:
+        metadata = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size > limit
+            or getattr(metadata, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        ):
+            return None
+        with path.open("rb") as handle:
+            raw = handle.read(limit + 1)
+    except OSError:
+        return None
+    if len(raw) > limit:
+        return None
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeError:
+        return None
 
 
 def resident_started(runtime: Path, launch_key: str) -> bool:

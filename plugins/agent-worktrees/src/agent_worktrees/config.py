@@ -735,42 +735,9 @@ def detect_machine(repo_dir: str | Path | None = None) -> str:
 def render_copilot_instructions(
     entry: MachineEntry, project: str = "",
 ) -> str:
-    """Render the content of ``machine.instructions.md`` for a machine.
+    from .session_context import render_legacy_machine_context
 
-    Detects the current platform and includes it along with the
-    deployment environment (SSH alias) so agents know their exact
-    identity for service deployments.  When *project* is provided,
-    includes project and binstub metadata.
-    """
-    plat = detect_platform()
-
-    # Find the SSH alias matching the current platform
-    deploy_env = ""
-    for ssh_env in entry.ssh_environments:
-        if ssh_env.name == plat:
-            deploy_env = ssh_env.alias
-            break
-
-    lines = [
-        f"Machine: {entry.display_name}",
-        f"Hostname: {socket.gethostname()}",
-        f"Machine name: {machine_name(entry)}",
-        f"Alias/friendly name: {entry.display_name}",
-        f"Environment: {entry.environment}",
-        f"Platform: {plat}",
-    ]
-    if deploy_env:
-        lines.append(f"Deployment environment: {deploy_env}")
-    if entry.role:
-        lines.append(f"Role: {entry.role}")
-    if entry.description:
-        lines.append(f"Description: {entry.description}")
-    if entry.capabilities:
-        lines.append(f"Capabilities: {', '.join(entry.capabilities)}")
-    if project:
-        lines.append(f"Project: {project}")
-        lines.append(f"Binstub: {project}")
-    return "\n".join(lines) + "\n"
+    return render_legacy_machine_context(entry, project=project)
 
 
 def detect_platform() -> str:
