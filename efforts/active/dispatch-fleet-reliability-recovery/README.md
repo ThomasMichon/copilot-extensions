@@ -561,3 +561,12 @@ requested contract.
   flake or permission to publish/merge past incomplete validation. The native
   boundary remains unresolved; no process, cleanup pass, hash or assertion is
   skipped, and no production or test timeout has been raised.
+- Disjoint supervisor/retention files subsequently pass 180 cases with one
+  existing platform skip. The bounded selection's 94 cases and exact companion
+  files' 27 cases are separate completed evidence, not a completed native suite.
+  The existing `windows-coverage-rotation.yml` supports an immutable candidate
+  ref and native full-suite validation without workflow edits. Normal publication
+  of this same shipping PR is needed to exercise that external lane; it does
+  not waive the local failures or authorize merge. The selected rotation date
+  must actually include agent-dispatch, and the run's pinned SHA and plugin
+  outcome must be recorded before treating it as acceptance.
