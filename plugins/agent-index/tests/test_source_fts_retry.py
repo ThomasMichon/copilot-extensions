@@ -1,8 +1,8 @@
 """Selected FTS conflicts cross an actual child boundary without exposing payloads."""
 
 import subprocess
-import threading
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -24,9 +24,11 @@ def test_selected_fts_real_child_conflict_retry(cold, monkeypatch, caplog, exist
                      np.array([[0, 1]], dtype=np.float32))
     content = store.content_store
     native_run = subprocess.run
+    native_sleep = time.sleep
     attempts, delays, diagnostics = [], [], []
 
     def actual_child(argv, **kwargs):
+        time.sleep(0.001)
         args = list(argv)
         assert "child_fts_owner" in args[4]
         attempts.append(args[-1])
@@ -42,17 +44,11 @@ def test_selected_fts_real_child_conflict_retry(cold, monkeypatch, caplog, exist
         return result
 
     monkeypatch.setattr(content_module.subprocess, "run", actual_child)
-    # `time` is the shared module: record only this thread's retry delay and let
-    # any other thread still in the process (left by an earlier test) sleep.
-    test_thread, real_sleep = threading.get_ident(), time.sleep
-
-    def record_sleep(delay):
-        if threading.get_ident() == test_thread:
-            delays.append(delay)
-        else:
-            real_sleep(delay)
-
-    monkeypatch.setattr(content_module.time, "sleep", record_sleep)
+    monkeypatch.setattr(content_module, "time", SimpleNamespace(
+        time=time.time, monotonic=time.monotonic,
+        sleep=lambda delay: delays.append(delay),
+    ))
+    assert time.sleep is native_sleep
     if exhausted:
         with pytest.raises(SourceLayoutError, match="FTS preparation failed") as failure:
             content.ensure_fts_index(max_retries=2)
