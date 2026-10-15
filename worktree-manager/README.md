@@ -344,6 +344,16 @@ null or missing-key document is not permission to retire profiles. Shortcut
 display names are validated before fragment publication, not after it. Engine
 callers pass their resolved `--machine` key so global configuration and machine
 detection do not depend on a project-local machine setting.
+For a selected installation cell, the engine additionally sends
+`--input-roots-stdin`: a version-1
+`copilot-extensions.terminal-profile-input-roots` JSON object with `context`,
+`payloadRoot`, `registryRoot`, and a `projectRoots` name-to-directory mapping.
+The engine resolves project identities; Manager validates the owning
+agent-worktrees installation receipt and cell containment, then uses those
+same explicit roots for preflight and publishing collection. Missing project
+mappings or invalid cell inputs block instead of reading legacy selections.
+This does not redirect Manager discovery, Terminal output or shortcut paths:
+those remain machine-global. Direct legacy invocations need no extra argument.
 Publication also validates existing Terminal fragments, state and settings
 before writing, retaining the input bytes through reconciliation and refusing
 observed drift. Missing optional documents remain valid; malformed or denied

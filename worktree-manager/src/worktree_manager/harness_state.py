@@ -223,8 +223,25 @@ class ProjectInfo:
     copilot-extensions#3390 Phase 3e Step 3b)."""
 
 
-def _registry(home_dir: Path | None, kind: str, *, strict: bool) -> dict:
-    path = (home_dir or home()) / ".agent-worktrees" / f"{kind}.yaml"
+@dataclass(frozen=True)
+class ProfileInputRoots:
+    """Caller-resolved input roots; never change the machine-global outputs."""
+
+    registry: Path
+    projects: dict[str, Path]
+
+    def project_dir(self, name: str) -> Path:
+        if name not in self.projects:
+            raise ValueError(f"Selected profile inputs omit project {name}")
+        return self.projects[name]
+
+
+def _registry(
+    home_dir: Path | None, kind: str, *, strict: bool,
+    input_roots: ProfileInputRoots | None = None,
+) -> dict:
+    root = input_roots.registry if input_roots else (home_dir or home()) / ".agent-worktrees"
+    path = root / f"{kind}.yaml"
     data = _read_yaml(path, strict=True, required_key=kind) if strict else _read_yaml(path)
     if strict:
         entries = data.get(kind, {})
@@ -268,12 +285,18 @@ def _validate_registry_entry(kind: str, name: str, entry: dict) -> None:
             raise ValueError(f"projects.{name}.wsl must contain string distro/state values")
 
 
-def repos_registry(home_dir: Path | None = None, *, strict: bool = False) -> dict:
-    return _registry(home_dir, "repos", strict=strict)
+def repos_registry(
+    home_dir: Path | None = None, *, strict: bool = False,
+    input_roots: ProfileInputRoots | None = None,
+) -> dict:
+    return _registry(home_dir, "repos", strict=strict, input_roots=input_roots)
 
 
-def projects_registry(home_dir: Path | None = None, *, strict: bool = False) -> dict:
-    return _registry(home_dir, "projects", strict=strict)
+def projects_registry(
+    home_dir: Path | None = None, *, strict: bool = False,
+    input_roots: ProfileInputRoots | None = None,
+) -> dict:
+    return _registry(home_dir, "projects", strict=strict, input_roots=input_roots)
 
 
 def project_config(name: str, home_dir: Path | None = None) -> dict:
@@ -419,9 +442,15 @@ def repo_enabled_plugins(repo_path: str | None) -> list[str]:
     ]
 
 
-def build_repos(home_dir: Path | None = None, *, strict: bool = False) -> list[RepoInfo]:
-    reg = repos_registry(home_dir, strict=True) if strict else repos_registry(home_dir)
-    project_reg = projects_registry(home_dir, strict=True) if strict else projects_registry(home_dir)
+def build_repos(
+    home_dir: Path | None = None, *, strict: bool = False,
+    input_roots: ProfileInputRoots | None = None,
+) -> list[RepoInfo]:
+    kwargs = {"strict": strict, "input_roots": input_roots} if input_roots else (
+        {"strict": True} if strict else {}
+    )
+    reg = repos_registry(home_dir, **kwargs)
+    project_reg = projects_registry(home_dir, **kwargs)
     projects = set((project_reg.get("projects") or {}).keys())
     account_map = reg.get("account_map") or {}
     pkey = _platform_key()
@@ -560,16 +589,24 @@ def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str, s
 
 
 
-def build_projects(home_dir: Path | None = None, *, strict_rosters: bool = False) -> list[ProjectInfo]:
-    reg = projects_registry(home_dir, strict=True) if strict_rosters else projects_registry(home_dir)
+def build_projects(
+    home_dir: Path | None = None, *, strict_rosters: bool = False,
+    input_roots: ProfileInputRoots | None = None,
+) -> list[ProjectInfo]:
+    root_kwargs = {"input_roots": input_roots} if input_roots else {}
+    reg = (projects_registry(home_dir, strict=True, **root_kwargs) if strict_rosters
+           else projects_registry(home_dir, **root_kwargs))
     repos = {r.name: r for r in (
-        build_repos(home_dir, strict=True) if strict_rosters else build_repos(home_dir)
+        build_repos(home_dir, strict=True, **root_kwargs) if strict_rosters
+        else build_repos(home_dir, **root_kwargs)
     )}
     out: list[ProjectInfo] = []
     for name, entry in (reg.get("projects") or {}).items():
         entry = entry or {}
-        cfg = (_read_yaml((home_dir or home()) / f".{name}" / "config.yaml", strict=True)
-               if strict_rosters else project_config(name, home_dir))
+        project_dir = (input_roots.project_dir(name) if input_roots
+                       else (home_dir or home()) / f".{name}")
+        cfg = (_read_yaml(project_dir / "config.yaml", strict=strict_rosters)
+               if strict_rosters or input_roots else project_config(name, home_dir))
         repo = repos.get(name)
         wsl = entry.get("wsl") if isinstance(entry.get("wsl"), dict) else {}
         # Prefer the repos.yaml-resolved path; fall back to this project's

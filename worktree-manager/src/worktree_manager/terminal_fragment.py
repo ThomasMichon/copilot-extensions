@@ -59,7 +59,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import terminal_profiles as profiles
-from .harness_state import RosterMachine, SshEnvironment
+from .harness_state import ProfileInputRoots, RosterMachine, SshEnvironment
 from .terminal_deploy_inputs import TerminalInputs, read_optional_json as _read_json
 
 __all__ = [
@@ -561,18 +561,22 @@ def _display_from_slug(slug: str) -> str:
     return " ".join(w.capitalize() for w in slug.replace("-", " ").split())
 
 
-def _resolve_icon(project_dir_fn, name: str) -> tuple[str, str]:
+def _resolve_icon(project_dir_fn, name: str, *, absolute_paths: bool = False) -> tuple[str, str]:
     """Resolve (icon, wsl_icon) with install.ps1's project-then-default fallback."""
     proj_root = project_dir_fn(name)
     aw_root = project_dir_fn("agent-worktrees")
 
-    icon = rf"%USERPROFILE%\.{name}\aperture-science.ico"
+    default_icon = str(aw_root / "aperture-science.ico") if absolute_paths else DEFAULT_ICON
+    icon = (str(proj_root / "aperture-science.ico") if absolute_paths
+            else rf"%USERPROFILE%\.{name}\aperture-science.ico")
     if not (proj_root / "aperture-science.ico").exists():
-        icon = DEFAULT_ICON
+        icon = default_icon
 
-    wsl_icon = rf"%USERPROFILE%\.{name}\aperture-science-wsl.ico"
+    wsl_icon = (str(proj_root / "aperture-science-wsl.ico") if absolute_paths
+                else rf"%USERPROFILE%\.{name}\aperture-science-wsl.ico")
     if not (proj_root / "aperture-science-wsl.ico").exists():
-        wsl_icon = r"%USERPROFILE%\.agent-worktrees\aperture-science-wsl.ico"
+        wsl_icon = (str(aw_root / "aperture-science-wsl.ico") if absolute_paths
+                    else r"%USERPROFILE%\.agent-worktrees\aperture-science-wsl.ico")
         if not (aw_root / "aperture-science-wsl.ico").exists():
             wsl_icon = icon
     return icon, wsl_icon
@@ -580,6 +584,7 @@ def _resolve_icon(project_dir_fn, name: str) -> tuple[str, str]:
 
 def collect_local_projects(
     current_project: str | None = None, *, home_dir=None, strict: bool = False,
+    input_roots: ProfileInputRoots | None = None,
 ) -> list[ProjectInput]:
     """Collect registry, roster and selection inputs, with the current project
     first. Publishing uses strict parsing instead of tolerant view defaults."""
@@ -587,8 +592,9 @@ def collect_local_projects(
     from .harness_state import home as hs_home
     from .harness_state import _read_yaml
 
-    projects = (hs_build_projects(home_dir, strict_rosters=True)
-                if strict else hs_build_projects(home_dir))
+    root_kwargs = {"input_roots": input_roots} if input_roots else {}
+    projects = (hs_build_projects(home_dir, strict_rosters=True, **root_kwargs)
+                if strict else hs_build_projects(home_dir, **root_kwargs))
     by_name = {p.name: p for p in projects}
 
     ordered: list[str] = []
@@ -603,7 +609,8 @@ def collect_local_projects(
     ordered = [n for n in ordered if n not in _RESERVED_BINSTUB_NAMES]
 
     def project_dir(name: str):
-        return (home_dir or hs_home()) / f".{name}"
+        return (input_roots.project_dir(name) if input_roots
+                else (home_dir or hs_home()) / f".{name}")
 
     out: list[ProjectInput] = []
     for name in ordered:
@@ -628,7 +635,14 @@ def collect_local_projects(
         else:
             sel = None
 
-        icon, wsl_icon = _resolve_icon(project_dir, name)
+        if input_roots:
+            def icon_dir(project_name: str):
+                return (input_roots.registry if project_name == "agent-worktrees"
+                        else project_dir(project_name))
+
+            icon, wsl_icon = _resolve_icon(icon_dir, name, absolute_paths=True)
+        else:
+            icon, wsl_icon = _resolve_icon(project_dir, name)
 
         out.append(ProjectInput(
             name=name,

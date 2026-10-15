@@ -44,11 +44,14 @@ def test_selected_cell_is_preserved(monkeypatch, tmp_path):
 def test_windows_profile_finishing_resolves_selected_state_and_restores_caller(
     monkeypatch, tmp_path, selected_context, success,
 ):
-    from agent_worktrees import manager_launch_cli
+    from agent_worktrees import manager_launch_cli, registry_paths
 
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", "inherited-payload")
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "inherited-context")
     monkeypatch.setattr(integration.installer, "reconcile_binstubs", lambda: {})
+    # This unit isolates selection/restoration; real receipt transport is
+    # exercised by test_terminal_refresh's cell fixture.
+    monkeypatch.setattr(registry_paths, "installation_context", lambda: None)
     monkeypatch.setattr(picker_profiles_cli.cfg, "project_name", lambda: "demo")
     monkeypatch.setattr(
         manager_launch_cli, "_discover_control_plane_provider_manifests",

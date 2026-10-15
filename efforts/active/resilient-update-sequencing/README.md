@@ -423,3 +423,26 @@ achieved by rearranging today's combined installer invocations.
   make Manager's legacy-only input collection cell-aware. Add an attributable
   selected-root/snapshot boundary and a real Manager-process regression before
   considering that finding resolved.
+
+### 2026-10-15 - Selected-cell profile input boundary
+- Engine finishing now transports its validated registry and per-project state
+  roots through a versioned stdin request. Manager checks the owning
+  agent-worktrees receipt with its existing vendored installation-context
+  validator, constrains inputs to that cell, and propagates the same roots
+  through strict preflight, machine lookup, registry joining and final
+  selection/icon collection. Missing project mappings block, never fall back
+  to legacy state. Project identity resolution stays with the engine.
+- Manager discovery, Windows Terminal output and shortcut destinations remain
+  machine-global. Direct legacy command compatibility is unchanged, and neither
+  side imports the other's implementation.
+- A native engine-to-real-Manager subprocess test uses distinct legacy/cell
+  registries and selections, retains the cell's peer and shell profiles, and
+  proves a second pass does not rewrite the fragment. Manager's independent
+  native command test covers the same distinction and unchanged shortcuts.
+  Invalid contexts, foreign roots, missing mappings and invalid/ambiguous YAML
+  block before publication.
+- Focused engine/context coverage passed 63 cases with two platform skips;
+  Manager read-model/profile/deployment/decoupling coverage passed 198.
+  Touched-code lint and all thirteen installation contracts pass. Fresh
+  current-head review and hosted CI still gate the source merge; nothing has
+  been rolled out.

@@ -6,12 +6,145 @@ import os
 import subprocess
 import sys
 import time
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from worktree_manager import local_profiles as profiles, terminal_fragment as tf
+
+from _installation_context_fixtures import namespaced_fixture
+
+
+@pytest.fixture
+def cell_profile_inputs(tmp_path):
+    home = tmp_path / "home"
+    context, _ = namespaced_fixture(home, windows=os.name == "nt")
+    registry = context.parent
+    cell = registry.parents[1]
+    roots = {name: cell / "repos" / ("repo-" + digit * 24) / "agent-worktrees"
+             for name, digit in (("demo", "a"), ("peer", "b"))}
+    for root in roots.values():
+        root.mkdir(parents=True)
+        (root / "config.yaml").write_text(
+            "machine: cell-host\nterminal_profiles:\n"
+            "- {machine: cell-host, env: Win, kind: shell}\n", encoding="utf-8",
+        )
+    (registry / "projects.yaml").write_text(
+        "projects:\n  demo: {display_name: Cell Demo}\n  peer: {display_name: Cell Peer}\n",
+        encoding="utf-8",
+    )
+    (registry / "repos.yaml").write_text("repos: {}\n", encoding="utf-8")
+    legacy = home / ".agent-worktrees"
+    legacy.mkdir()
+    (legacy / "projects.yaml").write_text(
+        "projects:\n  demo: {display_name: Legacy Demo}\n  legacy: {display_name: Legacy Only}\n",
+        encoding="utf-8",
+    )
+    (home / ".demo").mkdir()
+    (home / ".demo" / "config.yaml").write_text(
+        "machine: legacy-host\nterminal_profiles: []\n", encoding="utf-8",
+    )
+    request = {
+        "schema": "copilot-extensions.terminal-profile-input-roots", "version": 1,
+        "context": str(context), "payloadRoot": str(home / "payload"),
+        "registryRoot": str(registry),
+        "projectRoots": {name: str(root) for name, root in roots.items()},
+    }
+    return home, request
+
+
+def test_selected_cell_roots_drive_preflight_machine_and_collection(
+    cell_profile_inputs, monkeypatch,
+):
+    home, request = cell_profile_inputs
+    monkeypatch.setattr(profiles.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(profiles.harness_state, "home", lambda: home)
+    roots = profiles._input_roots(request)
+    seen = []
+
+    def deploy(machine, **kwargs):
+        seen.extend(kwargs["projects"])
+        assert machine == "cell-host"
+        return SimpleNamespace(
+            applied=True, fragment_path=home / "fragment.json", new_guids=[], notes=[],
+        )
+
+    monkeypatch.setattr(tf, "deploy_fragment", deploy)
+    monkeypatch.setattr(profiles, "refresh_shortcuts", lambda rows: 0)
+    assert profiles.refresh("demo", input_roots=roots)["status"] == "verified_current"
+    assert [row.name for row in seen] == ["demo", "peer"]
+    assert {row.display for row in seen} == {"Cell Demo", "Cell Peer"}
+    assert all(row.selection == frozenset({"cell-host|Win|shell"}) for row in seen)
+
+
+@pytest.mark.parametrize("damage", [
+    "context", "payloadRoot", "registryRoot", "foreign-project-root", "missing-project",
+    "bad-selection", "duplicate-registry", "duplicate-config",
+])
+def test_invalid_selected_cell_inputs_block_without_legacy_fallback(
+    cell_profile_inputs, monkeypatch, capsys, damage,
+):
+    home, request = cell_profile_inputs
+    monkeypatch.setattr(profiles.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(profiles.harness_state, "home", lambda: home)
+    if damage in {"context", "payloadRoot", "registryRoot"}:
+        request[damage] = str(home / "foreign")
+    elif damage == "foreign-project-root":
+        request["projectRoots"]["demo"] = str(home / ".demo")
+    elif damage == "missing-project":
+        del request["projectRoots"]["peer"]
+    elif damage == "duplicate-registry":
+        (Path(request["registryRoot"]) / "projects.yaml").write_text(
+            "projects: {demo: {}}\nprojects: {}\n", encoding="utf-8",
+        )
+    else:
+        (Path(request["projectRoots"]["demo"]) / "config.yaml").write_text(
+            "terminal_profiles: invalid\n" if damage == "bad-selection"
+            else "terminal_profiles: []\nterminal_profiles: []\n", encoding="utf-8",
+        )
+    monkeypatch.setattr(sys, "stdin", StringIO(json.dumps(request)))
+    monkeypatch.setattr(tf, "deploy_fragment", lambda *a, **k: pytest.fail("Invalid inputs published"))
+    monkeypatch.setattr(profiles, "refresh_shortcuts", lambda *a: pytest.fail("Invalid inputs published"))
+    assert profiles.main(["demo", "--input-roots-stdin"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "blocked"
+
+
+def test_native_selected_cell_refresh_process_preserves_peers_and_selections(
+    cell_profile_inputs,
+):
+    import platform
+    if platform.system() != "Windows":
+        pytest.skip("Windows Shell COM integration")
+    home, request = cell_profile_inputs
+    local = home / "local"
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+           "LOCALAPPDATA": str(local)}
+    before = {path: path.read_bytes() for path in home.rglob("*.yaml")}
+    first_mtime = None
+    for attempt in range(2):
+        result = subprocess.run(
+            [sys.executable, "-m", "worktree_manager", "refresh-profiles", "demo",
+             "--input-roots-stdin"],
+            input=json.dumps(request), env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15, **profiles.no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr + result.stdout
+        response = json.loads(result.stdout)
+        assert response["status"] == "verified_current"
+        fragment = Path(response["fragment"])
+        assert fragment.is_relative_to(local)
+        rows = json.loads(fragment.read_text(encoding="utf-8"))["profiles"]
+        names = {row["name"] for row in rows}
+        assert names == {"Cell Demo", "Cell Peer", "cell-host"}
+        assert (home / ".local" / "bin" / "Cell Peer.lnk").is_file()
+        if attempt:
+            assert fragment.stat().st_mtime_ns == first_mtime
+            assert response["shortcuts_changed"] == 0
+        else:
+            first_mtime = fragment.stat().st_mtime_ns
+    assert {path: path.read_bytes() for path in before} == before
 
 
 def test_refresh_collects_once_and_reuses_inputs(monkeypatch, tmp_path):

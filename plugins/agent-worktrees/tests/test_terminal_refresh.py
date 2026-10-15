@@ -210,6 +210,7 @@ def test_real_profile_process_protocol(manager):
 @pytest.mark.parametrize("override", [False, True])
 def test_cell_profile_refresh_uses_machine_manager_registration(monkeypatch, tmp_path, override):
     from agent_worktrees import control_plane_providers as providers
+    from agent_worktrees import registry_paths
 
     home = tmp_path / "home"
     registered = (tmp_path / "explicit-providers" if override else
@@ -223,6 +224,7 @@ def test_cell_profile_refresh_uses_machine_manager_registration(monkeypatch, tmp
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "plugin-sandbox"))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell" / "install.json"))
+    monkeypatch.setattr(registry_paths, "installation_context", lambda: None)
     if override:
         monkeypatch.setenv(providers._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(registered))
     else:
@@ -244,6 +246,86 @@ def test_cell_profile_refresh_uses_machine_manager_registration(monkeypatch, tmp
     )
     assert m._refresh_terminal_profiles("demo", machine="host") is True
     assert calls == [["registered-manager", "refresh-profiles", "demo", "--machine", "host"]]
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_cell_refresh_transports_validated_roots_without_changing_global_home(
+    manager, monkeypatch, tmp_path, native,
+):
+    from agent_worktrees import project_state
+    from test_registry_paths import _payload, _select, _stamp
+
+    if native and os.name != "nt":
+        pytest.skip("Windows Terminal and Shell COM integration")
+    payload = _payload(tmp_path, "payload")
+    context, registry = _stamp(
+        tmp_path / "durable", payload, marketplace="example",
+        repository="Example-Org/Example-Marketplace",
+    )
+    _select(monkeypatch, context, payload)
+    (registry / "projects.yaml").write_text("projects:\n  demo: {}\n  peer: {}\n",
+                                            encoding="utf-8")
+    (registry / "repos.yaml").write_text(json.dumps({"repos": {
+        name: {"class": "worktree", "remote": f"https://github.com/example/{name}.git"}
+        for name in ("demo", "peer")
+    }}), encoding="utf-8")
+    roots = {name: project_state.ensure_project_state(name) for name in ("demo", "peer")}
+    if native:
+        home = tmp_path / "home"
+        legacy = home / ".agent-worktrees"
+        legacy.mkdir(parents=True)
+        (legacy / "projects.yaml").write_text("projects:\n  legacy: {}\n", encoding="utf-8")
+        (home / ".demo").mkdir()
+        (home / ".demo" / "config.yaml").write_text("terminal_profiles: []\n", encoding="utf-8")
+        for root in roots.values():
+            (root / "config.yaml").write_text(
+                "terminal_profiles:\n- {machine: host, env: Win, kind: shell}\n",
+                encoding="utf-8",
+            )
+        monkeypatch.setenv("USERPROFILE", str(home))
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("LOCALAPPDATA", str(home / "local"))
+        manager_src = PLUGIN.parents[1] / "worktree-manager" / "src"
+        monkeypatch.setenv("PYTHONPATH", os.pathsep.join([
+            str(manager_src), os.environ.get("PYTHONPATH", ""),
+        ]))
+        manager.command = (sys.executable, "-m", "worktree_manager")
+        initial = None
+        for attempt in range(2):
+            assert m._refresh_terminal_profiles("demo", machine="host")
+            fragment = (home / "local" / "Microsoft" / "Windows Terminal" / "Fragments"
+                        / "AgentWorktrees" / "agent-worktrees.json")
+            names = {row["name"] for row in json.loads(fragment.read_text("utf-8"))["profiles"]}
+            assert names == {"Demo", "Peer", "host"}
+            assert (home / ".local" / "bin" / "Peer.lnk").is_file()
+            if attempt:
+                assert fragment.stat().st_mtime_ns == initial
+            else:
+                initial = fragment.stat().st_mtime_ns
+        return
+    home_before = os.environ.get("USERPROFILE")
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        assert os.environ.get("USERPROFILE") == home_before
+        return SimpleNamespace(returncode=0, stdout=json.dumps(SUCCESS), stderr="")
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    assert m._refresh_terminal_profiles("demo", machine="host")
+    argv, kwargs = calls[0]
+    assert argv[-1] == "--input-roots-stdin"
+    value = json.loads(kwargs["input"])
+    assert value["registryRoot"] == str(registry)
+    assert value["context"] == str(context)
+    assert value["payloadRoot"] == str(payload)
+    assert value["projectRoots"] == {name: str(root) for name, root in roots.items()}
+
+
+def test_invalid_cell_context_never_launches_manager(manager, monkeypatch, tmp_path):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "missing-install.json"))
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: pytest.fail("Invalid context launched Manager"))
+    assert m._refresh_terminal_profiles("demo", machine="host") is False
 
 
 @pytest.mark.guard

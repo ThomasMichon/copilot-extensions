@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -203,8 +204,26 @@ def _refresh_terminal_profiles(project: str | None = None, *, machine: str | Non
         if not isinstance(machine, str) or not machine.strip():
             raise ValueError("Cannot resolve machine key for terminal profile refresh")
         arguments = [*manager.command, "refresh-profiles", target_project, "--machine", machine]
+        from . import projects_registry, registry_paths
+
+        context = registry_paths.installation_context()
+        input_kwargs = {}
+        if context is not None:
+            registry = registry_paths.registry_root()
+            projects = projects_registry.parse_projects_registry(registry / "projects.yaml")
+            names = set(projects["projects"]) | {target_project}
+            input_kwargs["input"] = json.dumps({
+                "schema": "copilot-extensions.terminal-profile-input-roots",
+                "version": 1,
+                "context": os.environ["COPILOT_EXTENSIONS_CONTEXT"],
+                "payloadRoot": context["payloadRoot"],
+                "registryRoot": str(registry),
+                "projectRoots": {name: str(cfg.project_dir(name)) for name in sorted(names)},
+            })
+            arguments.append("--input-roots-stdin")
         result = subprocess.run(
             arguments,
+            **input_kwargs,
             capture_output=True,
             encoding="utf-8",
             errors="replace",
