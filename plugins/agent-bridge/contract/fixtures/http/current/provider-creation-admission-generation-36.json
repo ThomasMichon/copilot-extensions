@@ -40,11 +40,16 @@
     "creation_prompt_supported": false
   },
   "captured_from": {
-    "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+    "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 36,
     "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
-    "source_git_blob": "332e5d36e42bfef8b1f1d5849bb75cc1c5b9b18f",
-    "source_sha256": "de9a07f254c508a21483b5599ed8ba66410ceea0e35e1d20c48e976628908a6f"
+    "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+    "source_sha256": "f92a052889feda87ce29dd63b4e3f2fa42b8a21fc1dbae699a4f6a24ecbd0a8e"
+  },
+  "compatibility": {
+    "caller_handoff_retains_worktree_scope": true,
+    "provider_key_required_before_reuse": true,
+    "provider_native_recreation": false
   }
 }

@@ -156,7 +156,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
-          "sha256": "8f4b971f65a46584b4038e407ac73a92316091a519ec610fc6fbccd505695d81",
+          "sha256": "c57f924cecdf5be29f792511d7e53db4609a2ed850a2c2f4518868e5a0b6b009",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -174,13 +174,19 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
-          "sha256": "de9a07f254c508a21483b5599ed8ba66410ceea0e35e1d20c48e976628908a6f",
+          "sha256": "f92a052889feda87ce29dd63b4e3f2fa42b8a21fc1dbae699a4f6a24ecbd0a8e",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
-          "sha256": "a363ce3e21610bd93ffb664922a67a933c5a3115eb42a4b70b9761267758726a",
+          "sha256": "37946222a54f25ea917b8b1eb4e213b5e07c912961a1e2aec62e7799ca3fb856",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "sha256": "23eeb485c10755726c634e3a926bdee2abea3fdcb37bbd5b65c55bc62718b841",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -542,7 +548,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-36.json",
-          "sha256": "358179c2ceadb6105d0951bb88ff3c989abd5725fdced4831991ad880e17658b",
+          "sha256": "3baba03ddbeaba2e9f2a3fbb93174828d4ceb993dcb3a23bd6849f14f7afdab4",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
@@ -560,14 +566,20 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-36.json",
-          "sha256": "490771321726ff8974660df17bcccc528d6754825a43c4e9510c8c2e54cb78fa",
+          "sha256": "f477d111223609784fee4b148ca34a95f539b036769f63b4e790b49ae01faf44",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-36.json",
-          "sha256": "9ad633005334a266118edd8f841191504e4ca45cdd47dc852570160e9cbae7ad",
+          "sha256": "09f934ab3d2b2e5cb11b7c9df95618c808a4c699b291c0f61124e79cdd793361",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-36.json",
+          "sha256": "2d0b691ad9665f8fe338acd3e5a4cb6593f2b9e3efd1c54a23fbd5727b61d685",
+          "role": "Generation-36 provider-native replay and recovery boundary evidence",
           "generation": 36
         }
       ],
@@ -1587,6 +1599,38 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
           "source_git_blob": "7947752cdd158f3888cd23778bfc3feeb43e71a7",
           "capture_method": "Recapture provider native admission after opaque JSON key encoding correction; native Unicode/surrogate replay and real ACP subprocess tests retain one original native start."
+        },
+        {
+          "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "b4dac600729f0d583d36e1e285f4eb5e5d2870ef",
+          "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
+        },
+        {
+          "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
+        },
+        {
+          "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+          "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
+        },
+        {
+          "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "3ce38f533716cc084a4cdc995b9496a1619dae1c",
+          "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",

@@ -40,11 +40,16 @@
     "creation_prompt_supported": false
   },
   "captured_from": {
-    "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+    "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 36,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
-    "source_git_blob": "4c366724eabfec7d69b556bbe7654d2f3575de54",
-    "source_sha256": "8f4b971f65a46584b4038e407ac73a92316091a519ec610fc6fbccd505695d81"
+    "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+    "source_sha256": "c57f924cecdf5be29f792511d7e53db4609a2ed850a2c2f4518868e5a0b6b009"
+  },
+  "compatibility": {
+    "caller_handoff_retains_worktree_scope": true,
+    "provider_key_required_before_reuse": true,
+    "provider_native_recreation": false
   }
 }
