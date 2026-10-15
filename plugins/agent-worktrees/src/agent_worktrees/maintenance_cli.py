@@ -814,8 +814,8 @@ def cmd_reconcile_binstubs(args) -> int:
             inst.transfer_project_binstub(args.transfer)
         elif getattr(args, "remove", None):
             inst.remove_project_binstub(args.remove)
-        else:
-            inst.reconcile_binstubs()
+        elif inst.reconcile_binstubs().get("blocked"):
+            return 1
     except inst.BinstubOwnershipError as exc:
         output.err(str(exc))
         return 1

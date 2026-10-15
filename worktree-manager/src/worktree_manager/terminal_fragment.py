@@ -1058,13 +1058,14 @@ def deploy_fragment(
     *,
     current_project: str | None = None,
     apply: bool = False,
+    projects: list[ProjectInput] | None = None,
 ) -> FragmentDeployPlan:
     """Compute (and, when ``apply=True``, perform) this machine's Step 5 deploy.
 
     Mirrors ``install.ps1``'s ``Deploy-Shortcuts``/``Sync-TerminalState``/
     ``Get-SettingsProfileGuids``/``Clean-TerminalSettingsJson`` for the
-    fragment-write half only -- ``.lnk`` shortcut creation stays in
-    ``install.ps1``, out of this relocation's scope.
+    fragment-write half only. ``local_profiles.refresh`` composes it with
+    shortcut reconciliation for the narrow whole-system finishing path.
 
     ``apply=False`` (the default) computes the **full** plan -- the new
     fragment JSON, which GUIDs are stale/changed, and the resulting
@@ -1089,7 +1090,10 @@ def deploy_fragment(
         str(p["guid"]).lower() for p in old_profiles if p.get("guid")
     ]
 
-    result = preview_local(machine, current_project=current_project)
+    result = (
+        preview_local(machine, current_project=current_project)
+        if projects is None else build_fragment(projects, machine)
+    )
     new_fragment = result.fragment()
     new_profiles = [p for p in new_fragment.get("profiles", []) if isinstance(p, dict)]
     new_guids = [str(p["guid"]).lower() for p in new_profiles if p.get("guid")]
@@ -1188,15 +1192,7 @@ def deploy_fragment(
 
 
 def _apply_deploy_plan(plan: FragmentDeployPlan, local_state) -> None:
-    """Write ``state.json``/``settings.json``/the fragment file to disk.
-
-    Only ever called from :func:`deploy_fragment` when explicitly asked to
-    ``apply`` -- never invoked implicitly, and never called by any read-only
-    preview/doctor path. Mirrors ``install.ps1``'s write order: reconcile
-    live WT state BEFORE writing the new fragment (the race the PowerShell
-    installer's own comment calls out: writing the fragment first risks WT
-    reading it while stale GUIDs are still present in ``state.json``).
-    """
+    """Reconcile WT state before publishing changed fragment content."""
     import json
 
     if local_state is not None and Path(local_state).exists():
@@ -1249,7 +1245,7 @@ def _apply_deploy_plan(plan: FragmentDeployPlan, local_state) -> None:
                             json.dumps(settings, indent=2), encoding="utf-8"
                         )
 
-    if plan.fragment_path is not None:
+    if plan.fragment_path is not None and _read_json(plan.fragment_path) != plan.fragment:
         plan.fragment_path.parent.mkdir(parents=True, exist_ok=True)
         plan.fragment_path.write_text(
             json.dumps(plan.fragment, indent=2), encoding="utf-8"

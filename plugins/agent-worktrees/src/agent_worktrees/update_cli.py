@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config as cfg
-from . import installer as inst, output, services as svc
+from . import output, services as svc
 from . import picker_profiles_cli, services_cli
 from . import update_events as _events, update_options
 from . import worktree_identity
@@ -337,8 +337,6 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             "(use --force to re-deploy)"
         )
         _events.record("engine_runtime", plugin_ref, "SKIPPED (current)", changed=False)
-        if plat == "windows":
-            _refresh_terminal_profiles()
     else:
         if hooks_drifted:
             output.warn(
@@ -385,16 +383,10 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             output.err(str(error))
             _events.record("engine_runtime", plugin_ref, installer_deadline_status(error))
             return 1
+        aw_runtime_env["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] = "1"
         rc = _run_engine_installer(argv, plugin_dir, installer_timeout, aw_runtime_env)
         if rc != 0:
             return rc
-
-    _events.enter("binstubs")
-    try:
-        inst.reconcile_binstubs()
-    except Exception as e:
-        output.warn(f"Binstub reconcile skipped: {e}")
-        _events.record("binstubs", "binstubs", f"binstub reconcile failed: {e}", required=False)
 
     _events.enter("module_update")
     skip_modules = getattr(args, "skip_modules", None)
@@ -434,7 +426,10 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         _events.enter("prune")
         _core_helper("_prune_stale_pivots_after_update", _prune_stale_pivots_after_update)()
 
-    return 0 if payloads_ok and runtimes_ok else 1
+    from .update_integration import finish
+
+    integration_ok = finish(plugin_dir, plat, aw_runtime_env)
+    return 0 if payloads_ok and runtimes_ok and integration_ok else 1
 
 
 def _prune_stale_pivots_after_update() -> None:

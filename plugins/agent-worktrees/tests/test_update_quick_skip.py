@@ -21,6 +21,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import installer
 from agent_worktrees import picker_profiles_cli
 from agent_worktrees import reconcile
 
@@ -68,6 +69,7 @@ def wired(monkeypatch, plugin_dir):
     monkeypatch.setattr(subprocess, "run", _run)
     monkeypatch.setattr(m.subprocess, "run", _run)
     monkeypatch.setattr(m, "_registered_plugin_targets", lambda: {})
+    monkeypatch.setattr(installer, "reconcile_binstubs", lambda: {"blocked": []})
     monkeypatch.setattr(m, "_update_registered_plugins", lambda targets: None)
     monkeypatch.setattr(m, "_update_modules", lambda *a, **k: None)
     monkeypatch.setattr(m, "_fast_forward_project_anchors", lambda: None)
@@ -143,6 +145,36 @@ def test_required_runtime_failure_makes_update_fail(wired, monkeypatch):
     assert m.cmd_update(_args()) == 1
 
 
+@pytest.mark.parametrize("deployed", ["1.5.3-dev9", "1.5.3-dev8"])
+def test_local_finishing_runs_once_after_runtime_work(wired, monkeypatch, deployed):
+    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: deployed)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    order = []
+    monkeypatch.setattr(m, "_update_modules", lambda *a, **k: order.append("modules") or True)
+    monkeypatch.setattr(
+        m, "_reconcile_registered_runtimes",
+        lambda *a, **k: order.append("runtimes") or True,
+    )
+    monkeypatch.setattr(
+        installer, "reconcile_binstubs",
+        lambda: order.append("commands") or {"blocked": []},
+    )
+    monkeypatch.setattr(
+        picker_profiles_cli, "_refresh_terminal_profiles",
+        lambda: order.append("profiles") or True,
+    )
+    assert m.cmd_update(_args()) == 0
+    assert order == ["modules", "runtimes", "commands", "profiles"]
+
+
+def test_required_command_migration_failure_makes_update_fail(wired, monkeypatch):
+    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "1.5.3-dev9")
+    monkeypatch.setattr(installer, "reconcile_binstubs", lambda: {"blocked": ["demo"]})
+    assert m.cmd_update(_args()) == 1
+
+
 @pytest.mark.parametrize("status", ["ready", "deactivation-required"])
 @pytest.mark.parametrize("inherited_context", [None, "/caller/install.json"])
 def test_selected_context_runs_self_installer_with_validated_environment(
@@ -203,6 +235,7 @@ def test_selected_context_runs_self_installer_with_validated_environment(
     assert installer_environments
     environment = installer_environments[0]
     assert environment["COPILOT_EXTENSIONS_CONTEXT"] == str(context)
+    assert environment["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] == "1"
     assert "COPILOT_PLUGIN_ROOT" not in environment
     assert "PYTHONPATH" not in environment
     assert installer_argv[0][-2:] == ["--install-dir", str(cell_root)]

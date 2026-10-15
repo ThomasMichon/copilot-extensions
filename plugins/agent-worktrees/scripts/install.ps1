@@ -3400,150 +3400,42 @@ function Get-UsableWorktreeManagerBin {
     return $cmd.Source
 }
 
-function Deploy-TerminalFragmentViaWorktreeManager {
-    <# Phase 3e Step 5b (copilot-extensions#3390): deploy the Windows Terminal
-       fragment through the relocated ``worktree_manager.terminal_fragment
-       .deploy_fragment`` mechanism when a usable Worktree Manager install is
-       on PATH. Returns ``$true`` only when the deploy actually ran and
-       succeeded (exit 0) -- callers fall back to the local implementation on
-       ``$false``, the same present-or-fallback shape as the interactive mux
-       launch's own Worktree-Manager check (Phase 3b Sub-slice 2a). #>
-    param([string]$Machine, [string]$ProjectName)
+function Deploy-Shortcuts {
+    <# Compatibility entry point; Manager owns profile and shortcut reconciliation. #>
+    param([string]$Machine)
 
-    $wmBin = Get-UsableWorktreeManagerBin
-    if (-not $wmBin) { return $false }
-
-    & $wmBin terminal-fragment $ProjectName --machine $Machine --deploy --live 2>&1 |
-        ForEach-Object { Write-ServiceChanged "terminal-fragment: $_" }
-    if ($LASTEXITCODE -ne 0) {
-        Write-ServiceWarn "Worktree Manager terminal-fragment --deploy failed (exit $LASTEXITCODE) -- falling back to the local implementation"
+    if ($env:AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION -eq '1') { return $true }
+    $manager = Get-UsableWorktreeManagerBin
+    if (-not $manager) {
+        Write-ServiceWarn 'Worktree Manager is required to reconcile profiles and shortcuts.'
         return $false
     }
-    Write-ServiceOk "Windows Terminal profiles deployed via Worktree Manager"
+    $managerArgs = @('refresh-profiles')
+    if ($ProjectName) { $managerArgs += $ProjectName }
+    $managerArgs += @('--machine', $Machine)
+    $profileJson = & $manager @managerArgs
+    $profileExit = $LASTEXITCODE
+    try {
+        $profileResult = ($profileJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-ServiceWarn "Profile refresh returned an invalid result; update Worktree Manager: $_"
+        return $false
+    }
+    if ($profileResult -isnot [PSCustomObject] -or
+        -not $profileResult.PSObject.Properties['schema'] -or
+        $profileResult.schema -ne 'copilot-extensions.terminal-profile-refresh' -or
+        -not $profileResult.PSObject.Properties['version'] -or $profileResult.version -ne 1 -or
+        -not $profileResult.PSObject.Properties['status']) {
+        Write-ServiceWarn 'Profile refresh protocol is unavailable; update Worktree Manager.'
+        return $false
+    }
+    if ($profileExit -ne 0 -or $profileResult.status -ne 'verified_current') {
+        $detail = if ($profileResult.PSObject.Properties['error']) { $profileResult.error } else { "exit $profileExit" }
+        Write-ServiceWarn "Profile refresh did not verify current local integration: $detail"
+        return $false
+    }
+    Write-ServiceOk 'Windows Terminal profiles and shortcuts reconciled via Worktree Manager'
     return $true
-}
-
-function Deploy-TerminalFragmentLocally {
-    <# Phase 3e Step 6 (copilot-extensions#3390): Terminal Fragment generation
-       is no longer owned by agent-worktrees at all -- ``agent_worktrees``'s
-       own ``terminal-fragment``/``profiles`` verbs (the only thing this
-       function used to shell out to) were retired in Step 6; see
-       ``visions/plugins/agent-worktrees``'s *Not a Terminal Fragment owner*
-       Non-Goal. There is no local (non-Worktree-Manager) implementation left
-       to fall back to -- degrade loudly instead of attempting a command that
-       no longer exists. Always returns ``$false`` (matching the historical
-       ``Deploy-Shortcuts`` behaviour of skipping shortcut creation when the
-       fragment can't be deployed), so this machine's WT profiles/shortcuts
-       simply go stale until a usable Worktree Manager install is present. #>
-    param([string]$Machine)
-
-    Write-ServiceWarn "Worktree Manager is required to deploy Windows Terminal profiles (agent-worktrees no longer owns Terminal Fragments -- see visions/plugins/agent-worktrees's 'Not a Terminal Fragment owner' Non-Goal). Install or repair Worktree Manager, then re-run 'refresh-profiles'."
-    return $false
-}
-
-function Deploy-Shortcuts {
-    <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts.
-       Handles WT state cleanup so new/changed profiles appear correctly on next WT launch.
-
-       Phase 3e Step 5b (copilot-extensions#3390): prefers the relocated
-       Worktree Manager deploy mechanism when a usable install is on PATH,
-       falling back to the local implementation otherwise -- the same
-       present-or-fallback shape Phase 3b's mux launch repoint used. #>
-    param([string]$Machine)
-
-    $deployed = Deploy-TerminalFragmentViaWorktreeManager -Machine $Machine -ProjectName $ProjectName
-    if (-not $deployed) {
-        $deployed = Deploy-TerminalFragmentLocally -Machine $Machine
-    }
-    if (-not $deployed) { return }
-
-    # Create .lnk shortcuts for each registered project
-    $shell = New-Object -ComObject WScript.Shell
-    $wtExe = "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe"
-
-    $registry = Read-ProjectsRegistry
-    $allProjects = @($ProjectName)
-    if ($registry.projects -is [PSCustomObject]) {
-        foreach ($p in $registry.projects.PSObject.Properties) {
-            if ($p.Name -notin $allProjects) { $allProjects += $p.Name }
-        }
-    } elseif ($registry.projects -is [hashtable]) {
-        foreach ($p in $registry.projects.Keys) {
-            if ($p -notin $allProjects) { $allProjects += $p }
-        }
-    }
-
-    # One-time sweep: remove truncated, zero-length shortcut residue left by an
-    # earlier unquoted-path bug -- e.g. "Dotfiles (WSL" (no closing paren, no
-    # extension) sitting beside the real "Dotfiles (WSL).lnk". The stale-shortcut
-    # cleanup below only matches *.lnk, so these orphans were never swept. Scope
-    # strictly to EMPTY, extension-less files carrying the " (" label signature,
-    # so real binstubs (.cmd/.ps1), shortcuts (.lnk) and foreign files are safe.
-    Get-ChildItem -LiteralPath $LocalBin -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Length -eq 0 -and -not $_.Extension -and $_.Name -like '* (*' } |
-        ForEach-Object {
-            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-            Write-ServiceChanged "Removed shortcut residue: $($_.Name)"
-        }
-
-    foreach ($proj in $allProjects) {
-        # Resilience: a single malformed / incomplete projects.yaml entry (e.g. a
-        # null-bodied orphan left by a partial registration) must NOT abort the
-        # whole shortcut deploy. Do as much as possible -- note the bad entry,
-        # flag it, and move on so every other project's shortcut still lands.
-        try {
-            $displayName = ($proj -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
-
-            $lnkPath = Join-Path $LocalBin "$displayName.lnk"
-            $lnk = $shell.CreateShortcut($lnkPath)
-            $lnk.TargetPath = $wtExe
-            $lnk.Arguments = "-p `"$displayName`""
-            $lnk.WorkingDirectory = "%USERPROFILE%"
-            $lnk.Description = "$displayName - Worktree Session Manager"
-            $lnk.Save()
-
-            # WSL shortcut -- only when WSL support is recorded in registry. Guard
-            # the entry TYPE before touching .PSObject: a null-valued project key
-            # (``realproj:`` with no body) yields $null here, and $null.PSObject
-            # .Properties throws "The property 'Properties' cannot be found" --
-            # the exact crash this hardening prevents.
-            $projWslInfo = $null
-            if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$proj]) {
-                $projEntry = $registry.projects.$proj
-                if ($projEntry -is [PSCustomObject] -and $projEntry.PSObject.Properties['wsl'] -and $projEntry.wsl) {
-                    $projWslInfo = $projEntry.wsl
-                }
-            }
-            $shortcutWslState = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['state']) { $projWslInfo.state } else { $null }
-            $shortcutWslDistro = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['distro']) { $projWslInfo.distro } else { $null }
-            if ($shortcutWslState -and $shortcutWslDistro) {
-                $wslLabel = "$displayName (WSL)"
-                $lnkPath = Join-Path $LocalBin "$wslLabel.lnk"
-                $lnk = $shell.CreateShortcut($lnkPath)
-                $lnk.TargetPath = $wtExe
-                $lnk.Arguments = "-p `"$wslLabel`""
-                $lnk.WorkingDirectory = "%USERPROFILE%"
-                $lnk.Description = "$displayName - Worktree Session Manager (WSL)"
-                $lnk.Save()
-            } else {
-                # Remove stale WSL shortcut if it exists from a previous install
-                foreach ($pattern in @("$displayName (WSL).lnk", "$displayName (WSL: *).lnk")) {
-                    Get-ChildItem -Path $LocalBin -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-                }
-            }
-        } catch {
-            Write-ServiceWarn "Skipped shortcut for project '$proj' (malformed or incomplete registry entry): $_"
-            continue
-        }
-    }
-
-    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
-
-    # Global binstub deploy now runs as its own early step (Deploy-GlobalBinstub)
-    # in the install/update paths, so it is no longer dependent on this WT-heavy
-    # function completing. Kept here as an idempotent safety net.
-    Deploy-GlobalBinstub
-    Write-ServiceOk "Shortcuts deployed to $LocalBin (targeting wt.exe profiles)"
 }
 
 function Deploy-CopilotPlugin {
@@ -3950,7 +3842,7 @@ switch ($Action) {
             Deploy-Config -Machine $machine | Out-Null
             Register-ProjectEntry
             Reconcile-Binstubs
-            Deploy-Shortcuts -Machine $machine
+            [void](Deploy-Shortcuts -Machine $machine)
             if ($RepoDir) { Deploy-GitHooksPath }
 
             # Retire migrated managed instruction files (machine identity now via the session-machine hook)
@@ -4249,7 +4141,7 @@ switch ($Action) {
                 } catch { }
             }
         }
-        Deploy-Shortcuts -Machine $refreshMachine
+        if (-not (Deploy-Shortcuts -Machine $refreshMachine)) { exit 1 }
     }
 
     'update' {
@@ -4306,7 +4198,7 @@ switch ($Action) {
                     if ($cfgObj.machine) { $updateMachine = $cfgObj.machine }
                 } catch { }
             }
-            Deploy-Shortcuts -Machine $updateMachine
+            [void](Deploy-Shortcuts -Machine $updateMachine)
             if ($RepoDir) { Deploy-GitHooksPath }
 
             # Retire migrated managed instruction files (machine identity now via the session-machine hook)

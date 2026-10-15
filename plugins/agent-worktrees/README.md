@@ -67,12 +67,16 @@ for selection/refusal semantics and consumer compatibility.
 Project launchers are attributable global entry points. Each launcher invokes
 the absolute payload-local agent-worktrees command that created it and carries
 an ownership receipt under `~/.agent-worktrees/binstub-receipts/`. Routine
-install, update, repair, and reconciliation refuse to replace a command owned
-by another payload, replace any unreceipted command, or remove a receipt-owned
-command whose bytes changed. Legacy launchers require the same explicit
-transfer as every other unreceipted file. Windows command names are compared
-case-insensitively. An operator can explicitly transfer a registered project
-command with:
+install, update, repair, and reconciliation preserve foreign owners and edited
+bytes. Known historical generated launchers migrate automatically when receipt,
+installation lineage and exact generated-content checks establish ownership.
+Attributable obsolete or knowledge-only launchers retire through the same
+recoverable boundary; unknown unreceipted files and ambiguous relocations still
+require deliberate attribution. Windows command names are compared
+case-insensitively and edited siblings protect the entire command pair. See
+[historical command migration](docs/historical-project-command-migration.md)
+for admission and interruption recovery. An operator can explicitly transfer a
+registered project command with:
 
 ```bash
 agent-worktrees reconcile-binstubs --transfer <project>
@@ -93,6 +97,16 @@ These OS-only checks do not require Windows WMI; home overrides, installation
 context selection and WSL detection keep their existing precedence.
 Front-door Git discovery also uses the shared headless process helper for
 windowless callers.
+
+Unified update performs local command/profile reconciliation once after
+runtime reconciliation and anchor synchronization. It binds command repair to
+the freshly selected payload rather than an inherited historical snapshot.
+An unresolved required command or failed profile repair makes the update
+incomplete, not an advisory success. Preserved unrelated foreign inventory
+does not authorize overwriting it or make it a target of this installation.
+On Windows, profile refresh uses the Manager's narrow `refresh-profiles`
+JSON contract rather than entering the plugin installer. It repairs local
+integration even when the runtime version is already current.
 
 The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)

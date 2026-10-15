@@ -7,10 +7,11 @@ import json
 import subprocess
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import installer as inst
 from . import output, validate as val
-from .update_stage import discover_plugin_dir
 
 
 def _core():
@@ -180,75 +181,40 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
-def _resolve_terminal_install_script() -> Path | None:
-    """Locate ``install.ps1`` for the Windows Terminal profile refresh."""
-    candidates: list[Path] = []
-
-    manifest_path = cfg.install_dir() / "deploy-manifest.json"
-    if manifest_path.exists():
-        try:
-            manifest = json.loads(manifest_path.read_text())
-            plugin_source = manifest.get("plugin_source")
-            if plugin_source:
-                candidates.append(Path(plugin_source) / "scripts" / "install.ps1")
-        except Exception:
-            pass
-
-    try:
-        plugin_dir, _layout = discover_plugin_dir()
-        if plugin_dir:
-            candidates.append(plugin_dir / "scripts" / "install.ps1")
-    except Exception:
-        pass
-
-    try:
-        candidates.append(Path(__file__).resolve().parents[2] / "scripts" / "install.ps1")
-    except Exception:
-        pass
-
-    for candidate in candidates:
-        try:
-            if candidate.exists():
-                return candidate
-        except Exception:
-            continue
-    return None
-
-
 def _refresh_terminal_profiles() -> bool:
-    """Regenerate the Windows Terminal fragment from the saved selection."""
-    install_script = _resolve_terminal_install_script()
-    if install_script is None:
-        output.warn(
-            "Could not refresh Windows Terminal profiles: install.ps1 not found "
-            "(checked deploy-manifest plugin_source and installed-plugin dir)"
-        )
-        return False
-
-    cmd = ["pwsh", "-NoProfile", "-File", str(install_script), "refresh-profiles"]
-    try:
-        cmd += ["-ProjectName", cfg.project_name()]
-    except Exception:
-        pass
+    """Invoke the Manager's narrow owner surface, without staging an installer."""
+    from .manager_launch_cli import _discover_control_plane_provider_manifests
+    from .update_events import bounded
 
     try:
+        manager = _discover_control_plane_provider_manifests().get("worktree-manager")
+        if manager is None:
+            output.warn("Could not refresh Windows Terminal profiles: Worktree Manager is unavailable")
+            return False
         result = subprocess.run(
-            cmd,
+            [*manager.command, "refresh-profiles", cfg.project_name()],
             capture_output=True,
             encoding="utf-8",
             errors="replace",
-            timeout=180,
+            timeout=60,
+            **no_window_kwargs(),
         )
-    except Exception:
-        output.warn("Could not refresh Windows Terminal profiles")
-        return False
-
-    if result.returncode != 0:
-        output.warn(
-            f"Could not refresh Windows Terminal profiles (installer exited {result.returncode})"
-        )
+        response = json.loads(result.stdout)
+        if (result.returncode != 0 or not isinstance(response, dict)
+                or response.get("schema") != "copilot-extensions.terminal-profile-refresh"
+                or type(response.get("version")) is not int
+                or response.get("version") != 1
+                or response.get("status") != "verified_current"):
+            detail = (response.get("error") if isinstance(response, dict) else result.stderr)
+            detail = detail or "Manager did not verify current profiles; update or repair Manager"
+            output.warn(f"Could not refresh Windows Terminal profiles: {bounded(str(detail), 400)}")
+            return False
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        output.warn(f"Could not refresh Windows Terminal profiles: {bounded(str(error), 400)}")
         return False
     output.ok("Windows Terminal profiles refreshed")
+    for note in response.get("notes", []):
+        output.info(bounded(str(note), 400))
     return True
 
 
@@ -256,8 +222,8 @@ def cmd_repair(_args: argparse.Namespace) -> int:
     """Repair this machine's agent-worktrees integration in place."""
     output.header("Repairing project binstubs")
     try:
-        inst.reconcile_binstubs()
+        result = inst.reconcile_binstubs()
     except Exception as exc:
         output.err(f"Binstub repair failed: {exc}")
         return 1
-    return 0
+    return 1 if result.get("blocked") else 0

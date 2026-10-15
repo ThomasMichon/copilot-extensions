@@ -353,10 +353,8 @@ def _cmd_terminal_fragment(rest: list[str]) -> int:
     (or, with ``--deploy --live``, actually write) the Windows Terminal
     fragment a machine's config would emit.
 
-    Phase 3e Step 4 (copilot-extensions#3390): the read-only equivalent of
-    agent-worktrees' own ``profiles``/``terminal-fragment`` CLI verbs, now
-    backed entirely by the relocated ``terminal_fragment``/``harness_state``
-    modules. Unlike agent-worktrees' cwd-based ``--machine`` default, this
+    Uses the Manager-owned fragment and harness-state modules. Unlike the
+    engine's cwd-based ``--machine`` default, this
     takes an **explicit** ``<project>`` positional (matching
     ``worktree-manager projects``/``repos``'s own convention) and resolves
     the machine key from that project's own config.yaml directly -- no
@@ -1588,7 +1586,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  terminal-fragment <project> [--machine K] [--explain|--doctor|--migrate-selections]")
         print("                         preview the Windows Terminal fragment a project would emit")
         print("  profiles <project> get|apply [--machine K] [--set '<json>'] [--json]")
-        print("                         read/write this machine's terminal-profile column")
+        print("  refresh-profiles <project> [--machine K]  reconcile profiles/shortcuts (JSON)")
         print("  contracts [--project NAME] [--json]")
         print("                         validate plugin-contributed pivots/actions/cards/config")
         print("  picker [<project>]     launch the production Picker (Textual)")
@@ -1618,6 +1616,9 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_terminal_fragment(args[1:])
     if args and args[0] == "profiles":
         return _cmd_profiles(args[1:])
+    if args and args[0] == "refresh-profiles":
+        from .local_profiles import main as refresh_profiles
+        return refresh_profiles(args[1:])
     if args and args[0] == "contracts":
         return _cmd_contracts(args[1:])
     if args and args[0] == "picker":

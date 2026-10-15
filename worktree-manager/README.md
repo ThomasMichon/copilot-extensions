@@ -311,9 +311,8 @@ their identity must be classified before automated retirement.
 
 ## Manage the harness (state views)
 
-Once set up, the Worktree Manager is also the ongoing **Manager** — a read-only
-window (today) onto the real config state, read from the files the harness
-already writes:
+Once set up, the Worktree Manager provides state views read from the harness's
+own files, plus explicit local integration commands:
 
 ```bash
 uv run python -m worktree_manager projects        # harness repos (binstubs + profiles)
@@ -324,7 +323,16 @@ uv run python -m worktree_manager worktrees       # live worktree counts per pro
 uv run python -m worktree_manager worktrees <name> # one project's worktrees: state, sync tags, titles
 uv run python -m worktree_manager plugins --status  # known plugins vs. what is enabled user-global
 uv run python -m worktree_manager contracts --project <name> # contributed pivots/actions/cards/config
+uv run python -m worktree_manager refresh-profiles <name> # Windows: reconcile local profiles + shortcuts
 ```
+
+`refresh-profiles` is the narrow, JSON-producing local integration command.
+It collects saved project selections once, applies the existing fragment and
+Terminal state/settings reconciliation, and refreshes native/WSL shortcuts.
+Unchanged fragment content and shortcut properties are not rewritten. It does
+not stage a plugin payload, build a venv, or probe a remote host. A missing
+destination, invalid selection or failed shortcut operation returns a blocked
+result and nonzero exit rather than claiming synchronized profiles.
 
 The **worktrees** views are the first slice of the extracted Picker: they read
 **live** worktrees by shelling out to the `agent-worktrees` engine

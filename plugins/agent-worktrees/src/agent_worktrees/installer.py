@@ -17,7 +17,6 @@ import json
 import os
 import platform
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -613,6 +612,8 @@ def _receipt_path(project: str) -> Path:
 
 def _read_receipt(project: str) -> dict | None:
     path = _receipt_path(project)
+    if path.is_symlink():
+        raise BinstubOwnershipError(f"project command receipt is linked for {project}: {path}")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -647,9 +648,18 @@ def _same_identity(left: dict, right: dict, fields: tuple[str, ...]) -> bool:
 def _write_receipt(project: str, data: dict) -> None:
     path = _receipt_path(project)
     path.parent.mkdir(parents=True, exist_ok=True)
+    content = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    if path.is_file() and path.read_text(encoding="utf-8") == content:
+        return
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        with tmp.open("w", encoding="utf-8", newline="") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _stub_key(name: str) -> str:
@@ -754,52 +764,6 @@ def _is_project_binstub(text: str) -> bool:
     )
 
 
-def _is_legacy_project_binstub_for(text: str, project: str) -> bool:
-    """Recognize a pre-receipt generated stub for exactly one project."""
-    if "agent-worktrees project binstub" in text:
-        return False
-    if not _is_project_binstub(text):
-        return False
-    escaped = re.escape(project)
-    normalized = text.replace("\\", "/")
-    has_project = bool(
-        re.search(
-            (
-                rf"^\s*(?:(?:set\s+)[\"']?|\$env:)?"
-                rf"WORKTREE_PROJECT\s*=\s*[\"']?{escaped}(?=[\"'\s]|$)"
-            ),
-            text,
-            flags=re.IGNORECASE | re.MULTILINE,
-        )
-    )
-    legacy_launcher = ".agent-worktrees/bin/launch-session."  # marketplace-isolation: allow legacy
-    has_launcher = legacy_launcher in normalized
-    has_payload_route = (
-        "bin/payload/agent-worktrees" in normalized
-        or "python -m agent_worktrees" in normalized
-    )
-    return has_project and has_launcher and has_payload_route
-
-
-def _can_migrate_legacy_project_binstub(project: str) -> bool:
-    """Allow automatic transfer only for attributable pre-receipt bytes."""
-    existing = [
-        path
-        for path, _content in _project_binstub_specs(project)
-        if path.exists()
-    ]
-    if not existing:
-        return False
-    for path in existing:
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return False
-        if not _is_legacy_project_binstub_for(text, project):
-            return False
-    return True
-
-
 def _project_binstub_specs(
     project: str,
     *,
@@ -812,46 +776,14 @@ def _project_binstub_specs(
     generators never fight over the same files. Windows gets a ``.ps1`` (the
     primary pwsh resolution) plus a ``.cmd`` fallback; posix gets one bare stub.
     """
-    lb = local_bin()
-    payload = _payload_root(repo_dir)
-    if platform.system() == "Windows":
-        payload_cmd = payload / "bin" / "payload" / "agent-worktrees.cmd"
-        payload_ps1 = payload / "bin" / "payload" / "agent-worktrees.ps1"
-        cmd_path = str(payload_cmd).replace("%", "%%")
-        ps1_path = str(payload_ps1).replace("'", "''")
-        ps1_project = project.replace("'", "''")
-        cmd_content = "\r\n".join([
-            "@echo off",
-            "rem agent-worktrees project binstub",
-            'set "PYTHONUTF8=1"',
-            f'set "AGENT_WORKTREES_LAUNCH_ID={project}-%RANDOM%-%RANDOM%"',
-            "rem This attributable project entry point is pinned to its owning payload.",
-            f'"{cmd_path}" --project {project} %*',
-            "exit /b %ERRORLEVEL%",
-        ])
-        ps1_content = "\r\n".join([
-            "# agent-worktrees project binstub",
-            "$env:PYTHONUTF8 = '1'",
-            f"$env:AGENT_WORKTREES_LAUNCH_ID = '{ps1_project}-' + [guid]::NewGuid().ToString('N')",
-            "# This attributable project entry point is pinned to its owning payload.",
-            f"& '{ps1_path}' --project '{ps1_project}' @args",
-            "exit $LASTEXITCODE",
-        ])
-        return [
-            (lb / f"{project}.ps1", ps1_content),
-            (lb / f"{project}.cmd", cmd_content),
-        ]
-    payload_cmd = payload / "bin" / "payload" / "agent-worktrees"
-    sh_content = (
-        "#!/usr/bin/env bash\n"
-        "# agent-worktrees project binstub\n"
-        "export PYTHONUTF8=1\n"
-        f"export AGENT_WORKTREES_LAUNCH_ID={shlex.quote(project)}-$$-$RANDOM-$(date +%s)\n"
-        "# This attributable project entry point is pinned to its owning payload.\n"
-        f"exec {shlex.quote(str(payload_cmd))} --project "
-        f"{shlex.quote(project)} \"$@\"\n"
-    )
-    return [(lb / project, sh_content)]
+    from .project_command_templates import render
+
+    return [
+        (local_bin() / name, content)
+        for name, content in render(
+            project, _payload_root(repo_dir), windows=platform.system() == "Windows"
+        ).items()
+    ]
 
 
 def _project_binstub_context(
@@ -884,42 +816,19 @@ def _project_binstub_context(
     owner = _binstub_owner(repo_dir)
     project_identity = _project_identity(project, repo_dir)
     specs = _project_binstub_specs(project, repo_dir=repo_dir)
+    from . import project_command_migration as migration
+    from . import project_command_transaction as transaction
+
+    if not transfer:
+        transaction.recover(project, owner=owner, identity=project_identity)
     try:
         receipt = _read_receipt(project)
     except BinstubOwnershipError:
         if not transfer:
             raise
         receipt = None
-    existing = [(path, content) for path, content in specs if path.exists()]
-    if receipt is not None and not transfer:
-        if not _same_identity(
-            receipt.get("owner", {}),
-            owner,
-            _OWNER_IDENTITY_FIELDS,
-        ) or not _same_identity(
-            receipt.get("project", {}),
-            project_identity,
-            ("name",),
-        ):
-            raise BinstubOwnershipError(
-                f"refusing project command ownership transfer for {project}; "
-                f"existing receipt: {_receipt_path(project)}"
-            )
-        modified = [
-            path
-            for path, _content in existing
-            if _stub_hash(receipt, path) != _file_sha256(path)
-        ]
-        if modified:
-            raise BinstubContentError(
-                f"refusing to replace modified project command for {project}; "
-                f"use reconcile-binstubs --transfer {project} to replace it"
-            )
-    elif existing and not transfer:
-        raise BinstubContentError(
-            f"refusing to replace unreceipted project command for {project}; "
-            f"use reconcile-binstubs --transfer {project} to claim it"
-        )
+    if not transfer:
+        migration.validate(project, receipt, owner, project_identity)
     return owner, project_identity, specs
 
 
@@ -936,30 +845,9 @@ def _deploy_project_binstub_unlocked(
         transfer=transfer,
     )
 
-    is_windows = platform.system() == "Windows"
-    written = 0
-    hashes: dict[str, str] = {}
-    for dst, content in specs:
-        if _write_binstub_if_changed(dst, content):
-            written += 1
-        if not is_windows:
-            try:
-                dst.chmod(0o755)
-            except OSError:
-                pass
-        hashes[_stub_key(dst.name)] = _file_sha256(dst)
-    _write_receipt(
-        project,
-        {
-            "schema": _BINSTUB_RECEIPT_SCHEMA,
-            "version": _BINSTUB_RECEIPT_VERSION,
-            "owner": owner,
-            "project": project_identity,
-            "runtime": {"root": str(install_dir()), "resolver": "payload-local"},
-            "stubs": hashes,
-        },
-    )
-    return written
+    from .project_command_transaction import publish
+
+    return publish(project, owner, project_identity, specs, transfer=transfer)
 
 
 @contextmanager
@@ -1118,6 +1006,9 @@ def _reconcile_binstubs_unlocked() -> dict:
     added = 0
     migrated: list[str] = []
     preserved: list[str] = []
+    from . import project_command_migration as migration
+    from . import project_command_transaction as transaction
+
     for project in sorted(deployable):
         command_key = (
             project.casefold() if platform.system() == "Windows" else project
@@ -1125,63 +1016,44 @@ def _reconcile_binstubs_unlocked() -> dict:
         if command_key in _RESERVED_BINSTUB_NAMES:
             continue
         try:
-            added += _deploy_project_binstub(project)
-        except BinstubContentError as exc:
-            if _can_migrate_legacy_project_binstub(project):
-                added += _deploy_project_binstub(project, transfer=True)
-                migrated.append(project)
-                output.changed(
-                    f"Binstubs: migrated legacy project command for {project}"
-                )
-            else:
-                preserved.append(project)
-                output.warn(str(exc))
-        except BinstubOwnershipError as exc:
+            with _binstub_lock(project):
+                owner, identity = _binstub_owner(), _project_identity(project)
+                historical = transaction.recover(project, owner=owner, identity=identity)
+                historical = migration.validate(
+                    project, _read_receipt(project), owner, identity
+                ) or historical
+                added += _deploy_project_binstub_unlocked(project)
+                if historical:
+                    migrated.append(project)
+                    output.changed(
+                        f"Binstubs: migrated historical project command for {project}"
+                    )
+        except (BinstubOwnershipError, OSError) as exc:
             preserved.append(project)
             output.warn(str(exc))
 
     removed: list[Path] = []
-    for name, paths in _discover_project_binstubs().items():
-        if _stub_key(name) in registered_keys:
+    admitted_retirements: set[str] = set()
+    discovered = set(_discover_project_binstubs()) | migration.inventory()
+    registered_by_key = {_stub_key(name): name for name in registered}
+    for name in sorted(discovered):
+        if _stub_key(name) in registered_keys or is_reserved_project_command(name):
             continue
         with _binstub_lock(name):
             try:
-                receipt = _read_receipt(name)
-            except BinstubOwnershipError as exc:
+                removed.extend(_retire_project_binstub_unlocked(
+                    registered_by_key.get(_stub_key(name), name),
+                    registered=_stub_key(name) in registered_by_key,
+                    admitted=admitted_retirements,
+                ))
+            except (BinstubOwnershipError, OSError) as exc:
                 preserved.append(name)
                 output.warn(str(exc))
-                continue
-            if receipt is None or not _same_identity(
-                receipt.get("owner", {}),
-                _binstub_owner(),
-                _OWNER_IDENTITY_FIELDS,
-            ):
-                preserved.append(name)
-                output.warn(
-                    f"Binstubs: preserved unowned project command(s) for {name}"
-                )
-                continue
-            if any(
-                not path.exists()
-                or _stub_hash(receipt, path) != _file_sha256(path)
-                for path in paths
-            ):
-                preserved.append(name)
-                output.warn(
-                    f"Binstubs: preserved modified project command(s) for {name}"
-                )
-                continue
-            for p in paths:
-                try:
-                    p.unlink()
-                    removed.append(p)
-                except OSError:
-                    pass
-            try:
-                _receipt_path(name).unlink()
-            except OSError:
-                pass
 
+    blocked = sorted(
+        name for name in registered | admitted_retirements
+        if _stub_key(name) in {_stub_key(p) for p in preserved}
+    )
     if added:
         output.ok(f"Binstubs: deployed/refreshed {added} file(s) for "
                   f"{len(deployable)} registered project(s)")
@@ -1190,8 +1062,12 @@ def _reconcile_binstubs_unlocked() -> dict:
             "Binstubs: removed "
             f"{len(removed)} stale file(s): {', '.join(p.name for p in removed)}"
         )
-    if not added and not removed:
+    if blocked:
+        output.warn(f"Binstubs: unresolved required command(s): {', '.join(blocked)}")
+    elif not added and not removed:
         output.skipped(f"Binstubs: in sync ({len(deployable)} project(s))")
+    if preserved:
+        output.warn(f"Binstubs: preserved inventory: {', '.join(sorted(set(preserved)))}")
 
     return {
         "registered": sorted(registered),
@@ -1199,8 +1075,38 @@ def _reconcile_binstubs_unlocked() -> dict:
         "migrated": migrated,
         "removed": [str(p) for p in removed],
         "preserved": sorted(set(preserved)),
+        "blocked": blocked,
         "knowledge_only": sorted(knowledge_only_projects),
     }
+
+
+def _retire_project_binstub_unlocked(
+    project: str, *, registered: bool, admitted: set[str] | None = None
+) -> list[Path]:
+    """Retire an entire proven command, including non-detectable edited siblings."""
+    from . import project_command_migration as migration
+    from . import project_command_transaction as transaction
+
+    owner = _binstub_owner()
+    identity = _project_identity(project) if registered else None
+
+    def record_admission() -> None:
+        if admitted is not None:
+            admitted.add(project)
+
+    transaction.recover(project, owner=owner, identity=identity, on_admitted=record_admission)
+    receipt = _read_receipt(project)
+    specs = _project_binstub_specs(project)
+    paths = [p for p, _ in specs if p.exists() or p.is_symlink()]
+    if receipt is None and not paths:
+        return []
+    migration.validate(project, receipt, owner, identity)
+    record_admission()
+    transaction.publish(
+        project, owner, identity or (receipt or {}).get("project", {"name": _stub_key(project)}),
+        specs, retire=True,
+    )
+    return paths
 
 
 def reconcile_binstubs() -> dict:
@@ -1232,38 +1138,11 @@ def transfer_project_binstub(project: str) -> int:
 def remove_project_binstub(project: str) -> list[Path]:
     """Remove only a project command owned byte-for-byte by this payload."""
     with _binstub_lock(project):
-        receipt = _read_receipt(project)
-        if receipt is None or not _same_identity(
-            receipt.get("owner", {}),
-            _binstub_owner(),
-            _OWNER_IDENTITY_FIELDS,
-        ):
-            raise BinstubOwnershipError(
-                f"refusing to remove unowned project command for {project}"
-            )
-        allowed = {
-            _stub_key(path.name): path
-            for path, _ in _project_binstub_specs(project)
-        }
-        hashes = {
-            _stub_key(name): value
-            for name, value in receipt.get("stubs", {}).items()
-        }
-        paths = [allowed[name] for name in hashes if name in allowed]
-        if set(hashes) != set(allowed) or any(
-            not path.exists()
-            or hashes.get(_stub_key(path.name)) != _file_sha256(path)
-            for path in paths
-        ):
-            raise BinstubOwnershipError(
-                f"refusing to remove modified project command for {project}"
-            )
-        removed: list[Path] = []
-        for path in paths:
-            path.unlink()
-            removed.append(path)
-        _receipt_path(project).unlink()
-        return removed
+        if is_reserved_project_command(project) or not cfg._PROJECT_NAME_RE.fullmatch(project):
+            raise BinstubOwnershipError(f"refusing invalid/reserved project command: {project}")
+        return _retire_project_binstub_unlocked(
+            project, registered=project in read_projects_registry().get("projects", {})
+        )
 
 
 def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:

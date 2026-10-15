@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential proposal and implementation PRs against `dev`
 - **Created:** 2026-10-15
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Installer and Configurator](../../../visions/installer/README.md):
   resilient update convergence, historical generated-command migration and
   change-driven local integration
@@ -87,8 +87,8 @@ fulfilling that direction, not additional operator requirements.
 ## Plan
 
 ### Phase 1 - Reviewed design and coordination
-- [ ] Land this effort, design and standing intent through review before code.
-- [ ] Establish complementary edit boundaries with #6812 and retain neighboring
+- [x] Land this effort, design and standing intent through review before code.
+- [x] Establish complementary edit boundaries with #6812 and retain neighboring
   effort ownership explicitly.
 
 ### Phase 2 - Historical command migration and cheap local finishing
@@ -156,7 +156,7 @@ fulfilling that direction, not additional operator requirements.
 
 ## Proposal
 
-Pending review. Start with Phase 2 after the proposal merges. The larger
+Approved and merged in #6822. Start with Phase 2. The larger
 preparation barrier requires actual installer adapter support; it is not
 achieved by rearranging today's combined installer invocations.
 
@@ -168,3 +168,41 @@ achieved by rearranging today's combined installer invocations.
 - Claimed #6820 as the companion to #6812 and retained the existing build,
   artifact, ownership-transfer and transactional-installer campaigns.
 - Implementation has not started; the reviewed proposal is the first gate.
+
+### 2026-10-15 - Reviewed intent landed
+- #6822 merged after two current-head approving reviews with zero findings and
+  green required CI. A concurrent effort-index insertion was reconciled without
+  changing the design or taking over the neighboring campaign.
+- The worktree advanced onto the merged proposal before implementation.
+  The initial migration/update baseline passed 74 tests with two platform skips.
+- Begin historical command migration and the narrow profile finishing path;
+  the larger sequencing, release and running-state gates remain open.
+
+### 2026-10-15 - Narrow local finishing implementation
+- Added the Manager-owned JSON profile/shortcut boundary, one collected input
+  set and unchanged-output checks. The engine now performs one final local
+  repair pass against the selected payload/context rather than the inherited
+  historical launcher, and required repair failures remain update failures.
+- A native contained first-touch CLI fixture measured 1.828 seconds on its
+  first refresh and 1.688 seconds on its second; the second pass preserved
+  fragment/shortcut modification times. Both fit the fixture's explicit
+  ten-second process budget. This is not a production-host speedup claim.
+- Focused engine tests passed 51 cases; Manager profile/update tests passed
+  129 cases; install-contract validation passed for all thirteen plugins.
+  Migration integration, code review, promotion and live verification remain
+  open. No deployed runtime has been patched.
+
+### 2026-10-15 - Historical migration integrated
+- Integrated exact historical template/receipt admission and recoverable
+  publication through the existing ownership ledger. Required blockers include
+  admitted-owned obsolete retirement failures, not just registered commands;
+  unrelated foreign inventory remains protected and advisory.
+- Direct repair/reconcile exit behavior now agrees with unified finishing.
+  Independent contained integration/routing tests passed 315 cases with five
+  platform skips. A concurrent external host-setting change correctly rejected
+  an earlier run; attribution and operator-directed restoration preceded the
+  stable rerun. No containment guard was bypassed.
+- Touched-code lint, module ceilings and all thirteen install contracts pass.
+  Read-only admission accepted the recorded historical snapshot and current
+  receipts without changing deployed launchers. Code review, release and live
+  post-update verification remain required before this slice is complete.

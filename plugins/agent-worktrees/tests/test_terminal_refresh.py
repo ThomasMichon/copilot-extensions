@@ -1,211 +1,165 @@
-"""Regression guards for the Windows Terminal profile refresh resolution.
-
-dotfiles#211: `register`'s WT-profile refresh silently no-op'd because the
-installer script was resolved *only* from the deploy-manifest's `plugin_source`,
-which is empty after a marketplace install. The resolver must fall back to the
-installed-plugin dir and warn (not silently return) when nothing is found.
-
-dotfiles#563: the mirror ran the full `install.ps1 update` (~60s+) under a 30s
-subprocess timeout, so it was killed before the fragment was regenerated and the
-failure was swallowed while `mirrored: true` was still reported. The refresh now
-runs the narrow `refresh-profiles` action, passes the active project explicitly,
-and returns an accurate success bool.
-"""
+"""Profile refresh crosses the narrow Manager boundary, never an installer."""
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
-from agent_worktrees import picker_profiles_cli as m
+from agent_procutil import no_window_kwargs
+import pytest
 
-_PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-_INSTALL_PS = _PLUGIN_ROOT / "scripts" / "install.ps1"
-_INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
+from agent_worktrees import manager_launch_cli, picker_profiles_cli as m
+
+PLUGIN = Path(__file__).resolve().parents[1]
+SUCCESS = {
+    "schema": "copilot-extensions.terminal-profile-refresh",
+    "version": 1,
+    "status": "verified_current",
+}
 
 
-def _write_manifest(install_dir, plugin_source):
-    install_dir.mkdir(parents=True, exist_ok=True)
-    (install_dir / "deploy-manifest.json").write_text(
-        json.dumps({"plugin_source": plugin_source})
+@pytest.fixture
+def manager(monkeypatch):
+    selected = SimpleNamespace(command=("manager",))
+    monkeypatch.setattr(
+        manager_launch_cli, "_discover_control_plane_provider_manifests",
+        lambda: {"worktree-manager": selected},
     )
+    monkeypatch.setattr(m.cfg, "project_name", lambda: "demo")
+    return selected
 
 
-def test_empty_plugin_source_falls_back_to_installed_plugin(tmp_path, monkeypatch):
-    """Empty manifest `plugin_source` -> resolver uses the installed-plugin dir."""
-    install_dir = tmp_path / ".agent-worktrees"
-    _write_manifest(install_dir, "")  # marketplace-install leaves this empty
-
-    plugin_dir = tmp_path / "installed-plugins" / "copilot-extensions" / "agent-worktrees"
-    (plugin_dir / "scripts").mkdir(parents=True)
-    installed_script = plugin_dir / "scripts" / "install.ps1"
-    installed_script.write_text("# stub")
-
-    monkeypatch.setattr(m.cfg, "install_dir", lambda: install_dir)
-    monkeypatch.setattr(m, "discover_plugin_dir", lambda: (plugin_dir, "marketplace"))
-
-    resolved = m._resolve_terminal_install_script()
-    assert resolved == installed_script
-
-
-def test_plugin_source_preferred_when_present(tmp_path, monkeypatch):
-    """A valid `plugin_source` wins over the installed-plugin fallback."""
-    source_dir = tmp_path / "src-plugin"
-    (source_dir / "scripts").mkdir(parents=True)
-    source_script = source_dir / "scripts" / "install.ps1"
-    source_script.write_text("# source stub")
-
-    install_dir = tmp_path / ".agent-worktrees"
-    _write_manifest(install_dir, str(source_dir))
-
-    plugin_dir = tmp_path / "installed-plugins" / "agent-worktrees"
-    (plugin_dir / "scripts").mkdir(parents=True)
-    (plugin_dir / "scripts" / "install.ps1").write_text("# installed stub")
-
-    monkeypatch.setattr(m.cfg, "install_dir", lambda: install_dir)
-    monkeypatch.setattr(m, "discover_plugin_dir", lambda: (plugin_dir, "marketplace"))
-
-    resolved = m._resolve_terminal_install_script()
-    assert resolved == source_script
-
-
-def test_refresh_warns_when_no_script_found(tmp_path, monkeypatch):
-    """Nothing resolvable -> warn, do NOT silently return (and do NOT spawn)."""
-    install_dir = tmp_path / ".agent-worktrees"  # no manifest at all
-
-    monkeypatch.setattr(m.cfg, "install_dir", lambda: install_dir)
-    monkeypatch.setattr(m, "discover_plugin_dir", lambda: (None, ""))
-    # Neutralize the module-root fallback so nothing resolves.
-    monkeypatch.setattr(m, "_resolve_terminal_install_script", lambda: None)
-
-    warnings: list[str] = []
-    monkeypatch.setattr(m.output, "warn", lambda msg: warnings.append(msg))
-
-    def _fail_run(*a, **k):  # pragma: no cover - must never be reached
-        raise AssertionError("subprocess.run must not run without a script")
-
-    monkeypatch.setattr(m.subprocess, "run", _fail_run)
-
+def test_missing_manager_is_explicit(monkeypatch, capsys):
+    monkeypatch.setattr(
+        manager_launch_cli, "_discover_control_plane_provider_manifests", lambda: {},
+    )
     assert m._refresh_terminal_profiles() is False
-    assert warnings, "a missing installer must surface a warning, not a silent no-op"
-    assert "Windows Terminal profiles" in warnings[0]
+    assert "Worktree Manager is unavailable" in capsys.readouterr().out
 
 
-class _FakeProc:
-    def __init__(self, returncode):
-        self.returncode = returncode
-        self.stdout = ""
-        self.stderr = ""
+def test_refresh_uses_one_narrow_call_without_installer(manager, monkeypatch):
+    calls = []
 
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(SUCCESS), stderr="")
 
-def _stub_script(tmp_path, monkeypatch):
-    """Point the resolver at a fake install.ps1 so the refresh reaches subprocess."""
-    script = tmp_path / "scripts" / "install.ps1"
-    script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text("# stub")
-    monkeypatch.setattr(m, "_resolve_terminal_install_script", lambda: script)
-    return script
-
-
-def test_refresh_uses_narrow_action_and_passes_project(tmp_path, monkeypatch):
-    """dotfiles#563: the mirror runs the fast `refresh-profiles` action (not the
-    full `update`) and passes the active project explicitly; rc 0 -> True."""
-    script = _stub_script(tmp_path, monkeypatch)
-    monkeypatch.setattr(m.cfg, "project_name", lambda: "dotfiles")
-
-    captured = {}
-
-    def _run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["timeout"] = kwargs.get("timeout")
-        return _FakeProc(0)
-
-    monkeypatch.setattr(m.subprocess, "run", _run)
-    monkeypatch.setattr(m.output, "ok", lambda *_a, **_k: None)
-
+    monkeypatch.setattr(m.subprocess, "run", run)
     assert m._refresh_terminal_profiles() is True
-    cmd = captured["cmd"]
-    assert str(script) in cmd
-    assert "refresh-profiles" in cmd
-    assert "update" not in cmd  # must NOT run the heavyweight update path
-    assert cmd[cmd.index("-ProjectName") + 1] == "dotfiles"
-    # Generous timeout, well above the ~60s the full update takes and the old
-    # 30s cap that killed the mirror mid-pip.
-    assert captured["timeout"] and captured["timeout"] >= 120
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == ["manager", "refresh-profiles", "demo"]
+    assert not any("install." in value or value == "--version" for value in argv)
+    assert kwargs["encoding"] == "utf-8"
+    assert kwargs["errors"] == "replace"
+    assert kwargs["timeout"] == 60
 
 
-def test_refresh_decodes_output_defensively(tmp_path, monkeypatch):
-    """The installer's captured output is not guaranteed UTF-8 (a redirected
-    PowerShell pipe honors the console's OEM/ANSI codepage, and child tools can
-    leak raw bytes). The capture must decode with ``errors="replace"`` so a
-    stray byte can't crash subprocess's reader thread with UnicodeDecodeError --
-    the regression the user hit (0xfb) even though the refresh itself succeeded.
-    """
-    _stub_script(tmp_path, monkeypatch)
-    monkeypatch.setattr(m.cfg, "project_name", lambda: "dotfiles")
+@pytest.mark.parametrize("response", [
+    "old manager help text", "{}", "[]",
+    json.dumps({**SUCCESS, "status": "blocked"}),
+    json.dumps({**SUCCESS, "version": 2}),
+])
+def test_zero_exit_without_verified_protocol_is_failure(manager, monkeypatch, response):
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=response, stderr=""),
+    )
+    assert m._refresh_terminal_profiles() is False
 
-    captured = {}
 
-    def _run(cmd, **kwargs):
-        captured.update(kwargs)
-        return _FakeProc(0)
+def test_nonzero_exit_is_failure_even_with_success_body(manager, monkeypatch):
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(returncode=1, stdout=json.dumps(SUCCESS), stderr=""),
+    )
+    assert m._refresh_terminal_profiles() is False
 
-    monkeypatch.setattr(m.subprocess, "run", _run)
-    monkeypatch.setattr(m.output, "ok", lambda *_a, **_k: None)
 
+@pytest.mark.parametrize("error", [
+    OSError("cannot launch manager"), subprocess.TimeoutExpired("manager", 60),
+])
+def test_spawn_and_timeout_errors_are_visible(manager, monkeypatch, capsys, error):
+    def run(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    assert m._refresh_terminal_profiles() is False
+    assert "Could not refresh Windows Terminal profiles" in capsys.readouterr().out
+
+
+def test_real_profile_process_protocol(manager):
+    manager.command = (
+        sys.executable, "-c",
+        "import json,sys; assert sys.argv[1:] == ['refresh-profiles','demo']; "
+        f"print(json.dumps({SUCCESS!r}))",
+    )
     assert m._refresh_terminal_profiles() is True
-    # Robust decode: never strict text=True (which raises on a non-UTF-8 byte).
-    assert captured.get("errors") == "replace"
-    assert captured.get("encoding") == "utf-8"
-    assert captured.get("text") is not True
 
 
-def test_refresh_returns_false_on_nonzero_exit(tmp_path, monkeypatch):
-    """A non-zero installer exit -> warn + return False (no misreported success)."""
-    _stub_script(tmp_path, monkeypatch)
-    monkeypatch.setattr(m.cfg, "project_name", lambda: "dotfiles")
-    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: _FakeProc(1))
-
-    warnings: list[str] = []
-    monkeypatch.setattr(m.output, "warn", lambda msg: warnings.append(msg))
-
-    assert m._refresh_terminal_profiles() is False
-    assert warnings and "Windows Terminal profiles" in warnings[0]
-
-
-def test_refresh_returns_false_on_timeout(tmp_path, monkeypatch):
-    """A subprocess timeout is caught and surfaced as a failed mirror, not True."""
-    _stub_script(tmp_path, monkeypatch)
-    monkeypatch.setattr(m.cfg, "project_name", lambda: "dotfiles")
-
-    def _timeout(*a, **k):
-        raise m.subprocess.TimeoutExpired(cmd="pwsh", timeout=180)
-
-    monkeypatch.setattr(m.subprocess, "run", _timeout)
-    warnings: list[str] = []
-    monkeypatch.setattr(m.output, "warn", lambda msg: warnings.append(msg))
-
-    assert m._refresh_terminal_profiles() is False
-    assert warnings and "Windows Terminal profiles" in warnings[0]
-
-
-def test_installers_delegate_registry_write_to_python():
-    """The projects.yaml write has ONE owner -- the Python
-    `register-project-entry` subcommand -- and both installers call it rather
-    than reimplementing the registry logic. The Windows terminal fragment is
-    likewise generated by the single Python source of truth (the PowerShell
-    ``Build-TerminalFragment`` reimplementation is retired), so anchor
-    resolution from repos.yaml lives in Python, not the installer."""
-    ps = _INSTALL_PS.read_text(encoding="utf-8")
-    sh = _INSTALL_SH.read_text(encoding="utf-8")
-
-    # Both installers delegate the write to the single Python owner.
-    assert "register-project-entry" in ps
-    assert "register-project-entry" in sh
-    # The reimplemented PS writer is gone (no parallel YAML-in-PowerShell).
+def test_installers_keep_single_registry_and_fragment_owners():
+    ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    assert "register-project-entry" in ps and "register-project-entry" in sh
     assert "function Write-ProjectsRegistry" not in ps
-    # Neither installer persists identity/location facts to projects.yaml.
-    assert "$entry['anchor']" not in ps
-    assert "entry['anchor']" not in sh
-    # The PowerShell fragment generator is retired; the script owns its offline
-    # fallback path and no longer carries a parallel YAML writer.
+    assert "$entry['anchor']" not in ps and "entry['anchor']" not in sh
     assert "function Build-TerminalFragment" not in ps
+
+
+def test_native_installer_defers_profile_side_effects_to_update():
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell is unavailable")
+    source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    function = source.split("function Deploy-Shortcuts {", 1)[1].split(
+        "\nfunction Deploy-CopilotPlugin {", 1,
+    )[0]
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command",
+         "$ErrorActionPreference='Stop'; "
+         "function Deploy-TerminalFragmentViaWorktreeManager { throw 'unexpected profile deploy' }; "
+         "function Deploy-Shortcuts {" + function + "\nDeploy-Shortcuts -Machine example"],
+        env={**os.environ, "AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION": "1"},
+        capture_output=True, encoding="utf-8", errors="replace", timeout=10,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(("body", "exit_code", "expected"), [
+    (json.dumps(SUCCESS), 0, True),
+    (json.dumps({**SUCCESS, "status": "blocked", "error": "fixture denial"}), 1, False),
+    ("old manager help", 0, False),
+])
+def test_native_installer_compatibility_uses_verified_manager_result(body, exit_code, expected):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell is unavailable")
+    source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    function = source.split("function Deploy-Shortcuts {", 1)[1].split(
+        "\nfunction Deploy-CopilotPlugin {", 1,
+    )[0]
+    script = (
+        "$ErrorActionPreference='Stop'; $ProjectName='demo'; "
+        "function Write-ServiceWarn { param($Message) }; "
+        "function Write-ServiceOk { param($Message) }; "
+        "function Get-UsableWorktreeManagerBin { 'Invoke-FixtureManager' }; "
+        "function Invoke-FixtureManager { "
+        "if (($args -join '|') -ne 'refresh-profiles|demo|--machine|example') "
+        "{ throw 'wrong Manager arguments' }; "
+        f"$global:LASTEXITCODE={exit_code}; '{body.replace(chr(39), chr(39) * 2)}' "
+        "}; function Deploy-Shortcuts {" + function
+        + "\n$result = Deploy-Shortcuts -Machine example; "
+        + f"if ($result -ne ${str(expected).lower()}) {{ throw 'wrong refresh outcome' }}"
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command", script],
+        env={**os.environ, "AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION": ""},
+        capture_output=True, encoding="utf-8", errors="replace", timeout=10,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
