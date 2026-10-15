@@ -70,6 +70,10 @@ MARKETPLACE_OVERLAYS_DIR = CANONICAL_INREPO_CONFIG_DIR / "marketplaces"
 # ``~/.agent-worktrees/config.yaml`` (the shared runtime root).
 GLOBAL_CONFIG_FILENAME = "config.yaml"
 
+class ProjectNotRegisteredError(ValueError):
+    """No repository registration resolved for the requested local project."""
+
+
 @dataclass(frozen=True)
 class CopilotProfile:
     """A named Copilot backend configuration."""
@@ -1049,7 +1053,7 @@ def _load_config_uncached(
         repos[name] = _build_repo_config(merged, anchor, str(worktree_root))
 
     if not repos:
-        raise ValueError(
+        raise ProjectNotRegisteredError(
             f"No repo could be resolved for project {repo_name or '?'!r}.\n"
             f"Checked machine-local config ({path}) and the repos registry "
             f"({registry_paths.registry_path('repos.yaml', legacy_root=legacy_install_dir())}).\n"

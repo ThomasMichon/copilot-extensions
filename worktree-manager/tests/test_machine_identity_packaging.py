@@ -22,14 +22,26 @@ except ModuleNotFoundError:
 
 @pytest.mark.parametrize("consumer", ["agent-machines", "agent-worktrees", "worktree-manager"])
 def test_staged_identity_dependency_installs_without_checkout_paths(tmp_path, consumer):
+    import yaml
     repo = Path(__file__).resolve().parents[2]
     source = repo / "worktree-manager" if consumer == "worktree-manager" else repo / "plugins" / consumer
     payload = tmp_path / "payload"
+    external_libs = {
+        lib for _name, _path, lib, _editable in materializer.find_uv_editable_refs(source)
+    }
+    ignore_cache = shutil.ignore_patterns(
+        ".venv", ".test-venvs", "__pycache__", "*.pyc", "*.egg-info", ".pytest_cache",
+    )
+
+    def ignore(directory, names):
+        excluded = set(ignore_cache(directory, names))
+        if Path(directory) == source / "libs":
+            excluded.update(external_libs)
+        return excluded
+
     shutil.copytree(
         source, payload,
-        ignore=shutil.ignore_patterns(
-            ".venv", ".test-venvs", "__pycache__", "*.pyc", "*.egg-info", ".pytest_cache",
-        ),
+        ignore=ignore,
     )
     result = materializer.materialize_uv_editable_ref_into(
         source_consumer_dir=source, dest_consumer_dir=payload,
@@ -56,6 +68,8 @@ def test_staged_identity_dependency_installs_without_checkout_paths(tmp_path, co
     wheels = tmp_path / "wheels"
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
+    environment["UV_OFFLINE"] = "1"
+    environment["UV_CACHE_DIR"] = str(tmp_path / "empty-cache")
 
     def run(command):
         completed = subprocess.run(
@@ -78,14 +92,26 @@ def test_staged_identity_dependency_installs_without_checkout_paths(tmp_path, co
     runtime = tmp_path / "runtime"
     run([uv, "venv", "--python", sys.executable, str(runtime)])
     python = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    run([uv, "pip", "install", "--python", str(python), "pyyaml>=6.0.3"])
     run([uv, "pip", "install", "--python", str(python), "--no-index", "--no-deps", str(remote_wheel)])
     run([uv, "pip", "install", "--python", str(python), "--no-index", "--no-deps", str(wheel)])
-    result = json.loads(run([
-        str(python), "-I", "-c",
-        "import json, machine_transport; "
-        "print(json.dumps({'origin': machine_transport.__file__, "
-        "'guest': machine_transport.resolve_identity('example-host', guest=True).canonical}))",
-    ]))
+    script = """
+import importlib.util, json, pathlib, sys
+# Use the runner's prepared third-party YAML, never an index or shared-code path.
+yaml_file = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location(
+    "yaml", yaml_file, submodule_search_locations=[str(yaml_file.parent)],
+)
+module = importlib.util.module_from_spec(spec)
+sys.modules["yaml"] = module
+spec.loader.exec_module(module)
+import machine_transport, remote_login_shell
+print(json.dumps({
+    "origin": machine_transport.__file__,
+    "remote_origin": remote_login_shell.__file__,
+    "guest": machine_transport.resolve_identity("example-host", guest=True).canonical,
+}))
+"""
+    result = json.loads(run([str(python), "-I", "-c", script, str(Path(yaml.__file__))]))
     assert Path(result["origin"]).resolve().is_relative_to(runtime.resolve())
+    assert Path(result["remote_origin"]).resolve().is_relative_to(runtime.resolve())
     assert result["guest"] == "example-host-wsl"

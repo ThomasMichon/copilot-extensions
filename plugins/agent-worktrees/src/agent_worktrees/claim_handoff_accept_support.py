@@ -52,13 +52,9 @@ def require_handoff_record(record: tracking.WorktreeRecord, error_type: type[Exc
                 if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config) is None:
                     raise ExecutionSpaceError("handoff record has no verified local legacy WSL authority")
             else:
-                checkout = Path(record.worktree_path)
-                namespace = Path(config.repos[record.repo].worktree_root).expanduser()
                 if (
-                    record.platform != "wsl" or not namespace.is_absolute()
-                    or not checkout.is_absolute() or checkout.is_symlink()
-                    or checkout != namespace / record.worktree_id
-                    or checkout.resolve() != namespace.resolve() / record.worktree_id
+                    record.platform != "wsl"
+                    or not legacy_wsl_record_locality.record_namespace_matches(record, config)
                 ):
                     raise ExecutionSpaceError("handoff record has unproven WSL platform or namespace")
     except ExecutionSpaceError as exc:
@@ -70,7 +66,14 @@ def local_record_ref(ref: tracking.ClaimRef, *, machine: str) -> bool:
     if not ref.is_qualified:
         return False
     try:
-        config = cfg.load_project_config(ref.project, include_control_plane_related_pr=False)
+        try:
+            config = cfg.load_project_config(ref.project, include_control_plane_related_pr=False)
+        except cfg.ProjectNotRegisteredError:
+            project = cfg.project_dir(ref.project)
+            evidence = [project / "config.yaml", project / "worktrees" / f"{ref.worktree_id}.yaml"]
+            if any(path.exists() or path.is_symlink() for path in evidence):
+                raise
+            return False
         if not require_owner_identity(machine, config):
             return False
         legacy = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config)

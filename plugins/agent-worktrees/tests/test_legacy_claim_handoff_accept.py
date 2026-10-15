@@ -12,6 +12,8 @@ import yaml
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees import claim_handoff_accept_support, claim_handoffs, config as cfg, tracking
+from agent_worktrees import claimant, legacy_wsl_record_locality
+from agent_worktrees.tracking_claims import ANCHOR_ID, load_or_create_anchor_record
 from agent_worktrees.lease_config import LeaseSettings
 from agent_worktrees.lease_store import GitLeaseStore
 
@@ -82,6 +84,101 @@ def _offer(graph: SimpleNamespace) -> claim_handoffs.ClaimBundle:
         [claim.ref for claim in tracking.load_record(graph.paths["source"]).resources],
         machine=MACHINE, id_factory=lambda: "legacy-bundle",
     )[0]
+
+
+def _anchor_graph(graph: SimpleNamespace, *, qualified: bool) -> None:
+    claims = tracking.load_record(graph.paths["source"]).resources
+    original = tracking.load_record(graph.paths["source"])
+    original.resources = []
+    tracking.save_record(original, graph.paths["source"])
+    for role in ("source", "consumer"):
+        project = f"{role}-project"
+        record = load_or_create_anchor_record(
+            str(graph.anchors[role]), project,
+            MACHINE if qualified else "example-host", "wsl", cfg.project_dir(project) / "worktrees",
+        )
+        if role == "source":
+            record.resources = claims
+        tracking.save_record(record, record.yaml_path)
+        graph.paths[role] = record.yaml_path
+    graph.source = f"{MACHINE if qualified else 'native-alias'}/source-project/{ANCHOR_ID}"
+    graph.consumer = f"{MACHINE if qualified else 'example-host'}/consumer-project/{ANCHOR_ID}"
+    child = tracking.load_record(graph.paths["child"])
+    child.owner_ref = graph.source
+    tracking.save_record(child, graph.paths["child"])
+
+
+@pytest.mark.parametrize("qualified", [False, True])
+def test_anchor_actors_use_receiving_anchor_for_full_offer_accept(graph, monkeypatch, qualified):
+    _anchor_graph(graph, qualified=qualified)
+    monkeypatch.setattr(claimant, "_owner_looks_dead", lambda _record: False)
+    ref = tracking.parse_claim_ref(graph.source)
+    assert claimant.local_claimant_alive(graph.source) is True
+    assert claim_handoff_accept_support.local_record_ref(ref, machine=MACHINE)
+    bundle = _offer(graph)
+    result = claim_handoffs.accept(
+        bundle.bundle_id, actor=f"{MACHINE}/consumer-project/{ANCHOR_ID}", machine=MACHINE,
+    )
+    assert result.state == "accepted"
+    assert tracking.load_record(graph.paths["source"]).resources == []
+    assert tracking.load_record(graph.paths["child"]).owner_ref == graph.consumer
+    for role in ("source", "consumer"):
+        record = tracking.load_record(graph.paths[role])
+        assert record.worktree_path == str(graph.anchors[role])
+        assert record.machine == (MACHINE if qualified else "example-host")
+
+
+@pytest.mark.parametrize("qualified", [False, True])
+@pytest.mark.parametrize("violation", ["relative", "ordinary-root", "symlink", "platform"])
+def test_anchor_actor_still_requires_absolute_anchor_platform_and_no_redirect(
+    graph, qualified, violation,
+):
+    _anchor_graph(graph, qualified=qualified)
+    path = graph.paths["source"]
+    record = tracking.load_record(path)
+    if violation == "relative":
+        record = replace(record, worktree_path="relative-anchor")
+    elif violation == "ordinary-root":
+        record = replace(record, worktree_path=str(graph.root / "trees" / "source-project" / ANCHOR_ID))
+    elif violation == "platform":
+        record = replace(record, platform="windows")
+    else:
+        redirect = graph.root / "redirect-anchor"
+        try:
+            redirect.symlink_to(graph.anchors["source"], target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"host cannot create the contained symlink fixture: {exc}")
+        config_path = cfg.project_dir("source-project") / "config.yaml"
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        data["repos"]["source-project"]["anchor"] = str(redirect)
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        record = replace(record, worktree_path=str(redirect))
+    tracking.save_record(record, path)
+    before = {path: path.read_bytes() for path in graph.paths.values()}
+    with pytest.raises(claim_handoffs.ClaimHandoffError):
+        _offer(graph)
+    assert all(path.read_bytes() == content for path, content in before.items())
+
+
+def test_handoff_equivalence_uses_named_source_alias_not_ambient_consumer_topology(graph):
+    for role in ("source", "consumer", "child"):
+        topology = graph.anchors[role] / "machines.yaml"
+        data = yaml.safe_load(topology.read_text(encoding="utf-8"))
+        data["machines"]["example-host"]["alias"] = f"{role}-alias"
+        topology.write_text(yaml.safe_dump(data), encoding="utf-8")
+    graph.source = "source-alias/source-project/wt-source"
+    graph.consumer = "consumer-alias/consumer-project/wt-consumer"
+    old_owner = "example-host/source-project/wt-source"
+    assert legacy_wsl_record_locality.claim_refs_equivalent(
+        tracking.parse_claim_ref(old_owner), tracking.parse_claim_ref(graph.source),
+    )
+    bundle = _offer(graph)
+    result = claim_handoffs.accept(
+        bundle.bundle_id, actor=f"{MACHINE}/consumer-project/wt-consumer", machine=MACHINE,
+    )
+    assert result.state == "accepted"
+    assert tracking.load_record(graph.paths["source"]).resources == []
+    assert tracking.load_record(graph.paths["child"]).owner_ref == graph.consumer
 
 
 @pytest.mark.parametrize("labels", ["both-legacy", "qualified-consumer", "qualified-source"])

@@ -44,10 +44,32 @@ from . import config as cfg
 from .execution_spaces import ExecutionSpaceError
 
 if TYPE_CHECKING:
+    from .tracking import WorktreeRecord
     from .tracking_claims import ClaimRef
 
 _LOG = logging.getLogger(__name__)
 _RESOLUTION_ERRORS = (OSError, ValueError, KeyError, TypeError, yaml.YAMLError, ExecutionSpaceError)
+
+
+def record_namespace_matches(record: "WorktreeRecord", config: cfg.Config) -> bool:
+    """Check checkout identity against the named receiving repository."""
+    from .tracking_claims import ANCHOR_ID
+
+    repo = config.repos.get(record.repo)
+    if repo is None:
+        return False
+    checkout = Path(record.worktree_path)
+    anchor = record.worktree_id == ANCHOR_ID
+    root = Path(repo.anchor if anchor else repo.worktree_root).expanduser()
+    if not root.is_absolute() or not checkout.is_absolute():
+        return False
+    expected = root if anchor else root / record.worktree_id
+    resolved_expected = root.resolve() if anchor else root.resolve() / record.worktree_id
+    return (
+        not checkout.is_symlink()
+        and (not checkout.exists() or checkout.is_dir())
+        and checkout == expected and checkout.resolve() == resolved_expected
+    )
 
 
 def _native_counterpart_entry(
@@ -149,19 +171,7 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
             return None
         if not machine_label_is_legacy_local(record.machine or "", receiving_config):
             return None
-        checkout = Path(record.worktree_path)
-        if not checkout.is_absolute() or checkout.is_symlink():
-            return None
-        if checkout.exists() and not checkout.is_dir():
-            return None
-        repo_config = receiving_config.repos.get(ref.project)
-        if repo_config is None:
-            return None
-        namespace = Path(repo_config.worktree_root).expanduser()
-        if not namespace.is_absolute():
-            return None
-        expected = namespace / ref.worktree_id
-        if checkout != expected or checkout.resolve() != namespace.resolve() / ref.worktree_id:
+        if not record_namespace_matches(record, receiving_config):
             return None
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot establish legacy WSL record locality: %s", exc)
@@ -178,10 +188,12 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
 
 
 def legacy_wsl_owner_ref_is_local(ref: "ClaimRef") -> bool:
-    """Zero-config-arg convenience wrapper: loads the live config itself and
+    """Zero-config-arg convenience wrapper: loads the referenced project's config and
     swallows any resolution failure (fail-closed to "not local legacy")."""
+    if ref is None or not ref.is_qualified:
+        return False
     try:
-        config = cfg.load_config()
+        config = cfg.load_project_config(ref.project, include_control_plane_related_pr=False)
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot load legacy WSL ownership configuration: %s", exc)
         return False
@@ -195,7 +207,7 @@ def claim_refs_equivalent(
     record, directly (identical machine/project/worktree_id) or via one
     side's record-scoped legacy WSL spelling for the other's live identity.
 
-    Never raises; loads the live config itself (fail-closed to ``False`` if
+    Never raises; loads the referenced project's config (fail-closed to ``False`` if
     unavailable). Used where an offer/accept flow must recognize a bundle
     actor recorded under a pre-split legacy label as the same worktree the
     current, newly-qualified actor now names.
@@ -209,8 +221,8 @@ def claim_refs_equivalent(
     if left.project != right.project or left.worktree_id != right.worktree_id:
         return False
     try:
-        if config is None:
-            config = cfg.load_config()
+        if config is None or config.repo_name != left.project:
+            config = cfg.load_project_config(left.project, include_control_plane_related_pr=False)
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot establish legacy WSL claim equivalence: %s", exc)
         return False

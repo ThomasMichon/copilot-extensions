@@ -496,6 +496,10 @@ offer/accept routing requires each complete qualified reference to resolve under
 its receiving project's record, platform and namespace authority; host-label
 similarity alone never authorizes a transfer. Stored bundle/claim references and
 machine/platform fields are preserved while the accepted ownership changes.
+Anchor actors are checked against their receiving repository's configured anchor,
+not a synthetic worktree-root child. Equivalence uses the referenced project's
+topology; an unregistered foreign source uses the fenced remote leg, while invalid
+local authority still refuses the transfer.
 
 ## 5. What's cleanable, and what's never reaped
 
