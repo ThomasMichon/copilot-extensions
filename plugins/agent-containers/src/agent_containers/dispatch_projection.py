@@ -418,27 +418,46 @@ def environment(binding: dict) -> dict[str, str]:
     }
 
 
+def _worker_executable(
+    container_id: str, user: str, inspected: dict, *, kind: str, deadline: float,
+    executables: dict | None = None,
+) -> tuple[str, str]:
+    if executables is None:
+        return resolve_executable(container_id, user, inspected, kind=kind, deadline=deadline)
+    snapshot = json.dumps(
+        [inspected.get("Id"), (inspected.get("State") or {}).get("StartedAt"),
+         inspected.get("Config"), inspected.get("HostConfig"), inspected.get("Mounts")],
+        sort_keys=True,
+    )
+    key = container_id, user, kind, snapshot
+    if key not in executables:
+        executables[key] = resolve_executable(
+            container_id, user, inspected, kind=kind, deadline=deadline,
+        )
+    return executables[key]
+
+
 def build_spawn_command(
     target, binding: dict, acp_command: str, *, worker_admission: tuple[int, str],
+    executables: dict | None = None,
 ) -> list[str]:
     from . import lifecycle
 
     inspected = lifecycle.inspect_container(target.container_id)
     if inspected.get("Id") != binding["container_id"]:
         raise RuntimeError("Container physical identity changed before task launch")
-    bash, home = resolve_executable(
+    bash, home = _worker_executable(
         target.container_id, target.user, inspected, kind="bash",
-        deadline=time.monotonic() + 30,
+        deadline=time.monotonic() + 30, executables=executables,
     )
-    flock, _ = resolve_executable(
+    flock, _ = _worker_executable(
         target.container_id, target.user, inspected, kind="flock",
-        deadline=time.monotonic() + 30,
+        deadline=time.monotonic() + 30, executables=executables,
     )
-    node, _ = resolve_executable(
+    node, _ = _worker_executable(
         target.container_id, target.user, inspected, kind="node",
-        deadline=time.monotonic() + 30,
+        deadline=time.monotonic() + 30, executables=executables,
     )
-    _initialize_worker_lock(target, inspected)
     prefix = sanitized_exec_prefix(target.container_id, target.user, home)
     projected = environment(binding)
     if target.fleet.native_inference is not None:
@@ -457,14 +476,16 @@ def build_spawn_command(
     ]
 
 
-def _initialize_worker_lock(target, inspected: dict) -> None:
-    _initialize_lock(target.container_id, inspected, "worker.lock")
+def _initialize_worker_lock(target, inspected: dict, *, executables: dict | None = None) -> None:
+    _initialize_lock(target.container_id, inspected, "worker.lock", executables=executables)
 
 
-def _initialize_lock(container_id: str, inspected: dict, name: str) -> None:
-    node, home = resolve_executable(
+def _initialize_lock(
+    container_id: str, inspected: dict, name: str, *, executables: dict | None = None,
+) -> None:
+    node, home = _worker_executable(
         container_id, "0", inspected, kind="node",
-        deadline=time.monotonic() + 30,
+        deadline=time.monotonic() + 30, executables=executables,
     )
     try:
         result = subprocess.run(
@@ -537,12 +558,23 @@ def _reserve_worker_admission(
 
 def _publish_worker_admission(
     container_id: str, inspected: dict, admission: tuple[int, str],
+    *, executables: dict | None = None,
 ) -> int:
-    _initialize_worker_lock(SimpleNamespace(container_id=container_id), inspected)
+    if executables is None:
+        executables = {}
+    _initialize_worker_lock(
+        SimpleNamespace(container_id=container_id), inspected, executables=executables,
+    )
     deadline = time.monotonic() + 30
-    bash, home = resolve_executable(container_id, "0", inspected, kind="bash", deadline=deadline)
-    flock, _ = resolve_executable(container_id, "0", inspected, kind="flock", deadline=deadline)
-    node, _ = resolve_executable(container_id, "0", inspected, kind="node", deadline=deadline)
+    bash, home = _worker_executable(
+        container_id, "0", inspected, kind="bash", deadline=deadline, executables=executables,
+    )
+    flock, _ = _worker_executable(
+        container_id, "0", inspected, kind="flock", deadline=deadline, executables=executables,
+    )
+    node, _ = _worker_executable(
+        container_id, "0", inspected, kind="node", deadline=deadline, executables=executables,
+    )
     script = (
         f"exec 9<{shlex.quote(WORKER_LOCK)} || exit 1; "
         f"{shlex.quote(flock)} --nonblock --conflict-exit-code 75 9 || exit $?; "
@@ -640,13 +672,16 @@ def _launch_task(args, run_stdio) -> int:
         worker_admission = _reserve_worker_admission(
             args.name, expected_id, inspected, admission_token=admission.token,
         )
-        if _publish_worker_admission(expected_id, inspected, worker_admission) != 0:
+        executables = {}
+        if _publish_worker_admission(
+            expected_id, inspected, worker_admission, executables=executables,
+        ) != 0:
             raise ProviderAdmissionError("Restricted worker guest admission is busy or superseded")
         command = build_spawn_command(
             target, binding,
             _append_copilot_args(
                 target.acp_command, resolve_extra_copilot_args(getattr(args, "copilot_args", None)),
-            ), worker_admission=worker_admission,
+            ), worker_admission=worker_admission, executables=executables,
         )
         env = os.environ.copy()
         if args.stdio:

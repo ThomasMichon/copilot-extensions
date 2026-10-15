@@ -54,8 +54,8 @@ def target(monkeypatch, tmp_path):
         projection, "resolve_executable",
         lambda *args, kind, **kwargs: (f"/usr/bin/{kind}", "/home/worker"),
     )
-    monkeypatch.setattr(projection, "_initialize_worker_lock", lambda *args: None)
-    monkeypatch.setattr(projection, "_initialize_lock", lambda *args: None)
+    monkeypatch.setattr(projection, "_initialize_worker_lock", lambda *args, **kwargs: None)
+    monkeypatch.setattr(projection, "_initialize_lock", lambda *args, **kwargs: None)
     return target
 
 
@@ -355,6 +355,43 @@ def test_worker_admission_generation_advances_before_guest_publication(target):
         )
         assert reopened[0] == 3 and reopened[1] != first[1]
     assert projection._read(PHYSICAL_ID)["task_id"] == binding["task_id"]
+
+
+def test_executable_reuse_is_scoped_to_user_kind_and_immutable_instance_snapshot(target, monkeypatch):
+    import copy
+    calls = []
+    monkeypatch.setattr(
+        projection, "resolve_executable",
+        lambda container, user, inspected, **kwargs: (
+            calls.append((container, user, kwargs["kind"])) or ("/usr/bin/node", "/home/worker")
+        ),
+    )
+    inspected = lifecycle.inspect_container(PHYSICAL_ID)
+    inspected.update(
+        State={"StartedAt": "generation-1"}, HostConfig={"ReadonlyRootfs": True}, Mounts=[],
+    )
+    cache = {}
+    def lookup(snapshot=inspected, user="0", kind="node", memo=cache):
+        return projection._worker_executable(
+            PHYSICAL_ID, user, snapshot, kind=kind, deadline=time.monotonic() + 30,
+            executables=memo,
+        )
+    assert lookup() == lookup()
+    assert len(calls) == 1
+    lookup(user="node")
+    lookup(kind="bash")
+    lookup(memo={})
+    for field, value in (
+        ("State", {"StartedAt": "generation-2"}),
+        ("Config", {"Labels": {"different": "configuration"}}),
+        ("HostConfig", {"ReadonlyRootfs": False}),
+        ("Mounts", [{"Destination": "/usr/bin"}]),
+        ("Id", OTHER_ID),
+    ):
+        changed = copy.deepcopy(inspected)
+        changed[field] = value
+        lookup(changed)
+    assert len(calls) == 9
 
 
 @pytest.mark.parametrize("generation", [-1, True, "1", 2**53])

@@ -186,15 +186,23 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
         with pytest.raises(RuntimeError, match="cannot be rebound"):
             projection.project(name, physical_id, {**request, "owner_session_id": "native-other"})
         target = resolver.resolve_live_exec_target(name, dispatch_binding_id=binding["binding_id"])
-        command = projection.build_spawn_command(
-            target, binding,
-            "/usr/local/bin/node -e 'if(process.env.AGENT_DISPATCH_TASK_WORKER_ID!==\"worker-e2e\""
-            "||process.env.GH_TOKEN||process.env.AGENT_DISPATCH_CONTROL_TOKEN)process.exit(1)'",
-        )
-        worker = subprocess.run(
-            command, capture_output=True, text=True, timeout=30,
-            creationflags=no_window_flags(),
-        )
+        with lease.session_admission(
+            name, dispatch_container_id=physical_id, dispatch_binding_id=binding["binding_id"],
+        ) as admission:
+            worker_admission = projection._reserve_worker_admission(
+                name, physical_id, inspected, admission_token=admission.token,
+            )
+            assert projection._publish_worker_admission(physical_id, inspected, worker_admission) == 0
+            command = projection.build_spawn_command(
+                target, binding,
+                "/usr/local/bin/node -e 'if(process.env.AGENT_DISPATCH_TASK_WORKER_ID!==\"worker-e2e\""
+                "||process.env.GH_TOKEN||process.env.AGENT_DISPATCH_CONTROL_TOKEN)process.exit(1)'",
+                worker_admission=worker_admission,
+            )
+            worker = subprocess.run(
+                command, capture_output=True, text=True, timeout=30,
+                creationflags=no_window_flags(),
+            )
         assert worker.returncode == 0, worker.stderr
         config_path = tmp_path / "containers.yaml"
         cli_fleet = {key: value for key, value in asdict(fleet).items() if value is not None}

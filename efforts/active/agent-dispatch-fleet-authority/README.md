@@ -326,6 +326,25 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-15 -- Complete provider consumer acceptance remains runnable
+- Review found the original opt-in Docker scenario still invoking the old
+  builder signature. It now reserves and publishes the actual generation/nonce
+  under host session admission before building its guest command, matching the
+  production task lane rather than supplying an invented pair.
+- The complete scenario exposed repeated immutable-executable discovery pushing
+  cold worker readiness past its unchanged 30-second bound. Production now reuses
+  verified paths only within one admission operation, keyed by physical ID,
+  user, executable kind, start generation, configuration and mounts. No cache
+  survives an operation. The builder no longer repeats root lock initialization
+  already required by successful admission publication.
+- The cache-invalidation and coupled native selection passes 184. The original
+  complete Docker acceptance invocation passes one in 157.00 seconds with its
+  pre-existing 300-second item / 420-second sub-suite / 480-second aggregate
+  budgets and unchanged command/readiness limits. It exercises token privacy and
+  rotation, surviving guest publishers, cold CLI execution, duplicate refusal,
+  wrapper-only death and stop/remove/recreate deferral. No fixtures remain.
+  Touched Python lint passes.
+
 ### 2026-10-15 -- Guest lifecycle closure and mixed-environment recovery
 - Current-head #6745 review found that a delayed Docker exec could outlive its
   wrapper, resume after the final idle probe and start before destruction.
