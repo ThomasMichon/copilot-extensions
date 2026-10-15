@@ -103,9 +103,13 @@ Its receipt records source mode and the actual fallback trigger, not realization
 of the unavailable artifact lock. A source-mode lock needs no artifact manifest
 or successful publication, so optional artifacts remain genuinely optional.
 
-Integrity, source-provenance, blocked-package or unauthorized-source failures
-are not availability fallbacks. If neither approved mode can succeed, return
-the actual cause without activation or an alternate public feed.
+An artifact closure blocked by package policy may trigger authority-selected
+source fallback only when its distinct exact closure satisfies every existing
+acquisition, seasoning and revocation rule. It cannot reuse a blocked dependency
+or bypass that block. Integrity, source-provenance and unauthorized-source
+failures are not availability fallbacks; a blocked fallback closure also refuses.
+If neither approved mode can succeed, return the actual cause without activation
+or an alternate public feed.
 Already-admitted unchanged wheels can be reused without online feed access;
 explicit policy change or supplied revocation invalidates that reuse.
 
@@ -148,6 +152,9 @@ and cutover ownership. It does not regenerate or edit its historical lock.
   Remove default-install/torch-only-swap; prove first install, retained explicit
   capability, wrong target refusal, source fallback, failed-build retention,
   immutable rollback and concurrent installer exclusion with real consumers.
+  Prove a blocked artifact closure can select a distinct admissible source
+  closure, while blocked fallback dependencies and integrity/provenance failures
+  refuse without altering the prior generation.
 - [ ] Validate native supported lanes, including Darwin before claiming new
   parity, and two independent marketplace installations before cross-cell
   reuse. Preserve existing standalone/warm-engine ownership under #5768.
