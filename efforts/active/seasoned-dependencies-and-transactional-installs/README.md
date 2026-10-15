@@ -649,3 +649,28 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   resolver, imported successfully and published their exact completed profile
   selectors after the cleanup correction; neither build reused an old slot.
   Required fresh-head review and CI remain the next gate.
+- Replayed all sixteen implementation commits over the subsequent installer
+  publication-honesty changes. Retained guarded activation, immutable completed
+  Bridge slots and fail-closed cross-platform SHA-256 discovery while keeping
+  canonical construction ownership and failed-candidate cleanup. All completion
+  wrappers now return Boolean success only after the output-free held adapter
+  acknowledges completion; no raw candidate-directory deletion was restored.
+- The upstream completion guard now recognizes held construction as a throwing
+  writer, with regressions rejecting swallowed or conditionally skipped
+  failures. Actual shipped PowerShell wrappers exercise successful completion,
+  writer refusal and missing fingerprints. Streaming fingerprint tests retain
+  working/failing hash-tool coverage rather than selecting implementations by
+  their former buffering variable.
+- Native Windows Git Bash fixture integration exposed its distinct transport:
+  a Windows Python process cannot consume an MSYS FIFO as stdin, and its default
+  output uses CRLF. Test-only anonymous-pipe relays and explicit line framing now
+  model the real POSIX protocol, including early refusal and relay cleanup.
+  All 50 Worktrees publication cases and 131 guard/synchronization/finalizer
+  cases passed. Git Bash remains compatibility evidence, not native POSIX
+  evidence; the required Linux and stock macOS lanes remain authoritative.
+  Current-base Bridge admission and rollback passed 120 cases with ten native
+  platform skips across two focused invocations. Its trap assertion now
+  requires both marker cleanup and the install-lock release, retaining the
+  canonical construction settlement that precedes that outer trap.
+  Fresh-head review and provider CI remain pending. The effort is not merged,
+  released or deployed.

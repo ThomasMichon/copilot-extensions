@@ -635,6 +635,42 @@ _SH_SETUP = {
 }
 
 
+def _sh_runtime_scripts(tmp_path: Path) -> Path:
+    if os.name != "nt":
+        return _SCRIPTS
+    scripts = tmp_path / "runtime-scripts"
+    scripts.mkdir()
+    for name in (
+        "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    ):
+        shutil.copyfile(_SCRIPTS / name, scripts / name)
+    core = scripts / "versioned_runtime.py"
+    source = core.read_text(encoding="utf-8")
+    entrypoint = 'if __name__ == "__main__":\n'
+    assert source.count(entrypoint) == 1
+    core.write_text(
+        source.replace(entrypoint, entrypoint + '    sys.stdout.reconfigure(newline="\\n")\n'),
+        encoding="utf-8",
+    )
+    # Git Bash's FIFO is not a native Windows Python stdin handle. Model the
+    # POSIX transport with an anonymous pipe, retaining the real lease/protocol.
+    component = scripts / "versioned_runtime_construction.py"
+    adapter = component.read_text(encoding="utf-8")
+    assert adapter.count('        exec "$@"\n') == 1
+    component.write_text(
+        adapter.replace('        exec "$@"\n', '''
+        exec 7< <(cat)
+        relay=$!
+        rc=0
+        "$@" <&7 || rc=$?
+        kill "$relay" 2>/dev/null || true
+        wait "$relay" 2>/dev/null || true
+        exit "$rc"
+'''), encoding="utf-8",
+    )
+    return scripts
+
+
 def _sh_harness(tmp_path: Path, scenario: str, action: str, extra: tuple[str, ...] = ()) -> Path:
     text = _INSTALL_SH.read_text(encoding="utf-8")
     functions = "".join(
@@ -656,7 +692,7 @@ def _sh_harness(tmp_path: Path, scenario: str, action: str, extra: tuple[str, ..
         path.write_text(shim, encoding="utf-8", newline="\n")
         path.chmod(0o755)
     script = f"""set -euo pipefail
-SCRIPT_DIR={_sh_quote(_posix(_SCRIPTS))}
+SCRIPT_DIR={_sh_quote(_posix(_sh_runtime_scripts(tmp_path)))}
 PLUGIN_DIR={_sh_quote(_posix(_fake_plugin(tmp_path)))}
 INSTALL_DIR={_sh_quote(_posix(tmp_path / "install"))}
 LINK_DIR="$INSTALL_DIR/venv"
@@ -957,7 +993,9 @@ def test_slot_preparation_refusal_is_propagated_by_every_caller() -> None:
         boundary = "_install_slot_build\n" if name == "do_install" else '_update_lifecycle_drain_stop "'
         assert body.index("_versioned_slot_clean || exit 1") < body.index(boundary)
     update = _extract_sh("do_update", sh)
-    assert update.index("trap _clear_update_marker EXIT") < update.index("_versioned_slot_clean || exit 1")
+    assert update.index("trap '_clear_update_marker; _exit_install_lock' EXIT") < update.index(
+        "_versioned_slot_clean || exit 1"
+    )
 
 def test_reused_slot_skips_every_slot_mutation_in_both_installers() -> None:
     """A matching completed slot is activated as-is (#5472): the build,

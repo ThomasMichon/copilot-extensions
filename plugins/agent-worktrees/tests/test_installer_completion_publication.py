@@ -71,7 +71,21 @@ def _construction_adapter(shell: str) -> str:
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module.construction_shell_helpers("sh" if shell == "bash" else "ps1")
+    adapter = module.construction_shell_helpers("sh" if shell == "bash" else "ps1")
+    if shell == "bash" and os.name == "nt":
+        # Native Windows Python cannot read an MSYS FIFO handle. Convert only
+        # the fixture transport to an anonymous pipe; keep the protocol real.
+        assert adapter.count('        exec "$@"\n') == 1
+        adapter = adapter.replace('        exec "$@"\n', '''
+        exec 7< <(cat)
+        relay=$!
+        rc=0
+        "$@" <&7 || rc=$?
+        kill "$relay" 2>/dev/null || true
+        wait "$relay" 2>/dev/null || true
+        exit "$rc"
+''')
+    return adapter
 
 
 def _construction_script(

@@ -457,7 +457,7 @@ def _fails_unconditionally(
 
 
 # The writer invocation inside each helper, and how its status must be handled.
-_SH_WRITER = re.compile(r'"\$py"\s+"\$\{args\[@\]\}"')
+_SH_WRITER = re.compile(r'"\$py"\s+"\$\{args\[@\]\}"|(?<![\w])_runtime_construction_complete\b')
 _PS1_WRITER = re.compile(r"&\s*\$py\b")
 _PS1_STATUS_CHECK = re.compile(r"\bif\s*\(\s*\$(?:LASTEXITCODE|\w+\.ExitCode)\s+-ne\s+0\s*\)\s*\{")
 
@@ -476,6 +476,19 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
         if not line.lstrip().startswith("#")
     )
     if suffix == ".ps1":
+        code = re.sub(r"<#.*?#>", "", code, flags=re.S)
+        attached = re.search(
+            r"(?m)^[ \t]*Complete-RuntimeConstruction[ \t]+-PayloadHash[ \t]+"
+            r"(?:\$\w+|\(Get-PayloadHash\))[ \t]*$",
+            code,
+        )
+        if attached:
+            before = _strip_quoted_strings(code[:attached.start()])
+            return (
+                before.count("{") == before.count("}")
+                and not re.search(r"\b(?:try|catch|trap)\b", before)
+                and code[attached.end():].strip() == "return $true"
+            )
         writer = _PS1_WRITER.search(code)
         check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
         return bool(check) and _fails_unconditionally(
