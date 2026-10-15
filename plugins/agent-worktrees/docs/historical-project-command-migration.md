@@ -25,6 +25,9 @@ All existing platform siblings are checked together, including a Windows
 `.ps1` whose generated header was edited away. Missing siblings can be repaired;
 an edited sibling protects the entire command. Obsolete retirement uses the
 same validation and recovery boundary.
+Windows removal resolves registered spelling before rendering templates.
+Recovery normalizes both journal sibling maps case-insensitively, including
+receipt-only retirement, while rejecting duplicate aliases and unexpected names.
 
 Publication first records prior bytes, file modes and intended bytes/receipt
 inside the existing receipt's optional `transaction` section. Each file is
@@ -35,6 +38,8 @@ identity still match and every existing sibling matches the recorded prior or
 intended bytes. Edited intermediate files or corrupt transactions remain
 precise blockers. This is recoverable multi-file publication, not a promise of
 one atomic filesystem operation across a Windows command pair.
+Nested intended-receipt sections are structurally validated before use; a
+corrupt journal is preserved and reported without aborting unrelated projects.
 
 Results retain `migrated`, `removed` and `preserved`. `blocked` identifies
 unresolved **required** commands: registered commands (including knowledge-only

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shlex
@@ -146,6 +147,97 @@ def test_foreign_inventory_is_advisory(command_home, monkeypatch):
     result = inst.reconcile_binstubs()
     assert result["preserved"] == ["demo"]
     assert result["blocked"] == []
+
+
+@pytest.mark.parametrize("edited", [False, True])
+def test_windows_remove_uses_registered_spelling(command_home, monkeypatch, edited):
+    if inst.platform.system() != "Windows" or os.name != "nt":
+        pytest.skip("native Windows command casing")
+    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {"Demo": {}}})
+    inst._deploy_project_binstub("Demo")
+    before = {p: p.read_bytes() for p, _ in inst._project_binstub_specs("Demo")}
+    if edited:
+        target = next(iter(before))
+        target.write_bytes(b"operator edit\n")
+        before[target] = target.read_bytes()
+        with pytest.raises(inst.BinstubOwnershipError, match="modified"):
+            inst.remove_project_binstub("demo")
+        assert {p: p.read_bytes() for p in before} == before
+    else:
+        assert set(inst.remove_project_binstub("demo")) == set(before)
+        assert not any(p.exists() for p in before)
+        assert not inst._receipt_path("Demo").exists()
+
+
+@pytest.mark.parametrize("invalid_keys", [None, "before", "after", "unexpected"])
+def test_windows_receipt_only_retirement_recovers_casing(
+    command_home, monkeypatch, capsys, invalid_keys
+):
+    if inst.platform.system() != "Windows" or os.name != "nt":
+        pytest.skip("native Windows receipt-only recovery")
+    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {"Demo": {}}})
+    inst._deploy_project_binstub("Demo")
+    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {}})
+    receipt_path = inst._receipt_path("Demo")
+    unlink = Path.unlink
+
+    def interrupt_receipt_unlink(path, *args, **kwargs):
+        if path == receipt_path:
+            raise KeyboardInterrupt("interrupted before retirement receipt removal")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", interrupt_receipt_unlink)
+    with pytest.raises(KeyboardInterrupt):
+        inst.remove_project_binstub("Demo")
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert not any(p.exists() for p, _ in inst._project_binstub_specs("Demo"))
+    receipt = inst._read_receipt("Demo")
+    # Existing version-one journals used the original generated spelling.
+    for section in ("before", "after"):
+        states = receipt["transaction"][section]
+        receipt["transaction"][section] = {
+            "Demo" + Path(key).suffix: value for key, value in states.items()
+        }
+    if invalid_keys in ("before", "after"):
+        states = receipt["transaction"][invalid_keys]
+        states["demo.ps1"] = dict(states["Demo.ps1"])
+    elif invalid_keys == "unexpected":
+        receipt["transaction"]["after"]["other.cmd"] = {"bytes": None, "mode": 0o755}
+    inst._write_receipt("Demo", receipt)
+    capsys.readouterr()
+    result = inst.reconcile_binstubs()
+    if invalid_keys is None:
+        assert result["blocked"] == result["preserved"] == []
+        assert not receipt_path.exists()
+    else:
+        assert result["preserved"] == ["demo"]
+        assert inst._read_receipt("Demo") == receipt
+        assert "invalid interrupted command transaction" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("section", ["project", "owner", "runtime", "stubs"])
+def test_corrupt_nested_final_receipt_preserves_command_and_continues_peer(
+    command_home, monkeypatch, section
+):
+    before = seed_old(monkeypatch, command_home)
+    receipt = inst._read_receipt("demo")
+    states = {
+        p.name: {"bytes": base64.b64encode(data).decode("ascii"), "mode": 0o755}
+        for p, data in before.items()
+    }
+    final = json.loads(json.dumps(receipt))
+    final[section] = None
+    receipt["transaction"] = {
+        "version": 1, "before": states, "after": states, "receipt": final,
+    }
+    inst._write_receipt("demo", receipt)
+    monkeypatch.setattr(inst, "read_projects_registry",
+                        lambda: {"projects": {"demo": {}, "valid-peer": {}}})
+    result = inst.reconcile_binstubs()
+    assert result["blocked"] == result["preserved"] == ["demo"]
+    assert {p: p.read_bytes() for p in before} == before
+    assert inst._read_receipt("demo") == receipt
+    assert all(p.exists() for p, _ in inst._project_binstub_specs("valid-peer"))
 
 
 @pytest.mark.parametrize("receipted", [True, False])

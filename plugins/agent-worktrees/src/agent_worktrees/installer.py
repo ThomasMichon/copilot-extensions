@@ -1137,11 +1137,17 @@ def transfer_project_binstub(project: str) -> int:
 
 def remove_project_binstub(project: str) -> list[Path]:
     """Remove only a project command owned byte-for-byte by this payload."""
-    with _binstub_lock(project):
+    with _binstub_lock("__registries__"), _binstub_lock(project):
         if is_reserved_project_command(project) or not cfg._PROJECT_NAME_RE.fullmatch(project):
             raise BinstubOwnershipError(f"refusing invalid/reserved project command: {project}")
+        registered = read_projects_registry().get("projects", {})
+        if platform.system() == "Windows":
+            project = next(
+                (name for name in registered if name.casefold() == project.casefold()),
+                project,
+            )
         return _retire_project_binstub_unlocked(
-            project, registered=project in read_projects_registry().get("projects", {})
+            project, registered=project in registered
         )
 
 
