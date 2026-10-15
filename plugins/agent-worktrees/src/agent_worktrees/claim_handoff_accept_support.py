@@ -37,26 +37,24 @@ def same_machine(a: str, b: str, *, project: str | None = None) -> bool:
 
 
 def require_handoff_record(record: tracking.WorktreeRecord, error_type: type[Exception]) -> None:
-    """Fence the freshly loaded source, consumer, or child before mutation."""
+    """Require actual platform and receiving namespace for every handoff actor."""
     try:
         config = project_record_config(record)
         require_record_mutation(record, config)
         expected_record = cfg.project_dir(record.repo) / "worktrees" / f"{record.worktree_id}.yaml"
         if record.yaml_path != expected_record or record.yaml_path.is_symlink():
             raise ExecutionSpaceError("handoff record does not match its receiving project's record path")
-        if cfg.detect_platform() == "wsl" or record.machine != config.machine:
+        if (
+            record.platform != cfg.detect_platform()
+            or not legacy_wsl_record_locality.record_namespace_matches(record, config)
+        ):
+            raise ExecutionSpaceError("handoff record has unproven execution platform or namespace")
+        if record.machine != config.machine:
             ref = tracking.parse_claim_ref(
                 tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
             )
-            if record.machine != config.machine:
-                if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config) is None:
-                    raise ExecutionSpaceError("handoff record has no verified local legacy WSL authority")
-            else:
-                if (
-                    record.platform != cfg.detect_platform()
-                    or not legacy_wsl_record_locality.record_namespace_matches(record, config)
-                ):
-                    raise ExecutionSpaceError("handoff record has unproven execution platform or namespace")
+            if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config) is None:
+                raise ExecutionSpaceError("handoff record has no verified local legacy WSL authority")
     except ExecutionSpaceError as exc:
         raise error_type(str(exc)) from exc
 
@@ -153,7 +151,8 @@ def require_handoff_consumer(bundle, machine: str, error_type: type[Exception]) 
             consumer.project, include_control_plane_related_pr=False,
         )
         if (
-            any(entry.execution_platform for entry in registry_for_config(config).values())
+            bundle.state != "accepted"
+            and any(entry.execution_platform for entry in registry_for_config(config).values())
             and not same_local_records(source, consumer, machine=machine)
             and any(claim["kind"] == "worktree" for claim in bundle.claims)
         ):

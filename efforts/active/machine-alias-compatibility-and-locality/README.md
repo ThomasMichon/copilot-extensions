@@ -158,6 +158,28 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-15 - Close native handoff, retry and related-availability gaps
+- All handoff records now require actual-platform and receiving-namespace
+  proof on every platform, including identical machine labels under an empty
+  or unscoped registry. Native positive fixtures declare their real receiving
+  roots/platforms; foreign-platform and namespace negatives remain intact.
+- Accepted ordinary bundles retry from validated consumer/child records
+  without loading a retired source project or acquiring a new cross-machine
+  fence. Explicit scoped-roster regressions remove the real source ledger and
+  retain consumer artifacts and the child's owner transition.
+- Producer admission and acceptance both use complete-record locality, so
+  historical source labels and qualified guest consumers reach real
+  reserve/bind/offer/accept/retry flows without relabeling metadata. Foreign
+  namespace/platform records reject offers and acceptance without writes.
+- Related resolve/doctor retain exact key/profile precedence and use the actual
+  platform only for physical hostname/display metadata. Local, machine and
+  container availability cover Windows/WSL case variants without conflating
+  siblings; legacy unscoped current-machine reporting stays unchanged.
+- Final bounded validation passed 60 exact regression cases and the complete
+  guard portfolio (1,101 passed, 64 conditional skips). Ruff, install contracts,
+  module ceilings and whitespace checks passed. Native Windows validation,
+  current-head review, publication and deployment remain coordinator-owned.
+
 ### 2026-10-15 - Producer handoff and actual-caller locality corrections
 - Migrated the sole remaining caller of the removed machine-only handoff
   helper to complete-record locality. Producer acceptance validates the actual

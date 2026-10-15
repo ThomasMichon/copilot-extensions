@@ -740,6 +740,19 @@ removes the settings).
 > Manager owns `~/.tmux.conf` or `~/.psmux.conf`.
 
 
+## Claim handoff locality
+
+Every handoff actor must match its receiving project's exact tracking record,
+actual execution platform and absolute checkout namespace, including same-name
+native records with an unscoped machine registry. Mixed historical/current
+producer references use full-record locality at admission and acceptance;
+stored references and producer metadata are not relabeled.
+
+An accepted bundle can finish or retry from its consumer and child records
+without requiring a retired source ledger or acquiring a new cross-machine
+fence. Receiving-side identity, platform, namespace and artifact checks still
+apply; acceptance does not authorize a foreign execution space.
+
 ## Remote launch options
 
 Machine-targeted JSON and interactive resolve use the same option policy.

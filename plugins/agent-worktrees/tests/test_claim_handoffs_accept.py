@@ -44,8 +44,8 @@ def _record(
         "machines: {}\n", encoding="utf-8",
     )
     (tmp_path / project / "config.yaml").write_text(json.dumps({
-        "repo_name": project, "machine": machine,
-        "repos": {project: {"anchor": str(wdir)}},
+        "repo_name": project, "machine": machine, "platform": "linux",
+        "repos": {project: {"anchor": str(wdir), "worktree_root": str(wdir.parent)}},
     }), encoding="utf-8")
     record = tracking.create_new_record(
         worktree_id,
@@ -64,6 +64,7 @@ def _record(
 
 @pytest.fixture
 def handoff_world(tmp_path, monkeypatch):
+    monkeypatch.setattr(claim_handoffs.cfg, "detect_platform", lambda: "linux")
     runtime = tmp_path / "runtime"
     monkeypatch.setattr(claim_handoffs.cfg, "_load_inrepo_config", lambda anchor: {})
     monkeypatch.setattr(claim_handoffs.cfg, "install_dir", lambda: runtime)

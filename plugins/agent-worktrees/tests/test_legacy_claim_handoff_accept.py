@@ -128,6 +128,61 @@ def _anchor_graph(graph: SimpleNamespace, *, qualified: bool) -> None:
     tracking.save_record(child, graph.paths["child"])
 
 
+@pytest.mark.parametrize("violation", [None, "consumer-platform", "child-namespace"])
+@pytest.mark.parametrize("explicit_scoped", [False, True])
+def test_accepted_worktree_retry_needs_no_retired_source_or_new_fence(
+    graph, monkeypatch, violation, explicit_scoped,
+):
+    if explicit_scoped:
+        graph.source = f"{MACHINE}/source-project/wt-source"
+        graph.consumer = f"{MACHINE}/consumer-project/wt-consumer"
+        graph.child_ref = f"{MACHINE}/child-project/wt-child"
+        for anchor in graph.anchors.values():
+            (anchor / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+                MACHINE: {"execution_platform": "wsl", "physical_host": "example-host"},
+            }}), encoding="utf-8")
+        for role, path in graph.paths.items():
+            record = tracking.load_record(path)
+            record.machine = MACHINE
+            if role == "source":
+                record.resources[0].ref = graph.child_ref
+            if role == "child":
+                record.owner_ref = graph.source
+            tracking.save_record(record, path)
+    bundle = _offer(graph)
+    actor = f"{MACHINE}/consumer-project/wt-consumer"
+    assert claim_handoffs.accept(bundle.bundle_id, actor=actor, machine=MACHINE).state == "accepted"
+    graph.paths["source"].rename(graph.paths["source"].with_name("retired-source.yaml"))
+    if violation:
+        path = graph.paths["consumer" if violation == "consumer-platform" else "child"]
+        record = tracking.load_record(path)
+        if violation == "consumer-platform":
+            record.platform = "windows"
+        else:
+            record.worktree_path = str(graph.root / "foreign" / record.worktree_id)
+        tracking.save_record(record, path)
+    paths = [graph.paths["consumer"], graph.paths["child"], claim_handoffs.registry_path()]
+    before = {path: path.read_bytes() for path in paths}
+    load_config = cfg.load_project_config
+
+    def receiving_only(project, **kwargs):
+        assert project != "source-project", "accepted retry read its retired source project"
+        return load_config(project, **kwargs)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("accepted retry acquired a new cross-machine fence")
+
+    monkeypatch.setattr(cfg, "load_project_config", receiving_only)
+    monkeypatch.setattr(claim_handoffs, "acquire_bundle_fence", forbidden)
+    if violation:
+        with pytest.raises(claim_handoffs.ClaimHandoffError):
+            claim_handoffs.accept(bundle.bundle_id, actor=actor, machine=MACHINE)
+    else:
+        assert claim_handoffs.accept(bundle.bundle_id, actor=actor, machine=MACHINE).state == "accepted"
+        assert tracking.load_record(graph.paths["child"]).owner_ref == bundle.consumer
+    assert before == {path: path.read_bytes() for path in paths}
+
+
 @pytest.mark.parametrize("qualified", [False, True])
 def test_anchor_actors_use_receiving_anchor_for_full_offer_accept(graph, monkeypatch, qualified):
     _anchor_graph(graph, qualified=qualified)

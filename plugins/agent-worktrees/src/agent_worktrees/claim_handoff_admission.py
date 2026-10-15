@@ -45,7 +45,7 @@ def validate_producer_uniqueness(
 
 def validate_producer_offer(
     claims: Sequence[ResourceClaim], source: ClaimRef, consumer: ClaimRef,
-    *, error_type: type[Exception],
+    *, machine: str, error_type: type[Exception],
 ) -> None:
     from . import resource_producer
     producers = [claim for claim in claims if claim.has_producer]
@@ -53,14 +53,33 @@ def validate_producer_offer(
         return
     if len(producers) != len(claims):
         raise error_type("offer disposable producer claims in a separate bundle")
-    if source.machine != consumer.machine:
-        raise error_type("disposable producer handoff requires local source and consumer")
+    _require_local_producer_actors(source, consumer, machine=machine, error_type=error_type)
     if any(not resource_producer.valid_metadata(claim.producer) or claim.producer["phase"] != "bound"
            or resource_producer.claim_ref(claim.producer) != claim.ref for claim in producers):
         raise error_type("only valid bound producer claims can be offered; pending obligations remain owned")
     validate_producer_uniqueness(
         [snapshot_claim(claim) for claim in claims], error_type=error_type,
     )
+
+
+def _require_local_producer_actors(
+    source: ClaimRef, consumer: ClaimRef, *, error_type: type[Exception],
+    machine: str | None = None, accepted: bool = False,
+) -> None:
+    from . import config as cfg
+    from .claim_handoff_accept_support import local_record_ref, same_local_records
+
+    try:
+        if machine is None:
+            machine = cfg.load_config(include_control_plane_related_pr=False).machine
+        local = (
+            local_record_ref(consumer, machine=machine) if accepted
+            else same_local_records(source, consumer, machine=machine)
+        )
+    except (OSError, ValueError) as exc:
+        raise error_type(f"cannot establish producer admission authority: {exc}") from exc
+    if not local:
+        raise error_type("disposable producer handoff requires local source and consumer")
 
 
 def validate_supported_claims(
@@ -72,8 +91,10 @@ def validate_supported_claims(
     if producer_claims:
         if len(producer_claims) != len(bundle.claims):
             raise error_type("offer disposable producer claims in a separate bundle")
-        if qualified_ref(bundle.source, "source").machine != qualified_ref(bundle.consumer, "consumer").machine:
-            raise error_type("disposable producer handoff requires local source and consumer")
+        _require_local_producer_actors(
+            qualified_ref(bundle.source, "source"), qualified_ref(bundle.consumer, "consumer"),
+            accepted=bundle.state == "accepted", error_type=error_type,
+        )
         if any(not resource_producer.valid_metadata(c["producer"]) or c["producer"]["phase"] != "bound"
                or resource_producer.claim_ref(c["producer"]) != c["ref"] for c in producer_claims):
             raise error_type("only valid bound producer claims can be transferred; pending obligations remain owned")

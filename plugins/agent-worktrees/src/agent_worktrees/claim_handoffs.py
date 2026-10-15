@@ -572,7 +572,7 @@ def offer(
                 from .claim_handoff_admission import validate_producer_offer
                 validate_producer_offer(
                     [by_ref[ref] for ref in refs], source_ref, consumer_ref,
-                    error_type=ClaimHandoffError,
+                    machine=machine, error_type=ClaimHandoffError,
                 )
                 inactive = [
                     ref for ref in refs if not by_ref[ref].is_unsettled
@@ -708,6 +708,8 @@ def accept(
         if any("producer" in claim for claim in bundle.claims):
             from .producer_handoff import accept_producers
             return accept_producers(bundle_id, actor=actor, machine=machine)
+        if bundle.state == "accepted":
+            return _finish_accept_consumer_side(bundle, machine=machine)
         if same_local_records(source_ref, consumer_ref, machine=machine):
             if bundle.state != "accepted":
                 bundle = accept_source(bundle_id, actor=actor)

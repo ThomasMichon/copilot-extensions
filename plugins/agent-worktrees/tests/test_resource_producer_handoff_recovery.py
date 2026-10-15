@@ -251,8 +251,8 @@ def test_resource_producer_immutable_comparison_retains_optional_fields():
     )
 
 
-@pytest.fixture
-def historical_producer(tmp_path, monkeypatch):
+@pytest.fixture(params=[False, True], ids=["historical-consumer", "qualified-consumer"])
+def historical_producer(tmp_path, monkeypatch, request):
     anchor, namespace = tmp_path / "anchor", tmp_path / "trees"
     anchor.mkdir()
     (anchor / "machines.yaml").write_text("machines: {}\n", encoding="utf-8")
@@ -293,7 +293,8 @@ def historical_producer(tmp_path, monkeypatch):
     )
     config = replace(config, machine="example-host-wsl")
     bundle, _ = handoffs.offer(
-        old_ref, "example-host/p/consumer", [bound["ref"]], machine=config.machine,
+        old_ref, f"{config.machine if request.param else 'example-host'}/p/consumer",
+        [bound["ref"]], machine=config.machine,
     )
     return path, bundle, bound
 
@@ -320,7 +321,7 @@ def test_historical_producer_real_offer_accept_and_accepted_retry(historical_pro
 
 
 @pytest.mark.parametrize("role", ["owner", "consumer"])
-@pytest.mark.parametrize("violation", ["platform", "machine"])
+@pytest.mark.parametrize("violation", ["platform", "machine", "namespace"])
 @pytest.mark.guard
 def test_historical_producer_foreign_context_retains_exact_ledgers(
     historical_producer, role, violation,
@@ -328,12 +329,20 @@ def test_historical_producer_foreign_context_retains_exact_ledgers(
     path, bundle, _ = historical_producer
     target = path.with_name(role + ".yaml")
     record = tracking.load_record(target)
-    record = replace(record, **(
-        {"platform": "windows"} if violation == "platform" else {"machine": "foreign-host-wsl"}
-    ))
+    changes = (
+        {"platform": "windows"} if violation == "platform" else
+        {"machine": "foreign-host-wsl"} if violation == "machine" else
+        {"worktree_path": str(path.parent / "foreign" / record.worktree_id)}
+    )
+    record = replace(record, **changes)
     tracking.save_record(record, target)
     paths = (path, path.with_name("consumer.yaml"), handoffs.registry_path())
     before = {item: item.read_bytes() for item in paths}
+    with pytest.raises(handoffs.ClaimHandoffError):
+        handoffs.offer(
+            bundle.source, bundle.consumer, [snapshot["ref"] for snapshot in bundle.claims],
+            machine="example-host-wsl",
+        )
     with pytest.raises(handoffs.ClaimHandoffError):
         handoffs.accept(
             bundle.bundle_id, actor="example-host-wsl/p/consumer", machine="example-host-wsl",

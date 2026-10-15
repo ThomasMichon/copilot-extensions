@@ -6,7 +6,8 @@ import os
 import subprocess
 
 from agent_procutil import no_window_kwargs
-from machine_transport import IdentityError
+from machine_transport import IdentityError, resolve_machine_selection
+from machine_transport.registry import PhysicalMachineError
 
 from . import config as cfg
 from . import output, state_root as state_root_mod
@@ -115,6 +116,15 @@ def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
     except (ValueError, OSError, KeyError):
         config = None  # An unadopted repo may still supply portable topology.
     if config is not None and config.machine:
+        for candidate in dict.fromkeys([base_anchor, *anchors]):
+            if not candidate:
+                continue
+            try:
+                entry = _related_machine_entry(cfg.load_machines_yaml(candidate), config.machine)
+            except FileNotFoundError:
+                continue
+            if entry is not None:
+                return entry.key if entry.execution_platform else config.machine
         return config.machine
     for candidate in [base_anchor, *anchors]:
         if not candidate:
@@ -125,6 +135,13 @@ def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
         except OSError:
             continue
     return cfg.detect_machine(base_anchor)
+
+
+def _related_machine_entry(entries: dict[str, cfg.MachineEntry], name: str) -> cfg.MachineEntry | None:
+    try:
+        return cfg.find_machine_entry(entries, name)
+    except PhysicalMachineError:
+        return resolve_machine_selection(entries, name, cfg.detect_platform()).entry
 
 
 def _related_machine_matcher(anchors: list[str], base_anchor: str) -> MachineMatch:
@@ -142,8 +159,8 @@ def _related_machine_matcher(anchors: list[str], base_anchor: str) -> MachineMat
         break
 
     def matches(key: str, current: str) -> bool:
-        target = cfg.find_machine_entry(entries, key)
-        local = cfg.find_machine_entry(entries, current)
+        target = _related_machine_entry(entries, key)
+        local = _related_machine_entry(entries, current)
         if target is not None and local is not None:
             return target.key.casefold() == local.key.casefold()
         return related.machine_matches(key, current)
@@ -261,7 +278,7 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
     def _machine_known(key: str) -> bool:
         if not machines_known_available:
             return True
-        return cfg.find_machine_entry(machine_entries, key) is not None
+        return _related_machine_entry(machine_entries, key) is not None
 
     def _registry_has(name: str) -> bool:
         return repos.find_repo(name) is not None

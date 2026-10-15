@@ -31,7 +31,9 @@ def owner(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
     for name in ("owner", "consumer"):
-        tracking.create_new_record(name, f"worktree/{name}", str(tmp_path / name), "p", "m", "linux", records)
+        checkout = tmp_path / "trees" / name
+        checkout.mkdir(parents=True)
+        tracking.create_new_record(name, f"worktree/{name}", str(checkout), "p", "m", "linux", records)
     return records / "owner.yaml", config
 
 
