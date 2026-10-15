@@ -8,6 +8,8 @@ import sys
 
 import pytest
 
+pytestmark = pytest.mark.guard
+
 
 @pytest.mark.parametrize("protocol", [
     ["--launch-request-b64", "e30="],

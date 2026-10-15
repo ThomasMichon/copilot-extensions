@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import json
 import shlex
 from dataclasses import replace
 from types import SimpleNamespace
@@ -120,13 +121,15 @@ def test_target_local_request_protocol_refuses_machine_dispatch(
     from agent_worktrees import launch_request
 
     def forbidden(*args, **kwargs):
-        pytest.fail("target-local protocol reached local admission with a machine target")
+        pytest.fail("target-local protocol reached admission, status or machine resolution")
 
-    monkeypatch.setattr(launch_request, "cmd_request", forbidden)
+    monkeypatch.setattr(launch_request, "execute", forbidden)
+    monkeypatch.setattr(launch_request, "inspect", forbidden)
+    monkeypatch.setattr(resolve_cli.ResolveCommandState, "from_args", forbidden)
     assert resolve_cli.cmd_resolve(_parse([
         "--json", "--machine", "remote-host", option, "opaque-request",
-    ])) != 0
-    assert "cannot be combined" in capfd.readouterr().out
+    ])) == 3
+    assert "Structured launch requests require" in json.loads(capfd.readouterr().out)["error"]
 
 
 def test_remote_profile_starting_with_flag_prefix_round_trips() -> None:
