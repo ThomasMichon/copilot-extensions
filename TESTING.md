@@ -155,7 +155,14 @@ python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k
 > `agent-ssh-manager` under `plugins/<p>/libs/<lib>/`) installs into
 > `.test-venvs/<platform>/<p>` as a normal copy, not an editable link —
 > editing `libs/<lib>/src/...` does nothing to a suite you run against an
-> already-built venv until you pass `--reinstall`. This also means a shared
+> already-built venv until you pass `--reinstall`. That explicit option also
+> forwards reinstall to uv, so recreating the venv cannot silently reuse an old
+> same-version local-path wheel. Ordinary cached runs keep their existing policy.
+> Rebuild cleanup preserves the leased environment directory and unlinks child
+> junctions without traversing their targets, including under Python 3.11.
+> Native GUI-parent probes capture child diagnostics even when `pythonw -I`
+> cannot import the installed dependency API; an opaque exit code is not
+> windowless-launch evidence. This also means a shared
 > lib's **own** test suite (its top-level `libs/<lib>/tests/`, as opposed to
 > any plugin's `tests/`) is never run by this runner at all — it belongs to
 > no single plugin. Validate it directly against one specific vendored copy by
