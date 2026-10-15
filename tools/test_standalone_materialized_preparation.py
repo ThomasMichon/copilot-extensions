@@ -159,7 +159,10 @@ def test_materialized_preparation_has_one_real_source_per_distribution(
         )
     if materialized:
         log = materialize_main.materialize_uv_editable_refs(checkout, canonical_root=REPO)
-        assert log and not any(line.startswith("SKIP") for line in log), log
+        # An already-materialized release checkout legitimately needs no expansion.
+        assert not any(line.startswith("SKIP") for line in log), log
+        core = checkout / "plugins" / plugin
+        assert not materialize_main.uer.find_uv_editable_refs(core)
     assert {relative: _bytes(REPO / relative) for relative in inputs} == original
     if materialized:
         embedded = checkout / "plugins" / plugin / "libs" / "zdd"
