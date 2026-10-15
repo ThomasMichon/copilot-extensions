@@ -872,6 +872,9 @@ jobs:
       - name: Test worktree-manager
         working-directory: worktree-manager
         run: uv run --extra dev pytest -q
+      - name: Test materialized Manager collection
+        working-directory: worktree-manager
+        run: uv run --extra dev pytest -q ../tools/test_worktree_manager_collection.py
 
   agent-dispatch-service:
     name: agent-dispatch-service (out-of-plugin)

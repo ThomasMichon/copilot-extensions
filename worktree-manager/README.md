@@ -503,8 +503,16 @@ behaves exactly the same.
 cd worktree-manager
 uv run python -m worktree_manager          # run the app
 uv run python -m worktree_manager --version
-uv run pytest                          # tests
+uv run --extra dev pytest -q              # tests
 ```
+
+Default pytest collection owns `tests/`, including `tests/production_picker/`,
+in both development and materialized release layouts. Releases embed complete
+shared libraries under `libs/`, including their test sources; those suites
+remain owned by their canonical library lanes, not by Manager's default run.
+`tools/test_worktree_manager_collection.py` checks real materialization with a
+bounded selection of actual Manager test modules, preserves their collected
+IDs, and verifies that embedded library code and tests remain intact.
 
 Python + [uv](https://docs.astral.sh/uv/); the Phase 4 visual worktree-manager uses
 [Textual](https://textual.textualize.io/).

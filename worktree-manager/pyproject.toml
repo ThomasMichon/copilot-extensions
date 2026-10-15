@@ -151,6 +151,7 @@ target-version = "py310"
 line-length = 99
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
     "guard: fast structural and contract checks",
     "contract(name): behavioral contract attribution",
