@@ -1,0 +1,9 @@
+{
+  "comment": "Update shared execution identity and host/environment compatibility dependency",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

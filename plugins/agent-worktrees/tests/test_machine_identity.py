@@ -24,25 +24,25 @@ class TestIsLocalMachine:
         )
 
     def test_exact_match_against_config_machine(self, tmp_path: Path):
-        config = self._config(tmp_path, "tmichon-cloud2")
-        assert machine_identity.is_local_machine("tmichon-cloud2", config) is True
+        config = self._config(tmp_path, "example-cloud2")
+        assert machine_identity.is_local_machine("example-cloud2", config) is True
 
     def test_case_insensitive_direct_match(self, tmp_path: Path):
-        config = self._config(tmp_path, "tmichon-cloud2")
-        assert machine_identity.is_local_machine("TMICHON-CLOUD2", config) is True
+        config = self._config(tmp_path, "example-cloud2")
+        assert machine_identity.is_local_machine("EXAMPLE-CLOUD2", config) is True
 
     def test_alias_vs_key_both_resolve_to_this_machine(self, tmp_path: Path):
         # config.machine is the alias; a caller passing the registry KEY for
         # the very same entry must still be recognized as local.
         self._write(tmp_path, (
             "machines:\n"
-            "  tmichon-cloud2:\n"
+            "  example-cloud2:\n"
             "    display_name: cloud2\n"
-            "    alias: tmichon-cloud2\n"
+            "    alias: example-cloud2\n"
             "    environment: Windows 11\n"
         ))
-        config = self._config(tmp_path, "tmichon-cloud2")
-        assert machine_identity.is_local_machine("tmichon-cloud2", config) is True
+        config = self._config(tmp_path, "example-cloud2")
+        assert machine_identity.is_local_machine("example-cloud2", config) is True
 
     def test_raw_hostname_vs_canonical_alias_both_resolve_to_this_machine(
         self, tmp_path: Path, monkeypatch,
@@ -54,44 +54,44 @@ class TestIsLocalMachine:
         # remote and SSH-loopback to the very machine running the check.
         self._write(tmp_path, (
             "machines:\n"
-            "  tmichon-cloud2:\n"
+            "  example-cloud2:\n"
             "    display_name: cloud2\n"
-            "    alias: tmichon-cloud2\n"
-            "    hostname: CPC-tmich-Y97MC\n"
+            "    alias: example-cloud2\n"
+            "    hostname: CPC-example-Y97MC\n"
             "    environment: Windows 11\n"
         ))
-        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "CPC-tmich-Y97MC")
-        config = self._config(tmp_path, "tmichon-cloud2")
-        assert machine_identity.is_local_machine("CPC-tmich-Y97MC", config) is True
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "CPC-example-Y97MC")
+        config = self._config(tmp_path, "example-cloud2")
+        assert machine_identity.is_local_machine("CPC-example-Y97MC", config) is True
 
     def test_genuinely_different_machine_is_not_local(self, tmp_path: Path):
         self._write(tmp_path, (
             "machines:\n"
-            "  tmichon-cloud2:\n"
+            "  example-cloud2:\n"
             "    display_name: cloud2\n"
-            "    alias: tmichon-cloud2\n"
+            "    alias: example-cloud2\n"
             "    environment: Windows 11\n"
-            "  tmichon-cloud1:\n"
+            "  example-cloud1:\n"
             "    display_name: cloud1\n"
-            "    alias: tmichon-cloud1\n"
+            "    alias: example-cloud1\n"
             "    environment: Windows 11\n"
         ))
-        config = self._config(tmp_path, "tmichon-cloud2")
-        assert machine_identity.is_local_machine("tmichon-cloud1", config) is False
+        config = self._config(tmp_path, "example-cloud2")
+        assert machine_identity.is_local_machine("example-cloud1", config) is False
 
     def test_unknown_name_is_not_local(self, tmp_path: Path):
-        config = self._config(tmp_path, "tmichon-cloud2")
+        config = self._config(tmp_path, "example-cloud2")
         assert machine_identity.is_local_machine("nonexistent-box", config) is False
 
     def test_empty_name_is_not_local(self, tmp_path: Path):
-        config = self._config(tmp_path, "tmichon-cloud2")
+        config = self._config(tmp_path, "example-cloud2")
         assert machine_identity.is_local_machine("", config) is False
 
     def test_missing_registry_falls_back_gracefully(self, tmp_path: Path):
         # No machines.yaml at all -- direct-match path still works, and an
         # unresolvable name degrades to False rather than raising.
-        config = self._config(tmp_path, "tmichon-cloud2")
-        assert machine_identity.is_local_machine("tmichon-cloud2", config) is True
+        config = self._config(tmp_path, "example-cloud2")
+        assert machine_identity.is_local_machine("example-cloud2", config) is True
         assert machine_identity.is_local_machine("some-other-box", config) is False
 
 
