@@ -49,10 +49,10 @@ def test_json_native_labels_share_normalization(monkeypatch, label: str) -> None
 def test_remote_selector_preserves_resume_actions() -> None:
     state = resolve_cli.ResolveCommandState.from_args(SimpleNamespace(
         json=False, worktree_id="example-worktree", machine="remote-host",
-        bare_resume=True, restore=True, no_mux=True,
+        bare_resume=True, restore=True, no_mux=True, dry_run=True,
     ))
     assert resolve_cli._remote_selector_args(state) == [
-        "--worktree-id", "example-worktree", "--bare-resume", "--restore", "--no-mux",
+        "--worktree-id", "example-worktree", "--bare-resume", "--restore", "--no-mux", "--dry-run",
     ]
 
 
@@ -218,8 +218,13 @@ def test_legacy_hostname_guest_launch_uses_independent_profile(monkeypatch, name
     assert plans[0]["ssh_alias"] == "guest-ssh"
 
 
-@pytest.mark.parametrize("surface", ["json", "interactive", "interactive-new", "interactive-resume"])
-def test_suffix_only_guest_never_launches_locally_on_native_host(monkeypatch, surface):
+@pytest.mark.parametrize("surface", [
+    "json", "interactive", "interactive-new", "interactive-resume", "interactive-preview",
+])
+@pytest.mark.parametrize("explicit_environment", [False, True])
+def test_suffix_only_guest_never_launches_locally_on_native_host(
+    monkeypatch, surface, explicit_environment,
+):
     config = cfg.Config(
         srcroot="", machine="generated-host", platform="windows", repo_name="example",
         repos={"example": cfg.RepoConfig(anchor="example-repo", worktree_root="")},
@@ -253,13 +258,19 @@ def test_suffix_only_guest_never_launches_locally_on_native_host(monkeypatch, su
     monkeypatch.setattr(resolve_cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
     monkeypatch.setattr(resolve_machine_cli, "_in_ssh_session", lambda: False)
     args = SimpleNamespace(
-        json=surface == "json", new_worktree=surface == "interactive-new", machine="example-host-wsl",
-        environment=None, worktree_id="wt-guest" if surface in ("json", "interactive-resume") else None,
+        json=surface == "json", new_worktree=surface in ("interactive-new", "interactive-preview"),
+        machine="example-host" if explicit_environment else "example-host-wsl",
+        environment="WSL" if explicit_environment else None,
+        worktree_id="wt-guest" if surface in ("json", "interactive-resume") else None,
+        dry_run=surface == "interactive-preview",
     )
     plans = []
     monkeypatch.setattr(resolve_machine_cli, "_emit_plan", plans.append)
     assert resolve_cli.cmd_resolve(args) == 0
     assert plans[0]["ssh_alias"] == "guest-ssh"
+    if surface == "interactive-preview":
+        assert "--new" in plans[0]["remote_command"]
+        assert "--dry-run" in plans[0]["remote_command"]
 
 
 @pytest.mark.parametrize(("name", "environment"), [

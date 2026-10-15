@@ -235,6 +235,7 @@ def require_record_mutation(record: Any, config: Any) -> None:
 
     if record is None:
         return
+    require_current_execution_space(config)
     entries = registry_for_config(config)
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 

@@ -267,6 +267,8 @@ def _remote_selector_args(state: ResolveCommandState) -> list[str]:
             args.append(flag)
     if getattr(state.args, "target_no_mux", False) or getattr(state.args, "no_mux", False):
         args.append("--no-mux")
+    if getattr(state.args, "dry_run", False):
+        args.append("--dry-run")
     return args
 
 

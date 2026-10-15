@@ -15,6 +15,33 @@ from machine_transport.registry import (
 from agent_worktrees import claims_cli, config as cfg, execution_spaces, tracking
 
 
+@pytest.mark.parametrize("actual", ["windows", "linux", "wsl"])
+def test_persisted_record_cannot_bypass_current_platform_mismatch(tmp_path, monkeypatch, actual):
+    (tmp_path / "machines.yaml").write_text(
+        f"machines:\n  local-space:\n    execution_platform: {actual}\n",
+        encoding="utf-8",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="local-space",
+        platform="windows" if actual != "windows" else "wsl", repo_name="project",
+        repos={"project": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"))},
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_args, **_kwargs: config)
+    directory = tmp_path / "project" / "worktrees"
+    directory.mkdir(parents=True)
+    checkout = tmp_path / "trees" / "owned"
+    checkout.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "project_dir", lambda *_args: directory.parent)
+    record = tracking.create_new_record(
+        "owned", "worktree/owned", str(checkout), "project", "local-space", actual, directory,
+    )
+    before = record.yaml_path.read_bytes()
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="platform"):
+        execution_spaces.require_record_mutation(record, config)
+    assert record.yaml_path.read_bytes() == before
+
+
 @pytest.mark.parametrize("platform,key", [("windows", "workstation"), ("wsl", "workstation-wsl")])
 def test_legacy_roster_projects_local_detection_and_live_registration_machine(
     platform, key, tmp_path, monkeypatch, capsys,
