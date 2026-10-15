@@ -1,9 +1,0 @@
-{
-  "comment": "Accept canonical GitHub Enterprise Managed User owner names in PR source observations without weakening malformed-source refusal.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Use a complete creation-record fixture and fast guard for selected-project launch plans.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

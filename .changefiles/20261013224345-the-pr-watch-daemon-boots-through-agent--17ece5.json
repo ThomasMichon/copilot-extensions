@@ -1,9 +1,0 @@
-{
-  "comment": "The PR watch daemon boots through agent_procutil.spawn_daemon from its state directory, with Job breakaway and a watch-daemon.log for its stdout/stderr.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

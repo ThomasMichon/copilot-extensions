@@ -1,9 +1,0 @@
-{
-  "comment": "Add control-authorized incarnation-fenced task grant renewal and renewable private token-file worker credentials",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

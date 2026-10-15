@@ -1,9 +1,0 @@
-{
-  "comment": "update now honors machine-gated runtimes: a runtime the machine gate does not allow here is reported as skipped instead of installed, matching launch-time reconcile",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

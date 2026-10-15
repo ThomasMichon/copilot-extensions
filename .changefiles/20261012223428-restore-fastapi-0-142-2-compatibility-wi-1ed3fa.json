@@ -1,9 +1,0 @@
-{
-  "comment": "Restore FastAPI 0.142.2 compatibility without requiring the newest upstream release.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

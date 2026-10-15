@@ -1,9 +1,0 @@
-{
-  "comment": "Separate source-only payload provenance from installation-cell ownership validation.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Validate installer wiring in both development and materialized payload layouts while preserving asset-integrity and mixed-layout refusals",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}
