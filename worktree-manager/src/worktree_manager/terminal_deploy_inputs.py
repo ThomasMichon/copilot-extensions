@@ -2,10 +2,29 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
 from .harness_state import _has_dangling_link
+
+
+def _fragment_inventory(directory: Path) -> frozenset[Path]:
+    try:
+        directory.stat()
+    except FileNotFoundError:
+        if _has_dangling_link(directory):
+            raise ValueError(f"Dangling Terminal fragment directory: {directory}")
+        return frozenset()
+
+    def fail(error: OSError) -> None:
+        raise error
+
+    return frozenset(
+        Path(parent) / name
+        for parent, _directories, files in os.walk(directory, onerror=fail)
+        for name in files if name.lower().endswith(".json")
+    )
 
 
 def _jsonc(text: str) -> str:
@@ -93,7 +112,7 @@ class TerminalInputs:
 
     def verify(self) -> None:
         for directory, paths in self.fragment_sets.items():
-            if frozenset(directory.rglob("*.json")) != paths:
+            if _fragment_inventory(directory) != paths:
                 raise ValueError(f"Terminal fragment inventory changed before publication: {directory}")
         for path, raw in self.raw.items():
             if _read_bytes(path) != raw:
@@ -108,7 +127,7 @@ class TerminalInputs:
                 self.fragment_sets[directory] = paths | {path}
 
     def fragments(self, directory: Path) -> frozenset[Path]:
-        paths = frozenset(directory.rglob("*.json"))
+        paths = _fragment_inventory(directory)
         self.fragment_sets[directory] = paths
         return paths
 

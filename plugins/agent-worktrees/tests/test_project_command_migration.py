@@ -1154,6 +1154,26 @@ def test_shared_parser_rejects_duplicate_keys_before_migration(
         parse_projects_registry(path)
 
 
+@pytest.mark.parametrize("document", ["projects: !!map []\n", "projects: {demo: !!map []}\n"])
+@pytest.mark.parametrize("receipted", [False, True])
+@pytest.mark.parametrize("reader", ["shared", "secondary-empty"])
+def test_invalid_mapping_tag_never_authorizes_mutation(
+    command_home, monkeypatch, document, receipted, reader,
+):
+    before = seed_old(monkeypatch, command_home, receipted=receipted)
+    receipt_path = inst._receipt_path("demo")
+    receipt_before = receipt_path.read_bytes() if receipt_path.exists() else None
+    inst.projects_yaml_path().write_text(document, encoding="utf-8")
+    monkeypatch.setattr(
+        inst, "read_projects_registry",
+        READ_PROJECTS_REGISTRY if reader == "shared" else lambda **kwargs: {"projects": {}},
+    )
+    with pytest.raises(inst.BinstubOwnershipError, match="mapping node"):
+        inst.reconcile_binstubs()
+    assert {path: path.read_bytes() for path in before} == before
+    assert (receipt_path.read_bytes() if receipt_path.exists() else None) == receipt_before
+
+
 def test_duplicate_registry_readonly_view_remains_tolerant(command_home, monkeypatch):
     inst.projects_yaml_path().write_text(DUPLICATE_PROJECT_DOCUMENTS[0], encoding="utf-8")
     assert READ_PROJECTS_REGISTRY() == {"projects": {}}

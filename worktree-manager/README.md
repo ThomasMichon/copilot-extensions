@@ -350,6 +350,9 @@ observed drift. Missing optional documents remain valid; malformed or denied
 reads never become empty profile inventories. Terminal settings support JSONC
 comments and trailing commas. When settings need cleanup, their original bytes
 are backed up; unchanged settings are not rewritten.
+Strict YAML publishing rejects duplicate mapping keys before migration or
+defaulting. Fragment-directory enumeration errors are failures, never evidence
+of an empty inventory.
 Publishing rejects blank/non-string selection identifiers and unknown kinds,
 including when inputs change during collection; it never silently converts a
 shell typo into an agent launch.

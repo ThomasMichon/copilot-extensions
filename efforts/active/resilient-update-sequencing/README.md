@@ -405,3 +405,21 @@ achieved by rearranging today's combined installer invocations.
   partition; did not weaken the policy guard or use an alternate resolver.
 - All 140 public-toolchain and native-workflow composition contracts passed.
   Test selection and the existing step/job deadlines remain unchanged.
+
+### 2026-10-15 - Ambiguous YAML and inaccessible fragment inventories
+- Further review identified duplicate-key YAML authorizing unintended command
+  or profile retirement. Shared command-registry parsing and its secondary
+  explicit-empty check now reject duplicate keys before migration/defaulting;
+  strict Manager registry/config/roster reads use one duplicate-rejecting
+  loader. Invalid mapping tags are also refused rather than becoming empty
+  desired state. Tolerant read-only behavior remains compatible.
+- Required publication inventory traversal now propagates denied-directory
+  errors during both collection and verification. A hidden foreign fragment
+  cannot silently become an apparent orphan; uppercase JSON suffixes remain
+  discoverable on Windows.
+- Independent command admission/registry checks passed 354 cases with
+  twenty-six platform skips; Manager coverage passed 237. The selected-cell
+  input contract remains open: keeping the correct environment alone does not
+  make Manager's legacy-only input collection cell-aware. Add an attributable
+  selected-root/snapshot boundary and a real Manager-process regression before
+  considering that finding resolved.

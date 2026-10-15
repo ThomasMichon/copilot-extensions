@@ -73,9 +73,31 @@ def _has_dangling_link(path: Path) -> bool:
     return False
 
 
+class _StrictYamlLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        if not isinstance(node, yaml.MappingNode):
+            raise ValueError("YAML mapping node is invalid")
+        self.flatten_mapping(node)
+        result = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in result
+            except TypeError as error:
+                raise ValueError("YAML mapping keys must be scalar values") from error
+            if duplicate:
+                raise ValueError("Duplicate YAML mapping key")
+            result[key] = self.construct_object(value_node, deep=deep)
+        return result
+
+
+def _load_yaml(text: str, *, strict: bool = False):
+    return yaml.load(text, Loader=_StrictYamlLoader) if strict else yaml.safe_load(text)
+
+
 def _read_yaml(p: Path, *, strict: bool = False, required_key: str | None = None) -> dict:
     try:
-        data = yaml.safe_load(p.read_text("utf-8"))
+        data = _load_yaml(p.read_text("utf-8"), strict=strict)
         if strict and data is not None and not isinstance(data, dict):
             raise ValueError(f"Configuration must be a mapping: {p}")
         if strict and required_key is not None and (
@@ -272,7 +294,7 @@ def _load_roster(machines_yaml: Path, *, strict: bool = False) -> tuple[RosterMa
     if strict and not machines_yaml.is_file():
         raise ValueError(f"Machine roster must be a file: {machines_yaml}")
     try:
-        data = yaml.safe_load(machines_yaml.read_text(encoding="utf-8")) or {}
+        data = _load_yaml(machines_yaml.read_text(encoding="utf-8"), strict=strict) or {}
     except (OSError, yaml.YAMLError) as error:
         if strict:
             raise ValueError(f"Cannot read machine roster: {machines_yaml}") from error

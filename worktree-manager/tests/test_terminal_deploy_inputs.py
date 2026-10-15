@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,75 @@ def test_fragment_inventory_drift_refuses_publication(publication, monkeypatch, 
     assert lp.main(["demo"]) == 1
     assert "inventory changed" in json.loads(capsys.readouterr().out)["error"]
     assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()} == before
+
+
+@pytest.mark.parametrize("during_verify", [False, True])
+def test_denied_fragment_directory_never_authorizes_orphan_pruning(
+    publication, monkeypatch, capsys, during_verify,
+):
+    directory = publication["foreign"].parent / "private"
+    directory.mkdir()
+    guid = "{00000001-0000-1000-8000-000000000001}"
+    (directory / "foreign.json").write_text(json.dumps({"profiles": [{"guid": guid}]}), encoding="utf-8")
+    state = publication["state"]
+    data = json.loads(state.read_text(encoding="utf-8"))
+    data["generatedProfiles"].append(guid)
+    state.write_text(json.dumps(data), encoding="utf-8")
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()}
+    scandir, apply = os.scandir, tf._apply_deploy_plan
+
+    def denied(path):
+        if Path(path) == directory:
+            raise PermissionError("fixture fragment directory denied")
+        return scandir(path)
+
+    if during_verify:
+        def interleaved(plan, local_state, inputs=None):
+            monkeypatch.setattr(os, "scandir", denied)
+            return apply(plan, local_state, inputs)
+        monkeypatch.setattr(tf, "_apply_deploy_plan", interleaved)
+    else:
+        monkeypatch.setattr(os, "scandir", denied)
+    assert lp.main(["demo"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "blocked"
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()} == before
+
+
+@pytest.mark.parametrize(("target", "text"), [
+    ("projects", "projects: {demo: {}, peer: {}}\nprojects: {}\n"),
+    ("projects", "projects:\n  demo: {display_name: Demo}\n  demo: {}\n"),
+    ("projects", "projects: !!map []\n"),
+    ("repos", "repos: {demo: {}}\nrepos: {}\n"),
+    ("config", "terminal_profiles: []\nterminal_profiles: []\n"),
+    ("roster", "machines: {host: {}}\nmachines: {}\n"),
+    ("roster", "machines:\n  host:\n    ssh: {ready: true}\n    ssh: {}\n"),
+])
+def test_ambiguous_yaml_inputs_do_not_publish(publication, tmp_path, capsys, target, text):
+    home = lp.harness_state.home()
+    registry = home / ".agent-worktrees"
+    registry.mkdir()
+    if target == "config":
+        path = home / ".demo" / "config.yaml"
+    elif target == "roster":
+        repo = tmp_path / "repo"
+        path = repo / ".agent-worktrees" / "machines.yaml"
+        path.parent.mkdir(parents=True)
+        (registry / "projects.yaml").write_text(
+            json.dumps({"projects": {"demo": {"anchor": str(repo)}}}), encoding="utf-8",
+        )
+    else:
+        path = registry / f"{target}.yaml"
+    path.write_text(text, encoding="utf-8")
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()}
+    assert lp.main(["demo", "--machine", "host"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "blocked"
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()} == before
+
+
+def test_fragment_inventory_includes_uppercase_extension(tmp_path):
+    path = tmp_path / "foreign.JSON"
+    path.write_text('{"profiles": []}', encoding="utf-8")
+    assert TerminalInputs().fragments(tmp_path) == {path}
 
 
 @pytest.mark.parametrize("kind", ["registry", "project-config", "canonical-roster", "roster-root"])

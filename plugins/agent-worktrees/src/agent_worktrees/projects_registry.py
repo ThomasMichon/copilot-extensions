@@ -14,6 +14,8 @@ def load_projects_document(content: str) -> object:
         pass
 
     def mapping(loader, node):
+        if not isinstance(node, yaml.MappingNode):
+            raise ValueError("invalid mapping node in projects registry")
         loader.flatten_mapping(node)
         result = {}
         for key_node, value_node in node.value:
