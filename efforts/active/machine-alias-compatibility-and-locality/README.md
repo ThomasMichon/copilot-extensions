@@ -105,8 +105,9 @@ constraints retained, are in [inception-transcript.md](inception-transcript.md).
   that keyboard traversal follows the displayed order.
 
 ### Phase 3 - Review, release and authorized deployment
-- [ ] Publish the integrated source through the supported, exact-head flow;
-  obtain new operator confirmation whenever a recovery plan changes.
+- [ ] Publish the current integrated candidate through the normal supported
+  flow with verified replay provenance. Require exact-head recovery approval
+  only if the publication tool actually requires a recovery operation.
 - [ ] Obtain an eligible current-head review and passing required CI; merge.
 - [ ] Follow the release pipeline and verify the promoted snapshot contains
   the repair, rather than inferring release from commit ancestry.
@@ -158,6 +159,9 @@ unrelated service changes or a second machine registry.
 ## Journal
 
 ### 2026-10-15 - Context safety and complete remote option policy
+- Normal supported publication succeeded for `28bdc336`, `7d878` and `26a1a2be`
+  with intact replay proof after integration. No publication override is
+  currently needed; a prior sync-preparation refusal is not a publication gate.
 - Automatic Machines discovery can use an observed physical hostname that is
   also an explicit Windows key to select its registered WSL guest. Manual
   native-key/profile selections retain conflicting-context rejection.
@@ -219,9 +223,9 @@ unrelated service changes or a second machine registry.
 - Parent settlement rejects a different same-platform caller, and nonadjacent
   physical siblings share display and keyboard traversal order without changing
   source identities or SSH targets.
-- A sync-preparation refusal initially suggested exact-head recovery might be
-  needed; subsequent normal publication is documented above. No earlier
-  recovery confirmation is reused for a changed source.
+- Normal supported publication with verified replay proof supersedes the
+  earlier inferred recovery gate. Historical exact-head recovery approvals
+  remain facts about those earlier operations, not a new approval requirement.
 
 ### 2026-10-15 - Retroactive capture and widened acceptance
 - The effort capture merged in #6821 after current-head approval and required
