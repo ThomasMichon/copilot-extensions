@@ -1,0 +1,101 @@
+name: Trusted attribution bootstrap proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/validate-and-promote.yml
+      - .github/workflows/verify-attribution-bootstrap.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Exercise exact production provisioning and refusal boundaries
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import subprocess
+          import tempfile
+
+          workflow = pathlib.Path(".github/workflows/validate-and-promote.yml").read_text()
+          lines = workflow.splitlines()
+          bodies = []
+          for index, line in enumerate(lines):
+              if not line.startswith("      - name: Provision hash-pinned metadata validator tooling"):
+                  continue
+              while lines[index] != "        run: |":
+                  index += 1
+              index += 1
+              body = []
+              while index < len(lines) and lines[index].startswith("          "):
+                  body.append(lines[index][10:])
+                  index += 1
+              bodies.append("\n".join(body) + "\n")
+          assert len(bodies) == 4 and len(set(bodies)) == 1
+          production = bodies[0]
+          commit = "29cae581e4a38f4c9190a2d33c49d051b36425d8"
+          blob = "780739d4feedba75decec1cb1b98b4f1c87fc8df"
+          assert f"reviewed={commit}" in production
+          assert f'" = {blob}' in production
+          policy = pathlib.Path("libs/installer-engine/installer_dependency_policy.py")
+          before = hashlib.sha256(policy.read_bytes()).digest()
+
+          with tempfile.TemporaryDirectory(prefix="attribution-proof-") as temporary:
+              root = pathlib.Path(temporary)
+
+              def execute(body, case, *, fail_uv=False):
+                  directory = root / case
+                  directory.mkdir()
+                  environment = dict(os.environ, RUNNER_TEMP=str(directory))
+                  if fail_uv:
+                      tools = directory / "tools"
+                      tools.mkdir()
+                      fake_uv = tools / "uv"
+                      fake_uv.write_text("#!/bin/sh\nexit 73\n")
+                      fake_uv.chmod(0o700)
+                      environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
+                  script = directory / "provision.sh"
+                  script.write_text(body)
+                  result = subprocess.run(
+                      ["bash", "-e", str(script)], env=environment, text=True,
+                      capture_output=True, timeout=120,
+                  )
+                  assert hashlib.sha256(policy.read_bytes()).digest() == before
+                  return result, directory
+
+              refused, directory = execute(production.replace(blob, "0" * 40), "wrong-blob")
+              assert refused.returncode != 0 and not (directory / "artifact-validator").exists()
+              print("PASS: wrong helper identity refuses before provisioning")
+
+              interrupted, directory = execute(production, "interrupted", fail_uv=True)
+              assert interrupted.returncode == 73, interrupted.stdout + interrupted.stderr
+              assert not (directory / "artifact-validator").exists()
+              print("PASS: failed provisioning restores trusted checkout and preserves failure")
+
+              installed, directory = execute(production, "fresh")
+              assert installed.returncode == 0, installed.stdout + installed.stderr
+              verified = subprocess.run(
+                  [str(directory / "artifact-validator/bin/python"), "-I", "-c",
+                   "import importlib.metadata as m; assert m.version('packaging') == '25.0'"],
+                  capture_output=True, text=True, timeout=15,
+              )
+              assert verified.returncode == 0, verified.stderr
+              print("PASS: real fresh hash-pinned, seasoned provisioning; trusted checkout restored")
+          PY
