@@ -117,7 +117,13 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
     calls = []
     metadata = tmp_path / "plugins" / "agent-index" / "pyproject.toml"
     metadata.parent.mkdir(parents=True)
-    metadata.write_text('[project]\nversion = "0.1.0-dev210"\n')
+    metadata.write_text(
+        '[project]\nversion = "0.1.0-dev210"\n'
+        '[tool.uv.sources]\nagent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
+    )
+    procutil = tmp_path / "libs" / "agent-procutil"
+    procutil.mkdir(parents=True)
+    (procutil / "pyproject.toml").write_text('[project]\nname="agent-procutil"\n')
 
     def install(command, **kwargs):
         calls.append(command)
@@ -140,6 +146,8 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
     core_extra = "" if smoke else "[store,server]"
     service_extra = "[test]" if smoke else "[native,test]"
     assert str(tmp_path / "plugins" / "agent-index") + core_extra in calls[1]
+    assert str(tmp_path / "libs" / "zdd") not in calls[1]
+    assert str(procutil) not in calls[1]
     assert calls[1][-1] == str(tmp_path / "services/index") + service_extra
     assert not Path(calls[1][calls[1].index("--override") + 1]).exists()
 
@@ -190,6 +198,11 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         with (project / "pyproject.toml").open("a", encoding="utf-8") as manifest:
             manifest.write('[tool.setuptools.packages.find]\nwhere=["src"]\n')
         (project / "src").mkdir()
+    with (tmp_path / "plugins" / "agent-index" / "pyproject.toml").open("a") as manifest:
+        manifest.write(
+            '[tool.uv.sources]\n'
+            'agent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
+        )
     (tmp_path / "libs" / "versioned-runtime").mkdir()
     monkeypatch.setattr(runner, "REPO", tmp_path)
     python = runner.default_python(component)
