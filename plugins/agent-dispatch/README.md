@@ -81,6 +81,10 @@ reports the worker's own failure directly, not a fleet/session cleanup request.
 Fleet/history/cleanup options are refused. The coordinator independently
 checks the signed task, owner, session, generation, expiry and fencing epoch
 on every request; terminal transitions invalidate the grant.
+The coordinator's fencing floor is retained in the task queue database.
+Coordinator presence expiry, deregistration, demotion and process restart do
+not restore superseded grants or permit epoch-zero renewal after federation.
+An untouched standalone queue still uses epoch zero.
 
 This client pins the supplied HTTP(S) endpoint and sends only the task header.
 It does not discover endpoints, autostart a service, resolve machine identity,

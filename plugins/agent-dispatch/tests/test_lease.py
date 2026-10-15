@@ -12,10 +12,13 @@ over the real HTTP-backed :class:`CoordinatorRendezvous`.
 from __future__ import annotations
 
 import socket
+import subprocess
+import sys
 import threading
 import time
 
 import pytest
+from agent_procutil import no_window_flags
 
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.coordinator import create_app
@@ -324,6 +327,74 @@ def test_current_fencing_epoch(directory):
     assert current_fencing_epoch(directory) == 0
     CoordinatorLease(directory, "host-a").tick()
     assert current_fencing_epoch(directory) == 1
+
+
+@pytest.mark.parametrize("removal", ["expire", "deregister", "demote"])
+def test_fencing_floor_survives_presence_removal(directory, clock, removal):
+    directory.register("boss", role=ROLE_COORDINATOR, epoch=5)
+    if removal == "expire":
+        clock.advance(directory.ttl_seconds + 1)
+        directory.reap()
+    elif removal == "deregister":
+        directory.deregister("boss")
+    else:
+        directory.heartbeat("boss", role=ROLE_STANDBY, epoch=1)
+    assert directory.discover_coordinator() is None
+    assert current_fencing_epoch(directory) == 5
+    guard = FencingGuard(directory)
+    assert guard.current_epoch() == 5
+    assert guard.is_valid(4) is False
+    directory.register("older", role=ROLE_COORDINATOR, epoch=2)
+    assert guard.current_epoch() == 5
+    replacement = CoordinatorLease(directory, "replacement").tick()
+    assert replacement.is_active is True
+    assert replacement.epoch == 6
+
+
+def test_queue_fencing_floor_survives_concurrent_writers_and_restart(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    database = tmp_path / "tasks.db"
+    queues = [TaskQueue(database) for _ in range(2)]
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(
+            lambda epoch: queues[epoch % 2].advance_fencing_epoch(epoch),
+            [0, 5, 3, 8, 1, 4],
+        ))
+    assert all(result >= epoch for result, epoch in zip(results, [0, 5, 3, 8, 1, 4]))
+    restarted = TaskQueue(database)
+    assert restarted.advance_fencing_epoch(0) == 8
+    child = subprocess.run(
+        [
+            sys.executable, "-c",
+            "import sys; from agent_dispatch.queue import TaskQueue; "
+            "print(TaskQueue(sys.argv[1]).advance_fencing_epoch(0))",
+            str(database),
+        ],
+        capture_output=True, text=True, timeout=20, creationflags=no_window_flags(),
+    )
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "8"
+    directory = FleetDirectory(fencing_floor=restarted.advance_fencing_epoch)
+    replacement = CoordinatorLease(directory, "replacement").tick()
+    assert replacement.is_active is True
+    assert replacement.epoch == 9
+
+
+def test_restarted_lease_adopts_its_retained_coordinator_epoch(directory):
+    directory.register("boss", role=ROLE_COORDINATOR, epoch=5)
+    state = CoordinatorLease(directory, "boss").tick()
+    assert state.is_active is True
+    assert state.epoch == 5
+    assert directory.discover_coordinator()["epoch"] == 5
+
+
+@pytest.mark.parametrize("epoch", [-1, True, "5", 1.5])
+def test_queue_fencing_floor_rejects_invalid_epochs(tmp_path, epoch):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        queue.advance_fencing_epoch(epoch)
+    assert queue.advance_fencing_epoch(0) == 0
 
 
 def test_guard_rejects_deposed_writer_after_failover(directory, clock):

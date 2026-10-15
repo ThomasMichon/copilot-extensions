@@ -326,6 +326,25 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-15 -- Coordinator presence loss cannot lower task fencing
+- Current-head review of #6722 reproduced epoch-zero renewal succeeding after
+  an unread epoch-five registration expired. The task queue now durably retains
+  a monotonic coordinator floor; registration and coordinator heartbeats commit
+  that floor before advertising presence. Expiry, deregistration, demotion and
+  restart cannot restore older task grants. A never-federated queue stays at zero.
+- Fencing guards retain observed floors and lease takeover advances above the
+  durable floor, including after restart or lower-epoch discovery. A restarted
+  lease for the still-advertised coordinator adopts its actual retained epoch.
+  This adds one queue-owned metadata table, not another queue or state authority.
+- Coupled native grant, lease, directory, scoped-route and federation selection:
+  117 passed; touched Python lint passes. Proof includes the originally failing
+  real HTTP route, concurrent database writers, fresh app/queue construction,
+  and a genuinely cold native child reading the durable floor.
+- A disconnected, read-only existing Linux validation image lacks pytest.
+  No dependency or installer configuration was changed to work around that
+  absence. Required published-head CI remains the Linux runtime validation gate;
+  real central-container enrollment remains an explicit campaign gate.
+
 ### 2026-10-15 -- Renewal narrowed and lightweight collection prototype
 - Rebased #6722 while preserving upstream CI and scope contracts; removed
   this slice's incidental CI-budget edits and obsolete budget documentation.

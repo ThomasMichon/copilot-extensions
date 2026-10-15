@@ -177,11 +177,11 @@ def create_app(
             "AGENT_DISPATCH_CONTROL_TOKEN must differ from AGENT_DISPATCH_TOKEN"
         )
     bus = EventBus()
-    directory = FleetDirectory()
+    directory = FleetDirectory(fencing_floor=queue.advance_fencing_epoch)
     # FleetDirectory.discover_coordinator() already matches the shape the
     # Rendezvous Protocol expects, so this in-process fencing guard needs no
-    # network hop even when nothing else federates -- an unregistered
-    # directory (no FederationRunner ticking) reports epoch 0 and every
+    # network hop even when nothing else federates -- a fresh standalone
+    # queue reports epoch 0 and every
     # fencing check trivially passes, preserving today's non-federated
     # behavior exactly (agent-dispatch-fleet-authority effort, Phase 1).
     fencing_guard = FencingGuard(directory)

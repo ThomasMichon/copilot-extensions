@@ -175,6 +175,39 @@ def test_task_grant_requires_bound_native_session_without_starting(grant_api):
     assert bound.status == "claimed" and bound.started_at is None
 
 
+def test_expired_coordinator_presence_cannot_restore_stale_grants(grant_api, monkeypatch):
+    api, queue, task, body = grant_api
+    directory = api.app.state.directory
+    clock = 1000.0
+    monkeypatch.setattr(directory, "_clock", lambda: clock)
+    standalone_token = grant(api, task, body).json()["task_token"]
+    directory.register("central", role="coordinator", epoch=4)
+    old_token = grant(api, task, {**body, "expected_epoch": 4}).json()["task_token"]
+    # No guard read is needed to retain the newly registered coordinator epoch.
+    directory.register("central", role="coordinator", epoch=5)
+    clock += directory.ttl_seconds + 1
+    assert directory.reap() == 1
+    assert directory.discover_coordinator() is None
+    for epoch in (0, 4):
+        assert grant(api, task, {**body, "expected_epoch": epoch}).status_code == 409
+    for token in (standalone_token, old_token):
+        assert api.get(
+            f"/tasks/{task.id}", headers={TASK_SCOPE_HEADER: token},
+        ).status_code == 403
+    restarted_queue = RepoDefaultingQueue(queue.db_path)
+    with TestClient(create_app(
+        restarted_queue, token="fleet", control_token="control", enable_mcp=False,
+    )) as restarted:
+        for epoch in (0, 4):
+            assert grant(restarted, task, {**body, "expected_epoch": epoch}).status_code == 409
+        for token in (standalone_token, old_token):
+            assert restarted.get(
+                f"/tasks/{task.id}", headers={TASK_SCOPE_HEADER: token},
+            ).status_code == 403
+        assert grant(restarted, task, {**body, "expected_epoch": 5}).status_code == 200
+    assert queue.get(task.id) == task
+
+
 def test_task_grant_unconfigured_signer_fails_closed(tmp_path):
     queue = RepoDefaultingQueue(tmp_path / "tasks.db")
     with TestClient(create_app(queue, token="fleet", enable_mcp=False)) as api:
