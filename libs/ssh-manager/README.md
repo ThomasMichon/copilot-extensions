@@ -44,7 +44,9 @@ agent-codespaces) import this library instead of spawning SSH directly.
   Retirement fails the old transport's outstanding requests with the existing
   transport-loss error, including requests without a timeout; it neither fails
   fresh startup waiters nor resubmits operations on a replacement. Ownership
-  metadata lasts only as long as the corresponding pending request.
+  metadata lasts only as long as the corresponding pending request. Retirement
+  uses the existing transport-failure path, preserving subscription termination,
+  eligible subscription restoration, reconnect backoff and automatic recovery.
 
 ## Usage
 

@@ -171,26 +171,10 @@ class _CarrierLifecycleMixin:
             ):
                 return
             if self._process is not None and self._process.returncode is not None:
-                async with self._failure_lock:
-                    previous, self._process = self._process, None
-                    if previous is not None:
-                        previous_epoch = self._transport_epoch
-                        self._transport_epoch += 1
-                        self._writer_queue = None
-                        self._outbound_max_frame_size = self._max_frame_size
-                        current = asyncio.current_task()
-                        for task in list(self._tasks):
-                            if task is not current:
-                                task.cancel()
-                        for request_id, future in list(self._pending.items()):
-                            if (
-                                self._request_epochs.get(request_id) == previous_epoch
-                                and not future.done()
-                            ):
-                                future.set_exception(CarrierUnavailable(
-                                    "carrier transport was lost", reconnectable=True,
-                                ))
-                        await self._closer(previous)
+                await self._transport_failed(
+                    CarrierUnavailable("carrier process exited", reconnectable=True),
+                    expected_epoch=self._transport_epoch,
+                )
             if self._closed:
                 raise CarrierUnavailable("carrier has retired")
             while True:

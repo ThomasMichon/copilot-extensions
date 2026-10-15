@@ -334,7 +334,7 @@ async def test_native_descendant_held_stderr_read_transport_is_closed(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "replacement_mode", ["ensure", "request", "failed", "cancel", "submitted-cancel"],
+    "replacement_mode", ["ensure", "request", "failed", "cancel", "submitted-cancel", "recover"],
 )
 @pytest.mark.parametrize("old_request", [False, True])
 async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
@@ -356,8 +356,9 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
     frame = encode_envelope(hello_envelope())
     receive_old_request = (
         "n=struct.unpack('!I',sys.stdin.buffer.read(4))[0];sys.stdin.buffer.read(n);"
-        "n=struct.unpack('!I',sys.stdin.buffer.read(4))[0];sys.stdin.buffer.read(n);"
-        if old_request else ""
+    ) * (
+        1 + int(old_request) + (2 if replacement_mode == "recover" else 0)
+        if old_request or replacement_mode == "recover" else 0
     )
     parent = (
         "import os,struct,subprocess,sys;"
@@ -378,6 +379,14 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
     try:
         lease = await carrier.acquire()
         process = processes[0]
+        if replacement_mode == "recover":
+            replayable = await carrier.subscribe(
+                {"operation": "synthetic-events"}, subscription_id="replayable",
+            )
+            one_shot = await carrier.subscribe(
+                {"operation": "synthetic-events"}, subscription_id="one-shot",
+                replayable=False,
+            )
         if old_request:
             pending_request = asyncio.create_task(carrier.request(
                 {"operation": "old-synthetic"}, timeout=None, request_id="old-request",
@@ -397,6 +406,7 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
         old_tasks = set(carrier._tasks)
         replacement = _FailedProcess(b"", returncode=None)
         submitted = []
+        restored = []
         if replacement_mode not in ("failed", "cancel"):
             replacement.stdout = asyncio.StreamReader()
             replacement.stdout.feed_data(frame)
@@ -407,7 +417,14 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
         class ReplyInput(_Input):
             def write(self, data):
                 envelope = decode_envelope(data[4:])
-                if envelope.type is EnvelopeType.REQUEST:
+                if envelope.subscription_id:
+                    restored.append(envelope.subscription_id)
+                    replacement.stdout.feed_data(encode_envelope(Envelope(
+                        EnvelopeType.EVENT,
+                        subscription_id=envelope.subscription_id,
+                        payload={"restored": True},
+                    )))
+                elif envelope.type is EnvelopeType.REQUEST:
                     assert carrier._request_epochs[envelope.request_id] == carrier._transport_epoch
                     submitted.append(envelope.request_id)
                     if replacement_mode != "submitted-cancel":
@@ -418,11 +435,22 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
                         )))
 
         replacement.stdin = ReplyInput()
+        failed_replacement = _FailedProcess(b"", returncode=127)
+        opens = 0
 
         async def reopen():
+            nonlocal opens, replacement
             assert stderr_task.done()
             assert transport.is_closing()
             opening.set()
+            opens += 1
+            if replacement_mode == "recover" and opens == 1:
+                return failed_replacement
+            if replacement_mode == "cancel" and opens > 1:
+                replacement = _FailedProcess(b"", returncode=None)
+                replacement.stdout = asyncio.StreamReader()
+                replacement.stdout.feed_data(frame)
+                replacement.stdin = ReplyInput()
             return replacement
 
         carrier._opener = reopen
@@ -452,7 +480,11 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
             with pytest.raises(asyncio.CancelledError):
                 await fresh_request
             assert not submitted
-        else:
+            await asyncio.wait_for(
+                wait_until(lambda: carrier.diagnostics()["state"] == "healthy"),
+                timeout=2,
+            )
+        elif replacement_mode == "submitted-cancel":
             fresh_request = asyncio.create_task(carrier.request(
                 {"operation": "cancelled-synthetic"}, timeout=None,
             ))
@@ -461,6 +493,21 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
             with pytest.raises(asyncio.CancelledError):
                 await fresh_request
             assert len(submitted) == 1
+        else:
+            with pytest.raises(CarrierUnavailable):
+                await asyncio.wait_for(carrier.ensure_started(), timeout=2)
+            await asyncio.wait_for(
+                wait_until(lambda: carrier._process is replacement
+                           and carrier.diagnostics()["state"] == "healthy"),
+                timeout=5,
+            )
+            event = await asyncio.wait_for(replayable.get(), timeout=2)
+            assert event.payload == {"restored": True}
+            assert restored == ["replayable"]
+            with pytest.raises(CarrierUnavailable, match="non-replayable subscription"):
+                await one_shot.get()
+            assert not submitted
+            assert opens == 2
         if pending_request is not None:
             with pytest.raises(CarrierUnavailable, match="carrier transport was lost"):
                 await asyncio.wait_for(asyncio.shield(pending_request), timeout=2)
