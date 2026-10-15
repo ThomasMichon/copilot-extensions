@@ -298,26 +298,81 @@ def test_includes_cycle_and_escape_are_rejected(tmp_path):
         age.inventory(tmp_path)
 
 
-def test_owned_references_have_existing_source_contract_attribution():
-    declarations, projects = age.inventory(REPO)
+def _assert_owned_source_contract_attribution(root):
+    declarations, projects = age.inventory(root)
     refs = [
-        (REPO / "plugins" / "agent-index" / "server" / "pyproject.toml", "agent-index"),
-        (REPO / "services" / "dispatch" / "pyproject.toml", "agent-dispatch"),
-        (REPO / "services" / "index" / "pyproject.toml", "agent-index"),
-        (REPO / "services" / "index" / "pyproject.toml", "agent-procutil"),
-        (REPO / "plugins" / "agent-index" / "pyproject.toml", "fleet-manager"),
+        (root / "plugins" / "agent-index" / "server" / "pyproject.toml", "agent-index"),
+        (root / "services" / "dispatch" / "pyproject.toml", "agent-dispatch"),
+        (root / "services" / "index" / "pyproject.toml", "agent-index"),
+        (root / "services" / "index" / "pyproject.toml", "agent-procutil"),
+        (root / "plugins" / "agent-index" / "pyproject.toml", "fleet-manager"),
     ]
     count = 0
     for path, name in refs:
         assert name not in projects[path].get("tool", {}).get("uv", {}).get("sources", {})
-        target = age.contract_source(Requirement(name), path, projects, REPO)
-        assert target in projects and target != path
+        target = age.contract_source(Requirement(name), path, projects, root)
+        assert target is not None and target != path
+        assert age.attributed_project(Requirement(name), target.parent, projects, root)
         for declaration in declarations:
             req = Requirement(declaration.requirement) if declaration.ecosystem == "python" else None
             if declaration.path == path and req.name == name:
-                assert age.local_source(req, path, projects, REPO)
+                assert age.local_source(req, path, projects, root)
                 count += 1
     assert count == 7
+
+
+@pytest.mark.parametrize("materialized", [False, True])
+def test_owned_references_have_existing_source_contract_attribution(materialized):
+    if not materialized:
+        _assert_owned_source_contract_attribution(REPO)
+        return
+    import io
+    import os
+    import tarfile
+    import tempfile
+
+    spec = importlib.util.spec_from_file_location(
+        "dependency_age_materialized_provenance",
+        REPO / "tools" / "clean-room" / "lib" / "materialized_provenance.py",
+    )
+    assert spec is not None and spec.loader is not None
+    provenance = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(provenance)
+    environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    archive = subprocess.run(
+        ["git", "-C", str(REPO), "archive", "--format=tar", "HEAD"],
+        check=True, capture_output=True, timeout=120, env=environment,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    ).stdout
+    with tempfile.TemporaryDirectory(prefix="da-") as temporary:
+        root = Path(temporary) / "m"
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
+            provenance.extract_source(tree, root)
+        program = (
+            "import json,sys\nfrom pathlib import Path\n"
+            "root=Path(sys.argv[1]);sys.path.insert(0,str(root/'tools'))\n"
+            "import materialize_main\nlog=[]\n"
+            "for name in ('agent-index','agent-dispatch'):\n"
+            " path=root/'plugins'/name\n"
+            " log.extend(materialize_main.materialize_uv_editable_ref_into("
+            "source_consumer_dir=path, dest_consumer_dir=path, canonical_root=root, dest_root=root))\n"
+            "print(json.dumps(log))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", "-S", "-c", program, str(root)],
+            check=True, capture_output=True, text=True, timeout=120, env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        log = json.loads(result.stdout)
+        assert not any(entry.startswith("SKIP") for entry in log), log
+        projects = age.inventory(root)[1]
+        selected = age.contract_source(
+            Requirement("agent-procutil"), root / "services/index/pyproject.toml",
+            projects, root,
+        )
+        assert selected == root / "plugins/agent-index/libs/agent-procutil/pyproject.toml"
+        assert selected not in projects
+        _assert_owned_source_contract_attribution(root)
 
 
 @pytest.mark.parametrize("mode", [
