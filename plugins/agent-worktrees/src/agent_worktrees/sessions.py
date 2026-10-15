@@ -1419,25 +1419,18 @@ def _list_mux_sessions() -> dict[str, int] | None:
     the list-sessions command is unavailable or fails.
     """
     import subprocess
+    from agent_procutil import no_window_kwargs
+    from .mux_list_result import is_empty_tmux_listing, parse_session_counts
 
     if platform.system() == "Windows":
         cmd = ["psmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     else:
         cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
         if result.returncode != 0:
-            return None
-        sessions_map: dict[str, int] = {}
-        for line in result.stdout.strip().splitlines():
-            if ":" not in line:
-                continue
-            name, _, count_str = line.rpartition(":")
-            try:
-                sessions_map[name] = int(count_str)
-            except ValueError:
-                sessions_map[name] = 0
-        return sessions_map
+            return {} if is_empty_tmux_listing(cmd[0], result) else None
+        return parse_session_counts(result.stdout)
     except (OSError, subprocess.TimeoutExpired):
         # OSError covers FileNotFoundError (mux not installed) as well as
         # spawn failures such as WinError 4551 (Application Control policy

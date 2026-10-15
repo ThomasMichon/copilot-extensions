@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees/README.md` (durable repository/worktree identity); `visions/agent-fabric/README.md` (shared identity authority)
 - **Umbrella issue:** #5674
-- **Related issues:** #5972 · #6170 · #6692
+- **Related issues:** #5972 · #6170 · #6692 · #6739
 
 ## Guiding Intent
 
@@ -29,6 +29,7 @@ example, a source commit, or a merged individual pull request.
 | Identity implementation owner | Shared mapping, receiving-project compatibility and Manager locality | Existing managed source `chugging-bolt`; bounded delegate with exclusive edit ownership |
 | Windows validation | Native configuration, payload execution and installed launch/resume proof | Adopting host's configured native transport |
 | WSL validation | Guest configuration, historical records and installed launch/resume proof | Adopting host's configured guest transport |
+| Runtime readiness owner | Empty-mux current-roster and liveness prerequisite | Managed source `grimy-cylinder` |
 
 ## Coordination
 
@@ -77,6 +78,16 @@ slug. Public-safe request excerpts, with identifiers redacted but technical
 constraints retained, are in [inception-transcript.md](inception-transcript.md).
 
 ## Plan
+
+### Phase 0 - Empty-mux readiness prerequisite
+_(Agent-recommended prerequisite discovered while checking the requested live-data gate.)_
+- [x] Confirm the existing #6739 no-server classification defect using a
+  read-only probe, without killing sessions or starting a dummy server.
+- [x] Handle recognized healthy empty tmux results consistently in monitor and
+  session-liveness enumeration; retain unknown evidence for genuine failures.
+- [ ] Pass focused, real missing-socket and native-safe probe contracts; land
+  the readiness prerequisite through ordinary review and required CI.
+- [ ] Verify current-roster readiness after the authorized released update.
 
 ### Phase 1 - Capture ownership and the compatibility contract
 - [x] Resolve prior campaign ownership and preserve the original repair source.
@@ -168,3 +179,17 @@ unrelated service changes or a second machine registry.
   The broader historical-alias matrix and installed acceptance remain open.
 - The canonical wider transport-convergence campaign is preserved as a
   separate owner. This effort does not claim its downstream consumer slices.
+
+### 2026-10-15 - Empty-mux readiness prerequisite
+- A known independent blocker, #6739, classifies a normal absent tmux server as
+  failed enumeration. The monitor therefore cannot publish its first roster,
+  and the local Manager source can fail even when machine matching is correct.
+- The bounded repair distinguishes those recognized empty results from genuine
+  probe failures in both the monitor and session-liveness paths. No session or
+  service was stopped to reproduce the issue, and no dummy server is required.
+- This readiness prerequisite does not replace the original identity repair or
+  waive its review, release, deployment and installed-acceptance gates.
+- Focused hardened-container validation passed 393 tests with five conditional
+  skips. The host's actual tmux missing-socket contract passed within a 25-test
+  probe portfolio without creating or stopping a server. Probe/parsing
+  extraction keeps both existing module ceilings shrink-only.

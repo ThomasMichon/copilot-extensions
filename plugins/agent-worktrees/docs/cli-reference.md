@@ -574,6 +574,12 @@ authorize caller-side git/session/mux reconstruction. The Manager explicitly
 requires `--current`, and incompatible engines report an upgrade error rather
 than dropping that requirement.
 
+An installed tmux binary with no running server is a healthy empty session
+inventory, not a failed probe. Its recognized no-server responses do not block
+current-roster publication or make session liveness unknown by themselves.
+Permission errors, timeouts, missing executables and other probe failures remain
+unavailable evidence; they are never treated as proof that sessions are gone.
+
 Responses include complete generation/revision/count provenance. A failed
 producer preserves last-good rows with explicit stale availability. An
 unreachable or incompatible resident permits only independently indexed,
