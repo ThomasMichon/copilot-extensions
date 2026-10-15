@@ -9,7 +9,7 @@
   recoverable goals; plugin-services bounded work and single-owner lifecycle;
   registry-resolved configuration.
 - **Umbrella issue:** #6466
-- **Sub-issues:** #6467, #6470, #6471; coordinate #6185 and #6407.
+- **Sub-issues:** #6467, #6470, #6471, #6793; coordinate #6185 and #6407.
 
 ## Guiding Intent
 
@@ -27,6 +27,7 @@ Preserve the owning ground-layer, installer and configuration authorities.
 | Category implementer | Task metadata, producers and category-specific views | Dedicated implementation worktree for #6466 |
 | Supervisor implementer | Bounded receipt reconciliation and progress recovery | Dedicated implementation worktree for #6467 |
 | Registry implementer | Named repository/resource bindings and validation | Dedicated implementation worktree for #6470 |
+| Source safety implementer | Trusted ownership snapshots and optional scoped GitHub authentication | `jittery-latch`, #6793 |
 | Existing scalar-repair owner | Preserve ownership of #6407 and its existing #6421 PR | Existing PR and its current source worktree |
 
 ## Coordination
@@ -89,6 +90,17 @@ Public-safe summary of the requested behavior:
 
 Operational task recovery and deployment placement remain adopter-owned.
 No private host, checkout, task or session identifiers are needed upstream.
+
+### Bounded source-safety amendment
+
+Public-safe summary of the subsequently authorized repair:
+
+- Preserve ownership recorded by a trusted comment that the adapter updates in
+  place. An absent predecessor comment or task on another coordinator is not
+  evidence that the issue is unclaimed.
+- Allow a source to explicitly select existing repository-scoped GitHub
+  authentication, without switching global accounts, persisting credentials or
+  exporting one account into the shared supervisor environment.
 
 ## Plan
 
@@ -153,6 +165,26 @@ No private host, checkout, task or session identifiers are needed upstream.
 - [ ] Keep live, dirty, unlanded, open-PR, unfinished, held and ownership-ambiguous
   work protected by existing conclusion and cleanup authorities.
 
+### Phase 6 - Preserve source ownership and scoped authentication
+
+- [ ] Review this bounded amendment before runtime implementation of #6793.
+- [ ] Accept the adapter's verified, standalone claimed snapshot after an
+  in-place edit; preserve author, schema, occurrence and release-conflict
+  validation. Do not infer relinquished ownership from a missing local task.
+- [ ] _(Agent-recommended implementation detail)_ Add explicit GitHub-only
+  `forge.auth: repository`, retaining omitted/`ambient` standalone behavior.
+  Resolve the optional agent-worktrees sibling through its existing invocation
+  helper, select the repository account and obtain credentials through its
+  existing command boundary, then run GitHub operations with a child-only
+  environment. Refuse missing siblings, mismatches and credential fallback
+  before mutation. Never log or persist token output.
+- [ ] Renew scoped credentials on demand; preserve immediate pre-mutation
+  identity verification and avoid process-global environment changes.
+- [ ] Document the opt-in and unavailable-integration failures; add a changefile,
+  land through normal review/CI, and retain release/adoption as separate gates.
+- [ ] Leave task transfer (#6189), PR-ground-truth reconciliation (#2798),
+  broader account-aware operations, and unrelated recovery owners unchanged.
+
 ## Validation Plan
 
 - [ ] Request read-back preserves category-only scope, no pruning, audit retention,
@@ -177,6 +209,17 @@ No private host, checkout, task or session identifiers are needed upstream.
   review; drive implementation PRs through merge and promotion.
 - [ ] Authorized rollout has running-version and real consumer evidence; merge
   alone is not deployment.
+- [ ] Round-trip an actual provider comment edit through fresh discovery and
+  selection, including a second empty coordinator; a trusted claimed snapshot
+  remains excluded and is not released merely because its task is absent.
+- [ ] Keep malformed/untrusted markers rejected and conflicting releases from
+  clearing a claim. Preserve ordinary reserved/claimed/released histories.
+- [ ] Exercise scoped account selection, renewal, unavailable sibling, mismatched
+  account, failed/degraded token retrieval and child-environment isolation
+  without exposing credential bytes. Include a real subprocess contract.
+- [ ] Run the same declaration's ambient mode without the optional sibling.
+  Record native Windows results and available Linux CI separately from live
+  adopter proof; a mock or source pass is not installed-consumer evidence.
 - [ ] Resolve or explicitly transfer every plan/validation item before Done.
 
 ## Proposal
@@ -192,6 +235,17 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-14 - Bounded source-safety proposal
+
+- #6793 records two demonstrated source blockers. In-place marker editing
+  removes the predecessor that the current reducer requires for a claimed
+  snapshot; the GitHub adapter also has no source-scoped authentication opt-in.
+- This amendment closes existing dispatch ownership and agent-fabric
+  account-aware-operation intent. It adds no coordinator, credential store,
+  supervisor, transfer mechanism or mandatory sibling dependency.
+- Implementation remains gated on this amendment's review and merge. Existing
+  recovery, release and broader identity-contract ownership is unchanged.
 
 ### 2026-10-14 - Native category contract budget composition
 
