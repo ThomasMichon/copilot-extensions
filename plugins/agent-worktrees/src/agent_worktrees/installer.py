@@ -24,12 +24,16 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import config as cfg
 from . import launch_wrapper_assets as lwa
 from . import project_state, registry_paths
 from . import output, pr_authority
 from agent_procutil import no_window_kwargs
+
+if TYPE_CHECKING:
+    from .project_command_migration import CommandAdmission
 
 
 def install_dir() -> Path:
@@ -792,8 +796,8 @@ def _project_binstub_context(
     repo_dir: str | Path | None = None,
     transfer: bool = False,
     registry: dict | None = None,
-    admitted: object | None = None,
-) -> tuple[dict[str, str], dict[str, str], list[tuple[Path, str]], object]:
+    admitted: CommandAdmission | None = None,
+) -> tuple[dict[str, str], dict[str, str], list[tuple[Path, str]], CommandAdmission]:
     if not project or not cfg._PROJECT_NAME_RE.fullmatch(project):
         raise ValueError(
             "project command name must be 1-64 alphanumeric/dash/dot/underscore "
@@ -843,7 +847,7 @@ def _deploy_project_binstub_unlocked(
     repo_dir: str | Path | None = None,
     transfer: bool = False,
     registry: dict | None = None,
-    admitted: object | None = None,
+    admitted: CommandAdmission | None = None,
 ) -> int:
     """Write a single project's receipt-gated binstub file(s)."""
     owner, project_identity, specs, admitted = _project_binstub_context(

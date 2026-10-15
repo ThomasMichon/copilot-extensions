@@ -222,7 +222,6 @@ def write_registry(registry: ReposRegistry) -> None:
             lines.append(f"  {_quote(owner)}: {_quote(registry.account_map[owner])}")
         lines.append("")
 
-    # repos section
     if registry.repos:
         lines.append("repos:")
         for name in sorted(registry.repos.keys()):

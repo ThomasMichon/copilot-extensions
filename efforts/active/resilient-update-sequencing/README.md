@@ -297,3 +297,24 @@ achieved by rearranging today's combined installer invocations.
   platform skips; Manager coverage passed 189. Native profile command passes
   measured 2.125 and 1.672 seconds. Review and required CI remain open; no
   installation has been patched or deployment claimed.
+
+### 2026-10-15 - Admission evidence and canonical empty-state roundtrip
+- Review found another edit window between validation and transaction capture.
+  Admission now returns immutable sibling-byte evidence; registration,
+  reconciliation, retirement and explicit transfer carry it into publication.
+  A changed capture fails before any journal is written, preserving prior
+  receipts and edited command bytes rather than admitting the new bytes.
+- Strict empty-state readers exposed the canonical writers' old null/omitted
+  empty mappings. Both writers now emit explicit empty mappings. Real
+  writer-to-reader regressions remove the last project/repository, retain
+  edited commands for classification and apply the Manager's profile
+  reconciliation, including a source-root-only registry.
+- Independent integrated checks passed 572 cases with twenty-eight platform
+  skips; the standalone writer-to-reader file passed 21 cases. The fast,
+  filesystem-contained migration matrix now participates in required guards
+  so hosted Linux exercises the POSIX host path before merge, not only during
+  later full promotion validation. Its prior native Windows guard pass took
+  30.5 seconds for 152 cases with twenty-four platform skips.
+- The preceding published head cleared required CI. The new admission/writer
+  head still owes current-head review and CI; promotion and live proof remain
+  open.
