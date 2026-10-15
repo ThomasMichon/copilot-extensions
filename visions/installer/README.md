@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-15
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -230,6 +230,29 @@ and installer. It shows what is selected, ready, and serving, and it can
 request an update. It does not keep its own record of which release the host
 runs, and it is never a second updater. See
 [plugin-services *one-authority-per-lifecycle-decision*](../plugin-services/README.md#one-authority-per-lifecycle-decision).
+
+### resilient-update-convergence
+An update pursues a verified good, current state rather than treating one
+best-effort pass as success. Cheap deterministic blockers are discovered before
+expensive work; costly and failure-prone preparation precedes short,
+health-gated activation, followed by inexpensive local integration. Verified
+progress survives retry. Transient failures receive safe retry and mitigation;
+authority, policy and integrity blockers remain explicit and durable. Existing
+lifecycle authorities, package governance and rollback remain intact.
+
+### historical-generated-command-migration
+Known generated commands from earlier versions migrate or retire automatically
+when installation lineage and unchanged ownership can be established. A
+physical payload relocation does not by itself require manual ownership
+transfer. Foreign, edited or ambiguous commands remain protected, and an
+unresolved required command is never reported as synchronized.
+
+### change-driven-local-integration
+Terminal profiles, shortcuts and other owned local projections are reconciled
+once from stable update inputs through their narrow owning surfaces, without
+rebuilding runtimes or copying whole payloads merely to render a profile.
+Unchanged outputs avoid writes; missing or stale outputs are repaired even
+when package versions are already current.
 
 ### self-updating
 The app **keeps itself current on its own** — fetched by the one-line bootstrap

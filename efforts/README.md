@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Resilient Update Sequencing](active/resilient-update-sequencing/README.md) | Draft; historical command migration and cheap finishing first | #6820; complementary to #6812 |
 | [Bridge Workspace Owner Boundary](active/bridge-workspace-owner-boundary/README.md) | Active; local repair, coordinator review/publication and released-source proof pending | #6757 |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
 | [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Draft; follow-up gated on primary repairs and hosted publication | #6639; #6535/#6632 owners retained |
