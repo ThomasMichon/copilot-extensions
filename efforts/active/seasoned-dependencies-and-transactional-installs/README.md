@@ -727,3 +727,13 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   isolated environment, exact launch/resume arguments and workspace-only cleanup.
   The complete local owner-boundary module passed eight cases with three native
   POSIX skips; native Linux revalidation remains required CI evidence.
+- Subsequent genuine review identified a destructive support-synchronization
+  path: a destination symlink could redirect a policy-file copy or permission
+  change to an unrelated target. Synchronization now applies the existing
+  linked-path guard to the destination before reading or mutating it.
+  Twelve native filesystem regressions cover both wrapper modes, both support
+  files and different, matching or dangling targets; the link and target bytes,
+  permissions and modification time remain unchanged on refusal. All 142
+  synchronization/completion-guard cases passed, and all eight canonical
+  adopters remain synchronized. Fresh review and required CI still precede
+  merge; runtime installation behavior was not changed by this correction.

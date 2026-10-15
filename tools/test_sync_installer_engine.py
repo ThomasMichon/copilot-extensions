@@ -368,3 +368,46 @@ def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
 
     with pytest.raises(RuntimeError, match="symlink -- refusing"):
         sync_installer_engine.sync()
+
+
+@pytest.mark.parametrize("mode", ["canonical", "local"])
+@pytest.mark.parametrize("name", sync_installer_engine.ier.SUPPORT_FILES)
+@pytest.mark.parametrize("target_state", ["different", "matching", "dangling"])
+def test_sync_refuses_linked_support_without_touching_target(fake_repo, mode, name, target_state):
+    scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
+    writer = _write_canonical_refs if mode == "canonical" else _write_local_refs
+    writer(scripts)
+    canonical = fake_repo / "libs" / "installer-engine"
+    with (canonical / "installer-engine.sh").open("a", encoding="utf-8") as stream:
+        stream.write("# installer_dependency_policy.py\n")
+    for support in sync_installer_engine.ier.SUPPORT_FILES:
+        source = canonical / support
+        source.write_text(f"# canonical {support}\n", encoding="utf-8")
+        source.chmod(0o700)
+    outside = fake_repo / "unrelated"
+    outside.mkdir()
+    target = outside / name
+    if target_state != "dangling":
+        target.write_bytes(
+            (canonical / name).read_bytes() if target_state == "matching" else b"unrelated bytes\n"
+        )
+        target.chmod(0o600)
+    destination = scripts / name
+    destination.symlink_to(target)
+    original_link = os.readlink(destination)
+    before = (
+        target.read_bytes(), stat.S_IMODE(target.stat().st_mode), target.stat().st_mtime_ns,
+    ) if target.exists() else None
+
+    assert sync_installer_engine.verify()
+    with pytest.raises(RuntimeError, match="symlink -- refusing"):
+        sync_installer_engine.sync()
+
+    assert destination.is_symlink()
+    assert os.readlink(destination) == original_link
+    if before is None:
+        assert not target.exists()
+    else:
+        assert (
+            target.read_bytes(), stat.S_IMODE(target.stat().st_mode), target.stat().st_mtime_ns,
+        ) == before

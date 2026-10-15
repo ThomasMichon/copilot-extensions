@@ -17,6 +17,7 @@ Adopters can now exist in one of two valid dev-time forms:
 This tool's ``--check`` verifies both forms correctly. Its write mode keeps
 vendored adopters byte-identical and removes stale local copies from
 canonical-reference adopters.
+Linked destinations are refused before reading, copying or changing permissions.
 
 Usage::
 
@@ -279,6 +280,9 @@ def sync() -> list[str]:
             if bad_ancestor is not None:
                 raise RuntimeError(f"{bad_ancestor} is a symlink -- refusing")
             destination = REPO / "plugins" / plugin / "scripts" / name
+            bad_destination = uer._find_symlinked_ancestor(destination, REPO.resolve())
+            if bad_destination is not None:
+                raise RuntimeError(f"{bad_destination} is a symlink -- refusing")
             if not source.is_file():
                 raise FileNotFoundError(f"canonical source missing: {source}")
             if mode == "canonical" and name in FILES:
