@@ -1080,14 +1080,30 @@ and project configuration explicitly:
 ```
 
 The unconfirmed invocation refuses and previews the exact existing PR,
-destination fingerprint, immutable source commit and saved expected remote
-commit, without changing Git refs, tracking or the remote. **Stop for real
+destination fingerprint, immutable source commit, original saved head and
+current provider/ref-agreed expected remote commit, without changing Git refs,
+tracking, audits or the remote. Saved publication authority, action and any
+validated backed-sync proof are also fingerprint-bound. **Stop for real
 per-PR operator sign-off** on that previewed operation. A reason, discovered
 flag, broad policy approval or previous refusal does not authorize the push.
 Only then repeat with the same inputs and
 `--confirm-break-glass <preview-fingerprint>`. Agents must not generate consent
-on their own. A changed source (including an amend), destination, reason or
-expected head requires a new preview and sign-off.
+on their own. A changed source (including an amend), destination, reason,
+saved publication, expected head, action or evidence requires a new preview
+and sign-off.
+
+The preview prefers `settle-publication` when an existing completed backed-sync
+checkpoint independently proves its exact result is already the current
+provider/ref-agreed head. Confirmation then settles only local bookkeeping:
+no push, PR attribution edit or publication of later local work. Equal SHAs or
+patches without that checkpoint are not proof. Otherwise `rewrite` requires
+explicit confirmation of the exact source and agreed live CAS lease. The
+original saved lease is retained as evidence, never silently replaced before
+approval; normal publication and ordinary `--rewrite-pr` still refuse it.
+Corrupt, unreadable or dangling optional checkpoints mark settlement evidence
+`unusable` in the preview and audit. They disable settlement, not an explicit
+rewrite preview; their bytes/available file identity and referenced-ref state
+remain bound to confirmation and are never silently repaired.
 
 The exception waives historical original-owner, suffix and replay proof, not
 provider authentication, exact source/destination validation, an unchanged
@@ -1099,7 +1115,7 @@ the preview and private audit, never silently treated as ownership evidence.
 The approved commit object is pinned through transport even if its local branch
 moves later; no opportunistic lease refresh or implicit exception exists.
 
-Before pushing, the command retains the approved source and previous published
+Before either action, the command retains the approved source and actual agreed published
 tip at reported worktree-scoped `refs/agent-worktrees/recovery/...` refs. They
 survive reflog expiry and garbage collection while the refs and repository
 exist; do not remove them or clean up the worktree until the recovery is
@@ -1111,11 +1127,13 @@ does **not** restore the provider head: any remote rollback needs its own new
 preview, current exact lease and per-operation approval. No plain force push.
 
 Private `agent-worktrees-pr-break-glass-<id>.json` audits live in the selected
-worktree's Git metadata, with confirmation basis, reason, retained refs and
+worktree's Git metadata, with original saved publication evidence,
+confirmation basis, reason, retained refs and
 available observed invoker/session attribution. Unknown provenance is recorded
 honestly; the data is not proof of authenticated identity and is not
-automatically published. `succeeded` means transport succeeded, not that the
-PR merged. If tracking or audit persistence fails after transport, the command
+automatically published. `succeeded` means transport or the explicitly named
+bookkeeping settlement succeeded, not that the PR merged. If tracking or audit
+persistence fails after transport, the command
 reports the published remote head and reconciliation need, not success or a
 safe retry. Read provider/remote evidence before repairing bookkeeping.
 

@@ -1,4 +1,7 @@
-"""Selected FTS conflicts cross an actual child boundary without exposing payloads."""
+"""Selected FTS conflicts cross an actual child boundary without exposing payloads.
+
+Only store retry sleeps are recorded; shared native-library clocks stay real.
+"""
 
 import subprocess
 import time

@@ -367,18 +367,38 @@ agent-worktrees push-changes <recovery-worktree-id> --config <project-config> --
 
 This first call refuses with exit 2 and an exact PR/provider/repository/head-ref,
 destination fingerprint, full source commit and expected remote commit preview.
-It changes no Git refs, tracking data or remote head. The reason and preview
+The saved head remains separate from the current head agreed by the provider
+and remote ref; disagreement or an unreadable/deleted ref refuses even a preview.
+The preview also binds the original publication authority, proposed action and
+any validated recovery evidence. It changes no Git refs, tracking data, audit
+files or remote head. The reason and preview
 fingerprint are not operator authentication or permission. Obtain real operator
 sign-off for this specific PR and operation before repeating the same call with
 `--confirm-break-glass <preview-fingerprint>`. Never add confirmation automatically
-after a guard refusal. Changed source, reason, destination or expected head
-requires a fresh preview and sign-off.
+after a guard refusal. Changed source, reason, destination, saved publication,
+expected head, action or evidence requires a fresh preview and sign-off.
 
-The confirmed call publishes the pinned committed source as-is. Historical
+If an existing completed backed-sync checkpoint proves that its exact result
+is already the agreed published head, the preview prefers `settle-publication`:
+confirmation updates only local publication bookkeeping, never pushes or edits
+the PR, and leaves later local work unpublished. The preview binds the checkpoint's
+new base; settlement records that base and its corresponding publication patch ID.
+Equal source/remote commits
+or matching patches alone do not establish this proof. Otherwise `rewrite`
+publishes the pinned committed source as-is with the **previewed live head** as
+its exact CAS lease, not a silently refreshed saved lease. Both actions require
+confirmation and revalidate the plan immediately before taking effect.
+Malformed, unreadable or dangling historical checkpoints explicitly mark
+settlement evidence `unusable` and disable settlement, not the rewrite preview.
+Invalid ref arguments and failed optional Git probes receive the same treatment.
+The imperfect evidence snapshot is confirmation-bound and preserved unchanged;
+it is neither repaired nor accepted as authority.
+Ordinary `push-changes` and `--rewrite-pr` retain their saved-lease refusal.
+Historical
 ownership, suffix and replay bookkeeping may be waived; provider-confirmed
 destination, exact remote lease, serialization, protected refs, clean source,
 real hooks and fresh PR review/merge gates are not. Title/squash options and
-new-PR use are inapplicable. Source and prior published commits are retained at
+new-PR use are inapplicable. Source and actual agreed published commits are retained at
 the reported `refs/agent-worktrees/recovery/...` refs before transport.
 
 Azure recovery recognizes the standard secure SSH and HTTPS addresses of the
@@ -388,10 +408,12 @@ this source observation does not change the saved publication destination fence.
 
 The selected worktree's Git metadata contains private
 `agent-worktrees-pr-break-glass-<id>.json` audits with the reason, confirmed
-operation, retained refs and observed invoker/session context. Unknown attribution
+operation, original saved publication evidence, retained refs and observed
+invoker/session context. Unknown attribution
 stays unknown; this is not authenticated identity. Private rationale and invoker
 details are not posted to the provider. Audit `succeeded` records successful
-transport, not completed review/merge: a subsequent persistence failure explicitly
+transport or the explicitly named bookkeeping settlement, not completed
+review/merge: a subsequent persistence failure explicitly
 reports that the remote was published and needs reconciliation. Do not repeat a
 push to repair a tracking or audit error. A failed transport is followed by a
 bounded exact-ref observation: an approved commit on the remote is reconciled
