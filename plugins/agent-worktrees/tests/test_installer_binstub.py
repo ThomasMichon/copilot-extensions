@@ -701,11 +701,11 @@ def test_registration_serializes_shared_registries_before_project(
             events.append(f"release:{name}")
 
     monkeypatch.setattr(inst, "_binstub_lock", _lock)
-    monkeypatch.setattr(
-        inst,
-        "_project_binstub_context",
-        lambda *args, **kwargs: events.append("preflight"),
-    )
+    def _preflight(*args, **kwargs):
+        events.append("preflight")
+        return {}, {}, [], None
+
+    monkeypatch.setattr(inst, "_project_binstub_context", _preflight)
     monkeypatch.setattr(
         inst,
         "_deploy_project_binstub_unlocked",

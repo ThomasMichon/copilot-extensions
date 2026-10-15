@@ -3,11 +3,51 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 from packaging.version import InvalidVersion, Version
 
 from . import project_command_templates as templates
+
+
+@dataclass(frozen=True)
+class CommandAdmission:
+    """Immutable bytes actually checked at the admission boundary."""
+
+    historical: bool
+    stubs: Mapping[str, bytes | None]
+
+    def __post_init__(self) -> None:
+        captured = dict(self.stubs)
+        if not all(
+            isinstance(name, str) and (data is None or isinstance(data, bytes))
+            for name, data in captured.items()
+        ):
+            raise TypeError("command admission requires immutable bytes and string names")
+        object.__setattr__(self, "stubs", MappingProxyType(captured))
+
+    def __bool__(self) -> bool:
+        return self.historical
+
+
+def _capture_admission_bytes(project: str) -> dict[str, bytes | None]:
+    from . import installer as inst
+
+    captured = {}
+    for path, _ in inst._project_binstub_specs(project):
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise inst.BinstubContentError(f"refusing linked/non-file project command for {project}")
+        captured[inst._stub_key(path.name)] = path.read_bytes() if path.exists() else None
+    return captured
+
+
+def admit_transfer(project: str) -> CommandAdmission:
+    """Capture the specific bytes a caller's explicit transfer authorizes."""
+    return CommandAdmission(False, _capture_admission_bytes(project))
 
 
 def _json(path: Path) -> dict:
@@ -80,7 +120,7 @@ def same_lineage(receipt: dict, owner: dict) -> bool:
     )
 
 
-def _candidate_payload(project: str, paths: list[Path], owner: dict) -> Path | None:
+def _candidate_payload(project: str, contents: dict[str, bytes], owner: dict) -> Path | None:
     """Use only this owner or its recorded legacy runtime snapshots."""
     from . import installer as inst
 
@@ -91,34 +131,38 @@ def _candidate_payload(project: str, paths: list[Path], owner: dict) -> Path | N
         candidates += [p for p in snapshots.iterdir() if p.is_dir() and snapshot_lineage(p, owner, inst.install_dir())]
     for payload in candidates:
         for family in ("current", "traced", "ambient"):
-            expected = templates.render(project, payload, windows=inst.platform.system() == "Windows", family=family)
-            if paths and all(
-                not p.is_symlink() and templates.matches(p.read_bytes(), expected.get(p.name, ""))
-                for p in paths
+            expected = {
+                inst._stub_key(name): text
+                for name, text in templates.render(
+                    project, payload, windows=inst.platform.system() == "Windows", family=family
+                ).items()
+            }
+            if contents and all(
+                templates.matches(data, expected.get(name, "")) for name, data in contents.items()
             ):
                 return payload
     return None
 
 
-def validate(project: str, receipt: dict | None, owner: dict, identity: dict | None) -> bool:
-    """Validate the entire platform command; return whether it is historical."""
+def validate(project: str, receipt: dict | None, owner: dict, identity: dict | None) -> CommandAdmission:
+    """Validate one captured command and return its immutable admitted bytes."""
     from . import installer as inst
 
     paths = [p for p, _ in inst._project_binstub_specs(project)]
-    existing = [p for p in paths if p.exists() or p.is_symlink()]
-    if any(p.is_symlink() or not p.is_file() for p in existing):
-        raise inst.BinstubContentError(f"refusing linked/non-file project command for {project}")
+    captured = _capture_admission_bytes(project)
+    contents = {name: data for name, data in captured.items() if data is not None}
+    existing = [p for p in paths if captured[inst._stub_key(p.name)] is not None]
     if receipt is None:
         if not existing:
-            return False
+            return CommandAdmission(False, captured)
         if owner.get("marketplace_id") or owner.get("install_receipt"):
             raise inst.BinstubOwnershipError(f"refusing unreceipted command without cell ownership for {project}")
-        payload = _candidate_payload(project, existing, owner)
+        payload = _candidate_payload(project, contents, owner)
         if payload is None:
             raise inst.BinstubContentError(f"refusing unknown unreceipted project command for {project}; verify ownership before --transfer")
         if identity is not None and not identity.get("path"):
             raise inst.BinstubOwnershipError(f"registered project identity is unavailable for {project}")
-        return True
+        return CommandAdmission(True, captured)
     if not same_lineage(receipt, owner):
         raise inst.BinstubOwnershipError(f"refusing project command ownership transfer for {project}; source/cell lineage is not proven")
     previous_identity = receipt["project"]
@@ -132,22 +176,23 @@ def validate(project: str, receipt: dict | None, owner: dict, identity: dict | N
         raise inst.BinstubOwnershipError(f"refusing project command identity change for {project}")
     allowed = {inst._stub_key(p.name) for p in paths}
     if {inst._stub_key(name) for name in receipt["stubs"]} != allowed or any(
-        inst._stub_hash(receipt, p) != inst._file_sha256(p) for p in existing
+        inst._stub_hash(receipt, p) != hashlib.sha256(contents[inst._stub_key(p.name)]).hexdigest()
+        for p in existing
     ):
         raise inst.BinstubContentError(f"refusing modified project command for {project}; all sibling files are protected")
     if relocating:
         old = Path(receipt["owner"]["payload_root"])
-        if not any(all(templates.matches(p.read_bytes(), templates.render(
+        if not any(all(templates.matches(contents[inst._stub_key(p.name)], templates.render(
             project, old, windows=inst.platform.system() == "Windows", family=family
         )[p.name]) for p in existing) for family in ("current", "traced", "ambient")):
             raise inst.BinstubContentError(f"refusing unknown historical generated bytes for {project}")
     if not relocating and existing:
         desired = dict(inst._project_binstub_specs(project))
-        if any(not templates.matches(p.read_bytes(), desired[p]) for p in existing):
-            if _candidate_payload(project, existing, owner) is None:
+        if any(not templates.matches(contents[inst._stub_key(p.name)], desired[p]) for p in existing):
+            if _candidate_payload(project, contents, owner) is None:
                 raise inst.BinstubContentError(f"refusing unknown generated bytes for {project}")
-            return True
-    return relocating
+            return CommandAdmission(True, captured)
+    return CommandAdmission(relocating, captured)
 
 
 def inventory() -> set[str]:

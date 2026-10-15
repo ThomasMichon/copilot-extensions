@@ -784,6 +784,200 @@ def test_edit_during_staging_is_rechecked_at_replace_boundary(command_home, monk
     assert "transaction" in inst._read_receipt("demo")
 
 
+@pytest.mark.parametrize("generation", ["current", "historical", "pre-receipt"])
+@pytest.mark.parametrize("operation", ["refresh", "knowledge", "unregistered"])
+def test_admission_to_capture_edit_never_becomes_authorized(
+    command_home, monkeypatch, generation, operation
+):
+    from agent_worktrees import project_command_transaction as tx
+
+    from agent_worktrees import project_command_migration as migration
+
+    current, old = command_home
+    if generation != "current":
+        monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(old))
+    owner, identity = inst._binstub_owner(), inst._project_identity("demo")
+    inst.local_bin().mkdir(parents=True, exist_ok=True)
+    tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"),
+               admitted=migration.validate("demo", None, owner, identity))
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
+    if generation == "pre-receipt":
+        inst._receipt_path("demo").unlink()
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    receipt_path = inst._receipt_path("demo")
+    receipt_before = receipt_path.read_bytes() if receipt_path.exists() else None
+    user_bytes = b"operator edit after validation before capture\n"
+    original_capture = tx._capture
+    injected = False
+    owner = inst._binstub_owner()
+    admitted = migration.validate(
+        "demo", inst._read_receipt("demo"), owner, None if operation == "unregistered" else identity
+    )
+
+    def interleaved_capture(targets):
+        nonlocal injected
+        if not injected:
+            paths[-1].write_bytes(user_bytes)
+            injected = True
+        return original_capture(targets)
+
+    monkeypatch.setattr(tx, "_capture", interleaved_capture)
+    with pytest.raises(inst.BinstubContentError, match="admission"):
+        tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"),
+                   admitted=admitted, retire=operation != "refresh")
+    assert injected
+    assert paths[-1].read_bytes() == user_bytes
+    assert all(p.exists() for p in paths)
+    assert (receipt_path.read_bytes() if receipt_path.exists() else None) == receipt_before
+
+
+def test_transfer_admission_does_not_authorize_later_edit(command_home, monkeypatch):
+    from agent_worktrees import project_command_transaction as tx
+    from agent_worktrees import project_command_migration as migration
+
+    owner, identity = inst._binstub_owner(), inst._project_identity("demo")
+    inst.local_bin().mkdir(parents=True, exist_ok=True)
+    tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"),
+               admitted=migration.validate("demo", None, owner, identity))
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    paths[0].write_bytes(b"explicitly authorized prior custom command\n")
+    receipt_path = inst._receipt_path("demo")
+    receipt_path.write_bytes(b"\xffinvalid prior receipt")
+    receipt_before = receipt_path.read_bytes()
+    original_capture = tx._capture
+    user_bytes = b"later edit not authorized by explicit transfer\n"
+    admitted = migration.admit_transfer("demo")
+
+    def interleaved_capture(targets):
+        paths[-1].write_bytes(user_bytes)
+        return original_capture(targets)
+
+    monkeypatch.setattr(tx, "_capture", interleaved_capture)
+    with pytest.raises(inst.BinstubOwnershipError, match="admi"):
+        tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"),
+                   admitted=admitted, transfer=True)
+    assert paths[-1].read_bytes() == user_bytes
+    assert paths[0].read_bytes() == (
+        user_bytes if paths[0] == paths[-1] else b"explicitly authorized prior custom command\n"
+    )
+    assert receipt_path.read_bytes() == receipt_before
+
+
+def test_admission_evidence_is_immutable_and_fresh_creation_is_bound(command_home, monkeypatch):
+    from agent_worktrees import project_command_migration as migration
+    from agent_worktrees import project_command_transaction as tx
+
+    owner, identity = inst._binstub_owner(), inst._project_identity("demo")
+    admitted = migration.validate("demo", None, owner, identity)
+    with pytest.raises(TypeError):
+        admitted.stubs["demo"] = b"cannot widen admission"
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    original_capture = tx._capture
+
+    def interleaved_capture(targets):
+        paths[0].write_bytes(b"new command after absent-path admission\n")
+        return original_capture(targets)
+
+    inst.local_bin().mkdir(parents=True)
+    monkeypatch.setattr(tx, "_capture", interleaved_capture)
+    with pytest.raises(inst.BinstubContentError, match="admission"):
+        tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"), admitted=admitted)
+    assert paths[0].read_bytes() == b"new command after absent-path admission\n"
+    assert not inst._receipt_path("demo").exists()
+
+
+def test_validation_checks_only_the_captured_admission_bytes(command_home, monkeypatch):
+    from agent_worktrees import project_command_migration as migration
+    from agent_worktrees import project_command_templates as templates
+    from agent_worktrees import project_command_transaction as tx
+
+    current, old = command_home
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(old))
+    owner, identity = inst._binstub_owner(), inst._project_identity("demo")
+    inst.local_bin().mkdir(parents=True, exist_ok=True)
+    tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"),
+               admitted=migration.validate("demo", None, owner, identity))
+    inst._receipt_path("demo").unlink()
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    before = {inst._stub_key(p.name): p.read_bytes() for p in paths}
+    original_matches = templates.matches
+    edited = False
+
+    def interleaved_validation(data, content):
+        nonlocal edited
+        if not edited:
+            paths[-1].write_bytes(b"edit during template verification\n")
+            edited = True
+        return original_matches(data, content)
+
+    monkeypatch.setattr(templates, "matches", interleaved_validation)
+    owner = inst._binstub_owner()
+    admitted = migration.validate("demo", None, owner, identity)
+    assert dict(admitted.stubs) == before
+    with pytest.raises(inst.BinstubContentError, match="admission"):
+        tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"), admitted=admitted)
+    assert paths[-1].read_bytes() == b"edit during template verification\n"
+    assert not inst._receipt_path("demo").exists()
+
+
+@pytest.mark.parametrize("generation", ["current", "historical", "pre-receipt"])
+@pytest.mark.parametrize("operation", ["refresh", "knowledge", "unregistered", "transfer"])
+def test_installer_preserves_admission_through_publication(
+    command_home, monkeypatch, generation, operation
+):
+    from agent_worktrees import project_command_transaction as tx
+
+    if generation == "current":
+        inst._deploy_project_binstub("demo")
+    else:
+        seed_old(monkeypatch, command_home, receipted=generation != "pre-receipt")
+    if operation == "knowledge":
+        monkeypatch.setattr(inst, "_project_is_knowledge_only", lambda _name: True)
+    elif operation == "unregistered":
+        _registry(monkeypatch, {})
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    receipt_path = inst._receipt_path("demo")
+    receipt_before = receipt_path.read_bytes() if receipt_path.exists() else None
+    original_capture = tx._capture
+    user_bytes = b"operator edit between installer admission and publication\n"
+
+    def interleaved_capture(targets):
+        paths[-1].write_bytes(user_bytes)
+        return original_capture(targets)
+
+    monkeypatch.setattr(tx, "_capture", interleaved_capture)
+    if operation == "transfer":
+        with pytest.raises(inst.BinstubContentError, match="admission"):
+            inst.transfer_project_binstub("demo")
+    else:
+        result = inst.reconcile_binstubs()
+        assert result["blocked"] == result["preserved"] == ["demo"]
+    assert paths[-1].read_bytes() == user_bytes
+    assert all(p.exists() for p in paths)
+    assert (receipt_path.read_bytes() if receipt_path.exists() else None) == receipt_before
+
+
+def test_registration_does_not_recapture_after_preflight(command_home):
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    with pytest.raises(inst.BinstubContentError, match="admission"):
+        with inst.project_binstub_registration("demo", repo_dir=None) as registration:
+            paths[0].write_bytes(b"new operator command after registration preflight\n")
+            registration.commit()
+    assert paths[0].read_bytes() == b"new operator command after registration preflight\n"
+    assert not inst._receipt_path("demo").exists()
+
+
+def test_publication_without_admission_fails_before_capture(command_home, monkeypatch):
+    from agent_worktrees import project_command_transaction as tx
+
+    monkeypatch.setattr(tx, "_capture", lambda _paths: pytest.fail("missing evidence recaptured authority"))
+    with pytest.raises(inst.BinstubOwnershipError, match="admission"):
+        tx.publish("demo", inst._binstub_owner(), inst._project_identity("demo"),
+                   inst._project_binstub_specs("demo"))
+    assert not inst._receipt_path("demo").exists()
+
+
 def test_unknown_unreceipted_bytes_are_preserved(command_home, monkeypatch, capsys):
     before = seed_old(monkeypatch, command_home, receipted=False)
     p = next(iter(before))

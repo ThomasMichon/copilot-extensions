@@ -792,7 +792,8 @@ def _project_binstub_context(
     repo_dir: str | Path | None = None,
     transfer: bool = False,
     registry: dict | None = None,
-) -> tuple[dict[str, str], dict[str, str], list[tuple[Path, str]]]:
+    admitted: object | None = None,
+) -> tuple[dict[str, str], dict[str, str], list[tuple[Path, str]], object]:
     if not project or not cfg._PROJECT_NAME_RE.fullmatch(project):
         raise ValueError(
             "project command name must be 1-64 alphanumeric/dash/dot/underscore "
@@ -828,9 +829,12 @@ def _project_binstub_context(
         if not transfer:
             raise
         receipt = None
-    if not transfer:
-        migration.validate(project, receipt, owner, project_identity)
-    return owner, project_identity, specs
+    if admitted is None:
+        admitted = (
+            migration.admit_transfer(project) if transfer
+            else migration.validate(project, receipt, owner, project_identity)
+        )
+    return owner, project_identity, specs, admitted
 
 
 def _deploy_project_binstub_unlocked(
@@ -839,18 +843,20 @@ def _deploy_project_binstub_unlocked(
     repo_dir: str | Path | None = None,
     transfer: bool = False,
     registry: dict | None = None,
+    admitted: object | None = None,
 ) -> int:
     """Write a single project's receipt-gated binstub file(s)."""
-    owner, project_identity, specs = _project_binstub_context(
+    owner, project_identity, specs, admitted = _project_binstub_context(
         project,
         repo_dir=repo_dir,
         transfer=transfer,
         registry=registry,
+        admitted=admitted,
     )
 
     from .project_command_transaction import publish
 
-    return publish(project, owner, project_identity, specs, transfer=transfer)
+    return publish(project, owner, project_identity, specs, admitted=admitted, transfer=transfer)
 
 
 @contextmanager
@@ -863,8 +869,9 @@ def project_binstub_registration(
     with _binstub_lock("__registries__"), _binstub_lock(project):
         registration = ProjectBinstubRegistration()
         content_error: BinstubContentError | None = None
+        admitted = None
         try:
-            _project_binstub_context(project, repo_dir=repo_dir)
+            _, _, _, admitted = _project_binstub_context(project, repo_dir=repo_dir)
         except BinstubContentError as exc:
             content_error = exc
         yield registration
@@ -873,7 +880,7 @@ def project_binstub_registration(
         if content_error is not None:
             output.warn(str(content_error))
             return
-        _deploy_project_binstub_unlocked(project, repo_dir=repo_dir)
+        _deploy_project_binstub_unlocked(project, repo_dir=repo_dir, admitted=admitted)
 
 
 def _deploy_project_binstub(
@@ -1050,10 +1057,11 @@ def _reconcile_binstubs_unlocked() -> dict:
             with _binstub_lock(project):
                 owner, identity = _binstub_owner(), _project_identity(project)
                 historical = transaction.recover(project, owner=owner, identity=identity)
-                historical = migration.validate(
+                admitted = migration.validate(
                     project, _read_receipt(project), owner, identity
-                ) or historical
-                added += _deploy_project_binstub_unlocked(project, registry=registry)
+                )
+                historical = bool(admitted) or historical
+                added += _deploy_project_binstub_unlocked(project, registry=registry, admitted=admitted)
                 if historical:
                     migrated.append(project)
                     output.changed(
@@ -1131,11 +1139,11 @@ def _retire_project_binstub_unlocked(
     paths = [p for p, _ in specs if p.exists() or p.is_symlink()]
     if receipt is None and not paths:
         return []
-    migration.validate(project, receipt, owner, identity)
+    evidence = migration.validate(project, receipt, owner, identity)
     record_admission()
     transaction.publish(
         project, owner, identity or (receipt or {}).get("project", {"name": _stub_key(project)}),
-        specs, retire=True,
+        specs, admitted=evidence, retire=True,
     )
     return paths
 

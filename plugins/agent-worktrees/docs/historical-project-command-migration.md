@@ -55,6 +55,16 @@ rollback also verify the complete resulting pair before settling the receipt.
 Unexpected interleaved edits are preserved, fail visibly and retain the
 journal; retries remain blocked until the recorded state is restored. These
 checks are not atomic filesystem compare-and-swap against uncooperative writers.
+Admission reads each sibling's bytes once and performs receipt/template checks
+against those captured bytes. `validate()` returns immutable `CommandAdmission`
+evidence; its truthiness retains the historical-migration indicator. Explicit
+transfer instead captures the specific authorized bytes with `admit_transfer()`.
+Installer preflight, reconciliation and retirement carry that evidence to
+`publish(admitted=...)` without recapturing authority. Publication compares its
+working snapshot against the evidence before writing a journal: changed or
+newly appeared bytes are preserved and rejected, not adopted as a new prior
+state. Missing admission evidence fails closed rather than triggering an
+implicit fresh validation.
 Nested intended-receipt sections are structurally validated before use; a
 corrupt journal is preserved and reported without aborting unrelated projects.
 

@@ -10,6 +10,8 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from .project_command_migration import CommandAdmission
+
 
 def _digest(data: bytes | None) -> str | None:
     return hashlib.sha256(data).hexdigest() if data is not None else None
@@ -194,11 +196,18 @@ def recover(
     return True
 
 
-def publish(project: str, owner: dict, identity: dict, specs: list[tuple[Path, str]], *, retire: bool = False, transfer: bool = False) -> int:
+def publish(
+    project: str, owner: dict, identity: dict, specs: list[tuple[Path, str]],
+    *, admitted: CommandAdmission | None = None, retire: bool = False, transfer: bool = False,
+) -> int:
     """Journal prior bytes, atomically replace siblings, then publish the receipt."""
     from . import installer as inst
 
     paths = [p for p, _ in specs]
+    if not isinstance(admitted, CommandAdmission) or set(admitted.stubs) != {
+        inst._stub_key(p.name) for p in paths
+    }:
+        raise inst.BinstubOwnershipError(f"missing or invalid command admission evidence for {project}")
     receipt_path = inst._receipt_path(project)
     previous_bytes = receipt_path.read_bytes() if receipt_path.exists() else None
     try:
@@ -208,6 +217,8 @@ def publish(project: str, owner: dict, identity: dict, specs: list[tuple[Path, s
             raise
         previous = None
     before = _capture(paths)
+    if any(_decode(before[name]["bytes"]) != data for name, data in admitted.stubs.items()):
+        raise inst.BinstubContentError(f"command admission changed before publication for {project}; preserving current bytes")
     after = {}
     for path, content in specs:
         key = inst._stub_key(path.name)
