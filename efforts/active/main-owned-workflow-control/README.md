@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees; ordinary changes target `dev`
 - **Created:** 2026-10-12
-- **Status:** Active; baseline and main producers live-proven, main-PR CI cutover in progress, artifact recovery separately owned
+- **Status:** Active; main-PR CI invocation cutover live-proven, generated-main validation failures and remaining consolidation open
 - **Vision:** `visions/main-owned-workflow-control/README.md`
 - **Umbrella issue:** #6237
 - **Related campaigns:** #3336; `promotion-failure-reactive-fix-agent`; #6142
@@ -107,10 +107,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
-- [ ] Consolidate main-PR admission into its existing trusted reminder
+- [x] Consolidate main-PR admission into its existing trusted reminder
   invocation: release and prove admission and generated-content identifier
   scanning first, then remove legacy CI allocation while retaining full
   main-push validation.
+  #6789 proves zero CI invocations and preserved required admission/configured
+  scanning. Main-push CI still runs; its generated-tree failures remain open
+  below and are not a passing-coverage claim or permission to remove that lane.
 - [x] Coalesce or prevent redundant event-triggered runs, not merely mark all
   jobs skipped; preserve timely contributor feedback and review delivery.
   #6308/#6314 reduce trusted invocations; released #6359 prevents irrelevant
@@ -1541,3 +1544,87 @@ hosted checks, review and a containing full validation remain required.
   pass 1,320 cases with one skip under the original 25-file/300-second bounds.
   This is not a complete native pass because group 12 remains unproven.
   Normal containing Linux validation remains separate evidence.
+
+### 2026-10-15 - Real release proves invocation cutover, not generated-tree health
+
+- Normal full `38664339697` validates exact dev
+  `4f7b62facbe44df61f159dcde9b1afb11d34b3ea` and genuinely succeeds,
+  including build `116202232786`, attestation `116202731176`, promotion
+  `116202875668` and artifact publication `116203558540`. No early no-op,
+  skipped publication, manual retry or waiver is substituted for that result.
+- #6789 merges candidate `614c453af269f2a13e80a8cd1e823f6a755eabd8`
+  as `c33ccea3da5effc6f21b9e8c2ee726f8e4a85902` at `01:49:48Z`.
+  Annotated tag `promote-20261015015004-c33ccea3` resolves to that exact merge;
+  the merged release state names the validated dev input and prior main.
+- The complete candidate-head CI query reports `total_count: 0`; the complete
+  four-run head roster contains no CI invocation. Trusted host `38667722135`
+  preserves the successful required `main source gate`. Its real configured
+  scanner publishes `116203522264`: 763 changed files on that exact candidate,
+  `DENYLIST_CONFIGURED=true`, `STALE=false`, successful scan, no infrastructure
+  fallback. The published CI declaration excludes main-base PRs while keeping
+  main/dev push, manual and edited-retarget triggers; the old CI gate is absent.
+- Natural main-push CI `38667750280` runs on the actual merged commit, proving
+  that invocation was retained. It fails, so do not claim generated-tree health
+  or remove it. Read-only evidence isolates three families: unintended standalone
+  vendor-test collection plus conflicting canonical/vendored dependency URLs;
+  installer fixtures recopying an already embedded dependency; and a release-label
+  rewrite escaping frozen authority normalization. Genuine coverage, frozen
+  evidence and source identity must be preserved by any correction.
+- The live main rule now reports strict freshness true, unlike the earlier
+  snapshot. This session made no ruleset or credential change. The retained
+  #4876/#6697 publisher was notified; its separate future explicit-dispatch merge
+  contract is not retroactive evidence for this observed natural push.
+- #6788 independently merges the reviewed explicit-reinstall/diagnostic repair
+  as `c3e7dac9c215156c95b2533a44444103090e8213` at `02:18:24Z`.
+  Exact head `41cb01c6a387` receives native approval with zero findings;
+  all required same-head suites and the fresh source verifier pass. Its optional
+  trusted self-hosted suite is skipped, not a missing required check or CI bypass.
+- Reread the canonical Plan and Validation Plan after that merge. Close only
+  the main-PR invocation-cutover item. The test-tooling repair still needs its
+  containing release; generated-main validation, exact-input implementation,
+  coverage/repair ownership, comparable measurements and observation remain
+  open. Independent control activation stays dormant.
+- The complete prior #6642 head and new #6789 head queries show CI PR
+  invocations 1 -> 0, head-associated workflow runs 5 -> 4, and all check
+  records 29 -> 9: 20 fewer records for this event pair. The old set includes
+  20 skipped records and one optional CI failure; these are not 20 deleted
+  test suites or proof of quota improvement. Both check pages return their
+  full reported totals. Changed-file volume differs (322 versus 763), and
+  this one-pair observation does not replace broader comparable-cycle metrics
+  or include completion workflows indexed under another head.
+- Closed only release-proof issues #6699 and #6740 after verifying their
+  fixes are ancestors of the released dev input and actual main-push
+  customizing-copilot job `116203739428` succeeds. Separate installer-copy
+  failures and #6729 remain open; no local runtime adoption was performed.
+- The authority normalizer hashes its own source. Fixing its release-label
+  normalization therefore changes current authority identity, not merely a
+  fixture checksum. Keep frozen v1 bytes unchanged while the owner selects
+  the current-generation capture and historical-support policy; no authority
+  compatibility change or checksum rewrite has been made.
+
+### 2026-10-15 - Owner selects a new corpus revision; payload fixture is repaired
+
+- The operator selects a new independently captured current authority-corpus
+  generation, retaining v1 bytes as historical-producer evidence until
+  owner-reviewed retirement. No runtime acceptance of historical hashes,
+  protocol-generation, credential, service or publisher change is authorized
+  by that choice. The authority implementation/capture remains a separate
+  stretch; no old checksum has been rewritten.
+- Reserved the Budget Guidance payload fixture and standalone preparation/
+  Manager collection seams under #6237. The existing #6598 contributor already
+  touches the Codespaces engine-adoption test; requested that worker's custody
+  rather than pre-patching or superseding its still-open contribution.
+- Five new cross-platform fixture guards reproduce four failures against the
+  old unconditional copy, then pass with shared-copy-on-absence and explicit
+  embedded manifest/package integrity checks. Embedded bytes are preserved
+  even when shared bytes differ or the shared tree is absent; malformed
+  embedded data cannot be silently repaired. Source trees remain unchanged.
+- Full native Budget Guidance validation also exposed an oversized automatic
+  pytest node ID on Windows before the response-rejection test could execute.
+  Added only short explicit IDs, preserving the 65,537-byte input, 65,536-byte
+  rejection boundary and redaction assertions; no response limit was lowered.
+- The complete contained native suite passes 366 cases with 40 platform skips;
+  the actual guard selector executes and passes all five new cases. Existing
+  POSIX installer cases remain skipped on Windows, so hosted Linux and actual
+  containing materialized-main evidence remain mandatory. Ruff, docs and
+  whitespace checks pass. No production installer behavior or deadline changes.

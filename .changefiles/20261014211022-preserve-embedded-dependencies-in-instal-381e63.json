@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve embedded dependencies in installer fixtures and keep full-size response rejection cases runnable on Windows",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

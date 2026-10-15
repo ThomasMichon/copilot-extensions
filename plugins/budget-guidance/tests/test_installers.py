@@ -34,7 +34,11 @@ def _copy_payload(target: Path) -> None:
         canonical_root=PLUGIN.parents[1],
     )
     assert not any(change.startswith("SKIP ") for change in changes), changes
-    assert (target / "libs" / "agent-procutil" / "pyproject.toml").is_file()
+    procutil = target / "libs" / "agent-procutil"
+    assert (procutil / "pyproject.toml").is_file(), "Missing agent-procutil fixture manifest"
+    assert (procutil / "src" / "agent_procutil" / "__init__.py").is_file(), (
+        "Missing agent-procutil fixture package"
+    )
 
 
 def test_installers_recommend_supported_version_flag():
