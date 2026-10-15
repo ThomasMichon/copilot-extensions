@@ -259,3 +259,9 @@ achieved by rearranging today's combined installer invocations.
   with thirteen platform skips. Touched-code lint, module ceilings and all
   thirteen install contracts pass. Required guard consumers, current-head
   review, promotion and actual running-state verification remain open.
+- The broader native guard pass exposed a synthetic FIFO stat fixture that
+  dropped Windows file attributes, causing a TypeError before the intended
+  nonregular-file refusal. Preserved those attributes in the fixture rather
+  than changing production admission. Its focused guard partition passed nine
+  cases with four native-POSIX skips; the remaining guard portfolio runs in
+  a separate invocation under the unchanged per-run budget.

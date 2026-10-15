@@ -217,7 +217,10 @@ def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, k
     def file_stat(path, *args, **kwargs):
         value = original_stat(path, *args, **kwargs)
         if path == target:
-            return os.stat_result((stat.S_IFIFO | 0o600, *value[1:]))
+            return os.stat_result(
+                (stat.S_IFIFO | 0o600, *value[1:]),
+                {"st_file_attributes": getattr(value, "st_file_attributes", 0)},
+            )
         return value
 
     def read_bytes(path):
