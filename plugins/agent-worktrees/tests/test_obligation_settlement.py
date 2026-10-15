@@ -140,6 +140,49 @@ def test_parent_receiving_identity_cannot_authorize_a_different_caller(
     assert tracking.load_record(parent_path).resources[0].state == "active"
 
 
+@pytest.mark.parametrize("alias", ["Generated-Host", "Legacy-Alias", "Example Workstation"])
+def test_caller_alias_uses_its_own_map_before_parent_receiving_check(_project_root, monkeypatch, alias):
+    from agent_worktrees import config as cfg
+    from machine_transport import MachineEntry
+
+    local = MachineEntry(
+        key="Example-Host", hostname="Generated-Host", alias="Legacy-Alias",
+        display_name="Example Workstation",
+    )
+    native = MachineEntry(
+        key="Example-Host", hostname="Generated-Host", display_name="Example Workstation",
+        execution_platform="windows",
+    )
+    caller_anchor, parent_anchor = _project_root / "caller", _project_root / "parent"
+    monkeypatch.setattr(
+        cfg, "load_machines_yaml",
+        lambda anchor, **_kwargs: {local.key: local} if str(anchor) == str(caller_anchor)
+        else {native.key: native},
+    )
+    def repo(anchor: Path) -> cfg.RepoConfig:
+        return cfg.RepoConfig(anchor=str(anchor), worktree_root=str(_project_root))
+    caller = cfg.Config(
+        srcroot=str(_project_root), machine=alias, platform="windows", repo_name="childproj",
+        repos={"childproj": repo(caller_anchor)},
+    )
+    receiving = cfg.Config(
+        srcroot=str(_project_root), machine="Example-Host", platform="windows", repo_name="parentproj",
+        repos={"parentproj": repo(parent_anchor)},
+    )
+    monkeypatch.setattr(
+        cfg, "load_project_config",
+        lambda project, **_kwargs: caller if project == "childproj" else receiving,
+    )
+    child_ref = tracking.format_claim_ref(alias, "childproj", "wt-child")
+    parent_path = _write_parent(
+        _project_root, "parentproj", "wt-parent", child_ref, machine="Example-Host",
+    )
+    child = _child(_project_root, f"{alias}/parentproj/wt-parent", machine=alias)
+    _settle_parent_obligation(child, caller, "wt-child")
+    claim, = tracking.load_record(parent_path).resources
+    assert (claim.ref, claim.state) == (child_ref, "at-rest")
+
+
 @pytest.mark.guard
 def test_parent_claim_settled_on_child_finalize(_project_root, monkeypatch):
     child_id = "wt-child"
