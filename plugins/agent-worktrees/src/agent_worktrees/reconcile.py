@@ -787,7 +787,7 @@ def _run_installation_mode_helper(
             command.extend(["-Context", str(context)])
     else:
         command = [
-            sys.executable, "-I",
+            sys.executable, "-I", "-X", "utf8",
             str(helper),
             "probe-legacy",
             "--source-json",
@@ -821,7 +821,7 @@ def _run_installation_mode_helper(
         process = subprocess.run(
             command,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
             check=False,
             env=child_environment,
             timeout=15,

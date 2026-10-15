@@ -44,6 +44,7 @@ def test_probe_uses_isolated_current_python_without_native_shell(tmp_path, monke
     def run(command, **kwargs):
         calls.append(command)
         assert kwargs["timeout"] == 15
+        assert kwargs["encoding"] == "utf-8"
         assert not set(reconcile._RUNTIME_ENV_UNSET) & kwargs["env"].keys()
         return subprocess.CompletedProcess(command, 0, '{"allowMutation":true}', "")
 
@@ -53,7 +54,9 @@ def test_probe_uses_isolated_current_python_without_native_shell(tmp_path, monke
     reconcile._run_installation_mode_helper(
         "agent-worktrees", tmp_path, helper, tmp_path / "legacy", context=context,
     )
-    assert calls[0][:4] == [sys.executable, "-I", str(helper), "probe-legacy"]
+    assert calls[0][:6] == [
+        sys.executable, "-I", "-X", "utf8", str(helper), "probe-legacy",
+    ]
     assert calls[0][-2:] == ["--context", str(context)]
 
 
@@ -80,10 +83,22 @@ def test_prelaunch_omits_only_foreign_pr_overlays(tmp_path, monkeypatch):
 @pytest.mark.skipif(os.name != "nt", reason="native Windows adapter parity")
 @pytest.mark.parametrize(
     "scenario",
-    ["legacy", "active", "foreign-environment", "stale-generation", "invalid-policy"],
+    ["legacy", "unicode-legacy", "active", "foreign-environment",
+     "stale-generation", "invalid-policy"],
 )
 def test_windows_portable_probe_matches_native_authority(env, monkeypatch, scenario):
     payload = env.install_payload("agent-worktrees", "2.0.0", scope="universal")
+    if scenario == "unicode-legacy":
+        unicode_root = env.home / "caf\u00e9-\u6d4b\u8bd5"
+        unicode_root.mkdir()
+        relocated = unicode_root / "payload"
+        payload.rename(relocated)
+        payload = relocated
+        env.home = unicode_root
+        monkeypatch.setattr(reconcile, "_home", lambda: env.home)
+        monkeypatch.setattr(reconcile.subprocess, "_text_encoding", lambda: "cp1252")
+        monkeypatch.setenv("PYTHONUTF8", "0")
+        monkeypatch.setenv("PYTHONIOENCODING", "ascii")
     monkeypatch.setenv("USERPROFILE", str(env.home))
     monkeypatch.setenv("HOME", str(env.home))
     monkeypatch.setenv("DOTNET_MultiCoreJitNoProfileGather", "1")
@@ -129,7 +144,7 @@ def test_windows_portable_probe_matches_native_authority(env, monkeypatch, scena
             json.dumps(activation), encoding="utf-8",
         )
     policy = env.home / ".copilot-extensions" / "installation-mode.json"
-    if scenario != "legacy":
+    if scenario not in {"legacy", "unicode-legacy"}:
         policy.parent.mkdir(parents=True, exist_ok=True)
         policy.write_text(
             "invalid json" if scenario == "invalid-policy" else json.dumps({
@@ -168,12 +183,12 @@ def test_windows_portable_probe_matches_native_authority(env, monkeypatch, scena
     else:
         assert portable == native
     expected_status = {
-        "legacy": "ready", "active": "ready",
+        "legacy": "ready", "unicode-legacy": "ready", "active": "ready",
         "foreign-environment": "foreign-environment",
         "stale-generation": "revalidation-required", "invalid-policy": "invalid",
     }[scenario]
     assert portable["status"] == expected_status
-    assert portable["allowMutation"] is (scenario == "legacy")
+    assert portable["allowMutation"] is (scenario in {"legacy", "unicode-legacy"})
     expected_mode = (
         None if scenario == "foreign-environment"
         else "namespaced" if context else "legacy"
