@@ -248,10 +248,13 @@ def require_record_mutation(record: Any, config: Any) -> None:
             tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
         )
         legacy_path = resolve_legacy_wsl_owner_ref(legacy_ref, config)
-    if (
-        legacy_path is not None
-        and record.worktree_path == tracking.load_record(legacy_path).worktree_path
-    ):
+    if legacy_path is not None:
+        proven = tracking.load_record(legacy_path)
+        if any(
+            getattr(record, field, None) != getattr(proven, field, None)
+            for field in ("repo", "worktree_id", "machine", "platform", "worktree_path")
+        ):
+            raise ExecutionSpaceError("record snapshot identity/platform does not match its proven ledger")
         if record.owner_ref and any(entry.execution_platform for entry in entries.values()):
             owner = tracking.parse_claim_ref(record.owner_ref)
             if owner is None or not owner.is_qualified:

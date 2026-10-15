@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import subprocess
@@ -84,6 +85,74 @@ def _offer(graph: SimpleNamespace) -> claim_handoffs.ClaimBundle:
         [claim.ref for claim in tracking.load_record(graph.paths["source"]).resources],
         machine=MACHINE, id_factory=lambda: "legacy-bundle",
     )[0]
+
+
+@pytest.mark.guard
+def test_alias_spelled_self_offer_never_reserves_its_own_claims(graph):
+    path = graph.paths["source"]
+    before = path.read_bytes()
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match="same worktree record"):
+        claim_handoffs.offer(
+            graph.source, f"{MACHINE}/source-project/wt-source",
+            [claim.ref for claim in tracking.load_record(path).resources],
+            machine=MACHINE,
+        )
+    assert path.read_bytes() == before
+    assert not claim_handoffs.registry_path().exists()
+    assert all(not claim.handoff_bundle for claim in tracking.load_record(path).resources)
+
+
+@pytest.mark.parametrize("proof", ["retained", "old-alias", "old-exact"])
+@pytest.mark.parametrize("with_session", [False, True])
+@pytest.mark.guard
+def test_interrupted_historical_accept_keeps_child_specific_source_proof_after_retirement(
+    graph, monkeypatch, proof, with_session,
+):
+    child = tracking.load_record(graph.paths["child"])
+    if proof == "old-exact":
+        child.owner_ref = graph.source
+    if with_session:
+        child.owner_ref += "#owner-session"
+    tracking.save_record(child, child.yaml_path)
+    original_owner = child.owner_ref
+    bundle = _offer(graph)
+
+    def interrupt(*args, **kwargs):
+        raise OSError("interrupted before consumer settlement")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(claim_handoffs, "_finish_accept_consumer_side", interrupt)
+        with pytest.raises(claim_handoffs.ClaimHandoffError, match="interrupted"):
+            claim_handoffs.accept(
+                bundle.bundle_id, actor=f"{MACHINE}/consumer-project/wt-consumer", machine=MACHINE,
+            )
+    accepted = claim_handoffs.show(bundle.bundle_id)
+    assert accepted.state == "accepted"
+    assert tracking.load_record(graph.paths["source"]).resources == []
+    assert tracking.load_record(graph.paths["consumer"]).resources == []
+    assert tracking.load_record(graph.paths["child"]).owner_ref == original_owner
+    serialized = accepted.to_dict()
+    assert claim_handoffs._bundle_from_dict(serialized).to_dict() == serialized
+    assert claim_handoffs._parse_remote_bundle(json.dumps(serialized)).to_dict() == serialized
+    if proof != "old-exact":
+        assert dict(accepted.source_owner_refs)[graph.child_ref] == original_owner
+    graph.paths["source"].rename(graph.paths["source"].with_name("retired-source.yaml"))
+    if proof != "retained":
+        serialized.pop("source_owner_refs", None)
+        claim_handoffs._save_registry(
+            claim_handoffs.registry_path(), [claim_handoffs._bundle_from_dict(serialized)],
+        )
+    paths = [graph.paths["consumer"], graph.paths["child"], claim_handoffs.registry_path()]
+    before = {path: path.read_bytes() for path in paths}
+    if proof == "old-alias":
+        with pytest.raises(claim_handoffs.ClaimHandoffError, match="durable source-owner proof"):
+            claim_handoffs.accept(bundle.bundle_id, actor=bundle.consumer, machine=MACHINE)
+        assert before == {path: path.read_bytes() for path in paths}
+    else:
+        result = claim_handoffs.accept(bundle.bundle_id, actor=bundle.consumer, machine=MACHINE)
+        assert result.state == "accepted"
+        assert tracking.load_record(graph.paths["child"]).owner_ref == bundle.consumer
+        assert len(tracking.load_record(graph.paths["consumer"]).resources) == len(bundle.claims)
 
 
 def test_cross_project_claimant_keeps_actual_caller_and_receiving_alias_authority(graph, monkeypatch):

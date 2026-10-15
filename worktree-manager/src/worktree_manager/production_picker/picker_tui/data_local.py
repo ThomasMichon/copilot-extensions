@@ -17,6 +17,7 @@ from machine_transport import (
     is_local_machine,
     local_execution_platform,
     resolve_machine_selection,
+    is_observed_local_name,
 )
 
 from worktree_manager import engine_client
@@ -102,6 +103,11 @@ def is_local(machine: str, env: str) -> bool:
             return False
         if target is None and local is None:
             return matches_raw_local
+        if target is None and local is not None:
+            return is_observed_local_name(
+                machine, config_machine=config.machine, entries=entries,
+                environment=local_execution_platform(), real_hostname=LOCAL[0],
+            )
         return target is not None and target is local
     if matches_raw_local:
         return True

@@ -87,9 +87,7 @@ def test_preferred_local_source_loads_rows_without_self_ssh(
     assert roster.local_entry(entries, configured, "Generated-Host", platform).key == expected_key
     assert data_local.is_local(configured, expected_env)
     assert data_local.is_local(*local.key)
-    local_labels = ["Legacy-Alias", "Example Workstation"]
-    if hostname_metadata:
-        local_labels.append("Generated-Host")
+    local_labels = ["Legacy-Alias", "Example Workstation", "Generated-Host"]
     for base in local_labels:
         for alias in (base, *legacy_alias_forms(base, platform)):
             assert data_local.is_local(alias.swapcase(), expected_env)
@@ -103,6 +101,7 @@ def test_preferred_local_source_loads_rows_without_self_ssh(
             assert not data_local.is_local(*source.key)
 
     calls: list[list[str]] = []
+    stored_machine = configured if hostname_metadata else "Generated-Host"
 
     def runner(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
@@ -110,7 +109,7 @@ def test_preferred_local_source_loads_rows_without_self_ssh(
         assert "list" in argv and "--current" in argv
         return subprocess.CompletedProcess(argv, 0, json.dumps({
             "ok": True, "contract_version": 1,
-            "worktrees": [{"id": "one", "machine": configured, "platform": platform}],
+            "worktrees": [{"id": "one", "machine": stored_machine, "platform": platform}],
             "projection": {
                 "schema_version": 1, "quality": "current", "generation": "a" * 32,
                 "revision": 1, "observed_at": 123, "roster_count": 1, "selected_count": 1,
@@ -122,7 +121,7 @@ def test_preferred_local_source_loads_rows_without_self_ssh(
     assert (row["machine"], row["env"], row["source_id"]) == (
         *local.key, local.source_id,
     )
-    assert row["raw"]["machine"] == configured
+    assert row["raw"]["machine"] == stored_machine
     buckets = derive.for_source([row], local.source_id)
     assert buckets == derive.for_machine([row], *local.key)
     assert [item for bucket in buckets for item in bucket] == [row]

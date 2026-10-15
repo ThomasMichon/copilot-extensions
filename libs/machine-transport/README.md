@@ -246,3 +246,12 @@ so a published consumer installs a self-contained source tree with no
 cross-plugin `path` reference. `tools/sync-vendored-libs.py --check` verifies
 every materialized copy's `src/` tree and version stay byte-identical to this
 canonical one and to each other.
+## Observed local hostname fallback
+
+`is_observed_local_name` recognizes this process's observed hostname when it
+differs from its configured preferred identity and the registry does not map
+that name. It is restricted to the actual execution context; registered keys,
+profiles and physical associations always take precedence. This is a local
+lookup adapter, not a new registry alias or a Windows/WSL equivalence. Persisted
+record callers must still prove the receiving project, exact ledger, platform
+and absolute namespace before applying that local spelling.

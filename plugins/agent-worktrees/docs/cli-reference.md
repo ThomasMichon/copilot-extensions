@@ -752,6 +752,12 @@ An accepted bundle can finish or retry from its consumer and child records
 without requiring a retired source ledger or acquiring a new cross-machine
 fence. Receiving-side identity, platform, namespace and artifact checks still
 apply; acceptance does not authorize a foreign execution space.
+Before releasing source claims, the transaction persists child-specific
+`source_owner_refs` for validated source aliases. This optional version-1
+metadata survives local/remote serialization and is used only for accepted
+completion of those exact children. Older bundles still support exact source
+references; an alias-only retry without either the source ledger or durable
+proof fails explicitly rather than guessing equivalence.
 
 ## Remote launch options
 

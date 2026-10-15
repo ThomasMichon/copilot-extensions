@@ -52,6 +52,14 @@ def _target_is_local(
             target = split_machine_environment(entry.key, target.environment)
     if target.environment and target.environment != cfg.detect_platform():
         return False
+    if selected.entry is None:
+        from machine_transport import is_observed_local_name
+
+        if is_observed_local_name(
+            name, config_machine=config.machine, entries=entries,
+            environment=cfg.detect_platform(),
+        ):
+            return machine_identity.is_local_machine(config.machine, config)
     if target.environment and config.machine:
         current = resolve_machine_selection(entries, config.machine, cfg.detect_platform()).target
         if target.machine.casefold() == current.machine.casefold():

@@ -2,12 +2,42 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 import copy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .claim_handoffs import ClaimBundle
     from .tracking_claims import ClaimRef, ResourceClaim
+
+
+def bundle_state(bundle: ClaimBundle, state: str, *, reason: str | None = None) -> ClaimBundle:
+    from .tracking import _now_iso
+
+    return replace(
+        bundle, state=state, updated_at=_now_iso(),
+        reason=bundle.reason if reason is None else reason,
+    )
+
+
+def parse_source_owner_refs(
+    raw: object, claims: Sequence[dict], source: ClaimRef, *,
+    error_type: type[Exception],
+) -> tuple[tuple[str, str], ...]:
+    from .tracking_claims import parse_claim_ref
+
+    if not isinstance(raw, dict):
+        raise error_type("claim bundle source-owner proof must be a mapping")
+    worktree_refs = {claim["ref"] for claim in claims if claim["kind"] == "worktree"}
+    for child, owner in raw.items():
+        if child not in worktree_refs or not isinstance(owner, str):
+            raise error_type("claim bundle contains invalid source-owner proof")
+        parsed = parse_claim_ref(owner)
+        if parsed is None or not parsed.is_qualified or (
+            parsed.project, parsed.worktree_id
+        ) != (source.project, source.worktree_id):
+            raise error_type("claim bundle source-owner proof names another worktree")
+    return tuple(raw.items())
 
 
 def snapshot_claim(claim: ResourceClaim) -> dict:

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
-from machine_transport import resolve_machine_selection
+from machine_transport import resolve_machine_selection, is_observed_local_name
 from machine_transport.registry import PhysicalMachineError
 
 from . import config as cfg
@@ -73,6 +73,9 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
     try:
         caller_entries = registry_for_config(config)
         current = resolve_machine_selection(caller_entries, config.machine, actual)
+        observed_ref = is_observed_local_name(
+            ref.machine, config_machine=config.machine, entries=caller_entries, environment=actual,
+        )
         # Exact foreign logical entries are rejected before any ledger lookup.
         try:
             direct = resolve_machine_selection(caller_entries, ref.machine)
@@ -89,6 +92,7 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
                 return None
         if (
             any(entry.execution_platform and not entry.legacy_key for entry in caller_entries.values())
+            and not observed_ref
             and (direct is None or direct.entry is None)
             and (direct is None or not direct.target.environment)
             and (
@@ -132,6 +136,16 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
             return None
         requested = resolve_machine_selection(receiver_entries, ref.machine, record.platform)
         stored = resolve_machine_selection(receiver_entries, record.machine or "", record.platform)
+        if observed_ref and is_observed_local_name(
+            ref.machine, config_machine=receiving_config.machine,
+            entries=receiver_entries, environment=record.platform,
+        ):
+            requested = receiving
+        if is_observed_local_name(
+            record.machine or "", config_machine=receiving_config.machine,
+            entries=receiver_entries, environment=record.platform,
+        ):
+            stored = receiving
         if any(
             (
                 selected.entry.key.casefold() != receiving.entry.key.casefold()

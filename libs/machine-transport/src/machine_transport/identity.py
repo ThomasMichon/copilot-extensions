@@ -23,12 +23,36 @@ from .execution_identity import detect_platform, qualify_guest
 from .machine_environment import split_machine_environment
 from .registry import MachineIdentity, find_machine_entry, resolve_machine_selection
 
-__all__ = ["is_local_machine", "local_execution_platform"]
+__all__ = ["is_local_machine", "local_execution_platform", "is_observed_local_name"]
 
 
 def local_execution_platform() -> str:
     """Detect the current logical platform without probing or launching WSL."""
     return detect_platform()
+
+
+def is_observed_local_name(
+    name: str, *, config_machine: str, entries: Mapping[str, MachineIdentity],
+    environment: str, real_hostname: str | None = None,
+) -> bool:
+    """Bind an otherwise unregistered observed hostname to this local context only."""
+    if not name or not config_machine:
+        return False
+    try:
+        target = resolve_machine_selection(entries, name, environment)
+        if target.entry is not None:
+            return False  # Registry keys, profiles and physical associations win.
+        current = resolve_machine_selection(entries, config_machine, environment)
+        if current.target.environment != target.target.environment:
+            return False
+        hostname = real_hostname or socket.gethostname()
+        observed = {
+            split_machine_environment(value, environment).machine.casefold()
+            for value in (hostname, hostname.split(".")[0])
+        }
+        return target.target.machine.casefold() in observed
+    except ValueError:
+        return False
 
 
 def is_local_machine(
@@ -80,6 +104,11 @@ def is_local_machine(
     except (FileNotFoundError, ValueError, KeyError):
         return False
     if not entries and config_machine:
+        if is_observed_local_name(
+            name, config_machine=config_machine, entries=entries,
+            environment="wsl" if guest else local_execution_platform(), real_hostname=real_hostname,
+        ):
+            return True
         target = resolve_machine_selection(entries, name).target
         current = resolve_machine_selection(
             entries, config_machine, "wsl" if guest else local_execution_platform(),
@@ -90,7 +119,11 @@ def is_local_machine(
         )
     target = find_machine_entry(entries, name)
     if target is None:
-        return False
+        return is_observed_local_name(
+            name, config_machine=config_machine, entries=entries,
+            environment="wsl" if guest else local_execution_platform(),
+            real_hostname=real_hostname,
+        )
     if config_machine:
         this = find_machine_entry(entries, config_machine)
         # Entry-OBJECT identity (not a string comparison against

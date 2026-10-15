@@ -67,3 +67,54 @@ def test_related_resolve_and_doctor_use_contextual_physical_metadata(
     payload = json.loads(capfd.readouterr().out)
     assert payload["current_machine"] == expected
     assert not any(finding["kind"] == "unknown_machine" for finding in payload["findings"])
+
+
+@pytest.mark.parametrize("first", ["empty", "unrelated", "shadowed-key"])
+@pytest.mark.parametrize("actual", ["windows", "wsl"])
+def test_related_current_matcher_and_doctor_share_the_later_authoritative_topology(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd, first: str, actual: str,
+) -> None:
+    product, control = tmp_path / "product", tmp_path / "control"
+    product.mkdir()
+    control.mkdir()
+    key = "local-key-wsl" if actual == "wsl" else "local-key"
+    initial = {} if first == "empty" else {
+        key if first == "shadowed-key" else "other-key": {
+            "execution_platform": actual, "physical_host": "foreign-host",
+        },
+    }
+    (product / "machines.yaml").write_text(
+        yaml.safe_dump({"machines": initial}), encoding="utf-8",
+    )
+    (control / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        key: {
+            "execution_platform": actual, "physical_host": "local-key",
+            "hostname": "Generated-Host", "alias": "preferred-alias",
+        },
+    }}), encoding="utf-8")
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="Generated-Host", platform=actual, repo_name="product",
+        repos={"product": cfg.RepoConfig(anchor=str(product), worktree_root=str(tmp_path / "trees"))},
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    anchors = [str(product), str(control)]
+    monkeypatch.setattr(related_cli, "_related_config_source_anchors", lambda *a, **kw: anchors)
+    monkeypatch.setattr(repos, "find_repo", lambda name: None)
+    monkeypatch.setattr(repos, "resolve_account", lambda entry: None)
+    monkeypatch.setattr(doctor, "_read_projects", lambda: {})
+    related.write_related(product, related.RelatedConfig(related={
+        "target": related.RelatedEntry(
+            name="target", locus=related.Locus(preferred="machine:PREFERRED-ALIAS"),
+        ),
+    }))
+    assert related_cli._related_current_machine(anchors, str(product)) == key
+    matcher = related_cli._related_machine_matcher(anchors, str(product))
+    assert matcher("PREFERRED-ALIAS", key)
+    assert matcher("generated-host", key)
+    assert related_cli.cmd_related_dispatch(["resolve", "target", "--repo", str(product), "--json"]) == 0
+    assert json.loads(capfd.readouterr().out)["available_here"]
+    related_cli._related_doctor(str(product), [], True)
+    assert not any(
+        item["kind"] == "unknown_machine" for item in json.loads(capfd.readouterr().out)["findings"]
+    )

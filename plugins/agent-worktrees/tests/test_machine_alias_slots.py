@@ -69,6 +69,51 @@ def _topology(world, explicit):
     )
 
 
+@pytest.mark.parametrize("actual", ["windows", "wsl"])
+@pytest.mark.parametrize("observed", ["Observed-Host", "oBSERVED-hOST"])
+@pytest.mark.guard
+def test_observed_hostname_without_metadata_keeps_record_and_launch_local(
+    world, monkeypatch, actual, observed,
+):
+    (world.anchor / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "Preferred-Host": {"ssh": {"environments": [
+            {"name": "windows", "alias": "native-profile"},
+            {"name": "wsl", "alias": "guest-profile"},
+        ]}},
+    }}), encoding="utf-8")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
+    world.config_path.write_text(yaml.safe_dump({
+        "repo_name": "example", "machine": "Preferred-Host", "platform": actual,
+        "repos": {"example": {
+            "anchor": str(world.anchor), "worktree_root": str(world.namespace),
+        }},
+    }), encoding="utf-8")
+    config = cfg.load_config(world.config_path, include_control_plane_related_pr=False)
+    checkout = world.namespace / "observed"
+    checkout.mkdir()
+    record = tracking.create_new_record(
+        "observed", "worktree/observed", str(checkout), "example",
+        observed, actual, world.directory,
+    )
+    before = record.yaml_path.read_bytes()
+    ref = tracking.parse_claim_ref(f"{observed}/example/observed")
+    assert legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config) == record.yaml_path
+    execution_spaces.require_record_mutation(record, config)
+    assert resolve_cli._target_is_local(config, observed, actual)
+    other = "wsl" if actual == "windows" else "windows"
+    assert not resolve_cli._target_is_local(config, observed, other)
+    assert record.yaml_path.read_bytes() == before
+    registered = yaml.safe_load((world.anchor / "machines.yaml").read_text(encoding="utf-8"))
+    registered["machines"]["Observed-Host"] = {
+        "execution_platform": actual, "physical_host": "foreign-host",
+    }
+    (world.anchor / "machines.yaml").write_text(yaml.safe_dump(registered), encoding="utf-8")
+    assert not resolve_cli._target_is_local(config, observed, actual)
+    assert legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config) is None
+    assert record.yaml_path.read_bytes() == before
+
+
 @pytest.mark.parametrize("explicit", [False, True], ids=["legacy-record", "new-record"])
 @pytest.mark.parametrize("platform,alias", CELLS)
 def test_alias_slot_grid_preserves_strings_and_scopes(world, monkeypatch, explicit, platform, alias):

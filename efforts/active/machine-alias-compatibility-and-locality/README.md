@@ -158,6 +158,35 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-15 - Self-offer, snapshot and interrupted-completion proof
+- Alias-spelled source/consumer references resolving to one ledger now reject
+  before reservations. The mutation compatibility shortcut compares the
+  supplied immutable identity/platform/path with the proven disk record.
+- Before source release, ordinary handoffs durably capture child-specific
+  source-owner alias equivalence. Accepted completion uses that proof only for
+  the named child after receiving-platform/namespace validation. Local/remote
+  round-trips preserve it; older exact-reference bundles remain valid, while
+  old alias-only bundles without source/proof fail clearly.
+- Related current identity, matching and doctor now select the same first
+  topology that resolves the current machine, skipping empty/unrelated earlier
+  registries without losing exact key/profile precedence.
+- A bounded probe confirmed a missing acceptance cell: observed raw hostname
+  with no hostname metadata was not local despite a valid preferred identity.
+  The shared current-process fallback now covers that name on Windows/WSL,
+  including stored-record namespace proof and launch selection. Registered
+  foreign keys/profiles and conflicting contexts still override or reject it.
+  The 58-case Manager grid now checks the observed name even without metadata
+  and retains raw row names while assigning the selected logical source ID.
+- Final bounded checks passed: 94 focused Worktrees tests, 86 handoff/recovery
+  tests, 12 interrupted-completion cases including owner session fragments,
+  1,143 complete guards with 64 conditional skips, 260 shared transport tests
+  and 272 Manager tests.
+  Counts overlap. Ruff, install contracts, module ceilings and whitespace pass.
+- The coordinator's reported native acceptance applies to `c323`, not this
+  new delta. Shared identity, Worktrees record/handoff/related/launch adapters
+  and Manager locality need fresh native validation; no native workspace,
+  publication, deployment or unrelated namespace-repair state was touched.
+
 ### 2026-10-15 - Close native handoff, retry and related-availability gaps
 - All handoff records now require actual-platform and receiving-namespace
   proof on every platform, including identical machine labels under an empty

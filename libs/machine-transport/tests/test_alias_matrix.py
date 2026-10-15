@@ -9,7 +9,39 @@ from machine_transport import (
     MachineEntry, SSHEnvironment, legacy_alias_forms, normalize_machine_entries,
     parse_machines_yaml, resolve_machine_selection, split_machine_environment,
     is_local_machine,
+    is_observed_local_name,
 )
+
+
+@pytest.mark.parametrize("actual", ["windows", "wsl"])
+@pytest.mark.parametrize("standalone", [False, True])
+def test_observed_hostname_without_metadata_is_a_contextual_local_fallback(actual, standalone):
+    registry = {} if standalone else {
+        key: replace(entry, hostname="") for key, entry in entries(True).items()
+    }
+    configured = "Example-Host-wsl" if actual == "wsl" else "Example-Host"
+    for alias in legacy_alias_forms("Observed-Host", actual):
+        assert is_observed_local_name(
+            alias.swapcase(), config_machine=configured, entries=registry,
+            environment=actual, real_hostname="Observed-Host",
+        )
+    assert not is_observed_local_name(
+        "Observed-Host-wsl" if actual == "windows" else "Observed-Host-win",
+        config_machine=configured, entries=registry, environment=actual,
+        real_hostname="Observed-Host",
+    )
+    if not standalone:
+        for field in ("key", "profile"):
+            foreign = MachineEntry(
+                key="Observed-Host" if field == "key" else "foreign-space",
+                display_name="Foreign", execution_platform=actual, physical_host="foreign-host",
+                ssh_environments=[SSHEnvironment(actual, "Observed-Host" if field == "profile" else "foreign")],
+            )
+            assert not is_observed_local_name(
+                "Observed-Host", config_machine=configured,
+                entries={**registry, foreign.key: foreign}, environment=actual,
+                real_hostname="Observed-Host",
+            )
 
 
 def entries(explicit: bool):

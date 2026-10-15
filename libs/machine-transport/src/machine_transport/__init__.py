@@ -20,7 +20,7 @@ from .execution_identity import (
     resolve_identity,
     resolve_machine_identity,
 )
-from .identity import is_local_machine, local_execution_platform
+from .identity import is_local_machine, local_execution_platform, is_observed_local_name
 from .machine_environment import MachineEnvironment, legacy_alias_forms, normalize_environment, split_machine_environment
 from .registry import (
     AmbiguousMachineError,
@@ -66,6 +66,7 @@ __all__ = [
     "find_machine_entry",
     "get_machine_transport",
     "is_local_machine",
+    "is_observed_local_name",
     "local_execution_platform",
     "machine_entries_to_topology",
     "machine_name",

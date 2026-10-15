@@ -104,7 +104,9 @@ def _related_anchor(rest: list[str]) -> str | None:
         return None
 
 
-def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
+def _related_current_topology(
+    anchors: list[str], base_anchor: str,
+) -> tuple[str, dict[str, cfg.MachineEntry] | None]:
     try:
         config = cfg.load_config(include_control_plane_related_pr=False)
     except IdentityError:
@@ -115,26 +117,26 @@ def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
         config = None
     except (ValueError, OSError, KeyError):
         config = None  # An unadopted repo may still supply portable topology.
-    if config is not None and config.machine:
-        for candidate in dict.fromkeys([base_anchor, *anchors]):
-            if not candidate:
-                continue
-            try:
-                entry = _related_machine_entry(cfg.load_machines_yaml(candidate), config.machine)
-            except FileNotFoundError:
-                continue
-            if entry is not None:
-                return entry.key if entry.execution_platform else config.machine
-        return config.machine
-    for candidate in [base_anchor, *anchors]:
+    first_readable = None
+    for candidate in dict.fromkeys([base_anchor, *anchors]):
         if not candidate:
             continue
         try:
-            if cfg.machines_yaml_path(candidate).exists():
-                return cfg.detect_machine(candidate)
-        except OSError:
+            entries = cfg.load_machines_yaml(candidate)
+        except FileNotFoundError:
             continue
-    return cfg.detect_machine(base_anchor)
+        if first_readable is None:
+            first_readable = entries
+        current = config.machine if config is not None and config.machine else cfg.detect_machine(candidate)
+        entry = _related_machine_entry(entries, current)
+        if entry is not None:
+            return (entry.key if entry.execution_platform else current), entries
+    current = config.machine if config is not None and config.machine else cfg.detect_machine(base_anchor)
+    return current, first_readable
+
+
+def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
+    return _related_current_topology(anchors, base_anchor)[0]
 
 
 def _related_machine_entry(entries: dict[str, cfg.MachineEntry], name: str) -> cfg.MachineEntry | None:
@@ -148,15 +150,8 @@ def _related_machine_matcher(anchors: list[str], base_anchor: str) -> MachineMat
     """Resolve topology equivalence for availability, never ownership migration."""
     from . import related
 
-    entries: dict[str, cfg.MachineEntry] = {}
-    for candidate in dict.fromkeys([base_anchor, *anchors]):
-        if not candidate:
-            continue
-        try:
-            entries = cfg.load_machines_yaml(candidate)
-        except FileNotFoundError:
-            continue
-        break
+    _, selected = _related_current_topology(anchors, base_anchor)
+    entries = selected or {}
 
     def matches(key: str, current: str) -> bool:
         target = _related_machine_entry(entries, key)
@@ -266,14 +261,9 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
     anchors = _related_config_source_anchors(anchor)
     rc = related.read_related_grafted(anchors)
 
-    current_machine = _related_current_machine(anchors, anchor)
-
-    machines_known_available = True
-    machine_entries: dict = {}
-    try:
-        machine_entries = cfg.load_machines_yaml(anchor)
-    except Exception:
-        machines_known_available = False
+    current_machine, selected = _related_current_topology(anchors, anchor)
+    machines_known_available = selected is not None
+    machine_entries = selected or {}
 
     def _machine_known(key: str) -> bool:
         if not machines_known_available:
