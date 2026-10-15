@@ -28,6 +28,12 @@ class _Input:
     async def drain(self):
         pass
 
+    def close(self):
+        pass
+
+    async def wait_closed(self):
+        pass
+
 
 class _FailedProcess:
     def __init__(self, stderr, returncode=127):
@@ -320,6 +326,84 @@ async def test_native_descendant_held_stderr_read_transport_is_closed(tmp_path):
         await asyncio.wait_for(wait_until(finished.exists), timeout=10)
         await carrier.close()
     assert processes[0].returncode == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement_succeeds", [True, False])
+async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
+    tmp_path, replacement_succeeds,
+):
+    _native_console()
+    ready = tmp_path / "descendant-ready"
+    release = tmp_path / "release-descendant"
+    finished = tmp_path / "descendant-finished"
+    child = (
+        "import pathlib,time\n"
+        f"ready=pathlib.Path({str(ready)!r});release=pathlib.Path({str(release)!r})\n"
+        f"finished=pathlib.Path({str(finished)!r})\n"
+        "ready.write_text('ready')\n"
+        "deadline=time.monotonic()+15\n"
+        "while not release.exists() and time.monotonic()<deadline:time.sleep(.01)\n"
+        "finished.write_text('finished')\n"
+    )
+    frame = encode_envelope(hello_envelope())
+    parent = (
+        "import os,subprocess,sys;"
+        f"sys.stdout.buffer.write({frame!r});sys.stdout.buffer.flush();"
+        f"subprocess.Popen([sys.executable,'-c',{child!r}],"
+        "stdin=subprocess.DEVNULL,stdout=sys.stdout,stderr=sys.stderr);"
+        "os._exit(0)"
+    )
+    carrier, processes = await _native_carrier([sys.executable, "-u", "-c", parent])
+    old_tasks = set()
+
+    async def wait_until(predicate):
+        while not predicate():
+            await asyncio.sleep(0.01)
+
+    try:
+        lease = await carrier.acquire()
+        process = processes[0]
+        await asyncio.wait_for(
+            wait_until(lambda: ready.exists() and process.returncode is not None),
+            timeout=10,
+        )
+        stderr_task = carrier._stderr_tasks[id(process)]
+        transport = process.stderr._transport
+        old_tasks = set(carrier._tasks)
+        replacement = _FailedProcess(b"", returncode=None)
+        if replacement_succeeds:
+            replacement.stdout = asyncio.StreamReader()
+            replacement.stdout.feed_data(frame)
+
+        async def reopen():
+            assert stderr_task.done()
+            assert transport.is_closing()
+            return replacement
+
+        carrier._opener = reopen
+        if replacement_succeeds:
+            await asyncio.wait_for(carrier.ensure_started(), timeout=2)
+            assert carrier._process is replacement
+        else:
+            with pytest.raises(CarrierUnavailable):
+                await asyncio.wait_for(carrier.ensure_started(), timeout=2)
+            assert carrier._process is None
+        await carrier.close()
+        assert stderr_task.done()
+        assert transport.is_closing()
+        assert not carrier._stderr_tasks
+        await asyncio.wait_for(asyncio.gather(*old_tasks, return_exceptions=True), timeout=2)
+        assert not finished.exists()
+        await lease.release()
+    finally:
+        release.write_text("release")
+        await carrier.close()
+        await asyncio.wait_for(asyncio.gather(*old_tasks, return_exceptions=True), timeout=2)
+        for process in processes:
+            await carrier._closer(process)
+            await asyncio.wait_for(process.stdout.read(), timeout=10)
+        await asyncio.wait_for(wait_until(finished.exists), timeout=10)
 
 
 @pytest.mark.asyncio

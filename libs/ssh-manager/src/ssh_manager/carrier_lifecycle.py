@@ -169,6 +169,13 @@ class _CarrierLifecycleMixin:
                 and self._state != "connecting"
             ):
                 return
+            if self._process is not None and self._process.returncode is not None:
+                await self._transport_failed(
+                    CarrierUnavailable("carrier process exited", reconnectable=True),
+                    expected_epoch=self._transport_epoch,
+                )
+            if self._closed:
+                raise CarrierUnavailable("carrier has retired")
             while True:
                 delay = self._next_connect_at - time.monotonic()
                 if delay > 0:
