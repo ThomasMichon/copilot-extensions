@@ -60,12 +60,12 @@ def _is_parent_python_variable(name: str, *, windows: bool) -> bool:
     return candidate in _PYTHON_PARENT_ENV
 
 
-def _engine_environment() -> dict[str, str]:
+def _engine_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
     """Build a clean environment for the independently installed engine."""
     windows = os.name == "nt"
     env = {
         key: value
-        for key, value in os.environ.items()
+        for key, value in (os.environ if environment is None else environment).items()
         if not _is_parent_python_variable(key, windows=windows)
     }
     env["PYTHONUTF8"] = "1"

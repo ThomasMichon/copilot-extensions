@@ -1557,6 +1557,49 @@ depth: it snapshots the real User and Machine registry environment keys and
 fails the test flow if drift is observed. It never rolls back the whole key,
 because doing so could overwrite a legitimate concurrent edit.
 
+## Update-source authentication
+
+`agent-worktrees update` reports authentication before acquiring its configured
+GitHub marketplaces and HTTPS repo anchors. `update --auth-report` performs only
+that read-only report; it does not update payloads, install runtimes, write
+telemetry, or change saved credentials. `--json` returns the sanitized report.
+Sources and account mappings come from effective user/repository settings and
+the repository registry, not an updater-specific credential configuration.
+
+Public sources short-circuit anonymously. Other sources first exercise the
+caller's configured credentials through a read-only router, then try an
+environment token, the mapped `gh` account, and `git credential fill`. Each
+subprocess is bounded, non-interactive, headless on Windows, and retains at
+most 1 MiB per output stream. Windows requires a no-breakaway Job; POSIX probes
+own their session and nested helper children remain inside that boundary.
+Contained tests retain their test runner's ownership instead of detaching.
+
+A working setup gets no environment overlay. Only failed sources acquire an
+environment-only Git command-scope overlay, appended after inherited command
+configuration so local helpers cannot override it. Routes are qualified by
+host and repository: fixing or denying one repository must not change another
+working repository under the same owner. Other requests delegate to Git under
+the caller's original configuration at the child's actual working directory,
+preserving native helper matching, ordering, resets, and includes. Tokens are
+never written into the overlay. Read-only probes suppress credential approval
+and rejection; no path switches the active `gh` account.
+
+Unresolved required sources are denied without retrying a stalled helper and
+contribute `auth_required` (exit 4, unless a worse failure applies). The shared
+status includes `auth.report` and `auth.fallback_used`; helper command values
+are not included. `CE_UPDATE_AUTH=report-only` applies no credential fix, so
+fixable sources remain unresolved. `CE_UPDATE_AUTH=off` skips this preflight.
+There is no persistent configuration cleanup or cleanup-consent flag.
+
+The Worktree Manager consumes the same report through its existing engine JSON
+process seam before its own Git fetch. Its engine environment preserves an
+overlay when present while still discarding parent Python runtime variables.
+The internal `--auth-source`/`--auth-environment` report options transport only
+child environment differences over that pipe; never persist or publish that
+environment. Repository-isolated engine Git calls continue to discard arbitrary
+inherited Git selectors and receive only the updater's explicitly scoped auth
+overlay.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is

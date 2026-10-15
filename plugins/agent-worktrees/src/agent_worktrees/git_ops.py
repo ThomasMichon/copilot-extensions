@@ -51,10 +51,8 @@ _REPOSITORY_CONTEXT_ENV = frozenset({
 
 
 def repository_identity_env() -> dict[str, str]:
-    """Return ambient process state without inherited Git context.
-
-    Repository identity probes supply their checkout via ``git -C``; inherited
-    repo/config-selection vars are removed so they cannot override it (others remain).
+    """Remove inherited Git context; probes supply their checkout via ``git -C``.
+    Other environment variables remain unchanged.
     """
     env = env_scrub.scrub_python_runtime_env(os.environ.copy())
     for name in list(env):
@@ -182,6 +180,8 @@ def git(
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
     env = repository_identity_env() if isolated_repository else os.environ.copy()
+    from .update_auth_context import repository_environment
+    env = repository_environment(env)
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
     if kill_tree and timeout is not None:
         result = push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)

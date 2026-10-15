@@ -11,6 +11,11 @@ from . import output, update_events
 
 
 def add_update_options(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--auth-report", action="store_true",
+                   help="Report source authentication without updating or changing credentials")
+    p.add_argument("--auth-source", action="append", metavar="HTTPS_URL", help=argparse.SUPPRESS)
+    p.add_argument("--auth-environment", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--json", action="store_true", help="JSON output for --auth-report only")
     p.add_argument(
         "--force-runtime",
         action="append",
@@ -28,9 +33,18 @@ def forced_runtimes(args: argparse.Namespace) -> frozenset[str]:
 def forwarded_flags(args: argparse.Namespace) -> list[str]:
     """The options above, rebuilt for forwarding through the Manager seam."""
     flags: list[str] = []
+    if getattr(args, "auth_report", False):
+        flags.append("--auth-report")
     for name in getattr(args, "force_runtime", None) or ():
         flags += ["--force-runtime", name]
     return flags
+
+
+def validate_auth_flags(args: argparse.Namespace) -> None:
+    if not getattr(args, "auth_report", False) and any(
+        getattr(args, name, False) for name in ("auth_source", "auth_environment", "json")
+    ):
+        raise ValueError("--auth-source, --auth-environment and --json require --auth-report")
 
 
 def _module_dirs(plugin_dir: Path) -> dict[str, Path]:

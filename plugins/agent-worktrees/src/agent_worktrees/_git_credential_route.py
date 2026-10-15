@@ -1,0 +1,145 @@
+"""Read-only update credential router, invoked with the immutable slot interpreter."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from collections.abc import Mapping
+
+from .update_auth_process import publish_group, run
+
+SECRET_KEY = "pass" + "word"
+NON_INTERACTIVE = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+
+
+def parse_attributes(text: str) -> dict[str, str]:
+    return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
+
+
+def format_attributes(attributes: Mapping[str, str]) -> str:
+    return "".join(f"{key}={value}\n" for key, value in attributes.items()) + "\n"
+
+
+def env_token(owner: str, env: Mapping[str, str]) -> str:
+    key = "GH_TOKEN_" + re.sub(r"[^A-Z0-9]", "_", owner.upper())
+    return env.get(key) or env.get("GH_TOKEN") or env.get("GITHUB_TOKEN") or ""
+
+
+def helper_timeout(env: Mapping[str, str]) -> float:
+    return min(5.0, max(0.01, float(env.get("CE_UPDATE_AUTH_HELPER_TIMEOUT_MS", "5000")) / 1000))
+
+
+def _config_key(key: str) -> bool:
+    return key == "GIT_CONFIG_COUNT" or key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+
+
+def original_environment(env: Mapping[str, str]) -> dict[str, str]:
+    """Remove only this router's command-scope additions, not the caller's config."""
+    raw = env.get("CE_UPDATE_AUTH_BASE_CONFIG")
+    if raw is None:
+        return dict(env)
+    config = json.loads(raw)
+    if not isinstance(config, dict) or any(
+        not _config_key(key) or not isinstance(value, str) for key, value in config.items()
+    ):
+        raise ValueError("invalid original Git command configuration")
+    return {**{key: value for key, value in env.items() if not _config_key(key)}, **config}
+
+
+def base_config(env: Mapping[str, str]) -> str:
+    return json.dumps(
+        {key: value for key, value in original_environment(env).items() if _config_key(key)}
+    )
+
+
+def run_chain(
+    operation: str,
+    attributes: Mapping[str, str],
+    env: Mapping[str, str],
+) -> dict[str, str]:
+    # Let Git replay its own configuration at the child's actual cwd. Rebuilding
+    # a host-only helper list loses URL-specific helpers, includes and reset order.
+    command = {"get": "fill", "store": "approve", "erase": "reject"}[operation]
+    result = run(
+        ["git", "credential", command],
+        env={**original_environment(env), **NON_INTERACTIVE},
+        input=format_attributes(attributes),
+        timeout=helper_timeout(env),
+    )
+    return (
+        {**attributes, **parse_attributes(result.stdout)}
+        if (result.status == 0 and not result.truncated)
+        else dict(attributes)
+    )
+
+
+def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
+    attributes = parse_attributes(stdin)
+    host = attributes.get("host", "").lower()
+    owner = attributes.get("path", "").split("/")[0].lower()
+    routes = json.loads(env.get("CE_UPDATE_AUTH_ROUTES", "{}"))
+    # Host-qualified keys prevent the same owner spelling on another server
+    # from receiving a credential intended for this GitHub host.
+    repository = attributes.get("path", "").strip("/").removesuffix(".git").lower()
+    selected = routes.get(host + "/" + repository)
+    if selected is not None:
+        if operation != "get" or selected["method"] == "deny":
+            return ""
+        account = selected.get("account") or "x-access-token"
+        if selected["method"] == "fill":
+            filled = run_chain("get", {**attributes, "username": account}, env)
+            return format_attributes(filled) if filled.get(SECRET_KEY) else ""
+        if selected["method"] == "env":
+            secret = env_token(owner, env)
+        elif selected["method"] == "gh":
+            args = ["gh", "auth", "token", "--hostname", host, "--user", account]
+            token_env = {
+                key: value
+                for key, value in env.items()
+                if key
+                not in (
+                    "GH_TOKEN",
+                    "GITHUB_TOKEN",
+                    "GH_ENTERPRISE_TOKEN",
+                    "GITHUB_ENTERPRISE_TOKEN",
+                )
+            }
+            token = run(args, env=token_env, timeout=helper_timeout(env))
+            secret = token.stdout.strip() if token.status == 0 and not token.truncated else ""
+        else:
+            raise ValueError("unknown update credential route")
+        return (
+            format_attributes({**attributes, "username": account, SECRET_KEY: secret})
+            if (secret)
+            else ""
+        )
+    if operation not in ("get", "store", "erase"):
+        return ""
+    if operation != "get" and env.get("CE_UPDATE_AUTH_READONLY") == "1":
+        return ""
+    filled = run_chain(operation, attributes, env)
+    return (
+        format_attributes(filled)
+        if operation == "get" and (filled.get(SECRET_KEY) or filled.get("quit"))
+        else ""
+    )
+
+
+def main() -> int:
+    publish_group()
+    try:
+        response = route(
+            sys.argv[1] if len(sys.argv) > 1 else "get", sys.stdin.read(1024 * 1024), os.environ
+        )
+    except (OSError, ValueError, RuntimeError):
+        # Never print helper attributes, argv, or exceptions containing credentials.
+        print("update credential routing failed", file=sys.stderr)
+        return 1
+    sys.stdout.write(response)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

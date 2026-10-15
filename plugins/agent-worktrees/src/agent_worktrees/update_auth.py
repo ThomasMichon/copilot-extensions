@@ -1,0 +1,393 @@
+"""Read-only source authentication and failure-only, command-scope credential routing."""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import os
+import re
+import shlex
+import sys
+import time
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from ._git_credential_route import (
+    NON_INTERACTIVE,
+    SECRET_KEY,
+    base_config,
+    env_token,
+    original_environment,
+    parse_attributes,
+)
+from .update_auth_process import run
+
+
+class ResolverUnavailable(RuntimeError):
+    pass
+
+
+class ProbeUnavailable(RuntimeError):
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class Source:
+    id: str
+    url: str
+    host: str
+    owner: str
+    repo: str
+    required: bool = True
+    purpose: str = "marketplace"
+    cwd: Path | None = None
+
+    @property
+    def route_key(self) -> str:
+        return "/".join((self.host, self.owner, self.repo)).lower()
+
+
+def source(
+    id: str,
+    url: str,
+    *,
+    required: bool = True,
+    purpose: str = "marketplace",
+    cwd: Path | None = None,
+) -> Source | None:
+    parsed = urlsplit(url)
+    parts = parsed.path.strip("/").removesuffix(".git").split("/")
+    if (
+        parsed.scheme != "https"
+        or parsed.username
+        or parsed.password
+        or len(parts) != 2
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    if not parsed.hostname or any(not re.fullmatch(r"[\w.-]+", part) for part in parts):
+        return None
+    return Source(id, url, parsed.netloc, *parts, required, purpose, cwd)
+
+
+@dataclasses.dataclass
+class SourceAuth:
+    source: Source
+    helper_chain: list[str]
+    expected_account: str | None = None
+    visibility: str = "unknown"
+    as_configured: str = "skipped"
+    alternative: dict[str, str] | None = None
+    status: str = "unavailable"
+    fix: str = ""
+    duration_ms: int = 0
+
+    def summary(self) -> dict:
+        return {
+            "id": self.source.id,
+            "host": self.source.host,
+            "owner": self.source.owner,
+            "required": self.source.required,
+            "expected_account": self.expected_account,
+            "visibility": self.visibility,
+            "as_configured": self.as_configured,
+            "alternative": self.alternative,
+            "status": self.status,
+            "fix": self.fix,
+            "duration_ms": self.duration_ms,
+        }
+
+
+@dataclasses.dataclass
+class AuthReport:
+    results: list[SourceAuth]
+
+    @property
+    def failing(self) -> list[SourceAuth]:
+        return [
+            item
+            for item in self.results
+            if item.source.required and item.status not in ("ok", "anonymous")
+        ]
+
+    def summary(self) -> dict:
+        return {
+            "results": [item.summary() for item in self.results],
+            "all_ok": not self.failing,
+            "failing": [item.source.id for item in self.failing],
+            "fixable": [
+                item.source.id for item in self.failing if item.status == "fixable_by_fallback"
+            ],
+        }
+
+
+def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) -> dict[str, str]:
+    base = int(env.get("GIT_CONFIG_COUNT", "0"))
+    if base < 0:
+        raise ValueError("GIT_CONFIG_COUNT must not be negative")
+    for index in range(base):
+        if f"GIT_CONFIG_KEY_{index}" not in env or f"GIT_CONFIG_VALUE_{index}" not in env:
+            raise ValueError("incomplete inherited Git command configuration")
+    result = {"GIT_CONFIG_COUNT": str(base + len(entries))}
+    for index, (key, value) in enumerate(entries, base):
+        result[f"GIT_CONFIG_KEY_{index}"] = key
+        result[f"GIT_CONFIG_VALUE_{index}"] = value
+    return result
+
+
+def router_helper(python: str = sys.executable) -> str:
+    return (
+        "!"
+        + shlex.quote(python.replace("\\", "/"))
+        + (" -m agent_worktrees._git_credential_route")
+    )
+
+
+def helper_chain(source: Source, env: Mapping[str, str], runner=run) -> list[str]:
+    # Diagnostic values only: Git itself owns execution and matching in the router.
+    result = runner(
+        ["git", "config", "--null", "--get-all", "credential.helper"],
+        cwd=source.cwd,
+        env=env,
+    )
+    if result.missing:
+        raise ResolverUnavailable("git is not available")
+    if result.timed_out or result.truncated or result.status not in (0, 1):
+        raise ProbeUnavailable("cannot read effective Git credential configuration")
+    helpers: list[str] = []
+    for value in result.stdout.rstrip("\0").split("\0") if result.stdout else []:
+        if not value:
+            helpers.clear()
+        else:
+            helpers.append(value)
+    return helpers
+
+
+def _probe(item: SourceAuth, env: Mapping[str, str], anonymous: bool, runner) -> str:
+    src = item.source
+    helper = "" if anonymous else router_helper()
+    entries = [
+        (f"credential.https://{src.host}.useHttpPath", "true"),
+        ("credential.helper", ""),
+        (f"credential.https://{src.host}.helper", ""),
+        (f"credential.https://{src.host}.helper", helper),
+    ]
+    probe_env = {
+        **env,
+        **NON_INTERACTIVE,
+        **command_scope(env, entries),
+        "GIT_ASKPASS": "",
+        "SSH_ASKPASS": "",
+        "CE_UPDATE_AUTH_READONLY": "1",
+        "CE_UPDATE_AUTH_BASE_CONFIG": base_config(env),
+        "CE_UPDATE_AUTH_ROUTES": "{}",
+    }
+    result = runner(
+        ["git", "ls-remote", "--exit-code", src.url, "HEAD"], cwd=src.cwd, env=probe_env
+    )
+    if result.missing:
+        raise ResolverUnavailable("git is not available")
+    return (
+        "timeout"
+        if result.timed_out
+        else ("ok" if result.status == 0 and not result.truncated else "failed")
+    )
+
+
+def _check_token(secret: str, src: Source, expected: str | None, env, runner) -> dict[str, str]:
+    token_env = {**env, "GH_TOKEN": secret, "GH_ENTERPRISE_TOKEN": secret, "GH_HOST": src.host}
+    login = runner(["gh", "api", "--hostname", src.host, "user", "--jq", ".login"], env=token_env)
+    if login.missing:
+        return {"status": "unavailable"}
+    if login.timed_out:
+        return {"status": "timeout"}
+    observed = login.stdout.strip()
+    if login.status != 0 or not observed or login.truncated:
+        return {"status": "denied"}
+    if expected and observed.casefold() != expected.casefold():
+        return {"status": "mismatch", "observed_login": observed}
+    repo = runner(
+        ["gh", "api", "--hostname", src.host, f"repos/{src.owner}/{src.repo}", "--jq", ".id"],
+        env=token_env,
+    )
+    return {
+        "status": "timeout"
+        if repo.timed_out
+        else ("ok" if repo.status == 0 and not repo.truncated else "denied"),
+        "observed_login": observed,
+    }
+
+
+def _alternatives(item: SourceAuth, env: Mapping[str, str], runner) -> list[dict[str, str]]:
+    src, expected = item.source, item.expected_account
+    attempts = []
+    secret = env_token(src.owner, env)
+    if src.host != "github.com" and env.get("GH_HOST", "").casefold() != src.host.casefold():
+        # An ordinary HTTPS Git host is not a destination for a GitHub token.
+        secret = ""
+    if secret:
+        attempts.append({"method": "env", **_check_token(secret, src, expected, env, runner)})
+        if attempts[-1]["status"] == "ok":
+            return attempts
+    if expected:
+        token_env = {
+            key: value
+            for key, value in env.items()
+            if key
+            not in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+        }
+        token = runner(
+            ["gh", "auth", "token", "--hostname", src.host, "--user", expected], env=token_env
+        )
+        check = {
+            "status": "unavailable"
+            if token.missing
+            else "timeout"
+            if token.timed_out
+            else "denied"
+        }
+        if token.status == 0 and token.stdout.strip() and not token.truncated:
+            check = _check_token(token.stdout.strip(), src, expected, env, runner)
+        attempts.append({"method": "gh", **check})
+        if check["status"] == "ok":
+            return attempts
+    fill_env = {
+        **env,
+        **NON_INTERACTIVE,
+        "GIT_ASKPASS": "",
+        "SSH_ASKPASS": "",
+        "CE_UPDATE_AUTH_READONLY": "1",
+        "CE_UPDATE_AUTH_ROUTES": "{}",
+        "CE_UPDATE_AUTH_BASE_CONFIG": base_config(env),
+    }
+    entries = [
+        ("credential.helper", ""),
+        (f"credential.https://{src.host}.helper", ""),
+        (f"credential.https://{src.host}.helper", router_helper()),
+        (f"credential.https://{src.host}.useHttpPath", "true"),
+    ]
+    fill_env.update(command_scope(env, entries))
+    attributes = f"protocol=https\nhost={src.host}\npath={src.owner}/{src.repo}.git\n"
+    if expected:
+        attributes += f"username={expected}\n"
+    fill = runner(
+        ["git", "credential", "fill"], env=fill_env, cwd=src.cwd, input=attributes + "\n"
+    )
+    secret = parse_attributes(fill.stdout).get(SECRET_KEY) if fill.status == 0 else None
+    check = {"status": "timeout" if fill.timed_out else "denied"}
+    if secret and not fill.truncated:
+        check = _check_token(secret, src, expected, env, runner)
+    attempts.append({"method": "fill", **check})
+    return attempts
+
+
+def report(
+    sources: Sequence[Source],
+    *,
+    env: Mapping[str, str] | None = None,
+    account_for: Callable[[str], str | None] | None = None,
+    runner=run,
+) -> AuthReport:
+    from . import repos
+
+    environment = original_environment(os.environ if env is None else env)
+    account_for = account_for or repos.account_for_github_slug
+    results = []
+    for src in sources:
+        started = time.monotonic()
+        try:
+            chain = helper_chain(src, environment, runner)
+        except ProbeUnavailable as error:
+            item = SourceAuth(src, [], status="unavailable", fix=str(error))
+            item.duration_ms = round((time.monotonic() - started) * 1000)
+            results.append(item)
+            continue
+        item = SourceAuth(src, chain)
+        if _probe(item, environment, True, runner) == "ok":
+            item.visibility, item.status = "public", "anonymous"
+        else:
+            item.expected_account = account_for(f"{src.owner}/{src.repo}")
+            item.as_configured = _probe(item, environment, False, runner)
+            if item.as_configured == "ok":
+                item.visibility, item.status = "private", "ok"
+            else:
+                attempts = _alternatives(item, environment, runner)
+                item.alternative = next((a for a in attempts if a["status"] == "ok"), None)
+                if item.alternative:
+                    item.status = "fixable_by_fallback"
+                else:
+                    item.alternative = next(iter(attempts), None)
+                    item.status = (
+                        "mismatch"
+                        if any(a["status"] == "mismatch" for a in attempts)
+                        else ("timeout" if item.as_configured == "timeout" else "auth_required")
+                    )
+                    who = f"sign in as {item.expected_account}; " if item.expected_account else ""
+                    item.fix = f"gh auth login --hostname {src.host} --web ({who}never switch the active account)"
+        item.duration_ms = round((time.monotonic() - started) * 1000)
+        results.append(item)
+    return AuthReport(results)
+
+
+@dataclasses.dataclass(frozen=True)
+class RunOverlay:
+    entries: list[tuple[str, str]]
+    variables: dict[str, str]
+    applies_to: list[str]
+    denies: list[str]
+
+    def environment(self, env: Mapping[str, str]) -> dict[str, str]:
+        original = original_environment(env)
+        return {
+            **original,
+            **self.variables,
+            **command_scope(original, self.entries),
+            "CE_UPDATE_AUTH_BASE_CONFIG": base_config(original),
+        }
+
+
+def fallback(
+    auth: AuthReport,
+    *,
+    apply_fixes: bool = True,
+    python: str = sys.executable,
+) -> RunOverlay | None:
+    if not auth.failing:
+        return None
+    routes, hosts = {}, set()
+    applied, denied = [], []
+    entries = [("credential.interactive", "never")]
+    for item in auth.failing:
+        src = item.source
+        if src.host.lower() not in hosts:
+            hosts.add(src.host.lower())
+            prefix = f"credential.https://{src.host}"
+            entries.extend(
+                [
+                    (prefix + ".useHttpPath", "true"),
+                    (prefix + ".helper", ""),
+                    (prefix + ".helper", router_helper(python)),
+                ]
+            )
+        fix = apply_fixes and item.status == "fixable_by_fallback"
+        route = (
+            {"account": item.expected_account, "method": item.alternative["method"]}
+            if (fix)
+            else {"method": "deny"}
+        )
+        if src.route_key in routes and routes[src.route_key] != route:
+            route = {"method": "deny"}  # one owner cannot safely select two accounts
+        routes[src.route_key] = route
+    for item in auth.failing:
+        (denied if routes[item.source.route_key]["method"] == "deny" else applied).append(
+            item.source.id
+        )
+    variables = {
+        **NON_INTERACTIVE,
+        "GIT_ASKPASS": "",
+        "SSH_ASKPASS": "",
+        "CE_UPDATE_AUTH_ROUTES": json.dumps(routes),
+    }
+    return RunOverlay(entries, variables, applied, denied)

@@ -114,6 +114,8 @@ def classify_status(status: str) -> tuple[str, str | None]:
     """
     text = str(status).strip()
     low = text.lower()
+    if low == "auth_required":
+        return _ut.AUTH_REQUIRED, "auth_required"
     if text.startswith("OK"):
         return _ut.VERIFIED_CURRENT, None
     if text.startswith("SKIPPED (current)"):
@@ -186,6 +188,8 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
             return rc
         if rc == 0:
             outcome, code = _ut.VERIFIED_CURRENT, None
+        elif rc == 4:
+            outcome, code = _ut.AUTH_REQUIRED, "auth_required"
         elif rc == 1:
             # A generic failure: a more specific recorded target outcome wins.
             outcome = None if _ut.is_failure(run.outcome) else _ut.COMMAND_FAILED
@@ -195,3 +199,12 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
         return run.finish(outcome, error={"code": code} if code else None)
     except Exception:
         return rc
+
+
+def auth_result(summary: dict, *, applied: bool) -> None:
+    ok = summary["status"] in ("ok", "anonymous") or applied
+    record("auth_fallback" if applied else "auth_report", summary["id"],
+           "OK" if ok else "auth_required", required=summary["required"], changed=False)
+    if _run is not None:
+        _run.emit("auth_report", summary["id"], "info",
+                  details={"auth": summary, "fallback_applied": applied})

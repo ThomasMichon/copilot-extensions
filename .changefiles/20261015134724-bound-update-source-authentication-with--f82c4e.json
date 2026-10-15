@@ -1,0 +1,13 @@
+{
+  "comment": "Bound update-source authentication with a read-only report and failure-only command-scope credential routing, preserving working helper configurations and explicit unresolved outcomes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -1540,7 +1540,7 @@ def _cmd_update_steps(rest: list[str], run) -> int:
         if getattr(e, "install_hint", False):
             run.say("Run `worktree-manager setup --apply` to install the engine first.")
         return 1
-    return 1 if cutover_failed and rc == 0 else rc
+    return (4 if su.action == "auth_required" else 1 if cutover_failed else 0) if rc == 0 else rc
 
 
 def main(argv: list[str] | None = None) -> int:

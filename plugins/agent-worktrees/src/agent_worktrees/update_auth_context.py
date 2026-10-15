@@ -1,0 +1,210 @@
+"""Update-only auth scopes; unrelated Git identity probes retain strict isolation."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import contextvars
+import json
+import os
+from collections.abc import Mapping
+from pathlib import Path
+
+from . import output, update_auth as auth, update_auth_sources as sources, update_events
+
+_current: contextvars.ContextVar[Session | None] = contextvars.ContextVar(
+    "update_auth_session", default=None
+)
+_repository: contextvars.ContextVar[auth.RunOverlay | None] = contextvars.ContextVar(
+    "update_auth_repository", default=None
+)
+
+
+def mode() -> str:
+    value = os.environ.get("CE_UPDATE_AUTH", "on")
+    if value not in ("on", "off", "report-only"):
+        raise ValueError("CE_UPDATE_AUTH must be on, off or report-only")
+    return value
+
+
+def describe(report: auth.AuthReport) -> None:
+    if not report.results:
+        return
+    output.info("Auth report (read-only):")
+    for item in report.results:
+        account = f" as {item.expected_account}" if item.expected_account else ""
+        output.info(f"{item.source.id}{account}: {item.status} ({item.duration_ms} ms)")
+        if item.fix:
+            output.warn(f"fix {item.source.id}: {item.fix}")
+
+
+class Session:
+    def __init__(self) -> None:
+        self.reports: dict[Path | None, auth.AuthReport] = {}
+        self.overlays: dict[Path | None, auth.RunOverlay | None] = {}
+        self.unresolved = False
+        self.anchor_failed = False
+
+    def prepare(self, context: Path | None, *, include_anchors: bool = False) -> auth.AuthReport:
+        if context in self.reports:
+            return self.reports[context]
+        selected = sources.marketplaces(context)
+        if include_anchors:
+            selected += sources.anchors()
+        if selected:
+            update_events.enter("auth_report")
+        report = auth.report(selected)
+        overlay = auth.fallback(report, apply_fixes=mode() != "report-only")
+        self.reports[context], self.overlays[context] = report, overlay
+        self.unresolved |= bool(overlay and overlay.denies)
+        describe(report)
+        for item in report.results:
+            applied = overlay is not None and item.source.id in overlay.applies_to
+            update_events.auth_result(item.summary(), applied=applied)
+        return report
+
+    def environment(self, context: Path | None) -> dict[str, str] | None:
+        self.prepare(context)
+        overlay = self.overlays[context]
+        return overlay.environment(os.environ) if overlay is not None else None
+
+    def blocked(self, context: Path | None, id: str) -> bool:
+        self.prepare(context)
+        overlay = self.overlays[context]
+        return overlay is not None and id in overlay.denies
+
+
+@contextlib.contextmanager
+def session():
+    value = None if mode() == "off" else Session()
+    token = _current.set(value)
+    try:
+        yield value
+    finally:
+        _current.reset(token)
+
+
+def child_environment(context: Path | None) -> dict[str, dict[str, str]]:
+    value = _current.get()
+    env = value.environment(context) if value is not None else None
+    return {"env": env} if env is not None else {}
+
+
+def blocked(context: Path | None, marketplace: str) -> bool:
+    value = _current.get()
+    return value is not None and value.blocked(context, "marketplace:" + marketplace)
+
+
+class AuthRequired(RuntimeError):
+    pass
+
+
+def require_marketplace(context: Path | None, marketplace: str) -> None:
+    if blocked(context, marketplace):
+        raise AuthRequired("auth_required")
+
+
+def anchor_blocked(anchor: Path) -> bool:
+    value = _current.get()
+    if value is None:
+        return False
+    id = "anchor:" + str(anchor)
+    for overlay in value.overlays.values():
+        if overlay is not None and id in overlay.denies:
+            output.warn(f"{id}: auth_required")
+            return True
+    return False
+
+
+def anchor_failure(anchor: str, error: str) -> None:
+    credential = any(
+        marker in error.casefold()
+        for marker in (
+            "authentication failed",
+            "could not read username",
+            "could not read password",
+            "http 401",
+            "http 403",
+            "repository not found",
+            "auth_required",
+        )
+    )
+    update_events.record(
+        "anchor_sync",
+        "anchor:" + anchor,
+        "auth_required" if credential else "anchor fetch failed: " + error,
+    )
+    value = _current.get()
+    if value is not None:
+        value.unresolved |= credential
+        value.anchor_failed |= not credential
+
+
+@contextlib.contextmanager
+def repository_scope(anchor: Path):
+    value = _current.get()
+    overlay = None
+    if value is not None:
+        for context, report in value.reports.items():
+            if any(
+                item.source.purpose == "anchor" and item.source.cwd == anchor
+                for item in report.results
+            ):
+                overlay = value.overlays[context]
+                break
+    token = _repository.set(overlay)
+    try:
+        yield
+    finally:
+        _repository.reset(token)
+
+
+def repository_environment(env: Mapping[str, str]) -> dict[str, str]:
+    overlay = _repository.get()
+    return overlay.environment(env) if overlay is not None else dict(env)
+
+
+def run_update(args: argparse.Namespace, steps) -> int:
+    from . import update_cli
+
+    with session() as value:
+        if value is not None:
+            context = (
+                update_cli._core_helper(
+                    "_invocation_update_context", update_cli._invocation_update_context
+                )()
+                or update_cli._core_helper(
+                    "_project_update_context", update_cli._project_update_context
+                )()
+            )
+            value.prepare(context, include_anchors=not getattr(args, "no_anchor_sync", False))
+        rc = steps(args)
+        if value is not None and rc == 0:
+            return 1 if value.anchor_failed else 4 if value.unresolved else 0
+        return rc
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    selected = [] if getattr(args, "auth_source", None) else sources.marketplaces(Path.cwd())
+    if not getattr(args, "no_anchor_sync", False):
+        selected += sources.anchors()
+    for index, url in enumerate(getattr(args, "auth_source", None) or []):
+        item = auth.source(f"source:{index}", url, purpose="manager")
+        if item is None:
+            output.err("--auth-source requires an HTTPS repository URL")
+            return 3
+        selected.append(item)
+    report = auth.report(selected)
+    overlay = auth.fallback(report, apply_fixes=mode() != "report-only")
+    payload = report.summary()
+    if getattr(args, "auth_environment", False):
+        # Only added/replaced variables cross the Manager's process boundary.
+        environment = overlay.environment(os.environ) if overlay else {}
+        payload["environment"] = {
+            key: value for key, value in environment.items() if os.environ.get(key) != value
+        }
+    if getattr(args, "json", False):
+        print(json.dumps(payload))
+    else:
+        describe(report)
+    return 4 if overlay and overlay.denies else 0

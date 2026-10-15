@@ -72,6 +72,8 @@ class UpdateRun:
         required, error = True, None
         if cutover_failed:
             outcome, error = _ut.COMMAND_FAILED, {"code": "cutover_failed", "message": detail or ""}
+        elif action == "auth_required":
+            outcome, error = _ut.AUTH_REQUIRED, {"code": "auth_required", "message": detail or ""}
         elif action in ("updated", "already-current"):
             outcome = _ut.VERIFIED_CURRENT
         else:
