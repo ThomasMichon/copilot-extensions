@@ -29,10 +29,22 @@ jobs:
         run: |
           python - <<'PY'
           import hashlib
+          import json
           import os
           import pathlib
+          import re
+          import shutil
           import subprocess
           import tempfile
+          import time
+
+          deadline = time.monotonic() + 240
+
+          def bounded_run(command, *, timeout, **options):
+              remaining = deadline - time.monotonic()
+              if remaining <= 0:
+                  raise TimeoutError("Bootstrap proof exhausted its aggregate deadline")
+              return subprocess.run(command, timeout=min(timeout, remaining), **options)
 
           workflow = pathlib.Path(".github/workflows/validate-and-promote.yml").read_text()
           lines = workflow.splitlines()
@@ -56,27 +68,69 @@ jobs:
           assert f'" = {blob}' in production
           policy = pathlib.Path("libs/installer-engine/installer_dependency_policy.py")
           before = hashlib.sha256(policy.read_bytes()).digest()
+          requirements = pathlib.Path("tools/artifact_validation_requirements.txt")
+          declared = requirements.read_bytes()
+          actual_uv = shutil.which("uv")
+          assert actual_uv is not None
 
           with tempfile.TemporaryDirectory(prefix="attribution-proof-") as temporary:
               root = pathlib.Path(temporary)
 
-              def execute(body, case, *, fail_uv=False):
+              def execute(body, case, *, fail_uv=False, fail_cleanup=False,
+                          declaration=None, observe_target=False):
                   directory = root / case
                   directory.mkdir()
-                  environment = dict(os.environ, RUNNER_TEMP=str(directory))
-                  if fail_uv:
+                  environment = dict(
+                      os.environ, RUNNER_TEMP=str(directory),
+                      UV_CACHE_DIR=str(directory / "uv-cache"), PYTHONDONTWRITEBYTECODE="1",
+                  )
+                  assert not pathlib.Path(environment["UV_CACHE_DIR"]).exists()
+                  if fail_uv or fail_cleanup or observe_target:
                       tools = directory / "tools"
                       tools.mkdir()
+                      environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
+                  if fail_uv:
                       fake_uv = tools / "uv"
                       fake_uv.write_text("#!/bin/sh\nexit 73\n")
                       fake_uv.chmod(0o700)
-                      environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
+                  if fail_cleanup:
+                      fake_rm = tools / "rm"
+                      fake_rm.write_text("#!/bin/sh\necho simulated-cleanup-failure >&2\nexit 74\n")
+                      fake_rm.chmod(0o700)
+                  if observe_target:
+                      observer = tools / "uv"
+                      observer.write_text(
+                          "#!/usr/bin/env python3\n"
+                          "import hashlib, json, os, pathlib, subprocess, sys\n"
+                          "def snapshot(root):\n"
+                          "    return {str(p.relative_to(root)): "
+                          "('link:' + os.readlink(p) if p.is_symlink() else "
+                          "hashlib.sha256(p.read_bytes()).hexdigest()) "
+                          "for p in root.rglob('*') if p.is_file() or p.is_symlink()}\n"
+                          "if sys.argv[1] == '_proof_snapshot':\n"
+                          "    print(json.dumps(snapshot(pathlib.Path(sys.argv[2]))))\n"
+                          "    raise SystemExit(0)\n"
+                          "result = subprocess.run([os.environ['ATTRIBUTION_PROOF_UV'], "
+                          "*sys.argv[1:]])\n"
+                          "if result.returncode == 0 and sys.argv[1] == 'venv':\n"
+                          "    pathlib.Path(os.environ['ATTRIBUTION_PROOF_SNAPSHOT']).write_text("
+                          "json.dumps(snapshot(pathlib.Path(sys.argv[-1]))))\n"
+                          "raise SystemExit(result.returncode)\n"
+                      )
+                      observer.chmod(0o700)
+                      environment["ATTRIBUTION_PROOF_UV"] = actual_uv
+                      environment["ATTRIBUTION_PROOF_SNAPSHOT"] = str(directory / "target-before.json")
                   script = directory / "provision.sh"
                   script.write_text(body)
-                  result = subprocess.run(
-                      ["bash", "-e", str(script)], env=environment, text=True,
-                      capture_output=True, timeout=120,
-                  )
+                  if declaration is not None:
+                      requirements.write_text(declaration)
+                  try:
+                      result = bounded_run(
+                          ["bash", "-e", str(script)], env=environment, text=True,
+                          capture_output=True, timeout=120,
+                      )
+                  finally:
+                      requirements.write_bytes(declared)
                   assert hashlib.sha256(policy.read_bytes()).digest() == before
                   return result, directory
 
@@ -87,15 +141,68 @@ jobs:
               interrupted, directory = execute(production, "interrupted", fail_uv=True)
               assert interrupted.returncode == 73, interrupted.stdout + interrupted.stderr
               assert not (directory / "artifact-validator").exists()
+              assert not list(directory.glob("attribution-policy.*"))
               print("PASS: failed provisioning restores trusted checkout and preserves failure")
+
+              failed_cleanup, directory = execute(production, "cleanup-failure", fail_cleanup=True)
+              assert failed_cleanup.returncode == 74, failed_cleanup.stdout + failed_cleanup.stderr
+              assert list(directory.glob("attribution-policy.*"))
+              print("PASS: cleanup failure makes an otherwise successful provision fail")
+
+              both_failed, directory = execute(
+                  production, "provision-and-cleanup-failure", fail_uv=True, fail_cleanup=True,
+              )
+              assert both_failed.returncode == 73, both_failed.stdout + both_failed.stderr
+              print("PASS: provisioning failure remains nonzero when cleanup also fails")
+
+              unowned = root / "unowned-project"
+              unowned.mkdir()
+              (unowned / "pyproject.toml").write_text(
+                  '[project]\nname="unowned-bootstrap-proof"\nversion="0.0.1"\n',
+              )
+              included = root / "unowned-requirements.txt"
+              included.write_text(str(unowned) + "\n")
+              for case, declaration in {
+                  "directory": str(unowned), "editable": "-e " + str(unowned),
+                  "file-url": unowned.as_uri(), "requirements-include": "-r " + str(included),
+              }.items():
+                  refused, directory = execute(
+                      production, case, declaration=declaration + "\n", observe_target=True,
+                  )
+                  assert refused.returncode != 0, case
+                  assert "local source is outside attributable trusted source roots" in refused.stderr, refused.stderr
+                  snapshot = bounded_run(
+                      [str(directory / "tools/uv"), "_proof_snapshot",
+                       str(directory / "artifact-validator")],
+                      env=os.environ, capture_output=True, text=True, check=True, timeout=15,
+                  )
+                  assert json.loads(snapshot.stdout) == json.loads(
+                      (directory / "target-before.json").read_text(),
+                  ), case
+                  assert not list(directory.glob("attribution-policy.*"))
+                  print(f"PASS: {case} refuses without target/helper mutation")
+
+              wrong_hashes = re.sub(r"sha256:[0-9a-f]{64}", "sha256:" + "0" * 64, declared.decode())
+              assert wrong_hashes != declared.decode()
+              refused_hash, directory = execute(production, "wrong-hash", declaration=wrong_hashes)
+              assert refused_hash.returncode != 0
+              assert "hash mismatch" in refused_hash.stderr.lower(), refused_hash.stderr
+              absent = bounded_run(
+                  [str(directory / "artifact-validator/bin/python"), "-I", "-B", "-c",
+                   "import importlib.util; assert importlib.util.find_spec('packaging') is None"],
+                  capture_output=True, text=True, timeout=15,
+              )
+              assert absent.returncode == 0, absent.stderr
+              print("PASS: wrong package hash refuses without installing the validator")
 
               installed, directory = execute(production, "fresh")
               assert installed.returncode == 0, installed.stdout + installed.stderr
-              verified = subprocess.run(
+              verified = bounded_run(
                   [str(directory / "artifact-validator/bin/python"), "-I", "-c",
                    "import importlib.metadata as m; assert m.version('packaging') == '25.0'"],
                   capture_output=True, text=True, timeout=15,
               )
               assert verified.returncode == 0, verified.stderr
-              print("PASS: real fresh hash-pinned, seasoned provisioning; trusted checkout restored")
+              assert not list(directory.glob("attribution-policy.*"))
+              print("PASS: real cold hash-pinned, seasoned provisioning; trusted checkout restored")
           PY

@@ -429,16 +429,24 @@ jobs:
           test "$(git rev-parse "$reviewed:$policy")" = 780739d4feedba75decec1cb1b98b4f1c87fc8df
           original="$(mktemp "$RUNNER_TEMP/attribution-policy.XXXXXX")"
           cp -- "$policy" "$original"
-          trap 'cp -- "$original" "$policy"' EXIT
+          restore_policy() {
+            status=$?
+            trap - EXIT
+            cleanup_status=0
+            cp -- "$original" "$policy" || cleanup_status=$?
+            git diff --exit-code -- "$policy" || cleanup_status=$?
+            if [ "$cleanup_status" -eq 0 ]; then
+              rm -- "$original" || cleanup_status=$?
+            fi
+            if [ "$status" -eq 0 ]; then status=$cleanup_status; fi
+            exit "$status"
+          }
+          trap restore_policy EXIT
           git show "$reviewed:$policy" > "$policy"
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
           python tools/seasoned_uv.py --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
-          cp -- "$original" "$policy"
-          trap - EXIT
-          rm -- "$original"
-          git diff --exit-code -- "$policy"
       - name: Build the composed, versioned promotion candidate without release authority
         id: build
         env:
@@ -497,16 +505,24 @@ jobs:
           test "$(git rev-parse "$reviewed:$policy")" = 780739d4feedba75decec1cb1b98b4f1c87fc8df
           original="$(mktemp "$RUNNER_TEMP/attribution-policy.XXXXXX")"
           cp -- "$policy" "$original"
-          trap 'cp -- "$original" "$policy"' EXIT
+          restore_policy() {
+            status=$?
+            trap - EXIT
+            cleanup_status=0
+            cp -- "$original" "$policy" || cleanup_status=$?
+            git diff --exit-code -- "$policy" || cleanup_status=$?
+            if [ "$cleanup_status" -eq 0 ]; then
+              rm -- "$original" || cleanup_status=$?
+            fi
+            if [ "$status" -eq 0 ]; then status=$cleanup_status; fi
+            exit "$status"
+          }
+          trap restore_policy EXIT
           git show "$reviewed:$policy" > "$policy"
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
           python tools/seasoned_uv.py --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
-          cp -- "$original" "$policy"
-          trap - EXIT
-          rm -- "$original"
-          git diff --exit-code -- "$policy"
       - uses: actions/download-artifact@v4
         if: needs.build-python-artifacts.outputs.exported == 'true'
         with:
@@ -942,16 +958,24 @@ jobs:
           test "$(git rev-parse "$reviewed:$policy")" = 780739d4feedba75decec1cb1b98b4f1c87fc8df
           original="$(mktemp "$RUNNER_TEMP/attribution-policy.XXXXXX")"
           cp -- "$policy" "$original"
-          trap 'cp -- "$original" "$policy"' EXIT
+          restore_policy() {
+            status=$?
+            trap - EXIT
+            cleanup_status=0
+            cp -- "$original" "$policy" || cleanup_status=$?
+            git diff --exit-code -- "$policy" || cleanup_status=$?
+            if [ "$cleanup_status" -eq 0 ]; then
+              rm -- "$original" || cleanup_status=$?
+            fi
+            if [ "$status" -eq 0 ]; then status=$cleanup_status; fi
+            exit "$status"
+          }
+          trap restore_policy EXIT
           git show "$reviewed:$policy" > "$policy"
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
           python tools/seasoned_uv.py --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
-          cp -- "$original" "$policy"
-          trap - EXIT
-          rm -- "$original"
-          git diff --exit-code -- "$policy"
       - name: Download this run's signed Python artifacts
         if: steps.decide.outputs.proceed == 'true' && needs.python-artifacts.outputs.exported == 'true'
         uses: actions/download-artifact@v4
@@ -1478,16 +1502,24 @@ jobs:
           test "$(git rev-parse "$reviewed:$policy")" = 780739d4feedba75decec1cb1b98b4f1c87fc8df
           original="$(mktemp "$RUNNER_TEMP/attribution-policy.XXXXXX")"
           cp -- "$policy" "$original"
-          trap 'cp -- "$original" "$policy"' EXIT
+          restore_policy() {
+            status=$?
+            trap - EXIT
+            cleanup_status=0
+            cp -- "$original" "$policy" || cleanup_status=$?
+            git diff --exit-code -- "$policy" || cleanup_status=$?
+            if [ "$cleanup_status" -eq 0 ]; then
+              rm -- "$original" || cleanup_status=$?
+            fi
+            if [ "$status" -eq 0 ]; then status=$cleanup_status; fi
+            exit "$status"
+          }
+          trap restore_policy EXIT
           git show "$reviewed:$policy" > "$policy"
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
           python tools/seasoned_uv.py --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
-          cp -- "$original" "$policy"
-          trap - EXIT
-          rm -- "$original"
-          git diff --exit-code -- "$policy"
       - uses: actions/download-artifact@v4
         with:
           name: promotion-python-artifacts
