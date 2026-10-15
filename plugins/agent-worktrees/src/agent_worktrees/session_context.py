@@ -57,7 +57,7 @@ def publish_machine_context(payload: dict) -> str:
             json.dumps({"additionalContext": context}),
         )
         hook_client = core._load_hook_client_module()
-        if hook_client is None or not hook_client._write_session_guidance(payload):
+        if hook_client is None or not hook_client._write_session_guidance(payload, claim_launch=False):
             return "[agent-worktrees] Machine guidance file unavailable.\n"
     except Exception as exc:
         return f"[agent-worktrees] Machine guidance failed: {type(exc).__name__}\n"

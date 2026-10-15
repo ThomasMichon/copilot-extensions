@@ -8,7 +8,119 @@ import os
 import re
 import stat
 import struct
+import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
+
+
+def guidance_marker(payload: dict) -> str:
+    key = session_launch_key(payload)
+    if not key:
+        return ""
+    return (
+        "\n<!-- agent-worktrees:session-guidance "
+        + json.dumps({"launchKey": key, "timestamp": payload["timestamp"]})
+        + " -->\n"
+    )
+
+
+def _guidance_owner(content: str) -> dict | None:
+    match = re.search(
+        r"\n<!-- agent-worktrees:session-guidance (\{[^\r\n]*\}) -->\n?$",
+        content,
+    )
+    if match is None:
+        return None
+    try:
+        value = json.loads(match[1])
+    except ValueError:
+        return None
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"launchKey", "timestamp"}
+        or not isinstance(value["launchKey"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", value["launchKey"]) is None
+        or type(value["timestamp"]) not in (int, float)
+        or not math.isfinite(value["timestamp"])
+    ):
+        return None
+    return value
+
+
+@contextmanager
+def _guidance_lock(target: Path):
+    lock_path = target.with_name(".session-guidance.lock")
+    if lock_path.is_symlink():
+        raise OSError("Guidance lock cannot be a symbolic link")
+    with lock_path.open("a+b") as handle:
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def write_guidance(
+    target: Path, content: str, payload: dict, *, claim_launch: bool,
+) -> bool:
+    temporary = None
+    try:
+        incoming = _guidance_owner(guidance_marker(payload))
+        with _guidance_lock(target):
+            existing = read_bounded_text(target, limit=4096)
+            owner = _guidance_owner(existing) if existing is not None else None
+            if not claim_launch:
+                if incoming is None or owner is None or incoming != owner:
+                    return False
+            elif owner is not None and (
+                incoming is None
+                or incoming["timestamp"] < owner["timestamp"]
+                or incoming["timestamp"] == owner["timestamp"] and incoming != owner
+            ):
+                return False
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", newline="\n", dir=target.parent,
+                prefix=".session-guidance.", suffix=".tmp", delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                handle.write(content)
+            if os.name != "nt":
+                temporary.chmod(0o600)
+            os.replace(temporary, target)
+            return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def machine_context(context: str, *, hostname: str) -> str:

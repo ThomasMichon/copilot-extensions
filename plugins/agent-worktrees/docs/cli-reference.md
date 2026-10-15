@@ -53,6 +53,11 @@ inventory or machine-specific value is checked into instruction projections.
 Without usable registry context, the observed hostname remains visible while
 machine and alias are explicitly unresolved. An oversized combined guidance
 file retains the bounded machine block and reports the omitted guidance.
+The initial hook claims the launch under a per-session OS file lock.
+Lifecycle rewrites check that same launch ownership and replace the file
+under the lock, so a delayed prior launch cannot overwrite a newer resume's
+identity or command catalog. The launch marker is ordering metadata, not
+authorization or evidence that the model read the file.
 
 The legacy `machine-context` command likewise distinguishes the actual
 hostname, preferred machine name and friendly name; it no longer labels a

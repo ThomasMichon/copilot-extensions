@@ -19,7 +19,6 @@ import socket
 import stat
 import subprocess
 import sys
-import tempfile
 import time
 from functools import cache
 from pathlib import Path
@@ -348,6 +347,7 @@ def _write_session_guidance(
     *,
     home: Path | None = None,
     decision_context: str = "",
+    claim_launch: bool = True,
 ) -> bool:
     home = home or Path.home()
     session_id = payload.get("sessionId")
@@ -377,21 +377,22 @@ def _write_session_guidance(
     if decision_context and decision_context not in contexts:
         contexts.append(decision_context)
     machine = _machine_context(enriched, home)
-    content = _GUIDANCE_HEADER + "\n\n".join([*contexts, machine]) + "\n"
+    marker = _RUNTIME.guidance_marker(enriched)
+    content = _GUIDANCE_HEADER + "\n\n".join([*contexts, machine]) + "\n" + marker
     if len(content.encode("utf-8")) > _SESSION_GUIDANCE_MAX_BYTES:
         content = (
             _GUIDANCE_HEADER
             + "Current agent-worktrees session guidance was omitted because "
             "it exceeded the bounded file budget. Treat guidance as "
             "unavailable for this session-start invocation.\n\n"
-            + machine + "\n"
+            + machine + "\n" + marker
         )
     elif not contexts:
         content = (
             _GUIDANCE_HEADER
             + "No current agent-worktrees session guidance was available. "
             "Treat guidance as unavailable for this session-start invocation.\n\n"
-            + machine + "\n"
+            + machine + "\n" + marker
         )
 
     try:
@@ -419,26 +420,8 @@ def _write_session_guidance(
         if _is_link_or_reparse(target_dir):
             return False
         target = target_dir / "session-guidance.instructions.md"
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="\n",
-            dir=target_dir,
-            prefix=".session-guidance.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-            handle.write(content)
-        if os.name != "nt":
-            temporary.chmod(0o600)
-        os.replace(temporary, target)
-        return True
+        return _RUNTIME.write_guidance(target, content, enriched, claim_launch=claim_launch)
     except (OSError, RuntimeError, ValueError):
-        try:
-            temporary.unlink()
-        except (OSError, UnboundLocalError):
-            pass
         return False
 
 
@@ -965,6 +948,7 @@ def main(argv: list[str] | None = None) -> int:
             decision_context = result.get("additionalContext")
             _write_session_guidance(
                 payload,
+                claim_launch=False,
                 decision_context=(
                     decision_context
                     if isinstance(decision_context, str)
