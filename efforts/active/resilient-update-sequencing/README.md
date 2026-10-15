@@ -327,3 +327,26 @@ achieved by rearranging today's combined installer invocations.
 - The 21-case registry file passed with the actual process boundary, and all
   five Manager dependency-boundary contracts passed. The prior CI run's other
   2,307 Manager cases passed; current-head required CI and review remain open.
+
+### 2026-10-15 - Destination transfer recovery and Terminal input custody
+- Review found explicit-transfer journals retaining the previous installation's
+  owner, preventing ordinary recovery of an interrupted authorized transfer.
+  Transfer journals now use destination identity while retaining exact prior
+  receipt bytes for ordinary-failure rollback. Recovery no longer needs a
+  second transfer authorization after a mixed-pair interruption.
+- The new refresh boundary exposed a shared deployment reader that treated
+  invalid or denied Terminal settings reads as empty. Publication now strictly
+  admits fragments, state and settings before writes, retains their byte
+  snapshots and fragment inventory, and refuses observed drift before each
+  mutation. Read-only views remain tolerant; genuinely absent optional files
+  remain supported.
+- Terminal settings accept their native JSONC comments/trailing commas.
+  Unchanged settings retain bytes/timestamps; cleanup backs up original bytes.
+  Native output checks caught and corrected implicit Windows newline conversion
+  in snapshot bookkeeping rather than relaxing drift detection.
+- Independent command/registration/profile integration passed 334 cases with
+  twenty-eight platform skips. Manager coverage passed 223 cases, including
+  malformed/denied/changed inputs, inventory drift and JSONC backup preservation.
+  Native refresh passes measured 2.109 and 1.609 seconds. Module ceilings and
+  touched-code lint pass; current-head review, required CI and rollout remain
+  open.

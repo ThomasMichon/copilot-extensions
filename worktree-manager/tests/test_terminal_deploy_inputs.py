@@ -91,16 +91,39 @@ def test_input_drift_after_planning_does_not_publish(publication, monkeypatch, c
             assert (path.read_bytes(), path.stat().st_mtime_ns) == original
 
 
-def test_valid_jsonc_settings_keep_comments_when_no_cleanup_is_needed(publication, capsys):
+def test_fragment_inventory_drift_refuses_publication(publication, monkeypatch, capsys):
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()}
+    apply = tf._apply_deploy_plan
+
+    def interleaved(plan, state, inputs=None):
+        publication["foreign"].with_name("new.json").write_text('{"profiles": []}', encoding="utf-8")
+        return apply(plan, state, inputs)
+
+    monkeypatch.setattr(tf, "_apply_deploy_plan", interleaved)
+    assert lp.main(["demo"]) == 1
+    assert "inventory changed" in json.loads(capsys.readouterr().out)["error"]
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()} == before
+
+
+@pytest.mark.parametrize("cleanup", [False, True])
+def test_valid_jsonc_settings_preserve_original_bytes(publication, capsys, cleanup):
     path = publication["settings"]
     data = json.loads(path.read_text(encoding="utf-8"))
     data["help"] = 'https://example.invalid/"quoted"/*literal*/'
+    if cleanup:
+        data["profiles"]["list"].append({"guid": "{stale}", "source": "AgentWorktrees"})
     text = "// Terminal settings\n" + json.dumps(data)[:-1] + ", /* trailing */ }\n"
     path.write_text(text, encoding="utf-8")
     before = path.read_bytes(), path.stat().st_mtime_ns
     assert lp.main(["demo"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "verified_current"
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+    if cleanup:
+        assert json.loads(path.read_text(encoding="utf-8"))["help"] == data["help"]
+        backups = list(path.parent.glob("settings.json.wt-backup-*"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == before[0]
+    else:
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
 @pytest.mark.parametrize("kind", ["state", "settings"])

@@ -1114,8 +1114,9 @@ def deploy_fragment(
         # -- plus any other extension's on-disk fragment), so orphan reclaim
         # never prunes a GUID a foreign fragment still emits.
         all_fragment_guids = set(new_guids)
-        if frag_dir is not None and Path(frag_dir).exists():
-            for jf in Path(frag_dir).rglob("*.json"):
+        if frag_dir is not None:
+            for jf in (inputs.fragments(Path(frag_dir)) if inputs is not None
+                       else Path(frag_dir).rglob("*.json")):
                 data = read(jf)
                 if isinstance(data, dict):
                     for p in (data.get("profiles") or []):

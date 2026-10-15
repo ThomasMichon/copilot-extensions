@@ -77,6 +77,7 @@ class TerminalInputs:
     def __init__(self) -> None:
         self.raw: dict[Path, bytes | None] = {}
         self.documents: dict[Path, dict | None] = {}
+        self.fragment_sets: dict[Path, frozenset[Path]] = {}
 
     def read(self, path: Path, *, kind: str = "fragment") -> dict | None:
         if path not in self.raw:
@@ -89,6 +90,9 @@ class TerminalInputs:
         return self.documents[path]
 
     def verify(self) -> None:
+        for directory, paths in self.fragment_sets.items():
+            if frozenset(directory.rglob("*.json")) != paths:
+                raise ValueError(f"Terminal fragment inventory changed before publication: {directory}")
         for path, raw in self.raw.items():
             if _read_bytes(path) != raw:
                 raise ValueError(f"Terminal input changed before publication: {path}")
@@ -97,6 +101,14 @@ class TerminalInputs:
         self.verify()
         path.write_text(text, encoding="utf-8", newline="")
         self.raw[path] = text.encode("utf-8")
+        for directory, paths in self.fragment_sets.items():
+            if path.is_relative_to(directory):
+                self.fragment_sets[directory] = paths | {path}
+
+    def fragments(self, directory: Path) -> frozenset[Path]:
+        paths = frozenset(directory.rglob("*.json"))
+        self.fragment_sets[directory] = paths
+        return paths
 
     def backup(self, path: Path, destination: Path) -> None:
         self.verify()
