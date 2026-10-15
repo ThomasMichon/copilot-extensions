@@ -326,6 +326,24 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-15 -- Renewal narrowed and lightweight collection prototype
+- Rebased #6722 while preserving upstream CI and scope contracts; removed
+  this slice's incidental CI-budget edits and obsolete budget documentation.
+  Grant issuance and credential-file consumption remain the only runtime
+  behavior changes. Required CI and current-head review still gate merging.
+- Rebased grant/CLI selection: 95 passed, one platform skip, and one native
+  HTTP subprocess exceeded its unchanged 20-second bound. The isolated
+  direct/file HTTP pair then passed twice under the original bounds.
+  No deadline, fixture, skip, or CI bypass was changed.
+- The lightweight child-attribution prototype eliminates coverage-package
+  import and startup waits: median prelude 0.108 seconds, 13.2 times faster;
+  maximum 0.579 seconds, so the uniform 0.2-second target is not yet met.
+  The real two-node recovery pair passes both tests with its original
+  deadlines and a contained wall-time ratio of 0.923 versus ordinary execution.
+  Exact normal, abrupt-exit, forced-termination and thread-only attribution
+  parity passed. Integration and producer-completeness accounting are next;
+  no complete native baseline or strict CI activation is claimed.
+
 ### 2026-10-14 -- Coverage-selected fleet CI and provider review corrections
 - Narrow renewal PR #6722 back to its issuance/consumption contract.
   Its incidental CI-budget changes force unrelated whole-fleet and bridge
