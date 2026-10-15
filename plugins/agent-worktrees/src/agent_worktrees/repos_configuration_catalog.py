@@ -64,6 +64,12 @@ def inspect_project(project: str, workspace: str) -> Inspection:
     cfg.set_active_project(project)
     try:
         result.projects = installer.read_projects_registry(strict=True).get("projects", {})
+        if any(
+            not isinstance(entry, dict)
+            or ("base_repo" in entry and not isinstance(entry["base_repo"], bool))
+            for entry in result.projects.values()
+        ):
+            raise ConfigurationError("invalid-project-entry", "A project registration needs owner repair.")
         config = cfg.load_project_config(project, include_control_plane_related_pr=False)
         anchor = config.default_repo.anchor
         checkout = workspace or anchor

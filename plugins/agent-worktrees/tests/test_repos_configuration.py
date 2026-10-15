@@ -360,6 +360,27 @@ def test_route_projection_never_stringifies_or_exposes_invalid_source_values(nat
     assert tree(native) == before
 
 
+@pytest.mark.parametrize("entry", [
+    None, 42, SECRET, {"base_repo": "false"}, {"base_repo": {"secret": SECRET}},
+])
+def test_invalid_project_entry_with_matching_route_is_a_sanitized_finding(native, route_policy, entry):
+    from agent_worktrees import installer
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    route_policy.write_text("related:\n  external:\n", encoding="utf-8")
+    installer.projects_yaml_path().write_text(
+        yaml.safe_dump({"projects": {"external": entry}}), encoding="utf-8",
+    )
+    before = tree(native)
+    result = catalog("sample")
+    assert result["entries"]
+    for row in result["entries"]:
+        assert row["configuration"]["route"]["status"] == "unknown"
+        assert row["configuration"]["findings"][0]["code"] == "native-inspection-unavailable"
+    assert SECRET not in json.dumps(result)
+    assert tree(native) == before
+
+
 def test_native_minimal_related_link_is_valid(native, route_policy):
     from agent_worktrees.repos_configuration_catalog import catalog
     from agent_worktrees.repos_configuration_sources import defaults

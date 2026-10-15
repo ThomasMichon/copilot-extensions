@@ -20,6 +20,8 @@ layers, including duplicate keys, while accepting native bare minimal links.
 Routing fields are type-checked against the owner's supported locus/delegation
 values before projection; invalid nested source values are never stringified
 into JSON or inspection cards.
+Project registrations must be mappings with typed `base_repo` flags; malformed
+entries produce sanitized unknown-state findings instead of failing a section.
 Selected repository configuration uses the same committed/fallback source
 selection with failure-aware parsing. Invalid selected sources report unknown
 state; machine routes retain their resolved peer identity.
