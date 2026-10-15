@@ -17,6 +17,9 @@ optional anchor-directory switch destination. Older engines without that field
 leave pair inspection unsupported rather than falling back to the Manager's CWD.
 Route inspection validates the native selected base and marketplace-overlay
 layers, including duplicate keys, while accepting native bare minimal links.
+Routing fields are type-checked against the owner's supported locus/delegation
+values before projection; invalid nested source values are never stringified
+into JSON or inspection cards.
 Selected repository configuration uses the same committed/fallback source
 selection with failure-aware parsing. Invalid selected sources report unknown
 state; machine routes retain their resolved peer identity.

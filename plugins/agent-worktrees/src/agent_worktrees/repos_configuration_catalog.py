@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NoReturn
 
 import yaml
 
@@ -22,6 +23,39 @@ class Inspection:
         "status": "unsupported", "reason": "No explicit tracked workspace was supplied.",
     })
     findings: list = field(default_factory=list)
+
+
+def _validate_routes(raw: dict) -> None:
+    def invalid() -> NoReturn:
+        raise ConfigurationError("invalid-route-source", "A route source needs owner repair.")
+
+    entries = raw.get("related", {})
+    if not isinstance(entries, dict):
+        invalid()
+    for name, entry in entries.items():
+        identity(name)
+        if entry is None:
+            continue
+        if not isinstance(entry, dict):
+            invalid()
+        locus = entry.get("locus")
+        if locus is not None and not isinstance(locus, dict):
+            invalid()
+        preferred = (locus or {}).get("preferred", "")
+        if not isinstance(preferred, str):
+            invalid()
+        kind, machine = related.parse_preferred(preferred)
+        if kind and kind not in related.VALID_LOCUS_KINDS:
+            invalid()
+        if kind == "machine":
+            identity(machine)
+        delegate = entry.get("delegate")
+        via = delegate.get("via") if isinstance(delegate, dict) else delegate
+        if via is not None and not isinstance(via, str):
+            invalid()
+        via = related.normalize_delegate(via)
+        if via and via not in related.VALID_DELEGATES:
+            invalid()
 
 
 def inspect_project(project: str, workspace: str) -> Inspection:
@@ -52,12 +86,7 @@ def inspect_project(project: str, workspace: str) -> Inspection:
             for path in paths:
                 if path is None:
                     continue
-                raw = mapping(path)
-                entries = raw.get("related", {})
-                if not isinstance(entries, dict) or any(
-                    entry is not None and not isinstance(entry, dict) for entry in entries.values()
-                ):
-                    raise ConfigurationError("invalid-route-source", "A route source needs owner repair.")
+                _validate_routes(mapping(path))
         result.routes = related.read_related_grafted(anchors).related
         root = state_root.resolve_state_root(config, cwd=checkout)
         result.binding = {

@@ -337,6 +337,29 @@ def test_invalid_native_route_inspection_stays_unknown_not_valid_empty(native, r
     assert tree(native) == before
 
 
+@pytest.mark.parametrize("entry", [
+    {"locus": {"preferred": {"secret": SECRET}}},
+    {"locus": {"preferred": [SECRET]}},
+    {"locus": {"preferred": None}},
+    {"locus": {"preferred": SECRET}},
+    {"locus": {"preferred": f"machine:{SECRET}"}},
+    {"locus": [SECRET]},
+    {"delegate": {"via": {"secret": SECRET}}},
+    {"delegate": {"via": SECRET}},
+])
+def test_route_projection_never_stringifies_or_exposes_invalid_source_values(native, route_policy, entry):
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    route_policy.write_text(yaml.safe_dump({"related": {"external": entry}}), encoding="utf-8")
+    before = tree(native)
+    result = catalog("sample")
+    state = next(row["configuration"] for row in result["entries"] if row["id"] == "sample")
+    assert state["route"]["status"] == "unknown"
+    assert state["findings"][0]["code"] == "native-inspection-unavailable"
+    assert SECRET not in json.dumps(result)
+    assert tree(native) == before
+
+
 def test_native_minimal_related_link_is_valid(native, route_policy):
     from agent_worktrees.repos_configuration_catalog import catalog
     from agent_worktrees.repos_configuration_sources import defaults
