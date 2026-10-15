@@ -12,7 +12,7 @@ from agent_machines import modules
 from agent_machines.identity import resolve_machine
 from agent_machines.manifest import ManifestError, load_package, resolve_for_machine
 
-from ._helpers import base_package, write_package
+from ._helpers import base_package, enable_plugin, write_package
 
 
 def _topology(repo, machines):
@@ -158,6 +158,11 @@ def test_mixed_topologies_ignore_transport_details_in_identity_and_native_cli(
     assert identity.accepted == (identity.canonical, requested)
     assert identity.warnings == ()
 
+    for repo in repos:
+        write_package(repo, "defaults.yaml", base_package(
+            name=f"{repo.name}/defaults", gate=[requested],
+        ))
+        enable_plugin(repo)
     home = tmp_path / "home"
     registry = home / ".agent-worktrees"
     registry.mkdir(parents=True)
@@ -169,11 +174,11 @@ def test_mixed_topologies_ignore_transport_details_in_identity_and_native_cli(
             }}
             for repo in repos
         },
-    }), encoding="utf-8")
+    }, sort_keys=False), encoding="utf-8")
     (registry / "projects.yaml").write_text(yaml.safe_dump({
         "schema_version": 2,
         "projects": {repo.name: {"config_dir": str(home / repo.name)} for repo in repos},
-    }), encoding="utf-8")
+    }, sort_keys=False), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, "-m", "agent_machines", "discover", "--machine", requested, "--json"],
         cwd=tmp_path, env={**os.environ, "HOME": str(home), "USERPROFILE": str(home)},
@@ -184,6 +189,8 @@ def test_mixed_topologies_ignore_transport_details_in_identity_and_native_cli(
     assert payload["machine"] == identity.canonical
     assert payload["machine_aliases"] == list(identity.accepted)
     assert payload["machine_identity_warnings"] == []
+    assert [repo["repo"] for repo in payload["repos"]] == [repo.name for repo in repos]
+    assert all(repo["enabled"] for repo in payload["repos"])
 
 
 @pytest.mark.parametrize("reverse", [False, True])
