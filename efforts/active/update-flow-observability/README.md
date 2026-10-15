@@ -1,0 +1,192 @@
+# Update Flow Observability
+
+- **Slug:** `update-flow-observability`
+- **Repo:** copilot-extensions
+- **Branch(es):** independent reviewed plan and implementation slices
+- **Created:** 2026-10-14
+- **Status:** Draft
+- **Vision:** `visions/installer` Features/plugin-updating-and-alignment; `visions/plugin-services/runtime-assembly` verified immutable assembly
+- **Umbrella issue:** #6812
+- **Sub-issues:** existing #6600, #6086, #6046 and #6796 retain their owners and boundaries
+
+## Guiding Intent
+
+An operator should be able to account for every install/update operation:
+what it does, why it is necessary, how long it takes, and what is currently
+waiting. Consistent presentation must expose unnecessary work, not decorate
+it or obscure failures. Speed improvements remove measured repeated work
+while retaining installation, ownership, policy and health contracts.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Coordinator | Owns synthesis, shared contracts, integration, review and completion | The source worktree associated with #6812 |
+| Orchestration evidence reader | Audits unified update and launch-maintenance ordering | Coordinator's bounded read-only delegation |
+| Installer evidence reader | Audits runtime construction, activation and healthy no-op work | Coordinator's bounded read-only delegation |
+| Output evidence reader | Audits existing output helpers, protocols and formatting ownership | Coordinator's bounded read-only delegation |
+
+## Coordination
+
+- **Topology:** one reviewed proposal followed by independently reviewable,
+  dependency-ordered implementation PRs. Only the coordinator publishes or
+  mutates Git state in the integration worktree.
+- **Host (owns PRs):** Coordinator.
+- **Delegates:** three non-mutating evidence scopes above. Implementation
+  ownership is assigned only after the proposal clears review, with no
+  overlapping edits or concurrent Git operations.
+- **Handoff:** keep this README and the operation audit authoritative. A
+  completed PR is a slice, not completion of the effort.
+- **Existing owners:** the vendored-installer-engine campaign owns wholesale
+  installer-engine convergence; seasoned-dependencies-and-transactional-installs
+  owns its dependency and transaction changes. Existing open repair PRs are
+  not superseded. Coordinate any necessary overlapping change before editing.
+
+## Context
+
+- #6600 introduced persistent launch-phase accounting; this effort covers the
+  larger install/update path and its mixed human-readable output.
+- #6086 covers process-spawn reduction. Reuse its evidence and contracts rather
+  than claiming that every subprocess can be removed.
+- #6046 already owns the Windows seedless pane receipt defect; it is not a
+  timing-formatter implementation task.
+- #6796 owns the observed command-binding publication refusal.
+- A real launch resolution completed before a long maintenance sequence.
+  Bootstrap update failed, reconciliation continued, runtime construction and
+  cutover took minutes, and the same plugin actions appeared in a second
+  reconciliation pass. These observations motivate measurement; they do not
+  prove which individual operation caused each gap.
+- The [complete normalized line ledger and source operation map](audit.md)
+  cover every reference-run output line without publishing operator state.
+- `docs/install-contract.md` and `docs/patterns/README.md` remain binding:
+  independent installers, attributable immutable runtimes, package and
+  signature policy, publication ownership, health and rollback are preserved.
+- Vision reconciliation: this closes the existing installer's observable,
+  coherent update/alignment intent; it does not introduce another updater,
+  service or policy authority.
+
+## Request
+
+The operator confirmed the slug `update-flow-observability` and requested:
+
+> Audit every line of that update flow and identify why it's needed and figure out how we can speed things up. We likely should prefix every line of the install/update flow with the time, and post-fix with the duration, ideally using some consistent, elegant formatting. There's also mixes of formatting, messaging, and status reporting which need cleanup now that we report more overall update progress.
+
+## Plan
+
+The audit, timing, presentation and speed goals are operator-requested.
+The sequencing, specific repair choices, formatter grammar and validation
+matrix below are _(agent-recommended)_ implementation details.
+
+### Phase 1 - Account for the flow and review the proposal
+
+- [x] Audit every reached logical operation in unified update and normal
+  launch maintenance, with source citations, necessity, conditions,
+  repetitions, observed cost and remaining measurement gaps.
+- [x] Identify existing formatter owners and machine-readable stream
+  contracts; propose one coherent line and progress vocabulary.
+- [x] Rank safe reductions by measured work avoided; explicitly distinguish
+  code-proven causes from hypotheses.
+- [ ] Capture the audit in a linked operation inventory, complete this
+  proposal, and land the reviewed plan before implementation.
+
+### Phase 2 - Make timing and status reporting consistent
+
+- [ ] Retain per-action exit status and timed start/end/error outcomes in the
+  shell launch-maintenance path while preserving its fresh replanning.
+- [ ] Correct the supervisor JSON-framing defect before applying human line
+  formatting; preserve diagnostic stderr and identity-scoped retirement.
+- [ ] Implement the smallest shared extension of the existing formatter
+  ownership, covering aggregate progress, plugin installers, nested child
+  output and persistent diagnostics.
+- [ ] Prefix every human-readable install/update line with a wall-clock time;
+  suffix it with honestly labeled monotonic elapsed time or completed-step
+  duration. Do not represent arbitrary child-line arrival as execution cost.
+- [ ] Consolidate banners, status names, nesting and error presentation;
+  preserve useful detail without duplicate timestamps, repeated status
+  prefixes or contradictory aggregate success.
+- [ ] Preserve JSON/quiet/protocol output, redaction and Windows/POSIX parity.
+
+### Phase 3 - Remove proven unnecessary work
+
+- [ ] Reconcile Bridge serving-version drift through the admitted runtime's
+  existing cutover path rather than returning a misleading local-content
+  no-op or rebuilding an already current slot.
+- [ ] Attribute Codespaces package/completion/activation failures and validate
+  exact healthy-slot reuse before eliminating repeated dependency work.
+- [ ] Implement the reviewed, evidence-backed reductions in repeated planning,
+  probing, building or reconciliation, retaining all actual safety gates.
+- [ ] Make unchanged healthy work a genuine no-op; retain fresh, changed,
+  failed and uncertain-state behavior rather than adding success-shaped
+  fallbacks.
+- [ ] Measure before/after execution count and cost for the same scenarios.
+
+### Phase 4 - Land, prove and finish
+
+- [ ] Update source-owned documentation and per-plugin changefiles, then drive
+  each implementation through required review, CI, merge and source-worktree
+  finalization.
+- [ ] Prove the installed promoted release through the authorized update
+  owner; do not infer rollout from a dev merge or marketplace version.
+- [ ] Resolve or explicitly transfer every plan and validation item to a
+  named tracked objective, archive this effort, and release responsibility.
+
+## Validation Plan
+
+- [ ] Use deterministic clocks to cover start, progress, completion, no-op,
+  failure, nesting, multiline output, empty output and clock movement.
+- [ ] Prove clean JSON/stdout and diagnostic stderr at real subprocess
+  boundaries, including a failed installer and preserved exit status.
+- [ ] Cover Windows and POSIX installer entrypoints and synchronized vendored
+  formatter copies; run the relevant install-contract and formatting guards.
+- [ ] Exercise real unchanged, changed-version and first-touch consumer
+  contracts in isolated fixtures, retaining original limits and safety gates.
+- [ ] Compare operation counts and durations on equivalent before/after flows;
+  show the cost of required work separately from eliminated repetition.
+- [ ] Exercise clean-room provisioning when the changed boundary affects
+  first installation; record an explicit reason for any unavailable lane.
+- [ ] Verify a live authorized update and healthy no-op after promotion without
+  duplicate installation ownership, service instances or prompt delivery.
+- [ ] Record all validation tiers and rollout evidence with the corresponding
+  implementation PRs.
+
+## Proposal
+
+The [audit](audit.md) contains the complete reference-run line ledger,
+measured intervals, source map, concrete defects and proposed presentation.
+Implementation remains gated on this proposal's review.
+
+The requested timing suffix needs two distinct meanings: a progress line can
+report elapsed time in its current operation, while a completion line can
+report that operation's measured duration. Both must use monotonic clocks;
+the timestamp prefix is for human wall-clock correlation.
+
+Implementation proceeds in bounded slices: accurate action outcomes and
+machine-result framing first; native in-process formatting and nested-output
+convergence next; then measured work reduction and serving-state
+convergence. No slice introduces a Python subprocess or durable telemetry
+write per output line. A new library, service or lifecycle authority is not
+part of the proposal.
+
+Existing running/deployed state checks remain authoritative. Reconciliation
+already replans between passes; caching an earlier plan or dropping a pass
+because a process returned zero is explicitly rejected. Codespaces'
+unattributed gaps remain an investigation item, not a promised savings
+number.
+
+## Journal
+
+### 2026-10-14 - Kickoff
+
+- Captured the operator's request verbatim and confirmed the effort slug.
+- Claimed #6812 and established an isolated source worktree.
+- Started three read-only evidence tracks before broad source inspection.
+- The source worktree allocation completed, but its optional instruction
+  projection reported an unavailable enabled payload. That warning is not
+  treated as successful guidance publication or fixed by editing runtime files.
+- Completed the three evidence tracks and a normalized ledger covering all
+  249 reference-run log lines exactly once. Identified discarded action
+  outcomes, Bridge's serving-version/no-op gap, unconditional post-venv
+  package work, and the supervisor multiline-JSON framing defect.
+- A later read-only reconcile plan still selected Bridge running drift and
+  Codespaces version drift; Dispatch and Index were no longer selected.
+  No further updater was launched to inspect that state.
