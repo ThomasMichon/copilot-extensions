@@ -722,6 +722,12 @@ win grows with build complexity.
   evidence, not an actual publication or Linux workflow execution.
   The operational reference now correctly distinguishes the merge job's
   non-admin write-capable Actions token from the owner release PAT.
+- The next review had no Medium/High findings. Its useful Low-severity
+  documentation correction clarifies that dispatch reuse is scoped to the
+  same run-attempt identity. An Actions rerun increments the attempt and
+  dispatches new consumers; it still uses the original run creation time
+  as the inclusive discovery bound. This does not change the implementation
+  or claim reuse of a prior attempt's consumer runs.
 
 ### 2026-10-14 - Candidate-scoped readiness before merge
 

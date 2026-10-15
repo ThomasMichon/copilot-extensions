@@ -230,7 +230,10 @@ normalized source/state comparison, altered timestamps or pre-seeded refs never
 establish provenance. Changed inputs fail rather than force-pushing a replacement.
 Post-merge workflow discovery uses that same immutable creation time as its
 inclusive lower bound, excluding unrelated retained history while reusing
-earlier dispatches on retries and still refusing duplicate matching runs.
+earlier dispatches within the same run-attempt identity and still refusing
+duplicate matching runs. An Actions rerun changes `github.run_attempt` and
+dispatches new consumers for that attempt; its original `created_at` remains
+the discovery bound, not the later rerun start time.
 
 After the exact candidate PR really merges, the final publisher fetches the
 candidate commit explicitly (squash does not preserve its ancestry), repeats
