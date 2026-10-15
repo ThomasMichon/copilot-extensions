@@ -11,7 +11,8 @@ inputs to this resolver.
 
 from __future__ import annotations
 
-import platform
+import os
+import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,9 +37,9 @@ class IdentityError(ValueError):
 
 def detect_platform() -> str:
     """Classify execution roots, not a container's shared host kernel or env."""
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         return "windows"
-    if platform.system() == "Linux":
+    if sys.platform.startswith("linux"):
         if any(Path(marker).is_file() for marker in ("/.dockerenv", "/run/.containerenv")):
             return "linux"
         try:
@@ -47,7 +48,7 @@ def detect_platform() -> str:
             cgroup = ""
         if any(tag in cgroup for tag in ("/docker", "/kubepods", "containerd", "/lxc", "libpod")):
             return "linux"
-        if "microsoft" in platform.release().casefold():
+        if "microsoft" in os.uname().release.casefold():
             return "wsl"
         try:
             with open(Path("/proc/version"), encoding="utf-8") as stream:

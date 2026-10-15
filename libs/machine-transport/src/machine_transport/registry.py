@@ -29,6 +29,8 @@ from typing import Any, Protocol, TypeVar
 
 import yaml
 
+from .machine_environment import split_machine_environment
+
 __all__ = [
     "AmbiguousMachineError",
     "MachineIdentity",
@@ -260,10 +262,11 @@ def machine_identity_names(entry: MachineIdentity) -> tuple[str, ...]:
     """Explicit selection identities, excluding physical metadata for logical entries."""
     values = (entry.key,)
     if not getattr(entry, "execution_platform", ""):
-        values += (entry.hostname,)
+        hostname = entry.hostname
+        if hostname and split_machine_environment(entry.key).environment == "wsl":
+            hostname = split_machine_environment(hostname, "wsl").logical_machine
+        values += (hostname,)
     values += (entry.alias,)
-    if not getattr(entry, "execution_platform", ""):
-        values += (entry.display_name,)
     values += (
         *getattr(entry, "compatibility_aliases", ()),
         *(env.alias for env in getattr(entry, "ssh_environments", ())),
@@ -397,16 +400,19 @@ def find_machine_entry(
         # never falls through to an unrelated physical hostname.
         selected = (
             find_machine_entry(entries, name, reject_ambiguous=reject_ambiguous)
-            if any(
+            if not any(getattr(entry, "execution_platform", "") for entry in entries.values()) or any(
                 name.casefold() in {value.casefold() for value in machine_identity_names(entry)}
                 for entry in entries.values()
             ) else None
         )
         if selected and getattr(selected, "execution_platform", "") == execution_platform:
             return selected
-        physical = (getattr(selected, "physical_host", "") or selected.key) if selected else ""
+        def physical_host(entry: MachineIdentity) -> str:
+            return getattr(entry, "physical_host", "") or split_machine_environment(entry.key).machine
+
+        physical = physical_host(selected) if selected else ""
         physical_matches = {
-            (getattr(entry, "physical_host", "") or entry.key).casefold()
+            physical_host(entry).casefold()
             for entry in entries.values()
             if name.casefold() in {
                 entry.hostname.casefold(), getattr(entry, "physical_host", "").casefold(),
@@ -417,10 +423,10 @@ def find_machine_entry(
             if getattr(entry, "execution_platform", "") == execution_platform
             and (
                 entry is selected
-                or (physical and getattr(entry, "physical_host", "").casefold() == physical.casefold())
+                or (physical and physical_host(entry).casefold() == physical.casefold())
                 or (
                     selected is None
-                    and (getattr(entry, "physical_host", "") or entry.key).casefold() in physical_matches
+                    and physical_host(entry).casefold() in physical_matches
                 )
             )
         ]
@@ -461,7 +467,17 @@ def find_machine_entry(
                 matches.append(entry)
         if len(matches) > 1:
             raise AmbiguousMachineError(f"Machine '{name}' is ambiguous in topology")
-        return matches[0] if matches else None
+        if matches:
+            return matches[0]
+        displays = [
+            entry for entry in entries.values()
+            if entry.display_name and entry.display_name.casefold() == name.casefold()
+        ]
+        if len(displays) > 1:
+            raise AmbiguousMachineError(
+                f"display label {name!r} names multiple machines; use a machine key"
+            )
+        return displays[0] if displays else None
     keyed = [entry for key, entry in entries.items() if key.lower() == name_lower]
     if keyed:
         return keyed[0]

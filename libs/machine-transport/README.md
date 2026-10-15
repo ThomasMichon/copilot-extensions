@@ -114,8 +114,10 @@ operations targeting a projected space, and explicit declarations retain
 their existing registry-wide source-selection requirement.
 
 `machine_identity_names(entry)` exposes keys, aliases, explicit
-`compatibility_aliases`, and profile aliases. Hostname and display name are
-selection identities only for unscoped legacy entries. Logical-machine
+`compatibility_aliases`, and profile aliases. Hostnames are selection identities
+only for unscoped legacy entries; a WSL key qualifies its hostname for guest
+lookup. Display labels are a unique-lookup compatibility fallback, never a
+collision with a key or an alias. Logical-machine
 physical metadata is for grouping, not an alternate canonical source/target.
 Duplicate logical keys, profile aliases crossing entries, repeated same-platform
 profiles, and legacy WSL mixed with a non-Windows native platform fail closed.
@@ -126,11 +128,14 @@ topology repair, not an automatic merge.
 execution_platform=None)` resolves independent profile aliases as well as keys.
 An owner that knows its local platform may supply `execution_platform` to resolve
 a physical hostname/association or select a sibling of another platform.
+An explicit `physical_host` wins; otherwise conventional `<host>-wsl` keys
+derive the host association for this context-aware lookup only.
 Multiple eligible same-platform siblings remain ambiguous; an exact logical
 key/profile of the requested platform stays independently selectable.
 Without that context a physical hostname alone never selects a logical entry.
 `local_execution_platform()` detects Windows, WSL, or Linux without launching
-subprocesses. Downstream address syntax remains a logical machine name, not a
+subprocesses or trusting inherited WSL environment variables. It uses the same
+container-aware detector as execution identity. Downstream address syntax remains a logical machine name, not a
 machine/environment pair.
 
 The parser's compatibility defaults are unchanged: normalization is an explicit

@@ -26,7 +26,6 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
 agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = true }
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Vendored byte-identical from libs/plugin-resolve;

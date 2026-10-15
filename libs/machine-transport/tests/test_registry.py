@@ -126,6 +126,37 @@ def test_known_platform_can_select_hostname_without_optional_physical_host():
         find_machine_entry(entries, "os-host")
 
 
+@pytest.mark.parametrize("selector", ["Example-Host", "native-profile"])
+def test_contextual_guest_selection_derives_conventional_host_association(selector):
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "example-host": {"execution_platform": "windows", "alias": "native-profile"},
+        "example-host-wsl": {"execution_platform": "wsl"},
+    }}))
+    assert find_machine_entry(entries, selector, execution_platform="wsl").key == "example-host-wsl"
+    assert find_machine_entry(entries, "example-host").key == "example-host"
+
+
+def test_explicit_physical_association_overrides_conventional_guest_suffix():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "example-host": {"execution_platform": "windows"},
+        "example-host-wsl": {"execution_platform": "wsl", "physical_host": "another-host"},
+        "custom-guest": {"execution_platform": "wsl", "physical_host": "example-host"},
+    }}))
+    assert find_machine_entry(entries, "example-host", execution_platform="wsl").key == "custom-guest"
+
+
+def test_legacy_guest_hostname_and_display_metadata_do_not_alias_native_identity():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "example-host": {"hostname": "generated-host", "display_name": "Shared display"},
+        "example-host-wsl": {"hostname": "generated-host", "display_name": "Shared display"},
+    }}))
+    assert find_machine_entry(entries, "generated-host").key == "example-host"
+    assert find_machine_entry(entries, "generated-host-wsl").key == "example-host-wsl"
+    with pytest.raises(ValueError, match="display label.*multiple machines"):
+        find_machine_entry(entries, "Shared display", reject_ambiguous=True)
+    assert not entries["example-host-wsl"].execution_platform
+
+
 class TestParseMachinesYamlFile:
     def test_parses_basic_entry(self, tmp_path):
         path = _write(tmp_path, (

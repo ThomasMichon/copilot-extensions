@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 
+from types import SimpleNamespace
+
 import pytest
 
 from machine_transport import (
@@ -94,8 +96,8 @@ def test_machine_entry_projection_and_resolution():
 def test_detect_platform_ignores_inherited_environment(
     monkeypatch, system, release, expected,
 ):
-    monkeypatch.setattr("platform.system", lambda: system)
-    monkeypatch.setattr("platform.release", lambda: release)
+    monkeypatch.setattr("sys.platform", "win32" if system == "Windows" else "linux")
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release))
     monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
     monkeypatch.setattr("pathlib.Path.read_text", lambda *_args, **_kwargs: "0::/user.slice")
     monkeypatch.setattr("builtins.open", lambda *_args, **_kwargs: io.StringIO("Linux generic"))
@@ -108,8 +110,8 @@ def test_detect_platform_ignores_inherited_environment(
     "0::/lxc/example", "0::/libpod/example",
 ])
 def test_markerless_containers_do_not_inherit_wsl_identity(monkeypatch, cgroup):
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr("platform.release", lambda: "6.6-microsoft-standard-WSL2")
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"))
     monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
     monkeypatch.setattr("pathlib.Path.read_text", lambda *_args, **_kwargs: cgroup)
     assert detect_platform() == "linux"

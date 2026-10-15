@@ -35,7 +35,7 @@ import subprocess
 import threading
 
 from agent_procutil import no_window_flags
-from machine_transport import local_execution_platform, split_machine_environment
+from machine_transport import local_execution_platform
 
 from .. import project_config as cfg
 from . import data_local, derive, provider_sources, roster, source_identity
@@ -76,9 +76,7 @@ class Source:
 
     ``machine``/``env`` are the logical roster key and short env label, matching
     this module's ``machines()`` identities for filtering and local detection.
-    ``display_machine`` is cosmetic physical-host grouping only. Existing
-    local and remote machine sources share the ``machine-ssh`` kind; ``local``
-    records whether enumeration runs in-process rather than over SSH.
+    ``display_machine`` groups hosts cosmetically; ``local`` selects in-process enumeration.
     """
 
     def __init__(self, machine, env, argv, *, local=False, ready=True,
@@ -88,9 +86,7 @@ class Source:
                  venue=None, capabilities=None, resolve_argv=None,
                  connect_argv=None, display_machine=None):
         self.machine = machine        # canonical logical key from machines.yaml
-        self.display_machine = display_machine or (
-            split_machine_environment(machine).machine if machine else machine
-        )
+        self.display_machine = display_machine or roster.physical_machine(machine)
         self.env = env                # Win | WSL | Linux
         self.argv = argv              # subprocess argv (None for the local src)
         self.local = local

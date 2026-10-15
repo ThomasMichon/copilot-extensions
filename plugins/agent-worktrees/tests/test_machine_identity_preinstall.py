@@ -31,7 +31,7 @@ def test_machine_transport_preinstall(tmp_path, suffix, layout):
     source = (PLUGIN / "scripts" / f"install.{suffix}").read_text(encoding="utf-8")
     start = source.index("    # Vendored machine-transport lib")
     end = source.index(
-        "    if ! uv pip install" if suffix == "sh" else "    $installRes =",
+        "    # Vendored update-telemetry lib" if suffix == "sh" else "    $installRes =",
         source.index("\n\n", start) + 2,
     )
     block = source[start:end]

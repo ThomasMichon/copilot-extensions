@@ -340,9 +340,19 @@ def test_no_seed_cold_launch_has_execution_admission_fence(
 def test_resume_preserves_historical_host_and_separate_wsl_platform(
     tmp_path: Path, monkeypatch, capfd, machine: str, environment: str | None,
 ) -> None:
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = tmp_path / "state" / "worktrees"
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
+    monkeypatch.setattr(cfg, "project_dir", lambda _project=None: directory.parent)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     config = _create_config(tmp_path, machine="example-host-wsl", platform="wsl")
+    (directory.parent / "config.yaml").write_text(json.dumps({
+        "repo_name": config.repo_name, "machine": config.machine, "platform": "wsl",
+        "repos": {config.repo_name: {
+            "anchor": config.default_repo.anchor,
+            "worktree_root": config.default_repo.worktree_root,
+        }},
+    }), encoding="utf-8")
     work_dir = Path(config.default_repo.worktree_root) / "wt-a"
     work_dir.mkdir(parents=True)
     (Path(config.default_repo.anchor) / "machines.yaml").write_text(
@@ -356,7 +366,7 @@ def test_resume_preserves_historical_host_and_separate_wsl_platform(
     )
     tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(work_dir), "demo-repo", "example-host",
-        "wsl", tmp_path,
+        "wsl", directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(
@@ -368,7 +378,7 @@ def test_resume_preserves_historical_host_and_separate_wsl_platform(
     payload = json.loads(capfd.readouterr().out)
     assert payload["launch"]["action"] == "exec"
     assert payload["launch"]["work_dir"] == str(work_dir)
-    record = tracking.load_record(tmp_path / "wt-a.yaml")
+    record = tracking.load_record(directory / "wt-a.yaml")
     assert (record.machine, record.platform, record.resume_count) == ("example-host", "wsl", 1)
 
 

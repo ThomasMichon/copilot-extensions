@@ -1158,10 +1158,10 @@ def _load_config_uncached(
         if any((root / rel).is_file() for rel in (
             Path(INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
         )):
-            return replace(config, machine=detect_machine(anchor, value=machine))
+            return replace(config, machine=detect_machine(anchor, value=config.machine))
     else:
         if machine_raw.get("machine") or global_raw.get("machine"):
-            return replace(config, machine=detect_machine(value=machine))
+            return replace(config, machine=detect_machine(value=config.machine))
     return config
 
 

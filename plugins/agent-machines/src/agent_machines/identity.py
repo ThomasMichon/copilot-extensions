@@ -33,7 +33,15 @@ class MachineIdentity:
 
 
 def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
-    return tuple(dict((value.casefold(), value) for value in values if value).values())
+    result: dict[str, str] = {}
+    for value in values:
+        if value:
+            result.setdefault(value.casefold(), value)
+    return tuple(result.values())
+
+
+def detect_platform() -> str:
+    return local_execution_platform()
 
 
 def _topology_paths(repos: Iterable[Path]) -> list[Path]:
@@ -73,7 +81,7 @@ def resolve_machine(
         raise ManifestError("machine identity is empty")
     context = execution_platform
     if value is None and context is None:
-        context = local_execution_platform()
+        context = detect_platform()
     entries: dict[str, MachineEntry] = {}
     entry_paths: dict[str, Path] = {}
     warnings: list[str] = []
@@ -121,6 +129,11 @@ def resolve_machine(
             native = entry
             name = qualify_guest(native.key if native else name)
             entry = find_machine_entry(entries, name, reject_ambiguous=True)
+            if entry is not None and not entry.key.casefold().endswith("-wsl"):
+                raise ValueError(
+                    f"guest identity {name!r} collides with native machine {entry.key!r}; "
+                    "configure a separate guest identity"
+                )
             if entry is None and entries:
                 warnings.append(
                     f"machine topology has no guest entry for {name!r}; using qualified identity"
@@ -135,7 +148,7 @@ def resolve_machine(
             warnings=tuple(warnings),
         )
     accepted = machine_identity_names(entry)
-    if not entry.execution_platform:
+    if not entry.execution_platform and context != "wsl":
         accepted = (*accepted, raw)
     return MachineIdentity(
         raw=raw,

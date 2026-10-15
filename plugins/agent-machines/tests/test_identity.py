@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from types import SimpleNamespace
+
 import pytest
 import yaml
 
@@ -288,8 +290,8 @@ def test_execution_platform_ignores_inherited_environment(monkeypatch, system, r
     import io
     from machine_transport import detect_platform
 
-    monkeypatch.setattr("platform.system", lambda: system)
-    monkeypatch.setattr("platform.release", lambda: release)
+    monkeypatch.setattr("sys.platform", "win32" if system == "Windows" else "linux")
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release))
     real_is_file = Path.is_file
     monkeypatch.setattr(
         Path, "is_file",
@@ -307,8 +309,8 @@ def test_container_marker_distinguishes_shared_wsl_kernel(monkeypatch, marker, i
     import io
     from machine_transport import detect_platform
 
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr("platform.release", lambda: "6.6-microsoft-standard-WSL2")
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"))
     real_is_file = Path.is_file
     monkeypatch.setattr(
         Path, "is_file",
@@ -341,8 +343,8 @@ def test_headless_wsl_proc_fallback_without_container_marker(monkeypatch):
     import io
     from machine_transport import detect_platform
 
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr("platform.release", lambda: "generic-kernel")
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="generic-kernel"))
     real_is_file = Path.is_file
     monkeypatch.setattr(
         Path, "is_file",

@@ -34,7 +34,11 @@ _HOST_SHORT = {"Win": "Win", "WSL": "WSL", "Linux": "Lx"}
 
 def display_machine(entry: cfg.MachineEntry) -> str:
     """Group execution siblings without changing their routing keys."""
-    return entry.physical_host or split_machine_environment(entry.key).machine
+    return entry.physical_host or physical_machine(entry.key)
+
+
+def physical_machine(machine: str) -> str:
+    return split_machine_environment(machine).machine if machine else machine
 
 
 def _entries():

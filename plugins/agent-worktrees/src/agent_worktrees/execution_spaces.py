@@ -216,12 +216,17 @@ def require_record_mutation(record: Any, config: Any) -> None:
 
     if record is None:
         return
+    entries = registry_for_config(config)
+    if not any(entry.execution_platform for entry in entries.values()):
+        return
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
-    legacy_ref = tracking.parse_claim_ref(
-        tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
-    )
-    legacy_path = resolve_legacy_wsl_owner_ref(legacy_ref, config)
+    legacy_path = None
+    if getattr(record, "repo", "") and getattr(record, "platform", "") == "wsl":
+        legacy_ref = tracking.parse_claim_ref(
+            tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+        )
+        legacy_path = resolve_legacy_wsl_owner_ref(legacy_ref, config)
     if (
         legacy_path is not None and record.platform == "wsl"
         and record.worktree_path == tracking.load_record(legacy_path).worktree_path
@@ -238,7 +243,7 @@ def require_record_mutation(record: Any, config: Any) -> None:
                     "cross-space parent ownership remains unsupported; settlement is blocked"
                 )
         return
-    if not _requires_scoped_identity(registry_for_config(config), config.machine, record.machine):
+    if not _requires_scoped_identity(entries, config.machine, record.machine):
         return
     if not require_owner_identity(record.machine, config):
         raise ExecutionSpaceError(

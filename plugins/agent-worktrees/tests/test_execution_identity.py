@@ -20,12 +20,8 @@ def topology(tmp_path):
                 "example-host": {
                     "hostname": "generated-host",
                     "alias": "example-transport",
-                    "ssh": {"environments": [
-                        {"name": "windows", "alias": "arbitrary-windows-ssh"},
-                        {"name": "wsl", "alias": "arbitrary-guest-ssh"},
-                    ]},
                 },
-                "example-host-wsl": {"hostname": "generated-host"},
+                "example-host-wsl": {"hostname": "generated-host-wsl"},
             },
         }),
         encoding="utf-8",
@@ -117,8 +113,7 @@ def test_missing_guest_keeps_identity_and_host_metadata(tmp_path, monkeypatch, c
     (tmp_path / "machines.yaml").write_text(
         "machines:\n  example-host:\n    hostname: generated-host\n"
         "    description: Shared host metadata\n"
-        "    ssh:\n      environments:\n"
-        "      - name: wsl\n        alias: independent-transport\n",
+        "",
         encoding="utf-8",
     )
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "generated-host")
@@ -129,10 +124,8 @@ def test_missing_guest_keeps_identity_and_host_metadata(tmp_path, monkeypatch, c
     assert cfg.find_machine_entry(entries, "example-host-wsl") is None
     metadata = cfg.find_machine_metadata(entries, "example-host-wsl")
     assert metadata.description == "Shared host metadata"
-    assert metadata.ssh_environments[0].alias == "independent-transport"
     rendered = cfg.render_copilot_instructions(metadata, machine="example-host-wsl")
     assert "Machine: example-host-wsl" in rendered
-    assert "Deployment environment: independent-transport" in rendered
 
 
 def test_get_and_context_share_execution_identity(topology, monkeypatch, capsys):
@@ -337,8 +330,8 @@ def test_registered_container_identity_survives_shared_wsl_kernel(tmp_path, monk
     }), encoding="utf-8")
     before = local.read_bytes()
     monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr("platform.release", lambda: "6.6-microsoft-standard-WSL2")
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"))
     monkeypatch.setenv("WSL_DISTRO_NAME", "inherited-example-value")
     real_is_file = Path.is_file
     monkeypatch.setattr(

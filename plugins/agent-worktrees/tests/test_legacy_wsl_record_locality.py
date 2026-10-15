@@ -12,11 +12,15 @@ from agent_worktrees import claim_handoffs, claimant, claims_cli, config as cfg,
 from agent_worktrees.machine_identity import is_local_machine
 
 
-@pytest.fixture
-def legacy_records(tmp_path, monkeypatch):
+@pytest.fixture(params=["unscoped", "projected"])
+def legacy_records(tmp_path, monkeypatch, request):
     anchor = tmp_path / "source"
     anchor.mkdir()
+    projected = request.param == "projected"
     (anchor / "machines.yaml").write_text(
+        "machines:\n  example-host:\n    ssh:\n      environments:\n"
+        "      - {name: windows, alias: native-profile}\n"
+        "      - {name: wsl, alias: guest-profile}\n" if projected else
         "machines:\n  example-host: {}\n  example-host-wsl: {}\n",
         encoding="utf-8",
     )
@@ -52,7 +56,7 @@ def legacy_records(tmp_path, monkeypatch):
     )
     paths["child"] = directory / "legacy-child.yaml"
     snapshots = {path: path.read_bytes() for path in paths.values()}
-    yield SimpleNamespace(config=config, paths=paths, owner_ref=owner_ref)
+    yield SimpleNamespace(config=config, paths=paths, owner_ref=owner_ref, projected=projected)
     assert all(path.read_bytes() == content for path, content in snapshots.items())
 
 
@@ -76,7 +80,7 @@ def test_native_target_and_non_wsl_legacy_records_remain_foreign(legacy_records,
     assert claimant.local_claimant_alive(ref) is None
     path, _, error = claims_cli._resolve_owner_ref_record_path(ref, legacy_records.config)
     assert path is None
-    assert error is None
+    assert bool(error) is legacy_records.projected
 
 
 def test_legacy_wsl_owner_ref_remains_locally_addressable(legacy_records):
@@ -217,7 +221,8 @@ def test_legacy_record_evidence_must_match_exact_reference_and_namespace(
     resolved, _, error = claims_cli._resolve_owner_ref_record_path(
         legacy_records.owner_ref, legacy_records.config,
     )
-    assert resolved is None and error is None
+    assert resolved is None
+    assert bool(error) is legacy_records.projected
     assert claimant.local_claimant_alive(legacy_records.owner_ref) is None
     with pytest.raises(claim_handoffs.ClaimHandoffError, match="cross-machine"):
         claim_handoffs._load_actor_record(
@@ -233,7 +238,7 @@ def test_registered_execution_space_never_uses_legacy_record_exception(
         key: cfg.MachineEntry(key=key, display_name=key, execution_platform=platform)
         for key, platform in (("example-host", "windows"), ("example-host-wsl", "wsl"))
     }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _anchor, **_kwargs: entries)
     resolved, _, error = claims_cli._resolve_owner_ref_record_path(
         legacy_records.owner_ref, legacy_records.config,
     )
@@ -258,7 +263,8 @@ def test_legacy_record_cannot_infer_namespace_from_current_directory(
     resolved, _, error = claims_cli._resolve_owner_ref_record_path(
         legacy_records.owner_ref, legacy_records.config,
     )
-    assert resolved is None and error is None
+    assert resolved is None
+    assert bool(error) is legacy_records.projected
     assert claimant.local_claimant_alive(legacy_records.owner_ref) is None
 
 
@@ -301,17 +307,22 @@ def test_legacy_child_cannot_authorize_registered_parent_ledger(
     )
     old_ref = "example-host/parent/legacy-parent"
     resolved, _, error = claims_cli._resolve_owner_ref_record_path(old_ref, legacy_records.config)
-    assert resolved is None and error is None
+    assert resolved is None
+    assert bool(error) is legacy_records.projected
     assert claimant.local_claimant_alive(old_ref) is None
     with pytest.raises(claim_handoffs.ClaimHandoffError, match="cross-machine"):
         claim_handoffs._load_actor_record(
             tracking.parse_claim_ref(old_ref), role="consumer",
             machine=legacy_records.config.machine,
         )
-    child = SimpleNamespace(owner_claim_ref=tracking.parse_claim_ref(old_ref))
-    finalize._settle_parent_obligation(child, legacy_records.config, "legacy-child")
+    child = replace(tracking.load_record(legacy_records.paths["child"]), owner_ref=old_ref)
+    if legacy_records.projected:
+        with pytest.raises(execution_spaces.ExecutionSpaceError, match="parent ownership"):
+            finalize._settle_parent_obligation(child, legacy_records.config, "legacy-child")
+    else:
+        finalize._settle_parent_obligation(child, legacy_records.config, "legacy-child")
     assert path.read_bytes() == before
-    child.owner_claim_ref = tracking.parse_claim_ref("example-host-wsl/parent/legacy-parent")
+    child.owner_ref = "example-host-wsl/parent/legacy-parent"
     with pytest.raises(execution_spaces.ExecutionSpaceError):
         finalize._settle_parent_obligation(child, legacy_records.config, "legacy-child")
     assert path.read_bytes() == before

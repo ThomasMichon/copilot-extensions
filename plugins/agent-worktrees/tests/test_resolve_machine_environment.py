@@ -58,9 +58,10 @@ def test_native_target_does_not_select_a_guest() -> None:
     ) is entries["example-host"]
     with pytest.raises(ValueError, match="conflicts"):
         resolve_machine_cli._entry_for_environment(entries, "example-host-wsl", "Win")
-    assert resolve_machine_cli._entry_for_environment(
-        {"example-host": entries["example-host"]}, "example-host", "WSL",
-    ) is None
+    with pytest.raises(ValueError, match="no wsl logical entry"):
+        resolve_machine_cli._entry_for_environment(
+            {"example-host": entries["example-host"]}, "example-host", "WSL",
+        )
 
 
 @pytest.mark.parametrize("configured", ["example-host", "example-host-wsl"])
