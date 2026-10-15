@@ -376,6 +376,7 @@ successor.
 
 ```bash
 agent-bridge service start      # start the daemon (no-op if already running) -- marketplace-isolation: allow service-management
+agent-bridge service start --direct  # installer use: skip systemd/the scheduled task, start through the job-surviving detached launch; non-zero exit if it never becomes healthy -- marketplace-isolation: allow service-management
 agent-bridge service stop       # stop the daemon (kills the worker + releases the port) -- marketplace-isolation: allow service-management
 agent-bridge service restart    # zero-downtime cutover to a fresh daemon generation (same code path as `deploy`: spawn passive -> health-gate -> flip -> drain -> retire) -- marketplace-isolation: allow service-management
 agent-bridge service status     # running state + bound port + PID -- marketplace-isolation: allow service-management

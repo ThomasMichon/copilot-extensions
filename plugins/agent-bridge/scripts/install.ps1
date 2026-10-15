@@ -2667,10 +2667,6 @@ function Invoke-Start {
         }
     }
 
-    $logFile = Join-Path $InstallDir 'agent-bridge.log'
-    $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
-
-
     # Prefer the scheduled task to start the daemon whenever one is registered
     # -- for BOTH headless (S4U/Password, session 0) and at-logon (interactive)
     # tasks. The Task Scheduler owns the resulting process, so it is NOT parented
@@ -2717,24 +2713,14 @@ function Invoke-Start {
         Write-Warn '  For an always-on host reached over SSH, reinstall headless: install.ps1 update -NonInteractive'
     }
 
-    # Start the service through a DETACHED, hidden pwsh launched via
-    # ShellExecute (no -NoNewWindow / no redirection on THIS call, so handles
-    # are NOT inherited from the installer). That inner pwsh does the redirected
-    # Start-Process and records the pid. Without this indirection the long-lived
-    # uvicorn server inherits the installer's std handles; when install.ps1 is
-    # run with its output redirected or piped, the server holds that handle open
-    # and the installer appears to hang after "Update complete".
-    # #1376: pin both the inner python AND its conhost host to the runtime home,
-    # never the installer's cwd (the installed-plugins payload dir). -NoNewWindow
-    # keeps this conhost alive hosting the long-lived daemon, so without an
-    # explicit working dir it would hold the payload folder open and a later
-    # ``copilot plugin update agent-bridge`` would fail (os error 32) and empty it.
-    $inner = @"
-`$p = Start-Process -FilePath '$($LinkPython -replace "'", "''")' -ArgumentList '-m','agent_bridge','start' -WorkingDirectory '$($InstallDir -replace "'", "''")' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
-Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
-"@
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
-    $pwshForHeadless = Get-PwshPath
+    # Start the service directly through the bridge's own job-surviving launch
+    # (`service start --direct` -> agent_procutil.spawn_daemon): it breaks away
+    # from the installer's Job (an SSH session's or an updater's), falls back to
+    # the WMI broker when that Job forbids breakaway, roots the daemon at the
+    # runtime home rather than the installer's cwd (#1376: never the plugin
+    # payload), and gives it its own stdio files, so the long-lived server never
+    # holds the installer's std handles open. A PowerShell process launch offers
+    # none of those lifetime guarantees.
 
     # Spawn + health-gate, retrying a few times. A single slow/failed spawn must
     # NOT leave the service down (the previous single-attempt logic exited here,
@@ -2745,27 +2731,18 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
         $label = if ($attempt -gt 1) { " (attempt $attempt/$maxAttempts)" } else { '' }
         Write-Step "Starting agent-bridge$label..."
 
-        # Launch the detached, hidden pwsh through conhost --headless so Windows
-        # Terminal (when configured as the default terminal app) cannot capture it
-        # as a visible window/tab -- -WindowStyle Hidden alone is ignored by the
-        # DefTerm handoff. ShellExecute (no -NoNewWindow / no redirection on THIS
-        # call) is preserved so the long-lived python.exe (-m agent_bridge) does
-        # not inherit the installer's std handles.
-        Start-Process -FilePath 'conhost.exe' `
-            -ArgumentList @('--headless', "`"$pwshForHeadless`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
-            -WorkingDirectory $InstallDir `
-            -WindowStyle Hidden | Out-Null
+        & $LinkPython -m agent_bridge service start --direct 2>&1 | ForEach-Object { Write-Host "  $_" }
 
         # Success == the port actually answers /health (not merely "a process
         # exists"). Single-shot probe per second so the loop paces at ~1s.
         for ($i = 0; $i -lt 25; $i++) {
-            Start-Sleep -Seconds 1
             if (Test-HealthOnce) {
                 $rp = Get-RunningProcess
                 $pidTxt = if ($rp) { "pid=$($rp.Id), " } else { '' }
                 Write-Ok ("agent-bridge started ({0}port={1})" -f $pidTxt, (Get-ActiveEndpoint).Port)
                 return
             }
+            Start-Sleep -Seconds 1
         }
 
         Write-Warn "agent-bridge did not become healthy within 25s$label -- draining and retrying"

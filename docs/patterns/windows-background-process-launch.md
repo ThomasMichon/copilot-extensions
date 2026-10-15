@@ -128,7 +128,15 @@ check into recurring self-SSH process churn.
   is not a resident daemon carries `# daemon-spawn: allow <reason>` on its
   `Popen` line. `tools/daemon-spawn.allow` is a shrink-only, reasoned baseline
   of the sites not yet migrated: each entry covers one launch, and a stale
-  entry fails the check.
+  entry fails the check;
+- an installer (`plugins/*/scripts/install*.ps1`,
+  `plugins/*/transports/*/scripts/install*.ps1`) may not start a process with
+  `Start-Process` of `conhost`: that child stays in the installer's Job. Start
+  a daemon now through its user-mode ensure path (built on `spawn_daemon`), or
+  WMI `Win32_Process.Create` for a PowerShell-only daemon; a child the caller
+  deliberately owns (a foreground supervisor that waits on it, a warned last
+  resort) carries `# daemon-spawn: allow <reason>` on the statement or the
+  comment line directly above it.
 
 `agent_procutil.spawn_daemon` is an approved headless primitive: a launch
 through it is windowless by construction. It approves only its own call; a raw

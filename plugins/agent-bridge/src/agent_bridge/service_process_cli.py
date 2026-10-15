@@ -497,19 +497,21 @@ def _launch_bridge_daemon(argv: list[str], *, display: str, contained_last_resor
     )
 
 
-def _spawn_detached_argv(argv: list[str]) -> None:
-    """Spawn ``argv`` as a detached, job-surviving bridge process.
+def _spawn_detached_argv(argv: list[str]):
+    """Spawn ``argv`` as a detached, job-surviving bridge process; return its handle.
 
     Never the caller's ambient cwd: this is a long-lived supervised daemon that
     may outlive whatever checkout the caller ran from, so it is rooted at the
     durable install dir where its logs also live.
     """
-    _launch_bridge_daemon(argv, display="agent-bridge service", contained_last_resort=True)
+    return _launch_bridge_daemon(
+        argv, display="agent-bridge service", contained_last_resort=True
+    )
 
 
-def _spawn_detached_daemon() -> None:
+def _spawn_detached_daemon():
     """Spawn ``agent-bridge start`` through the job-surviving launch path."""
-    _spawn_detached_argv(_daemon_launch_argv())
+    return _spawn_detached_argv(_daemon_launch_argv())
 
 
 def _spawn_watchdog_replacement(
@@ -694,7 +696,29 @@ def _ensure_daemon() -> bool:
             core._release_ensure_lock(fd)
 
 
-def _service_start() -> None:
+def _record_started_pid(handle) -> None:
+    """Record a directly started daemon's pid for service-management tooling.
+
+    A WMI-brokered handle names the hosting console, not the daemon, so it is
+    never recorded; the daemon's own routing publication identifies it.
+    """
+    if handle is None or isinstance(handle, _BrokeredProcessHandle):
+        return
+    try:
+        with open(_core()._PID_FILE, "w", encoding="utf-8") as fh:
+            fh.write(str(handle.pid))
+    except OSError:
+        pass
+
+
+def _service_start(direct: bool = False) -> None:
+    """Start the daemon, through the platform service manager when one is registered.
+
+    ``direct`` skips systemd and the scheduled task -- for an installer that has
+    already tried them -- and starts the daemon through the job-surviving
+    ``spawn_daemon`` launch; it exits non-zero when the daemon does not become
+    healthy.
+    """
     import subprocess as sp
 
     core = _core()
@@ -713,7 +737,9 @@ def _service_start() -> None:
         return
 
     used_platform_manager = False
-    if core._systemd_available():
+    if direct:
+        _record_started_pid(core._spawn_detached_daemon())
+    elif core._systemd_available():
         sp.run(["systemctl", "--user", "start", core._SYSTEMD_UNIT])
         used_platform_manager = True
     elif sys.platform == "win32" and core._win_task_exists():
@@ -739,6 +765,8 @@ def _service_start() -> None:
         "agent-bridge-err.log",
         file=sys.stderr,
     )
+    if direct:
+        sys.exit(1)
 
 
 def _service_stop() -> None:
@@ -822,7 +850,10 @@ def _cmd_service(
     if conditional is not None and action != "restart":
         raise ValueError("conditional service operation only supports restart")
     if action == "start":
-        core._service_start()
+        if getattr(args, "direct", False):
+            core._service_start(direct=True)
+        else:
+            core._service_start()
     elif action == "stop":
         core._service_stop()
     elif action == "restart":
@@ -865,6 +896,16 @@ def register_service_control_commands(sub: argparse._SubParsersAction) -> None:
         ("status", "Show daemon status, port, and PID"),
     ):
         action_p = service_sub.add_parser(_act, help=_help)
+        if _act == "start":
+            action_p.add_argument(
+                "--direct",
+                action="store_true",
+                help=(
+                    "Skip systemd/the scheduled task and start the daemon through the "
+                    "job-surviving detached launch (for installers that already tried "
+                    "them); exits non-zero if it does not become healthy"
+                ),
+            )
         if _act == "restart":
             # Same flags as `venue deploy` -- `restart` calls _cmd_deploy
             # directly, via the shared registration helper so the two never
