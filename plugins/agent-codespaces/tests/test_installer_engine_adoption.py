@@ -1150,6 +1150,7 @@ New-Item -ItemType Directory (Join-Path $InstallDir 'versions/1.0.0') -Force | O
 & '{base}' -I '{helper}' --root $InstallDir activate 1.0.0 --no-link | Out-Null
 if (-not (Invoke-Dev)) {{ throw 'Initial development build failed' }}
 $before = (Get-Content (Join-Path $InstallDir 'current-version') -Raw).Trim()
+if ($before -notlike 'dev-*') {{ throw 'Initial development build did not activate its generation' }}
 $good = Join-Path $InstallDir "versions/$before"
 $completion = [IO.File]::ReadAllText((Join-Path $good '.install-complete.json'))
 $prefix = [IO.File]::ReadAllText((Join-Path $good 'pyvenv.cfg'))
@@ -1213,6 +1214,7 @@ mkdir -p "$INSTALL_DIR/versions/1.0.0"
 '{base}' -I '{helper}' --root "$INSTALL_DIR" activate 1.0.0 --no-link >/dev/null
 do_dev || exit 90
 before="$(cat "$INSTALL_DIR/current-version")"
+[[ "$before" == dev-* ]] || {{ echo 'Initial development build did not activate its generation' >&2; exit 103; }}
 good="$INSTALL_DIR/versions/$before"
 completion="$(cat "$good/.install-complete.json")"
 prefix="$(cat "$good/pyvenv.cfg")"

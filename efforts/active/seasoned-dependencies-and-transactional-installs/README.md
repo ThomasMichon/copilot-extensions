@@ -674,3 +674,19 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   canonical construction settlement that precedes that outer trap.
   Fresh-head review and provider CI remain pending. The effort is not merged,
   released or deployed.
+- The reconciled head received a genuine clean current-head Copilot Comment,
+  but required CI correctly blocked on two native failures. Removed an
+  accidentally inserted early success return from Codespaces development
+  construction: completion must still be followed by helper staging and
+  generation activation. Its real native failure/retry test now explicitly
+  requires the initial generated selector and passed on Windows; native POSIX
+  revalidation remains required CI evidence.
+- A cold Windows read-only helper exceeded its unchanged fifteen-second
+  subprocess deadline. The canonical PowerShell bootstrap now compiles missing
+  native types in one batch rather than repeatedly invoking the compiler.
+  Four cold/partial-preload/reentry cases passed on both installed PowerShell
+  hosts within that same bound. All eighteen real diagnostic/binding cases
+  passed in 105.14 seconds, and seven native receipt/filesystem cases passed.
+  Canonical copies are synchronized across all eleven payload adopters.
+  No timeout, selection, filesystem guarantee or review requirement was relaxed.
+  Fresh-head native CI is still required before implementation merge.

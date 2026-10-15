@@ -12,6 +12,8 @@ cells. Mutation remains explicit and non-automatic:
   plus `awk`, a SHA-256 command (`sha256sum`, `shasum`, or `openssl`), and a
   physical-path command (`realpath -m` or `readlink -f`).
 - `installation-context.ps1` provides the PowerShell 5.1+/pwsh bootstrap.
+  Missing native types compile in one batch to bound cold diagnostic startup;
+  re-entry retains already-loaded types rather than recompiling them.
 - `legacy-entrypoint-probe.sh` and `legacy-entrypoint-probe.ps1` derive
   conservative legacy-footprint evidence from `payload-invocation.json` and
   gate installer/bootstrap mutation through the read-only `probe-legacy`

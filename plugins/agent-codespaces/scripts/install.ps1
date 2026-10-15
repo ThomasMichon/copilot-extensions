@@ -833,7 +833,6 @@ function Invoke-Dev {
 
     if ((Get-PayloadHash) -ne $payloadHash) { throw 'Development payload changed during construction' }
     Complete-RuntimeConstruction -PayloadHash $payloadHash
-    return $true
     Deploy-VersionedRuntimeHelper
     if (-not (Test-Path (Join-Path $InstallDir 'versioned_runtime.py'))) {
         throw 'Development release helper was not staged'

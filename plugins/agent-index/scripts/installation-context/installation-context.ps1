@@ -53,9 +53,10 @@ $script:ValidatedFileSha256 = @{}
 $script:SnapshotMaxEntries = 100000
 $script:SnapshotMaxPathBytes = 4096
 $script:SnapshotMaxContentBytes = 4294967296
+$nativeTypeDefinitions = @()
 
 if ($env:OS -eq 'Windows_NT' -and -not ('CeFinalPath' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -110,7 +111,7 @@ public static class CeFinalPath {
 }
 
 if ($env:OS -eq 'Windows_NT' -and -not ('CeDirectoryState' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.IO;
@@ -232,7 +233,7 @@ public static class CeDirectoryState {
 }
 
 if ($env:OS -ne 'Windows_NT' -and -not ('CePosixPath' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -261,7 +262,7 @@ public static class CePosixPath {
 }
 
 if ($env:OS -ne 'Windows_NT' -and -not ('CePosixAccount' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -301,7 +302,7 @@ public static class CePosixAccount {
 }
 
 if (-not ('CeSafeFile' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.IO;
@@ -698,7 +699,7 @@ public sealed class CeSafeFile : IDisposable {
 }
 
 if (-not ('CeStrictJson' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -921,7 +922,7 @@ public static class CeStrictJson {
 }
 
 if (-not ('CeAtomicFile' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System.IO;
 
 public static class CeAtomicFile {
@@ -937,7 +938,7 @@ public static class CeAtomicFile {
 }
 
 if (-not ('CeAtomicDirectory' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -1035,6 +1036,18 @@ public static class CeAtomicDirectory {
     }
 }
 '@
+}
+
+if ($nativeTypeDefinitions.Count -gt 0) {
+    # One compiler invocation keeps cold read-only probes within their deadline.
+    $usingPattern = '(?m)^using [^\r\n]+;\r?$'
+    $imports = @($nativeTypeDefinitions | ForEach-Object {
+        [regex]::Matches($_, $usingPattern) | ForEach-Object { $_.Value.Trim() }
+    } | Sort-Object -Unique)
+    $definitions = @($nativeTypeDefinitions | ForEach-Object {
+        [regex]::Replace($_, $usingPattern, '')
+    })
+    Add-Type -TypeDefinition ([string]::Join("`n", [string[]]($imports + $definitions)))
 }
 
 function Fail([string]$Message) {
