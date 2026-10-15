@@ -16,6 +16,64 @@ def _loader(entries):
 
 
 class TestIsLocalMachine:
+    @pytest.mark.parametrize("key,declared", [
+        ("box-a", ""), ("box-a", "windows"), ("box-a-wsl", "windows"),
+    ])
+    @pytest.mark.parametrize("case", [False, True])
+    def test_guest_exact_match_cannot_bypass_native_configured_entry(self, key, declared, case):
+        native = MachineEntry(key=key, display_name="Native", execution_platform=declared)
+        guest = MachineEntry(
+            key="guest-cell", display_name="Guest", execution_platform="wsl",
+            physical_host="box-a",
+        )
+        assert not is_local_machine(
+            key.upper() if case else key, config_machine=key,
+            load_entries=_loader({native.key: native, guest.key: guest}), guest=True,
+        )
+
+    @pytest.mark.parametrize("key", ["box-a-wsl", "guest-cell"])
+    @pytest.mark.parametrize("case", [False, True])
+    def test_guest_exact_match_accepts_registered_guest_even_without_suffix(self, key, case):
+        guest = MachineEntry(key=key, display_name="Guest", execution_platform="wsl")
+        calls = []
+
+        def load():
+            calls.append(True)
+            return {key: guest}
+
+        assert is_local_machine(
+            key.upper() if case else key, config_machine=key, load_entries=load, guest=True,
+        )
+        assert calls == [True]
+
+    @pytest.mark.parametrize("missing", [False, True])
+    @pytest.mark.parametrize("key,expected", [("box-a-wsl", True), ("box-a", False), ("guest-cell", False)])
+    def test_guest_standalone_exact_match_requires_guest_qualification(self, missing, key, expected):
+        def load():
+            if missing:
+                raise FileNotFoundError("registry absent")
+            return {}
+
+        assert is_local_machine(key, config_machine=key, load_entries=load, guest=True) is expected
+
+    def test_guest_malformed_registry_does_not_authorize_an_exact_match(self):
+        def load():
+            raise ValueError("invalid registry")
+
+        assert not is_local_machine(
+            "box-a-wsl", config_machine="box-a-wsl", load_entries=load, guest=True,
+        )
+
+    @pytest.mark.parametrize("scoped", [False, True])
+    def test_qualified_guest_self_keeps_legacy_host_only_fallback_not_scoped_unknown(self, scoped):
+        native = MachineEntry(
+            key="box-a", display_name="Native", execution_platform="windows" if scoped else "",
+        )
+        assert is_local_machine(
+            "box-a-wsl", config_machine="box-a-wsl", load_entries=_loader({native.key: native}),
+            guest=True,
+        ) is (not scoped)
+
     @pytest.mark.parametrize("configured", ["", "unregistered"])
     def test_consumer_identity_without_optional_scope_fields(self, configured):
         entry = SimpleNamespace(

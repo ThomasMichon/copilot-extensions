@@ -67,7 +67,7 @@ def is_local_machine(
     display_name) refers to the CURRENT machine.
 
     ``config_machine`` is this machine's own configured identity (e.g.
-    ``Config.machine``) -- checked directly BEFORE calling ``load_entries``,
+    ``Config.machine``) -- for native callers, checked BEFORE ``load_entries``,
     so a configured local alias still resolves local during a registry
     outage or malformed file (mirroring this function's own historical
     ordering; preserved deliberately, not merely for performance). Every
@@ -75,8 +75,8 @@ def is_local_machine(
     unset ``config_machine`` (legitimately empty for some consumers) must
     never blanket-match an empty/unset registry field.
 
-    ``load_entries`` is called at most once, lazily -- only once the direct
-    check has already failed to resolve the answer -- and only its
+    ``load_entries`` is called at most once, when the native fast path did not
+    settle locality (guest callers always need the authority check), and only its
     ``FileNotFoundError``/``ValueError``/``KeyError`` are treated as "no
     registry available" (degrades to ``False`` for an unresolved name rather
     than raising); any other exception propagates, since that is not this
@@ -86,7 +86,10 @@ def is_local_machine(
     (``socket.gethostname()``) -- the final ground-truth check, independent
     of what ``config_machine`` itself resolved to. Override only for tests.
 
-    ``guest=True`` marks the CALLER's own execution as a WSL guest: a guest
+    ``guest=True`` validates configured guest authority before accepting even
+    an exact spelling. Registered WSL keys need not have a suffix; without a
+    guest entry, only qualified guest self names retain the unscoped/absent
+    registry fallback. It marks the CALLER's own execution as a WSL guest: a guest
     process must never resolve local against its native host's registry
     entry just because ``config_machine`` fuzzy-matched that entry (a guest
     whose own topology has no dedicated ``-wsl`` entry yet) -- native-host
@@ -97,12 +100,38 @@ def is_local_machine(
         return False
     name_lower = name.lower()
     config_machine = config_machine or ""
-    if config_machine and name_lower == config_machine.lower():
+    if not guest and config_machine and name_lower == config_machine.lower():
         return True
     try:
         entries = load_entries()
-    except (FileNotFoundError, ValueError, KeyError):
+    except FileNotFoundError:
+        return bool(
+            guest and config_machine and name_lower == config_machine.lower()
+            and split_machine_environment(config_machine).environment == "wsl"
+        )
+    except (ValueError, KeyError):
         return False
+    if guest and config_machine:
+        try:
+            configured = find_machine_entry(entries, config_machine)
+        except ValueError:
+            return False
+        if configured is not None:
+            declared = getattr(configured, "execution_platform", "")
+            guest_identity = (
+                declared == "wsl" if declared
+                else split_machine_environment(configured.key).environment == "wsl"
+            )
+            if not guest_identity:
+                return False
+        elif name_lower == config_machine.lower():
+            return (
+                split_machine_environment(config_machine).environment == "wsl"
+                and not any(
+                    getattr(entry, "execution_platform", "") and not getattr(entry, "legacy_key", "")
+                    for entry in entries.values()
+                )
+            )
     if not entries and config_machine:
         if is_observed_local_name(
             name, config_machine=config_machine, entries=entries,
@@ -132,12 +161,6 @@ def is_local_machine(
         # without also risking an empty-string false-positive the way
         # comparing two possibly-empty alias strings directly would.
         if this is not None:
-            execution_platform = getattr(this, "execution_platform", "")
-            if guest and (
-                execution_platform != "wsl" if execution_platform
-                else split_machine_environment(this.key).environment != "wsl"
-            ):
-                return False
             return target is this
     if getattr(target, "execution_platform", ""):
         return False

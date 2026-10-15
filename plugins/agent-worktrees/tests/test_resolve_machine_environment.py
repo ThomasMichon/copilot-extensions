@@ -279,13 +279,16 @@ def test_suffix_only_guest_never_launches_locally_on_native_host(
 def test_json_creation_uses_local_allocator_for_the_same_wsl_execution_tuple(
     monkeypatch, capfd, name: str, environment: str | None,
 ) -> None:
-    config = SimpleNamespace(machine="example-host-wsl")
+    config = SimpleNamespace(
+        machine="example-host-wsl", default_repo=SimpleNamespace(anchor="example-repo"),
+    )
     state = resolve_cli.ResolveCommandState.from_args(SimpleNamespace(
         json=True, new_worktree=True, machine=name, environment=environment,
         worktree_id=None,
     ))
     state.config = config
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(resolve_cli, "_validate_profile_assignment_config", lambda *_args: None)
     monkeypatch.setattr(resolve_cli, "_resolve_profile", lambda *_args: None)
     allocated = []

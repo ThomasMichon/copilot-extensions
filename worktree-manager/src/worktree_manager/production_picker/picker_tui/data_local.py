@@ -74,9 +74,9 @@ def is_local(machine: str, env: str) -> bool:
     single ``(machine, env)`` pair rather than the whole roster.
 
     The ``env``-gate and hostname tuple fast path stay Picker-specific.
-    Logical entries use the shared platform-aware lookup through ``roster``;
-    legacy native entries and registry outages retain the shared
-    ``is_local_machine`` compatibility behavior.
+    Every readable roster uses the shared platform-aware lookup through
+    ``roster``, including unscoped native/guest pairs. Registry outages retain
+    the shared ``is_local_machine`` fallback with the actual guest context.
     """
     matches_raw_local = (machine, env) == LOCAL
     if not machine or env != LOCAL[1]:
@@ -91,7 +91,7 @@ def is_local(machine: str, env: str) -> bool:
         return False
     except (FileNotFoundError, ValueError, KeyError):
         entries = {}
-    if any(m.execution_platform for m in entries.values()):
+    if entries:
         try:
             target = resolve_machine_selection(
                 entries, machine, local_execution_platform(),
@@ -123,6 +123,7 @@ def is_local(machine: str, env: str) -> bool:
         # e.g. ``host.example.test`` vs. a registry entry's short
         # ``hostname: host``.
         real_hostname=LOCAL[0],
+        guest=local_execution_platform() == "wsl",
     )
 
 

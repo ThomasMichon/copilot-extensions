@@ -158,6 +158,28 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-15 - Align unscoped guest task routing and shared self checks
+- Manager action locality now uses the same contextual tuple mapping as source
+  construction for all readable rosters, including unscoped host/guest pairs.
+  Real task-command construction and resume decisions stay local for supported
+  historical host, qualified guest, hostname and alias spellings in WSL.
+  Explicit native-space keys remain foreign to the guest.
+- Shared guest self checks validate the configured entry before accepting an
+  equal name. Native entries, including native keys with guest-looking suffixes,
+  cannot use the fast path; registered WSL cells without suffixes remain valid.
+  Native callers retain the no-topology-read fast path, and qualified guest
+  names retain the absent/legacy-unscoped fallback without granting unknown
+  names authority in an explicit execution-space registry.
+- Audited direct identity-helper consumers; native/no-guest call contracts
+  remain unchanged. Core fixtures now declare their intended actual platform
+  or absent registry rather than depending on an ambient detector.
+- Bounded validation passed 279 shared transport tests, all 1,143 Worktrees
+  guards with 64 conditional skips, and 134 focused Manager/task-routing tests.
+  Ruff, install contracts, module ceilings and whitespace checks passed.
+- Native validation and the separate no-running-mux readiness prerequisite
+  remain coordinator-owned. No mux/session runtime, other implementation source,
+  native workspace, publication or deployment was changed here.
+
 ### 2026-10-15 - Self-offer, snapshot and interrupted-completion proof
 - Alias-spelled source/consumer references resolving to one ledger now reject
   before reservations. The mutation compatibility shortcut compares the

@@ -29,9 +29,11 @@ resolved -- network call to reach a host that is actually the caller itself.
   legacy+canonical merge), and `find_machine_entry()` (key/alias/hostname/
   display_name matching, case-insensitive).
 - **`identity`** -- `is_local_machine()`: the canonicalized "is this the
-  local machine?" check, checking a direct `config_machine` match BEFORE
-  ever loading the registry (so a registry outage doesn't mask a known local
-  alias), with every comparison gated on a non-empty value.
+  local machine?" check. Native callers retain the direct `config_machine`
+  match before registry loading; guest callers first validate guest authority.
+  A registered WSL key need not have a suffix. Qualified guest self names retain
+  the absent/unscoped-registry fallback, never an explicit native entry.
+  Every comparison is gated on a non-empty value.
 - **`machine_environment`** -- `split_machine_environment()`: converts
   `<host>-wsl` and `<host>` plus `WSL` into the same physical-host/environment
   pair. It normalizes environment labels and rejects conflicting requests.
