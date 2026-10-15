@@ -64,7 +64,13 @@ def _alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    # An exited process its parent has not reaped yet still answers kill(0).
+    return not _state(pid).startswith("Z")
+
+
+def _state(pid: int) -> str:
+    return subprocess.run(["ps", "-o", "state=", "-p", str(pid)], capture_output=True,
+                          text=True, check=False).stdout.strip() or "Z"
 
 
 def _wait_dead(pid: int, seconds: float = 10) -> bool:
@@ -203,9 +209,17 @@ def test_posix_deadline_reaches_a_regrouped_child_but_not_a_daemon(tmp_path, stu
 
 
 def _stopped(pid: int) -> bool:
-    state = subprocess.run(["ps", "-o", "state=", "-p", str(pid)], capture_output=True,
-                           text=True, check=False).stdout.strip()
-    return state.startswith("T")
+    return _state(pid).startswith("T")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX zombies")
+def test_an_unreaped_child_counts_as_dead():
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        assert _wait_for(lambda: _state(child.pid).startswith("Z")), "the child exits unreaped"
+        assert not _alive(child.pid)
+    finally:
+        child.wait()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX sessions")
