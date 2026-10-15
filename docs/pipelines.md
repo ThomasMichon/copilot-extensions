@@ -849,6 +849,18 @@ aggregate rejects any skipped required job. The verifier waits for both exact
 runs, checks all job results and specifically requires the source-attribution
 refresh; accepting a dispatch request is not completion.
 
+Native Windows command-binding and lifecycle contracts run in a separate,
+required, change-scoped CI job. Real installer admission, teardown, and hidden
+child stream tests retain their complete selection and individual deadlines;
+they do not share the read-only provenance lane's two-minute step budget.
+The lifecycle job allows six minutes for tests and eight minutes overall,
+based on a 316-second native run of the former combined selection. Dependency
+preparation is separately bounded, and duration output identifies future
+growth without hiding timeouts or weakening the required aggregate.
+CI-selection contracts and payload-source attribution also have their own
+two-minute steps, so native PowerShell checks of workflow failure propagation
+and source graphs cannot consume the read-only diagnostic API tests' budget.
+
 The human administrator escape remains available for independently
 shape-validated workflow/control repair, never arbitrary source. Such a repair
 may advance main beyond its latest published release. Snapshot checks require

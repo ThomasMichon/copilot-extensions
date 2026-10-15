@@ -124,6 +124,17 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert smoke["if"] == "steps.installation-context.outputs.run == 'true'"
     assert smoke["timeout-minutes"] <= 3
     assert smoke["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+    selection = next(
+        step for step in steps
+        if step.get("name") == "Installation-context CI selection contracts (Windows)"
+    )
+    assert selection["if"] == smoke["if"]
+    assert selection["timeout-minutes"] == 2
+    assert selection["run"].split() == [
+        "python", "tools/seasoned_uv.py", "--uv", "uv", "--", "--system", "pytest", "pyyaml",
+        "&&", "python", "-m", "pytest", "-q", "tools/test_installation_context_ci_scope.py",
+    ]
+    assert "test_installation_context_ci_scope.py" not in smoke["run"]
     assert "test_installation_mode_governance.py" in smoke["run"]
     assert "status_and_probe_cli_parity_and_read_only" in smoke["run"]
     assert "diagnostic_api_never_enters_mutation" in smoke["run"]
@@ -131,35 +142,20 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert "test_diagnostic_consumers.py" in smoke["run"]
     assert "derived_diagnostic_api_read_only" in smoke["run"]
     assert "peer_governance_wrapper_read_only" in smoke["run"]
-    assert "libs/installation-context/tests/test_payload_source.py" in smoke["run"]
-    assert 'payload_source or installation_context_ci_scope' in smoke["run"]
+    source = next(
+        step for step in steps if step.get("name") == "Payload source attribution (Windows)"
+    )
+    assert source["if"] == smoke["if"]
+    assert source["timeout-minutes"] == 2
+    assert source["run"].split() == [
+        "python", "-m", "pytest", "-q",
+        "libs/installation-context/tests/test_payload_source.py",
+    ]
+    assert "test_payload_source.py" not in smoke["run"]
+    assert '-k "status_and_probe_cli_parity_and_read_only' in smoke["run"]
     assert "libs/payload-invocation/tests/test_command_binding.py" not in smoke["run"]
     assert "libs/payload-invocation/tests/test_command_lifecycle.py" not in smoke["run"]
-    assert "or command_binding" in smoke["run"]
-    lifecycle = next(
-        step for step in steps
-        if step.get("name") == "Command lifecycle read-only contracts (Windows)"
-    )
-    first_touch = next(
-        step for step in steps
-        if step.get("name") == "Command lifecycle native first-touch (Windows)"
-    )
-    native = "real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage"
-    catalog = next(
-        step for step in steps
-        if step.get("name") == "Command catalog native contracts (Windows)"
-    )
-    for step in (catalog, lifecycle, first_touch):
-        assert step["if"] == smoke["if"]
-        assert step["timeout-minutes"] == 2
-        assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
-    assert "libs/payload-invocation/tests/test_command_binding.py" in catalog["run"]
-    assert '-k "command_binding"' in catalog["run"]
-    for step in (lifecycle, first_touch):
-        assert "libs/payload-invocation/tests/test_command_lifecycle.py" in step["run"]
-    assert "libs/payload-invocation/tests/test_command_lifecycle_stdio.py" in lifecycle["run"]
-    assert f'-k "command_binding and not ({native})"' in lifecycle["run"]
-    assert f'-k "command_binding and ({native})"' in first_touch["run"]
+    assert "or command_binding" not in smoke["run"]
     manager = next(
         step for step in steps if step.get("name") == "Manager read-only wrapper (Windows)"
     )
@@ -180,6 +176,40 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert '-k "runtime_resolution_real_helper_read_only or command_binding"' in reconciliation["run"]
     assert "or command_binding" in reconciliation["run"]
     assert "--timeout 120" in reconciliation["run"]
+
+
+def test_native_command_lifecycle_coverage_has_its_own_required_budget() -> None:
+    workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["command-lifecycle-windows"]
+    assert job["runs-on"] == "windows-latest"
+    assert job["timeout-minutes"] == 8
+    assert job["if"] == workflow["jobs"]["installation-context-windows"]["if"]
+    assert "command-lifecycle-windows" in workflow["jobs"]["pr-gate"]["needs"]
+    assert "command-lifecycle-windows" in workflow["jobs"]["promotion-gate"]["needs"]
+    assert not job.get("continue-on-error", False)
+    steps = job["steps"]
+    detection = next(step for step in steps if step.get("id") == "installation-context")
+    assert "installation_context_ci_scope.py" in detection["run"]
+    preparation = next(
+        step for step in steps if step.get("name") == "Prepare command lifecycle test dependencies"
+    )
+    contracts = next(
+        step for step in steps if step.get("name") == "Native command binding and lifecycle contracts"
+    )
+    condition = "steps.installation-context.outputs.run == 'true'"
+    assert preparation["if"] == contracts["if"] == condition
+    assert preparation["timeout-minutes"] == 1
+    assert "seasoned_uv.py --uv uv -- --system pytest pyyaml" in preparation["run"]
+    assert contracts["timeout-minutes"] == 6
+    assert contracts["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+    assert not contracts.get("continue-on-error", False)
+    assert contracts["run"].split() == [
+        "python", "-m", "pytest", "-q", "--durations=20",
+        "libs/payload-invocation/tests/test_command_binding.py",
+        "libs/payload-invocation/tests/test_command_lifecycle.py",
+        "libs/payload-invocation/tests/test_command_lifecycle_stdio.py",
+        "-k", "command_binding",
+    ]
 
 
 def test_native_vault_snapshot_lane_preserves_bounded_first_use_proof() -> None:

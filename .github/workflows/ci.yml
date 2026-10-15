@@ -1104,50 +1104,26 @@ jobs:
         run: |
           run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
           echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Installation-context CI selection contracts (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q tools/test_installation_context_ci_scope.py
       - name: Source provenance and read-only diagnostics (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q
-          tools/test_installation_context_ci_scope.py
           libs/installation-context/tests/test_installation_mode_governance.py
           libs/installation-context/tests/test_diagnostic_consumers.py
-          libs/installation-context/tests/test_payload_source.py
-          -k "payload_source or installation_context_ci_scope or command_binding or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
-      - name: Command catalog native contracts (Windows)
+          -k "status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+      - name: Payload source attribution (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
-        env:
-          INSTALLATION_CONTEXT_POWERSHELL: powershell
-        run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
-          python -m pytest -q
-          libs/payload-invocation/tests/test_command_binding.py
-          -k "command_binding"
-      - name: Command lifecycle read-only contracts (Windows)
-        if: steps.installation-context.outputs.run == 'true'
-        timeout-minutes: 2
-        env:
-          INSTALLATION_CONTEXT_POWERSHELL: powershell
-        run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
-          python -m pytest -q
-          libs/payload-invocation/tests/test_command_lifecycle.py
-          libs/payload-invocation/tests/test_command_lifecycle_stdio.py
-          -k "command_binding and not (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"
-      - name: Command lifecycle native first-touch (Windows)
-        if: steps.installation-context.outputs.run == 'true'
-        timeout-minutes: 2
-        env:
-          INSTALLATION_CONTEXT_POWERSHELL: powershell
-        run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
-          python -m pytest -q
-          libs/payload-invocation/tests/test_command_lifecycle.py
-          -k "command_binding and (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"
+        run: python -m pytest -q libs/installation-context/tests/test_payload_source.py
       - name: Derived native diagnostics (Windows PowerShell 5.1)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
@@ -1174,6 +1150,47 @@ jobs:
           --test-file tests/test_installer_command_binding.py
           -k "runtime_resolution_real_helper_read_only or command_binding"
           --admission-wait 60 --timeout 120
+
+  command-lifecycle-windows:
+    name: Command binding and lifecycle (Windows)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    # The combined provenance/lifecycle command took 316s on native Windows.
+    # Keep real installer/teardown coverage out of the two-minute read-only lane.
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - id: installation-context
+        name: Detect command lifecycle changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Prepare command lifecycle test dependencies
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 1
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml
+      - name: Native command binding and lifecycle contracts
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 6
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python -m pytest -q --durations=20
+          libs/payload-invocation/tests/test_command_binding.py
+          libs/payload-invocation/tests/test_command_lifecycle.py
+          libs/payload-invocation/tests/test_command_lifecycle_stdio.py
+          -k command_binding
 
   vault-snapshot-windows:
     name: Vault snapshot first-use (Windows)
@@ -1584,6 +1601,7 @@ jobs:
       - test-runner-linux
       - test-runner-windows
       - installation-context-windows
+      - command-lifecycle-windows
       - vault-snapshot-windows
       - fleet-native-linux
       - fleet-native-windows
@@ -1644,6 +1662,7 @@ jobs:
       - test-runner-linux
       - test-runner-windows
       - installation-context-windows
+      - command-lifecycle-windows
       - vault-snapshot-windows
       - fleet-native-linux
       - fleet-native-windows
