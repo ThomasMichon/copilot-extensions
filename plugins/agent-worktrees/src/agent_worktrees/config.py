@@ -753,7 +753,9 @@ def render_copilot_instructions(
 
     lines = [
         f"Machine: {entry.display_name}",
-        f"Hostname: {entry.key}",
+        f"Hostname: {socket.gethostname()}",
+        f"Machine name: {machine_name(entry)}",
+        f"Alias/friendly name: {entry.display_name}",
         f"Environment: {entry.environment}",
         f"Platform: {plat}",
     ]

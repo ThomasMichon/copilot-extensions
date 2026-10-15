@@ -3951,6 +3951,23 @@ def _run_session_lifecycle(
     terminal_identity.record_session_terminal(payload, session_environment)
     try:
         project_process = _start_project_session_hook(cwd, session_environment)
+        from . import session_context as _session_context
+
+        try:
+            machine_config = (
+                cfg.load_config(include_control_plane_related_pr=False)
+                if cfg.active_project() else None
+            )
+            machine_context = _session_context.render_machine_context(machine_config)
+            _write_session_lifecycle_snapshot(
+                "machine-context", payload,
+                json.dumps({"additionalContext": machine_context}),
+            )
+            hook_client = _load_hook_client_module()
+            if hook_client is None or not hook_client._write_session_guidance(payload):
+                diagnostics += "[agent-worktrees] Machine guidance file unavailable.\n"
+        except Exception as exc:
+            diagnostics += f"[agent-worktrees] Machine guidance failed: {type(exc).__name__}\n"
         nudge = _registration_nudge_context(cwd)
         _write_session_lifecycle_snapshot(
             "register-nudge",

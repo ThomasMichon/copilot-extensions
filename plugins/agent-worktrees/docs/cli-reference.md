@@ -34,6 +34,28 @@ scoped keys retain their binding and checkout resolution.
 An explicit `--session-id` still selects the session's project before any
 scalar read; the shortcut does not change that targeting contract.
 
+## Session machine identity
+
+The existing `instructions/agent-worktrees/session-guidance.instructions.md`
+file in the exact Copilot session contains a compact **Current machine
+identity** block. `hostname` is the observed OS hostname; `machine` is the
+registry's preferred name (alias when configured, otherwise key); `alias`
+is its friendly display name. Platform, resolution status and source are
+reported separately. These are contextual facts, never authorization.
+
+The combined startup lifecycle resolves and writes this block before
+worktree registration and other slower reconciliation. Fresh and resumed
+launches replace the exact-session snapshot; native context rollover reads
+the same file through the existing session-guidance pointer. No machine
+inventory or machine-specific value is checked into instruction projections.
+Without usable registry context, the observed hostname remains visible while
+machine and alias are explicitly unresolved. An oversized combined guidance
+file retains the bounded machine block and reports the omitted guidance.
+
+The legacy `machine-context` command likewise distinguishes the actual
+hostname, preferred machine name and friendly name; it no longer labels a
+registry key as the OS hostname.
+
 ## Exact durable record read
 
 `agent-worktrees record --worktree-id <exact-id> --json` reads one durable

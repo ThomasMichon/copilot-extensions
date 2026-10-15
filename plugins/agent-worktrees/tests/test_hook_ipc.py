@@ -849,11 +849,13 @@ def test_session_start_writes_combined_session_guidance(
         / "agent-worktrees"
         / "session-guidance.instructions.md"
     )
-    assert target.read_text(encoding="utf-8") == (
+    content = target.read_text(encoding="utf-8")
+    assert content.startswith(
         "# Agent Worktrees session guidance\n\n"
         "## command catalog\n\ncatalog\n\n"
-        "[agent-worktrees] binding\n"
+        "[agent-worktrees] binding\n\n"
     )
+    assert "## Current machine identity" in content
 
 
 def test_session_start_reuses_registration_with_command_catalog(
@@ -885,9 +887,7 @@ def test_session_start_reuses_registration_with_command_catalog(
         / "agent-worktrees"
         / "session-guidance.instructions.md"
     )
-    assert target.read_text(encoding="utf-8").endswith(
-        "catalog\n\n[agent-worktrees] binding\n"
-    )
+    assert "catalog\n\n[agent-worktrees] binding\n\n" in target.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -972,9 +972,152 @@ def test_session_start_guidance_overwrites_on_resume(
         )
         assert hook_client._write_session_guidance(payload, home=tmp_path)
 
-    assert target.read_text(encoding="utf-8").endswith(
-        "catalog\n\nsecond\n"
+    assert "catalog\n\nsecond\n\n" in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("source", ["new", "resume"])
+def test_session_machine_guidance_survives_missing_registration(monkeypatch, tmp_path, source):
+    monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
+    monkeypatch.setattr(hook_client, "_command_catalog_context", lambda: "catalog")
+    monkeypatch.setattr(hook_client.socket, "gethostname", lambda: "VM-ABC")
+    payload = {
+        "sessionId": "session-1", "cwd": str(tmp_path),
+        "source": source, "timestamp": 1000,
+    }
+    enriched = hook_client._enrich_session_payload(payload)
+    launch_key = hook_client._session_launch_key(enriched)
+    snapshots = tmp_path / ".agent-worktrees" / ".session-context"
+    snapshots.mkdir(parents=True)
+    identity = (
+        '## Current machine identity\n\n```json\n'
+        '{"hostname":"VM-ABC","machine":"worker-a","alias":"builder","status":"resolved"}\n```'
     )
+    (snapshots / f"machine-context-{launch_key}.json").write_text(
+        json.dumps({
+            "launchKey": launch_key,
+            "output": json.dumps({"additionalContext": identity}),
+        }), encoding="utf-8",
+    )
+
+    assert hook_client._write_session_guidance(enriched, home=tmp_path)
+    target = (
+        tmp_path / ".copilot" / "session-state" / "session-1"
+        / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
+    )
+    content = target.read_text(encoding="utf-8")
+    assert identity in content
+    assert "catalog" in content
+    assert not list(snapshots.glob("register-session-*"))
+
+
+def test_session_machine_guidance_survives_context_budget_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(hook_client.socket, "gethostname", lambda: "VM-ABC")
+    monkeypatch.setattr(hook_client, "_registration_context", lambda payload, home: "x" * 4096)
+    monkeypatch.setattr(hook_client, "_command_catalog_context", lambda: "")
+
+    assert hook_client._write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    content = (
+        tmp_path / ".copilot" / "session-state" / "session-1"
+        / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
+    ).read_text(encoding="utf-8")
+
+    assert "exceeded the bounded file budget" in content
+    assert '"hostname": "VM-ABC"' in content
+    assert '"status": "unresolved"' in content
+    assert len(content.encode("utf-8")) <= 4096
+
+
+def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts(tmp_path):
+    child = (
+        "import importlib.util,json,sys; from pathlib import Path; "
+        "spec=importlib.util.spec_from_file_location('hook',sys.argv[1]); "
+        "hook=importlib.util.module_from_spec(spec); spec.loader.exec_module(hook); "
+        "hook._command_catalog_context=lambda:'catalog'; "
+        "hook.socket.gethostname=lambda:'VM-ABC'; "
+        "hook.decide=lambda *args: (_ for _ in ()).throw(RuntimeError('lifecycle interrupted')); "
+        "raise SystemExit(hook.main(['sessionStart']))"
+    )
+    environment = {
+        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "PYTHONPATH": "", "AGENT_HOME": str(tmp_path),
+    }
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    result = subprocess.run(
+        [sys.executable, "-c", child, str(_SCRIPT)],
+        input=json.dumps({"sessionId": "first-touch", "cwd": str(tmp_path)}),
+        capture_output=True, text=True, timeout=20, env=environment,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {}
+    content = (
+        tmp_path / ".copilot" / "session-state" / "first-touch"
+        / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
+    ).read_text(encoding="utf-8")
+    assert '"hostname": "VM-ABC"' in content
+    assert '"machine": null' in content
+    assert '"status": "unresolved"' in content
+    assert len(content.encode("utf-8")) <= 4096
+
+
+def test_session_machine_lifecycle_writes_guidance_before_registration(monkeypatch, tmp_path):
+    from agent_worktrees import local_cache_refresh
+
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n  worker-a:\n    hostname: VM-ABC\n    display_name: builder\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "sessionId": "session-1", "cwd": str(tmp_path),
+        "source": "resume", "timestamp": 1000,
+        "_agentWorktrees": {"pluginVersion": "1.2.3-dev4", "environment": {}},
+    }
+    target = (
+        tmp_path / ".copilot" / "session-state" / "session-1"
+        / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
+    )
+    monkeypatch.setattr(main.cfg, "active_project", lambda: "project")
+    monkeypatch.setattr(main.cfg, "set_active_project", lambda value: None)
+    monkeypatch.setattr(
+        main.cfg, "load_config",
+        lambda **kwargs: SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path))),
+    )
+    monkeypatch.setattr(main.cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(hook_client.socket, "gethostname", lambda: "VM-ABC")
+    monkeypatch.setattr(main, "_aw_runtime_home", lambda: tmp_path / ".agent-worktrees")
+    monkeypatch.setattr(hook_client, "_selected_runtime_root", lambda home: home / ".agent-worktrees")
+    monkeypatch.setattr(hook_client, "_command_catalog_context", lambda: "catalog")
+    monkeypatch.setattr(
+        main, "_load_hook_client_module",
+        lambda: SimpleNamespace(
+            _write_session_guidance=lambda value: hook_client._write_session_guidance(value, home=tmp_path),
+        ),
+    )
+    monkeypatch.setattr(main, "_start_project_session_hook", lambda cwd, env: None)
+    monkeypatch.setattr(main, "_finish_project_session_hook", lambda process, deadline: ({}, ""))
+    monkeypatch.setattr(main, "_registration_nudge_context", lambda cwd: "")
+    monkeypatch.setattr(main, "_write_session_lifecycle_receipt", lambda *args: None)
+    monkeypatch.setattr(main.terminal_identity, "record_session_terminal", lambda *args: None)
+    monkeypatch.setattr(main, "_migrate_legacy_marketplace_overrides", lambda *args: None)
+    monkeypatch.setattr(main, "_reconcile_knowledge_plugin_overlay", lambda *args: None)
+    monkeypatch.setattr(local_cache_refresh, "sessionstart_diagnostic", lambda *args, **kwargs: "")
+    monkeypatch.setattr(main, "_anchor_hygiene_diagnostic", lambda cwd: "")
+    monkeypatch.setattr(main, "_start_provisioning_if_needed", lambda *args: "")
+
+    def failed_registration(args):
+        content = target.read_text(encoding="utf-8")
+        assert '"hostname": "VM-ABC"' in content
+        assert '"machine": "worker-a"' in content
+        assert '"alias": "builder"' in content
+        assert '"status": "resolved"' in content
+        raise RuntimeError("registration unavailable")
+
+    monkeypatch.setattr(main, "cmd_register_session", failed_registration)
+    result = main._run_session_lifecycle(payload, deadline=time.time() + 30)
+
+    assert "Session registration failed" in result["_stderr"]
+    assert '"machine": "worker-a"' in target.read_text(encoding="utf-8")
+    assert len(target.read_bytes()) <= 4096
 
 
 @pytest.mark.parametrize("suffix", (".json", ""))
@@ -1960,6 +2103,14 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
         main.cfg, "set_active_project", lambda value: restored.append(value)
     )
     monkeypatch.setattr(main, "_start_project_session_hook", lambda cwd, env: "p")
+    from agent_worktrees import session_context
+
+    monkeypatch.setattr(main.cfg, "load_config", lambda **kwargs: object())
+    monkeypatch.setattr(session_context, "render_machine_context", lambda config: "identity")
+    monkeypatch.setattr(
+        main, "_load_hook_client_module",
+        lambda: SimpleNamespace(_write_session_guidance=lambda payload: True),
+    )
     monkeypatch.setattr(
         main,
         "_finish_project_session_hook",
@@ -2024,6 +2175,7 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
         "anchor warning\nprovisioning\nproject warning\n"
     )
     assert snapshots == [
+        ("machine-context", '{"additionalContext": "identity"}'),
         ("register-nudge", '{"additionalContext": "register this repo"}'),
         ("marketplace-overrides-migration", "{}"),
         ("knowledge-plugin-overlay", "{}"),
