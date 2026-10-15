@@ -14,9 +14,9 @@ import socket
 
 from machine_transport import (
     AmbiguousMachineError,
-    find_machine_entry,
     is_local_machine,
     local_execution_platform,
+    resolve_machine_selection,
 )
 
 from worktree_manager import engine_client
@@ -92,7 +92,9 @@ def is_local(machine: str, env: str) -> bool:
         entries = {}
     if any(m.execution_platform for m in entries.values()):
         try:
-            target = find_machine_entry(entries, machine, reject_ambiguous=True)
+            target = resolve_machine_selection(
+                entries, machine, local_execution_platform(),
+            ).entry
             local = roster.local_entry(
                 entries, config.machine, LOCAL[0], local_execution_platform(),
             )
