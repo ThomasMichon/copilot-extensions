@@ -157,6 +157,25 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-15 - Integrate upstream session identity and preserve source acceptance
+- The coordinator verified normal supported publication of the preceding source.
+  A sync-preparation refusal was not a publication refusal; no tracking edits,
+  reparenting or raw push were needed. The next publication remains coordinator-owned.
+- Completed the helper-directed rebase onto the nine newer upstream commits.
+  The rendering overlap retains observed hostname, canonical and friendly names,
+  explicit execution identity and platform-selected deployment metadata through
+  one renderer. Both upstream lifecycle and compatibility regressions remain.
+- The effort add/add resolution preserves Phase 2 completion, source evidence
+  and the operator's deployment authorization. The root effort index retains
+  every upstream row.
+- Final bounded integration checks passed: 596 Worktrees tests with nine
+  conditional skips, 256 shared transport tests and 272 Manager tests. The
+  context fixture now supplies a real registry entry to the actual metadata
+  selector rather than mocking an obsolete lookup seam.
+- Ruff, install contracts, module ceilings and whitespace checks passed.
+  Native Windows, current-head review, release and installed acceptance remain
+  open; this source integration does not close the effort.
+
 ### 2026-10-15 - Shared alias matrix and preferred-name source correction
 - The source now maps historical names through the shared contextual registry
   across discovery/configuration, launch, stored records, qualified ownership
@@ -178,8 +197,9 @@ unrelated service changes or a second machine registry.
 - Parent settlement rejects a different same-platform caller, and nonadjacent
   physical siblings share display and keyboard traversal order without changing
   source identities or SSH targets.
-- Publication requires a new exact-head recovery preview after upstream
-  integration. No earlier operator confirmation is reused for a changed source.
+- A sync-preparation refusal initially suggested exact-head recovery might be
+  needed; subsequent normal publication is documented above. No earlier
+  recovery confirmation is reused for a changed source.
 
 ### 2026-10-15 - Retroactive capture and widened acceptance
 - The effort capture merged in #6821 after current-head approval and required

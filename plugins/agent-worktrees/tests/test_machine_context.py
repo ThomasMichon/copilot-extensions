@@ -65,12 +65,11 @@ def test_emits_identity_without_machines_yaml(monkeypatch, capsys):
 
 
 def test_emits_additional_context_in_project(monkeypatch, capsys):
-    sentinel = object()
+    sentinel = cfg.MachineEntry(key="foo", display_name="Foo")
     monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
     monkeypatch.setattr(m.cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Config())
     monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda _rd: {"foo": sentinel})
-    monkeypatch.setattr(m.cfg, "find_machine_entry", lambda _reg, _name: sentinel)
     monkeypatch.setattr(
         m.cfg, "render_copilot_instructions",
         lambda _entry, project="", machine="": (
