@@ -103,6 +103,13 @@ Single-agent effort for Phase 1 (design). Later phases may dispatch
 component-sized implementation slices; this section will be filled in once
 Phase 2+ scope is broken into concrete, assignable pieces.
 
+| Participant | Scope | Coordination |
+|-------------|-------|--------------|
+| Streaming recovery owner | Phase 6d.3a client startup/reconnect acceptance only | #6832; independent, sequential plan and implementation PRs |
+
+This participant does not take ownership of the remaining daemon phases,
+singleton transitions, central fleet exporter, or other pivots.
+
 ## Context
 
 ### How this was found
@@ -936,6 +943,18 @@ than hypothetical:
       module docstrings to describe the consolidated architecture, so a
       future reader doesn't rediscover this effort's own "two daemons, one
       fact" history as a live bug.
+
+### Phase 6d.3a - Recover slow consumer feed startup
+
+The [consumer recovery plan](phase-6d-consumer-recovery.md) addresses #6832
+within the already-requested Phase 6d.3 real-consumer acceptance.
+
+- [ ] Review the bounded client startup/reconnect plan before implementation.
+- [ ] Repair the client deadline/recovery policy and add real-process regressions.
+- [ ] Verify promoted, installed default streaming through the real Picker;
+      remove the temporary opt-out only after that proof.
+- [ ] Journal the result and return the remaining parent acceptance to #3761;
+      completing this narrow repair does not complete the whole effort.
 
 ## Validation Plan
 
