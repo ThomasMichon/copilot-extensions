@@ -12,7 +12,7 @@ _STRUCTURED_CUTOFF = re.compile(
 )
 
 
-def cutoff_value(value: str, now: datetime, *, error_type, clamp_relative=True) -> datetime:
+def cutoff_value(value: str, now: datetime, *, error_type) -> datetime:
     value = value.strip().removesuffix(",").strip()
     structured = _STRUCTURED_CUTOFF.fullmatch(value)
     if structured:
@@ -21,8 +21,7 @@ def cutoff_value(value: str, now: datetime, *, error_type, clamp_relative=True) 
             relative = cutoff_value(
                 f"Relative(ExcludeNewerSpan({structured[2]}))", now, error_type=error_type,
             )
-            if clamp_relative:
-                cutoff = min(cutoff, relative)
+            cutoff = min(cutoff, relative)
         return cutoff
     absolute = re.fullmatch(r"Absolute\(\s*([^,\s]+),?\s*\)", value)
     if absolute:
@@ -53,6 +52,19 @@ def cutoff_value(value: str, now: datetime, *, error_type, clamp_relative=True) 
         except OverflowError as exc:
             raise error_type("UV relative cutoff exceeds the supported range") from exc
     raise error_type("unsupported UV cutoff representation")
+
+
+def package_cutoffs(entries, *, balanced, error_type):
+    result = []
+    entries = entries.strip()
+    while entries:
+        entry = re.match(r'PackageName\(\s*"([a-z0-9._-]+)",?\s*\):\s*Enabled\(', entries)
+        if entry is None:
+            raise error_type("disabled or unsupported package-specific seasoning")
+        value, stop = balanced(entries, entry.end() - 1, "(", ")")
+        result.append((entry[1], value))
+        entries = entries[stop:].lstrip(", \r\n\t")
+    return result
 
 
 def _toml_value(value, error_type):
@@ -136,7 +148,7 @@ def merge_config(high, low):
 
 
 def resolver_configuration(
-    projection, remapper=None, *, balanced, error_type, now=None,
+    projection, remapper=None, *, balanced, error_type, now=None, freeze_package_cutoffs=False,
 ):
     now = datetime.now(timezone.utc) if now is None else now
     match = re.search(r"\bsettings: PipSettings \{", projection)
@@ -151,13 +163,15 @@ def resolver_configuration(
     if package is None:
         raise error_type("UV package cutoffs cannot be compared")
     package_body, _ = balanced(cutoff_body, package.end() - 1, "(", ")")
-    # Relative spans embed a new timestamp per probe; retain their identity
-    # and any stricter captured timestamp against the shared admission clock.
-    package_body = _STRUCTURED_CUTOFF.sub(
-        lambda match: f"Cutoff({cutoff_value(match[0], now, error_type=error_type).isoformat()}, {match[2]!r})",
-        package_body,
-    )
-    body = body[:cutoff.start()] + "package_cutoffs:" + package_body + "\n" + body[end:]
+    package_entries = re.fullmatch(r"\s*\{(.*)\},?\s*", package_body, re.DOTALL)
+    if package_entries is None:
+        raise error_type("UV package cutoff settings are unsupported")
+    keys = []
+    for name, value in package_cutoffs(package_entries[1], balanced=balanced, error_type=error_type):
+        timestamp = cutoff_value(value, now, error_type=error_type)
+        span = re.search(r"\bExcludeNewerSpan\(\s*([^,\s]+)", value)
+        keys.append((name, timestamp.isoformat(), span[1] if span and not freeze_package_cutoffs else None))
+    body = body[:cutoff.start()] + "package_cutoffs:" + repr(sorted(keys)) + "\n" + body[end:]
     if remapper is not None:
         for field in ("dependency_metadata", "extra_build_dependencies", "sources"):
             match = re.search(r"(?m)^\s*" + field + r":\s*[^\n({\[]*([({\[])", body)

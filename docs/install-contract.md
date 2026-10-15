@@ -2245,10 +2245,13 @@ installer does not add an epsilon that could admit younger bytes.
 Supported UV cutoff projections include legacy absolute/relative values and
 structured timestamps with an optional relative span. The structured form
 uses the earlier captured timestamp or relative boundary for the enforced
-global cutoff. A retained package override's actual timestamp must independently
-pass the global boundary; span metadata cannot justify a younger override.
-Package-cutoff comparison uses one admission clock without discarding its span,
-a stricter timestamp or any other resolver setting.
+global cutoff. Each effective package cutoff must be at least as strict as that
+global boundary. Every admitted package override, including environment and
+configuration-file values, is frozen to an absolute CLI cutoff before execution;
+span metadata never excuses a younger executed override. Retained
+comparison accounts for that intentional span-to-absolute conversion, preserving
+the admitted timestamp and every other resolver setting even as probe and
+execution clocks advance.
 `--reinstall` forces actual resolution rather than
 trusting a previously installed, potentially newer package. Skipping dependency
 or isolated-build resolution is not an age-enforcement fallback.

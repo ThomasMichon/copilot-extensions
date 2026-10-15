@@ -159,9 +159,10 @@ def test_structured_uv_cutoff_preserves_the_strongest_boundary(timestamp, span, 
 @pytest.mark.parametrize("timestamp,span,accepted", [
     ("2026-10-06T00:00:00Z", "None", True),
     ("2026-10-06T00:00:00Z", "Some(ExcludeNewerSpan(7d))", True),
+    ("2026-10-06T00:00:01Z", "Some(ExcludeNewerSpan(7d))", True),
     ("2026-10-06T00:00:01Z", "None", False),
     ("2026-10-03T00:00:01Z", "Some(ExcludeNewerSpan(10d,),)", True),
-    ("2026-10-12T00:00:00Z", "Some(ExcludeNewerSpan(10d,),)", False),
+    ("2026-10-12T00:00:00Z", "Some(ExcludeNewerSpan(10d,),)", True),
 ])
 def test_structured_uv_package_cutoff_cannot_weaken_seasoning(timestamp, span, accepted):
     projection = settings(packages=package("demo", projected_cutoff(timestamp, span)))
@@ -206,6 +207,19 @@ def test_structured_package_comparison_preserves_stricter_timestamps(timestamp, 
 def test_stricter_package_is_preserved():
     date = NOW - timedelta(days=10)
     assert policy.cutoff_arguments(settings(packages=package("demo", absolute(date))), now=NOW)[1] == "2026-10-06T00:00:00Z"
+
+
+def test_every_effective_package_override_is_frozen_to_its_admitted_absolute_cutoff():
+    packages = (
+        package("first", absolute(NOW - timedelta(days=10)))
+        + package("second", "Relative(ExcludeNewerSpan(11d))")
+    )
+    assert policy.cutoff_arguments(settings(packages=packages), now=NOW) == [
+        "--exclude-newer", "2026-10-06T00:00:00Z",
+        "--exclude-newer-package", "first=2026-10-03T00:00:00Z",
+        "--exclude-newer-package", "second=2026-10-02T00:00:00Z",
+        "--reinstall",
+    ]
 
 
 @pytest.mark.parametrize("packages", [
@@ -393,7 +407,10 @@ def test_real_uv_settings_consumer_preserves_stricter_cutoff(tmp_path):
     ]
     result = policy.prepare_uv_install(uv, arguments, cwd=tmp_path, now=NOW)
     assert result.count("--exclude-newer") == 1
-    assert result[-3:] == ["--exclude-newer", "2020-01-01T00:00:00Z", "--reinstall"]
+    assert result[result.index("--exclude-newer") + 1] == "2020-01-01T00:00:00Z"
+    assert result.count("--exclude-newer-package") == 1
+    assert result[result.index("--exclude-newer-package") + 1] == "demo=2019-01-01T00:00:00Z"
+    assert result[-1] == "--reinstall"
 
 
 def test_real_uv_settings_consumer_preserves_relative_cutoffs(tmp_path):
@@ -406,10 +423,13 @@ def test_real_uv_settings_consumer_preserves_relative_cutoffs(tmp_path):
     ]
     result = policy.prepare_uv_install(uv, arguments, cwd=tmp_path, now=now)
     expected = (now - timedelta(days=10)).isoformat().replace("+00:00", "Z")
-    assert result[-3:] == ["--exclude-newer", expected, "--reinstall"]
+    assert result[result.index("--exclude-newer") + 1] == expected
+    expected_package = (now - timedelta(days=11)).isoformat().replace("+00:00", "Z")
+    assert result[result.index("--exclude-newer-package") + 1] == f"demo={expected_package}"
+    assert result[-1] == "--reinstall"
 
 
-def test_real_uv_package_span_cannot_mask_a_weaker_timestamp(tmp_path):
+def test_real_uv_package_span_is_enforced_on_the_executed_override(tmp_path):
     uv = shutil.which("uv")
     assert uv, "native UV is required for structured package cutoff coverage"
     (tmp_path / "uv.toml").write_text(
@@ -418,19 +438,10 @@ def test_real_uv_package_span_cannot_mask_a_weaker_timestamp(tmp_path):
     )
     arguments = ["--python", sys.executable, "demo"]
     environment = offline_environment(tmp_path)
-    projection = subprocess.run(
-        [uv, "pip", "install", "--show-settings", *arguments], cwd=tmp_path,
-        env=environment, capture_output=True, text=True, timeout=30,
-        creationflags=policy._HEADLESS,
-    )
-    assert projection.returncode == 0, projection.stderr
-    if "ExcludeNewerValue {" in projection.stdout:
-        with pytest.raises(policy.DependencyPolicyError, match="weakens seasoning"):
-            policy.prepare_uv_install(uv, arguments, cwd=tmp_path, env=environment, now=NOW)
-    else:
-        assert "Relative(" in projection.stdout and "2099-01-01" not in projection.stdout
-        admitted = policy.prepare_uv_install(uv, arguments, cwd=tmp_path, env=environment, now=NOW)
-        assert admitted[-3:] == ["--exclude-newer", "2026-10-06T00:00:00Z", "--reinstall"]
+    admitted = policy.prepare_uv_install(uv, arguments, cwd=tmp_path, env=environment, now=NOW)
+    assert admitted[admitted.index("--exclude-newer") + 1] == "2026-10-06T00:00:00Z"
+    assert admitted[admitted.index("--exclude-newer-package") + 1] == "demo=2026-10-02T00:00:00Z"
+    assert admitted[-1] == "--reinstall"
 
 
 @pytest.mark.parametrize("missing_timestamp,url_dependency,exact_boundary", [
@@ -439,7 +450,7 @@ def test_real_uv_package_span_cannot_mask_a_weaker_timestamp(tmp_path):
 @pytest.mark.parametrize("first_party_source", [False, True])
 def test_real_uv_registry_transitive_and_isolated_build_age(
     tmp_path, missing_timestamp, url_dependency, exact_boundary, first_party_source,
-    mutation=None, monkeypatch=None,
+    mutation=None, monkeypatch=None, clock_source=None,
 ):
     import hashlib
     import io
@@ -479,6 +490,8 @@ def test_real_uv_registry_transitive_and_isolated_build_age(
         }
         if not (missing_timestamp and name == "fixture-transitive"):
             record["upload-time"] = "2020-01-01T00:00:00Z" if old else datetime.now(timezone.utc).isoformat()
+            if clock_source and name == "fixture-transitive" and not old:
+                record["upload-time"] = (NOW - timedelta(days=7) + timedelta(seconds=1)).isoformat()
             if old and name == "fixture-transitive":
                 adjustment = timedelta() if exact_boundary else timedelta(milliseconds=1)
                 record["upload-time"] = (NOW - timedelta(seconds=604800) - adjustment).isoformat()
@@ -559,6 +572,14 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                       encoding="utf-8")
     environment["UV_CONFIG_FILE"] = str(config)
     environment["UV_CACHE_DIR"] = str(tmp_path / "cache")
+    if clock_source == "config":
+        config.write_text(
+            'exclude-newer-package={fixture-transitive="7 days"}\n'
+            + config.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    elif clock_source == "environment":
+        environment["UV_EXCLUDE_NEWER_PACKAGE"] = "fixture-transitive=7 days"
     venv = tmp_path / "venv"
     flags = {"creationflags": policy._HEADLESS}
     try:
@@ -588,6 +609,10 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                 assert downloads == []
                 return
         arguments = ["--python", str(python), requirement]
+        if clock_source == "cli":
+            arguments.extend(["--exclude-newer-package", "fixture-transitive=7 days"])
+        elif clock_source == "cli-inline":
+            arguments.append("--exclude-newer-package=fixture-transitive=7 days")
         included = tmp_path / "included.txt"
         requirements = tmp_path / "requirements.txt"
         if mutation == "requirements":
@@ -596,8 +621,15 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             arguments = ["--python", str(python), "-r", str(requirements)]
         actual_run = subprocess.run
         mutations = []
+        clock_steps = []
 
         def run(command, **kwargs):
+            if clock_source and command[1:3] == ["pip", "install"]:
+                clock = NOW + (timedelta(seconds=2) if clock_steps else timedelta())
+                kwargs["env"] = dict(
+                    kwargs["env"], UV_TEST_CURRENT_TIMESTAMP=clock.isoformat().replace("+00:00", "Z"),
+                )
+                clock_steps.append(clock)
             if mutation and "--show-settings" not in command and command[1:3] == ["pip", "install"]:
                 mutations.append(mutation)
                 remote = f"fixture-transitive @ http://127.0.0.1:{server.server_port}/files/fixture_transitive-2.0-py3-none-any.whl"
@@ -618,7 +650,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                 assert Path(kwargs["cwd"]) != tmp_path
             return actual_run(command, **kwargs)
 
-        if mutation:
+        if mutation or clock_source:
             monkeypatch.setattr(policy.subprocess, "run", run)
         installed = policy.run_uv_install(
             uv, arguments, env=environment, cwd=tmp_path, now=NOW, trusted_source_roots=roots,
@@ -639,6 +671,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                 env=environment, check=True, capture_output=True, text=True, timeout=10, **flags,
             )
             assert versions.stdout.splitlines() == ["1.0", "backend-1.0"]
+            if clock_source:
+                assert clock_steps == [NOW, NOW + timedelta(seconds=2), NOW + timedelta(seconds=2)]
+                assert "fixture_transitive-2.0-py3-none-any.whl" not in downloads
             if mutation:
                 assert mutations == [mutation]
                 assert "fixture_transitive-2.0-py3-none-any.whl" not in downloads
@@ -652,6 +687,13 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 def test_native_install_never_reopens_admitted_mutable_inputs(tmp_path, monkeypatch, mutation):
     test_real_uv_registry_transitive_and_isolated_build_age(
         tmp_path, False, False, False, True, mutation=mutation, monkeypatch=monkeypatch,
+    )
+
+
+@pytest.mark.parametrize("source", ["cli", "cli-inline", "environment", "config"])
+def test_native_package_cutoffs_stay_frozen_across_probe_and_execution_clocks(tmp_path, monkeypatch, source):
+    test_real_uv_registry_transitive_and_isolated_build_age(
+        tmp_path, False, False, False, False, monkeypatch=monkeypatch, clock_source=source,
     )
 
 

@@ -916,3 +916,22 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   fixed test clock as the policy rather than comparing captured wall-clock
   timestamps against a different injected date. The final complete portfolios
   and governed preparation above include these corrections.
+- The first independent review of #6886 identified the remaining execution
+  boundary: a relative override can advance after admission even when its
+  normalized comparison passes. A native controlled-index replay against that
+  exact preceding source actually installed the excluded `2.0` artifact
+  instead of `1.0`. The correction freezes every admitted effective package
+  cutoff to an absolute CLI value, covering separate/inline CLI arguments,
+  environment and configuration files. Retained comparison explicitly accounts
+  for this intentional conversion; it does not discard unrelated settings.
+  The four real consumer cases advance UV's clock between admission, retained
+  probing and actual installation and require the excluded artifact to remain
+  undownloaded. Fresh final validation and current-head review remain required.
+- Final freeze validation passed 207 policy cases with real UV 0.11.7 and
+  294 legacy UV 0.12.5 policy/synchronization cases. The final governed
+  Worktrees preparation also succeeds. Freezing the derived absolute boundary
+  supersedes the interim timestamp-only refusal: equal relative boundaries
+  remain usable, while a newer captured timestamp cannot become a younger
+  executed override. All four advancing-clock cases execute real resolution
+  from fresh targets; malformed, weaker absolute and unknown settings remain
+  refused. The correction still owes fresh-head review/CI and release.

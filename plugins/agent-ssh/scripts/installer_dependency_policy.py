@@ -420,17 +420,13 @@ def cutoff_arguments(settings: str, *, now: datetime | None = None) -> list[str]
     )
     if package_match is None:
         raise DependencyPolicyError("UV package cutoff settings are unsupported")
-    entries = package_match[1].strip()
-    while entries:
-        entry = re.match(r'PackageName\(\s*"([a-z0-9._-]+)",?\s*\):\s*Enabled\(', entries)
-        if entry is None:
-            raise DependencyPolicyError("disabled or unsupported package-specific seasoning")
-        value, stop = _balanced(entries, entry.end() - 1, "(", ")")
-        # Package overrides remain in UV's input, so their actual timestamp must pass.
-        if _cutoff_value(value, now, clamp_relative=False) > floor:
-            raise DependencyPolicyError(f"package-specific cutoff weakens seasoning: {entry[1]}")
-        entries = entries[stop:].lstrip(", \r\n\t")
-    return ["--exclude-newer", floor.isoformat().replace("+00:00", "Z"), "--reinstall"]
+    package_arguments = []
+    for name, value in _package_cutoffs(package_match[1]):
+        if _cutoff_value(value, now) > floor:
+            raise DependencyPolicyError(f"package-specific cutoff weakens seasoning: {name}")
+        frozen = _cutoff_value(value, now).isoformat().replace("+00:00", "Z")
+        package_arguments.extend(["--exclude-newer-package", f"{name}={frozen}"])
+    return ["--exclude-newer", floor.isoformat().replace("+00:00", "Z"), *package_arguments, "--reinstall"]
 
 
 def _source_inputs(arguments, environment, cwd, trusted_source_roots):
@@ -572,9 +568,9 @@ def prepare_uv_install(
     cleaned = []
     iterator = iter(arguments)
     for argument in iterator:
-        if argument == "--exclude-newer":
+        if argument in ("--exclude-newer", "--exclude-newer-package"):
             next(iterator, None)
-        elif (not argument.startswith("--exclude-newer=")
+        elif (not argument.startswith(("--exclude-newer=", "--exclude-newer-package="))
               and argument not in ("--reinstall", "--force-reinstall")):
             cleaned.append(argument)
     return [*cleaned, *admitted]
@@ -630,6 +626,7 @@ _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyErro
 _private_retained_root = partial(_configuration.private_retained_root, error_type=DependencyPolicyError)
 _merge_config = _configuration.merge_config
 _cutoff_value = partial(_configuration.cutoff_value, error_type=DependencyPolicyError)
+_package_cutoffs = partial(_configuration.package_cutoffs, balanced=_balanced, error_type=DependencyPolicyError)
 _resolver_configuration = partial(
     _configuration.resolver_configuration, balanced=_balanced, error_type=DependencyPolicyError,
 )
@@ -925,7 +922,9 @@ def run_uv_install(
             uv, retained, env=retained_environment, cwd=retained_base, now=now,
             trusted_source_roots=retained_roots, _projection=retained_projection,
         )
-        original_configuration = _resolver_configuration(original_projection[0], remap, now=now)
+        original_configuration = _resolver_configuration(
+            original_projection[0], remap, now=now, freeze_package_cutoffs=True,
+        )
         retained_configuration = _resolver_configuration(retained_projection[0], now=now)
         if original_configuration != retained_configuration:
             raise DependencyPolicyError("retained UV configuration differs from the configured resolver")
