@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from ssh_manager.carrier import (
+    CarrierProtocolError,
     CarrierUnavailable,
     Envelope,
     EnvelopeType,
@@ -332,9 +333,12 @@ async def test_native_descendant_held_stderr_read_transport_is_closed(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("replacement_mode", ["ensure", "request", "failed"])
+@pytest.mark.parametrize(
+    "replacement_mode", ["ensure", "request", "failed", "cancel", "submitted-cancel"],
+)
+@pytest.mark.parametrize("old_request", [False, True])
 async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
-    tmp_path, replacement_mode,
+    tmp_path, replacement_mode, old_request,
 ):
     _native_console()
     ready = tmp_path / "descendant-ready"
@@ -350,15 +354,22 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
         "finished.write_text('finished')\n"
     )
     frame = encode_envelope(hello_envelope())
+    receive_old_request = (
+        "n=struct.unpack('!I',sys.stdin.buffer.read(4))[0];sys.stdin.buffer.read(n);"
+        "n=struct.unpack('!I',sys.stdin.buffer.read(4))[0];sys.stdin.buffer.read(n);"
+        if old_request else ""
+    )
     parent = (
-        "import os,subprocess,sys;"
+        "import os,struct,subprocess,sys;"
         f"sys.stdout.buffer.write({frame!r});sys.stdout.buffer.flush();"
+        f"{receive_old_request}"
         f"subprocess.Popen([sys.executable,'-c',{child!r}],"
         "stdin=subprocess.DEVNULL,stdout=sys.stdout,stderr=sys.stderr);"
         "os._exit(0)"
     )
     carrier, processes = await _native_carrier([sys.executable, "-u", "-c", parent])
     old_tasks = set()
+    pending_request = fresh_request = None
 
     async def wait_until(predicate):
         while not predicate():
@@ -367,35 +378,51 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
     try:
         lease = await carrier.acquire()
         process = processes[0]
+        if old_request:
+            pending_request = asyncio.create_task(carrier.request(
+                {"operation": "old-synthetic"}, timeout=None, request_id="old-request",
+            ))
         await asyncio.wait_for(
             wait_until(lambda: ready.exists() and process.returncode is not None),
             timeout=10,
         )
+        assert len(carrier._request_epochs) == int(old_request)
+        assert set(carrier._request_epochs.values()) <= {carrier._transport_epoch}
+        if old_request:
+            with pytest.raises(CarrierProtocolError, match="duplicate carrier request_id"):
+                await carrier.request({}, request_id="old-request")
+            assert len(processes) == 1
         stderr_task = carrier._stderr_tasks[id(process)]
         transport = process.stderr._transport
         old_tasks = set(carrier._tasks)
         replacement = _FailedProcess(b"", returncode=None)
         submitted = []
-        if replacement_mode != "failed":
+        if replacement_mode not in ("failed", "cancel"):
             replacement.stdout = asyncio.StreamReader()
             replacement.stdout.feed_data(frame)
+        elif replacement_mode == "cancel":
+            replacement.stdout = asyncio.StreamReader()
+        opening = asyncio.Event()
 
         class ReplyInput(_Input):
             def write(self, data):
                 envelope = decode_envelope(data[4:])
                 if envelope.type is EnvelopeType.REQUEST:
+                    assert carrier._request_epochs[envelope.request_id] == carrier._transport_epoch
                     submitted.append(envelope.request_id)
-                    replacement.stdout.feed_data(encode_envelope(Envelope(
-                        EnvelopeType.RESPONSE,
-                        request_id=envelope.request_id,
-                        payload={"executed": 1},
-                    )))
+                    if replacement_mode != "submitted-cancel":
+                        replacement.stdout.feed_data(encode_envelope(Envelope(
+                            EnvelopeType.RESPONSE,
+                            request_id=envelope.request_id,
+                            payload={"executed": 1},
+                        )))
 
         replacement.stdin = ReplyInput()
 
         async def reopen():
             assert stderr_task.done()
             assert transport.is_closing()
+            opening.set()
             return replacement
 
         carrier._opener = reopen
@@ -404,13 +431,41 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
             assert response.payload == {"executed": 1}
             assert submitted == [response.request_id]
             assert carrier._process is replacement
+            for _ in range(8):
+                assert not carrier._request_epochs
+                await carrier.request({"operation": "synthetic"}, timeout=2)
+            assert len(submitted) == len(set(submitted)) == 9
+            assert "old-request" not in submitted
         elif replacement_mode == "ensure":
             await asyncio.wait_for(carrier.ensure_started(), timeout=2)
             assert carrier._process is replacement
-        else:
+        elif replacement_mode == "failed":
             with pytest.raises(CarrierUnavailable):
                 await asyncio.wait_for(carrier.ensure_started(), timeout=2)
             assert carrier._process is None
+        elif replacement_mode == "cancel":
+            fresh_request = asyncio.create_task(carrier.request(
+                {"operation": "cancelled-synthetic"}, timeout=None,
+            ))
+            await asyncio.wait_for(opening.wait(), timeout=2)
+            fresh_request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await fresh_request
+            assert not submitted
+        else:
+            fresh_request = asyncio.create_task(carrier.request(
+                {"operation": "cancelled-synthetic"}, timeout=None,
+            ))
+            await asyncio.wait_for(wait_until(lambda: len(submitted) == 1), timeout=2)
+            fresh_request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await fresh_request
+            assert len(submitted) == 1
+        if pending_request is not None:
+            with pytest.raises(CarrierUnavailable, match="carrier transport was lost"):
+                await asyncio.wait_for(asyncio.shield(pending_request), timeout=2)
+        assert not carrier._pending
+        assert not carrier._request_epochs
         await carrier.close()
         assert stderr_task.done()
         assert transport.is_closing()
@@ -421,6 +476,10 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
     finally:
         release.write_text("release")
         await carrier.close()
+        for request in (pending_request, fresh_request):
+            if request is not None:
+                request.cancel()
+                await asyncio.gather(request, return_exceptions=True)
         await asyncio.wait_for(asyncio.gather(*old_tasks, return_exceptions=True), timeout=2)
         for process in processes:
             await carrier._closer(process)

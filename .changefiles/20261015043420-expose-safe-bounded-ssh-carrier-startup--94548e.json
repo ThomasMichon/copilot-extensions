@@ -1,5 +1,5 @@
 {
-  "comment": "Expose safe bounded SSH carrier startup failure diagnostics without changing raw framing or operation semantics (#6847).",
+  "comment": "Expose safe bounded SSH carrier startup diagnostics and retire owned process pipes and outstanding requests without replay or raw framing changes (#6847).",
   "changes": [
     {
       "plugin": "agent-bridge",

@@ -39,8 +39,12 @@ agent-codespaces) import this library instead of spawning SSH directly.
   Cleanup bounds the final stderr drain and closes its owned read transport
   even when a descendant keeps the remote pipe open; it does not change
   process-tree ownership. An exited transport is retired under the failure lock
-  with its epoch invalidated before a replacement opens, without failing fresh
-  requests awaiting submission.
+  with its epoch invalidated before a replacement opens. Requests are registered
+  only after startup and bound to that transport's epoch and output queue.
+  Retirement fails the old transport's outstanding requests with the existing
+  transport-loss error, including requests without a timeout; it neither fails
+  fresh startup waiters nor resubmits operations on a replacement. Ownership
+  metadata lasts only as long as the corresponding pending request.
 
 ## Usage
 

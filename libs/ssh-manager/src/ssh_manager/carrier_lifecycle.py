@@ -112,6 +112,7 @@ class _CarrierLifecycleMixin:
         self._reconnect_task: asyncio.Task[None] | None = None
         self._idle_task: asyncio.Task[None] | None = None
         self._pending: dict[str, asyncio.Future[Envelope]] = {}
+        self._request_epochs: dict[str, int] = {}
         self._subscriptions: dict[str, CarrierSubscription] = {}
         self._buffer_budget = _BufferBudget(max_buffered_bytes)
         self._logical_clients = 0
@@ -173,6 +174,7 @@ class _CarrierLifecycleMixin:
                 async with self._failure_lock:
                     previous, self._process = self._process, None
                     if previous is not None:
+                        previous_epoch = self._transport_epoch
                         self._transport_epoch += 1
                         self._writer_queue = None
                         self._outbound_max_frame_size = self._max_frame_size
@@ -180,8 +182,14 @@ class _CarrierLifecycleMixin:
                         for task in list(self._tasks):
                             if task is not current:
                                 task.cancel()
-                        # Pending futures also include requests not yet submitted.
-                        # Retire only the old process, not those fresh requests.
+                        for request_id, future in list(self._pending.items()):
+                            if (
+                                self._request_epochs.get(request_id) == previous_epoch
+                                and not future.done()
+                            ):
+                                future.set_exception(CarrierUnavailable(
+                                    "carrier transport was lost", reconnectable=True,
+                                ))
                         await self._closer(previous)
             if self._closed:
                 raise CarrierUnavailable("carrier has retired")
@@ -412,6 +420,7 @@ class _CarrierLifecycleMixin:
                 if not future.done():
                     future.set_exception(CarrierUnavailable("carrier retired"))
             self._pending.clear()
+            self._request_epochs.clear()
             for subscription in self._subscriptions.values():
                 subscription._terminate(CarrierUnavailable("carrier retired"))
             self._subscriptions.clear()

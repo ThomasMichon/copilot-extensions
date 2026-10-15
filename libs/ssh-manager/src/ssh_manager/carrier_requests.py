@@ -39,15 +39,25 @@ class _CarrierRequestMixin:
         request_id = request_id or uuid.uuid4().hex
         if request_id in self._pending:
             raise CarrierProtocolError("duplicate carrier request_id")
+        await self.ensure_started()
+        if request_id in self._pending:
+            raise CarrierProtocolError("duplicate carrier request_id")
         future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
+        self._request_epochs[request_id] = self._transport_epoch
         submitted = False
         try:
-            await self._send(
-                Envelope(
-                    EnvelopeType.REQUEST,
-                    payload=dict(payload),
-                    request_id=request_id,
+            queue = self._writer_queue
+            if queue is None:
+                raise CarrierUnavailable("carrier output is unavailable", reconnectable=True)
+            await queue.put(
+                encode_envelope(
+                    Envelope(
+                        EnvelopeType.REQUEST,
+                        payload=dict(payload),
+                        request_id=request_id,
+                    ),
+                    max_frame_size=self._outbound_max_frame_size,
                 )
             )
             submitted = True
@@ -64,6 +74,7 @@ class _CarrierRequestMixin:
             raise
         finally:
             self._pending.pop(request_id, None)
+            self._request_epochs.pop(request_id, None)
             self._schedule_idle_retirement()
 
 
@@ -177,4 +188,3 @@ class _CarrierRequestMixin:
                     )
                 )
                 await process.stdin.drain()
-
