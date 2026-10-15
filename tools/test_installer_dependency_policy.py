@@ -827,6 +827,8 @@ def test_relative_certificate_directory_list_retains_original_cwd(tmp_path, monk
 
 
 def source_project(path, name="fixture-source", sources="", dependencies=""):
+    import ast
+
     path.mkdir(parents=True, exist_ok=True)
     (path / "pyproject.toml").write_text(
         '[build-system]\nrequires=[]\nbuild-backend="fixture_backend"\nbackend-path=["."]\n'
@@ -834,13 +836,16 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
         + (f"[tool.uv.sources]\n{sources}\n" if sources else ""),
         encoding="utf-8",
     )
+    metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n" + "".join(
+        f"Requires-Dist: {requirement}\n" for requirement in ast.literal_eval(f"[{dependencies}]")
+    )
     (path / "fixture_backend.py").write_text(
         "import pathlib, zipfile\n"
         "def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):\n"
         f"    name = '{name.replace('-', '_')}-1.0-py3-none-any.whl'\n"
         "    with zipfile.ZipFile(pathlib.Path(wheel_directory) / name, 'w') as wheel:\n"
         f"        prefix = '{name.replace('-', '_')}-1.0.dist-info/'\n"
-        f"        wheel.writestr(prefix + 'METADATA', 'Metadata-Version: 2.1\\nName: {name}\\nVersion: 1.0\\n')\n"
+        f"        wheel.writestr(prefix + 'METADATA', {metadata!r})\n"
         "        wheel.writestr(prefix + 'WHEEL', 'Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n')\n"
         "        wheel.writestr(prefix + 'RECORD', '')\n"
         "    return name\n",
@@ -1082,10 +1087,12 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
         repository / "plugins" / "fixture-plugin", "fixture-plugin",
         sources=f'fixture-lib={{path="../../libs/fixture-lib"{editable}}}' if canonical_libraries
         else 'fixture-lib={path="libs/fixture-lib"}',
+        dependencies='"fixture-lib>=1"',
     )
     lib = source_project(
         repository / "libs" / "fixture-lib" if canonical_libraries else payload / "libs" / "fixture-lib",
         "fixture-lib", sources=f'fixture-leaf={{path="../fixture-leaf"{editable}}}',
+        dependencies='"fixture-leaf>=1"',
     )
     leaf = source_project(lib.parent / "fixture-leaf", "fixture-leaf")
     manifest = {
@@ -1137,14 +1144,25 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     import os
 
     python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    for source in (payload, lib, leaf):
-        result = subprocess.run(
-            [sys.executable, "-I", str(helper), "--uv", uv, "--",
-             "--no-config", "--no-index", "--python", str(python), str(source)],
-            cwd=tmp_path, env=environment, capture_output=True, text=True,
-            timeout=30, creationflags=policy._HEADLESS,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
+    result = subprocess.run(
+        [sys.executable, "-I", str(helper), "--uv", uv, "--",
+         "--no-config", "--no-index", "--python", str(python), str(payload)],
+        cwd=tmp_path, env=environment, capture_output=True, text=True,
+        timeout=30, creationflags=policy._HEADLESS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    installed = subprocess.run(
+        [str(python), "-I", "-c",
+         "import importlib.metadata as m, json; "
+         "print(json.dumps({name: m.version(name) for name in "
+         "('fixture-plugin', 'fixture-lib', 'fixture-leaf')}))"],
+        cwd=tmp_path, env=environment, capture_output=True, text=True,
+        timeout=30, creationflags=policy._HEADLESS,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert json.loads(installed.stdout) == {
+        "fixture-plugin": "1.0", "fixture-lib": "1.0", "fixture-leaf": "1.0",
+    }
     unowned = source_project(repository / "unowned", "agent-lookalike")
     rejected = subprocess.run(
         [sys.executable, "-I", str(helper), "--uv", uv, "--", str(unowned)],

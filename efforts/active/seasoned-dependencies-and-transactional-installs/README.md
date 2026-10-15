@@ -837,3 +837,11 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   Thirteen runtime change entries carry the synchronized correction. Fresh
   review/CI, containing release qualification and configured-feed rollout
   remain required; no production or installed copy was patched.
+- Genuine review of #6849 found that the initial native fixture installed its
+  three projects separately, so it proved graph attribution but not actual
+  transitive installation from the payload. The synthetic backend now emits
+  the declared dependency metadata, the fixture installs only the payload,
+  and its fresh target interpreter verifies all three installed distribution
+  versions. All 160 policy cases passed with that stronger consumer assertion.
+  The production correction is unchanged; fresh current-head review and CI
+  remain necessary before merge.
