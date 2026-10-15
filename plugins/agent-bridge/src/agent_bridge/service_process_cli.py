@@ -371,17 +371,23 @@ def _daemon_launch_argv() -> list[str]:
 
 
 def _spawn_via_wmi_broker_pid(argv: list[str]) -> int | None:
-    """Launch the daemon through WMI ``Win32_Process.Create``."""
+    """Launch the daemon through WMI ``Win32_Process.Create``.
+
+    The WMI-created process inherits the WMI provider's environment rather than
+    the caller's, so the install/config root overrides are set explicitly.
+    """
     import base64
     import subprocess as _sp
 
     core = _core()
-    log = os.path.join(core._INSTALL_DIR, "agent-bridge.log")
-    err = os.path.join(core._INSTALL_DIR, "agent-bridge-err.log")
-    inner = " ".join(f'"{a}"' for a in argv) + f' >> "{log}" 2>> "{err}"'
+    root = os.path.abspath(core._INSTALL_DIR)
+    log = os.path.join(root, "agent-bridge.log")
+    err = os.path.join(root, "agent-bridge-err.log")
+    env = "".join(f'set "{name}={value}" && ' for name, value in _daemon_root_env().items())
+    inner = env + " ".join(f'"{a}"' for a in argv) + f' >> "{log}" 2>> "{err}"'
     cmdline = f'conhost.exe --headless cmd.exe /c "{inner}"'
     ps_cmdline = cmdline.replace("'", "''")
-    ps_cwd = core._INSTALL_DIR.replace("'", "''")
+    ps_cwd = root.replace("'", "''")
     ps = (
         "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
         f"-Arguments @{{ CommandLine = '{ps_cmdline}'; "
@@ -435,42 +441,70 @@ class _BrokeredProcessHandle:
         )
 
 
-def _spawn_detached_argv(argv: list[str]) -> None:
-    """Spawn ``argv`` as a detached, job-surviving process."""
-    import subprocess as _sp
+def _daemon_root_env() -> dict[str, str]:
+    """Anchor caller-relative install/config root overrides for the child.
+
+    The daemon runs from its install root, not the caller's cwd, so a relative
+    override in the environment would otherwise resolve against the wrong
+    directory in the child.
+    """
+    from .install_paths import CONFIG_DIR_ENV, INSTALL_DIR_ENV
+
+    return {
+        name: os.path.abspath(os.path.expanduser(os.environ[name]))
+        for name in (INSTALL_DIR_ENV, CONFIG_DIR_ENV)
+        if os.environ.get(name)
+    }
+
+
+def _launch_bridge_daemon(argv: list[str], *, display: str, contained_last_resort: bool):
+    """Start a bridge daemon through ``spawn_daemon``; return its process handle.
+
+    The daemon breaks away from the caller's Job and runs from the install root
+    with ``agent-bridge.log`` and a separate ``agent-bridge-err.log``. When the
+    caller's Job forbids breakaway on Windows, the WMI broker re-parents the
+    daemon outside it instead. Only when that also fails, and the caller
+    accepts a daemon that dies with its Job (``contained_last_resort``), is it
+    started inside the Job; otherwise the launch failure is raised.
+    """
+    from agent_procutil import DaemonSpawnError
 
     core = _core()
-    # Never the caller's ambient cwd: this is a long-lived supervised daemon
-    # that may outlive whatever repo/worktree checkout the caller happened
-    # to be running from (service-lifecycle-supervision's "nothing pins the
-    # plugin payload" rule, generalized to every deletable checkout). Its
-    # own log files already live under the durable install dir -- root cwd
-    # there too.
+    root = os.path.abspath(core._INSTALL_DIR)
+    os.makedirs(root, exist_ok=True)
+    launch = {
+        "cwd": root,
+        "log_path": os.path.join(root, "agent-bridge.log"),
+        "stderr_log_path": os.path.join(root, "agent-bridge-err.log"),
+        "env_overrides": _daemon_root_env(),
+        "console_children": True,
+    }
     try:
-        logf = open(os.path.join(core._INSTALL_DIR, "agent-bridge.log"), "ab")
-        errf = open(os.path.join(core._INSTALL_DIR, "agent-bridge-err.log"), "ab")
-        _sp.Popen(
-            argv,
-            stdout=logf,
-            stderr=errf,
-            stdin=_sp.DEVNULL,
-            cwd=core._INSTALL_DIR,
-            **core.windowless_daemon_kwargs(breakaway=True),
-        )
-        return
-    except OSError:
-        if sys.platform == "win32" and core._spawn_via_wmi_broker(argv):
-            return
-        logf = open(os.path.join(core._INSTALL_DIR, "agent-bridge.log"), "ab")
-        errf = open(os.path.join(core._INSTALL_DIR, "agent-bridge-err.log"), "ab")
-        _sp.Popen(
-            argv,
-            stdout=logf,
-            stderr=errf,
-            stdin=_sp.DEVNULL,
-            cwd=core._INSTALL_DIR,
-            **core.windowless_daemon_kwargs(),
-        )
+        return core.spawn_daemon(argv, display=display, **launch)
+    except DaemonSpawnError:
+        if sys.platform != "win32":
+            raise
+        pid = core._spawn_via_wmi_broker_pid(argv)
+        if pid is not None:
+            return _BrokeredProcessHandle(pid)
+        if not contained_last_resort:
+            raise
+    return core.spawn_daemon(
+        argv,
+        breakaway=False,
+        display=f"{display} (contained: breakaway denied and the WMI broker failed)",
+        **launch,
+    )
+
+
+def _spawn_detached_argv(argv: list[str]) -> None:
+    """Spawn ``argv`` as a detached, job-surviving bridge process.
+
+    Never the caller's ambient cwd: this is a long-lived supervised daemon that
+    may outlive whatever checkout the caller ran from, so it is rooted at the
+    durable install dir where its logs also live.
+    """
+    _launch_bridge_daemon(argv, display="agent-bridge service", contained_last_resort=True)
 
 
 def _spawn_detached_daemon() -> None:

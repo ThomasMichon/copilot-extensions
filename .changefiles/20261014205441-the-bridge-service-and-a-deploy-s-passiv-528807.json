@@ -1,0 +1,9 @@
+{
+  "comment": "The bridge service and a deploy's passive generation launch through the shared spawn_daemon primitive: rooted at the absolute install dir, stderr kept in agent-bridge-err.log, caller-relative root overrides anchored, and the WMI broker used only when the caller's Job forbids breakaway (it now carries the root overrides and absolute paths).",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

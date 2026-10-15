@@ -93,7 +93,11 @@ It composes the helpers above, so its flags never drift from them:
   its own copy of the handle before returning the `Popen`. The header records
   the cwd and the executable (`argv[0]`) only, never the rest of argv or the
   environment, since either may carry a token, password or credential URL.
-  Pass an already-redacted `display="..."` label to add context to it.
+  Pass an already-redacted `display="..."` label to add context to it. A
+  daemon whose operators read its stderr from a separate file passes
+  `stderr_log_path=` (validated, created and tightened exactly like
+  `log_path`; the same path merges); the header and any breakaway note are
+  then written to both logs.
 
 `argv` must be a sequence of arguments: a bare `str`, `bytes` or path raises
 `TypeError` instead of being split into characters. `env` defaults to a copy

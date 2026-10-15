@@ -7,7 +7,6 @@ import contextlib
 import io
 import json
 import socket
-import subprocess
 import sys
 import time
 import urllib.request
@@ -175,27 +174,6 @@ def _fault_frontend_restart_hostindex_loss(
     }
 
 
-def _passive_daemon_creationflags() -> int:
-    core = _core()
-    if sys.platform == "win32":
-        return int(core.windowless_daemon_kwargs(breakaway=True).get("creationflags", 0))
-    return 0
-
-
-def _passive_daemon_stdio_kwargs() -> tuple[dict, list]:
-    from .config import config_dir
-
-    open_fn = getattr(_core(), "open", open)
-    log_out = open_fn(config_dir() / "agent-bridge.log", "ab")
-    try:
-        log_err = open_fn(config_dir() / "agent-bridge-err.log", "ab")
-    except OSError:
-        log_out.close()
-        raise
-    kwargs = {"stdout": log_out, "stderr": log_err, "stdin": subprocess.DEVNULL}
-    return kwargs, [log_out, log_err]
-
-
 def _cmd_deploy(
     args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
     routing_dir: Path | None = None,
@@ -259,24 +237,11 @@ def _cmd_deploy(
 
     def spawn_passive(port: int):
         cmd = [sys.executable, "-m", "agent_bridge", "start", "--port", str(port), "--passive"]
-        kwargs, opened_streams = _passive_daemon_stdio_kwargs()
-        if sys.platform == "win32":
-            kwargs["creationflags"] = _passive_daemon_creationflags()
-        else:
-            kwargs["start_new_session"] = True
-        try:
-            try:
-                return subprocess.Popen(cmd, **kwargs)
-            finally:
-                for stream in opened_streams:
-                    stream.close()
-        except OSError:
-            if sys.platform != "win32":
-                raise
-            pid = core._spawn_via_wmi_broker_pid(cmd)
-            if pid is None:
-                raise
-            return core._BrokeredProcessHandle(pid)
+        # A passive generation inside the deploy's Job would die with it once
+        # the cutover retires the active daemon: never start it contained.
+        return core._launch_bridge_daemon(
+            cmd, display="agent-bridge passive generation", contained_last_resort=False
+        )
 
     def health_check(h: str, port: int) -> bool:
         try:

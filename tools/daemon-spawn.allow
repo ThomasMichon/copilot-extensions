@@ -21,7 +21,3 @@ plugins/agent-worktrees/src/agent_worktrees/activity.py::_dispatch_background_pr
 plugins/agent-worktrees/src/agent_worktrees/local_cache_worker.py::queue  one-shot cache refresh worker, not a daemon
 plugins/agent-worktrees/src/agent_worktrees/sessions.py::headless_new_session  user-requested headless Copilot session, not a plugin daemon
 plugins/agent-worktrees/src/agent_worktrees/status_updater_cli.py::_spawn_status_updater  per-session status updater that exits with its session, not a resident daemon
-
-# Resident daemons not yet on spawn_daemon (migrate, then delete the entry).
-plugins/agent-bridge/src/agent_bridge/service_process_cli.py::_spawn_detached_argv  resident bridge service; its WMI-broker fallback and its separate agent-bridge-err.log must move into the shared launch first
-plugins/agent-bridge/src/agent_bridge/service_process_cli.py::_spawn_detached_argv  same service: the contained retry after breakaway and the WMI broker both fail

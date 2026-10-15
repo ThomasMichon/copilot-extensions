@@ -77,7 +77,8 @@ for recurring console descendants), or, at sites not yet migrated to it,
 `windowless_daemon_kwargs(breakaway=True)` / `detached_kwargs(breakaway=True)`.
 `spawn_daemon` also requires an explicit durable `cwd` (the runtime root or
 home, never the caller's cwd or a plugin payload) and appends the daemon's
-output to a `log_path` instead of discarding it.
+output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
+of discarding it.
 Do not remove the caller's Job or make every child break away to repair one
 daemon. The containing Job must permit breakaway; a rejected spawn is an error
 to surface, not a reason to silently retry with caller-owned lifetime.

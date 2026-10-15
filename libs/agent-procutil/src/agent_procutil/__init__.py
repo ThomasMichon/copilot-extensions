@@ -48,6 +48,7 @@ this package's own ``README.md`` § Vendoring for the mechanism, and
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ctypes
 import logging
 import math
@@ -727,23 +728,25 @@ def _is_inside_payload(path: str) -> bool:
     return _PAYLOAD_DIR_MARKER in parts
 
 
-def _validated_daemon_log_path(log_path: str | os.PathLike[str] | None) -> str:
+def _validated_daemon_log_path(
+    log_path: str | os.PathLike[str] | None, name: str = "log_path"
+) -> str:
     """Reject a log path that is missing, relative, or inside a plugin payload.
 
     The daemon holds its log open for its whole life, so a log inside a
     payload directory pins that directory exactly like a payload cwd would.
     """
     if log_path is None:
-        raise ValueError("spawn_daemon requires a log_path")
+        raise ValueError(f"spawn_daemon requires a {name}")
     path = os.fspath(log_path)
     if not path or not os.path.isabs(path):
         # Never resolved against ``cwd``: a caller-relative path would silently
         # land somewhere else once the daemon's cwd differs from the caller's.
-        raise ValueError(f"spawn_daemon log_path must be an absolute path, got {path!r}")
+        raise ValueError(f"spawn_daemon {name} must be an absolute path, got {path!r}")
     for candidate in (path, os.path.realpath(path)):
         if _is_inside_payload(candidate):
             raise ValueError(
-                f"spawn_daemon log_path is inside a plugin payload ({path}"
+                f"spawn_daemon {name} is inside a plugin payload ({path}"
                 + (f" -> {candidate}" if candidate != path else "")
                 + "); keep the daemon log under its runtime root or home directory"
             )
@@ -872,6 +875,7 @@ def spawn_daemon(
     contained_fallback: bool = False,
     extra_creationflags: int = 0,
     display: str | None = None,
+    stderr_log_path: str | os.PathLike[str] | None = None,
 ) -> subprocess.Popen:
     """Launch a long-lived daemon that outlives its caller.
 
@@ -914,7 +918,10 @@ def spawn_daemon(
       ``display`` when given: the remaining argv and the environment are never
       written, since either may carry a token, password or credential URL. A
       caller that wants more context in the log passes an already-redacted
-      ``display`` label.
+      ``display`` label. A daemon whose operators read its stderr separately
+      passes ``stderr_log_path`` (validated, created and tightened exactly like
+      ``log_path``; the same path as ``log_path`` merges); the launch header
+      and any breakaway note are then written to both logs.
 
     ``argv`` is a sequence of arguments; a bare ``str``/``bytes``/path raises
     :class:`TypeError` rather than being split into characters. ``env``
@@ -931,6 +938,12 @@ def spawn_daemon(
     extra_creationflags = _validated_extra_creationflags(extra_creationflags)
     cwd_path = _validated_daemon_cwd(cwd)
     log_file = _validated_daemon_log_path(log_path)
+    err_file = None
+    if stderr_log_path is not None:
+        err_file = _validated_daemon_log_path(stderr_log_path, "stderr_log_path")
+        same = [os.path.normcase(os.path.normpath(p)) for p in (err_file, log_file)]
+        if same[0] == same[1]:
+            err_file = None
 
     child_env = dict(os.environ if env is None else env)
     if env_overrides:
@@ -940,16 +953,24 @@ def spawn_daemon(
         breakaway=breakaway,
         extra_creationflags=extra_creationflags,
     )
-    with _open_daemon_log(log_file) as log_fh:
+    with contextlib.ExitStack() as stack:
+        log_fh = stack.enter_context(_open_daemon_log(log_file))
+        err_fh = stack.enter_context(_open_daemon_log(err_file)) if err_file else None
+        logs = [fh for fh in (log_fh, err_fh) if fh is not None]
+
+        def write_logs(data: bytes) -> None:
+            for fh in logs:
+                fh.write(data)
+                fh.flush()
+
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        log_fh.write(_daemon_log_header(stamp, cwd_path, command[0], display))
-        log_fh.flush()
+        write_logs(_daemon_log_header(stamp, cwd_path, command[0], display))
         popen_kwargs = {
             "cwd": cwd_path,
             "env": child_env,
             "stdin": subprocess.DEVNULL,
             "stdout": log_fh,
-            "stderr": subprocess.STDOUT,
+            "stderr": subprocess.STDOUT if err_fh is None else err_fh,
             "close_fds": True,
         }
         try:
@@ -959,14 +980,13 @@ def spawn_daemon(
                 raise
             note = "spawn_daemon: the caller's Job object forbids breakaway"
             if not contained_fallback:
-                log_fh.write(f"{stamp} {note}; daemon not started\n".encode())
+                write_logs(f"{stamp} {note}; daemon not started\n".encode())
                 raise DaemonSpawnError(
                     f"{note}; the daemon would die with its caller "
                     f"({command[0]})"
                 ) from exc
             note += "; starting the daemon inside it (contained_fallback)"
             log.warning("%s (%s)", note, command[0])
-            log_fh.write(f"{stamp} {note}\n".encode())
-            log_fh.flush()
+            write_logs(f"{stamp} {note}\n".encode())
             kwargs["creationflags"] &= ~_CREATE_BREAKAWAY_FROM_JOB
             return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
