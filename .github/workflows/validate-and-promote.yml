@@ -1239,6 +1239,7 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.inventory.outputs.matrix }}
+      windows_matrix: ${{ steps.inventory.outputs.windows_matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1265,11 +1266,13 @@ jobs:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
         run: |
-          matrix=$(python -I -B trusted/tools/validate_materialized_candidate.py \
+          inventory=$(python -I -B trusted/tools/validate_materialized_candidate.py \
             --root candidate --candidate-sha "$CANDIDATE_SHA" \
             --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --matrix)
-          matrix=$(printf '%s' "$matrix" | jq -c '{include: [.include[] | select(.os == "ubuntu-latest")]}')
+          matrix=$(printf '%s' "$inventory" | jq -c '{include: [.include[] | select(.os == "ubuntu-latest")]}')
+          windows_matrix=$(printf '%s' "$inventory" | jq -c '{include: [.include[] | select(.os == "windows-latest")]}')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "windows_matrix=$windows_matrix" >> "$GITHUB_OUTPUT"
 
   materialized-candidate-consumers:
     name: Materialized consumer (${{ matrix.component }}, ${{ matrix.os }})
@@ -1327,14 +1330,7 @@ jobs:
     timeout-minutes: ${{ matrix.job_minutes }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - component: index
-            job_minutes: 10
-          - component: fleet-manager
-            job_minutes: 23
-          - component: validator-bootstrap
-            job_minutes: 20
+      matrix: ${{ fromJson(needs.materialized-candidate-plan.outputs.windows_matrix) }}
     permissions:
       contents: read
     steps:

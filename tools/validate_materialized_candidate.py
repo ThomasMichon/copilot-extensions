@@ -17,6 +17,7 @@ from materialized_candidate_inventory import (  # noqa: E402
     PLUGIN,
     STANDALONE,
     CandidateValidationError,
+    fleet_partitions,
     matrix as inventory_matrix,
     python_suites,
     regular as _regular,
@@ -139,10 +140,14 @@ def recipes(
                 for flag in ("--collect-only", "--guards")
             ]
         return [([sys.executable, str(plugin_runner), name], root)]
-    if component in STANDALONE:
+    fleet = component.startswith("fleet-manager:")
+    standalone = "fleet-manager" if fleet else component
+    if standalone in STANDALONE and (standalone != "fleet-manager" or fleet):
+        if fleet and component.removeprefix("fleet-manager:") not in fleet_partitions(root):
+            raise CandidateValidationError("unknown canonical Fleet partition")
         runner = _regular(root, Path("tools") / "run-standalone-tests.py")
         argv = [
-            sys.executable, str(runner), STANDALONE[component].as_posix(),
+            sys.executable, str(runner), STANDALONE[standalone].as_posix(),
             "--prepare", "--admission-wait", "60",
         ]
         if component == "dispatch":
@@ -150,7 +155,7 @@ def recipes(
         elif component == "index":
             argv += ["--smoke"]
         else:
-            argv += ["--timeout", "300" if os.name == "nt" else "120"]
+            argv += ["--timeout", "120"]
             return [
                 ([sys.executable, str(_regular(root, Path("tools/seasoned_uv.py"))),
                   "--uv", "uv", "--", "--system", "pytest"], root),
@@ -187,15 +192,20 @@ def run(
         env = _environment()
         if temporary:
             env["UV_CACHE_DIR"] = str(Path(temporary) / "uv-cache")
-        if component == "fleet-manager":
+        fleet = component.startswith("fleet-manager:")
+        if fleet:
             env["PYTEST_ADDOPTS"] = '-m "not client_distribution_full and not observation_retention_full"'
         if not commands:
             raise CandidateValidationError("required candidate consumer has no executable recipe")
-        for argv, directory in commands:
+        for index, (argv, directory) in enumerate(commands):
+            command_env = env
+            if fleet and index == len(commands) - 1:
+                selector = fleet_partitions(root)[component.removeprefix("fleet-manager:")]
+                command_env = {**env, "PYTEST_ADDOPTS": env["PYTEST_ADDOPTS"] + f' -k "{selector}"'}
             try:
                 minutes = next(row["minutes"] for row in expected if row["component"] == component)
                 result = subprocess.run(
-                    argv, cwd=directory, check=False, timeout=int(minutes) * 60, env=env,
+                    argv, cwd=directory, check=False, timeout=int(minutes) * 60, env=command_env,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 )
             except (OSError, subprocess.TimeoutExpired) as error:

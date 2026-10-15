@@ -76,8 +76,12 @@ standalone Dispatch/Index/Fleet on a statically routed Linux host.
 native Windows lanes; both platforms also require validator bootstrap. No
 matrix input can select a runner label. The supported
 recipes must cover the validated development input's canonical standalone
-roster. Fleet retains its existing bounded timeouts and exhaustive-test
-exclusions rather than silently expanding ordinary promotion coverage.
+roster. Fleet's canonical literal partition selectors from the immutable
+candidate's CI definition become independent matrix rows on both platforms.
+Each portfolio invocation retains its own 120-second deadline and existing
+exhaustive-test exclusions; selectors do not filter the prerequisite coverage
+guard. Missing, duplicate, nonliteral or platform-divergent partition metadata
+refuses qualification instead of collapsing the portfolio under one deadline.
 
 Validator bootstrap starts with a fresh venv and private empty UV cache. It
 runs the candidate's actual `seasoned_uv.py --registry-only` with the same

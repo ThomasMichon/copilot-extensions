@@ -95,6 +95,32 @@ def plugin_minutes(root: Path, name: str) -> int:
     return math.ceil(overrides.get(name, default) / 60) + 3
 
 
+def fleet_partitions(root: Path) -> dict[str, str]:
+    try:
+        text = regular(root, Path(".github/workflows/ci.yml")).read_text("utf-8")
+    except (OSError, UnicodeError) as error:
+        raise CandidateValidationError("candidate Fleet partition inventory is unreadable") from error
+    sections = text.split("        partition: &fleet-native-partitions\n")
+    if len(sections) != 2:
+        raise CandidateValidationError("candidate Fleet partition declaration is ambiguous")
+    body = sections[1].split("    steps: &fleet-native-steps\n", 1)
+    windows = text.split("\n  fleet-native-windows:\n")
+    windows_body = re.split(r"\n  [a-z][a-z0-9_-]*:\n", windows[1], maxsplit=1)[0] if len(windows) == 2 else ""
+    if len(body) != 2 or "        partition: *fleet-native-partitions\n" not in windows_body:
+        raise CandidateValidationError("candidate Fleet platforms do not share canonical partitions")
+    entries = list(re.finditer(
+        r"          - name: ([a-z][a-z0-9-]{0,63})\n"
+        r"            selector: '([A-Za-z0-9_ ()]{1,512})'\n", body[0],
+    ))
+    partitions = {entry[1]: entry[2] for entry in entries}
+    if (
+        not 1 <= len(entries) <= 32 or len(partitions) != len(entries)
+        or "".join(entry[0] for entry in entries) != body[0]
+    ):
+        raise CandidateValidationError("candidate Fleet partitions must be unique literal selectors")
+    return partitions
+
+
 def matrix(
     root: Path, expected: set[str], standalone: set[str],
 ) -> dict[str, list[dict[str, str | int]]]:
@@ -132,14 +158,23 @@ def matrix(
                 regular(root, relative / name)
             for name in ("seasoned_uv.py", "test_fleet_ci_scope.py"):
                 regular(root, Path("tools") / name)
-        rows.extend({
-            "os": platform, "component": component, "minutes": 5 if component == "index" else 6,
-        } for platform in platforms)
-    for row in rows:
-        count = (
-            2 if row["component"] == "plugin:agent-worktrees"
-            else 3 if row["component"] in ("fleet-manager", "validator-bootstrap") else 1
+        consumers = (
+            [f"fleet-manager:{name}" for name in fleet_partitions(root)]
+            if component == "fleet-manager" else [component]
         )
+        rows.extend({
+            "os": platform, "component": consumer, "minutes": 5 if component == "index" else 6,
+        } for platform in platforms for consumer in consumers)
+    for row in rows:
+        component = row["component"]
+        if component == "plugin:agent-worktrees":
+            count = 2
+        elif component == "validator-bootstrap" or (
+            isinstance(component, str) and component.startswith("fleet-manager:")
+        ):
+            count = 3
+        else:
+            count = 1
         row["job_minutes"] = int(row["minutes"]) * count + 5
         if row["job_minutes"] > 360:
             raise CandidateValidationError("consumer recipe budget exceeds the hosted job limit")

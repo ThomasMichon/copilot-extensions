@@ -49,6 +49,7 @@ def subject(tmp_path, monkeypatch):
     git(root, "config", "core.hooksPath", str(root / "no-hooks"))
     files = {
         "owned.txt": "unchanged\n",
+        ".github/workflows/ci.yml": (ROOT / ".github/workflows/ci.yml").read_text(),
         "plugins/agent-worktrees/plugin.json": "{}",
         "plugins/agent-worktrees/tests/test_owned.py": "def test_owned(): pass\n",
         "plugins/agent-bridge/plugin.json": "{}",
@@ -59,7 +60,11 @@ def subject(tmp_path, monkeypatch):
             " stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         ),
         "tools/fixture_sibling.py": 'LABEL = "supported recipe"\n',
-        "tools/run-standalone-tests.py": "print('fixture standalone executed')\n",
+        "tools/run-standalone-tests.py": (
+            "import os\nfrom pathlib import Path\n"
+            "Path('fleet-selector.txt').write_text(os.environ.get('PYTEST_ADDOPTS', ''))\n"
+            "print('fixture standalone executed')\n"
+        ),
         "tools/standalone_consumers.py": (
             "STANDALONE_CONSUMERS = "
             "('worktree-manager', 'services/index', 'fleet-manager', 'services/dispatch')\n"
@@ -92,7 +97,7 @@ def subject(tmp_path, monkeypatch):
         "schema": candidate.SCHEMA, "version": 1,
         "last_promotion": {"dev_head": main, "main_before": main},
     }
-    (root / ".github").mkdir()
+    (root / ".github").mkdir(exist_ok=True)
     (root / candidate.STATE).write_text(json.dumps(state), encoding="utf-8")
     git(root, "add", ".")
     git(root, "commit", "-qm", "candidate")
@@ -214,8 +219,12 @@ def test_complete_matrix_and_exact_existing_recipes(subject):
         ("plugin:agent-bridge", "ubuntu-latest"),
         ("manager", "ubuntu-latest"), ("dispatch", "ubuntu-latest"),
         ("index", "ubuntu-latest"), ("index", "windows-latest"),
-        ("fleet-manager", "ubuntu-latest"), ("fleet-manager", "windows-latest"),
         ("validator-bootstrap", "ubuntu-latest"), ("validator-bootstrap", "windows-latest"),
+        *(
+            (f"fleet-manager:{name}", platform)
+            for name in candidate.fleet_partitions(root)
+            for platform in ("ubuntu-latest", "windows-latest")
+        ),
     }
     commands = candidate.recipes(root, "plugin:agent-worktrees")
     assert [command[-1] for command, _ in commands] == ["--collect-only", "--guards"]
@@ -230,12 +239,12 @@ def test_complete_matrix_and_exact_existing_recipes(subject):
     ]
     assert directory == root
     assert candidate.recipes(root, "index")[0][0][-1] == "--smoke"
-    fleet = candidate.recipes(root, "fleet-manager")
+    fleet = candidate.recipes(root, "fleet-manager:planner")
     assert fleet[0][0][2:] == ["--uv", "uv", "--", "--system", "pytest"]
     assert fleet[1][0][1:4] == ["-m", "pytest", "-q"]
     assert fleet[2][0][2:] == [
         "fleet-manager", "--prepare", "--admission-wait", "60",
-        "--timeout", "300" if os.name == "nt" else "120",
+        "--timeout", "120",
     ]
 
 
@@ -521,11 +530,49 @@ def test_enclosing_jobs_allow_all_recipe_calls_and_host_setup(subject, tmp_path)
 def test_real_fleet_recipe_preserves_existing_bounded_exclusions(subject):
     root, head, dev, main = subject
     assert candidate.run(
-        root, head, dev, main, "fleet-manager", dev_root=root.parent / "validated-dev",
+        root, head, dev, main, "fleet-manager:gateway", dev_root=root.parent / "validated-dev",
     )["outcome"] == "success"
     assert (root / "fleet-exclusions.txt").read_text() == (
         '-m "not client_distribution_full and not observation_retention_full"'
     )
+    assert (root / "fleet-selector.txt").read_text() == (
+        '-m "not client_distribution_full and not observation_retention_full" '
+        '-k "gateway_ and not gateway_processes"'
+    )
+
+
+def test_fleet_recipes_preserve_each_canonical_partition_and_inner_deadline(subject):
+    root = subject[0]
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
+    canonical = jobs["fleet-native-linux"]["strategy"]["matrix"]["partition"]
+    assert jobs["fleet-native-windows"]["strategy"]["matrix"]["partition"] == canonical
+    assert candidate.fleet_partitions(root) == {
+        entry["name"]: entry["selector"] for entry in canonical
+    }
+    for partition in canonical:
+        commands = candidate.recipes(root, f"fleet-manager:{partition['name']}")
+        assert len(commands) == 3
+        assert commands[-1][0][-2:] == ["--timeout", "120"]
+    with pytest.raises(candidate.CandidateValidationError, match="unknown materialized"):
+        candidate.recipes(root, "fleet-manager")
+    with pytest.raises(candidate.CandidateValidationError, match="unknown canonical Fleet"):
+        candidate.recipes(root, "fleet-manager:unrecognized")
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "nonliteral", "platform-drift"])
+def test_unknown_fleet_partition_shape_cannot_silently_reduce_coverage(tmp_path, mutation):
+    text = (ROOT / ".github/workflows/ci.yml").read_text()
+    if mutation == "duplicate":
+        text = text.replace("- name: planner\n", "- name: storage\n", 1)
+    elif mutation == "nonliteral":
+        text = text.replace("selector: 'not gateway_", "selector: '${{ unsafe }} not gateway_", 1)
+    else:
+        text = text.replace("partition: *fleet-native-partitions", "partition: []")
+    path = tmp_path / ".github/workflows/ci.yml"
+    path.parent.mkdir(parents=True)
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(candidate.CandidateValidationError, match="Fleet"):
+        candidate.fleet_partitions(tmp_path)
 
 
 def test_isolated_trusted_cli_loads_inventory_and_executes_actual_consumer(subject):
@@ -586,11 +633,15 @@ def test_pipeline_requires_successful_exact_candidate_jobs_and_preserves_old_gat
     assert jobs["materialized-candidate-windows"]["runs-on"] == "windows-latest"
     assert jobs["materialized-candidate-consumers"]["timeout-minutes"] == "${{ matrix.job_minutes }}"
     assert jobs["materialized-candidate-windows"]["timeout-minutes"] == "${{ matrix.job_minutes }}"
-    assert jobs["materialized-candidate-windows"]["strategy"]["matrix"]["include"] == [
-        {"component": "index", "job_minutes": 10},
-        {"component": "fleet-manager", "job_minutes": 23},
-        {"component": "validator-bootstrap", "job_minutes": 20},
-    ]
+    assert jobs["materialized-candidate-windows"]["strategy"]["matrix"] == (
+        "${{ fromJson(needs.materialized-candidate-plan.outputs.windows_matrix) }}"
+    )
+    assert jobs["materialized-candidate-plan"]["outputs"]["windows_matrix"] == (
+        "${{ steps.inventory.outputs.windows_matrix }}"
+    )
+    planner = jobs["materialized-candidate-plan"]["steps"][-1]["run"]
+    assert 'select(.os == "ubuntu-latest")' in planner
+    assert 'select(.os == "windows-latest")' in planner
     assert jobs["materialized-candidate-windows"]["strategy"]["fail-fast"] is False
     assert jobs["materialized-candidate-consumers"]["strategy"]["fail-fast"] is False
     assert "needs.materialized-candidate-plan.result == 'success'" in (
