@@ -233,6 +233,18 @@ bounded source delta inspection.
 - Targeted regressions passed after the fix. Full current-candidate
   acceptance and fresh review remain required; the prior approval is not
   treated as approval of this new head.
+- Full acceptance of `a8e6332dbe54763567f1633765b2f3d71c4ded1d`
+  then passed: canonical Windows engine/deadline coverage 264 cases
+  (one platform skip), Manager 46, and headless guard contracts 93.
+  An exact-source native Linux consumer passed 250 engine/deadline cases
+  (15 platform skips), 46 Manager cases, 93 headless contracts and all
+  38 generator cases. Original limits and all existing checks remain.
+- Rebuilt the corrected stdlib wheel using the declared backend and
+  seven-day cutoff. A new credential-free clean-room consumer verified
+  its installed bytes and exercised both direct and real native-stream
+  multiline redaction, Unicode output, timing and exit 23: three stages
+  passed. That owned container was removed; the distinct source-feed TLS
+  obstruction and full Windows bootstrap limitation remain documented.
 
 ### 2026-10-15 - Presentation review and bounded serving-source cooperation
 
