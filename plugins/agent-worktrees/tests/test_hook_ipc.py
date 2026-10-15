@@ -876,7 +876,7 @@ def test_session_start_reuses_registration_with_command_catalog(
     )
 
     assert hook_client._write_session_guidance(
-        {"sessionId": "session-1"}, home=tmp_path
+        {"sessionId": "session-1", "_agentWorktrees": {}}, home=tmp_path
     )
     target = (
         tmp_path
@@ -1025,6 +1025,28 @@ def test_session_machine_guidance_survives_context_budget_failure(monkeypatch, t
     assert '"hostname": "VM-ABC"' in content
     assert '"status": "unresolved"' in content
     assert len(content.encode("utf-8")) <= 4096
+
+
+def test_session_machine_rewrite_keeps_caller_payload_catalog(monkeypatch, tmp_path):
+    catalog = "## agent-worktrees session command catalog\n\npayload-owned catalog"
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context",
+        lambda: pytest.fail("deployed runtime must not rediscover the payload catalog"),
+    )
+    payload = {
+        "sessionId": "session-1",
+        "_agentWorktrees": {"commandCatalog": catalog},
+    }
+
+    assert hook_client._write_session_guidance(payload, home=tmp_path)
+    content = (
+        tmp_path / ".copilot" / "session-state" / "session-1"
+        / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
+    ).read_text(encoding="utf-8")
+
+    assert catalog in content
+    assert "## Current machine identity" in content
+    assert "No current agent-worktrees session guidance" not in content
 
 
 def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts(tmp_path):
