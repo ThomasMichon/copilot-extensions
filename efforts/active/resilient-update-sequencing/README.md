@@ -247,3 +247,15 @@ achieved by rearranging today's combined installer invocations.
 - Focused core checks passed 283 cases with two native-POSIX skips; Manager
   checks passed 164. Native fixture timings were 2.015 and 1.797 seconds.
   Final integrated UTF-8 repair, required CI and current-head review remain open.
+
+### 2026-10-15 - Authoritative command targets
+- The next review identified a destructive ambiguity: tolerant project-registry
+  reads could interpret malformed input as an empty desired command set.
+- Reconciliation now validates one strict target snapshot under the existing
+  registry lock before pruning or command mutation. Missing, malformed, denied
+  or invalidly shaped inputs preserve prior commands and receipts; retiring all
+  prior inventory requires an explicit empty projects mapping.
+- Independent contained migration/integration/routing checks passed 470 cases
+  with thirteen platform skips. Touched-code lint, module ceilings and all
+  thirteen install contracts pass. Required guard consumers, current-head
+  review, promotion and actual running-state verification remain open.
