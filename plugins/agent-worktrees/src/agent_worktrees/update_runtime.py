@@ -646,6 +646,8 @@ def _run_engine_installer(
     rc, status = (0 if run.status == "OK" else (run.rc or 1)), run.status
     if run.status.startswith("timed out"):
         output.err("agent-worktrees installer timed out")
+    elif run.status != "OK":
+        output.err(f"agent-worktrees installer failed: {run.status}")
     update_events.record("engine_runtime", "agent-worktrees@copilot-extensions", status,
                          changed=status.startswith("OK"))
     return rc

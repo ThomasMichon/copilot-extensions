@@ -270,6 +270,10 @@ if [[ -z "$PORT" ]]; then
 fi
 RELAY_PORT=9857   # integrated credential relay (in-process with the bridge)
 SYSTEMD_UNIT="agent-bridge.service"
+# `python -c "$_NEW_SESSION_PY" <python> <args...>` runs `<python> <args...>` in
+# a new session (setsid, then exec in place, so $! stays the service's pid).
+# It needs only the runtime interpreter, so it also works without setsid(1).
+_NEW_SESSION_PY=$'import os, sys\ntry:\n    os.setsid()\nexcept (AttributeError, OSError):\n    pass\nos.execv(sys.argv[1], sys.argv[1:])'
 
 # === install-contract:v3 versioned-venv (agent-bridge: venv-as-symlink) ===
 # Immutable per-version runtime (#581): build the venv into versions/<version>
@@ -2055,10 +2059,12 @@ do_start() {
         _warn "systemd start did not activate the service (rc=$systemd_start_rc) -- falling back to direct start"
     fi
 
-    # Direct start -- launch the resolved slot interpreter. Close fd 8 (8>&-) so
-    # a daemon launched during do_install/do_update never inherits and holds the
-    # install lock (ce#802).
-    nohup "$rt_py" -m agent_bridge start > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
+    # Direct start -- launch the resolved slot interpreter in a session of its
+    # own, so an installer deadline that kills the installer's session never
+    # takes the service with it. Close fd 8 (8>&-) so a daemon launched during
+    # do_install/do_update never inherits and holds the install lock (ce#802).
+    nohup "$rt_py" -c "$_NEW_SESSION_PY" "$rt_py" -m agent_bridge start \
+        > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     sleep 2

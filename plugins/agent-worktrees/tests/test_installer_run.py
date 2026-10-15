@@ -224,7 +224,8 @@ def test_session_sweep_revalidates_each_census_entry(monkeypatch, stale):
         censuses = iter([{other.pid: started}])
         monkeypatch.setattr(installer_run, "_session_census", lambda _sid: next(censuses, {}))
         installer_run._kill_session(leader)
-        assert _wait_dead(leader.pid), "the installer itself still dies"
+        # Owned child: reap it, or os.kill(pid, 0) still sees the zombie.
+        assert leader.wait(timeout=10) is not None, "the installer itself still dies"
         assert other.poll() is None and _alive(other.pid), "a stale entry is never killed"
         assert not _stopped(other.pid), "a stale entry is never left stopped"
     finally:

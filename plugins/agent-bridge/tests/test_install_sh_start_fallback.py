@@ -94,13 +94,17 @@ def test_failed_systemd_start_reaches_direct_fallback(tmp_path: Path) -> None:
         "exit 0\n",
     )
     _executable(fake_bin / "curl", "#!/bin/sh\nexit 0\n")
-    # Stands in for the slot interpreter; the installer invokes it as
-    # `python -m agent_bridge start`.
+    # Stands in for the slot interpreter. The installer runs it as the
+    # new-session launcher (`-c ...`), which execs it again as
+    # `python -m agent_bridge start`; that run records its pid and session.
+    record = tmp_path / "service-session"
     _executable(
         slot_bin / "python",
         "#!/bin/sh\n"
-        "trap 'exit 0' TERM INT\n"
-        "sleep 30\n",
+        f"if [ \"$1\" = -c ]; then exec '{sys.executable}' \"$@\"; fi\n"
+        f"exec '{sys.executable}' -c 'import os, sys, time\n"
+        "open(sys.argv[1], \"w\").write(\"%d %d\" % (os.getpid(), os.getsid(0)))\n"
+        f"time.sleep(30)' '{record}'\n",
     )
 
     env = {
@@ -108,21 +112,26 @@ def test_failed_systemd_start_reaches_direct_fallback(tmp_path: Path) -> None:
         "HOME": str(home),
         "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
     }
-    result = subprocess.run(
+    installer = subprocess.Popen(
         [_BASH, str(_INSTALL_SH), "start"],
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         env=env,
-        timeout=20,
-        check=False,
+        start_new_session=True,
     )
+    stdout, stderr = installer.communicate(timeout=20)
 
     pid_file = home / ".agent-bridge" / "agent-bridge.pid"
     try:
-        assert result.returncode == 0, result.stderr
-        assert "falling back to direct start" in result.stderr
-        assert "agent-bridge started" in result.stdout
+        assert installer.returncode == 0, stderr
+        assert "falling back to direct start" in stderr
+        assert "agent-bridge started" in stdout
         assert pid_file.is_file()
+        service_pid, service_sid = map(int, record.read_text().split())
+        assert service_pid == int(pid_file.read_text().strip()), "the pid file names the service"
+        # A deadline that kills the installer's session must not reach it.
+        assert service_sid == service_pid != installer.pid
     finally:
         if pid_file.is_file():
             os.kill(int(pid_file.read_text().strip()), signal.SIGTERM)

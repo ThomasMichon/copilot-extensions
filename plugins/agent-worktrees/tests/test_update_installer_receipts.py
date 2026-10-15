@@ -70,10 +70,17 @@ def test_module_update_fails_an_exit_0_that_left_the_old_receipt(example):
     assert not runtime._update_modules(plugin, "linux", None, force=True, targets=targets)
 
 
-def test_engine_installer_fails_an_exit_0_that_left_the_old_receipt(example, tmp_path):
+def test_engine_installer_fails_an_exit_0_that_left_the_old_receipt(
+    example, tmp_path, monkeypatch,
+):
     plugin, _deployed = example
+    errors: list[str] = []
+    monkeypatch.setattr(runtime.output, "err", errors.append)
     rc = runtime._run_engine_installer(
         ["bash", "install.sh", "update"], plugin, 60, dict(os.environ),
         runtime_root=tmp_path / "aw-runtime",
     )
     assert rc == 1
+    # The installer's own output looked successful, so the reason must be shown.
+    assert errors == ["agent-worktrees installer failed: runtime not at target after a "
+                      "successful installer exit (deployed 1.0.0, expected 2.0.0)"]
