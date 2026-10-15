@@ -281,7 +281,8 @@ jobs:
         # the `promote` job's own "Verify enrolled coverage baselines were
         # actually collected" step makes an ENROLLED plugin's baseline a
         # hard requirement regardless -- keep this `if:` condition's
-        # plugin list in exact sync with that step's own list. Expand both
+        # plugin list in sync with that step's plugin entries (native fleet
+        # identities are enrolled separately below). Expand both plugin
         # lists together as later pilots prove out. `--cov-source` is
         # derived from `matrix.plugin` (every plugin's own `src/` package
         # name is its plugin name with hyphens swapped for underscores --
@@ -369,6 +370,43 @@ jobs:
       - name: Test standalone controller with installed core and host containment
         run: python tools/run-standalone-tests.py services/index --prepare --admission-wait 60
 
+  fleet-manager-baselines:
+    name: fleet-manager (${{ matrix.os }}, installed full coverage)
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            baseline: fleet-manager-linux
+          - os: windows-latest
+            baseline: fleet-manager-windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Earn complete installed-package baseline under native host containment
+        run: >-
+          python tools/coverage_guided_selection/standalone.py fleet-manager
+          --prepare --admission-wait 60 --timeout 720
+          --measured-commit "${{ needs.gate.outputs.sha }}"
+          --out "${{ matrix.baseline }}.json"
+      - name: Upload platform-specific fleet baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline-${{ matrix.baseline }}
+          path: ${{ matrix.baseline }}.json
+          if-no-files-found: error
+          retention-days: 7
+
   guards-full-sweep:
     name: guards (full-tree, non-PR-scoped)
     needs: gate
@@ -397,7 +435,7 @@ jobs:
 
   build-python-artifacts:
     name: Build first-party Python artifacts without signing authority
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, fleet-manager-baselines, guards-full-sweep]
     if: >-
       needs.gate.outputs.is_dev == 'true' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
@@ -570,7 +608,7 @@ jobs:
     # exists to react automatically to real validation runs), so the fix is
     # to just never offer that path, rather than trying to harden a job
     # whose own YAML could be attacker-controlled.
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, publish-python-artifacts]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, fleet-manager-baselines, guards-full-sweep, build-python-artifacts, python-artifacts, publish-python-artifacts]
     if: >-
       always() &&
       github.event_name == 'repository_dispatch' &&
@@ -579,6 +617,7 @@ jobs:
        needs.worktree-manager.result == 'failure' ||
        needs.agent-index-service-linux.result == 'failure' ||
        needs.agent-index-service-windows.result == 'failure' ||
+       needs.fleet-manager-baselines.result == 'failure' ||
        needs.guards-full-sweep.result == 'failure' ||
        needs.build-python-artifacts.result == 'failure' ||
        needs.python-artifacts.result == 'failure' ||
@@ -752,7 +791,7 @@ jobs:
 
   promote:
     name: Promote dev -> main
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, python-artifacts]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, fleet-manager-baselines, guards-full-sweep, python-artifacts]
     # `always()`: `full`/`worktree-manager`/`guards-full-sweep` are legitimately
     # `skipped` (not `success`) whenever `gate` found `is_dev == 'false'` --
     # the default implicit `if` (require every `needs` job to have succeeded)
@@ -872,7 +911,7 @@ jobs:
           # is_dev was true, so full/worktree-manager/guards-full-sweep were
           # NOT skipped by their own `if:` above -- they must have genuinely
           # run and succeeded, or we refuse to promote unvalidated content.
-          for r in "${{ needs.full.result }}" "${{ needs.worktree-manager.result }}" "${{ needs.agent-index-service-linux.result }}" "${{ needs.agent-index-service-windows.result }}" "${{ needs.guards-full-sweep.result }}" "${{ needs.python-artifacts.result }}"; do
+          for r in "${{ needs.full.result }}" "${{ needs.worktree-manager.result }}" "${{ needs.agent-index-service-linux.result }}" "${{ needs.agent-index-service-windows.result }}" "${{ needs.fleet-manager-baselines.result }}" "${{ needs.guards-full-sweep.result }}" "${{ needs.python-artifacts.result }}"; do
             if [ "$r" != "success" ]; then
               echo "proceed=false" >> "$GITHUB_OUTPUT"
               echo "::error::Validation did not pass ($r) -- refusing to promote."
@@ -950,12 +989,12 @@ jobs:
         # never optional -- only a plugin not yet in this list is allowed
         # to have none.
         #
-        # Keep this list in exact sync with `full` job's own
-        # `if: matrix.plugin == '...'` collection-step condition above --
-        # that's the single other place a plugin gets "enrolled".
+        # Keep plugin entries in sync with `full` job's collection condition
+        # and standalone identities in sync with `fleet-manager-baselines`'s
+        # native matrix. Each enrolled identity must produce its own asset.
         run: |
           missing=()
-          for plugin in agent-ssh agent-codespaces agent-containers agent-vault agent-logger agent-mcp agent-bridge agent-worktrees agent-dispatch; do
+          for plugin in agent-ssh agent-codespaces agent-containers agent-vault agent-logger agent-mcp agent-bridge agent-worktrees agent-dispatch fleet-manager-linux fleet-manager-windows; do
             if [ ! -f "coverage-baselines/${plugin}.json" ]; then
               missing+=("$plugin")
             fi
