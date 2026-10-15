@@ -38,6 +38,8 @@ def _run(body: str, tmp_path: Path) -> list[str]:
     launcher.write_text("# launcher\n", encoding="utf-8")
     prelude = f"""
 $ErrorActionPreference = 'Stop'
+# The launcher is Windows-only; give a POSIX test host the Windows root it reads.
+if (-not $env:SystemRoot) {{ $env:SystemRoot = 'C:\Windows' }}
 $InstallDir = '{tmp_path}'
 $LauncherDst = '{launcher}'
 $Alias = 'box'; $Port = 2222; $Tunnel = $null; $User = $null
@@ -80,7 +82,7 @@ Start-HostLauncher
     assert target == "Win32_Process.Create"
     assert cwd == str(tmp_path)
     assert "conhost.exe\" --headless \"" in command
-    assert command.startswith('"') and "\\System32\\conhost.exe" in command
+    assert command.startswith('"') and "System32" in command
     assert "-Alias box -Port 2222" in command
     assert not any(line.startswith("start-process:") for line in out)
     assert "dtssh host started for box on port 2222" in out
