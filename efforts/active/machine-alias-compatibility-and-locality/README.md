@@ -84,22 +84,24 @@ constraints retained, are in [inception-transcript.md](inception-transcript.md).
   silently changing publication leases.
 - [x] Land the exact-head recovery prerequisite #6692 through reviewed source;
   its implementation merged as #6703 and reached a release.
-- [ ] Land this retrospective effort and remaining-work plan through review.
-- [ ] Bind the implementation source to the declared effort and slice after
+- [x] Land this retrospective effort and remaining-work plan through review
+  in #6821.
+- [x] Bind the implementation source to the declared effort and slice after
   the canonical document is available in its repository.
 
 ### Phase 2 - Shared alias map and all identity slots
-- [ ] Complete the single shared mapping seam for keys, aliases, hostnames,
+- [x] Complete the single shared mapping seam for keys, aliases, hostnames,
   display names, case variants, legacy `-win`/`-wsl` and parenthesized
   environment labels.
-- [ ] Wire configuration/detection, JSON and interactive launch selectors,
+- [x] Wire configuration/detection, JSON and interactive launch selectors,
   persisted machine/platform records, owner/claim refs, handoff, liveness,
   settlement and Manager source selection to that seam.
-- [ ] Preserve stored identity strings and explicit execution-space authority;
+- [x] Preserve stored identity strings and explicit execution-space authority;
   contextual compatibility must not make a foreign native space local.
-- [ ] Resolve the remaining review findings and upstream integration in the
-  existing identity repair, with regressions for each bug class.
-- [ ] Ensure physical sibling grouping is independent of roster adjacency and
+- [x] Address the known review findings and integrate the shared-registry
+  contract in the existing identity repair, with regressions for each bug
+  class. Fresh current-head review remains a Phase 3 gate.
+- [x] Ensure physical sibling grouping is independent of roster adjacency and
   that keyboard traversal follows the displayed order.
 
 ### Phase 3 - Review, release and authorized deployment
@@ -123,15 +125,15 @@ constraints retained, are in [inception-transcript.md](inception-transcript.md).
 
 ## Validation Plan
 
-- [ ] Cross the alias forms with Windows/WSL contexts and every Phase 2 slot,
+- [x] Cross the alias forms with Windows/WSL contexts and every Phase 2 slot,
   covering both historical host/platform tuples and logical-key records.
-- [ ] Prove exact registered-key and configured transport-alias precedence;
+- [x] Prove exact registered-key and configured transport-alias precedence;
   reject ambiguous mappings, conflicting context and foreign-space authority.
-- [ ] Exercise preferred-key, raw-hostname and alias Manager source selection:
+- [x] Exercise preferred-key, raw-hostname and alias Manager source selection:
   the actual local source must have `local=True` and no SSH launch argv.
-- [ ] Cover physical grouping, nonadjacent siblings, keyboard order, unchanged
+- [x] Cover physical grouping, nonadjacent siblings, keyboard order, unchanged
   source IDs and separate SSH targets.
-- [ ] Verify receiving-project record ID, actual platform and absolute
+- [x] Verify receiving-project record ID, actual platform and absolute
   namespace proof for legacy ownership, including anchor actors, post-cleanup
   ledgers, cross-project aliases and real offer/accept/settlement flows.
 - [ ] Run bounded affected tests, offline staged-payload checks and native
@@ -155,7 +157,36 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-15 - Shared alias matrix and preferred-name source correction
+- The source now maps historical names through the shared contextual registry
+  across discovery/configuration, launch, stored records, qualified ownership
+  references and Manager locality. Stored strings are preserved.
+- Explicit regression matrices cover shared matching (96 cells), stored slots
+  (96), JSON/non-JSON routing (96), record-backed local resume (48), Machines
+  discovery (48), and Manager matching/grouping (48). Counts overlap the test
+  portfolios and are not native-host or installed-state claims.
+- Preferred-name validation adds 58 cases through source construction and
+  engine-client row parsing. It confirmed a mismatch between source selection
+  and the separate local-alias predicate; the latter now uses execution context.
+  The reported live empty/failed tab still requires installed diagnosis.
+- Bounded source portfolios passed: 256 shared-library tests; 708 Worktrees
+  tests with two conditional skips, plus a 211-test follow-up; 168 Machines
+  tests; 237 Manager/offline-packaging tests; two copied-payload tests; and four
+  host installer adapter tests. The final preferred-name Manager portfolio
+  passed 272 tests. These overlapping runs do not substitute for native Windows
+  execution or the release/deployment completion gate.
+- Parent settlement rejects a different same-platform caller, and nonadjacent
+  physical siblings share display and keyboard traversal order without changing
+  source identities or SSH targets.
+- Publication requires a new exact-head recovery preview after upstream
+  integration. No earlier operator confirmation is reused for a changed source.
+
 ### 2026-10-15 - Retroactive capture and widened acceptance
+- The effort capture merged in #6821 after current-head approval and required
+  checks. The implementation and installed-acceptance gates remain open.
+- The operator reaffirmed continuous execution until Windows/WSL worktrees
+  resolve and authorized deployment on both environments and other adopting
+  machines as needed. Normal target workflows and safety gates still apply.
 - The operator requested this effort after observing preferred-name Manager
   tabs that appeared local but showed failed/empty data.
 - Prior source work and repeated review corrections remain in the original

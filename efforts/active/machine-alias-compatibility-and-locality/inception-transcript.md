@@ -68,6 +68,15 @@ The coordinator found references in existing campaigns but no dedicated effort
 or binding for this compatibility/locality deployment objective. The operator
 approved the slug `machine-alias-compatibility-and-locality`.
 
+## Deployment authorization reaffirmed
+
+> Keep driving until all worktrees across Windows and WSL resolve; you have
+> my full approval for all deployments on Windows and WSL and other
+> [adopting] machines
+
+This authorizes the deployment work, not bypassing the target's contribution
+flow or changing unrelated ownership and safety requirements.
+
 ## Separate deferred request
 
 Blank attribution-only update comments are tracked separately by #6815.
