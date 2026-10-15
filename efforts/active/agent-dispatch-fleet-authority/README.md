@@ -326,6 +326,17 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-15 -- Known supersession takes precedence over discovery outage
+- Further #6722 review reproduced an active epoch-one lease renewing during a
+  discovery-only outage after independently reading floor five. The lease now
+  clears active status immediately on known supersession, before entering the
+  old availability fallback. It neither renews the old entry nor withdraws or
+  overwrites the successor when discovery is unavailable.
+- The new regression failed before the two-line state correction. Final lease
+  selection passes 41, including retained-floor HTTP takeover, same-floor
+  discovery-outage heartbeat compatibility and the superseded-owner refusal.
+  Touched Python lint passes. Required published-head review and CI remain gates.
+
 ### 2026-10-15 -- HTTP replacement leases consume the durable floor
 - Follow-up #6722 review found the HTTP rendezvous still exposing only live
   coordinator presence. Added a non-cacheable `/directory/fencing-epoch` read,

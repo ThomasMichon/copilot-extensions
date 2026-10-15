@@ -90,6 +90,9 @@ takeover, even when `/directory/coordinator` has no live entry. An older
 authority lacking the retained-floor endpoint must be upgraded before a new
 coordinator/standby lease can safely activate; unavailable or malformed floors
 never downgrade to epoch zero. Existing live-presence discovery remains unchanged.
+An observed higher floor revokes an active lease before any discovery-outage
+renewal fallback. A discovery-only outage at the same floor still permits
+heartbeating the already-held lease.
 
 This client pins the supplied HTTP(S) endpoint and sends only the task header.
 It does not discover endpoints, autostart a service, resolve machine identity,

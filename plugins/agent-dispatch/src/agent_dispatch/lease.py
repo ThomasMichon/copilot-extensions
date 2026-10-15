@@ -161,6 +161,8 @@ class CoordinatorLease:
         floor = getattr(self._rv, "fencing_epoch", None)
         if floor is not None:
             self._observe(int(floor()))
+        if self._active and self._epoch < self._observed_epoch:
+            self._active = False
         try:
             coord = self._rv.discover_coordinator()
         except Exception:

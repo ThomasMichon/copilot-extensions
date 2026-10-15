@@ -124,6 +124,24 @@ class _FlakyDiscoverRendezvous:
             raise RuntimeError("enumeration currently unavailable")
         return self._inner.discover_coordinator()
 
+    def fencing_epoch(self):
+        return current_fencing_epoch(self._inner)
+
+
+def test_active_lease_cannot_renew_after_new_floor_and_discovery_outage(directory, clock):
+    flaky = _FlakyDiscoverRendezvous(directory)
+    lease = CoordinatorLease(flaky, "host-a")
+    assert lease.tick().epoch == 1
+    before = directory.get("host-a")
+    directory.register("successor", role=ROLE_COORDINATOR, epoch=5)
+    flaky.discover_should_fail = True
+    clock.advance(5)
+    with pytest.raises(RuntimeError, match="enumeration currently unavailable"):
+        lease.tick()
+    assert lease.is_active is False
+    assert directory.get("host-a")["last_seen"] == before["last_seen"]
+    assert directory.get("successor")["role"] == ROLE_COORDINATOR
+
 
 def test_active_coordinator_keeps_heartbeating_through_a_discovery_only_outage(
     directory, clock
