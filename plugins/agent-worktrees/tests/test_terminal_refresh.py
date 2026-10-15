@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -57,6 +58,75 @@ def test_refresh_uses_one_narrow_call_without_installer(manager, monkeypatch):
     assert kwargs["encoding"] == "utf-8"
     assert kwargs["errors"] == "replace"
     assert kwargs["timeout"] == 60
+
+
+def test_explicit_registration_target_does_not_require_active_context(manager, monkeypatch):
+    def no_context():
+        raise AssertionError("active project lookup must not run for an explicit target")
+
+    monkeypatch.setattr(m.cfg, "project_name", no_context)
+    captured = []
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda argv, **k: captured.append(argv) or SimpleNamespace(
+            returncode=0, stdout=json.dumps(SUCCESS), stderr="",
+        ),
+    )
+    assert m._refresh_terminal_profiles("registered") is True
+    assert captured == [["manager", "refresh-profiles", "registered"]]
+
+
+def test_register_without_active_project_refreshes_the_registered_target(monkeypatch, tmp_path):
+    from agent_worktrees import installation_cli, installer, repos
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr(
+        manager_launch_cli, "_discover_control_plane_provider_manifests",
+        lambda: {"worktree-manager": SimpleNamespace(command=("manager",))},
+    )
+    monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(m.cfg, "project_dir", lambda name: tmp_path / "config")
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(m.cfg, "machines_yaml_path", lambda path: repo / "missing.yaml")
+    monkeypatch.setattr(
+        m.cfg, "load_config",
+        lambda *a, **k: SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(enabled=False))),
+    )
+    overrides = {
+        "_prepare_namespaced_project_state": lambda *a, **k: True,
+        "_write_global_config": lambda *a, **k: None,
+        "_write_config": lambda *a, **k: None,
+        "_cleanup_stale_instructions": lambda *a, **k: None,
+        "_ensure_ado_pr_cli": lambda *a, **k: None,
+    }
+    monkeypatch.setattr(installation_cli, "_core_helper", lambda name, local: overrides.get(name, local))
+    monkeypatch.setattr(repos, "find_repo", lambda *a, **k: None)
+    monkeypatch.setattr(repos, "add_repo", lambda *a, **k: None)
+    monkeypatch.setattr(installer, "register_project", lambda *a, **k: None)
+    monkeypatch.setattr(installer, "deploy_binstubs", lambda *a, **k: True)
+
+    @contextmanager
+    def registration(*args, **kwargs):
+        yield SimpleNamespace(commit=lambda: None)
+
+    monkeypatch.setattr(installer, "project_binstub_registration", registration)
+    captured = []
+
+    def run(argv, **kwargs):
+        if argv[0] == "git":
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        captured.append(argv)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(SUCCESS), stderr="")
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    args = SimpleNamespace(
+        project_name="registered", repo_dir=str(repo), machine="example-host",
+        default_branch="main", force=False, agent=True,
+    )
+    assert installation_cli.cmd_register(args) == 0
+    assert m.cfg.active_project() is None
+    assert captured == [["manager", "refresh-profiles", "registered"]]
 
 
 @pytest.mark.parametrize("response", [

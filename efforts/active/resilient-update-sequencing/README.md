@@ -215,3 +215,18 @@ achieved by rearranging today's combined installer invocations.
 - The expanded contained integration/routing/telemetry selection passed
   400 cases with five platform skips. The failure was fixed forward; no check
   was waived and no production behavior was reverted to satisfy stale tests.
+
+### 2026-10-15 - Code-review corrections
+- Real code review identified five medium-severity defects: Windows spelling
+  during explicit removal and receipt-only retirement recovery, malformed
+  nested transaction receipt data, registration without ambient context, and
+  tolerant roster loading on a publishing path.
+- Added explicit registration-target propagation without changing active
+  context, and strict publishing roster collection before any output writes.
+  Read-only roster behavior stays tolerant. Native/structural regressions prove
+  existing fragment, state and settings bytes/timestamps survive bad or denied
+  canonical and legacy roster inputs.
+- Focused registration/finishing/telemetry tests passed 140 cases; Manager
+  roster/profile tests passed 101. The native two-pass fixture measured
+  1.922 and 1.750 seconds. Migration review fixes are integrated separately
+  before the current-head review/CI gate is retried.

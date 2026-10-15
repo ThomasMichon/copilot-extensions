@@ -578,7 +578,7 @@ def _resolve_icon(project_dir_fn, name: str) -> tuple[str, str]:
 
 
 def collect_local_projects(
-    current_project: str | None = None, *, home_dir=None
+    current_project: str | None = None, *, home_dir=None, strict_rosters: bool = False,
 ) -> list[ProjectInput]:
     """Build :class:`ProjectInput` rows from this machine's on-disk config.
 
@@ -593,7 +593,8 @@ def collect_local_projects(
     from .harness_state import build_projects as hs_build_projects
     from .harness_state import home as hs_home
 
-    projects = hs_build_projects(home_dir)
+    projects = (hs_build_projects(home_dir, strict_rosters=True)
+                if strict_rosters else hs_build_projects(home_dir))
     by_name = {p.name: p for p in projects}
 
     ordered: list[str] = []
@@ -649,9 +650,11 @@ def preview_local(
     *,
     current_project: str | None = None,
     self_env: str = "Win",
+    strict_rosters: bool = False,
 ) -> FragmentResult:
     """Collect this machine's inputs and build the fragment (no disk write)."""
-    projects = collect_local_projects(current_project=current_project)
+    projects = (collect_local_projects(current_project=current_project, strict_rosters=True)
+                if strict_rosters else collect_local_projects(current_project=current_project))
     return build_fragment(projects, self_machine, self_env=self_env)
 
 
@@ -1060,21 +1063,11 @@ def deploy_fragment(
     apply: bool = False,
     projects: list[ProjectInput] | None = None,
 ) -> FragmentDeployPlan:
-    """Compute (and, when ``apply=True``, perform) this machine's Step 5 deploy.
+    """Plan local WT reconciliation; publishing requires strict roster inputs.
 
-    Mirrors ``install.ps1``'s ``Deploy-Shortcuts``/``Sync-TerminalState``/
-    ``Get-SettingsProfileGuids``/``Clean-TerminalSettingsJson`` for the
-    fragment-write half only. ``local_profiles.refresh`` composes it with
-    shortcut reconciliation for the narrow whole-system finishing path.
-
-    ``apply=False`` (the default) computes the **full** plan -- the new
-    fragment JSON, which GUIDs are stale/changed, and the resulting
-    ``generatedProfiles``/``settings.json`` reconciliation -- without
-    touching disk at all: a caller can always preview exactly what a real
-    deploy would do. Only ``apply=True`` performs the writes, in the same
-    order the PowerShell installer uses (reconcile ``state.json`` /
-    ``settings.json`` BEFORE writing the new fragment file, to avoid a race
-    where WT reads the new fragment while stale GUIDs are still present).
+    Read-only preview remains tolerant. Publishing reconciles state/settings
+    before the fragment. Supplied projects are already collected and validated
+    by the caller; ``local_profiles.refresh`` also reconciles shortcuts.
     """
     frag_dir = _wt_fragments_dir()
     local_state = _wt_local_state_dir()
@@ -1091,7 +1084,7 @@ def deploy_fragment(
     ]
 
     result = (
-        preview_local(machine, current_project=current_project)
+        preview_local(machine, current_project=current_project, strict_rosters=apply)
         if projects is None else build_fragment(projects, machine)
     )
     new_fragment = result.fragment()

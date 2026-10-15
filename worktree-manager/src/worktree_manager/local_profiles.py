@@ -170,7 +170,7 @@ def refresh(project: str | None, machine: str | None = None) -> dict:
     ).get("machine") if project is not None else None)
     if not isinstance(selected_machine, str) or not selected_machine:
         raise ValueError("Cannot resolve machine key; pass --machine or repair project config")
-    projects = terminal_fragment.collect_local_projects(current_project=project)
+    projects = terminal_fragment.collect_local_projects(current_project=project, strict_rosters=True)
     plan = terminal_fragment.deploy_fragment(
         selected_machine, current_project=project, apply=True, projects=projects,
     )

@@ -187,7 +187,7 @@ def project_config(name: str, home_dir: Path | None = None) -> dict:
     return _read_yaml((home_dir or home()) / f".{name}" / "config.yaml")
 
 
-def _load_roster(machines_yaml: Path) -> tuple[RosterMachine, ...]:
+def _load_roster(machines_yaml: Path, *, strict: bool = False) -> tuple[RosterMachine, ...]:
     """Parse a ``machines.yaml`` file into :class:`RosterMachine` rows.
 
     Ported verbatim from ``agent_worktrees.terminal_fragment._load_roster``
@@ -195,25 +195,46 @@ def _load_roster(machines_yaml: Path) -> tuple[RosterMachine, ...]:
     empty behavior on a missing/malformed file.
     """
     if not machines_yaml.exists():
+        if strict and machines_yaml.is_symlink():
+            raise ValueError(f"Cannot read machine roster: {machines_yaml}")
         return ()
+    if strict and not machines_yaml.is_file():
+        raise ValueError(f"Machine roster must be a file: {machines_yaml}")
     try:
         data = yaml.safe_load(machines_yaml.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+    except (OSError, yaml.YAMLError) as error:
+        if strict:
+            raise ValueError(f"Cannot read machine roster: {machines_yaml}") from error
         return ()
     machines = data.get("machines") if isinstance(data, dict) else None
     if not isinstance(machines, dict):
+        if strict:
+            raise ValueError(f"Machine roster must contain a machines mapping: {machines_yaml}")
         return ()
     out: list[RosterMachine] = []
     for key, entry in machines.items():
         if not isinstance(entry, dict):
+            if strict:
+                raise ValueError(f"Invalid machine entry in roster: {machines_yaml}")
             continue
+        if strict and "ssh" in entry and not isinstance(entry["ssh"], dict):
+            raise ValueError(f"Invalid SSH entry in roster: {machines_yaml}")
         ssh = entry.get("ssh") if isinstance(entry.get("ssh"), dict) else {}
         envs = []
-        for e in (ssh.get("environments") or []):
+        environments = ssh.get("environments") if strict else (ssh.get("environments") or [])
+        if environments is None:
+            environments = []
+        if strict and not isinstance(environments, list):
+            raise ValueError(f"Invalid SSH environments in roster: {machines_yaml}")
+        for e in environments:
             if not isinstance(e, dict):
+                if strict:
+                    raise ValueError(f"Invalid SSH environment in roster: {machines_yaml}")
                 continue
             name = str(e.get("name") or "").strip()
             if not name:
+                if strict:
+                    raise ValueError(f"Missing SSH environment name in roster: {machines_yaml}")
                 continue
             envs.append(SshEnvironment(
                 name=name,
@@ -230,7 +251,7 @@ def _load_roster(machines_yaml: Path) -> tuple[RosterMachine, ...]:
     return tuple(out)
 
 
-def project_roster(repo_path: str | None) -> tuple[RosterMachine, ...]:
+def project_roster(repo_path: str | None, *, strict: bool = False) -> tuple[RosterMachine, ...]:
     """This project's ``machines.yaml`` roster, given its resolved repo path.
 
     Checks ``<repo_path>/.agent-worktrees/machines.yaml`` first, falling back
@@ -241,6 +262,12 @@ def project_roster(repo_path: str | None) -> tuple[RosterMachine, ...]:
         return ()
     root = Path(repo_path)
     machines_yaml = root / ".agent-worktrees" / "machines.yaml"
+    if strict:
+        try:
+            machines_yaml.lstat()
+        except FileNotFoundError:
+            machines_yaml = root / "machines.yaml"
+        return _load_roster(machines_yaml, strict=True)
     if not machines_yaml.is_file():
         machines_yaml = root / "machines.yaml"
     return _load_roster(machines_yaml)
@@ -437,7 +464,7 @@ def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str, s
 
 
 
-def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
+def build_projects(home_dir: Path | None = None, *, strict_rosters: bool = False) -> list[ProjectInfo]:
     reg = projects_registry(home_dir)
     repos = {r.name: r for r in build_repos(home_dir)}
     out: list[ProjectInfo] = []
@@ -461,7 +488,7 @@ def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
             enabled_plugins=tuple(repo_enabled_plugins(repo.path) if repo else ()),
             wsl_distro=wsl.get("distro"),
             wsl_state=wsl.get("state"),
-            roster=project_roster(anchor),
+            roster=(project_roster(anchor, strict=True) if strict_rosters else project_roster(anchor)),
             display_name=entry.get("display_name"),
             anchor=anchor,
         ))
