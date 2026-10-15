@@ -54,6 +54,15 @@ observations; `busy_reasons` records the actual oracle decision.
 Handler counts cover their server's tracked lifetime, not only successful
 mutations: a socket being read, a rejected/fallback request or a response being
 written can still be an active handler. Do not interpret them as task counts.
+The control server excludes the drain RPC itself from its current-roster-read
+count; it must not wait for its own handler to finish.
+
+The nonstreaming control handler does not cancel its callback when a client
+socket deadline expires. The client can report a timeout while the daemon is
+still waiting for its lock or polling busy work. A response write after the
+client disconnects can then fail. Consequently, client failure, daemon drain
+completion and caller rollback are separate observations; one does not prove
+the others happened.
 
 ## Reading the logs
 

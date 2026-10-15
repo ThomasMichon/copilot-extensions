@@ -223,3 +223,53 @@ def test_successor_promotion_failure_is_logged_before_any_predecessor_rpc(
     assert events[-1]["detail"]["timeout_s"] == 300
     assert not any(event["detail"]["phase"] == "request-predecessor" for event in events)
     assert "private fixture detail" not in (tmp_path / "lifecycle.log").read_text()
+
+
+def test_client_timeout_does_not_cancel_the_daemon_drain_callback(tmp_path):
+    busy = threading.Event()
+    busy.set()
+    entered = threading.Event()
+    finished = threading.Event()
+
+    def handle(action, payload):
+        assert action == "drain"
+        entered.set()
+        try:
+            return diagnostics.drain_with_diagnostics(
+                state_lock=threading.RLock(), enter=lambda: None, cleanup=lambda: None,
+                busy=lambda: ["hook"] if busy.is_set() else [],
+                observe=lambda: {"hook": int(busy.is_set())},
+                directory=tmp_path, port=server.port,
+                timeout=float(payload["timeout"]), poll=float(payload["poll"]),
+                force=bool(payload["force"]),
+            )
+        finally:
+            finished.set()
+
+    server = ControlServer(handle)
+    server.start()
+    try:
+        client = ControlClient(
+            f"http://127.0.0.1:{server.port}", config_dir=tmp_path, timeout=0.5,
+        )
+        with pytest.raises(TimeoutError):
+            client.drain(timeout=2, poll=0.05, force=False)
+        assert entered.is_set() and not finished.is_set()
+        busy.clear()
+        assert finished.wait(timeout=2)
+    finally:
+        busy.clear()
+        server.close()
+    events = _events(tmp_path)
+    assert any(
+        event["detail"]["role"] == "client"
+        and event["detail"]["phase"] == "request-predecessor"
+        and event["outcome"] == "fail"
+        for event in events
+    )
+    assert any(
+        event["detail"]["role"] == "daemon"
+        and event["detail"]["phase"] == "complete"
+        and event["outcome"] == "ok"
+        for event in events
+    )
