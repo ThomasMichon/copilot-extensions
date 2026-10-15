@@ -85,8 +85,8 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
   read-only probe, without killing sessions or starting a dummy server.
 - [x] Handle recognized healthy empty tmux results consistently in monitor and
   session-liveness enumeration; retain unknown evidence for genuine failures.
-- [ ] Pass focused, real missing-socket and native-safe probe contracts; land
-  the readiness prerequisite through ordinary review and required CI.
+- [x] Pass focused, real missing-socket and native-safe probe contracts; land
+  the readiness prerequisite through ordinary review and required CI in #6856.
 - [ ] Verify current-roster readiness after the authorized released update.
 
 ### Phase 1 - Capture ownership and the compatibility contract
@@ -116,12 +116,17 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
   that keyboard traversal follows the displayed order.
 
 ### Phase 3 - Review, release and authorized deployment
-- [ ] Publish the current integrated candidate through the normal supported
+- [x] Publish the current integrated candidate through the normal supported
   flow with verified replay provenance. Require exact-head recovery approval
   only if the publication tool actually requires a recovery operation.
-- [ ] Obtain an eligible current-head review and passing required CI; merge.
+- [x] Obtain an eligible current-head review and passing required CI; merge
+  the original identity repair in #5689.
 - [ ] Follow the release pipeline and verify the promoted snapshot contains
   the repair, rather than inferring release from commit ancestry.
+  Blocked by #6848: the trusted release-branch artifact validator cannot
+  promote its own already-merged fix. The retained pipeline owner needs
+  explicit authorization for the documented bootstrap exception; normal
+  deployment authorization does not grant that exception.
 - [ ] Install the released repair through the unified update flow in both
   adopting environments; verify the selected running versions.
 
@@ -148,9 +153,9 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
 - [x] Verify receiving-project record ID, actual platform and absolute
   namespace proof for legacy ownership, including anchor actors, post-cleanup
   ledgers, cross-project aliases and real offer/accept/settlement flows.
-- [ ] Run bounded affected tests, offline staged-payload checks and native
+- [x] Run bounded affected tests, offline staged-payload checks and native
   Windows lanes; distinguish conditional skips from executed proof.
-- [ ] Pass applicable lint, install-contract, module ceilings, publication
+- [x] Pass applicable lint, install-contract, module ceilings, publication
   safety, documentation-impact review and required provider checks.
 - [ ] Verify released and installed behavior in both environments, preserving
   queued prompts, live sessions, historical strings and unrelated records.
@@ -168,6 +173,41 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-15 - Source merged and native proof complete; release remains blocked
+- The original #5689 merged as `24f6f61df26f57456c91cfa9ce98e84763266bc7`
+  after exact-head review of `bf0457fd6be5c8fac998a6e53c485bb5827e6a66`
+  reported no Medium/High findings and the required CI gate passed. The sole
+  Low documentation-impact finding was corrected in the PR description.
+  Publication used the ordinary supported flow, without a recovery override.
+- Final corrections retain native preferred-name compatibility under legacy
+  rosters, contextual hostname selection for unscoped host/guest pairs, and
+  machine-key precedence when an SSH profile reuses that key. Explicit
+  execution-space and profile-only restrictions remain enforced.
+- Native Windows executed the final alias/configuration/detection grid
+  (210 passed), Machines alias/discovery grid (56 passed), and complete shared
+  transport suite (292 passed). The preceding native delta passed 42 Related
+  and 92 Manager cases. Earlier native launch, ownership, handoff and staged
+  payload portfolios also passed; counts overlap and are not installed proof.
+- Final bounded Linux validation passed 1,165 Worktrees guards with 64
+  conditional skips, 178 Machines identity/discovery tests and 292 shared
+  transport tests. CI's unchanged Index hook exceeded its 20-second bound once;
+  one accepted same-head job retry and its dependent required gate passed.
+  No timeout, dependency policy or assertion was weakened.
+- The independent readiness prerequisite #6856 merged as
+  `0731ed01d2d24168ecba15f1769187208e94f218`. Its native Windows portfolio
+  passed 24 cases with one POSIX-only socket skip; the real missing-socket host
+  portfolio passed 25 cases without creating or stopping a server.
+- Promotion run `38752078211` still used trusted release commit `8abb234719`
+  and failed artifact-validator provisioning with
+  `canonical local graph lacks library attribution`. Existing #6848 retains
+  the source/bootstrap owner and explicit-authorization gate. No competing
+  repair, unchanged promotion retry, direct release-branch edit or policy
+  waiver was performed.
+- The effort remains Active. Next is the containing release, followed by the
+  authorized unified updates, all-existing-worktree and Manager acceptance,
+  and only then archive/release and resource closure. Earlier pending-native
+  annotations describe their historical checkpoints, not the current result.
 
 ### 2026-10-15 - Align unscoped guest task routing and shared self checks
 - Manager action locality now uses the same contextual tuple mapping as source
