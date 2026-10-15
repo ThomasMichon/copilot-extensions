@@ -47,6 +47,7 @@ class _FailedProcess:
     ("stderr", "reason"),
     [
         (b"command not found", "command_unavailable"),
+        (b"sh: 1: /path/to/agent-bridge: not found", "command_unavailable"),
         (b"is not recognized as an internal or external command", "command_unavailable"),
         (b"Permission denied (publickey)", "authentication_rejected"),
         (b"x" * 1010 + b"Permission denied", "authentication_rejected"),
@@ -116,6 +117,41 @@ async def test_spawn_error_does_not_expose_exception_message():
         await carrier.close()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eof", [True, False])
+async def test_immediate_write_failure_drains_buffered_stderr_with_a_bound(eof):
+    class BrokenInput(_Input):
+        async def drain(self):
+            raise BrokenPipeError("private-command")
+
+    process = _FailedProcess(b"", returncode=127)
+    process.stdin = BrokenInput()
+    process.stderr = asyncio.StreamReader()
+    process.stderr.feed_data(b"Permission denied (publickey)")
+    if eof:
+        process.stderr.feed_eof()
+
+    async def opener():
+        return process
+
+    async def closer(_process):
+        pass
+
+    carrier = PersistentCarrier("synthetic", "command", opener, closer)
+    try:
+        with pytest.raises(CarrierUnavailable):
+            await asyncio.wait_for(carrier.acquire(), timeout=2)
+        assert carrier.diagnostics()["startup_failure"] == {
+            "stage": "hello-write",
+            "error_type": "BrokenPipeError",
+            "exit_code": 127,
+            "reason": "authentication_rejected",
+        }
+        assert not carrier._stderr_tasks
+    finally:
+        await carrier.close()
+
+
 async def _native_carrier(argv, *, timeout=15, env=None):
     processes = []
 
@@ -142,7 +178,7 @@ async def _native_carrier(argv, *, timeout=15, env=None):
             await process.stdin.wait_closed()
         try:
             await asyncio.wait_for(process.wait(), timeout=0.5)
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             await terminate_ssh_process_tree(process, grace=0.1)
 
     return PersistentCarrier("native-fixture", "synthetic", opener, closer,
@@ -276,7 +312,10 @@ async def test_finished_stderr_reader_is_not_retained_by_a_live_carrier():
     carrier = PersistentCarrier("synthetic", "command", opener, closer)
     try:
         lease = await carrier.acquire()
-        await asyncio.sleep(0)
+        async def reader_released():
+            while carrier._stderr_tasks:
+                await asyncio.sleep(0)
+        await asyncio.wait_for(reader_released(), timeout=2)
         assert not carrier._stderr_tasks
         assert carrier.diagnostics()["state"] == "healthy"
         await lease.release()
@@ -327,3 +366,20 @@ async def test_native_windows_global_shim_keeps_hello_bytes(tmp_path, installed)
         await carrier.close()
     assert processes[0].returncode is not None
     assert not carrier._stderr_tasks
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Actual POSIX shell fixture")
+async def test_native_posix_shell_missing_launcher_is_classified(tmp_path):
+    missing = tmp_path / "missing-launcher"
+    carrier, processes = await _native_carrier(
+        ["/bin/sh", "-c", f'exec "{missing}"']
+    )
+    try:
+        with pytest.raises(CarrierUnavailable):
+            await carrier.acquire()
+        assert carrier.diagnostics()["startup_failure"]["reason"] == "command_unavailable"
+        assert not carrier._stderr_tasks
+    finally:
+        await carrier.close()
+    assert processes[0].returncode is not None

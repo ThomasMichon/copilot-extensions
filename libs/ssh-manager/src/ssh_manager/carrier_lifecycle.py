@@ -42,7 +42,7 @@ _STARTUP_STDERR_REASONS = (
     ("host_key_rejected", (b"host key verification failed", b"remote host identification has changed")),
     ("authentication_rejected", (b"permission denied", b"authentication failed")),
     ("command_unavailable", (
-        b"command not found", b"no such file or directory",
+        b"command not found", b": not found", b"no such file or directory",
         b"is not recognized as an internal or external command",
         b"the system cannot find the path specified",
     )),
@@ -313,8 +313,11 @@ class _CarrierLifecycleMixin:
         finally:
             stderr_task = self._stderr_tasks.pop(id(process), None)
             if stderr_task is not None:
-                stderr_task.cancel()
-                await asyncio.gather(stderr_task, return_exceptions=True)
+                try:
+                    await asyncio.wait({stderr_task}, timeout=0.05)
+                finally:
+                    stderr_task.cancel()
+                    await asyncio.gather(stderr_task, return_exceptions=True)
 
 
     def _record_connect_failure(self, exc: BaseException) -> None:
