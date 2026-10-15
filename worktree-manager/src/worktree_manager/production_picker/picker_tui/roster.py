@@ -16,6 +16,9 @@ the engine then falls back to its built-in default axes.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
 from machine_transport import (
     find_machine_entry,
     local_execution_platform,
@@ -23,6 +26,9 @@ from machine_transport import (
 )
 
 from .. import project_config as cfg
+
+if TYPE_CHECKING:
+    from .data_ssh import Source
 
 # machines.yaml environment name -> the picker's short env label (and C_ENV key).
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
@@ -39,6 +45,18 @@ def display_machine(entry: cfg.MachineEntry) -> str:
 
 def physical_machine(machine: str) -> str:
     return split_machine_environment(machine).machine if machine else machine
+
+
+def presentation_sources(sources: Iterable[Source]) -> list[Source]:
+    """Keep physical siblings together without altering any source identity."""
+    groups: dict[tuple[str, str], list[Source]] = {}
+    for source in sources:
+        key = (
+            source.display_machine.casefold()
+            if source.source_kind == "machine-ssh" else source.source_id
+        )
+        groups.setdefault((source.source_kind, key), []).append(source)
+    return [source for group in groups.values() for source in group]
 
 
 def _entries():

@@ -153,12 +153,16 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
 
     if ref is None or not ref.is_qualified:
         return None
+    try:
+        if _native_counterpart_entry(config) is None:
+            return None
+    except _RESOLUTION_ERRORS as exc:
+        _LOG.warning("Cannot establish legacy WSL execution locality: %s", exc)
+        return None
     path = cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
     if not path.exists():
         return None
     try:
-        if _native_counterpart_entry(config) is None:
-            return None
         if path.is_symlink() or path.resolve().parent != path.parent.resolve():
             return None
         record = tracking.load_record(path)

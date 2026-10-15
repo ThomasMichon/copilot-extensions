@@ -784,7 +784,7 @@ def machines(sources=None):
     """
     return [
         (f"{s.display_machine} {s.env}", s.machine, s.env, s.ready)
-        for s in (sources if sources is not None else _build_sources())
+        for s in roster.presentation_sources(sources if sources is not None else _build_sources())
         if s.source_kind == SOURCE_KIND_MACHINE_SSH
     ]
 
@@ -813,7 +813,7 @@ def source_tabs(sources=None):
             "venue": dict(source.venue),
             "capabilities": dict(source.capabilities),
         }
-        for source in (sources if sources is not None else _build_sources())
+        for source in roster.presentation_sources(sources if sources is not None else _build_sources())
     ]
 
 

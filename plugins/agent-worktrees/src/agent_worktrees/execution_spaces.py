@@ -121,7 +121,10 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 owner, config,
             ) != parent_path:
                 return
-            require_record_mutation(parent, project_record_config(parent))
+            receiving_config = project_record_config(parent)
+            require_record_mutation(parent, receiving_config)
+            if not require_owner_identity(config.machine, receiving_config):
+                raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             child_ref = tracking.format_claim_ref(config.machine, config.repo_name, worktree_id)
             settled = tracking.settle_resource_claim(
                 parent, child_ref, obligations.AT_REST, save=False,

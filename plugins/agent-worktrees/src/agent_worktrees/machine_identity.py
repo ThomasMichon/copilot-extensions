@@ -45,7 +45,7 @@ def resolve_execution_machine(
             pass
     explicit = any(entry.execution_platform and not entry.legacy_key for entry in entries.values())
     selected = find_machine_entry(
-        entries, name, reject_ambiguous=True, execution_platform="wsl" if guest else None,
+        entries, name, reject_ambiguous=True, execution_platform=cfg.detect_platform(),
     ) if not explicit else None
     if explicit or (selected is not None and selected.execution_platform):
         if configured:

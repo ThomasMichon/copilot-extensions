@@ -58,10 +58,13 @@ def test_settle_persists_and_reloads(tmp_path):
 
 # ── _settle_parent_obligation hook ───────────────────────────────────────────
 
-def _child(project_root: Path, owner_ref: str = "") -> WorktreeRecord:
+def _child(
+    project_root: Path, owner_ref: str = "", *,
+    machine: str = "machine-x", platform: str = "windows",
+) -> WorktreeRecord:
     return tracking.create_new_record(
         "wt-child", "worktree/wt-child", str(project_root / "wt-child"),
-        "childproj", "machine-x", "windows", project_root,
+        "childproj", machine, platform, project_root,
         owner_ref=owner_ref,
     )
 
@@ -90,6 +93,7 @@ def _project_root(tmp_path, monkeypatch):
     paths resolve under the sandbox. The hook imports ``config as cfg`` locally,
     so patching the config module attribute covers it."""
     from agent_worktrees import config as cfg
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     monkeypatch.setattr(cfg, "project_dir",
                         lambda name=None: tmp_path / f".{name or 'proj'}")
     monkeypatch.setattr(
@@ -102,6 +106,38 @@ def _project_root(tmp_path, monkeypatch):
         ),
     )
     return tmp_path
+
+
+@pytest.mark.parametrize("platform", ["windows", "linux"])
+def test_parent_receiving_identity_cannot_authorize_a_different_caller(
+    _project_root, monkeypatch, platform,
+):
+    from agent_worktrees import config as cfg, execution_spaces
+
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args, **_kwargs: {})
+    child_ref = "host-a/childproj/wt-child"
+    parent_path = _write_parent(
+        _project_root, "parentproj", "wt-parent", child_ref,
+        machine="host-b", platform=platform,
+    )
+    before = parent_path.read_bytes()
+    receiving_config = cfg.Config(
+        srcroot=str(_project_root), machine="host-b", platform=platform,
+        repo_name="parentproj",
+        repos={"parentproj": cfg.RepoConfig(
+            anchor=str(_project_root), worktree_root=str(_project_root),
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_args, **_kwargs: receiving_config)
+    child = _child(
+        _project_root, "host-a/parentproj/wt-parent", machine="host-a", platform=platform,
+    )
+    caller = SimpleNamespace(machine="host-a", repo_name="childproj")
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="caller is not local"):
+        _settle_parent_obligation(child, caller, "wt-child")
+    assert parent_path.read_bytes() == before
+    assert tracking.load_record(parent_path).resources[0].state == "active"
 
 
 @pytest.mark.guard
