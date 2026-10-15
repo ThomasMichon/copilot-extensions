@@ -12,6 +12,10 @@ from agent_worktrees import machine_identity
 
 
 class TestIsLocalMachine:
+    @pytest.fixture(autouse=True)
+    def native_execution(self, monkeypatch) -> None:
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+
     def _write(self, tmp_path: Path, body: str) -> Path:
         (tmp_path / "machines.yaml").write_text(body, encoding="utf-8")
         return tmp_path

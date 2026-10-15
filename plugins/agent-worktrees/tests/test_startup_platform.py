@@ -70,7 +70,7 @@ def test_platform_detection_preserves_windows_linux_and_wsl(
     real_open = open
 
     def read_version(path, *args, **kwargs):
-        if str(path) == "/proc/version":
+        if Path(path) == Path("/proc/version"):
             return io.StringIO(proc_version)
         return real_open(path, *args, **kwargs)
 
