@@ -24,7 +24,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 
-from machine_transport import MachineEntry, machine_entries_to_topology, machine_name, resolve_identity
+from machine_transport import MachineEntry, find_machine_entry, machine_entries_to_topology, machine_name, resolve_identity
 from machine_transport import is_local_machine as _mt_is_local_machine
 
 from . import config as cfg
@@ -43,7 +43,11 @@ def resolve_execution_machine(
             entries = load_entries()
         except FileNotFoundError:
             pass
-    if any(entry.execution_platform for entry in entries.values()):
+    explicit = any(entry.execution_platform and not entry.legacy_key for entry in entries.values())
+    selected = find_machine_entry(
+        entries, name, reject_ambiguous=True, execution_platform="wsl" if guest else None,
+    ) if not explicit else None
+    if explicit or (selected is not None and selected.execution_platform):
         if configured:
             return resolve_identity(name).canonical
         from .execution_spaces import detect_legacy_machine

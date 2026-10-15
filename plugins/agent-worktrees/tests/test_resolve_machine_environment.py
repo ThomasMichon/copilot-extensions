@@ -15,6 +15,7 @@ pytestmark = pytest.mark.guard
 
 @pytest.mark.parametrize(("name", "environment"), [
     ("example-host-wsl", None), ("example-host", "WSL"),
+    ("generated-host", "WSL"), ("native-label", "WSL"),
 ])
 def test_host_only_legacy_topology_preserves_local_wsl_launch(
     monkeypatch, name: str, environment: str | None,
@@ -22,7 +23,9 @@ def test_host_only_legacy_topology_preserves_local_wsl_launch(
     config = SimpleNamespace(
         machine="example-host-wsl", default_repo=SimpleNamespace(anchor="example-repo"),
     )
-    host = cfg.MachineEntry(key="example-host", display_name="Example")
+    host = cfg.MachineEntry(
+        key="example-host", display_name="Example", hostname="generated-host", alias="native-label",
+    )
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args, **_kwargs: {host.key: host})
     assert resolve_cli._target_is_local(config, name, environment)

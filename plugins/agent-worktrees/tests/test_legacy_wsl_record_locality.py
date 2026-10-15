@@ -95,6 +95,32 @@ def test_legacy_wsl_owner_ref_has_local_claimant_liveness(legacy_records):
     assert claimant.local_claimant_alive(legacy_records.owner_ref) is True
 
 
+def test_historical_alias_uses_receiving_project_not_callers_topology(
+    legacy_records, tmp_path,
+):
+    from agent_worktrees.legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
+
+    receiving = Path(legacy_records.config.default_repo.anchor) / "machines.yaml"
+    text = receiving.read_text()
+    receiving.write_text(text.replace(
+        "  example-host: {}", "  example-host: {alias: receiving-alias}",
+    ).replace(
+        "  example-host:\n", "  example-host:\n    alias: receiving-alias\n",
+    ))
+    caller_anchor = tmp_path / "caller-source"
+    caller_anchor.mkdir()
+    (caller_anchor / "machines.yaml").write_text(
+        "machines:\n  example-host: {alias: caller-alias}\n  example-host-wsl: {}\n",
+    )
+    caller = replace(
+        legacy_records.config, repo_name="caller",
+        repos={"caller": cfg.RepoConfig(anchor=str(caller_anchor), worktree_root=str(tmp_path / "caller-trees"))},
+    )
+    ref = tracking.parse_claim_ref("receiving-alias/example/legacy-wsl")
+    assert resolve_legacy_wsl_owner_ref(ref, caller) == legacy_records.paths["wsl"]
+    assert resolve_legacy_wsl_owner_ref(ref, replace(caller, machine="foreign-host-wsl")) is None
+
+
 @pytest.mark.parametrize("checkout_state", ["missing", "file", "foreign-symlink"])
 def test_post_cleanup_legacy_locality_keeps_exact_namespace_and_redirect_fences(
     legacy_records, tmp_path, checkout_state,

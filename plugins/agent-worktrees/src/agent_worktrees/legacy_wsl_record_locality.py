@@ -96,7 +96,7 @@ def _native_counterpart_entry(
     if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
         return None
     native_entry = cfg.find_machine_entry(entries, native_key) if entries else None
-    if any(entry.execution_platform for entry in entries.values()):
+    if native_entry is not None and native_entry.execution_platform:
         current = cfg.find_machine_entry(entries, machine)
         if (
             current is None or current.execution_platform != "wsl"
@@ -153,12 +153,12 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
 
     if ref is None or not ref.is_qualified:
         return None
-    if not machine_label_is_legacy_local(ref.machine, config):
-        return None
     path = cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
     if not path.exists():
         return None
     try:
+        if _native_counterpart_entry(config) is None:
+            return None
         if path.is_symlink() or path.resolve().parent != path.parent.resolve():
             return None
         record = tracking.load_record(path)
@@ -167,6 +167,8 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         from .execution_spaces import project_record_config
 
         receiving_config = project_record_config(record)
+        if receiving_config.machine.casefold() != config.machine.casefold():
+            return None
         if not machine_label_is_legacy_local(ref.machine, receiving_config):
             return None
         if not machine_label_is_legacy_local(record.machine or "", receiving_config):
@@ -182,8 +184,6 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
     # "which legacy label it was actually written under" -- but it may name
     # yet another topology label (hostname/alias/key) than the ref does, so
     # resolve it through the same topology check, not a literal string match.
-    if not machine_label_is_legacy_local(record.machine or "", config):
-        return None
     return path
 
 

@@ -11,6 +11,23 @@ from agent_worktrees import config as cfg
 from agent_worktrees import machine_identity
 
 
+def test_remote_legacy_projection_does_not_suppress_local_wsl_qualification() -> None:
+    from machine_transport import normalize_machine_entries
+
+    local = cfg.MachineEntry(key="example-host", display_name="Local")
+    remote = cfg.MachineEntry(
+        key="remote-host", display_name="Remote",
+        ssh_environments=[
+            cfg.SSHEnvironment("windows", "remote-native"),
+            cfg.SSHEnvironment("wsl", "remote-guest"),
+        ],
+    )
+    for entries in ({local.key: local}, normalize_machine_entries({local.key: local, remote.key: remote})):
+        assert machine_identity.resolve_execution_machine(
+            local.key, guest=True, configured=True, load_entries=lambda: entries,
+        ) == "example-host-wsl"
+
+
 class TestIsLocalMachine:
     @pytest.fixture(autouse=True)
     def native_execution(self, monkeypatch) -> None:

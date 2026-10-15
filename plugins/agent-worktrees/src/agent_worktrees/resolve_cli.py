@@ -49,6 +49,7 @@ def _target_is_local(
                 return True
             if entry.execution_platform:
                 return False
+            target = split_machine_environment(entry.key, target.environment)
     if target.environment and target.environment != cfg.detect_platform():
         return False
     if target.environment and config.machine:
