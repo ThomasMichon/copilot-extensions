@@ -105,6 +105,38 @@ def test_fragment_inventory_drift_refuses_publication(publication, monkeypatch, 
     assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()} == before
 
 
+@pytest.mark.parametrize("kind", ["registry", "project-config", "canonical-roster", "roster-root"])
+def test_dangling_directory_inputs_never_authorize_profile_removal(
+    publication, tmp_path, capsys, kind,
+):
+    home = lp.harness_state.home()
+    if kind == "registry":
+        target = home / ".agent-worktrees"
+    elif kind == "project-config":
+        target = home / ".demo"
+        (target / "config.yaml").unlink()
+        target.rmdir()
+    else:
+        repo = tmp_path / "repo"
+        registry = home / ".agent-worktrees" / "projects.yaml"
+        registry.parent.mkdir()
+        registry.write_text(json.dumps({"projects": {"demo": {"anchor": str(repo)}}}), encoding="utf-8")
+        if kind == "canonical-roster":
+            repo.mkdir()
+            (repo / "machines.yaml").write_text("machines:\n  host: {}\n", encoding="utf-8")
+            target = repo / ".agent-worktrees"
+        else:
+            target = repo
+    try:
+        target.symlink_to(tmp_path / "missing-directory", target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"Directory symlink creation unavailable: {error}")
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()}
+    assert lp.main(["demo", "--machine", "host"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "blocked"
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()} == before
+
+
 @pytest.mark.parametrize("cleanup", [False, True])
 def test_valid_jsonc_settings_preserve_original_bytes(publication, capsys, cleanup):
     path = publication["settings"]

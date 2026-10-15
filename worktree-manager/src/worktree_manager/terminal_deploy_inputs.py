@@ -5,6 +5,8 @@ import json
 import re
 from pathlib import Path
 
+from .harness_state import _has_dangling_link
+
 
 def _jsonc(text: str) -> str:
     strings = r'"(?:\\.|[^"\\])*"'
@@ -33,7 +35,7 @@ def _read_bytes(path: Path) -> bytes | None:
     try:
         return path.read_bytes()
     except FileNotFoundError:
-        if any(p.is_symlink() and not p.exists() for p in (path, *path.parents)):
+        if _has_dangling_link(path):
             raise ValueError(f"Dangling Terminal input link: {path}")
         return None
 

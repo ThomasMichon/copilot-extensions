@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,6 +61,18 @@ def _read_json(p: Path) -> dict:
         return {}
 
 
+def _has_dangling_link(path: Path) -> bool:
+    for candidate in (path, *path.parents):
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        linked = stat.S_ISLNK(info.st_mode) or (getattr(info, "st_file_attributes", 0) or 0) & 0x400
+        if linked and not candidate.exists():
+            return True
+    return False
+
+
 def _read_yaml(p: Path, *, strict: bool = False, required_key: str | None = None) -> dict:
     try:
         data = yaml.safe_load(p.read_text("utf-8"))
@@ -71,7 +84,7 @@ def _read_yaml(p: Path, *, strict: bool = False, required_key: str | None = None
             raise ValueError(f"Registry requires an explicit {required_key} mapping: {p}")
         return data if isinstance(data, dict) else {}
     except FileNotFoundError as error:
-        if strict and p.is_symlink():
+        if strict and _has_dangling_link(p):
             raise ValueError(f"Cannot read configuration mapping: {p}") from error
         return {}
     except (OSError, yaml.YAMLError) as error:
@@ -253,7 +266,7 @@ def _load_roster(machines_yaml: Path, *, strict: bool = False) -> tuple[RosterMa
     empty behavior on a missing/malformed file.
     """
     if not machines_yaml.exists():
-        if strict and machines_yaml.is_symlink():
+        if strict and _has_dangling_link(machines_yaml):
             raise ValueError(f"Cannot read machine roster: {machines_yaml}")
         return ()
     if strict and not machines_yaml.is_file():
@@ -324,6 +337,8 @@ def project_roster(repo_path: str | None, *, strict: bool = False) -> tuple[Rost
         try:
             machines_yaml.lstat()
         except FileNotFoundError:
+            if _has_dangling_link(machines_yaml):
+                raise ValueError(f"Cannot read machine roster: {machines_yaml}")
             machines_yaml = root / "machines.yaml"
         return _load_roster(machines_yaml, strict=True)
     if not machines_yaml.is_file():

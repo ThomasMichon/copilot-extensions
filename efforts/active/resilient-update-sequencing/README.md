@@ -350,3 +350,16 @@ achieved by rearranging today's combined installer invocations.
   Native refresh passes measured 2.109 and 1.609 seconds. Module ceilings and
   touched-code lint pass; current-head review, required CI and rollout remain
   open.
+
+### 2026-10-15 - Shared dangling-path admission
+- The next review had no open inline findings but identified two medium
+  summary findings: strict YAML and roster fallback still recognized only
+  dangling leaf links, not dangling ancestor directories.
+- All strict registry/config/roster and Terminal JSON reads now share an
+  ancestor-aware dangling-link check, including Windows reparse-point
+  metadata. An unavailable canonical roster directory cannot authorize a
+  legacy/empty fallback. Genuinely absent paths beneath healthy parents remain
+  optional, and read-only behavior stays tolerant.
+- Four directory-link publication regressions preserve all existing outputs.
+  Manager coverage passed 227 cases; native refresh passes measured 2.485 and
+  2.062 seconds. Current-head review/CI and actual deployment remain open.
