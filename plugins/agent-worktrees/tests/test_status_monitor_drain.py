@@ -13,6 +13,8 @@ import pytest
 from agent_worktrees import status_monitor_drain as diagnostics
 from agent_worktrees.status_monitor_cutover import ControlClient, ControlServer
 
+pytestmark = pytest.mark.guard
+
 
 def _events(directory: Path) -> list[dict]:
     path = directory / "lifecycle.log"
