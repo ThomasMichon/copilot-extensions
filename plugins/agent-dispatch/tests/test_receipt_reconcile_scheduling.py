@@ -1,6 +1,8 @@
 """Receipt scheduling preserves unresolved generations without starving siblings."""
 
 import os
+import json
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -71,3 +73,121 @@ def test_unmanaged_retirement_requires_exit_confirmation(tmp_path, monkeypatch):
     assert controller._operation_record("withdrawn")["state"] == "unknown"
     with pytest.raises(CompanionIndeterminate, match="not confirmed"):
         controller._assert_receipt_available("withdrawn")
+
+
+@pytest.mark.parametrize("version", [None, 2])
+def test_bounded_retirement_retains_unsupported_receipt(tmp_path, monkeypatch, version):
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    receipt = _receipt(controller)
+    if version is None:
+        receipt.pop("schema_version")
+    else:
+        receipt["schema_version"] = version
+    path = controller._receipt_path("withdrawn")
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    before, retired = path.read_bytes(), []
+    monkeypatch.setattr(controller, "_retire_receipt", lambda *args, **kwargs: retired.append(args))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+        for future in controller.receipt_futures():
+            try:
+                future.result(1)
+            except CompanionIndeterminate:
+                pass
+    assert retired == []
+    assert path.read_bytes() == before
+    with pytest.raises(CompanionIndeterminate, match="version"):
+        controller._assert_receipt_available("withdrawn")
+
+
+@pytest.mark.parametrize("corruption", ["receipt-json", "operation-json", "operation-digest", "unreadable"])
+def test_corrupt_metadata_fences_only_its_identity(tmp_path, monkeypatch, caplog, corruption):
+    from agent_dispatch import companion_reconcile
+    from agent_dispatch.managed_runtime import ManagedRuntimeError
+
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    _receipt(controller, "a")
+    _receipt(controller, "z")
+    path = controller._receipt_path("a")
+    if corruption.startswith("operation"):
+        path = controller._operation_path("a")
+    if corruption == "operation-digest":
+        path.write_text(json.dumps({
+            "registration_id": "a", "schema_version": 1, "state": "unknown",
+            "generation": {"receipt": None, "selection": None}, "generation_digest": "invalid",
+        }), encoding="utf-8")
+    else:
+        path.write_text("{", encoding="utf-8")
+    before, retired = path.read_bytes(), []
+    read = companion_reconcile._read_metadata
+
+    def metadata(root, candidate):
+        if corruption == "unreadable" and candidate == path.absolute():
+            raise ManagedRuntimeError("injected unreadable metadata")
+        return read(root, candidate)
+
+    monkeypatch.setattr(companion_reconcile, "_read_metadata", metadata)
+    monkeypatch.setattr(
+        controller, "_retire_receipt", lambda receipt, **kwargs: retired.append(receipt["registration_id"]),
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        for _ in range(3):
+            controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+            for rid, future in tuple(controller._receipt_operations.items()):
+                try:
+                    future.result(1)
+                except CompanionIndeterminate:
+                    assert rid == "a"
+    assert retired == ["z"]
+    assert controller._operation_record("z")["state"] == "complete"
+    assert path.read_bytes() == before
+    with pytest.raises(CompanionIndeterminate):
+        controller._assert_receipt_available("a")
+    assert [record["registration_id"] for record in controller.receipt_operation_progress()] == ["z"]
+    assert "a" in caplog.text
+
+
+def test_corrupt_operation_metadata_is_indeterminate_at_provider_boundary(tmp_path):
+    controller = DefaultCompanionController(tmp_path / "receipts")
+    controller.receipt_dir.mkdir()
+    controller._operation_path("damaged").write_text("{", encoding="utf-8")
+    with pytest.raises(CompanionIndeterminate, match="metadata"):
+        controller.resolve({"id": "damaged"}, machine="host", env="native")
+
+
+def test_operation_replacement_waits_for_local_metadata_reader(tmp_path, monkeypatch):
+    from agent_dispatch import companion_reconcile
+    from tests.test_bounded_receipt_reconcile import _unknown_operation
+
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    _unknown_operation(controller, "unit")
+    record = controller._operation_record("unit")
+    path = controller._operation_path("unit")
+    entered, release, writing = threading.Event(), threading.Event(), threading.Event()
+    read = companion_reconcile._read_metadata
+
+    def held_read(root, candidate):
+        if candidate == path.absolute():
+            with candidate.open("rb"):
+                entered.set()
+                assert release.wait(3)
+        return read(root, candidate)
+
+    def write():
+        writing.set()
+        controller._write_operation("unit", {**record, "state": "complete"})
+
+    monkeypatch.setattr(companion_reconcile, "_read_metadata", held_read)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reader = pool.submit(controller._operation_record, "unit")
+        try:
+            assert entered.wait(1)
+            writer = pool.submit(write)
+            assert writing.wait(1)
+            with pytest.raises(TimeoutError):
+                writer.result(0.05)
+        finally:
+            release.set()
+            reader.result(1)
+        writer.result(1)
+    assert controller._operation_record("unit")["state"] == "complete"

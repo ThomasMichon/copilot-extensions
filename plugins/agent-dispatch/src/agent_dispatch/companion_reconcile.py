@@ -15,6 +15,8 @@ from plugin_activation import write_json_object_atomic
 from . import companion as lifecycle
 from .managed_runtime import ManagedRuntimeError, _canonical_digest, _read_metadata, _RootLock, _safe_directory
 
+log = logging.getLogger(__name__)
+
 
 class ReceiptReconciliation:
     """Internal controller mixin sharing its receipt and process-identity primitives."""
@@ -96,25 +98,41 @@ class ReceiptReconciliation:
         return self._receipt_path(registration_id).with_suffix(".reconcile-operation.json")
 
     def _write_operation(self, rid: str, record: dict) -> None:
-        history = _safe_directory(self.receipt_dir.absolute(), "reconcile-history")
-        identity = {key: record[key] for key in (
-            "registration_id", "generation_digest", "owner_pid", "owner_start_token",
-            "started_at", "state",
-        )}
-        milestone = history / f"{_canonical_digest(identity)}.json"
-        if not milestone.exists() and not milestone.is_symlink():
-            write_json_object_atomic(milestone, record)
-        else:
-            previous = _read_metadata(self.receipt_dir.absolute(), milestone.absolute())
-            if any(previous.get(key) != value for key, value in identity.items()):
-                raise lifecycle.CompanionIndeterminate("receipt operation history is inconsistent")
-        write_json_object_atomic(self._operation_path(rid), record)
+        with self._receipt_state_lock:
+            history = _safe_directory(self.receipt_dir.absolute(), "reconcile-history")
+            identity = {key: record[key] for key in (
+                "registration_id", "generation_digest", "owner_pid", "owner_start_token",
+                "started_at", "state",
+            )}
+            milestone = history / f"{_canonical_digest(identity)}.json"
+            if not milestone.exists() and not milestone.is_symlink():
+                write_json_object_atomic(milestone, record)
+            else:
+                previous = self._receipt_metadata(milestone)
+                if any(previous.get(key) != value for key, value in identity.items()):
+                    raise lifecycle.CompanionIndeterminate("receipt operation history is inconsistent")
+            write_json_object_atomic(self._operation_path(rid), record)
+
+    def _receipt_metadata(self, path: Path) -> dict:
+        try:
+            with self._receipt_state_lock:
+                return _read_metadata(self.receipt_dir.absolute(), path.absolute())
+        except (ManagedRuntimeError, OSError) as exc:
+            raise lifecycle.CompanionIndeterminate(
+                f"receipt metadata is unavailable or invalid: {path.name}: {exc}"
+            ) from exc
 
     def _receipt_generation(self, registration_id: str) -> dict:
         path = self._selection_path(registration_id)
+        receipt = self._read_receipt(registration_id)
+        if receipt is not None:
+            if type(receipt.get("schema_version")) is not int or receipt["schema_version"] != lifecycle._RECEIPT_VERSION:
+                raise lifecycle.CompanionIndeterminate("companion receipt version is unsupported")
+            if receipt.get("registration_id") != registration_id:
+                raise lifecycle.CompanionIndeterminate("companion receipt identity is inconsistent")
         return {
-            "receipt": self._read_receipt(registration_id),
-            "selection": _read_metadata(self.receipt_dir.absolute(), path.absolute())
+            "receipt": receipt,
+            "selection": self._receipt_metadata(path)
             if path.exists() or path.is_symlink() else None,
         }
 
@@ -122,7 +140,7 @@ class ReceiptReconciliation:
         path = self._operation_path(registration_id)
         if not path.exists() and not path.is_symlink():
             return None
-        record = _read_metadata(self.receipt_dir.absolute(), path.absolute())
+        record = self._receipt_metadata(path)
         if (
             type(record.get("schema_version")) is not int or record["schema_version"] != 1
             or record.get("registration_id") != registration_id
@@ -148,6 +166,7 @@ class ReceiptReconciliation:
         record = self._operation_record(registration_id)
         if record is not None and record["state"] in {"pending", "timeout", "unknown"}:
             raise lifecycle.CompanionIndeterminate("receipt reconciliation outcome is not confirmed")
+        self._receipt_generation(registration_id)
 
     def _retirement_readback(self, generation: dict, *, deadline: float) -> bool:
         if self.monotonic() >= deadline:
@@ -200,11 +219,17 @@ class ReceiptReconciliation:
             return []
         progress = []
         for path in sorted(self.receipt_dir.glob("*.reconcile-operation.json")):
-            raw = _read_metadata(self.receipt_dir.absolute(), path.absolute())
-            rid = raw.get("registration_id")
-            if not isinstance(rid, str) or path != self._operation_path(rid):
-                raise lifecycle.CompanionIndeterminate("receipt operation progress identity is invalid")
-            record = self._operation_record(rid)
+            try:
+                raw = self._receipt_metadata(path)
+                rid = raw.get("registration_id")
+                if not isinstance(rid, str) or path != self._operation_path(rid):
+                    raise lifecycle.CompanionIndeterminate("receipt operation progress identity is invalid")
+                record = self._operation_record(rid)
+                if record is None:
+                    continue
+            except (lifecycle.CompanionIndeterminate, OSError) as exc:
+                log.warning("receipt progress unavailable for %s: %s", path.name, exc)
+                continue
             progress.append({key: record[key] for key in (
                 "registration_id", "generation_digest", "state", "started_at", "observed_at",
             )})
@@ -228,7 +253,7 @@ class ReceiptReconciliation:
                     lifecycle.CompanionError, lifecycle.CompanionIndeterminate,
                     ManagedRuntimeError, OSError,
                 ) as exc:
-                    logging.getLogger(__name__).warning("receipt operation incomplete for %s: %s", rid, exc)
+                    log.warning("receipt operation incomplete for %s: %s", rid, exc)
         ids: set[str] = set()
         for pattern, path_for in (
             ("*.companion.json", self._receipt_path),
@@ -236,10 +261,14 @@ class ReceiptReconciliation:
             ("*.reconcile-operation.json", self._operation_path),
         ):
             for path in self.receipt_dir.glob(pattern):
-                record = _read_metadata(self.receipt_dir.absolute(), path.absolute())
-                rid = record.get("registration_id")
-                if not isinstance(rid, str) or not rid or path != path_for(rid):
-                    raise lifecycle.CompanionIndeterminate("receipt path does not match its identity")
+                try:
+                    record = self._receipt_metadata(path)
+                    rid = record.get("registration_id")
+                    if not isinstance(rid, str) or not rid or path != path_for(rid):
+                        raise lifecycle.CompanionIndeterminate("receipt path does not match its identity")
+                except (lifecycle.CompanionIndeterminate, OSError) as exc:
+                    log.warning("receipt inventory unavailable for %s: %s", path.name, exc)
+                    continue
                 ids.add(rid)
         blocked: set[str] = set()
         ordered = sorted(ids)
@@ -249,48 +278,60 @@ class ReceiptReconciliation:
                 + [rid for rid in ordered if rid <= self._receipt_last_scheduled]
             )
         for rid in ordered:
-            record = self._operation_record(rid)
-            if record is not None and record["state"] in {"pending", "timeout", "unknown"}:
+            try:
+                self._schedule_receipt(
+                    rid, blocked, executor, deadline,
+                    self._receipt_adopted if _inventory else adopted_registration_ids,
+                )
+            except (lifecycle.CompanionError, lifecycle.CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
                 blocked.add(rid)
-                if rid not in self._receipt_operations:
-                    if record["state"] != "unknown":
-                        self._write_operation(rid, {
-                            **record, "state": "unknown", "observed_at": time.time(),
-                        })
-                    if len(self._receipt_operations) < 2 and self.monotonic() < deadline:
-                        self._receipt_operations[rid] = executor.submit(
-                            self._readback_receipt_operation, rid, record, deadline,
-                        )
-                        self._receipt_last_scheduled = rid
-                elif self.monotonic() >= record["deadline"]:
-                    with self._receipt_state_lock:
-                        latest = self._operation_record(rid)
-                        if latest is not None and latest["state"] == "pending":
-                            self._write_operation(rid, {
-                                **latest, "state": "timeout", "observed_at": time.time(),
-                            })
-                continue
-            if rid in (self._receipt_adopted if _inventory else adopted_registration_ids):
-                continue
-            if len(self._receipt_operations) >= 2 or self.monotonic() >= deadline:
-                continue
-            generation = self._receipt_generation(rid)
-            if all(value is None for value in generation.values()):
-                continue
-            token = self._receipt_owner_token(executor, deadline)
-            if token is None or self.monotonic() >= deadline:
-                continue
-            record = {
-                "schema_version": 1, "registration_id": rid,
-                "generation": generation, "generation_digest": _canonical_digest(generation),
-                "state": "pending", "owner_pid": os.getpid(), "owner_start_token": token,
-                "started_at": time.time(), "deadline": deadline, "observed_at": time.time(),
-            }
-            self._write_operation(rid, record)
-            self._receipt_operations[rid] = executor.submit(self._reconcile_receipt_generation, rid, record)
-            self._receipt_last_scheduled = rid
-            blocked.add(rid)
+                log.warning("receipt reconciliation unavailable for %s: %s", rid, exc)
         return blocked
+
+    def _schedule_receipt(
+        self, rid: str, blocked: set[str], executor: Executor, deadline: float, adopted: set[str],
+    ) -> None:
+        record = self._operation_record(rid)
+        if record is not None and record["state"] in {"pending", "timeout", "unknown"}:
+            blocked.add(rid)
+            if rid not in self._receipt_operations:
+                if record["state"] != "unknown":
+                    self._write_operation(rid, {
+                        **record, "state": "unknown", "observed_at": time.time(),
+                    })
+                if len(self._receipt_operations) < 2 and self.monotonic() < deadline:
+                    self._receipt_operations[rid] = executor.submit(
+                        self._readback_receipt_operation, rid, record, deadline,
+                    )
+                    self._receipt_last_scheduled = rid
+            elif self.monotonic() >= record["deadline"]:
+                with self._receipt_state_lock:
+                    latest = self._operation_record(rid)
+                    if latest is not None and latest["state"] == "pending":
+                        self._write_operation(rid, {
+                            **latest, "state": "timeout", "observed_at": time.time(),
+                        })
+            return
+        if rid in adopted:
+            return
+        if len(self._receipt_operations) >= 2 or self.monotonic() >= deadline:
+            return
+        generation = self._receipt_generation(rid)
+        if all(value is None for value in generation.values()):
+            return
+        token = self._receipt_owner_token(executor, deadline)
+        if token is None or self.monotonic() >= deadline:
+            return
+        record = {
+            "schema_version": 1, "registration_id": rid,
+            "generation": generation, "generation_digest": _canonical_digest(generation),
+            "state": "pending", "owner_pid": os.getpid(), "owner_start_token": token,
+            "started_at": time.time(), "deadline": deadline, "observed_at": time.time(),
+        }
+        self._write_operation(rid, record)
+        self._receipt_operations[rid] = executor.submit(self._reconcile_receipt_generation, rid, record)
+        self._receipt_last_scheduled = rid
+        blocked.add(rid)
 
     def _reconcile_receipt_generation(self, rid: str, operation: dict) -> None:
         state = "unknown"

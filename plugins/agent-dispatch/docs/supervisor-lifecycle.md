@@ -27,6 +27,9 @@ declaration/registration discovery, so four long-running valid providers cannot
 hide unrelated additions or removals.
 An unresolved unmanaged provider also retains its receipt fence while its
 declaration remains present; lack of a confirmed launch is not withdrawal.
+Withdrawal invalidates a provider's cached authority even if its running future
+cannot be cancelled. That future remains tracked until it finishes; reintroducing
+the same declaration must resolve it afresh rather than consume a withdrawn result.
 Declaration conversion runs inside the discovery future. Coordinator mirroring
 uses one tracked publication batch on a separate single-worker pool: a slow
 register/remove cannot hold the master, and the batch checks its deadline
@@ -45,6 +48,12 @@ absent receipts **and** confirmed retirement of the recorded process generation.
 Unmanaged receipts require the same exit confirmation as managed receipts.
 Completed operations are reaped before scheduling, and admission rotates through
 receipt identities so two unknown readbacks cannot starve a later withdrawal.
+Unsupported or missing process-receipt schema versions remain indeterminate and
+cannot authorize retirement. Corrupt metadata is logged per path or identity and
+retained, fencing that identity without aborting valid sibling scheduling or
+progress collection. Provider metadata failures use the same indeterminate contract.
+Local operation-metadata readers and atomic writers share the controller lock,
+so a Windows reader cannot reject a simultaneous local atomic replacement.
 Matching durable root selection pins must also be absent, including matching
 pins from another process-identity domain. Pin readback is non-mutating metadata
 inspection under the root lock and its deadline; a surviving pin keeps the
@@ -55,8 +64,9 @@ sampling waits only for the remaining shared deadline; unfinished identity work
 stays in shutdown accounting. Late readback does not settle authority. A receipt
 deletion failure remains unknown and cannot schedule another destructive retirement.
 Completed owner probes are discarded on every outcome, so a transient probe
-error or unusable token can retry in the same daemon. Receipt futures enter
-shutdown accounting even when a later record aborts the controller's pass;
+error or unusable token is logged and fenced, then can retry in the same daemon.
+Receipt futures enter
+shutdown accounting even when a later record fails in the controller's pass;
 partial scheduling cannot be reported as a clean drain.
 Completed legacy reconciliation futures are cleared on success or failure;
 only genuinely pending work is retained. A worker-raised timeout is surfaced as

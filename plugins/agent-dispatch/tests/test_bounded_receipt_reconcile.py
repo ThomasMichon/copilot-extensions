@@ -294,7 +294,7 @@ def test_partial_receipt_schedule_failure_still_accounts_every_running_mutation(
 
 
 @pytest.mark.parametrize("outcome", [OSError("transient"), TimeoutError("transient"), None, "", 123])
-def test_completed_owner_probe_failure_can_retry_in_same_daemon(tmp_path, monkeypatch, outcome):
+def test_completed_owner_probe_failure_can_retry_in_same_daemon(tmp_path, monkeypatch, caplog, outcome):
     controller = DefaultCompanionController(tmp_path / "receipts")
     _receipt(controller, owner_ready=False)
     outcomes = [outcome, "owner"]
@@ -317,8 +317,8 @@ def test_completed_owner_probe_failure_can_retry_in_same_daemon(tmp_path, monkey
     try:
         assert daemon.reconcile_once().started == ["unrelated"]
         if controller._receipt_inventory_future is not None:
-            with pytest.raises((OSError, CompanionIndeterminate)):
-                controller._receipt_inventory_future.result(2)
+            assert controller._receipt_inventory_future.result(2) == {"withdrawn"}
+        assert "receipt reconciliation unavailable for withdrawn" in caplog.text
         assert controller._receipt_owner_future is None
         assert controller._receipt_owner_identity is None
         assert controller._receipt_operations == {}

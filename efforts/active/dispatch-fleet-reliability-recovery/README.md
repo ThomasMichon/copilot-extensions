@@ -518,3 +518,46 @@ requested contract.
   labeled a pass or a proven flake. The latest two complete selections now
   cover 136 and 133 passing cases, respectively; publication and review gates
   remain separate and no live deployment is claimed.
+
+### 2026-10-14 - Isolate damaged receipt metadata and invalidate withdrawn providers
+
+- The next exact-head review identified four gaps: unsupported process-receipt
+  versions could reach retirement; withdrawn provider futures could be reused;
+  malformed operation metadata escaped the indeterminate contract; and one
+  corrupt receipt or operation could prevent valid sibling scheduling.
+  Nine new regression variants failed against the published source before
+  correction. No completed earlier phase was treated as final approval.
+- Receipt generations now validate schema and identity before journaling or
+  retirement, and unavailable metadata remains an explicit indeterminate fence.
+  Inventory, operation scheduling and progress isolate and log failures by
+  path or identity while preserving damaged files and processing valid siblings.
+  Withdrawn providers lose cached authority immediately; uncancellable work
+  remains tracked but cannot supply a reintroduced declaration's launch result.
+- Combined validation exposed a native Windows operation-file replacement
+  failure. A separate controlled held-reader regression reproduced the exact
+  `WinError 5` at atomic replacement. The controller's existing reentrant lock
+  now serializes its metadata readers and operation writes. This is not a
+  retry, filesystem-error waiver or broader lifecycle-authority change.
+- Current bounded receipt/discovery/provider coverage passes 94 cases with
+  unchanged deadlines, including the new corruption, withdrawal and real
+  held-file regressions. The earlier owner-probe regression now asserts the
+  intended per-identity error log and retained fence instead of a whole-pass
+  exception; its retry, thread, process and receipt-preservation assertions
+  remain. Coupled consumer validation, normal publication, fresh review and
+  required CI remain separate gates. Independent native keeper custody and
+  live fleet processing remain open.
+- Coupled coverage then exceeded the unchanged 30-second rollback-test limit.
+  Narrow phase instrumentation confirms the test executor was running real
+  retention scans synchronously on the master: its first scan took 4.547
+  seconds; the restarted master's second began at 24.640 seconds and was still
+  inspecting cells at expiry. A test-only alternative routed both real scans
+  asynchronously and passed once, but failed its unchanged total deadline in
+  subsequent combined coverage. That alternative and its temporary tracing were
+  removed in full; neither lifecycle fixture nor its deadline has changed.
+- Exact companion/gate files pass 27 cases. Broader coupled coverage exceeded
+  its existing 600-second aggregate limit. Disjoint managed-companion coverage
+  reached the native readiness/rollback/stop case, which exceeded its existing
+  30-second limit in the real stop subprocess. Neither result is a proven
+  flake or permission to publish/merge past incomplete validation. The native
+  boundary remains unresolved; no process, cleanup pass, hash or assertion is
+  skipped, and no production or test timeout has been raised.

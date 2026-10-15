@@ -501,3 +501,84 @@ def test_companionless_cycles_prune_completed_probe_futures_and_retain_pending()
     finally:
         pending.set_result(None)
         daemon.shutdown()
+
+
+@pytest.mark.parametrize("pending_at_removal", [False, True])
+def test_removed_provider_result_is_never_reused_after_reintroduction(pending_at_removal):
+    controller = FakeCompanionController()
+    resolve = controller.resolve
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def provider(registration, **kwargs):
+        calls.append(registration["id"])
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(5)
+        controller.resolve_outcomes.append({
+            "arguments": [str(len(calls))], "environment": {}, "environment_digest": "same",
+        })
+        return resolve(registration, **kwargs)
+
+    controller.resolve = provider
+    registration = _companion_reg("companion")
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", launcher=FakeLauncher(), companion_controller=controller,
+        reconcile_call_budget=0.05,
+    )
+    try:
+        daemon._reconcile_deadline = time.monotonic() + 0.05
+        desired = {"companion": registration}
+        daemon._resolve_companion_desired(desired)
+        assert entered.wait(1)
+        future = daemon._resolution_futures["companion"][1]
+        if not pending_at_removal:
+            release.set()
+            future.result(1)
+        daemon._resolve_companion_desired({})
+        if pending_at_removal:
+            assert future in daemon._probe_inflight
+            assert not future.done()
+            reintroduced = {"companion": registration}
+            daemon._resolve_companion_desired(reintroduced)
+            assert reintroduced == {}
+            assert calls == ["companion"]
+            assert daemon._resolution_futures["companion"][1] is future
+        else:
+            assert "companion" not in daemon._resolution_futures
+        release.set()
+        future.result(1)
+        daemon._reconcile_deadline = time.monotonic() + 1
+        desired = {"companion": registration}
+        daemon._resolve_companion_desired(desired)
+        assert calls == ["companion", "companion"]
+        assert desired["companion"]["companion_runtime"]["arguments"] == ["2"]
+        assert "companion" not in daemon._resolution_futures
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
+def test_corrupt_companion_operation_does_not_abort_sibling_reconciliation(tmp_path, caplog):
+    controller = DefaultCompanionController(tmp_path / "receipts")
+    controller.receipt_dir.mkdir()
+    damaged = controller._operation_path("damaged")
+    damaged.write_text("{", encoding="utf-8")
+    registration = _companion_reg("damaged")
+    registration["machine"] = "host"
+    daemon = SupervisorDaemon(
+        FakeClient([registration, _reg("unrelated", machine="host")]), "host",
+        launcher=FakeLauncher(), companion_controller=controller,
+    )
+    try:
+        assert daemon.reconcile_once().started == ["unrelated"]
+        future = daemon._resolution_futures.get("damaged")
+        if future is not None:
+            with pytest.raises(CompanionIndeterminate, match="metadata"):
+                future[1].result(1)
+        assert daemon.reconcile_once().running == ["unrelated"]
+        assert damaged.read_text(encoding="utf-8") == "{"
+        assert len(daemon.launcher.launched) == 1
+        assert "damaged" in caplog.text
+    finally:
+        daemon.shutdown()

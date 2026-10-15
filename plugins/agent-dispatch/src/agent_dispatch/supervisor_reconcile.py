@@ -303,6 +303,15 @@ class BoundedReconciliation:
             )
         return self._read_executor
 
+    def _invalidate_absent_companion_resolutions(self, present: set[str]) -> None:
+        for rid in set(self._resolution_futures) - present:
+            _, future = self._resolution_futures[rid]
+            future.cancel()
+            if future.done():
+                self._resolution_futures.pop(rid)
+            else:
+                self._resolution_futures[rid] = (None, future)
+
     def _resolve_companion(self, rid: str, registration: dict, authority: str) -> Any:
         if self._reconcile_deadline is None:
             return self._companion().resolve(

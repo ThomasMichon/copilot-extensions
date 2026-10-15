@@ -430,6 +430,7 @@ class SupervisorDaemon(BoundedReconciliation):
             for rid, registration in desired.items()
             if registration.get("kind") == RegistrationKind.PLUGIN_COMPANION
         }
+        self._invalidate_absent_companion_resolutions(present)
         if callable(getattr(self._companion(), "request_receipt_inventory", None)):
             self._prime_receipt_inventory(present | set(self._units))
         for rid in set(self._last_companion_desired) - present:
