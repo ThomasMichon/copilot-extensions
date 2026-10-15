@@ -1,4 +1,4 @@
-"""Both installer adapters preinstall the portable transport dependency."""
+"""Source/order guard through installer adapters, not dependency-age admission proof."""
 
 from __future__ import annotations
 
@@ -39,11 +39,25 @@ def test_machine_transport_preinstall(tmp_path, suffix, layout):
     )
     block = source[start:end]
     if suffix == "sh":
+        scripts = plugin / "scripts"
+        scripts.mkdir()
+        for helper in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+            shutil.copyfile(PLUGIN / "scripts" / helper, scripts / helper)
         script = (
             "set -euo pipefail\n"
             "err() { echo ERROR; }\n"
-            'uv() { printf "INSTALL:%s\\n" "${@: -2:1}"; }\n'
-            f"PLUGIN_DIR={shlex.quote(str(plugin))}\nVENV_PYTHON=fixture-python\n"
+            'uv() { echo "policy bypass" >&2; return 1; }\n'
+            'fixture_python() {\n'
+            '  [[ "$#" == 11 && "$1" == -I &&\n'
+            '     "$2" == "$SCRIPT_DIR/installer_dependency_policy.py" && -f "$2" &&\n'
+            '     "$3" == --uv && "$4" == uv && "$5" == -- &&\n'
+            '     "$6" == --python && "$7" == "$VENV_PYTHON" &&\n'
+            '     "$8" == --reinstall-package && "${11}" == --quiet ]] || return 1\n'
+            '  [[ "${9}" == agent-remote-login-shell || "${9}" == agent-machine-transport ]] || return 1\n'
+            '  printf "INSTALL:%s\\n" "${10}"\n'
+            '}\n'
+            f"PLUGIN_DIR={shlex.quote(str(plugin))}\nVENV_PYTHON=fixture_python\n"
+            f"SCRIPT_DIR={shlex.quote(str(scripts))}\n"
             f"probe() {{\n{block}\n}}\nprobe\n"
         )
         command = [executable, "-c", script]
