@@ -1100,6 +1100,63 @@ def test_session_machine_lifecycle_cannot_claim_an_unstarted_launch(tmp_path):
     ).exists()
 
 
+def test_session_machine_same_launch_final_writer_reads_latest_snapshot(monkeypatch, tmp_path):
+    payload = {
+        "sessionId": "same-session", "cwd": str(tmp_path),
+        "timestamp": 1000, "source": "resume",
+        "_agentWorktrees": {
+            "pluginVersion": "1.2.3-dev4",
+            "commandCatalog": "## agent-worktrees session command catalog\n\ncatalog",
+        },
+    }
+    assert hook_client._write_session_guidance(payload, home=tmp_path)
+    reached_write = threading.Event()
+    release_final = threading.Event()
+    real_write = hook_client._RUNTIME.write_guidance
+    results = []
+
+    def delayed_write(*args, **kwargs):
+        if threading.current_thread() is worker:
+            reached_write.set()
+            assert release_final.wait(5)
+        return real_write(*args, **kwargs)
+
+    monkeypatch.setattr(hook_client._RUNTIME, "write_guidance", delayed_write)
+    worker = threading.Thread(target=lambda: results.append(
+        hook_client._write_session_guidance(
+            payload, home=tmp_path, decision_context="late final", claim_launch=False,
+        )
+    ))
+    worker.start()
+    try:
+        assert reached_write.wait(5)
+        snapshots = tmp_path / ".agent-worktrees" / ".session-context"
+        snapshots.mkdir(parents=True)
+        key = hook_client._session_launch_key(payload)
+        (snapshots / f"machine-context-{key}.json").write_text(
+            json.dumps({
+                "launchKey": key,
+                "output": json.dumps({
+                    "additionalContext": '## Current machine identity\n\n'
+                    '{"machine":"worker-a","alias":"builder","status":"resolved"}',
+                }),
+            }), encoding="utf-8",
+        )
+        assert hook_client._write_session_guidance(payload, home=tmp_path, claim_launch=False)
+    finally:
+        release_final.set()
+        worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert results == [True]
+    content = (
+        tmp_path / ".copilot" / "session-state" / "same-session"
+        / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
+    ).read_text(encoding="utf-8")
+    assert '"status":"resolved"' in content
+    assert '"machine":"worker-a"' in content
+    assert "late final" in content
+
+
 def test_session_machine_owner_check_and_replace_share_one_lock(tmp_path):
     payload = {
         "sessionId": "same-session", "cwd": str(tmp_path),

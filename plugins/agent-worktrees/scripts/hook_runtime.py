@@ -11,6 +11,7 @@ import struct
 import tempfile
 import time
 from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -89,7 +90,7 @@ def _guidance_lock(target: Path):
 
 
 def write_guidance(
-    target: Path, content: str, payload: dict, *, claim_launch: bool,
+    target: Path, render: Callable[[], str], payload: dict, *, claim_launch: bool,
 ) -> bool:
     temporary = None
     try:
@@ -106,6 +107,7 @@ def write_guidance(
                 or incoming["timestamp"] == owner["timestamp"] and incoming != owner
             ):
                 return False
+            content = render()
             with tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", newline="\n", dir=target.parent,
                 prefix=".session-guidance.", suffix=".tmp", delete=False,

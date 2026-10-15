@@ -342,26 +342,7 @@ def _is_link_or_reparse(path: Path) -> bool:
     )
 
 
-def _write_session_guidance(
-    payload: dict,
-    *,
-    home: Path | None = None,
-    decision_context: str = "",
-    claim_launch: bool = True,
-) -> bool:
-    home = home or Path.home()
-    session_id = payload.get("sessionId")
-    if (
-        not isinstance(session_id, str)
-        or not _SESSION_IDENTIFIER.fullmatch(session_id)
-    ):
-        return False
-
-    enriched = (
-        payload
-        if isinstance(payload.get("_agentWorktrees"), dict)
-        else _enrich_session_payload(payload)
-    )
+def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
     registration = _registration_context(enriched, home)
     contexts = []
     if registration.startswith(_COMMAND_CATALOG_HEADING):
@@ -394,7 +375,28 @@ def _write_session_guidance(
             "Treat guidance as unavailable for this session-start invocation.\n\n"
             + machine + "\n" + marker
         )
+    return content
 
+
+def _write_session_guidance(
+    payload: dict,
+    *,
+    home: Path | None = None,
+    decision_context: str = "",
+    claim_launch: bool = True,
+) -> bool:
+    home = home or Path.home()
+    session_id = payload.get("sessionId")
+    if (
+        not isinstance(session_id, str)
+        or not _SESSION_IDENTIFIER.fullmatch(session_id)
+    ):
+        return False
+    enriched = (
+        payload
+        if isinstance(payload.get("_agentWorktrees"), dict)
+        else _enrich_session_payload(payload)
+    )
     try:
         copilot_root = home / ".copilot"
         copilot_root.mkdir(exist_ok=True)
@@ -420,7 +422,10 @@ def _write_session_guidance(
         if _is_link_or_reparse(target_dir):
             return False
         target = target_dir / "session-guidance.instructions.md"
-        return _RUNTIME.write_guidance(target, content, enriched, claim_launch=claim_launch)
+        return _RUNTIME.write_guidance(
+            target, lambda: _guidance_content(enriched, home, decision_context),
+            enriched, claim_launch=claim_launch,
+        )
     except (OSError, RuntimeError, ValueError):
         return False
 
