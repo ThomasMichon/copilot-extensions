@@ -389,7 +389,7 @@ def test_restarted_lease_adopts_its_retained_coordinator_epoch(directory):
     assert directory.discover_coordinator()["epoch"] == 5
 
 
-@pytest.mark.parametrize("epoch", [-1, True, "5", 1.5])
+@pytest.mark.parametrize("epoch", [-1, True, "5", 1.5, 2**63])
 def test_queue_fencing_floor_rejects_invalid_epochs(tmp_path, epoch):
     queue = TaskQueue(tmp_path / "tasks.db")
     with pytest.raises(ValueError, match="nonnegative integer"):
@@ -493,11 +493,19 @@ def test_lease_ttl_default_is_shorter_than_directory_ttl():
 
 
 @pytest.fixture
-def http_rv(tmp_path):
+def http_rv_app(tmp_path, request):
     """A CoordinatorRendezvous wired to a real coordinator on an ephemeral port."""
     import uvicorn
 
     app = create_app(TaskQueue(tmp_path / "tasks.db"))
+    clock = None
+    mode = getattr(request, "param", None)
+    if mode == "restart":
+        app.state.directory.register("former", role=ROLE_COORDINATOR, epoch=5)
+        app = create_app(TaskQueue(tmp_path / "tasks.db"))
+    elif mode == "expire":
+        clock = FakeClock()
+        app.state.directory._clock = clock
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -520,11 +528,60 @@ def http_rv(tmp_path):
         client.close()
         raise RuntimeError("coordinator did not start")
 
-    yield CoordinatorRendezvous(client)
+    yield app, CoordinatorRendezvous(client), clock
 
     client.close()
     server.should_exit = True
     thread.join(timeout=5)
+
+
+@pytest.fixture
+def http_rv(http_rv_app):
+    return http_rv_app[1]
+
+
+@pytest.mark.parametrize("http_rv_app", ["expire", "restart"], indirect=True)
+def test_http_takeover_advances_above_expired_or_restarted_authority_floor(http_rv_app):
+    _app, rendezvous, clock = http_rv_app
+    if clock is not None:
+        rendezvous.register("former", role=ROLE_COORDINATOR, epoch=5)
+        clock.advance(91)
+    assert rendezvous.discover_coordinator() is None
+    assert rendezvous.fencing_epoch() == 5
+    replacement = CoordinatorLease(rendezvous, "replacement")
+    state = replacement.tick()
+    assert state.is_active is True and state.epoch == 6
+    guard = FencingGuard(rendezvous)
+    with pytest.raises(FencedError):
+        guard.check(5)
+    guard.check(replacement.fencing_token())
+
+
+@pytest.mark.parametrize("response", [
+    None, {}, {"epoch": True}, {"epoch": -1}, {"epoch": "5"}, {"epoch": 2**63},
+])
+def test_http_retained_fencing_floor_refuses_malformed_authority(response):
+    import json
+    import httpx
+    from agent_dispatch.client import DispatchError
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, content=json.dumps(response)),
+    )
+    with DispatchClient("http://coordinator.test", transport=transport) as client:
+        with pytest.raises(DispatchError, match="invalid retained fencing epoch"):
+            CoordinatorRendezvous(client).fencing_epoch()
+
+
+@pytest.mark.parametrize("content", [b"", b"not-json", b"\xff"])
+def test_http_retained_fencing_floor_refuses_invalid_encoding(content):
+    import httpx
+    from agent_dispatch.client import DispatchError
+
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=content))
+    with DispatchClient("http://coordinator.test", transport=transport) as client:
+        with pytest.raises(DispatchError, match="invalid retained fencing epoch"):
+            CoordinatorRendezvous(client).fencing_epoch()
 
 
 def test_lease_and_guard_over_http(http_rv):

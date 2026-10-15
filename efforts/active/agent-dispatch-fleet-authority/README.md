@@ -326,6 +326,29 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-15 -- HTTP replacement leases consume the durable floor
+- Follow-up #6722 review found the HTTP rendezvous still exposing only live
+  coordinator presence. Added a non-cacheable `/directory/fencing-epoch` read,
+  strict client validation and the hosted rendezvous getter used before lease
+  takeover. An absent, malformed or unavailable authoritative floor never
+  becomes an epoch-zero fallback; older authorities require an upgrade before
+  a new coordinator/standby lease can activate.
+- Real HTTP expiry and fresh-server construction against retained state both
+  advance replacement leases from floor five to epoch six and reject epoch-five
+  fencing tokens afterward. Directory epoch inputs and returned floors are
+  bounded to SQLite's integer range; empty, invalid UTF-8 and malformed JSON
+  report explicit client errors.
+- Final coupled native grant, lease, directory, scoped-route and federation
+  selection: 129 passed in 71.95 seconds. No ordinary test deadline, queue
+  ownership, service installation or promotion behavior was changed.
+- The complete Windows coverage run passed 605 tests with six platform skips,
+  but correctly refused to earn a baseline: a native child crosses an opaque
+  build-tool boundary, and copied SDK modules execute with `-I -S -B`, which
+  suppresses interpreter startup hooks. Copied SDK bytes were verified against
+  17 canonical modules. A separate design decision is required for genuine
+  trace activation; no wrapper, argv rewrite, approximate attribution or
+  exemption was silently introduced, and strict coverage activation remains off.
+
 ### 2026-10-15 -- Coordinator presence loss cannot lower task fencing
 - Current-head review of #6722 reproduced epoch-zero renewal succeeding after
   an unread epoch-five registration expired. The task queue now durably retains

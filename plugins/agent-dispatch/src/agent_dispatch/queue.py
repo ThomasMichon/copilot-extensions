@@ -244,8 +244,8 @@ class TaskQueue(
 
     def advance_fencing_epoch(self, epoch: int) -> int:
         """Retain the coordinator's nondecreasing floor with its durable queue."""
-        if type(epoch) is not int or epoch < 0:
-            raise ValueError("fencing epoch must be a nonnegative integer")
+        if type(epoch) is not int or not 0 <= epoch < 2**63:
+            raise ValueError("fencing epoch must be a nonnegative integer below 2**63")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT epoch FROM coordinator_fencing WHERE singleton = 1"

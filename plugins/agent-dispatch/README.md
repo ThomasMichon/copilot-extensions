@@ -85,6 +85,11 @@ The coordinator's fencing floor is retained in the task queue database.
 Coordinator presence expiry, deregistration, demotion and process restart do
 not restore superseded grants or permit epoch-zero renewal after federation.
 An untouched standalone queue still uses epoch zero.
+HTTP-backed leases read that floor through `/directory/fencing-epoch` before
+takeover, even when `/directory/coordinator` has no live entry. An older
+authority lacking the retained-floor endpoint must be upgraded before a new
+coordinator/standby lease can safely activate; unavailable or malformed floors
+never downgrade to epoch zero. Existing live-presence discovery remains unchanged.
 
 This client pins the supplied HTTP(S) endpoint and sends only the task header.
 It does not discover endpoints, autostart a service, resolve machine identity,
