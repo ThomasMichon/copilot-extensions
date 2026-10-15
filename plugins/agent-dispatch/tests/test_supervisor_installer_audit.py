@@ -285,13 +285,13 @@ def test_retirement_audit_warning_does_not_corrupt_result_or_suppress_diagnostic
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
-@pytest.mark.parametrize("mode", [
-    "compact", "pretty", "failed", "truncated", "malformed", "multiple",
-    "diagnostic-stdout", "wrong-type", "foreign-retired", "array-root", "empty",
-])
-def test_retirement_native_stream_framing(tmp_path, mode, host):
+def test_retirement_native_stream_framing(tmp_path, host):
     if not shutil.which(host):
         pytest.skip(f"{host} unavailable")
+    modes = [
+        "compact", "pretty", "failed", "truncated", "malformed", "multiple",
+        "diagnostic-stdout", "wrong-type", "foreign-retired", "array-root", "empty",
+    ]
     producer = tmp_path / "producer.py"
     producer.write_text(
         "import json, sys\n"
@@ -308,9 +308,9 @@ def test_retirement_native_stream_framing(tmp_path, mode, host):
         "if mode == 'diagnostic-stdout': text = 'unexpected stdout\\n' + text\n"
         "if mode == 'array-root': text = '[' + text + ']'\n"
         "if mode == 'empty': text = ''\n"
-        "print('before {diagnostic}', file=sys.stderr, flush=True)\n"
+        "print(mode + ': before {diagnostic}', file=sys.stderr, flush=True)\n"
         "print(text, flush=True)\n"
-        "print('after diagnostic', file=sys.stderr, flush=True)\n"
+        "print(mode + ': after diagnostic', file=sys.stderr, flush=True)\n"
         "sys.exit(1 if mode == 'failed' else 0)\n"
     )
     helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
@@ -319,30 +319,40 @@ def test_retirement_native_stream_framing(tmp_path, mode, host):
         "$ErrorActionPreference='Continue'",
         "function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }",
         f". '{helper}'",
-        f"$raw=@(& '{sys.executable}' '{producer}' '{mode}' 2>&1)",
-        "$childExit=$LASTEXITCODE",
-        "try {",
-        "  $result=Convert-SupervisorRetirementResult -Output $raw",
-        "  @{result=$result; exit=$childExit}|ConvertTo-Json -Depth 10 -Compress",
-        "} catch { [Console]::Error.WriteLine('framing rejected: '+$_.Exception.Message); exit 9 }",
+        "$outcomes=@(",
+        "foreach($mode in @(" + ",".join(f"'{mode}'" for mode in modes) + ")) {",
+        f"  $raw=@(& '{sys.executable}' '{producer}' $mode 2>&1)",
+        "  $childExit=$LASTEXITCODE",
+        "  try {",
+        "    $result=Convert-SupervisorRetirementResult -Output $raw",
+        "    @{mode=$mode; accepted=$true; result=$result; exit=$childExit}",
+        "  } catch {",
+        "    @{mode=$mode; accepted=$false; error=$_.Exception.Message; exit=$childExit}",
+        "  }",
+        "}",
+        ")",
+        "ConvertTo-Json -InputObject $outcomes -Depth 10 -Compress",
     ]))
     result = subprocess.run(
         [host, "-NoProfile", "-File", str(fixture)],
         capture_output=True, text=True, timeout=20,
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
-    valid = mode in {"compact", "pretty", "failed"}
-    assert result.returncode == (0 if valid else 9), result.stdout + result.stderr
-    assert "before {diagnostic}" in result.stderr
-    assert "after diagnostic" in result.stderr
-    if valid:
-        data = json.loads(result.stdout)
-        assert data["result"]["ok"] is (mode != "failed")
-        assert data["exit"] == (1 if mode == "failed" else 0)
-        assert data["result"]["retired"] == [123]
-    else:
-        assert not result.stdout
-        assert "framing rejected:" in result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    outcomes = json.loads(result.stdout)
+    assert [data["mode"] for data in outcomes] == modes
+    for data in outcomes:
+        mode = data["mode"]
+        valid = mode in {"compact", "pretty", "failed"}
+        assert data["accepted"] is valid, data
+        assert data["exit"] == (1 if mode == "failed" else 0), data
+        assert f"{mode}: before {{diagnostic}}" in result.stderr
+        assert f"{mode}: after diagnostic" in result.stderr
+        if valid:
+            assert data["result"]["ok"] is (mode != "failed"), data
+            assert data["result"]["retired"] == [123], data
+        else:
+            assert data["error"], data
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")

@@ -186,6 +186,26 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-15 - Retain framing coverage within the existing CI budget
+
+- Opened #6846 and received an exact-head approving review. Its required
+  Dispatch job then exceeded the unchanged 12-minute job deadline despite
+  every test sub-suite passing; the required aggregate correctly failed.
+  This is the passing-suite/job-budget class already tracked by #6052,
+  not permission to bypass the gate or retry an unchanged candidate.
+- Reduced the new framing matrix's redundant shell-host startups from
+  22 to two. Each host still executes all 11 distinct Python producer
+  subprocesses and validates their stream framing, exit status and
+  diagnostics; shell cold startup itself is not the changed contract.
+  No case, subprocess boundary, timeout or required check was removed.
+- The same focused retirement selection now passes seven pytest items
+  containing the original matrix: Windows fell from 68.02s to 30.15s;
+  Linux fell from 130.74s to 58.48s. These are local measurements of
+  equivalent test coverage, not claimed installer/update savings.
+- The revised source still requires a fresh review and successful
+  required CI. No merge, deadline increase or pipeline retry substitutes
+  for that result.
+
 ### 2026-10-15 - First implementation slice prepared
 
 - Retained native reconciliation exit codes, timed action outcomes and
