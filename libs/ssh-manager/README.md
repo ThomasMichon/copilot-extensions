@@ -38,8 +38,9 @@ agent-codespaces) import this library instead of spawning SSH directly.
   `startup_failure` after failure and clears it on successful negotiation.
   Cleanup bounds the final stderr drain and closes its owned read transport
   even when a descendant keeps the remote pipe open; it does not change
-  process-tree ownership. An exited transport is retired through the same
-  epoch-checked failure path before a replacement opens.
+  process-tree ownership. An exited transport is retired under the failure lock
+  with its epoch invalidated before a replacement opens, without failing fresh
+  requests awaiting submission.
 
 ## Usage
 

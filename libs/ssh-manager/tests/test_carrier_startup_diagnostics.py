@@ -13,7 +13,10 @@ import pytest
 
 from ssh_manager.carrier import (
     CarrierUnavailable,
+    Envelope,
+    EnvelopeType,
     PersistentCarrier,
+    decode_envelope,
     encode_envelope,
     hello_envelope,
 )
@@ -329,9 +332,9 @@ async def test_native_descendant_held_stderr_read_transport_is_closed(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("replacement_succeeds", [True, False])
+@pytest.mark.parametrize("replacement_mode", ["ensure", "request", "failed"])
 async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
-    tmp_path, replacement_succeeds,
+    tmp_path, replacement_mode,
 ):
     _native_console()
     ready = tmp_path / "descendant-ready"
@@ -372,9 +375,23 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
         transport = process.stderr._transport
         old_tasks = set(carrier._tasks)
         replacement = _FailedProcess(b"", returncode=None)
-        if replacement_succeeds:
+        submitted = []
+        if replacement_mode != "failed":
             replacement.stdout = asyncio.StreamReader()
             replacement.stdout.feed_data(frame)
+
+        class ReplyInput(_Input):
+            def write(self, data):
+                envelope = decode_envelope(data[4:])
+                if envelope.type is EnvelopeType.REQUEST:
+                    submitted.append(envelope.request_id)
+                    replacement.stdout.feed_data(encode_envelope(Envelope(
+                        EnvelopeType.RESPONSE,
+                        request_id=envelope.request_id,
+                        payload={"executed": 1},
+                    )))
+
+        replacement.stdin = ReplyInput()
 
         async def reopen():
             assert stderr_task.done()
@@ -382,7 +399,12 @@ async def test_replacement_retires_exited_carrier_with_descendant_held_pipes(
             return replacement
 
         carrier._opener = reopen
-        if replacement_succeeds:
+        if replacement_mode == "request":
+            response = await carrier.request({"operation": "synthetic"}, timeout=2)
+            assert response.payload == {"executed": 1}
+            assert submitted == [response.request_id]
+            assert carrier._process is replacement
+        elif replacement_mode == "ensure":
             await asyncio.wait_for(carrier.ensure_started(), timeout=2)
             assert carrier._process is replacement
         else:
