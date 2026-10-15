@@ -14,6 +14,16 @@ import pytest
 
 from agent_worktrees import installer as inst
 
+READ_PROJECTS_REGISTRY = inst.read_projects_registry
+
+
+def _registry(monkeypatch, projects):
+    snapshot = {"projects": projects}
+    path = inst.projects_yaml_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snapshot), encoding="utf-8")
+    monkeypatch.setattr(inst, "read_projects_registry", lambda **_kwargs: snapshot)
+
 
 @pytest.fixture(params=["Windows", "Linux"])
 def command_home(request, monkeypatch, tmp_path):
@@ -33,10 +43,10 @@ def command_home(request, monkeypatch, tmp_path):
     monkeypatch.setattr(inst, "install_dir", lambda: runtime)
     monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
     monkeypatch.setattr(inst, "_command_arbitration_dir", lambda: runtime / "receipts")
+    monkeypatch.setattr(inst, "projects_yaml_path", lambda: runtime / "projects.yaml")
     monkeypatch.setattr(inst.registry_paths, "installation_context", lambda: None)
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
-    monkeypatch.setattr(inst, "read_projects_registry",
-                        lambda: {"projects": {"demo": {"path": str(tmp_path / "repo")}}})
+    _registry(monkeypatch, {"demo": {"path": str(tmp_path / "repo")}})
     monkeypatch.setattr(inst, "_project_is_knowledge_only", lambda _name: False)
     monkeypatch.setattr(inst, "_project_identity", lambda name, repo_dir=None: {
         "name": inst._stub_key(name), "path": str(tmp_path / "repo"),
@@ -79,7 +89,7 @@ def test_snapshot_obsolete_retirement(command_home, monkeypatch, registered, rec
     if registered:
         monkeypatch.setattr(inst, "_project_is_knowledge_only", lambda _name: True)
     else:
-        monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {}})
+        _registry(monkeypatch, {})
     result = inst.reconcile_binstubs()
     assert set(result["removed"]) == {str(p) for p in before}
     assert result["preserved"] == result["blocked"] == []
@@ -130,7 +140,7 @@ def test_obsolete_edited_sibling_protects_entire_command(command_home, monkeypat
     target = next(iter(before))
     target.write_bytes(b"edited without generated signature\n")
     before[target] = target.read_bytes()
-    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {}})
+    _registry(monkeypatch, {})
     result = inst.reconcile_binstubs()
     assert result["removed"] == []
     assert result["preserved"] == ["demo"]
@@ -143,7 +153,7 @@ def test_foreign_inventory_is_advisory(command_home, monkeypatch):
     receipt = inst._read_receipt("demo")
     receipt["owner"]["marketplace"] = "another-marketplace"
     inst._write_receipt("demo", receipt)
-    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {}})
+    _registry(monkeypatch, {})
     result = inst.reconcile_binstubs()
     assert result["preserved"] == ["demo"]
     assert result["blocked"] == []
@@ -153,7 +163,7 @@ def test_foreign_inventory_is_advisory(command_home, monkeypatch):
 def test_windows_remove_uses_registered_spelling(command_home, monkeypatch, edited):
     if inst.platform.system() != "Windows" or os.name != "nt":
         pytest.skip("native Windows command casing")
-    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {"Demo": {}}})
+    _registry(monkeypatch, {"Demo": {}})
     inst._deploy_project_binstub("Demo")
     before = {p: p.read_bytes() for p, _ in inst._project_binstub_specs("Demo")}
     if edited:
@@ -175,9 +185,9 @@ def test_windows_receipt_only_retirement_recovers_casing(
 ):
     if inst.platform.system() != "Windows" or os.name != "nt":
         pytest.skip("native Windows receipt-only recovery")
-    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {"Demo": {}}})
+    _registry(monkeypatch, {"Demo": {}})
     inst._deploy_project_binstub("Demo")
-    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {}})
+    _registry(monkeypatch, {})
     receipt_path = inst._receipt_path("Demo")
     unlink = Path.unlink
 
@@ -231,8 +241,7 @@ def test_corrupt_nested_final_receipt_preserves_command_and_continues_peer(
         "version": 1, "before": states, "after": states, "receipt": final,
     }
     inst._write_receipt("demo", receipt)
-    monkeypatch.setattr(inst, "read_projects_registry",
-                        lambda: {"projects": {"demo": {}, "valid-peer": {}}})
+    _registry(monkeypatch, {"demo": {}, "valid-peer": {}})
     result = inst.reconcile_binstubs()
     assert result["blocked"] == result["preserved"] == ["demo"]
     assert {p: p.read_bytes() for p in before} == before
@@ -247,7 +256,7 @@ def test_admitted_unregistered_retirement_failure_is_required(
     from agent_worktrees import project_command_transaction as tx
 
     before = seed_old(monkeypatch, command_home, receipted=receipted)
-    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {}})
+    _registry(monkeypatch, {})
 
     def fail_publication(*_args, **_kwargs):
         raise PermissionError("retirement publication denied")
@@ -267,7 +276,7 @@ def test_interrupted_unregistered_retirement_retains_admission(
     from agent_worktrees import project_command_transaction as tx
 
     before = seed_old(monkeypatch, command_home)
-    monkeypatch.setattr(inst, "read_projects_registry", lambda: {"projects": {}})
+    _registry(monkeypatch, {})
     original = tx._replace
 
     def interrupt(path, data, mode):
@@ -559,6 +568,88 @@ def test_explicit_transfer_repairs_non_utf8_receipt(command_home, monkeypatch):
     assert inst.transfer_project_binstub("demo") == 0
     assert inst.reconcile_binstubs()["blocked"] == []
     assert timestamps == {p: p.stat().st_mtime_ns for p in paths + [receipt_path]}
+
+
+@pytest.mark.parametrize("receipted", [True, False])
+@pytest.mark.parametrize("damage", [
+    "yaml", "root", "projects", "entry", "name", "read", "utf8", "missing", "empty", "no-targets",
+])
+def test_invalid_authoritative_registry_never_prunes_or_retires(
+    command_home, monkeypatch, receipted, damage
+):
+    before = seed_old(monkeypatch, command_home, receipted=receipted)
+    receipt_path = inst._receipt_path("demo")
+    receipt_before = receipt_path.read_bytes() if receipt_path.exists() else None
+    path = inst.install_dir() / "projects.yaml"
+    monkeypatch.setattr(inst, "projects_yaml_path", lambda: path)
+    monkeypatch.setattr(inst, "read_projects_registry", READ_PROJECTS_REGISTRY)
+    writes = []
+    monkeypatch.setattr(inst, "write_projects_registry", lambda *args, **kwargs: writes.append(args))
+    contents = {
+        "yaml": "projects: [\n",
+        "root": "[]\n",
+        "projects": "projects: [demo]\n",
+        "entry": "projects:\n  agent-worktrees: {}\n  demo: 3\n",
+        "name": "projects:\n  agent-worktrees: {}\n  ../bad: {}\n",
+        "read": "projects: {}\n",
+        "utf8": "",
+        "empty": "",
+        "no-targets": "schema_version: 2\n",
+    }
+    if damage != "missing":
+        path.write_text(contents[damage], encoding="utf-8")
+    else:
+        path.unlink()
+    if damage == "utf8":
+        path.write_bytes(b"\xff")
+    if damage == "read":
+        original_read = Path.read_text
+
+        def denied(target, *args, **kwargs):
+            if target == path:
+                raise PermissionError("registry read denied")
+            return original_read(target, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", denied)
+    with pytest.raises(inst.BinstubOwnershipError, match="projects registry"):
+        inst.reconcile_binstubs()
+    assert writes == []
+    assert {p: p.read_bytes() for p in before} == before
+    assert (receipt_path.read_bytes() if receipt_path.exists() else None) == receipt_before
+
+
+@pytest.mark.parametrize("contents", [None, "projects: {}\n", "projects:\n  demo: {}\n"])
+def test_fresh_registry_and_legacy_targets_remain_supported(command_home, monkeypatch, contents):
+    path = inst.install_dir() / "projects.yaml"
+    monkeypatch.setattr(inst, "projects_yaml_path", lambda: path)
+    monkeypatch.setattr(inst, "read_projects_registry", READ_PROJECTS_REGISTRY)
+    path.unlink(missing_ok=True)
+    if contents is not None:
+        path.write_text(contents, encoding="utf-8")
+    result = inst.reconcile_binstubs()
+    assert result["blocked"] == []
+    assert result["registered"] == (["demo"] if contents and "demo" in contents else [])
+
+
+def test_reconcile_reuses_one_strict_registry_snapshot(command_home, monkeypatch):
+    path = inst.install_dir() / "projects.yaml"
+    path.write_text("projects:\n  agent-worktrees: {}\n  demo: {}\n", encoding="utf-8")
+    monkeypatch.setattr(inst, "projects_yaml_path", lambda: path)
+    calls, writes = [], []
+
+    def read_once(*, strict=False):
+        calls.append(strict)
+        assert calls == [True], "reconciliation reread the target registry"
+        return READ_PROJECTS_REGISTRY(strict=strict)
+
+    monkeypatch.setattr(inst, "read_projects_registry", read_once)
+    monkeypatch.setattr(inst, "write_projects_registry", lambda data: writes.append(data))
+    result = inst.reconcile_binstubs()
+    assert result["registered"] == ["demo"]
+    assert result["blocked"] == []
+    assert calls == [True]
+    assert len(writes) == 1
+    assert set(writes[0]["projects"]) == {"demo"}
 
 
 def test_unknown_unreceipted_bytes_are_preserved(command_home, monkeypatch, capsys):

@@ -328,9 +328,13 @@ def test_wsl_binstub_routes_through_tool_binstub_not_retired_launcher():
 
 
 def _reg(monkeypatch, names: list[str]) -> None:
+    snapshot = {"projects": {n: {} for n in names}}
+    path = inst.projects_yaml_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snapshot), encoding="utf-8")
     monkeypatch.setattr(
         inst, "read_projects_registry",
-        lambda: {"projects": {n: {} for n in names}},
+        lambda **_kwargs: snapshot,
     )
 
 

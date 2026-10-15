@@ -791,6 +791,7 @@ def _project_binstub_context(
     *,
     repo_dir: str | Path | None = None,
     transfer: bool = False,
+    registry: dict | None = None,
 ) -> tuple[dict[str, str], dict[str, str], list[tuple[Path, str]]]:
     if not project or not cfg._PROJECT_NAME_RE.fullmatch(project):
         raise ValueError(
@@ -805,7 +806,7 @@ def _project_binstub_context(
     if platform.system() == "Windows":
         collisions = [
             name
-            for name in read_projects_registry().get("projects", {})
+            for name in (registry if registry is not None else read_projects_registry()).get("projects", {})
             if name != project and name.casefold() == command_key
         ]
         if collisions:
@@ -837,12 +838,14 @@ def _deploy_project_binstub_unlocked(
     *,
     repo_dir: str | Path | None = None,
     transfer: bool = False,
+    registry: dict | None = None,
 ) -> int:
     """Write a single project's receipt-gated binstub file(s)."""
     owner, project_identity, specs = _project_binstub_context(
         project,
         repo_dir=repo_dir,
         transfer=transfer,
+        registry=registry,
     )
 
     from .project_command_transaction import publish
@@ -919,7 +922,7 @@ def _discover_project_binstubs() -> dict[str, list[Path]]:
 
 
 @pr_authority.registry_transaction
-def _prune_reserved_projects_unlocked() -> list[str]:
+def _prune_reserved_projects_unlocked(registry: dict | None = None) -> list[str]:
     """Remove any reserved-name entries from projects.yaml (self-heal).
 
     The runtime's own name (``agent-worktrees``) is not a project. A prior buggy
@@ -929,7 +932,8 @@ def _prune_reserved_projects_unlocked() -> list[str]:
     write, but existing machines still carry the stale entry -- so drop it here,
     on every install/update, to heal them fleet-wide. Returns the names removed.
     """
-    registry = read_projects_registry()
+    if registry is None:
+        registry = _projects_snapshot_for_mutation()
     projects = registry.get("projects", {})
     if not isinstance(projects, dict):
         return []
@@ -973,6 +977,43 @@ def _project_is_knowledge_only(project: str) -> bool:
         return False
 
 
+def _projects_snapshot_for_mutation() -> dict:
+    """Require authoritative target input before pruning or command mutation."""
+    from . import project_command_migration as migration
+
+    try:
+        registry = read_projects_registry(strict=True)
+        if not isinstance(registry, dict) or not isinstance(registry.get("projects"), dict):
+            raise ValueError("target set is not a projects mapping")
+        projects = registry["projects"]
+        seen: set[str] = set()
+        for name, entry in projects.items():
+            if (
+                not isinstance(name, str) or not cfg._PROJECT_NAME_RE.fullmatch(name)
+                or (entry is not None and not isinstance(entry, dict))
+            ):
+                raise ValueError("invalid project name or entry")
+            key = _stub_key(name)
+            if key in seen:
+                raise ValueError("case-insensitive project command collision")
+            seen.add(key)
+        if _discover_project_binstubs() or migration.inventory():
+            path = projects_yaml_path()
+            if not path.is_file():
+                raise ValueError("missing registry with prior command inventory")
+            if not projects:
+                import yaml
+
+                raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+                if not isinstance(raw, dict) or raw.get("projects") != {}:
+                    raise ValueError("prior commands require an explicit empty projects mapping")
+        return {**registry, "projects": dict(projects)}
+    except Exception as exc:
+        raise BinstubOwnershipError(
+            f"cannot mutate commands without a valid authoritative projects registry: {exc}"
+        ) from exc
+
+
 def _reconcile_binstubs_unlocked() -> dict:
     """Reconcile project binstubs against the projects registry.
 
@@ -984,25 +1025,15 @@ def _reconcile_binstubs_unlocked() -> dict:
     is reclaimed by the stale-removal pass below, same as an unregistered one.
     """
     # Self-heal: a reserved runtime name must never be a registered project.
-    _prune_reserved_projects_unlocked()
+    registry = _projects_snapshot_for_mutation()
+    _prune_reserved_projects_unlocked(registry)
 
-    registered = set(read_projects_registry().get("projects", {}).keys())
+    registered = set(registry["projects"])
     knowledge_only_projects = {
         project for project in registered if _project_is_knowledge_only(project)
     }
     deployable = registered - knowledge_only_projects
     registered_keys = {_stub_key(project) for project in deployable}
-    if platform.system() == "Windows":
-        seen: dict[str, str] = {}
-        for project in sorted(registered):
-            key = project.casefold()
-            if key in seen and seen[key] != project:
-                raise BinstubOwnershipError(
-                    "case-insensitive project command collision: "
-                    f"{seen[key]!r} and {project!r}"
-                )
-            seen[key] = project
-
     added = 0
     migrated: list[str] = []
     preserved: list[str] = []
@@ -1022,7 +1053,7 @@ def _reconcile_binstubs_unlocked() -> dict:
                 historical = migration.validate(
                     project, _read_receipt(project), owner, identity
                 ) or historical
-                added += _deploy_project_binstub_unlocked(project)
+                added += _deploy_project_binstub_unlocked(project, registry=registry)
                 if historical:
                     migrated.append(project)
                     output.changed(

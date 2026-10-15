@@ -5,6 +5,16 @@ ledger. It refreshes registered commands and retires attributable unregistered
 or `knowledge_only` commands. It does not activate installation cells or
 transfer another installation's commands.
 
+Before pruning or touching commands, reconciliation acquires one strict projects
+snapshot under the existing registry lock. It validates target names, entries
+and case collisions, and reuses that snapshot for pruning and deployment.
+Unreadable or malformed authoritative input fails explicitly without command,
+receipt or prune writes. Missing registry input with prior command inventory
+also blocks; an empty target set with prior inventory must be explicitly
+declared as `projects: {}`. An absent registry remains supported for a fresh
+installation with no prior commands or receipts. Tolerant read-only views do
+not authorize retirement.
+
 Automatic physical relocation requires a matching installation receipt and
 marketplace identity, the same runtime root and source repository, and a
 non-decreasing payload version. Legacy snapshots have a narrower bridge:
