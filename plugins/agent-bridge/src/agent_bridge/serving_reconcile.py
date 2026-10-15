@@ -33,6 +33,24 @@ def compare_serving_version(running: str, target: str) -> str:
     return "current" if left == right else "older" if left < right else "newer"
 
 
+def existing_auth_token(root: Path) -> str:
+    """Read existing control authority; reconcile never creates or repairs it."""
+    import yaml
+
+    try:
+        data = yaml.safe_load((root / "auth.yaml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ServingReconcileError(
+            "existing Bridge credential is unavailable or unreadable; no credential was created"
+        ) from exc
+    token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(token, str) or not token.strip():
+        raise ServingReconcileError(
+            "existing Bridge credential is empty or malformed; no credential was changed"
+        )
+    return token
+
+
 @dataclass
 class ServingRuntime:
     root: Path

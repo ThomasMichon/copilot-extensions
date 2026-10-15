@@ -20,7 +20,8 @@ daemon actually serving. Healthy/current serving is a no-op; a healthy, adopted
 older daemon uses ordinary guarded cutover from the unchanged slot. The
 installer-internal `deploy --reconcile-serving` mode retains the observed
 PID/start reference, rechecks the predecessor at publication and authenticated
-control, and confirms native exit without force-reaping. Missing, damaged,
+control, and confirms native exit without force-reaping. It requires the existing
+control credential and never generates, repairs or rotates one. Missing, damaged,
 unhealthy or changed ownership fails explicitly; an inactive installation or
 forwarded route is not started locally. This mode neither repairs stale
 cutovers nor substitutes for the effective-config conditional-repair contract.

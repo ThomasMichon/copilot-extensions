@@ -19,6 +19,7 @@ def serving(tmp_path, monkeypatch):
         "version": "1.2.2", "process_start_time": "123456",
     }
     (tmp_path / "active.json").write_text(json.dumps({"active": row}))
+    (tmp_path / "auth.yaml").write_text("token: existing-fixture-credential\n")
     health = {
         "status": "ok", "service": "agent-bridge", "ready": True,
         "version": row["version"], "draining": False,
@@ -164,6 +165,27 @@ def test_serving_reconcile_invalid_version_refuses():
         reconcile.compare_serving_version("unknown", "1.2.3")
 
 
+@pytest.mark.parametrize("body", [
+    None, "token: [", "[]", "{}", "token: 123", "token: true", 'token: "   "',
+])
+def test_serving_reconcile_never_creates_or_repairs_credentials(tmp_path, body):
+    auth = tmp_path / "auth.yaml"
+    if body is not None:
+        auth.write_text(body)
+    before = auth.read_bytes() if auth.exists() else None
+    with pytest.raises(reconcile.ServingReconcileError):
+        reconcile.existing_auth_token(tmp_path)
+    assert (auth.read_bytes() if auth.exists() else None) == before
+
+
+def test_serving_reconcile_reads_existing_credential_without_writing(tmp_path):
+    auth = tmp_path / "auth.yaml"
+    auth.write_text("token: existing-fixture-credential\n")
+    before = auth.read_bytes()
+    assert reconcile.existing_auth_token(tmp_path) == "existing-fixture-credential"
+    assert auth.read_bytes() == before
+
+
 @pytest.mark.parametrize(("running", "expected", "deploys"), [
     ("1.2.2", 0, True), ("1.2.3", 0, False), ("1.2.4", 1, False),
 ])
@@ -275,7 +297,10 @@ def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, 
     monkeypatch.setattr(venue_cli, "_core", lambda: core)
     monkeypatch.setattr(config, "config_dir", lambda: root)
     monkeypatch.setattr(config, "load_config", lambda: Namespace(bind="127.0.0.1"))
-    monkeypatch.setattr(config, "load_or_create_auth_token", lambda: "test-credential")
+    monkeypatch.setattr(
+        config, "load_or_create_auth_token",
+        Mock(side_effect=AssertionError("credential creation path ran")),
+    )
     monkeypatch.setattr(
         breadcrumb, "recover_stale_cutover",
         Mock(side_effect=AssertionError("legacy recovery ran")),
@@ -296,3 +321,119 @@ def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, 
     assert kwargs["refuse_old"].__self__ is observed
     assert orchestrator.run.call_args.kwargs["force"] is False
     core._ensure_retired_daemon_exited.assert_not_called()
+
+
+@pytest.mark.parametrize("retirement_confirmed", [True, False])
+def test_serving_reconcile_actual_cutover_requires_native_retirement(
+    serving, monkeypatch, retirement_confirmed,
+):
+    from urllib.parse import urlparse
+    import agent_bridge
+    from agent_bridge import config, venue_cli
+    from agent_bridge.client import BridgeClient
+    from zdd import cutover, routing
+
+    root, row, _, old_reference, core = serving
+    state = {"retired": False}
+    old_reference.wait.side_effect = lambda _: state["retired"]
+    new_reference = MagicMock(pid=2222, start_time="123456")
+    new_reference.wait.return_value = False
+    new_reference.__enter__.return_value = new_reference
+    new_reference.close.return_value = None
+    new_reference.__exit__.side_effect = lambda *_: new_reference.close()
+    references = {row["pid"]: old_reference, 2222: new_reference}
+    monkeypatch.setattr(
+        process_exit, "open_process", lambda pid, _start: references[pid],
+    )
+    monkeypatch.setattr(agent_bridge, "__version__", "1.2.3")
+    monkeypatch.setattr(venue_cli, "_core", lambda: core)
+    monkeypatch.setattr(config, "config_dir", lambda: root)
+    monkeypatch.setattr(config, "load_config", lambda: Namespace(bind="127.0.0.1"))
+    monkeypatch.setattr(
+        config, "load_or_create_auth_token",
+        Mock(side_effect=AssertionError("credential creation path ran")),
+    )
+    core._active_endpoint_is_forward.return_value = False
+    handle = Mock(pid=2222)
+    core._launch_bridge_daemon.return_value = handle
+
+    def health(port):
+        active = routing.read_table(root)["active"]
+        pid = row["pid"] if port == row["port"] else 2222
+        return {
+            "status": "ok", "service": "agent-bridge", "ready": True,
+            "version": row["version"] if pid == row["pid"] else "1.2.3",
+            "slot": {"pid": pid, "role": "active" if active["pid"] == pid else "passive",
+                     "active": active},
+        }
+
+    core._service_health_on_port.side_effect = health
+
+    def urlopen(url, **_kwargs):
+        response = MagicMock(status=200)
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps(health(urlparse(url).port)).encode()
+        return response
+
+    monkeypatch.setattr(venue_cli.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(routing, "_listening", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(routing, "_pid_alive", lambda _: True)
+    calls = []
+
+    def request(client, method, path, body=None, **_kwargs):
+        calls.append((method, path, body))
+        if path == "/api/v1/drain":
+            assert body["force"] is False
+            return {"drained": True, "clean": True, "forced": False, "busy_sessions": []}
+        if path == "/api/v1/shutdown":
+            state["retired"] = retirement_confirmed
+            return {"shutting_down": True}
+        return {}
+
+    monkeypatch.setattr(BridgeClient, "_request", request)
+
+    class Routing:
+        ActivePublicationRefused = routing.ActivePublicationRefused
+
+        def read_table(self, directory):
+            return routing.read_table(directory)
+
+        def read_active_endpoint(self, directory):
+            return routing.Endpoint.from_dict(self.read_table(directory)["active"])
+
+        def reap_stale_active(self, *_args, **_kwargs):
+            pass
+
+        def publish_active_with_previous_guarded(self, directory, **kwargs):
+            active = self.read_table(directory)["active"]
+            assert kwargs["refuse_current"](active) is None
+            assert kwargs["expected_active"] == routing.Endpoint.from_dict(active)
+            successor = routing.Endpoint(
+                kwargs["bind"], kwargs["port"], kwargs["pid"], kwargs["version"],
+                row["generation"] + 1, "123456",
+            )
+            (directory / "active.json").write_text(json.dumps({
+                "active": successor.to_dict(), "previous": active,
+            }))
+            return successor, routing.Endpoint.from_dict(active)
+
+    real_orchestrator = cutover.CutoverOrchestrator
+    monkeypatch.setattr(
+        cutover, "CutoverOrchestrator",
+        lambda *args, **kwargs: real_orchestrator(
+            *args, **kwargs, routing_mod=Routing(), sleep=lambda _: None,
+        ),
+    )
+    args = Namespace(
+        force=False, recover=False, json=True, reconcile_serving=True,
+        health_timeout=1, drain_timeout=1,
+    )
+    with pytest.raises(SystemExit) as exit:
+        reconcile.reconcile_serving(args)
+    assert exit.value.code == (0 if retirement_confirmed else 1)
+    result = core._json_out.call_args.args[0]
+    assert result["ok"] is retirement_confirmed
+    assert any(path == "/api/v1/shutdown" for _, path, _ in calls)
+    assert any(path == "/api/v1/session-hosts/reattach" for _, path, _ in calls) is retirement_confirmed
+    core._ensure_retired_daemon_exited.assert_not_called()
+    handle.terminate.assert_not_called()

@@ -239,7 +239,12 @@ def _cmd_deploy(
             print(f"[SKIP] agent-bridge deploy: {forwarded_skip}")
         return
     cfg = load_config()
-    token = load_or_create_auth_token()
+    if serving is not None:
+        from .serving_reconcile import existing_auth_token
+
+        token = existing_auth_token(serving.root)
+    else:
+        token = load_or_create_auth_token()
     host = cfg.bind if cfg.bind not in ("0.0.0.0", "") else "127.0.0.1"
 
     def pick_free_port() -> int:
