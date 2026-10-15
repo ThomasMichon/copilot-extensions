@@ -1325,6 +1325,79 @@ def test_reused_pid_does_not_keep_a_stale_lifecycle_lock(
         lock.release()
 
 
+def _stale_lock_with_guard_exit_cost(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from agent_worktrees import finalize_lock
+
+    path = tmp_path / ".finalize.lock"
+    path.write_text("123:111:token", encoding="utf-8")
+    monkeypatch.setattr(finalize_lock.locks, "pid_alive", lambda _pid: True)
+    monkeypatch.setattr(finalize_lock.locks, "process_start_time", lambda _pid: "222")
+    clock, entered = [0.0], []
+    real_time, real_guard = finalize_lock.time, tracking._RecordLock
+    monkeypatch.setattr(finalize_lock, "time", types.SimpleNamespace(
+        monotonic=lambda: clock[0], time=real_time.time, sleep=real_time.sleep,
+    ))
+
+    @contextmanager
+    def guard(*args, **kwargs):
+        try:
+            with real_guard(*args, **kwargs):
+                entered.append(args[0])
+                yield
+        finally:
+            clock[0] += 0.2
+
+    monkeypatch.setattr(tracking, "_RecordLock", guard)
+    return finalize_lock.FinalizeLock(path, timeout=0.1, stale_after=3600), entered, clock
+
+
+def test_stale_pid_claim_completes_under_original_guard_before_exit_cost(tmp_path, monkeypatch):
+    lock, entered, _ = _stale_lock_with_guard_exit_cost(tmp_path, monkeypatch)
+    try:
+        lock.acquire()
+        assert lock.held
+        assert lock.lock_path.read_text(encoding="utf-8") == lock.token
+        assert entered == [lock.guard_path]
+    finally:
+        lock.release()
+
+
+def test_stale_pid_claim_never_overwrites_reappearing_exact_token(tmp_path, monkeypatch):
+    lock, _, _ = _stale_lock_with_guard_exit_cost(tmp_path, monkeypatch)
+    original_unlink = Path.unlink
+    foreign = "999:222:foreign-token"
+
+    def replace_after_unlink(path, *args, **kwargs):
+        original_unlink(path, *args, **kwargs)
+        if path == lock.lock_path:
+            path.write_text(foreign, encoding="utf-8")
+
+    monkeypatch.setattr(Path, "unlink", replace_after_unlink)
+    with pytest.raises(TimeoutError):
+        lock.acquire()
+    assert not lock.held
+    assert lock.lock_path.read_text(encoding="utf-8") == foreign
+
+
+def test_stale_pid_claim_does_not_discharge_after_own_deadline(tmp_path, monkeypatch):
+    from agent_worktrees import finalize_lock
+
+    lock, _, clock = _stale_lock_with_guard_exit_cost(tmp_path, monkeypatch)
+    before = lock.lock_path.read_bytes()
+
+    def slow_owner_probe(pid):
+        if pid == 123:
+            clock[0] = 0.2
+        return "222"
+
+    monkeypatch.setattr(finalize_lock.locks, "process_start_time", slow_owner_probe)
+    with pytest.raises(TimeoutError):
+        lock.acquire()
+    assert not lock.held
+    assert lock.lock_path.read_bytes() == before
+
+
 def _pair_sibling(
     tmp_path,
     monkeypatch,

@@ -715,3 +715,29 @@ requested contract.
   deployed-state change was attempted. The additive source ancestors and
   backups remain intact; coordinator disposition of the concrete containment
   blocker and unfinished coverage is still required.
+
+- **Same-guard stale lifecycle recovery (PR #6542):** A bounded recorded
+  capture exposed the reused-PID fixture exhausting its unchanged 0.1-second
+  deadline after stale unlink. Deterministic fail-first regressions then proved
+  a source defect: releasing/reacquiring the guard after successful stale proof
+  can spend the remaining budget before exclusive claim, and an expired owner
+  probe could still unlink the old token. Retain the same per-path guard for
+  proven stale cleanup and exclusive-create, check the existing monotonic
+  deadline before discharge/claim, and keep PID/birth verification and exact
+  release-token fencing unchanged. A reappearing foreign token is preserved.
+  No timeout, liveness/ownership permission or containment policy is relaxed.
+  Five focused deterministic/native cases passed; the exact independent
+  reciprocal `None` crash case passed. Per-case records and exhaustive disjoint
+  groups proved all 64 original terminal cases plus three new regressions
+  passed exactly once, with every setup/call/teardown successful and each outer
+  contained runner returning success. No old quiet dots were credited; the
+  longest remaining group took 68.18 seconds within unchanged bounds.
+  Shared publication/creation lifecycle callers passed 31 cases, and all 73
+  coupled launch-seed/admission/receipt cases passed after the correction.
+  The prior 418 passes remain their own exact source evidence. The original
+  native/Git timing, old aggregate-deadline and host-environment uncertainties
+  are not retroactively cleared or declared flakes. This below-altitude fix is
+  covered by the existing plugin patch changefile. Fatal lint, module ceilings,
+  install/documentation/whitespace/large-file and changefile gates passed.
+  An ancestry-preserving publication path and fresh review remain owed, with
+  merge and rollout coordinator-owned.

@@ -111,6 +111,10 @@ All ordinary terminal guards still apply: live/unknown processes, dirty or
 unlanded work, open PRs, unfinished efforts, claims, pairing and ambiguous
 ownership remain protected. Preview eligibility is permission to retry those
 guards, never an assertion that they will pass.
+Lifecycle lock recovery retains its per-path guard across proven stale PID/birth
+cleanup and exclusive token creation. It does not release/reacquire that guard
+between those steps or grant additional deadline time. Proof already outside the
+caller deadline cannot unlink a token; a reappearing exact token is never overwritten.
 
 For paired worktrees, an atomic ground-layer receipt retains the exact
 reciprocal identity and terminal sibling document before unlinking the sibling.
