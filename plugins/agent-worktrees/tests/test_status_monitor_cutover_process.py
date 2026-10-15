@@ -176,6 +176,22 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
         assert locks.pid_alive(new_pid)
         new_lock = _read_json(lock_path)
         assert "hook_endpoint" in new_lock and "classify_endpoint" in new_lock
+        drain_events = [
+            json.loads(line)
+            for line in (routing_path.parent / "lifecycle.log").read_text().splitlines()
+            if json.loads(line).get("action") == "monitor-drain"
+        ]
+        assert any(
+            event["detail"]["control_action"] == "promote"
+            and event["detail"]["phase"] == "complete"
+            for event in drain_events
+        )
+        assert any(
+            event["detail"]["role"] == "daemon"
+            and event["detail"]["control_action"] == "drain"
+            and event["detail"]["phase"] == "complete"
+            for event in drain_events
+        )
     finally:
         for pid in pids_to_kill:
             try:

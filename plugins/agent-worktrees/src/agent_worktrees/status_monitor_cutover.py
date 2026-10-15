@@ -23,6 +23,7 @@ from zdd import routing
 from zdd.cutover import CutoverOrchestrator
 
 from . import locks
+from .status_monitor_drain import DrainTrace
 from .status_monitor_python import direct_monitor_python
 
 _BIND = "127.0.0.1"
@@ -313,21 +314,32 @@ class ControlClient:
         )
 
     def drain(self, *, timeout: float, poll: float, force: bool) -> dict:
-        if self.config_dir is not None:
-            active = routing.read_active_endpoint(self.config_dir, verify_listener=False)
-            if active is not None and active.base_url != self.base_url:
+        trace = DrainTrace(
+            self.config_dir or routing_dir(), role="client", port=self.port,
+            timeout=timeout, poll=poll, rpc_timeout=self.timeout, force=force,
+        )
+        with trace.stage("select-successor"):
+            active = (
+                routing.read_active_endpoint(self.config_dir, verify_listener=False)
+                if self.config_dir is not None else None
+            )
+        if active is not None and active.base_url != self.base_url:
+            with trace.stage("promote-successor"):
                 promoted = ControlClient(
-                    active.base_url,
-                    token=self.token,
-                    config_dir=self.config_dir,
-                    timeout=self.timeout,
+                    active.base_url, token=self.token,
+                    config_dir=self.config_dir, timeout=self.timeout,
                 ).promote()
                 if not promoted.get("adopted"):
                     raise ValueError("status-monitor successor refused promotion")
-        return self._request(
-            "drain",
-            {"timeout": timeout, "poll": poll, "force": force},
+        with trace.stage("request-predecessor"):
+            result = self._request(
+                "drain", {"timeout": timeout, "poll": poll, "force": force},
+            )
+        trace.emit(
+            "response", "ok" if result.get("drained") else "fail",
+            reasons=result.get("busy_sessions"), receipt=result,
         )
+        return result
 
     def undrain(self) -> dict:
         return self._request("undrain")

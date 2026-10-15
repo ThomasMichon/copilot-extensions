@@ -1357,6 +1357,10 @@ unconditionally.
 
 ### Version-cutover reap and live-launcher protection
 
+For the installer handover's exact admission, lock, busy-oracle and rollback
+sequence, and its bounded structural logs, see the
+[status-monitor drain audit](status-monitor-drain.md).
+
 A version bump publishes a fresh `~/.agent-worktrees/versions/<v>` slot and
 calls `status-monitor-restart` (`_restart_status_monitor`) from that new
 slot's interpreter. Alongside reaping the singleton status-monitor's own
