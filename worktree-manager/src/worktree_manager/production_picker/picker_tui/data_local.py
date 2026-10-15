@@ -77,6 +77,8 @@ def is_local(machine: str, env: str) -> bool:
     Every readable roster uses the shared platform-aware lookup through
     ``roster``, including unscoped native/guest pairs. Registry outages retain
     the shared ``is_local_machine`` fallback with the actual guest context.
+    An unregistered configured native name also retains its self fallback when
+    the entire readable roster is legacy/unscoped; guest and scoped targets do not.
     """
     matches_raw_local = (machine, env) == LOCAL
     if not machine or env != LOCAL[1]:
@@ -92,21 +94,28 @@ def is_local(machine: str, env: str) -> bool:
     except (FileNotFoundError, ValueError, KeyError):
         entries = {}
     if entries:
+        actual = local_execution_platform()
         try:
             target = resolve_machine_selection(
-                entries, machine, local_execution_platform(),
+                entries, machine, actual,
             ).entry
             local = roster.local_entry(
-                entries, config.machine, LOCAL[0], local_execution_platform(),
+                entries, config.machine, LOCAL[0], actual,
             )
         except ValueError:
             return False
+        if (
+            target is None and actual in ("windows", "linux")
+            and machine.casefold() == (config.machine or "").casefold()
+            and not any(entry.execution_platform for entry in entries.values())
+        ):
+            return True
         if target is None and local is None:
             return matches_raw_local
         if target is None and local is not None:
             return is_observed_local_name(
                 machine, config_machine=config.machine, entries=entries,
-                environment=local_execution_platform(), real_hostname=LOCAL[0],
+                environment=actual, real_hostname=LOCAL[0],
             )
         return target is not None and target is local
     if matches_raw_local:

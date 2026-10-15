@@ -269,10 +269,11 @@ def parse_machines_yaml(
 
 def machine_identity_names(
     entry: MachineIdentity, *, entries: Mapping[str, MachineIdentity] | None = None,
+    include_metadata: bool = True,
 ) -> tuple[str, ...]:
-    """Explicit selection identities, excluding physical metadata for logical entries."""
+    """Selection names; metadata exclusion leaves only keys, aliases and profiles."""
     values = (entry.key,)
-    if not getattr(entry, "execution_platform", ""):
+    if include_metadata and not getattr(entry, "execution_platform", ""):
         hostname = entry.hostname
         if hostname and split_machine_environment(entry.key).environment == "wsl":
             hostname = split_machine_environment(hostname, "wsl").logical_machine
@@ -283,7 +284,7 @@ def machine_identity_names(
         *(env.alias for env in getattr(entry, "ssh_environments", ())),
     )
     display = entry.display_name
-    if entries is not None and display and not getattr(entry, "execution_platform", ""):
+    if include_metadata and entries is not None and display and not getattr(entry, "execution_platform", ""):
         others = [other for other in entries.values() if other is not entry]
         if not any(
             other.display_name.casefold() == display.casefold()
@@ -291,7 +292,7 @@ def machine_identity_names(
             for other in others
         ):
             values += (display,)
-    if entries is not None:
+    if include_metadata and entries is not None:
         platform = getattr(entry, "execution_platform", "") or split_machine_environment(entry.key).environment
         if platform in ("windows", "wsl"):
             bases = (entry_physical_host(entry), entry.hostname, entry.display_name,

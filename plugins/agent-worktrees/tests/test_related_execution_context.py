@@ -13,6 +13,66 @@ from agent_worktrees import config as cfg, doctor, related, related_cli, repos
 pytestmark = pytest.mark.guard
 
 
+@pytest.mark.parametrize("actual,key", [
+    ("windows", "example-host"), ("wsl", "example-host-wsl"),
+])
+@pytest.mark.parametrize("hostname", ["Generated-Host", "gENERATED-hOST"])
+@pytest.mark.parametrize("locus", ["local", "machine", "container"])
+def test_unscoped_pair_hostname_uses_context_but_preserves_explicit_identities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd,
+    actual: str, key: str, hostname: str, locus: str,
+) -> None:
+    entries = {
+        "example-host": cfg.MachineEntry(
+            key="example-host", display_name="Native", alias="native-alias",
+            hostname="Generated-Host",
+            ssh_environments=[cfg.SSHEnvironment("windows", "native-profile")],
+        ),
+        "example-host-wsl": cfg.MachineEntry(
+            key="example-host-wsl", display_name="Guest", alias="guest-alias",
+            hostname="Generated-Host",
+            ssh_environments=[cfg.SSHEnvironment("wsl", "guest-profile")],
+        ),
+    }
+    assert not any(entry.execution_platform for entry in entries.values())
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine=key, platform=actual, repo_name="example",
+        repos={"example": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"))},
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *args, **kwargs: entries)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(related_cli, "_related_config_source_anchors", lambda *a, **kw: [str(tmp_path)])
+    monkeypatch.setattr(repos, "find_repo", lambda name: None)
+    monkeypatch.setattr(repos, "resolve_account", lambda entry: None)
+    monkeypatch.setattr(doctor, "_read_projects", lambda: {})
+    target = related.Locus(
+        preferred=f"machine:{hostname}" if locus == "machine" else locus,
+        machines=[hostname] if locus == "local" else [],
+        container={"repo": "org/target", "machines": [hostname]} if locus == "container" else {},
+    )
+    related.write_related(tmp_path, related.RelatedConfig(
+        related={"target": related.RelatedEntry(name="target", locus=target)},
+    ))
+    matcher = related_cli._related_machine_matcher([str(tmp_path)], str(tmp_path))
+    assert matcher(hostname, key)
+    for candidate in ("example-host", "native-alias", "native-profile"):
+        assert matcher(candidate, key) is (actual == "windows")
+    for candidate in ("example-host-wsl", "guest-alias", "guest-profile"):
+        assert matcher(candidate, key) is (actual == "wsl")
+    assert related_cli.cmd_related_dispatch(["resolve", "target", "--repo", str(tmp_path), "--json"]) == 0
+    assert json.loads(capfd.readouterr().out)["available_here"]
+    related_cli._related_doctor(str(tmp_path), [], True)
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["current_machine"] == key
+    assert not any(item["kind"] == "unknown_machine" for item in payload["findings"])
+    entries["profile-owner"] = cfg.MachineEntry(
+        key="profile-owner", display_name="Foreign",
+        ssh_environments=[cfg.SSHEnvironment(actual, hostname)],
+    )
+    assert not matcher(hostname, key)
+
+
 @pytest.mark.parametrize("actual", ["windows", "wsl"])
 @pytest.mark.parametrize("current", [
     "Generated-Host", "gENERATED-hOST", "Example Workstation", "eXAMPLE wORKSTATION",

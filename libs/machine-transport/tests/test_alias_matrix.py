@@ -10,7 +10,24 @@ from machine_transport import (
     parse_machines_yaml, resolve_machine_selection, split_machine_environment,
     is_local_machine,
     is_observed_local_name,
+    machine_identity_names,
 )
+
+
+def test_explicit_identity_names_exclude_legacy_physical_metadata() -> None:
+    entry = MachineEntry(
+        key="Example-Host", display_name="Example workstation", hostname="Generated-Host",
+        alias="native-alias", compatibility_aliases=("legacy-alias",),
+        ssh_environments=[SSHEnvironment("windows", "native-profile")],
+    )
+    assert machine_identity_names(entry, include_metadata=False) == (
+        "Example-Host", "native-alias", "legacy-alias", "native-profile",
+    )
+    assert "Generated-Host" in machine_identity_names(entry)
+    assert "Example workstation" in machine_identity_names(entry, entries={entry.key: entry})
+    assert "Example workstation" not in machine_identity_names(
+        entry, entries={entry.key: entry}, include_metadata=False,
+    )
 
 
 @pytest.mark.parametrize("actual", ["windows", "wsl"])

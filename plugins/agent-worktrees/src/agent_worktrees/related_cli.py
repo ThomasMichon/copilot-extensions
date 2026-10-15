@@ -6,8 +6,7 @@ import os
 import subprocess
 
 from agent_procutil import no_window_kwargs
-from machine_transport import IdentityError, resolve_machine_selection
-from machine_transport.registry import PhysicalMachineError
+from machine_transport import IdentityError, machine_identity_names, resolve_machine_selection
 
 from . import config as cfg
 from . import output, state_root as state_root_mod
@@ -140,10 +139,16 @@ def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
 
 
 def _related_machine_entry(entries: dict[str, cfg.MachineEntry], name: str) -> cfg.MachineEntry | None:
-    try:
-        return cfg.find_machine_entry(entries, name)
-    except PhysicalMachineError:
-        return resolve_machine_selection(entries, name, cfg.detect_platform()).entry
+    explicit = {
+        key: entry for key, entry in entries.items()
+        if name.casefold() in {
+            value.casefold() for value in machine_identity_names(entry, include_metadata=False)
+        }
+    }
+    return (
+        resolve_machine_selection(explicit, name).entry if explicit
+        else resolve_machine_selection(entries, name, cfg.detect_platform()).entry
+    )
 
 
 def _related_machine_matcher(anchors: list[str], base_anchor: str) -> MachineMatch:

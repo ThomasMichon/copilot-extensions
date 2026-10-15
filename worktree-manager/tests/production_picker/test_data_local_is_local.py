@@ -14,6 +14,9 @@ and dispatches over SSH to reach a host that is actually this one -- see ``engin
 from __future__ import annotations
 
 import types
+from dataclasses import replace
+
+import pytest
 
 from agent_worktrees import config as agent_cfg
 from machine_transport import identity as mt_identity
@@ -41,6 +44,43 @@ def _install_roster(monkeypatch, entries, *, machine):
     monkeypatch.setattr(data_local.cfg, "load_config", lambda: fake_config)
     monkeypatch.setattr(
         data_local.cfg, "load_machines_yaml", lambda _anchor: entries)
+
+
+@pytest.mark.parametrize("shape", ["unrelated", "hostname-only"])
+@pytest.mark.parametrize("actual,env", [("windows", "Win"), ("linux", "Linux")])
+@pytest.mark.parametrize("target", ["preferred-name", "PREFERRED-NAME"])
+def test_unregistered_native_preferred_self_survives_nonempty_legacy_roster(
+    monkeypatch: pytest.MonkeyPatch, shape: str, actual: str, env: str, target: str,
+) -> None:
+    entry = _entry(
+        "remote-host" if shape == "unrelated" else "legacy-local",
+        hostname="Other-Host" if shape == "unrelated" else "Generated-Host",
+    )
+    _install_roster(monkeypatch, {entry.key: entry}, machine="preferred-name")
+    monkeypatch.setattr(data_local, "LOCAL", ("Generated-Host", env))
+    monkeypatch.setattr(data_local, "local_execution_platform", lambda: actual)
+    assert data_local.is_local(target, env)
+    assert not data_local.is_local("unknown-host", env)
+
+
+@pytest.mark.parametrize("shape", ["unrelated", "hostname-only"])
+@pytest.mark.parametrize("actual,env", [("windows", "Win"), ("linux", "Linux"), ("wsl", "WSL")])
+def test_preferred_native_fallback_cannot_override_scoped_or_guest_authority(
+    monkeypatch: pytest.MonkeyPatch, shape: str, actual: str, env: str,
+) -> None:
+    entry = _entry(
+        "remote-host" if shape == "unrelated" else "legacy-local",
+        hostname="Other-Host" if shape == "unrelated" else "Generated-Host",
+    )
+    entries = {entry.key: entry}
+    _install_roster(monkeypatch, entries, machine="preferred-name")
+    monkeypatch.setattr(data_local, "LOCAL", ("Generated-Host", env))
+    monkeypatch.setattr(data_local, "local_execution_platform", lambda: actual)
+    if actual == "wsl":
+        assert not data_local.is_local("preferred-name", env)
+    entries[entry.key] = replace(entry, execution_platform=actual)
+    assert not data_local.is_local("preferred-name", env)
+    assert not data_local.is_local("foreign-key", env)
 
 
 def test_is_local_fast_path_matches_raw_local_tuple():
