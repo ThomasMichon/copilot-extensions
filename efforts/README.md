@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; retroactive capture, alias matrix and installed Windows/WSL acceptance open | #5674; original identity repair retained, wider transport convergence remains separately owned |
 | [Bridge Workspace Owner Boundary](active/bridge-workspace-owner-boundary/README.md) | Active; local repair, coordinator review/publication and released-source proof pending | #6757 |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
 | [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Draft; follow-up gated on primary repairs and hosted publication | #6639; #6535/#6632 owners retained |
