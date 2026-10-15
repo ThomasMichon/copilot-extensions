@@ -795,6 +795,30 @@ def _add_registry_remedies(
     return replace(snapshot, findings=tuple(findings))
 
 
+def read_operator_config_fragments(directory: Path) -> dict[str, Any]:
+    """Read validated operator YAML only, without activation or registry state."""
+    from . import config as cfg
+
+    try:
+        metadata = directory.stat()
+    except FileNotFoundError:
+        return {}
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError(f"Configuration fragment path is not a directory: {directory}")
+    merged: dict[str, Any] = {}
+    for entry in sorted(directory.iterdir()):
+        if entry.suffix.lower() not in {".yaml", ".yml"}:
+            continue
+        decision = _validated_yaml(entry, entry, entry_class="operator")
+        if decision.value is None:
+            detail = "; ".join(
+                finding.detail or finding.reason for finding in decision.findings
+            )
+            raise ValueError(f"Cannot read operator configuration {entry}: {detail}")
+        merged = cfg._deep_merge(merged, decision.value.raw_config)
+    return merged
+
+
 def scan_config_dropin_registry(
     directory: str | os.PathLike[str],
     *,

@@ -977,24 +977,24 @@ def ensure_owner_running(
     if is_owner_live():
         return True
     try:
-        import subprocess
         import sys
-        from agent_procutil import windowless_daemon_kwargs
 
-        argv = [sys.executable, "-m", "agent_codespaces", "owner"]
-        popen_kwargs: dict[str, Any] = {
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-            "close_fds": True,
-            "cwd": os.path.expanduser("~"),  # never the caller's cwd
-            **windowless_daemon_kwargs(breakaway=True),
-        }
-        child = subprocess.Popen(argv, **popen_kwargs)
+        from agent_procutil import spawn_daemon
+
+        # Relay/SSH children inherit its hidden console; stdio is appended to a
+        # log beside its state so a startup crash leaves a traceback.
+        stdio_log = OWNER_FILE.parent.absolute() / "logs" / "owner-stdio.log"
+        child = spawn_daemon(
+            [sys.executable, "-m", "agent_codespaces", "owner"],
+            cwd=os.path.expanduser("~"),  # never the caller's cwd
+            log_path=stdio_log,
+            console_children=True,
+            display="agent_codespaces owner",
+        )
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False
     return wait_for_owner_startup(
         child, is_owner_live, timeout=spawn_timeout, poll=poll,
-        log_path=RUNTIME_DIR / "logs" / "owner.log",
+        log_path=stdio_log,
     )

@@ -47,6 +47,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -276,7 +277,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         for child in venv.iterdir():
             if child.is_symlink():
                 child.unlink()
-            elif callable(getattr(child, "is_junction", None)) and child.is_junction():
+            elif os.name == "nt" and child.lstat().st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT:
                 child.rmdir()
             elif child.is_dir():
                 shutil.rmtree(child)
@@ -299,6 +300,9 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # deps).
             spec = ".[dev]" if _has_dev_extra(name) else "."
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
+            if reinstall:
+                # A new venv can still consume uv's stale local-path wheels.
+                cmd.append("--reinstall")
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
             cmd.extend(RUNNER_DEPENDENCIES)

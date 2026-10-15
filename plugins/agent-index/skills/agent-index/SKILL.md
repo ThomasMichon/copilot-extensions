@@ -102,7 +102,10 @@ installer/runtime lifecycle that owns the host (`install`, `start`, `update`,
 `indexer.ssh` or set `AGENT_INDEX_REPO`; the CLI read transport needs a project
 to choose the SSH target.
 - Engine issues: `<catalog argv[0]> engine status` shows durable engine health, PID,
-endpoint, and venv provisioning state.
+endpoint, and venv provisioning state. A started engine appends its stdout and
+stderr (startup failures, warnings) to `<engine home>/logs/engine-stdio.log`; a
+per-reindex engine uses `<data dir>/logs/engine-<model>.log`. Spawned engines log
+at `AGENT_INDEX_ENGINE_LOG_LEVEL` (default `warning`; `info` adds every request).
 - Interrupted host cutover: inspect the local zdd routing/runtime state and use
 `deploy --recover`; do not hand-edit markers or manifests to pick a generation.
 

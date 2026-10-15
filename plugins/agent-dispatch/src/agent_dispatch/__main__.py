@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path as Path  # noqa: F401 -- compatibility export for tests
@@ -363,10 +362,7 @@ def _spawn_coordinator_process() -> None:
 
     install_dir = runtime_install_dir()
     from .install_paths import apply_service_env_overlay
-    from .procutil import (
-        resolve_own_runtime_python,
-        windowless_daemon_kwargs,
-    )
+    from .procutil import resolve_own_runtime_python, spawn_dispatch_daemon
 
     # Always the canonically-resolved current-version slot (never sys.executable
     # directly, and never a legacy `.venv` path -- see resolve_own_runtime_python's
@@ -381,33 +377,12 @@ def _spawn_coordinator_process() -> None:
     env.setdefault("PYTHONUTF8", "1")
     apply_service_env_overlay(env, install_dir)
 
-    try:
-        log: Any = open(install_dir / "serve-service.log", "ab")
-    except OSError:
-        log = subprocess.DEVNULL
-
-    kwargs: dict[str, Any] = dict(
-        stdin=subprocess.DEVNULL,
-        stdout=log,
-        stderr=log,
-        close_fds=True,
-        env=env,
-        # Launch the detached coordinator from the runtime root, never the CWD we
-        # inherited (a session-start hook's CWD is often the plugin payload dir,
-        # which on Windows would lock it against `copilot plugin update`). The
-        # daemon also relocates itself (procutil.relocate_off_payload) as a belt.
-        cwd=str(install_dir),
+    # Runs from the runtime root, never the CWD we inherited (a session-start
+    # hook's CWD is often the plugin payload dir, which on Windows would lock it
+    # against `copilot plugin update`), and outlives an installer's command Job.
+    spawn_dispatch_daemon(
+        [python, "-m", "agent_dispatch", "serve"], log_name="serve-service.log", env=env
     )
-    # Successful installers also close their command Job; this daemon must outlive it.
-    kwargs.update(windowless_daemon_kwargs(breakaway=True))
-    try:
-        subprocess.Popen([python, "-m", "agent_dispatch", "serve"], **kwargs)  # noqa: S603
-    finally:
-        if log is not subprocess.DEVNULL:
-            try:
-                log.close()
-            except OSError:
-                pass
 
 
 def _lazy_start_coordinator(*, timeout: float = 20.0) -> bool:

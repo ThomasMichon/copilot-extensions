@@ -559,6 +559,18 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
     (root / "ordinary-directory").mkdir(parents=True)
     (root / "ordinary-directory" / "file").touch()
     (root / "ordinary-file").touch()
+    outside = cache / "outside"
+    outside.mkdir()
+    sentinel = outside / "keep"
+    sentinel.touch()
+    link = root / "outside-link"
+    if os.name == "nt":
+        subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(outside)],
+            check=True, timeout=10, capture_output=True, **launch_options(),
+        )
+    else:
+        link.symlink_to(outside, target_is_directory=True)
     monkeypatch.delattr(Path, "is_junction", raising=False)
     monkeypatch.setattr(runner, "_dep_fingerprint", lambda _: "new")
     monkeypatch.setattr(runner, "_has_pyproject", lambda _: False)
@@ -577,6 +589,7 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
         runner._ensure_venv("alpha", "uv", reinstall=True)
         after = root.stat()
         assert (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+        assert sentinel.exists()
     finally:
         lease.release()
 
@@ -595,7 +608,7 @@ def test_ci_runner_portfolio_keeps_smoke_path_gated_and_manual_exhaustive():
         assert tests["run"].split().count("tools/test_environment_admission.py") == 1
         assert tests["if"] == "steps.runner-contracts.outputs.run == 'true'"
         assert tests["env"]["PYTEST_ADDOPTS"] == (
-            """${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}"""
+            """${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}"""
         )
         assert '"$EVENT_NAME" = "workflow_dispatch"' in detector["run"]
         assert "run=true" in detector["run"] and "run=false" in detector["run"]

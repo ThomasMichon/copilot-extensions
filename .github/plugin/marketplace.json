@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.24.62-dev1"
+    "version": "1.24.63-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.24.62-dev1",
+      "version": "1.24.63-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.60-dev1",
+      "version": "0.9.61-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -38,7 +38,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.5.59-dev1",
+      "version": "0.5.60-dev1",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.18.1-dev1",
+      "version": "0.18.2-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -116,7 +116,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.10.28-dev1",
+      "version": "0.10.29-dev1",
       "source": "plugins/agent-index"
     },
     {

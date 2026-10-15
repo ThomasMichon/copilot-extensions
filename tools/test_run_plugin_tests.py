@@ -32,6 +32,43 @@ finally:
     sys.path[:] = _previous_path
 
 
+@pytest.mark.parametrize("reinstall", [False, True])
+@pytest.mark.parametrize("cached", [False, True])
+def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
+    tmp_path, monkeypatch, reinstall, cached,
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    monkeypatch.setattr(runner, "_has_pyproject", lambda _name: True)
+    monkeypatch.setattr(runner, "_has_dev_extra", lambda _name: True)
+    monkeypatch.setattr(runner, "_dep_fingerprint", lambda _name: "current")
+    root = runner.VENV_ROOT / "example"
+    root.mkdir(parents=True)
+    python = root / "fixture-python"
+    monkeypatch.setattr(runner, "_venv_python", lambda _name: python)
+    if cached:
+        python.touch()
+        (root / ".dep-fingerprint").write_text("current", encoding="utf-8")
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        if command[:2] == ["uv", "venv"]:
+            python.touch()
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    assert runner._ensure_venv("example", "uv", reinstall=reinstall) == python
+    installs = [command for command in calls if command[:3] == ["uv", "pip", "install"]]
+    assert len(installs) == int(reinstall or not cached)
+    if installs:
+        assert installs[0].count("--reinstall") == int(reinstall)
+        assert installs[0][3:5] == ["--python", str(python)]
+        assert installs[0][5:7] == ["-e", ".[dev]"]
+
+
 @pytest.fixture
 def selectable_tests(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)

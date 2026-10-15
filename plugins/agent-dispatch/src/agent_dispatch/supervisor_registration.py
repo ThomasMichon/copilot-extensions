@@ -163,38 +163,25 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> N
     resolves its own site-packages without either var set.
     """
     import os
+    from pathlib import Path
 
-    from agent_procutil import windowless_daemon_kwargs
+    from .procutil import spawn_dispatch_daemon
 
     cmd = [python_path, "-m", "agent_dispatch", *respawn_argv]
     env = {
         k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")
     }
-    kwargs: dict[str, Any] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "env": env,
-        # Never the caller's ambient cwd: this respawned successor is a
-        # long-lived supervised daemon that may outlive whatever repo/
-        # worktree checkout the current (stale) process happened to be
-        # running from (service-lifecycle-supervision's "nothing pins the
-        # plugin payload" rule, generalized to every deletable checkout).
-        "cwd": os.path.expanduser("~"),
-    }
-    # NOT windowless_python()/detached_kwargs(): this supervisor daemon has
-    # RECURRING console-subsystem descendants (it embodies workers, spawning
-    # headless CLI/script sessions on every claimed task). A DETACHED_PROCESS
-    # root has no console for those children to inherit, so each one
-    # allocates its own fresh, visible Default Terminal window (confirmed via
-    # a live controlled comparison -- see
-    # docs/patterns/windows-background-process-launch.md and
-    # efforts/active/windows-launch-hardening/README.md). Keep the
-    # console-subsystem interpreter (`python_path`, not `pythonw.exe`) and use
-    # CREATE_NO_WINDOW so this process's own console stays hidden while still
-    # being inheritable by its children.
-    kwargs.update(windowless_daemon_kwargs(breakaway=True))
-    subprocess.Popen(cmd, **kwargs)  # noqa: S603
+    # Never the caller's ambient cwd: this respawned successor is a long-lived
+    # supervised daemon that may outlive whatever checkout the current (stale)
+    # process was running from. Console children: it embodies workers through
+    # console programs, which inherit its one hidden console (see
+    # docs/patterns/windows-background-process-launch.md).
+    spawn_dispatch_daemon(
+        cmd,
+        log_name="logs/supervisor-successor.log",
+        env=env,
+        cwd=Path(os.path.expanduser("~")),
+    )
 
 
 def _spec_fingerprint(reg: dict) -> str:

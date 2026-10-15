@@ -33,6 +33,10 @@ from .resolver_diagnostics import (
     resolver_failure_detail,
     structured_resolver_error,
 )
+from .session_lifecycle_cli import (
+    _agent_worktrees_environment,
+    _agent_worktrees_launch_prefix,
+)
 
 log = logging.getLogger("agent-bridge")
 
@@ -308,111 +312,26 @@ def _wrap_batch_for_windows(
     return args
 
 
-def _agent_worktrees_root() -> str:
-    """The agent-worktrees runtime root, honoring ``AGENT_RT_ROOT``.
-
-    The standard cross-plugin resolution override every plugin's own
-    ``resolve-runtime.ps1``/``resolve-runtime.sh`` honors; defaulting here too
-    keeps every consumer of the runtime root (the interpreter resolver below,
-    and the legacy ``lib/`` PYTHONPATH compatibility shim) consistent with an
-    active override instead of only the interpreter lookup respecting it.
-    """
-    return os.environ.get("AGENT_RT_ROOT") or os.path.join(
-        os.path.expanduser("~"), ".agent-worktrees"
-    )
-
-
-def _agent_worktrees_python() -> str:
-    """Absolute path to the agent-worktrees runtime interpreter.
-
-    Resolves the junction-free ``current-version`` marker
-    (``~/.agent-worktrees/current-version`` -> ``versions/<ver>/``), exactly as
-    the agent-worktrees binstub does. The ``.venv`` junction is retired (marker
-    model, #581/#1085/#1106) and nothing may traverse that reparse point. Falls
-    back to the newest ``versions/`` slot, then -- best-effort, for un-migrated
-    hosts -- the legacy ``.venv``. Raises ``RuntimeError`` when no interpreter is
-    found.
-
-    Honors ``AGENT_RT_ROOT`` as the runtime-root override (see
-    :func:`_agent_worktrees_root`), exactly as ``resolve-runtime.ps1``/
-    ``resolve-runtime.sh`` do -- the standard cross-plugin resolution signal,
-    so a machine using a non-default agent-worktrees install location resolves
-    consistently everywhere, rather than only via a hardcoded
-    ``~/.agent-worktrees`` default.
-    """
-    root = _agent_worktrees_root()
-    rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
-
-    # Preferred: the current-version marker.
-    ver = ""
-    try:
-        with open(os.path.join(root, "current-version"), encoding="utf-8") as fh:
-            ver = fh.read().strip()
-    except OSError:
-        ver = ""
-    if ver:
-        cand = os.path.join(root, "versions", ver, *rel)
-        if os.path.exists(cand):
-            return cand
-
-    # Fallback: the newest versions/ slot (lexical order, matching the binstub).
-    try:
-        slots = sorted(os.listdir(os.path.join(root, "versions")))
-    except OSError:
-        slots = []
-    for name in reversed(slots):
-        cand = os.path.join(root, "versions", name, *rel)
-        if os.path.exists(cand):
-            return cand
-
-    # Legacy fallback: the retired .venv junction (un-migrated hosts only).
-    legacy = os.path.join(root, ".venv", *rel)
-    if os.path.exists(legacy):
-        return legacy
-
-    raise RuntimeError(
-        "agent-worktrees runtime interpreter not found under "
-        f"{os.path.join(root, 'versions')} (current-version={ver or 'unset'}); "
-        "is agent-worktrees installed?"
-    )
-
-
 async def _resolve_worktree(
     target: SpawnTarget, env: dict[str, str],
 ) -> dict:
     """Run ``agent-worktrees resolve --json`` to get a launch plan.
 
-    Calls the agent-worktrees Python module directly (bypassing the
-    .cmd binstub and cmd.exe) to avoid console allocation issues when
-    running from a headless background service on Windows.
-
-    Returns the parsed JSON plan dict.
+    The owner boundary selects its own completed runtime and installation
+    context; bridge routing variables never select a sibling interpreter.
     """
-    # Resolve the agent-worktrees runtime interpreter via the junction-free
-    # current-version marker (the .venv junction is retired; see
-    # _agent_worktrees_python). Calls the module directly (not the .cmd binstub)
-    # to avoid console-allocation issues in a headless background service.
-    python = _agent_worktrees_python()
-
-    # Clear VIRTUAL_ENV/PYTHONHOME so the bridge's own venv doesn't pollute the
-    # agent-worktrees subprocess (they may use different Python versions). The
-    # versioned runtime bundles its own site-packages, so no PYTHONPATH is needed;
-    # a legacy host that still carries ~/.agent-worktrees/lib gets it for
-    # compatibility.
-    env = dict(env)
-    _aw_lib = os.path.join(_agent_worktrees_root(), "lib")
-    if os.path.isdir(_aw_lib):
-        env["PYTHONPATH"] = _aw_lib
+    prefix = _agent_worktrees_launch_prefix()
+    if not prefix:
+        raise RuntimeError("worktree owner capability is unavailable; cannot resolve managed workspace")
+    env = _agent_worktrees_environment(env)
     env["PYTHONUTF8"] = "1"
-    env.pop("VIRTUAL_ENV", None)
-    env.pop("PYTHONHOME", None)
     # Pass the project as the global --project flag (before the subcommand).
     # agent-worktrees resolves the project from cwd or --project ONLY -- the
     # ambient $WORKTREE_PROJECT identity fallback was retired (cwd-resolution
     # Phase 3). A bridge resolve runs from a neutral daemon cwd that is not
     # inside the target repo, so without --project it fails "could not resolve a
     # project".
-    base_args = [python, "-m", "agent_worktrees"]
+    base_args = list(prefix)
     if target.project and not target.explicit_cwd:
         base_args += ["--project", target.project]
     base_args += ["resolve", "--json", "--no-resume"]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import time
 import types
 
@@ -542,6 +543,14 @@ def test_ensure_owner_running_spawns_and_waits_for_liveness(store, monkeypatch):
     # Never the caller's ambient cwd -- this is a permanent-ish background
     # daemon rooted at HOME instead.
     assert seen_kwargs.get("cwd") == os.path.expanduser("~")
+    # Launched through spawn_daemon: stdio appended to a log beside its state.
+    assert seen_kwargs["stdin"] == subprocess.DEVNULL
+    assert seen_kwargs["stdout"].name == os.path.join(
+        str(owner.OWNER_FILE.parent), "logs", "owner-stdio.log"
+    )
+    assert "agent_codespaces owner" in (
+        owner.OWNER_FILE.parent / "logs" / "owner-stdio.log"
+    ).read_text(encoding="utf-8")
 
 
 def test_ensure_owner_running_returns_false_on_spawn_failure(store, monkeypatch):

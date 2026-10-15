@@ -188,13 +188,65 @@ relaxing artifact evidence.
 A no-content-change or paused run builds and
 publishes nothing.
 
-Only after the exact candidate PR really merges does publication recheck its
-actual parent/content tree and project set and revalidate archive contents.
+Before creating or merging the candidate PR, promotion publishes
+the attested transfer index and every bundle to the candidate-scoped prerelease
+`python-artifacts-<candidate-commit>`. It validates that commit's actual
+parent/content tree, complete project set and archive contents first. The
+prerelease is never marked latest and is not a source-release or dependency-policy
+approval. A failed candidate may leave immutable inputs there, but never claims
+a stable plugin version tag. Clients still have to independently verify their
+selected source and the pinned artifact attestation; the prerelease's existence
+is not installation authority.
+
+The readiness gate pages through all remote assets, requires uploaded state
+and matching SHA-256 metadata, and downloads the index and every bundle using
+the **read-only** workflow token to verify their actual bytes. An upload result
+or a release-writer-only view is not availability proof. Authentication,
+publication, incomplete-set and byte-integrity failures fail the promotion job
+before any PR merge is attempted. A retry may fill missing assets but cannot replace
+existing bytes. The generated PR links its ready set, and merge authorization
+and the merge waiter retain the SHA appended directly by the trusted promoter
+to the step's GitHub output file. A remote branch lookup never selects that
+identity: both the lookup and fetched ref must equal the promoter's SHA before
+any readiness publication. A separate checkout-free merge job polls
+required checks and issues a direct squash merge with an atomic expected-head
+condition using its non-admin Actions token, which has contents and pull-request
+write permissions. That job never receives the owner release PAT and executes
+no checkout, setup actions or repository code. It never arms auto-merge:
+GitHub's auto-merge request can survive a moved
+head, so checking a head only when enabling it is not durable candidate binding.
+An existing matching PR can be resumed; a different head, cross-repository PR,
+closed-unmerged PR or ambiguous match fails rather than creating a replacement.
+Both pre-merge readiness failures and final-publication failures enter the
+shared failure reporter, including when final publication is skipped because
+the promotion job failed before merge.
+Promotion reads its platform-assigned immutable workflow `created_at` (not a
+rerun's start time) with read-only authority. `--promotion-time` fixes both state
+timestamps and Git author/committer dates; the workflow commit identity, UTF-8
+encoding and unsigned commit construction are fixed too. Re-running the failed
+job therefore recomputes the identical complete candidate SHA and tag stem.
+An existing branch is accepted only when that exact recomputed SHA matches;
+normalized source/state comparison, altered timestamps or pre-seeded refs never
+establish provenance. Changed inputs fail rather than force-pushing a replacement.
+Post-merge workflow discovery uses that same immutable creation time as its
+inclusive lower bound, excluding unrelated retained history while reusing
+earlier dispatches within the same run-attempt identity and still refusing
+duplicate matching runs. An Actions rerun changes `github.run_attempt` and
+dispatches new consumers for that attempt; its original `created_at` remains
+the discovery bound, not the later rerun start time.
+
+After the exact candidate PR really merges, the final publisher fetches the
+candidate commit explicitly (squash does not preserve its ancestry), repeats
+read-only availability verification without repairing the ready set, and
+requires exact complete-tree equality with that ready candidate (including
+release state and coverage pointers), rechecks the actual merge's parent/content
+tree and project set and revalidates
+archive contents. This final binding is not the first availability check.
 Content-tree filtering removes only release state and coverage pointers from a
 throwaway index loaded from the supplied candidate tree. Its index-only removal
 does not require those entries to match the publisher's older trusted checkout;
 the real index, working files and candidate payload remain unchanged.
-Assets live under the deterministic
+Final version aliases also publish assets under the deterministic
 `<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
 manifest's content-addressed `artifact_id`, permitting independently attested
 rebuilds without replacing a prior asset. Outer ZIP members have fixed
@@ -215,11 +267,13 @@ plugin/vendored closure, distributions/versions and payload hash still match.
 Unrelated promotions must not move unchanged plugins' stable version tags,
 and a toolchain-only rebuild may add a new content-addressed asset to that
 same version. An unshipped or different-payload tag is rejected.
-Its release PAT and verification token are scoped to the final
-publisher step, not exposed to checkout, Python setup or artifact-download
-actions. Publication is its own job so a partial upload can be retried with
+The release PAT and verification token are scoped to their readiness/final
+publisher shell steps, not exposed to checkout, Python setup or transfer-artifact
+actions. Final version publication remains its own job so a partial upload can be retried with
 **Re-run failed jobs**, reusing the successful signer and exact merge
-outputs rather than repeating promotion. It also enters the failure reporter.
+outputs rather than repeating promotion. Such a failure does not erase the
+complete pre-merge candidate set, but the overall pipeline remains failed until
+final publication is green. It also enters the failure reporter.
 Transfer artifacts expire after two days; durable release-asset
 retention remains a separately tracked policy.
 
@@ -227,7 +281,10 @@ These first-party sets are **not yet an installer fast path**. Third-party
 closure/admission, verified shared-installer consumption and retention remain
 open in `efforts/active/governed-python-artifact-promotion/README.md`. No
 published bundle contains third-party runtime dependency bytes or certifies a
-consumer's governed feed.
+consumer's governed feed. Artifact consumption during install/update remains
+optional: an authorized independently verified source/local-venv path must not
+wait for artifact publication or rollout proof. This does not permit bypassing
+source integrity, dependency governance or an invalid artifact's security refusal.
 
 For manual runs, dispatch this workflow on the default branch. The gate
 resolves its live dev tip and applies the same ancestor proof as automated
@@ -637,7 +694,7 @@ release-candidate invocation.
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (open a generated `release/promote-<run id>` PR against `main`, auto-merge via `APERTURE_RELEASE_TOKEN`). See [Promotion: dev → main](#promotion-dev--main). |
+| `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (publish/read back candidate inputs and open a generated `release/promote-<run id>` PR against `main` using `APERTURE_RELEASE_TOKEN`) → a separate checkout-free `merge-promotion` job (wait for required checks and squash-merge that exact head using the non-admin Actions token) → final publication and explicit post-merge workflow verification. See [Promotion: dev → main](#promotion-dev--main). |
 | `purge-consumed-changefiles.yml` | `schedule` (daily), `repository_dispatch: [purge-changefiles-requested]` | Standalone daily (or on-demand) companion to the promotion pipeline: opens the "clear consumed changefiles on dev" housekeeping PR for whatever changefiles a promotion has already consumed by then -- pure housekeeping, not per-promotion and never load-bearing for promotion correctness. |
 
 **Scheduled sweeps and watchdogs** (`stale-branch-sweep.yml` acts on
@@ -716,14 +773,17 @@ Budget on the order of **10-20 minutes** from a green `dev` merge to a real
 `main` release: `CI` on `dev` (a few minutes) → `Validation Gate` →
 `Promote` opens a generated `release/promote-<run id>` candidate PR
 against `main` → that candidate PR's own fast `main source gate` check →
-auto-merge (via the pipeline's own `APERTURE_RELEASE_TOKEN` — a personal
-fine-grained PAT minted under the maintainer's own account, not the
-default `GITHUB_TOKEN`/Actions-bot identity). To confirm a change actually shipped rather than
+exact-head squash merge in a separate, checkout-free job using the non-admin
+`GITHUB_TOKEN`/Actions identity. The owner `APERTURE_RELEASE_TOKEN` creates
+the candidate PR and publishes artifacts, but never authorizes this routine
+merge. To confirm a change actually shipped rather than
 assuming the `dev` merge itself was the release:
 
 The promotion job retains the workflow's exclusive concurrency slot while
-waiting for its exact generated PR to merge. Enabling auto-merge alone is not
-delivery: the waiter verifies the PR identity and reports a bounded timeout,
+waiting for required checks and its exact generated PR to merge. It does not
+arm a head-independent auto-merge request. The waiter verifies the PR identity
+before the atomic expected-head merge, requires strict server-enforced
+base freshness on the existing main source gate, and reports a bounded timeout,
 closed-unmerged state or provider error as a failure. The release tag uses that
 PR's actual merge commit, even if `main` advances again before tagging.
 `tools/tag_promotion.py` provides the intended naming for that tag:
@@ -732,8 +792,26 @@ PR's actual merge commit, even if `main` advances again before tagging.
 `.github/release-pipeline-state.json`, so a tag and the state it releases
 agree. It refuses to tag when that state names a different promoted `dev`
 commit or the tag already points elsewhere, and a re-run on the same commit is
-a no-op. Until the workflow's tag step calls it, that step still names the tag
-from a fresh `date -u` timestamp plus the merge sha.
+a no-op. Only a successfully verified tag is emitted as a workflow receipt.
+
+An Actions-token merge does not trigger push workflows. The promotion flow
+therefore explicitly dispatches CI at that promotion tag, and the privileged
+Workflow lockdown guard from trusted main, with the exact expected merged SHA
+and owning run-attempt identity. The guard independently verifies that target
+SHA is on its immutable main control snapshot before checking out the release
+implementation; matching caller-supplied tag/SHA fields are not authority.
+Its control snapshot may be newer than the release, and verification records
+both identities. CI's promotion dispatch retains all main-push discovery, plugin,
+native Windows and standalone-service coverage, without selecting the separate
+manual exhaustive tiers or repeating the full validation matrix. Its promotion
+aggregate rejects any skipped required job. The verifier waits for both exact
+runs, checks all job results and specifically requires the source-attribution
+refresh; accepting a dispatch request is not completion.
+
+The human administrator escape remains available for independently
+shape-validated workflow/control repair, never arbitrary source. Such a repair
+may advance main beyond its latest published release. Snapshot checks require
+that release to remain on main, not that it remain main's current control tip.
 
 ```bash
 gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:release/promote-" --limit 5

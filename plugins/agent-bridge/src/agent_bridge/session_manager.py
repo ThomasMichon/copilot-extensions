@@ -32,7 +32,8 @@ from .session_recovery_dormancy import (
     _RecoveryDormancyMixin,
     _background_recovery_backoff_seconds,  # noqa: F401 -- re-exported for tests
 )
-from .transport import SpawnTarget, _agent_worktrees_python, _agent_worktrees_root, spawn
+from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
+from .transport import SpawnTarget, spawn
 
 log = logging.getLogger("agent-bridge")
 
@@ -640,8 +641,8 @@ def _parse_progress_markers(text: str) -> dict[str, str]:
 async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
     """Attempt to clean up the worktree associated with a session.
 
-    For 0-turn sessions (unused worktrees), runs agent-worktrees cleanup
-    with --include-unused to remove worktrees that have no commits. For
+    For 0-turn sessions (unused worktrees), asks the owner to clean only that
+    worktree with --include-unused and its normal prune-safety checks. For
     sessions with turns, logs a notice -- manual finalization is required.
     """
     worktree_id = target.worktree_id
@@ -656,28 +657,22 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
         )
         return
 
-    # 0-turn session: run cleanup --clean --include-unused to remove
-    # all accumulated unused worktrees (including this one)
-    # Resolve the agent-worktrees runtime interpreter via the junction-free
-    # current-version marker (the .venv junction is retired; see
-    # _agent_worktrees_python).
     try:
-        python = _agent_worktrees_python()
+        prefix = _agent_worktrees_launch_prefix()
+        if not prefix:
+            raise RuntimeError("worktree owner capability is unavailable")
     except RuntimeError as exc:
         log.warning("Cannot cleanup worktree %s: %s", worktree_id, exc)
         return
 
-    env = os.environ.copy()
-    aw_lib = os.path.join(_agent_worktrees_root(), "lib")
-    if os.path.isdir(aw_lib):
-        env["PYTHONPATH"] = aw_lib
+    env = _agent_worktrees_environment()
     env["PYTHONUTF8"] = "1"
 
     # Global --project (before the subcommand); the ambient $WORKTREE_PROJECT
     # identity fallback was retired (cwd-resolution Phase 3) and this cleanup
     # runs from a neutral daemon cwd outside the target repo.
-    cmd = [python, "-m", "agent_worktrees", "--project", target.project,
-           "cleanup", "--clean", "--include-unused"]
+    cmd = [*prefix, "--project", target.project,
+           "cleanup", "--worktree-id", worktree_id, "--automatic", "--json", "--include-unused"]
     log.info("Cleaning up unused worktrees (session %s was 0-turn): %s", worktree_id, " ".join(cmd))
 
     try:
@@ -686,6 +681,7 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            creationflags=no_window_flags(),
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode == 0:
@@ -694,7 +690,7 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
                 for line in stdout.decode(errors="replace").strip().splitlines():
                     log.debug("cleanup: %s", line)
         else:
-            err = stderr.decode(errors="replace").strip()
+            err = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
             log.warning("Worktree cleanup failed (exit %d): %s", proc.returncode, err)
     except Exception as exc:
         log.warning("Worktree cleanup error: %s", exc)

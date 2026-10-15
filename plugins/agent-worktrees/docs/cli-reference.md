@@ -34,6 +34,85 @@ scoped keys retain their binding and checkout resolution.
 An explicit `--session-id` still selects the session's project before any
 scalar read; the shortcut does not change that targeting contract.
 
+## Exact durable record read
+
+`agent-worktrees record --worktree-id <exact-id> --json` reads one durable
+tracking YAML from the receiving project's configured tracking namespace.
+Use the repository's binstub, its current directory, or explicit `--project`
+to select that project. IDs are exact filename components, not suffixes or
+codenames; the command never searches another project, enumerates records or
+sessions, asks the resident, or computes live facts. A newly created record
+is readable even before the resident publishes it. Ordinary `list` projection
+authority and failure behavior are unchanged.
+Membership is read from the selected project's machine-local repository
+declarations and registered anchors, not from a global default project or
+Git-backed repository policy. No plugin activation, policy overlays, or Git
+probes are needed to identify these metadata records.
+Validated operator-owned `config.d` YAML fragments merge in lexical order
+beneath `config.yaml`, preserving ordinary repository-declaration precedence.
+Managed plugin pointers are not activated by this metadata-only read.
+Project selection for this command reads Git marker and common-directory files
+without running Git or changing the caller's working directory.
+Git-file layouts without a common-directory marker (including submodules and
+separate Git directories) use the registered checkout root. Malformed or
+unreadable selection metadata returns `project-unavailable` JSON with the
+underlying diagnostic, not an unstructured traceback.
+Registered bare anchors and their linked worktrees resolve the common Git
+directory itself before considering a non-bare checkout's parent.
+
+Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
+The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
+`session_count`, `last_session_id`, `sessions_indexed`, `execution_leg`,
+`execution_leg_opaque`, `session_backend`, `session_backend_opaque`,
+and raw historical `machine`, `platform`, `owner`,
+`owner_ref`, `caller_worktree`, `parent_session`, `checkout_managed` fields
+(absent raw fields are null). `session_count` is null when sessions have not
+been indexed, not zero; an indexed empty list returns zero.
+`last_session_id` uses the existing record-local asserted-head resolution,
+including its transition ledger, without filesystem/session discovery.
+Malformed present ledgers or session states return `record-malformed` rather
+than silently deriving a legacy head. An absent or empty legacy ledger retains
+the existing asserted-head fallback; an explicit null head transition clears it.
+`execution_leg` uses the existing read-only legacy-backend compatibility view,
+preserving an unrecognized explicit leg as opaque data.
+An unrecognized legacy backend likewise remains visible as raw data with its
+opaque flag; a null derived leg does not prove absence of a provider binding.
+YAML timestamp scalars, including those nested in opaque bindings or provider
+blobs, are represented as ISO-8601 strings in JSON without rewriting the record.
+Other values must be JSON-compatible: mapping keys must be strings, and
+unsupported scalar types, non-finite numbers, and cyclic YAML are malformed.
+JSON conversion is bounded to 64 nesting levels, 10,000 expanded nodes and
+1 MiB of encoded data. Shared aliases count on every expansion; exceeding any
+budget returns `record-malformed` rather than allocating unbounded output.
+The same budgets are checked on raw record values before compatibility parsing
+can stringify them, as well as on the returned metadata.
+Keys are never silently coerced or collapsed during JSON conversion.
+Recognized legacy backends use the existing parsed version-1 representation.
+Explicit binding schema versions must be integers, not booleans, floats,
+strings, or null; malformed versions return `record-malformed` before binding
+interpretation. Unknown integer versions remain opaque, and an omitted legacy
+version retains the existing version-1 compatibility behavior.
+Durable `finalizing` and legacy `completed` statuses are returned unchanged,
+like other recognized lifecycle statuses; reading them grants no execution
+authority.
+
+The stored ID must match the requested ID, the repository must belong to the
+receiving project's configured repositories, and the stored path must be
+absolute and non-traversing. Historical paths need not exist or be locally
+executable, including paths recorded on another platform. No machine/platform
+identity is rewritten, nonce backfilled, registration created, or process
+started.
+
+Failures exit one with `{"version":1,"ok":false,"worktree":null,
+"error":{"code":"...","message":"..."}}`. Codes are `invalid-id`,
+`project-unavailable`, `record-missing`, `record-unreadable`,
+`record-malformed`, `id-mismatch`, `repository-mismatch`, and `path-invalid`.
+Argparse usage failures exit two. Missing, unreadable, or malformed metadata
+never means terminal/disposed, sessionless, or permission to allocate again.
+Successful reading likewise grants **no local execution, takeover, mutation,
+or launch authorization**. Actual launch APIs retain execution-space,
+locality, head, duplicate and live-holder protections.
+
 ## State-root and paired-worktree resolution
 
 `agent-worktrees state-root --json` resolves the repository that owns personal
@@ -171,6 +250,7 @@ continue to work unchanged.
 | `session-recovery` | Read one exact session's reciprocal projection and emit validated, machine-readable recovery state without changing bindings. Version-aware output includes schema version, history completeness, relation overflow (`omitted_relations` is `null` for v2 overflow), and tombstone-overflow diagnostics. `--stdin` accepts a sessionStart payload; `--emit-context` renders the bounded pointer used when startup cannot establish an authoritative worktree binding |
 | `session-lineage` | Read one exact session projection and validate every retained worktree relation against authoritative records. Reports restored evidence, missing records, unsupported or invalid projections, schema/history completeness, relation overflow, full-key v1 or opaque-digest v2 tombstones, and tombstone overflow without enumerating the live session-state root |
 | `head-session` | Project-agnostic replay of a worktree's monotonic head-transition ledger, including pending handoffs (JSON; fail-open when untracked) |
+| `record` | Read one exact durable record in the current project (`--worktree-id <exact-id> --json`), without resident roster computation, session discovery, or lifecycle/launch authority |
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
 | `fleet` | Aggregate `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. |
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |

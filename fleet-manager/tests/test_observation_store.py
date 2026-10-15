@@ -48,6 +48,56 @@ def read(result, entity="worktree-a", origin="machine-a", project="example"):
     return result.read(origin=origin, project=project, entity=entity)
 
 
+def seed_updates(result, candidates):
+    """Populate read fixtures in one durable transaction, not exercise admission."""
+    with result._transaction() as (connection, _store, _head, _floor):
+        for candidate in candidates:
+            value = candidate.to_dict()
+            position = result._append(
+                connection, origin=value["origin"], project=value["project"],
+                generation=value["generation"], sequence=value["sequence"],
+                payload=candidate.encoded,
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO current VALUES(?,?,?,?,?,?,?,?)",
+                (value["origin"], value["project"], value["entity"], value["generation"],
+                 value["source_revision"], position, int(value["state"] is not None),
+                 candidate.encoded),
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO streams VALUES(?,?,?,?,?,?,?)",
+                (value["origin"], value["project"], value["generation"], value["sequence"],
+                 value["source_revision"], position, candidate.encoded),
+            )
+
+
+def test_bulk_read_fixture_matches_admitted_database(tmp_path):
+    admitted = ready(tmp_path)
+    seeded = store(tmp_path / "seeded.db")
+    seeded.bind_origin(BINDING)
+    candidates = [
+        update(), update(sequence=2, entity="second"),
+        update(sequence=3, entity="second", state=None, reason="projection-removed"),
+        update(sequence=4, state={"status": "paused"}),
+    ]
+    for candidate in candidates:
+        admitted.apply(candidate)
+    seed_updates(seeded, candidates)
+    with closing(sqlite3.connect(admitted.path)) as actual, closing(
+        sqlite3.connect(seeded.path)
+    ) as fixture:
+        for table, ordering in (
+            ("origins", "origin"), ("current", "origin,project,entity"),
+            ("streams", "origin,project"), ("changes", "position"),
+        ):
+            query = f"SELECT * FROM {table} ORDER BY {ordering}"
+            assert actual.execute(query).fetchall() == fixture.execute(query).fetchall()
+        query = "SELECT authority,installation,position,floor FROM identity"
+        assert actual.execute(query).fetchall() == fixture.execute(query).fetchall()
+    for entity in ("worktree-a", "second"):
+        assert read(admitted, entity)["row"] == read(seeded, entity)["row"]
+
+
 def test_canonical_immutable_bounded_current_shape():
     source = update().to_dict()
     accepted = CurrentUpdate.from_dict(source)
@@ -200,7 +250,10 @@ def test_bounded_replay_expires_visibly_but_latest_retry_remains_idempotent(
     original = read(result)["cursor"]
     first = update()
     result.apply(first)
-    for sequence in range(2, retention + 3):
+    seed_updates(result, (
+        update(sequence=sequence) for sequence in range(2, retention + 1)
+    ))
+    for sequence in range(retention + 1, retention + 3):
         latest = update(sequence=sequence)
         position = result.apply(latest)
     with closing(sqlite3.connect(result.path)) as connection:
@@ -286,8 +339,13 @@ def test_point_access_is_indexed_and_decodes_only_selected_current_slot(tmp_path
     monkeypatch.setattr(sqlite3, "connect", measured_connection)
     read(result, "worktree-0001")
     measuring = False
-    for sequence in range(2, 257):
-        result.apply(update(sequence=sequence, entity=f"worktree-{sequence:04}"))
+    seed_updates(result, (
+        update(sequence=sequence, entity=f"worktree-{sequence:04}")
+        for sequence in range(2, 257)
+    ))
+    with closing(connect(result.path)) as connection:
+        assert connection.execute("SELECT count(*) FROM current").fetchone()[0] == 256
+        assert connection.execute("SELECT count(*) FROM changes").fetchone()[0] == 257
     measuring = True
     decoded = []
     original = result._decode_update

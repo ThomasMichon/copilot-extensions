@@ -1,4 +1,5 @@
 name: CI
+run-name: ${{ inputs.promotion_run != '' && format('CI promotion {0} at {1}', inputs.promotion_run, inputs.promotion_sha) || '' }}
 
 # Fast smoke CI (budget: under ~5 min for a PR).
 #
@@ -39,6 +40,15 @@ on:
   push:
     branches: [main, dev]
   workflow_dispatch:
+    inputs:
+      promotion_sha:
+        description: "Exact merged release SHA (promotion verification only)"
+        required: false
+        type: string
+      promotion_run:
+        description: "Owning promotion run-attempt identity"
+        required: false
+        type: string
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -58,6 +68,7 @@ permissions:
   contents: read
 
 env:
+  CI_PROMOTION_RUN: ${{ inputs.promotion_run }}
   # The heavy plugin (~11 min) kept out of the fast lane; runs full only on
   # workflow_dispatch, and gets a collect-only smoke on PR/push.
   HEAVY_PLUGIN: agent-worktrees
@@ -78,6 +89,22 @@ jobs:
     name: guards + lint
     runs-on: ubuntu-latest
     steps:
+      - name: Verify the dispatched promotion snapshot before checkout
+        if: github.event_name == 'workflow_dispatch' && (inputs.promotion_sha != '' || inputs.promotion_run != '')
+        env:
+          EXPECTED_SHA: ${{ inputs.promotion_sha }}
+          PROMOTION_RUN: ${{ inputs.promotion_run }}
+          RUN_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_REF: ${{ github.ref }}
+        run: |
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+          [[ "$PROMOTION_RUN" =~ ^[0-9]+-[0-9]+$ ]] &&
+          [[ "$RUN_REF" =~ ^refs/tags/promote-[0-9]{14}-[0-9a-f]{8}$ ]] &&
+          [ "$RUN_SHA" = "$EXPECTED_SHA" ] && [ "$WORKFLOW_SHA" = "$EXPECTED_SHA" ] || {
+            echo "::error::Promotion dispatch does not execute the exact merged snapshot."
+            exit 1
+          }
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -518,12 +545,14 @@ jobs:
             base="${{ github.event.pull_request.base.sha }}"
           elif [ "${{ github.event_name }}" = "push" ]; then
             base="${{ github.event.before }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$CI_PROMOTION_RUN" ]; then
+            base="$(git rev-parse --verify HEAD^)"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py))$'; then
+            '^(\.github/workflows/(validate-and-promote|ci|workflow-lockdown-guard)\.yml|tools/(tag_promotion\.py|test_tag_promotion\.py|verify_promotion_workflows\.py|test_verify_promotion_workflows\.py|promote_release\.py|test_promote_release\.py|promotion_candidate\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|promotion_artifact_readiness\.py|test_promotion_artifact_readiness\.py|test_promotion_candidate_retry\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -542,6 +571,9 @@ jobs:
           tools/test_promotion_control.py
           tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
           tools/test_promotion_workflow_adapter.py
+          tools/test_tag_promotion.py
+          tools/test_verify_promotion_workflows.py
+          tools/test_promotion_artifact_readiness.py tools/test_promotion_candidate_retry.py
       - uses: astral-sh/setup-uv@v9.0.0
         if: steps.python-artifact-builder.outputs.run == 'true'
       - name: Fresh seasoned-public toolchain and shared real wheel builds
@@ -643,12 +675,14 @@ jobs:
             base="${{ github.event.pull_request.base.sha }}"
           elif [ "${{ github.event_name }}" = "push" ]; then
             base="${{ github.event.before }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$CI_PROMOTION_RUN" ]; then
+            base="$(git rev-parse --verify HEAD^)"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_build_python_artifacts\.py))$'; then
+            '^(\.github/workflows/(validate-and-promote|ci|workflow-lockdown-guard)\.yml|tools/(tag_promotion\.py|test_tag_promotion\.py|verify_promotion_workflows\.py|test_verify_promotion_workflows\.py|promote_release\.py|test_promote_release\.py|promotion_candidate\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|promotion_artifact_readiness\.py|test_promotion_artifact_readiness\.py|test_promotion_candidate_retry\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_build_python_artifacts\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -668,6 +702,14 @@ jobs:
           uv run --with pytest --with pyyaml python -m pytest -q
           tools/test_promotion_control.py tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
           tools/test_promotion_workflow_adapter.py
+      - name: Native candidate readiness and retry contracts (Windows)
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        run: >-
+          uv run --with pytest --with pyyaml python -m pytest -q
+          tools/test_promotion_artifact_readiness.py           tools/test_promotion_candidate_retry.py
+          tools/test_verify_promotion_workflows.py
+          tools/test_tag_promotion.py
+          -k 'native or binary_read'
 
   windows-hooks:
     name: Git hooks (Windows)
@@ -748,7 +790,7 @@ jobs:
     name: test runner (ubuntu-latest)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -779,7 +821,7 @@ jobs:
         if: steps.runner-contracts.outputs.run == 'true'
         env:
           PYTHONPATH: libs/single-instance-lease/src
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}
+          PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
           uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
@@ -832,17 +874,17 @@ jobs:
       - name: Test thin fleet planner with installed package and host containment
         if: steps.fleet-contracts.outputs.run == 'true'
         env:
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
+          PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
         run: |
           uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && 600 || 120 }}
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}
 
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
     needs: discover
     if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -853,7 +895,7 @@ jobs:
         shell: bash
         run: |
           MODE="--smoke"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$CI_PROMOTION_RUN" ]; then MODE=""; fi
           python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
   agent-index-service-windows:
@@ -861,7 +903,7 @@ jobs:
     needs: discover
     if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: windows-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -872,7 +914,7 @@ jobs:
         shell: bash
         run: |
           MODE="--smoke"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$CI_PROMOTION_RUN" ]; then MODE=""; fi
           python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
   test-runner-windows:
@@ -881,7 +923,7 @@ jobs:
     runs-on: windows-latest
     # Native diagnostic/wrapper acceptance shares this job with runner,
     # payload-CWD and fleet contracts; retain each selection's own bound.
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 7 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -961,7 +1003,7 @@ jobs:
         if: steps.runner-contracts.outputs.run == 'true'
         env:
           PYTHONPATH: libs/single-instance-lease/src
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}
+          PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
           uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
@@ -1012,10 +1054,10 @@ jobs:
       - name: Test thin fleet planner with installed package and host containment
         if: steps.fleet-contracts.outputs.run == 'true'
         env:
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
+          PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
         run: |
           uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && 600 || 120 }}
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}
 
   archive-sources-windows:
     name: archive sources (windows-latest)
@@ -1037,7 +1079,7 @@ jobs:
   discover:
     name: discover suites
     if: >-
-      github.event_name != 'workflow_dispatch' &&
+      (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') &&
       (github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main')
     runs-on: ubuntu-latest
     outputs:
@@ -1083,7 +1125,9 @@ jobs:
     needs: discover
     if: needs.discover.outputs.smoke != '[]' && needs.discover.outputs.smoke != ''
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.plugin == 'agent-dispatch' && 12 || 8 }}
+    # Index setup plus its passing split suites exceeded eight minutes;
+    # retain the ordinary bound for every other plugin.
+    timeout-minutes: ${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index') && 12 || 8 }}
     strategy:
       fail-fast: false
       matrix:
@@ -1248,7 +1292,7 @@ jobs:
 
   full:
     name: full - ${{ matrix.plugin }}
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.promotion_run == ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1283,7 +1327,7 @@ jobs:
     # spawn a real 'uv run --with coverage --with pytest-cov --with
     # pytest-json-report' subprocess against a real plugin's suite (or a
     # constructed throwaway one).
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.promotion_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1298,6 +1342,44 @@ jobs:
         run: >-
           uv run --with pytest python -m pytest -q
           tools/test_coverage_guided_selection.py
+
+  promotion-gate:
+    name: Promotion snapshot gate
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.promotion_run != ''
+    needs:
+      - checks
+      - windows-python-artifact-builder
+      - windows-hooks
+      - bootstrap-killswitch-powershell-5-1
+      - worktree-manager
+      - agent-dispatch-service
+      - agent-index-service-linux
+      - agent-index-service-windows
+      - test-runner-linux
+      - test-runner-windows
+      - archive-sources-windows
+      - discover
+      - smoke
+      - worktrees-smoke
+      - worktrees-windows-launch
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require all main-push coverage at the dispatched release snapshot
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          results = json.loads(os.environ["NEEDS_JSON"])
+          bad = {name: info["result"] for name, info in results.items()
+                 if info["result"] != "success"}
+          if bad:
+              raise SystemExit(f"Required promotion snapshot coverage did not succeed: {bad}")
+          print("Every required main-push job succeeded at this release snapshot.")
+          PY
 
   pr-gate:
     name: PR gate (required check)

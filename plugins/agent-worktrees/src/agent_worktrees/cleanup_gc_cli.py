@@ -43,6 +43,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--clean", action="store_true")
     p.add_argument("--worktree-id", default=None, help="Clean a single worktree by ID (non-interactive, re-checks prune-safety; pair with --json for the picker's per-item progress)")
     p.add_argument("--force", action="store_true", help="With --worktree-id: reap even if prune-safety would skip it (still refuses an active session)")
+    p.add_argument("--automatic", action="store_true", help="With --worktree-id and without --force: preserve dispatch allocations for their owner conclusion")
     p.add_argument("--json", action="store_true", help="With --worktree-id: emit a single JSON result object")
     p.add_argument("--include-unused", action="store_true", help="Also clean truly-empty worktrees (no commits, zero conversation turns)")
     p.add_argument("--include-conversations", action="store_true", help="Also clean conversation-only worktrees (no commits but the session held turns); implies --include-unused")
@@ -93,6 +94,7 @@ def _cleanup_one(args: argparse.Namespace) -> int:
         include_unused=getattr(args, "include_unused", False),
         include_conversations=getattr(args, "include_conversations", False),
         reconcile_prs=getattr(args, "reconcile_prs", False),
+        **({"automatic": True} if getattr(args, "automatic", False) else {}),
     )
     if getattr(args, "json", False):
         output._json_output(payload)
@@ -202,6 +204,7 @@ def _revalidate_cleanup_safety(
     force: bool = False,
     include_unused: bool = False,
     include_conversations: bool = False,
+    automatic: bool = False,
     reap: Callable[
         [tracking.WorktreeRecord, git_ops.WorktreeStateInfo], tuple[int, list[str]]
     ]
@@ -254,6 +257,9 @@ def _revalidate_cleanup_safety(
     This function never performs a network PR reconciliation -- ``rec.prs``
     is read as already reconciled at scan time (or not reconciled at all, in
     which case a stale ``open`` fails safe toward "don't reap").
+
+    Automatic exact cleanup additionally preserves dispatch provenance under
+    the record lock. Explicit operator cleanup retains its existing contract.
     """
     yaml_path = tracking_path / f"{wt_id}.yaml"
     if not yaml_path.exists():
@@ -292,6 +298,13 @@ def _revalidate_cleanup_safety(
     try:
         with tracking._RecordLock(yaml_path, require_sidecar=True):
             latest = tracking.load_record(yaml_path)
+            if automatic and (
+                latest.dispatch_attempt is not None or latest.dispatch_attempt_opaque
+            ):
+                return RevalidationResult(
+                    False, "dispatch allocation requires owner conclusion and managed cleanup",
+                    "dispatch-pending",
+                )
             from .execution_spaces import ExecutionSpaceError, require_cleanup_identity
             try:
                 require_cleanup_identity(latest, repo.anchor)
@@ -354,6 +367,10 @@ def _revalidate_cleanup_safety(
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
+    if getattr(args, "automatic", False) and (
+        not getattr(args, "worktree_id", None) or getattr(args, "force", False)
+    ):
+        return output._json_error("--automatic requires --worktree-id and forbids --force", 2)
     if getattr(args, "worktree_id", None):
         return _core_helper("_cleanup_one", _cleanup_one)(args)
 

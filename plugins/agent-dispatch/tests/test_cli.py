@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import subprocess
 import time
 import types
 
@@ -5052,7 +5053,7 @@ class TestInboxBoard:
 
         monkeypatch.setattr(m, "_client", lambda _args: _Client())
         monkeypatch.setattr("agent_dispatch.remote_dispatch.is_peer_machine", lambda _m: False)
-        monkeypatch.setattr(m.subprocess, "run", lambda *_a, **_k: (_ for _ in ()).throw(
+        monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: (_ for _ in ()).throw(
             AssertionError("render path must not shell out")
         ))
         monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)

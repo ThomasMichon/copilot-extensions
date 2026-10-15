@@ -46,6 +46,9 @@ import tempfile
 import time
 import types
 from pathlib import Path
+from promotion_candidate import (
+    CandidateIdentityError, candidate_clock, candidate_environment, push_candidate,
+)
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -70,9 +73,12 @@ class PromotionError(RuntimeError):
     pass
 
 
-def _git(args: list[str], *, cwd: Path | None = None, check: bool = True) -> str:
+def _git(
+    args: list[str], *, cwd: Path | None = None, check: bool = True,
+    env: dict[str, str] | None = None,
+) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=str(cwd or REPO), capture_output=True, text=True
+        ["git", *args], cwd=str(cwd or REPO), capture_output=True, text=True, env=env,
     )
     if check and result.returncode != 0:
         raise PromotionError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
@@ -642,6 +648,7 @@ def promote(
     python_artifacts_dir: Path | None = None,
     toolchain_source: str = "governed",
     toolchain_min_age_days: int | None = None,
+    promotion_time: str | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
     "nothing to promote" (reported via ``report["promoted"] is False``).
@@ -775,14 +782,15 @@ def promote(
         # squash-merge produces it). Every pushed tag is `<stem>-<sha8>` of
         # the commit it points at, so the tag and the state it releases
         # always agree.
-        tag_stem = f"{tag_prefix}-{time.strftime('%Y%m%d%H%M%S', time.gmtime())}"
+        prepared_at, stamp = candidate_clock(promotion_time)
+        tag_stem = f"{tag_prefix}-{stamp}"
 
         new_state = dict(state)
         new_state["last_promotion"] = {
             "dev_head": dev_head,
             "main_before": main_head,
             "tag": tag_stem,
-            "promoted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "promoted_at": prepared_at,
         }
         if "control_preserved" in summary:
             new_state["last_promotion"]["control_preserved"] = summary["control_preserved"]
@@ -793,8 +801,13 @@ def promote(
         )
         new_tree = build_promotion_tree(scratch, control=summary.get("control_preserved"))
 
+        identity = (
+            ["-c", "commit.gpgsign=false", "-c", "i18n.commitEncoding=UTF-8"]
+            if promotion_time is not None else []
+        )
         commit = _git(
-            ["commit-tree", new_tree, "-p", main_head, "-m", message], cwd=scratch
+            [*identity, "commit-tree", new_tree, "-p", main_head, "-m", message],
+            cwd=scratch, env=candidate_environment(promotion_time),
         )
         if build_python_artifacts_dir is not None:
             try:
@@ -814,7 +827,7 @@ def promote(
             # `<tag_stem>-<merge sha8>`; this pre-merge candidate's sha is
             # replaced by the squash-merge, so no tag name is reported for it.
             tag_name = None
-            _git(["push", "origin", f"{commit}:refs/heads/{candidate_branch}"], cwd=scratch)
+            push_candidate(commit, candidate_branch, cwd=scratch, git=_git)
         else:
             if build_python_artifacts_dir is None:
                 _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
@@ -839,6 +852,8 @@ def promote(
             "python_artifacts_exported": build_python_artifacts_dir is not None,
             **summary,
         }
+    except CandidateIdentityError as exc:
+        raise PromotionError(str(exc)) from exc
     finally:
         remove_scratch_worktree(scratch, repo=repo)
 
@@ -850,6 +865,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", type=Path, default=REPO, help="repo root (default: this checkout)")
     ap.add_argument("--dev-ref", default="origin/dev")
     ap.add_argument("--main-ref", default="origin/main")
+    ap.add_argument("--github-output", type=Path, help="append the exact pushed candidate SHA")
+    ap.add_argument("--promotion-time", help="immutable run-created UTC time for exact candidate retries")
     ap.add_argument(
         "--force", action="store_true",
         help="override the non-incremental-promotion guard after a rollback",
@@ -876,6 +893,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--toolchain-min-age-days", type=int, default=None)
     args = ap.parse_args(argv)
+    if args.github_output is not None and not (args.push and args.candidate_branch):
+        ap.error("--github-output requires --push and --candidate-branch")
     if args.build_python_artifacts_dir is not None and args.push:
         ap.error("build artifacts without --push, in a credential-separated job")
     if args.toolchain_min_age_days is not None and args.toolchain_source != "seasoned-public":
@@ -890,6 +909,7 @@ def main(argv: list[str] | None = None) -> int:
             python_artifacts_dir=args.python_artifacts_dir,
             toolchain_source=args.toolchain_source,
             toolchain_min_age_days=args.toolchain_min_age_days,
+            promotion_time=args.promotion_time,
         )
     except PromotionPaused as exc:
         # A pause is an expected, intentional operator action (part of the
@@ -949,6 +969,9 @@ def main(argv: list[str] | None = None) -> int:
     if report.get("python_artifacts_exported"):
         print("  python-artifacts-exported: true")
     if report.get("candidate_branch"):
+        if args.github_output is not None:
+            with args.github_output.open("a", encoding="utf-8") as workflow_output:
+                workflow_output.write(f"candidate_sha={report['commit']}\n")
         print(f"  pushed candidate branch: {report['candidate_branch']} "
               "(land it on main via a real PR + merge; tag the actual merged commit)")
     elif not report["pushed"]:

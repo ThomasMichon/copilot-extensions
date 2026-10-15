@@ -258,13 +258,14 @@ def _legacy_worktrees_runtime_prefix(own_root: Path) -> list[str] | None:
     return [str(python), "-I", "-X", "utf8", "-m", "agent_worktrees"] if python else None
 
 
-def _agent_worktrees_environment() -> dict[str, str]:
+def _agent_worktrees_environment(inherited: dict[str, str] | None = None) -> dict[str, str]:
     """Keep registry and Python routing with the resolved owner installation."""
     excluded = {
         "AGENT_HOME", "AGENT_RT_ROOT", "AGENT_RT_PY", "COPILOT_PLUGIN_ROOT",
         "VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "__PYVENV_LAUNCHER__",
     }
-    return {key: value for key, value in os.environ.items() if key.upper() not in excluded}
+    source = os.environ if inherited is None else inherited
+    return {key: value for key, value in source.items() if key.upper() not in excluded}
 
 
 def _cmd_handoff_check(args: argparse.Namespace) -> None:

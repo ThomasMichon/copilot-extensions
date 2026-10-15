@@ -261,7 +261,11 @@ def test_spawn_passive_is_windowless_from_pythonw_parent(tmp_path: Path) -> None
     }
     surfaced = set()
     focus_changes = set()
-    with subprocess.Popen([str(pythonw), "-I", str(parent), str(tmp_path), str(output), str(python)]) as proc:
+    parent_log = tmp_path / "windowless-parent.log"
+    with parent_log.open("w", encoding="utf-8") as stream, subprocess.Popen(
+        [str(pythonw), "-I", str(parent), str(tmp_path), str(output), str(python)],
+        stdout=stream, stderr=stream,
+    ) as proc:
         deadline = time.monotonic() + 25
         while proc.poll() is None and time.monotonic() < deadline:
             surfaced.update(
@@ -275,7 +279,7 @@ def test_spawn_passive_is_windowless_from_pythonw_parent(tmp_path: Path) -> None
         if proc.poll() is None:
             proc.terminate()
             pytest.fail("windowless passive-monitor probe exceeded its deadline")
-        assert proc.returncode == 0
+        assert proc.returncode == 0, parent_log.read_text(encoding="utf-8", errors="replace")
     pids = json.loads(output.read_text(encoding="utf-8"))
     assert len(pids) == 2
     assert all(isinstance(pid, int) and pid > 0 for pid in pids)

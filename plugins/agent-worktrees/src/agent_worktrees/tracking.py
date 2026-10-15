@@ -24,6 +24,7 @@ import yaml
 from . import config as cfg
 from . import disposition_history, record_cache
 from .effort_focus import ActiveEffort, active_effort_from_mapping
+from .record_io import load_record_uncached as _load_record_uncached
 
 #: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
 #: status bar (120-col default) and the Worktree Picker's table rows; longer prose
@@ -36,7 +37,8 @@ TITLE_MAX = 30
 #: ``archived`` is post-``finalized`` -- the tombstone `retire_record`
 #: writes for an unpaired reaped worktree instead of deleting it.
 WorktreeStatus = Literal[
-    "active", "complete", "pushed", "finalized", "orphaned", "archived",
+    "active", "complete", "completed", "pushed", "finalizing",
+    "finalized", "orphaned", "archived",
 ]
 
 # A Copilot session's asserted lifecycle state within its worktree
@@ -1534,27 +1536,8 @@ def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
     return loaded(record) if copy_result else record
 
 
-def _load_record_uncached(path: Path) -> WorktreeRecord:
-    """The parse :func:`load_record` memoizes via :mod:`record_cache` --
-    call :func:`load_record` instead of this directly."""
-    raw = _read_text_with_retry(path)
-    try:
-        data = _yaml_safe_load(raw)
-    except yaml.reader.ReaderError:
-        # alice_example/dotfiles#1789: a stray C0 control char (e.g. BEL)
-        # persisted into a
-        # value makes the YAML reader raise on every load, wedging all future
-        # disposition writes. Self-heal by stripping the illegal control chars
-        # and re-parsing; the next save then rewrites the file cleanly. Do not
-        # reinterpret unrelated malformed YAML as a repairable record.
-        repaired = _strip_control_chars(raw)
-        if repaired == raw:
-            raise
-        data = _yaml_safe_load(repaired)
-
-    if not isinstance(data, dict):
-        raise yaml.YAMLError("worktree tracking record must be a YAML mapping")
-
+def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
+    """Parse an already-read tracking mapping without filesystem effects."""
     title = data.get("title")
     if title == "null" or title is None:
         title = None

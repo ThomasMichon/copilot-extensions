@@ -633,6 +633,229 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-10-14 - Non-admin merge authority and explicit post-merge verification
+
+- The operator selected an isolated Actions-token squash merge, rather than
+  a new application credential or removal of the administrator repair escape.
+  The owner PAT still creates the exact candidate branch/PR and publishes
+  artifacts; it must never authorize the routine merge. That merge runs in a
+  fresh job with no checkout, setup action, downloaded artifact or repository
+  code. Server-enforced strict base freshness complements the atomic expected
+  head. Its rollout changes the existing main rule in place and preserves its
+  administrator escape, rather than creating a blanket no-bypass ruleset.
+- A main control repair may advance main beyond the latest published release.
+  Publication verifies an exact release snapshot on main; it must not require
+  that snapshot to remain the branch tip. Human repairs remain shape-validated
+  workflow/control changes, not an exception admitting arbitrary source.
+- An Actions-token merge suppresses automatic push workflows. Completion
+  therefore owes explicit dispatch and successful immutable-snapshot evidence
+  for both existing main-push consumers: CI and Workflow lockdown guard.
+  Read-only CI uses the state-derived promotion tag; the check-publishing
+  guard runs only from trusted main and verifies target ancestry before
+  executing the exact merged implementation. Dispatches pin the expected merged SHA,
+  and must fail on a moved tag, wrong run identity, skipped required refresh,
+  failed job or deadline. This is a new event contract coordinated with #6237,
+  not retrospective proof that its earlier automatic-push lane ran.
+- This closes the exact-candidate ordering/identity intent in the existing
+  promotion pattern. Consumer artifact use and governed verified-source
+  fallback remain optional and independent of publication proof. No live
+  policy change or completion claim is made by this design entry.
+- Implementation isolates both write-capable orchestration jobs from all
+  third-party checkout/setup actions. The dispatch verifier is fetched from
+  the immutable trusted workflow commit, not the candidate or a mutable
+  branch. Promotion dispatch preserves the complete main-push CI coverage
+  and existing bounded tiers rather than selecting the unrelated manual
+  exhaustive suites. Its aggregate requires every main-push job to succeed.
+- Broad publication/source validation exposed and fixed five new
+  contract/fixture failures; the related promotion batch then passed 257 cases and
+  exposed only a native test launcher choosing the WindowsApps WSL shim.
+  Switching that fixture to the existing native Git Bash selection passed
+  all ten actual shell-guard cases. Final merge/dispatch/watchdog contracts
+  passed 118 cases, including strict-policy absence, stale base, moved head
+  and tag, exact workflow SHA, pagination, skipped coverage and idempotent
+  dispatch. The final coherent merge/tag/dispatch/watchdog/fleet selection
+  passed 159 cases in 92.56 seconds. Python lint, whitespace and full
+  module-size guards passed.
+  Hosted exact-head review/checks, containing release, new trusted-flow
+  publication proof, strict-rule activation and authorized rollout remain
+  open; Windows local evidence is not Linux-hosted evidence.
+- Source-owned rebase onto current dev preserves the independently merged
+  small/production retention tiers and manual exhaustive budgets. Promotion
+  dispatch still selects the current push tiers and 120-second fleet bound,
+  not the manual exhaustive lane. The integrated workflow contracts passed
+  116 cases; real contained fleet admission/equivalence and both retention
+  windows passed three cases without widening their bound.
+- Native review found the relocated tag step had lost its former job's Git
+  identity and authentication setup. The writer step now configures the bot
+  identity and non-persisted GitHub CLI credential helper before the actual
+  tagger. A fresh native Git-repository execution of that exact shell step
+  creates the annotated remote tag and output receipt with no ambient Git
+  identity and no persisted token. That contract and its coupled credential/
+  CI-selector checks passed four cases; the Windows changed-path lane now
+  selects it as well.
+- Native review correctly rejected caller-supplied tag/SHA consistency as
+  authority for privileged source-attribution execution. The revised guard
+  keeps its definition main-only, independently verifies the exact release
+  against the immutable main control snapshot before checkout, and executes
+  only that verified release implementation. The coordinator records both
+  control and target identities, rather than requiring control HEAD to equal
+  the published release. This closes the trusted-admission and compatible
+  execution intent in `visions/main-owned-workflow-control/README.md`; it
+  does not introduce mutable contribution imports or a new credential.
+  The focused trust/metadata/event-policy selection passed 99 cases,
+  including executing the literal guard against self-consistent off-main
+  targets and tag dispatches, and allowing a newer main control snapshot.
+  Live GitHub comparison accepted the immutable main snapshot and refused
+  the unmerged PR head with a no-common-ancestor error; no fetched code
+  executed. Hosted review/publication proof and strict-rule activation are
+  still outstanding.
+- Review caught a real post-merge liveness defect: scanning all retained main
+  dispatches would exhaust the bounded pagination limit even with the exact
+  matching run on the first page. Both workflow lookups now use the owning
+  promotion's immutable API `created_at` as an inclusive lower bound, never
+  a retry's later start time. A 1,500-row unrelated-history regression proves
+  exact-run reuse and duplicate-run refusal; malformed owning-run identities
+  or timestamps fail before dispatch. The focused workflow/readiness/retry
+  selection passed 119 cases in 75.92 seconds, and touched Python lint and
+  whitespace checks passed. A read-only live GitHub query accepted the encoded
+  timestamp qualifier and returned no out-of-scope rows. This is API-filter
+  evidence, not an actual publication or Linux workflow execution.
+  The operational reference now correctly distinguishes the merge job's
+  non-admin write-capable Actions token from the owner release PAT.
+- The next review had no Medium/High findings. Its useful Low-severity
+  documentation correction clarifies that dispatch reuse is scoped to the
+  same run-attempt identity. An Actions rerun increments the attempt and
+  dispatches new consumers; it still uses the original run creation time
+  as the inclusive discovery bound. This does not change the implementation
+  or claim reuse of a prior attempt's consumer runs.
+- Exact-head hosted CI run `38659619307` exposed a separate measured budget
+  failure, not a test failure to bypass: `agent-index` job `116181814124`
+  exceeded its eight-minute whole-job limit after every test and cleanup
+  step succeeded. The split suites reported 375 passed/23 skipped in 305.64
+  seconds and 99 passed in 2.52 seconds; the runner wrapper also reported
+  success. Hosted setup and teardown brought the job to 8 minutes 2 seconds,
+  and the platform cancellation correctly failed the aggregate gate.
+  The index plugin now shares the existing twelve-minute dispatch bound;
+  all other plugin job limits and every test/aggregate condition remain
+  unchanged. This narrowly fixes the observed setup/test/cleanup allowance,
+  rather than retrying an undocumented failure or skipping the required gate.
+  A new hosted exact-head run must still prove the correction.
+
+### 2026-10-14 - Candidate-scoped readiness before merge
+
+- Reconciled current #6535/#6632 publisher repair, #6639 boundary-hardening,
+  #6237 workflow consolidation and open PR custody before taking the missing
+  ordering seam under #4876. The operator now authorizes relevant rollouts
+  and requires continuing through an actual clean promotion with every
+  artifact-publishing job green. Existing serialized updater and observer
+  owners retain their work; no competing updater or release dispatch is
+  introduced.
+- Implementation retains squash promotion and actual-merge version-tag
+  binding. A separate immutable candidate prerelease carries the same
+  attested index and complete bundle set before the PR is created or merge
+  is enabled. The gate verifies source composition, uploaded metadata and
+  every downloaded byte using read-only authority; failure never arms
+  merge. Failed candidates cannot poison stable version tags or authorize
+  source installation. The final publisher independently rechecks that
+  ready set without repairing it, then retains its actual-merge checks.
+- Client consumption remains optional and no installer fast path is
+  enabled by this slice. Source fallback, lock authority, dependency
+  governance, integrity refusals and the open consumer/retention gates
+  remain unchanged.
+- Initial scoped validation passed 261 artifact/source/publication cases,
+  then 34 readiness/merge-wait cases including actual binary subprocess
+  transport and a real Git candidate/non-ancestor squash source-binding
+  check. The exact-candidate retry addition passed its two native Git
+  cases plus the existing protected-main candidate-push contract (three
+  cases); touched Python lint and whitespace checks passed. A retry
+  preserves the original candidate when only generated time/tag state
+  changes and refuses a source change without moving either remote ref.
+  Hosted publication and rollout remain open until a normal containing
+  promotion proves every publishing job green. Installer clean-room
+  validation is not claimed by this pipeline-only slice.
+- Implementation PR #6697 is open against `dev`; it is not merged or
+  released yet. Final scoped readiness/CLI/merge-wait/attestation and
+  trusted-adapter validation passed 46 cases. Native review and required
+  CI are pending. The owning session retains actual promotion/publication
+  and authorized rollout follow-through rather than treating PR creation
+  as completion.
+- Its first current-head native review found two real omissions: enabling
+  auto-merge did not durably bind a later merge to the verified head, and
+  explicit CI selectors omitted the new readiness/retry suites. The fix
+  removes auto-merge entirely: the waiter uses read-only authority while
+  checking the exact PR head and required contexts, then performs one
+  direct squash merge with an atomic expected-head condition. A head or
+  policy race, expired deadline or missing write authority fails without
+  leaving auto-merge armed. Existing PR lookup is exact and fail-closed.
+- Changed-path required CI now includes the full new logic contracts on
+  Linux and focused native Git/binary transport contracts on Windows,
+  with selector regression coverage rather than an unconditional new
+  matrix. The revised readiness/waiter/credential contracts passed 50
+  cases; all three changed workflow shell bodies passed native Bash
+  syntax validation. Fresh exact-head review and required CI remain open.
+- The next native review identified a distinct identity gap: readiness
+  selected the remote branch SHA rather than retaining the trusted
+  promoter's returned commit. The promoter now appends its actual pushed
+  SHA directly to the step output file; readiness rejects a moved or
+  deleted ref before any publication and never reselects identity from
+  that ref. PR lookup, merge and final publication retain the same
+  producer identity. Final binding additionally compares the entire
+  candidate and merge trees, including the state/coverage paths excluded
+  from wheel identity.
+- The resulting 75 scoped cases pass, including executing the actual
+  readiness Bash body against moved/deleted refs, direct output-file
+  receipt/no-op tests, real Git state-only substitution refusal and the
+  existing immutable-publisher contracts. Updated the prescriptive
+  promotion pattern and contributor release flow to match direct
+  expected-head merging rather than recommending auto-merge.
+- A third native review correctly rejected the remaining normalized
+  retry adoption itself. The replacement pins the platform's immutable
+  run-created UTC time and fixed workflow Git metadata, recomputes the
+  entire candidate SHA and accepts only that exact remote SHA. No
+  mutable branch contents establish authority. The existing state-derived
+  idempotent tagger now names the final tag from the recorded stem,
+  preserving the same frozen preparation identity.
+- The complete promoter/readiness/retry selection passed 84 cases, with
+  one new forged-state fixture checkout corrected and its refusal then
+  passing independently. Merge/tag contracts passed; the ten real
+  trusted-adapter contracts also passed after their copied trusted-tool
+  fixture included the new helper. A counterfeit candidate-side helper
+  remains an execution trap rather than a trusted fallback.
+- Required Windows CI exposed a separate real 120-second fleet-suite
+  limit and enclosing seven-minute cancellation, not supersession. The
+  isolated fixture-only repair retains all previously selected tests and
+  the 256-row/query/VM assertions, batches read-fixture population in one
+  durable transaction, and checks equivalence with actual admission.
+  Its owner reports two complete unchanged-budget runs: 598 passed,
+  six platform skips and seven existing explicit-tier deselections in
+  95.48/98.45 seconds, on local Python 3.14.7, not CI 3.12.10.
+  Independent coordinator execution passed all three affected
+  equivalence/read/retention contracts. Hosted CI remains the required
+  proof of the integrated seven-minute lane; no budget is relaxed.
+
+### 2026-10-14 - Reviewed ordering contract merged; source updater unblocked
+
+- Intent PR #6621 merged at `52067d5e707f9bb48dc0ce496132b390360379db`
+  after native Copilot approval of exact head
+  `721e71f895a0bd90ad0f7ce3f53d7ba43b74cb8d`, no unresolved threads
+  and all required CI contexts succeeding. Promotion-time artifact readiness
+  is mandatory before merge; client artifact consumption remains optional.
+  This lands reviewed intent, not the pipeline-ordering implementation.
+- The sole already-authorized updater reports its normal unified
+  source/venv update completed with exit 0 against released source
+  `f327cf44793c60321bc205eddadccaeda3d5ee43`, with no first-party
+  artifact identity selected and no package-policy override. It separately
+  verified installed production file identities and the corrected runtime
+  dependency floor. The update retained command-receipt refusal warnings,
+  a supervisor-reconciliation warning and a missing optional local tool;
+  this is not a universal service-health or clean-room PASS.
+- The next implementation slice is the pre-merge readiness/final-binding
+  seam with the existing workflow and publisher owners. Reconcile current
+  claims and branches before editing; do not duplicate #6535/#6632/#6639
+  publisher repairs or #6237 workflow work. Client artifact admission,
+  authority-approved locks, fallback isolation, native clean-room proof,
+  retention and the remaining validation obligations stay open.
+
 ### 2026-10-14 - Promotion must finish artifact production before merge
 
 - The operator explicitly separated mandatory promotion-time artifact

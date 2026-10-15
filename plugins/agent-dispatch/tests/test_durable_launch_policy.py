@@ -29,6 +29,7 @@ def test_durable_callers_request_escape_and_preserve_test_containment(
         return canonical(breakaway=breakaway)
 
     monkeypatch.setattr(procutil, "windowless_daemon_kwargs", kwargs)
+    monkeypatch.setattr(agent_procutil, "windowless_daemon_kwargs", kwargs)
     monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: sys.executable)
     monkeypatch.setattr(procutil, "runtime_root", lambda: tmp_path)
     monkeypatch.setattr("agent_dispatch.install_paths.install_dir", lambda: tmp_path)

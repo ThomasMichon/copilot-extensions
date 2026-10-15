@@ -570,7 +570,7 @@ jobs:
     # exists to react automatically to real validation runs), so the fix is
     # to just never offer that path, rather than trying to harden a job
     # whose own YAML could be attacker-controlled.
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, publish-python-artifacts]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, promote, merge-promotion, publish-python-artifacts, postmerge-workflows]
     if: >-
       always() &&
       github.event_name == 'repository_dispatch' &&
@@ -582,7 +582,10 @@ jobs:
        needs.guards-full-sweep.result == 'failure' ||
        needs.build-python-artifacts.result == 'failure' ||
        needs.python-artifacts.result == 'failure' ||
-       needs.publish-python-artifacts.result == 'failure')
+       needs.promote.result == 'failure' ||
+       needs.merge-promotion.result == 'failure' ||
+       needs.publish-python-artifacts.result == 'failure' ||
+       needs.postmerge-workflows.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -770,7 +773,10 @@ jobs:
       statuses: read
     timeout-minutes: 330
     outputs:
-      merge_sha: ${{ steps.merged.outputs.merge_sha }}
+      candidate_sha: ${{ steps.promote.outputs.candidate_sha }}
+      candidate_branch: ${{ env.CANDIDATE_BRANCH }}
+      main_before: ${{ steps.ready.outputs.main_before }}
+      pr_number: ${{ steps.land.outputs.pr_number }}
     # Environment gating (configured 2026-09-25, repo Settings, not this
     # file): `main-promotion` restricts its deployment_branch_policy to
     # protected branches only (`dev`/`main`) and deliberately carries NO
@@ -801,18 +807,14 @@ jobs:
     # for the full trade-off; this is a named, accepted residual risk,
     # not an oversight.
     #
-    # `main` carries a zero-bypass "pull request required" ruleset (a
-    # personal GitHub account cannot grant the GitHub Actions app -- or any
-    # other actor -- a bypass the way an organization can), so this job can
-    # never push to `main` directly. It pushes the generated commit to a
-    # throwaway `release/promote-<run id>` branch instead, opens a PR
-    # against `main`, and squash-merges it via the `gh` CLI (the same
-    # sanctioned path every other change to this repo already lands
-    # through) -- then tags the REAL, post-merge commit on `main` (a
-    # squash-merge produces a new sha; the pre-merge candidate commit this
-    # job built locally is never the thing that actually lands).
+    # Main requires a PR and its source-shape gate. The owner PAT pushes the
+    # exact generated candidate and opens the PR so that gate is triggered.
+    # A separate checkout-free job merges with the non-admin Actions token;
+    # strict server-side base freshness and expected-head matching apply.
+    # Preserve the human administrator escape for shape-validated control
+    # repair; it is never the routine promotion merge authority.
     #
-    # Write steps use the `APERTURE_RELEASE_TOKEN` environment secret (scoped to
+    # Candidate/publication writes use the `APERTURE_RELEASE_TOKEN` environment secret (scoped to
     # `main-promotion`; a fine-grained PAT scoped to this repo, Contents:
     # Read and write + Pull requests: Read and write), NOT the default
     # `github.token`. Other steps use the read-only job token; the PAT is
@@ -825,6 +827,8 @@ jobs:
     # live on the very first real --push run, #3533 -- had to be merged
     # with a manual admin bypass). A PAT-authored push/PR does trigger
     # downstream workflows normally, making the merge genuinely turn-key.
+    # The Actions-token MERGE does suppress push workflows, so the separate
+    # postmerge-workflows job explicitly dispatches and verifies both consumers.
     #
     # Emergency rollback: `python tools/rollback_release.py pause --reason
     # "..." --push` BEFORE `revert --reason "..." --push` -- run by a human
@@ -995,6 +999,12 @@ jobs:
 
           raise SystemExit(promotion.main(sys.argv[2:]))
           PY
+      - name: Pin the immutable workflow creation time for deterministic candidate retries
+        id: candidate-clock
+        if: steps.decide.outputs.proceed == 'true'
+        run: |
+          created_at=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          printf 'prepared_at=%s\n' "$created_at" >> "$GITHUB_OUTPUT"
       - name: Promote (push a candidate branch; report-only if push=false)
         id: promote
         if: steps.decide.outputs.proceed == 'true'
@@ -1026,6 +1036,7 @@ jobs:
           # artifact from a superseded run can never be silently checked
           # in by passing this directory, whether or not it's empty.
           COVERAGE_BASELINES_DIR: coverage-baselines
+          PROMOTION_TIME: ${{ steps.candidate-clock.outputs.prepared_at }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
             output=$("$RUNNER_TEMP/artifact-validator/bin/python" -I -B "$RUNNER_TEMP/trusted-promoter.py" "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main \
@@ -1036,6 +1047,8 @@ jobs:
           else
             output=$("$RUNNER_TEMP/artifact-validator/bin/python" -I -B "$RUNNER_TEMP/trusted-promoter.py" "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main \
               --push --candidate-branch "$CANDIDATE_BRANCH" \
+              --promotion-time "$PROMOTION_TIME" \
+              --github-output "$GITHUB_OUTPUT" \
               --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
               --python-artifacts-dir python-artifacts)
             echo "$output"
@@ -1150,52 +1163,92 @@ jobs:
               exit 1
             fi
           fi
-      - name: Land the candidate branch on main via PR + squash-merge
-        id: land
-        if: steps.promote.outputs.land == 'true'
+      - name: Publish and read back exact-candidate artifacts before enabling merge
+        id: ready
+        if: steps.promote.outputs.land == 'true' && steps.promote.outputs.candidate_sha != ''
         env:
           GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+          ARTIFACT_VERIFY_TOKEN: ${{ github.token }}
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          CANDIDATE_SHA: ${{ steps.promote.outputs.candidate_sha }}
         run: |
-          if ! git ls-remote --exit-code --heads origin "$CANDIDATE_BRANCH" > /dev/null; then
-            echo "No candidate branch pushed (nothing to promote) -- skipping."
-            echo "candidate_pushed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          remote_ref=$(git ls-remote --heads origin "refs/heads/$CANDIDATE_BRANCH")
+          if [ "$(printf '%s\n' "$remote_ref" | cut -f1)" != "$CANDIDATE_SHA" ]; then
+            echo "::error::Remote branch does not match the trusted promoter's candidate."
+            exit 1
           fi
+          git fetch origin "refs/heads/$CANDIDATE_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$CANDIDATE_SHA"
+          "$RUNNER_TEMP/artifact-validator/bin/python" tools/publish_python_artifacts.py prepare --directory python-artifacts \
+            --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
+            --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF" \
+            --candidate-commit "$CANDIDATE_SHA" --dev-head "$DEV_SHA"
           echo "candidate_pushed=true" >> "$GITHUB_OUTPUT"
-          # `gh pr create` has no --json/--jq flags (those belong to `gh pr
-          # view`/`gh pr list`); it prints the PR URL on success. Extract the
-          # number from that URL instead of piping create straight into --jq
-          # (confirmed live: this workflow's first real --push run failed
-          # here with "unknown flag: --json").
-          pr_url=$(gh pr create --base main --head "$CANDIDATE_BRANCH" \
-            --title "release: promote dev to main ($CANDIDATE_BRANCH)" \
-            --body "Generated by tools/promote_release.py. Do not edit by hand.")
-          pr_number=$(basename "$pr_url")
-          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
-          # `--auto` can race a PR that's already fully mergeable (no
-          # pending required check/review left to wait on) and fail with
-          # `GraphQL: Pull request is in clean status
-          # (enablePullRequestAutoMerge)` -- confirmed live (run
-          # 36242397956's changefile-cleanup PR, #3836, stuck open with
-          # exactly this error, needing a manual merge). `main` normally
-          # has a real pending check (`main source gate`) for `--auto` to
-          # wait on, making this race rare but not impossible here too, so
-          # apply the same safe fallback: retry as a direct merge, which
-          # is exactly what "already clean" means it's safe to do.
-          merge_out=$(gh pr merge "$pr_number" --squash --auto 2>&1) || {
-            if echo "$merge_out" | grep -qi "is in clean status"; then
-              echo "::notice::--auto raced an already-clean PR; merging directly instead."
-              gh pr merge "$pr_number" --squash
-            else
-              echo "$merge_out" >&2
-              exit 1
-            fi
-          }
-      - name: Wait for the exact promotion PR to merge
-        id: merged
-        if: steps.promote.outputs.land == 'true' && steps.land.outputs.candidate_pushed == 'true'
+          printf 'main_before=%s\n' "$(git rev-parse "$CANDIDATE_SHA^")" >> "$GITHUB_OUTPUT"
+      - name: Land the candidate branch on main via PR + squash-merge
+        id: land
+        if: steps.ready.outputs.candidate_pushed == 'true'
         env:
-          PROMOTION_PR: ${{ steps.land.outputs.pr_number }}
+          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+          CANDIDATE_SHA: ${{ steps.promote.outputs.candidate_sha }}
+        run: |
+          echo "candidate_pushed=true" >> "$GITHUB_OUTPUT"
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$CANDIDATE_BRANCH" \
+            --base main --state all --json number,headRefOid,isCrossRepository,state --limit 100)
+          pr_number=$(PR_CANDIDATES="$existing" python - <<'PY'
+          import json
+          import os
+
+          candidates = json.loads(os.environ["PR_CANDIDATES"])
+          if not isinstance(candidates, list) or len(candidates) > 1:
+              raise RuntimeError("ambiguous existing promotion PR")
+          if candidates:
+              pr = candidates[0]
+              if (
+                  not isinstance(pr, dict)
+                  or pr.get("headRefOid") != os.environ["CANDIDATE_SHA"]
+                  or pr.get("isCrossRepository") is not False
+                  or pr.get("state") not in ("OPEN", "MERGED")
+                  or type(pr.get("number")) is not int or pr["number"] <= 0
+              ):
+                  raise RuntimeError("existing promotion PR does not match the exact candidate")
+              print(pr["number"])
+          PY
+          )
+          if [ -z "$pr_number" ]; then
+            pr_url=$(gh pr create --base main --head "$CANDIDATE_BRANCH" \
+              --title "release: promote dev to main ($CANDIDATE_BRANCH)" \
+              --body "Generated by tools/promote_release.py. Do not edit by hand. Verified candidate artifacts: https://github.com/$GITHUB_REPOSITORY/releases/tag/python-artifacts-$CANDIDATE_SHA")
+            pr_number=$(basename "$pr_url")
+          fi
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+
+  merge-promotion:
+    name: Merge the exact ready candidate without administrator authority
+    needs: promote
+    if: needs.promote.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+    outputs:
+      merge_sha: ${{ steps.merged.outputs.merge_sha }}
+    # This fresh runner executes only the literal merge waiter. No checkout,
+    # setup action, downloaded artifact or repository code sees its write token.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_BRANCH: ${{ needs.promote.outputs.candidate_branch }}
+    steps:
+      - name: Wait for required checks and merge only the exact ready candidate
+        id: merged
+        env:
+          PROMOTION_PR: ${{ needs.promote.outputs.pr_number }}
+          CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
+          MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
+          PROMOTION_MERGE_TOKEN: ${{ github.token }}
         run: |
           python - <<'PY'
           import json
@@ -1207,6 +1260,11 @@ jobs:
 
           WAIT_SECONDS = 5 * 60 * 60
           POLL_SECONDS = 30
+          merge_token = os.environ.pop("PROMOTION_MERGE_TOKEN")
+          if not merge_token:
+              raise RuntimeError("promotion merge authority is unavailable")
+          read_env = os.environ.copy()
+          merge_attempted = False
           identity = f"{os.environ['GITHUB_REPOSITORY']}#{os.environ['PROMOTION_PR']}"
           expected = f"{os.environ['CANDIDATE_BRANCH']} -> main"
           observed = "not yet queried"
@@ -1221,9 +1279,10 @@ jobs:
               result = subprocess.run(
                   ["gh", "pr", "view", os.environ["PROMOTION_PR"],
                    "--repo", os.environ["GITHUB_REPOSITORY"],
-                   "--json", "state,mergeCommit,headRefName,baseRefName"],
+                   "--json", "state,mergeCommit,headRefName,headRefOid,baseRefName,baseRefOid"],
                   check=True, stdout=subprocess.PIPE, text=True,
                   timeout=min(60, remaining),
+                  env=read_env,
               )
               pr = json.loads(result.stdout)
               observed = (
@@ -1232,6 +1291,7 @@ jobs:
               if (
                   pr["headRefName"] != os.environ["CANDIDATE_BRANCH"]
                   or pr["baseRefName"] != "main"
+                  or pr["headRefOid"] != os.environ["CANDIDATE_SHA"]
               ):
                   raise RuntimeError(
                       f"{identity} identity changed; expected {expected}; observed {observed}"
@@ -1247,6 +1307,8 @@ jobs:
                   break
               if pr["state"] != "OPEN":
                   raise RuntimeError(f"{identity} closed without merging; observed {observed}")
+              if pr["baseRefOid"] != os.environ["MAIN_BEFORE"]:
+                  raise RuntimeError(f"{identity} main advanced after candidate preparation; rebuild required")
               remaining = deadline - time.monotonic()
               if remaining <= 0:
                   raise TimeoutError(f"{identity} exceeded the merge-wait deadline")
@@ -1256,6 +1318,7 @@ jobs:
                    "--required", "--json", "name,bucket,link"],
                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                   timeout=min(60, remaining),
+                  env=read_env,
               )
               registration_pending = (
                   checks.returncode == 1
@@ -1274,30 +1337,61 @@ jobs:
               if checks.returncode not in (0, 1, 8):
                   raise subprocess.CalledProcessError(checks.returncode, checks.args)
               required = json.loads(checks.stdout)
-              if not isinstance(required, list):
+              if not isinstance(required, list) or any(
+                  not isinstance(check, dict)
+                  or check.get("bucket") not in ("pass", "skipping", "pending", "fail", "cancel")
+                  for check in required
+              ):
                   raise RuntimeError(f"{identity} returned an invalid required-check list")
               failures = [
                   f"{check['name']} ({check['bucket']}): {check['link']}"
-                  for check in required if check["bucket"] in ("fail", "cancel")
+                  for check in required if check["bucket"] in ("fail", "cancel", "skipping")
               ]
               if failures:
                   raise RuntimeError(f"{identity} required checks failed: " + "; ".join(failures))
               if checks.returncode == 1:
                   raise subprocess.CalledProcessError(checks.returncode, checks.args)
+              if not merge_attempted and required and all(
+                  check["bucket"] == "pass" for check in required
+              ):
+                  remaining = deadline - time.monotonic()
+                  if remaining <= 0:
+                      raise TimeoutError(f"{identity} exceeded the merge-wait deadline")
+                  rules = subprocess.run(
+                      ["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/rules/branches/main"],
+                      check=True, stdout=subprocess.PIPE, text=True, timeout=min(60, remaining),
+                      env=read_env,
+                  )
+                  strict = any(
+                      rule.get("type") == "required_status_checks"
+                      and rule.get("parameters", {}).get("strict_required_status_checks_policy") is True
+                      and any(check.get("context") == "main source gate"
+                              for check in rule["parameters"].get("required_status_checks", []))
+                      for rule in json.loads(rules.stdout)
+                  )
+                  if not strict:
+                      raise RuntimeError("main source gate requires strict server-enforced base freshness")
+                  merge_env = read_env.copy()
+                  merge_env["GH_TOKEN"] = merge_token
+                  remaining = deadline - time.monotonic()
+                  if remaining <= 0:
+                      raise TimeoutError(f"{identity} exceeded the merge-wait deadline")
+                  try:
+                      subprocess.run(
+                          ["gh", "pr", "merge", os.environ["PROMOTION_PR"],
+                           "--repo", os.environ["GITHUB_REPOSITORY"], "--squash",
+                           "--match-head-commit", os.environ["CANDIDATE_SHA"]],
+                          check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          timeout=min(60, remaining),
+                          env=merge_env,
+                      )
+                  except subprocess.CalledProcessError as error:
+                      if error.stderr:
+                          print(error.stderr, file=sys.stderr, end="")
+                      raise
+                  merge_attempted = True
               time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic())))
           PY
-      - name: Tag the real post-merge commit
-        if: steps.promote.outputs.land == 'true' && steps.land.outputs.candidate_pushed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
-          MERGE_SHA: ${{ steps.merged.outputs.merge_sha }}
-        run: |
-          git fetch origin main
-          new_sha="$MERGE_SHA"
-          git merge-base --is-ancestor "$new_sha" origin/main
-          tag_name="promote-$(date -u +%Y%m%d%H%M%S)-${new_sha:0:8}"
-          git tag -a "$tag_name" -m "release: promote dev to main ($CANDIDATE_BRANCH -> $new_sha)" "$new_sha"
-          git push origin "$tag_name"
       # Note: consumed changefiles are no longer cleared here. See
       # `purge-consumed-changefiles.yml` (a standalone daily workflow) --
       # `promote_release.py`'s bump computation already ignores a
@@ -1308,8 +1402,8 @@ jobs:
 
   publish-python-artifacts:
     name: Publish attested first-party Python artifacts
-    needs: [gate, python-artifacts, promote]
-    if: needs.promote.outputs.merge_sha != '' && needs.python-artifacts.outputs.exported == 'true'
+    needs: [gate, python-artifacts, promote, merge-promotion]
+    if: needs.merge-promotion.outputs.merge_sha != '' && needs.python-artifacts.outputs.exported == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: main-promotion
@@ -1317,8 +1411,11 @@ jobs:
       contents: read
       actions: read
       attestations: read
+    outputs:
+      promotion_tag: ${{ steps.tag.outputs.promotion_tag }}
     env:
-      MERGE_SHA: ${{ needs.promote.outputs.merge_sha }}
+      MERGE_SHA: ${{ needs.merge-promotion.outputs.merge_sha }}
+      CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
       DEV_SHA: ${{ needs.gate.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -1346,8 +1443,44 @@ jobs:
           ARTIFACT_VERIFY_TOKEN: ${{ github.token }}
         run: |
           git fetch origin main
+          git fetch origin "$CANDIDATE_SHA"
           git merge-base --is-ancestor "$MERGE_SHA" origin/main
           "$RUNNER_TEMP/artifact-validator/bin/python" tools/publish_python_artifacts.py publish --directory python-artifacts \
             --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF" \
-            --merged-commit "$MERGE_SHA" --dev-head "$DEV_SHA"
+            --merged-commit "$MERGE_SHA" --candidate-commit "$CANDIDATE_SHA" --dev-head "$DEV_SHA"
+      - name: Tag the real post-merge commit
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          gh auth setup-git --hostname github.com
+          python tools/tag_promotion.py --merge-sha "$MERGE_SHA" --dev-sha "$DEV_SHA" \
+            --github-output "$GITHUB_OUTPUT" \
+            --message "release: promote dev to main ($MERGE_SHA)"
+
+  postmerge-workflows:
+    name: Verify required workflows at the immutable merged release
+    needs: [merge-promotion, publish-python-artifacts]
+    if: needs.publish-python-artifacts.outputs.promotion_tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch and verify both required main-push consumers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRUSTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          MERGE_SHA: ${{ needs.merge-promotion.outputs.merge_sha }}
+          PROMOTION_TAG: ${{ needs.publish-python-artifacts.outputs.promotion_tag }}
+          PROMOTION_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          [[ "$TRUSTED_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/contents/tools/verify_promotion_workflows.py?ref=$TRUSTED_WORKFLOW_SHA" \
+            --header "Accept: application/vnd.github.raw+json" > "$RUNNER_TEMP/verify-promotion-workflows.py"
+          python -I -B "$RUNNER_TEMP/verify-promotion-workflows.py" --repository "$GITHUB_REPOSITORY" \
+            --merge-sha "$MERGE_SHA" --tag "$PROMOTION_TAG" --promotion-run "$PROMOTION_RUN"

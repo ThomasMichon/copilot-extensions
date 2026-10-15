@@ -92,6 +92,7 @@ this pattern breaks (see §5, "the incident that prompted this guide").
         "allowed_merge_methods": ["squash"]
     }},
     { "type": "required_status_checks", "parameters": {
+        "strict_required_status_checks_policy": true,
         "required_status_checks": [{ "context": "<main-shape-gate-check-name>" }]
     }}
   ],
@@ -134,13 +135,12 @@ gate's required status check.
 ```
 `bypass_mode: "pull_request"` (not `"always"`) matters: it lets a named
 maintainer merge their own PR without a second reviewer, but never lets
-them bypass by direct push. **Important operational fact, confirmed
-live:** a bypass-actor entry (by role *or* by named user) only actually
-activates through your CLI/API's explicit "administrator merge" code path
-(e.g. `gh pr merge --admin`) — an ordinary/auto merge call fully respects
-the stated requirements even for a listed bypass actor. Don't assume
-"they're on the bypass list" is enough on its own; the merge call itself
-has to ask for the bypass.
+them bypass by direct push. Do not infer non-bypass authority from a CLI's
+omission of `--admin`: an administrator credential can retain its server-side
+bypass rights on an ordinary merge request. Routine promotion instead uses
+the non-admin Actions token in a separate merge-only job. Keep owner credentials
+for candidate creation/publication and shape-validated control repair, never
+for the routine merge.
 
 ### 2.3 Why `main` can safely require **zero** reviews
 
@@ -181,19 +181,21 @@ generated diff), so it just jams forever. `main`'s real protection is:
    `main` self-heals from anything except a change to the pipeline's own
    definition, which is exactly what the shape gate above protects).
 
-### 2.3.1 Never admin-merge into `main` — not even once
+### 2.3.1 Separate routine promotion from shape-validated control repair
 
-State this explicitly in your contribution docs, in these words or close
-to them: *once the shape gate exists, `gh pr merge --admin` (or your
-platform's equivalent override) has no legitimate use against `main`.* If
-the shape gate is rejecting your PR, that is the gate correctly telling
-you the PR doesn't belong on `main` — retarget it to `dev`. A single
-real incident is worth citing internally: a PR landed directly on `main`
-via admin-bypass once, stranding content that the very next wholesale
-promotion silently reverted, because nothing on `dev` knew that content
-existed. Admin-merge capability on `main` is legitimate (maintainers are
-maintainers) and shouldn't be revoked — but after the shape gate exists,
-it should never actually be *used*.
+Routine promotion never uses administrator authority. Its exact-head merge
+uses a non-bypass actor and a strict, server-enforced base-freshness rule.
+Do not remove the human administrator escape: workflow/control repairs must
+remain possible when the pipeline or its own gate is broken. Independently
+validate that repair's permitted shape and record why the escape was needed;
+it does not admit arbitrary source, tests or documentation directly to main.
+
+Main's current control head and its latest published release are distinct.
+A workflow-only repair may advance main beyond the published release.
+Readiness and publication bind an exact release commit on main, not a promise
+that no later control commit exists. The next candidate must incorporate the
+current control base; never rebase a verified candidate to make a stale base
+appear fresh.
 
 ### 2.4 A generated-PR merge race to design around up front
 
@@ -203,10 +205,31 @@ provider can race finding nothing left to wait on and error instead of
 just merging — rather than falling back to a direct merge. Confirmed live,
 twice, in two different shapes:
 
-- The **main-targeting promotion PR** can hit this if it happens to be
-  clean the moment auto-merge is armed. Fix: catch the specific "already
-  clean" error text from the arm call and fall back to an immediate direct
-  merge on that specific error only.
+- For a **main-targeting promotion PR**, do not arm auto-merge. Its expected
+  head argument is checked when the request is enabled, not durably bound
+  to the later merge; a writer can otherwise move the candidate while
+  auto-merge stays armed. Retain the commit identity emitted directly by
+  the trusted promoter, verify artifact readiness before creating the PR,
+  poll the exact PR's required checks, then issue one direct squash merge
+  from a fresh, merge-only Actions-token job with an atomic expected-head
+  condition and strict server-enforced base freshness. No checkout, setup
+  action or repository code shares that job's write token. A moved
+  head or policy race fails without an auto-merge fallback. Final binding
+  compares the complete ready candidate tree with the actual merge tree,
+  including release state and coverage bookkeeping.
+  Retry inputs must be deterministic, including the platform's immutable
+  run-created time and Git commit metadata. Recompute the entire candidate
+  SHA and require an existing ref to equal it; normalized tree/state equality
+  on a mutable pre-existing branch is not evidence of trusted provenance.
+  Because the Actions-token merge suppresses automatic push workflows,
+  explicitly dispatch read-only CI at the state-derived immutable promotion
+  tag. Dispatch a check-publishing consumer from trusted main instead, verify
+  release ancestry against that immutable control snapshot before executing
+  the exact release implementation, and reject direct tag dispatches. Verify
+  the dispatched run's exact target and control identities and
+  required job results before reporting promotion complete; a dispatch
+  acknowledgment alone is not proof. Preserve shape-validated human repairs
+  and allow the main control tip to advance beyond that release snapshot.
 - The **dev-targeting changefile-cleanup PR** is *always* generated,
   mechanical, and touches nothing but changefile deletions — but if `dev`
   tightens its review requirement for real contributor PRs (as it should),

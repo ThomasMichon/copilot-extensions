@@ -4471,6 +4471,7 @@ def reap_one(
     include_unused: bool = False,
     include_conversations: bool = False,
     reconcile_prs: bool = False,
+    automatic: bool = False,
 ) -> dict:
     """Reap a single worktree by ID and return a JSON-ready result dict.
 
@@ -4480,11 +4481,7 @@ def reap_one(
     result-returning core shared by the ``cleanup --worktree-id`` CLI and the
     picker's in-process local Cleanup executor.
     """
-    # Stage D: _revalidate_cleanup_safety's real implementation lives in
-    # cleanup_gc_cli (which itself calls back into this function via
-    # `_core_helper`); importing it directly here -- instead of the bare
-    # global name only bound during `_load_full_command_surface()` -- is
-    # what lets `cleanup`/`gc` (cleanup_gc_cli) stay cluster-free.
+    # Import the owner directly so cleanup stays cluster-free.
     from . import cleanup_gc_cli as _cleanup_gc_cli
 
     _revalidate_cleanup_safety = _self_override("_revalidate_cleanup_safety", _cleanup_gc_cli._revalidate_cleanup_safety)
@@ -4618,6 +4615,7 @@ def reap_one(
             force=force,
             include_unused=include_unused,
             include_conversations=include_conversations,
+            **({"automatic": True} if automatic else {}),
             reap=lambda latest, fresh_info: _reap_worktree(
                 latest, fresh_info, repo, tracking_path),
         )
@@ -5236,6 +5234,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
     from . import handoff_successor_repair_cli
+    from . import record_cli
 
     resolve_cli.add_parsers(sub)
 
@@ -5332,6 +5331,7 @@ def build_parser() -> argparse.ArgumentParser:
     handoff_cancel_cli.add_parsers(sub)
 
     session_tracking_cli.add_parsers(sub)
+    record_cli.add_parsers(sub)
     worktree_status_audit.add_parsers(sub)
 
     activity.add_parsers(sub)
@@ -5494,6 +5494,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
     'reap-shells': ('reap_cli', 'cmd_reap_shells'), 'sweep-finished-sessions': ('cleanup_gc_cli', 'cmd_sweep_finished_sessions'), 'sweep-managed': ('cleanup_gc_cli', 'cmd_sweep_managed'),
     'recent-messages': ('session_tracking_cli', 'cmd_recent_messages'),
+    'record': ('record_cli', 'cmd_record'),
     'reclaim': ('reclaim_cli', 'cmd_reclaim'),
     'reconcile-binstubs': ('maintenance_cli', 'cmd_reconcile_binstubs'),
     'reconcile-plugins': ('update_cli', 'cmd_reconcile_plugins'),
@@ -5591,6 +5592,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "pr_state_cli",
     "reap_cli",
     "reclaim_cli",
+    "record_cli",
     "resource_producer_cli",
     "session_binding_cli",
     "session_inspection_cli",
@@ -6142,6 +6144,8 @@ def _load_full_command_surface() -> None:
         return handoff_diagnostics.cmd_handoff_trace(
             args, json_output=output._json_output, json_error=output._json_error
         )
+    from .record_cli import cmd_record
+
     COMMAND_MAP = {
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
@@ -6241,6 +6245,7 @@ def _load_full_command_surface() -> None:
         "hygiene": cmd_hygiene,
         "list-sessions": cmd_list_sessions,
         "head-session": cmd_head_session,
+        "record": cmd_record,
         "worktree-lineage": cmd_worktree_lineage,
         "worktree-status-bundle": cmd_worktree_status_bundle,
         "worktree-status-audit": cmd_worktree_status_audit,
@@ -6466,38 +6471,20 @@ def main(argv: list[str] | None = None) -> int:
     # after the sibling router (siblings return above).
     _guard_project_scope(_proj, args_list[0] if args_list else None)
 
-    # Only auto-derive from CWD for project-requiring commands (skip the git
-    # subprocess for global no-project commands and bare flags).
-    _needs_project = not _is_no_project_invocation(args_list)
-    _optional_project = (
-        bool(args_list) and args_list[0] == "config-root" and _is_no_project_invocation(args_list)
-    )
-
-    if _proj:
-        _project, _assumed = _resolve_active_project(_proj)
-    elif _needs_project or _optional_project:
-        _project, _assumed = _resolve_active_project(None)
-    else:
-        _project, _assumed = None, None
-
-    if _project:
-        cfg.set_active_project(_project)
-        # git-like `-C`: when --project targets a project the caller is NOT
-        # already inside, change to its anchor so every downstream path
-        # (worktree-id inference, repo discovery, git subprocesses) resolves
-        # consistently. When the caller IS inside one of the project's
-        # worktrees, keep the current directory so the binstub acts on THAT
-        # worktree (the common sign-off case: `<project> push-changes`).
-        if _proj and _assumed is not None and not _cwd_is_inside_project(_assumed):
-            try:
-                os.chdir(_assumed)
-            except OSError:
-                pass
-
-    # Identity is a pure function of CWD + optional --project (threaded in
-    # process via set_active_project); no ambient $WORKTREE_PROJECT is consulted
-    # (cwd-resolution Phase 3).
-    has_project = bool(cfg.active_project())
+    try:
+        has_project = front_door_cli.resolve_invocation_project(
+            args_list, _proj, _resolve_active_project, _cwd_is_inside_project,
+            _is_no_project_invocation,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        if not args_list or args_list[0] != "record":
+            raise
+        cfg.set_active_project(None)
+        output._json_output({
+            "ok": False, "worktree": None,
+            "error": {"code": "project-unavailable", "message": str(exc)},
+        })
+        return 1
 
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
     # invocation is the human-facing path. The Manager now owns the transplanted
@@ -6516,6 +6503,8 @@ def main(argv: list[str] | None = None) -> int:
     # A project-requiring subcommand without any project context → balk
     # helpfully instead of raising a bare RuntimeError deep in load_config.
     if not has_project and not _is_no_project_invocation(args_list):
+        if args_list[0] == "record":
+            return _dispatch_lazy("record", args_list)
         return cmd_help_unrouted(requested=args_list[0])
 
     # --version / -V → print version + build info + boot provenance

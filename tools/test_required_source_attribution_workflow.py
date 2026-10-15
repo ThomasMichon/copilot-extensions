@@ -35,19 +35,26 @@ def test_metadata_events_and_trusted_checkout_do_not_execute_pr_content():
     assert "protectedPrefixes" in protected["steps"][0]["with"]["script"]
 
 
-def test_existing_heads_are_refreshed_from_only_the_default_branch():
+def test_existing_heads_refresh_from_default_branch_or_verified_promotion():
     workflow = load("workflow-lockdown-guard.yml")
     refresh = workflow["jobs"]["refresh-source-attribution"]
     assert workflow["on"]["push"]["branches"] == ["main"]
     assert "github.event.repository.default_branch" in refresh["if"]
+    assert "refs/tags/" not in refresh["if"]
     assert refresh["permissions"] == {
         "contents": "read", "pull-requests": "read", "checks": "write",
     }
-    assert refresh["steps"][0]["with"]["ref"] == "${{ github.workflow_sha }}"
-    assert refresh["steps"][0]["uses"] == "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
-    assert refresh["steps"][1]["run"] == "npm ci --ignore-scripts --no-audit --no-fund"
-    assert ".backfill(" in refresh["steps"][2]["with"]["script"]
-    assert refresh["steps"][2]["with"]["retries"] == "0"
+    guard, checkout, install, backfill = refresh["steps"]
+    assert guard["if"] == "github.event_name == 'workflow_dispatch' && (inputs.promotion_sha != '' || inputs.promotion_run != '')"
+    assert '"$RUN_REF" = "$DEFAULT_REF"' in guard["run"]
+    assert '"$RUN_SHA" = "$WORKFLOW_SHA"' in guard["run"]
+    assert "/compare/$EXPECTED_SHA...$WORKFLOW_SHA" in guard["run"]
+    assert checkout["with"]["ref"] == "${{ inputs.promotion_sha || github.workflow_sha }}"
+    assert checkout["uses"] == "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+    assert checkout["with"]["persist-credentials"] == "false"
+    assert install["run"] == "npm ci --ignore-scripts --no-audit --no-fund"
+    assert ".backfill(" in backfill["with"]["script"]
+    assert backfill["with"]["retries"] == "0"
     assert "labeled" in workflow["jobs"]["request-review"]["if"]
     assert "unlabeled" in workflow["jobs"]["request-review"]["if"]
 

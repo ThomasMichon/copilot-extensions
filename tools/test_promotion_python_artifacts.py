@@ -729,7 +729,11 @@ def resolve_toolchain_lock(*args, **kwargs):
     driver = repo.parent / "trusted" / "tools"
     shutil.copytree(repo / "tools", driver)
     shutil.copy(Path(promotion.__file__), driver / "promote_release.py")
-    for name in ("promotion_python_artifacts.py", "build_python_artifacts.py", "build_toolchain_lock.py"):
+    shutil.copy(Path(promotion.__file__).with_name("promotion_candidate.py"), driver / "promotion_candidate.py")
+    for name in (
+        "promotion_python_artifacts.py", "build_python_artifacts.py", "build_toolchain_lock.py",
+        "promotion_candidate.py",
+    ):
         (repo / "tools" / name).write_text("raise RuntimeError('candidate forged toolchain provenance')")
     real_run = artifacts._run
 
@@ -1033,7 +1037,7 @@ def test_attestation_failure_stops_before_any_publication(tmp_path, monkeypatch)
     assert publisher.main([
         "publish", "--directory", str(directory), "--repository", "example/plugins",
         "--signer-digest", MAIN, "--source-digest", MAIN, "--source-ref", "refs/heads/main",
-        "--merged-commit", TREE, "--dev-head", DEV,
+        "--merged-commit", TREE, "--candidate-commit", TREE, "--dev-head", DEV,
     ]) == 1
     assert len(calls) == 1
     assert calls[0][:2] == ["attestation", "verify"]
@@ -1133,7 +1137,10 @@ def test_release_publication_never_clobbers_and_only_treats_404_as_absence(
         }), "")
 
     monkeypatch.setattr(publisher, "_gh", gh)
-    kwargs = dict(repository="example/plugins", merged_commit=TREE, dev_head=DEV, repo=tmp_path)
+    kwargs = dict(
+        repository="example/plugins", merged_commit=TREE, candidate_commit=TREE,
+        dev_head=DEV, repo=tmp_path,
+    )
     if status in ("different", "unauthorized", "draft"):
         with pytest.raises(artifacts.PromotionArtifactError):
             publisher.publish_artifacts(directory, **kwargs)
@@ -1442,9 +1449,9 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     decision = next(step for step in steps if step.get("id") == "decide")
     assert "needs.python-artifacts.result" in decision["run"]
     publishing = jobs["publish-python-artifacts"]
-    assert "needs.promote.outputs.merge_sha != ''" in publishing["if"]
-    assert jobs["promote"]["outputs"]["merge_sha"] == "${{ steps.merged.outputs.merge_sha }}"
-    assert publishing["env"]["MERGE_SHA"] == "${{ needs.promote.outputs.merge_sha }}"
+    assert "needs.merge-promotion.outputs.merge_sha != ''" in publishing["if"]
+    assert jobs["merge-promotion"]["outputs"]["merge_sha"] == "${{ steps.merged.outputs.merge_sha }}"
+    assert publishing["env"]["MERGE_SHA"] == "${{ needs.merge-promotion.outputs.merge_sha }}"
     assert "GH_TOKEN" not in publishing["env"]
     assert "ARTIFACT_VERIFY_TOKEN" not in publishing["env"]
     publisher_step = next(step for step in publishing["steps"] if "publish_python_artifacts.py publish" in step.get("run", ""))
@@ -1453,3 +1460,5 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     assert all("env" not in step for step in publishing["steps"] if "uses" in step)
     assert "id-token" not in publishing["permissions"]
     assert "publish-python-artifacts" in jobs["report-failure"]["needs"]
+    assert "promote" in jobs["report-failure"]["needs"]
+    assert "needs.promote.result == 'failure'" in jobs["report-failure"]["if"]

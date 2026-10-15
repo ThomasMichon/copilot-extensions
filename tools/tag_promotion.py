@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -85,7 +86,7 @@ def tag_promotion(
             f"expected the promoted {dev_sha}"
         )
     stem = promotion.get("tag")
-    if not isinstance(stem, str) or not stem.startswith(TAG_PREFIX):
+    if not isinstance(stem, str) or not re.fullmatch(rf"{re.escape(TAG_PREFIX)}[0-9]{{14}}", stem):
         raise TagError(f"{PIPELINE_STATE_PATH} at {merge_sha} has no {TAG_PREFIX}* tag stem ({stem!r})")
 
     tag_name = f"{stem}-{merge_sha[:8]}"
@@ -124,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", type=Path, default=Path.cwd())
     ap.add_argument("--remote", default="origin")
     ap.add_argument("--main-branch", default="main")
+    ap.add_argument("--github-output", type=Path, help="append the verified promotion tag receipt")
     args = ap.parse_args(argv)
     try:
         tag_name, created = tag_promotion(
@@ -133,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     except TagError as exc:
         print(f"::error::tag-promotion: {exc}", file=sys.stderr)
         return 1
+    if args.github_output is not None:
+        with args.github_output.open("a", encoding="utf-8") as output:
+            output.write(f"promotion_tag={tag_name}\n")
     if created:
         print(f"tag-promotion: pushed {tag_name} -> {args.merge_sha}")
     else:

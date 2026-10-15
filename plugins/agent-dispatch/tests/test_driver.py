@@ -152,7 +152,7 @@ def test_drive_execute_resolve_runs_unwind(capsys, monkeypatch):
         calls.append(list(argv))
         return _Proc()
 
-    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
     rc = _cmd_recipes_drive(
         _args([
             "recipes", "drive", "reviewer", "--signal", "abandoned",

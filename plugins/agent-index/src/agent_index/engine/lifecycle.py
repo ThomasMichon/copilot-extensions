@@ -31,15 +31,19 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
+from agent_index.config import data_dir
 from agent_index.engine.client import EngineUnavailableError
+from agent_index.engine.daemon import ENGINE_LOG_LEVEL_ENV
 
 if TYPE_CHECKING:
     from agent_index.engine.client import EngineClient
@@ -51,6 +55,33 @@ log = logging.getLogger(__name__)
 # embed call, so we only wait for the HTTP server to answer /health here.
 _START_TIMEOUT = 60.0
 _POLL_INTERVAL = 1.0
+_NORMAL_PRIORITY_CLASS = 0x00000020
+
+# Filesystem overrides the engine child re-reads. It runs from the data dir,
+# not the caller's cwd, so a relative value is anchored at the caller first.
+_ENGINE_PATH_ENV = (
+    "AGENT_INDEX_CONFIG", "AGENT_INDEX_CONFIG_ROOT", "AGENT_INDEX_HOME",
+    "AGENT_INDEX_DATA_DIR", "AGENT_INDEX_STATE_DIR", "AGENT_INDEX_RUN_DIR",
+    "AGENT_INDEX_LOG_DIR", "AGENT_INDEX_CACHE_DIR", "AGENT_INDEX_ROUTING_DIR",
+    "AGENT_INDEX_BACKUP_DIR", "AGENT_INDEX_BACKUP_MOUNT_ROOT", "AGENT_INDEX_ENGINE_HOME",
+)
+
+
+def _anchor_relative_path_env(env: dict[str, str]) -> None:
+    """Make relative path overrides absolute against the caller's cwd.
+
+    A value that is absolute once ``~`` is expanded (as the readers expand it)
+    is passed through unchanged, so its documented expansion still applies.
+    ``AGENT_INDEX_MODEL`` is a hub model id or a local model directory; only a
+    relative value naming an existing directory from the caller is anchored.
+    """
+    for name in _ENGINE_PATH_ENV:
+        value = env.get(name)
+        if value and not os.path.isabs(os.path.expanduser(value)):
+            env[name] = os.path.abspath(value)
+    model = env.get("AGENT_INDEX_MODEL")
+    if model and not os.path.isabs(os.path.expanduser(model)) and os.path.isdir(model):
+        env["AGENT_INDEX_MODEL"] = os.path.abspath(model)
 
 # Child engine processes this module spawned (subprocess mode), keyed by
 # model_id. ``ensure_engine`` and ``stop_engine`` run in the same process (the
@@ -145,29 +176,30 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
         "--port",
         str(profile.engine_port),
     ]
-    kwargs: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "env": os.environ.copy(),
-    }
-    kwargs["env"].update(windowless_python_env(python))
-    # Detach from the parent console so the engine is independent.
-    kwargs.update(detached_kwargs())
-    if sys.platform.startswith("win"):
-        # The spawning process (e.g. the index-worker, itself niced down via
-        # AGENT_INDEX_INDEXER_NICE) must not leak its own lowered priority
-        # class onto this child via normal Windows priority-class
-        # inheritance -- that would defeat the engine's own deferred-
-        # throttle sequencing (agent_index_engine.app._get_pipeline): the
-        # child would start its one-time model load already throttled,
-        # reproducing the load-stall bug through a different path. Force
-        # NORMAL_PRIORITY_CLASS explicitly at spawn (ORed in, not
-        # overwriting detached_kwargs()'s own flags); the engine's own
-        # startup sequencing takes over the throttle decision from there.
-        _NORMAL_PRIORITY_CLASS = 0x00000020
-        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _NORMAL_PRIORITY_CLASS
-    return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
+    env = os.environ.copy()
+    env.update(windowless_python_env(python))
+    env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
+    _anchor_relative_path_env(env)
+    root = Path(os.path.abspath(os.path.expanduser(data_dir())))
+    root.mkdir(parents=True, exist_ok=True)
+    model = re.sub(r"[^A-Za-z0-9._-]", "_", str(profile.model_id)) or "engine"
+    # The spawning process (e.g. the index-worker, itself niced down via
+    # AGENT_INDEX_INDEXER_NICE) must not leak its own lowered priority class
+    # onto this child via normal Windows priority-class inheritance -- that
+    # would defeat the engine's own deferred-throttle sequencing
+    # (agent_index_engine.app._get_pipeline): the child would start its
+    # one-time model load already throttled. NORMAL_PRIORITY_CLASS is applied
+    # on Windows only; the engine's startup sequencing takes over from there.
+    # No breakaway: this engine is owned by the indexer that stops it.
+    return spawn_daemon(
+        cmd,
+        cwd=root,
+        log_path=root / "logs" / f"engine-{model}.log",
+        env=env,
+        breakaway=False,
+        extra_creationflags=_NORMAL_PRIORITY_CLASS,
+        display="agent_index_engine.app",
+    )
 
 
 def ensure_engine(profile: ModelProfile, client: EngineClient) -> bool:

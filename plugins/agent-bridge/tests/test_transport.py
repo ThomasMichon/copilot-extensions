@@ -13,8 +13,6 @@ from agent_bridge.transport import (
     _ACP_STDIO_LIMIT_BYTES,
     AgentProcess,
     SpawnTarget,
-    _agent_worktrees_python,
-    _agent_worktrees_root,
     _build_remote_cmd,
     _extract_json_object,
     _looks_unprovisioned_project,
@@ -799,6 +797,10 @@ class TestResolveWorktreeRemote:
 
 
 class TestSpawnLocal:
+    @pytest.fixture(autouse=True)
+    def owner_command(self, monkeypatch):
+        monkeypatch.setattr("agent_bridge.transport._agent_worktrees_launch_prefix", lambda: ["owner-command"])
+
 
     @pytest.mark.asyncio
     async def test_local_with_project_resolves_then_execs(self):
@@ -840,12 +842,10 @@ class TestSpawnLocal:
 
             result = await spawn_local(target)
 
-            # First call: resolve (calls python directly, not binstub)
+            # First call: resolve through the selected owner boundary.
             resolve_call = mock_asyncio.create_subprocess_exec.call_args_list[0]
             resolve_args = resolve_call[0]
-            assert resolve_args[0].endswith("python.exe") or resolve_args[0].endswith("python")
-            assert "-m" in resolve_args
-            assert "agent_worktrees" in resolve_args
+            assert resolve_args[0] == "owner-command"
             assert "resolve" in resolve_args
             assert "--json" in resolve_args
             assert "--new" in resolve_args
@@ -1320,6 +1320,10 @@ class TestLocalResolveBridgeFallback:
     """The local resolve marks new worktrees kind=bridge, retrying without
     --bridge when the local agent-worktrees runtime is too old for it."""
 
+    @pytest.fixture(autouse=True)
+    def owner_command(self, monkeypatch):
+        monkeypatch.setattr("agent_bridge.transport._agent_worktrees_launch_prefix", lambda: ["owner-command"])
+
     def _proc(self, returncode, stdout=b"", stderr=b""):
         p = MagicMock()
         p.returncode = returncode
@@ -1474,112 +1478,15 @@ class TestLocalResolveBridgeFallback:
         assert "--caller-worktree" in calls[0] and "--bridge" in calls[0]
 
 
-class TestAgentWorktreesPython:
-    """_agent_worktrees_python resolves the junction-free current-version marker
-    (the retired .venv junction must not be traversed -- #581/#1085/#1106)."""
-
-    @pytest.fixture(autouse=True)
-    def _clear_ambient_agent_rt_root_override(self, monkeypatch):
-        """``_agent_worktrees_python`` honors ``AGENT_RT_ROOT`` as a resolution
-        override with priority over the default ``~/.agent-worktrees`` (see
-        ``test_honors_agent_rt_root_override`` below) -- any host that
-        genuinely has this set ambiently (the facility's own convention: every
-        plugin's ``resolve-runtime.ps1``/``resolve-runtime.sh`` honors the
-        same override) bypasses every other test's ``os.path.expanduser``
-        monkeypatch entirely, silently resolving the REAL ambient
-        ``AGENT_RT_ROOT`` instead of the test's isolated ``tmp_path``. Clear it
-        by default so these tests are deterministic regardless of the host's
-        own environment; the one test that needs it sets its own override."""
-        monkeypatch.delenv("AGENT_RT_ROOT", raising=False)
-
-    def _make_slot(self, root, ver):
-        import os
-        import sys
-        rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
-        slot = os.path.join(str(root), ".agent-worktrees", "versions", ver, *rel)
-        os.makedirs(os.path.dirname(slot), exist_ok=True)
-        with open(slot, "w") as fh:
-            fh.write("")
-        return slot
-
-    def test_resolves_via_current_version_marker(self, tmp_path, monkeypatch):
-        import os
-        want = self._make_slot(tmp_path, "1.5.3-dev467")
-        self._make_slot(tmp_path, "1.5.3-dev400")  # older slot present too
-        awroot = os.path.join(str(tmp_path), ".agent-worktrees")
-        with open(os.path.join(awroot, "current-version"), "w") as fh:
-            fh.write("1.5.3-dev467\n")
-        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
-        assert _agent_worktrees_python() == want
-
-    def test_falls_back_to_newest_slot_without_marker(self, tmp_path, monkeypatch):
-        import os
-        self._make_slot(tmp_path, "1.5.3-dev400")
-        want = self._make_slot(tmp_path, "1.5.3-dev467")  # newest by lexical order
-        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
-        assert _agent_worktrees_python() == want
-
-    def test_raises_when_no_runtime(self, tmp_path, monkeypatch):
-        import os
-        os.makedirs(os.path.join(str(tmp_path), ".agent-worktrees"), exist_ok=True)
-        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
-        with pytest.raises(RuntimeError, match="agent-worktrees runtime interpreter not found"):
-            _agent_worktrees_python()
-
-    def test_never_returns_the_retired_venv_when_a_slot_exists(self, tmp_path, monkeypatch):
-        import os
-        import sys
-        # A stale .venv junction remnant must be ignored in favor of the marker slot.
-        rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
-        venv = os.path.join(str(tmp_path), ".agent-worktrees", ".venv", *rel)
-        os.makedirs(os.path.dirname(venv), exist_ok=True)
-        open(venv, "w").close()
-        want = self._make_slot(tmp_path, "1.5.3-dev467")
-        awroot = os.path.join(str(tmp_path), ".agent-worktrees")
-        with open(os.path.join(awroot, "current-version"), "w") as fh:
-            fh.write("1.5.3-dev467\n")
-        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
-        got = _agent_worktrees_python()
-        assert got == want
-        assert ".venv" not in got
-
-    def test_honors_agent_rt_root_override(self, tmp_path, monkeypatch):
-        """The standard cross-plugin resolution override every plugin's own
-        resolve-runtime.ps1/.sh honors -- a non-default agent-worktrees
-        install location must resolve consistently here too, not only via
-        the hardcoded ~/.agent-worktrees default."""
-        import os
-        import sys
-        custom_root = tmp_path / "custom-agent-worktrees-root"
-        rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
-        want = os.path.join(str(custom_root), "versions", "1.5.3-dev467", *rel)
-        os.makedirs(os.path.dirname(want), exist_ok=True)
-        open(want, "w").close()
-        os.makedirs(str(custom_root), exist_ok=True)
-        with open(os.path.join(str(custom_root), "current-version"), "w") as fh:
-            fh.write("1.5.3-dev467\n")
-        # A default-location slot must be ignored while the override is set.
-        self._make_slot(tmp_path, "1.5.3-dev999")
-        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
-        monkeypatch.setenv("AGENT_RT_ROOT", str(custom_root))
-        assert _agent_worktrees_python() == want
-
-    def test_agent_worktrees_root_honors_override(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("AGENT_RT_ROOT", str(tmp_path / "custom"))
-        assert _agent_worktrees_root() == str(tmp_path / "custom")
-
-    def test_agent_worktrees_root_defaults_to_home(self, tmp_path, monkeypatch):
-        import os
-        monkeypatch.delenv("AGENT_RT_ROOT", raising=False)
-        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
-        assert _agent_worktrees_root() == os.path.join(str(tmp_path), ".agent-worktrees")
-
-
 class TestLocalResolvePassesProject:
     """The local worktree resolve passes the target project as the global
     --project flag -- the ambient $WORKTREE_PROJECT identity fallback was retired
     (cwd-resolution Phase 3), and a bridge resolve runs from a neutral daemon cwd
     outside the repo, so --project is required."""
+
+    @pytest.fixture(autouse=True)
+    def owner_command(self, monkeypatch):
+        monkeypatch.setattr("agent_bridge.transport._agent_worktrees_launch_prefix", lambda: ["owner-command"])
 
     def _proc(self, returncode, stdout=b"", stderr=b""):
         p = MagicMock()

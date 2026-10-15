@@ -1445,3 +1445,99 @@ hosted checks, review and a containing full validation remain required.
   contract and whitespace checks pass; the required patch changefile is
   generated. The later watchdog #6780 matches this already-reserved repair,
   with no other writer. Hosted review/CI and containing release remain gates.
+
+### 2026-10-15 - Optional-assignment repair merged; normal release still open
+
+- #6781 merged as `2e1d19f58789254307fafaf42afc47c4b2de00b2` at
+  `00:07:18Z`. Exact head `a4803388340d` received native Copilot approval
+  with zero findings. All three same-head suites and the fresh source
+  required-check verifier passed before managed merge, without CI bypass.
+- Hosted Linux job `116169595572` executes the real guard selector:
+  971 passed, 19 skipped, including this newly guarded case. The separate
+  Windows launch job also passes. Closed #6780's stale fixture expectation;
+  neither that closure nor a dev merge is release or installed-runtime proof.
+- Reread the canonical Plan and Validation Plan. The campaign remains Active:
+  ordinary dev CI `38658176845` and natural full `38658267992` are queued.
+  Establish the latter's actual checkout before attributing a containing pass.
+- #6775 remains the sole reconnect writer; its updated head now has native
+  approval. Do not merge it on that writer's behalf, waive a finding or start
+  another repair. Continue normal release and the original main-PR invocation
+  proof; main-push coverage and all deadlines remain unchanged.
+
+### 2026-10-15 - Optional-assignment clears; registry probe fixture is stale
+
+- Natural full `38658267992` actually checks out
+  `2e1d19f58789254307fafaf42afc47c4b2de00b2`; guards job
+  `116173193107` records both the ref and actual Git HEAD. Worktrees reaches
+  group 11/16 after the repaired profile group passes 964 cases with two skips.
+- The next failure is the registered-repository headless-options assertion,
+  with 793 cases passing and one skip in that group. Exact issue/PR searches
+  find no retained writer. Reserved only this contract mismatch under #6237
+  and reproduced it through the contained runner's supported file selector.
+- The production registry probe intentionally delegates to the canonical
+  isolated-repository Git helper. Its stale test patches the former direct
+  subprocess owner's headless helper and omits explicit decoding/environment
+  arguments. Correct only that test seam and expected transport contract,
+  keeping the real Git helper and intercepting only its subprocess.
+- The guard also checks poisoned Git repository selectors are removed,
+  noninteractive prompting is enforced and unrelated environment is retained.
+  No production code, deadline, isolation rule or fallback changes. Complete
+  coupled-module and remaining unproven full-group coverage precede publication.
+
+### 2026-10-15 - Retain the canonical registry repair and honest native coverage
+
+- The local complete registry/Git-helper selection passes 142 cases. The
+  normal remaining-file runner passes native group 11 with 793 cases and two
+  skips, then reaches the unchanged 300-second limit in group 12 without
+  reporting an assertion failure. This is not a complete native pass, and
+  no deadline or resource ceiling was raised.
+- A disjoint selection of still-unrun groups 13-16, not a retry of group 12,
+  exposes a Windows-only windowless-parent probe failure in
+  `test_status_monitor_cutover_process.py`; its GUI Python child exits 1
+  without captured diagnostics. That first group otherwise passes 792 cases
+  with 24 skips. Subsequent groups remain unproven; no flake is accepted.
+- During that broader validation another release driver publishes #6785 for
+  the same registry contract. It preserves the real shared Git helper,
+  exact headless/decoding/timeout checks and stronger environment isolation.
+  Retain that sole published writer, withdrawing only this session's
+  unpublished duplicate fixture, testing paragraph and generated changefile.
+- #6785 merges as `4f7b62facbe44df61f159dcde9b1afb11d34b3ea` at
+  `01:01:18Z` after native approval. No competing PR, other worktree change
+  or merge was performed here. The separate Windows probe needs bounded
+  diagnosis; normal containing Linux validation and original cutover proof
+  remain outstanding.
+
+### 2026-10-15 - Native probe exposes stale uv dependency cache, not a daemon bug
+
+- Capturing the real GUI parent's diagnostics shows an import failure before
+  any daemon launch: its isolated interpreter loads an old installed
+  `agent_procutil` without `spawn_daemon`, although the current vendored source
+  has that API. The existing runner's explicit `--reinstall` rebuilds the venv
+  but still consumes uv's stale same-version local-path wheel.
+- Rebuilding only that local test dependency makes the unchanged two-cycle
+  window/focus/PID contract pass. The bounded root fix forwards explicit
+  reinstall to uv; ordinary cached runs and automatic fingerprint policy stay
+  unchanged. The new regression fails before the fix only for explicit
+  reinstall, then both explicit and ordinary cases pass.
+- Broader environment-lease validation exposes a tightly coupled Python 3.11
+  junction cleanup gap. Read the existing reparse tag to unlink a child junction
+  without traversing its target; preserve the leased root identity and outside
+  sentinel. The strengthened old regression covers absence of the newer
+  `Path.is_junction` API.
+- The normal runner/environment-admission selection passes 53 cases with one
+  platform skip and 19 explicit exhaustive exclusions, including fresh/cached
+  explicit and ordinary install paths. Six additional real-uv rebuild and
+  junction-safety cases pass across all existing rebuild/alias modes.
+  The actual repaired
+  `--reinstall` rebuilds the first-party dependency wheels, including
+  `agent_procutil`; the complete native GUI-probe module passes one case with
+  its POSIX-only companion skipped. All two-cycle window/focus, cleanup and
+  25/30/300-second assertions remain unchanged.
+- This restores isolated test tooling, not an installed plugin/runtime or a
+  production daemon. The GUI fixture keeps captured child diagnostics. The
+  native group-12 aggregate still hits its unchanged 300-second boundary after
+  the dependency fix, so its cause is not attributed to that cache failure or
+  accepted as a flake. The 53 still-unrun files in disjoint native groups 14-16
+  pass 1,320 cases with one skip under the original 25-file/300-second bounds.
+  This is not a complete native pass because group 12 remains unproven.
+  Normal containing Linux validation remains separate evidence.

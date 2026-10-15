@@ -17,6 +17,19 @@ per-record `_RecordLock(require_sidecar=True)` held through `_reap_worktree`,
 so the tool's own record writers (claim/follow-up/session-registration
 mutations) cannot slip a conflicting change into the final read→delete window.
 
+Automatic callers targeting one unused workspace use
+`cleanup --worktree-id <id> --automatic --include-unused`. This mode requires an
+exact ID and rejects `--force`. The owner checks the freshly loaded dispatch
+provenance under the same record lock before removal: an allocated pending or
+retrying dispatch workspace is preserved even with no claimant, no turns and
+clean content. Opaque dispatch provenance is preserved too. Only owner
+conclusion hands a dispatch workspace to the existing managed-GC route;
+automatic single-item cleanup does not replace that lifecycle.
+
+Explicit operator single-item cleanup without `--automatic` retains its
+existing semantics, including the separately documented force escape hatch.
+Callers must not retry an unsupported automatic mode as ordinary cleanup.
+
 This is a **fail-closed, in-tool writer fence**, not a universal filesystem
 lock: arbitrary external edits or raw git commands outside agent-worktrees can
 still race the local delete. `cleanup --worktree-id <id> --force` remains the

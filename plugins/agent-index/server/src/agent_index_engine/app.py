@@ -379,10 +379,13 @@ def run_engine(*, host: str = "127.0.0.1", port: int = 8421) -> None:
     """
     import uvicorn
 
+    # Spawned engines set this to ``warning`` so their stdio log is not one
+    # access line per embedding request.
+    log_level = os.environ.get("AGENT_INDEX_ENGINE_LOG_LEVEL", "info")
     fd = _systemd_socket_fd()
     if fd is not None:
         print(f"Starting agent-index engine on inherited systemd socket (fd={fd})")
-        uvicorn.run(app, fd=fd, log_level="info")
+        uvicorn.run(app, fd=fd, log_level=log_level)
         return
 
     print(f"Starting agent-index engine on {host}:{port}")
@@ -390,7 +393,7 @@ def run_engine(*, host: str = "127.0.0.1", port: int = 8421) -> None:
         app,
         host=host,
         port=port,
-        log_level="info",
+        log_level=log_level,
     )
 
 
