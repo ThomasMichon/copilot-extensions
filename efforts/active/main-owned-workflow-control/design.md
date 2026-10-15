@@ -82,6 +82,9 @@ expected suites/platforms, run and attempt. Read authoritative run/job evidence;
 do not accept an arbitrary dispatch payload or candidate-provided success blob.
 PR synthetic-merge tests are not evidence for a different dev snapshot.
 Generated output needs its own contract tests, not only pre-materialization tests.
+The bounded [materialized-candidate validation slice](materialized-candidate-validation.md)
+specifies the proposed pre-merge consumer gate while retaining the existing
+post-merge verification and repair ownership.
 
 Final merge freshness must be enforced. A candidate composed against an older
 main cannot overwrite a later critical repair. Select and prove a provider
