@@ -15,6 +15,7 @@ import update_telemetry as ut
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import installer
 from agent_worktrees import reconcile, update_cli, update_events, update_gate, update_options
 from agent_worktrees import update_runtime as runtime
 
@@ -84,7 +85,7 @@ def test_phase_events_emitted(wired, _update_home):
     assert status["run"]["exit_code"] == 0
     phases = [p["phase"] for p in status["run"]["phases"]]
     assert phases == [
-        "payload_refresh", "engine_runtime", "binstubs", "module_update", "runtime_reconcile"]
+        "payload_refresh", "engine_runtime", "module_update", "runtime_reconcile", "binstubs"]
     events = _events(_update_home)
     assert {e["proc"] for e in events} == {"engine"}
     starts = [e["phase"] for e in events if e["component"] == "run" and e["event"] == "start"]
@@ -361,13 +362,17 @@ def _advisories(home: Path) -> dict[str, str]:
     return {a["component"]: a["summary"] for a in _status(home)["advisories"]}
 
 
-def test_binstub_failure_is_an_advisory(wired, monkeypatch, _update_home):
+def test_required_binstub_failure_blocks_the_update(wired, monkeypatch, _update_home):
     def boom():
         raise RuntimeError("binstub dir unwritable")
 
-    monkeypatch.setattr(update_cli.inst, "reconcile_binstubs", boom)
-    assert m.cmd_update(_args()) == 0
-    assert "binstub dir unwritable" in _advisories(_update_home)["binstubs"]
+    monkeypatch.setattr(installer, "reconcile_binstubs", boom)
+    assert m.cmd_update(_args()) != 0
+    status = _status(_update_home)
+    assert status["run"]["outcome"] == ut.COMMAND_FAILED
+    assert _phase_outcomes(_update_home)["binstubs"] == ut.COMMAND_FAILED
+    assert "binstub dir unwritable" in status["last_failure"]["summary"]
+    assert "project-commands" not in _advisories(_update_home)
 
 
 @pytest.mark.parametrize("failure", ["import", "scan"])

@@ -206,3 +206,12 @@ achieved by rearranging today's combined installer invocations.
   Read-only admission accepted the recorded historical snapshot and current
   receipts without changing deployed launchers. Code review, release and live
   post-update verification remain required before this slice is complete.
+
+### 2026-10-15 - Required CI consumer-contract correction
+- The first implementation CI found two telemetry wiring expectations that
+  still required early finishing and advisory command failure. Updated the
+  tests to require the reviewed late-finishing order and failed required
+  reconciliation, including its final run outcome and failure summary.
+- The expanded contained integration/routing/telemetry selection passed
+  400 cases with five platform skips. The failure was fixed forward; no check
+  was waived and no production behavior was reverted to satisfy stale tests.
