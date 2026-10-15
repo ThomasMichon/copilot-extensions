@@ -105,17 +105,6 @@ def test_widen_only_keeps_ordinary_ceiling_checks_without_an_exact_baseline_gate
     assert "checks" in workflow["jobs"]["pr-gate"]["needs"]
 
 
-def test_bridge_smoke_budget_includes_setup_and_teardown():
-    workflow = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
-    smoke = workflow["jobs"]["smoke"]
-    assert smoke["timeout-minutes"] == (
-        "${{ matrix.plugin == 'agent-dispatch' && 12 || "
-        "matrix.plugin == 'agent-bridge' && 10 || 8 }}"
-    )
-    assert smoke["strategy"]["fail-fast"] is False
-    assert "smoke" in workflow["jobs"]["pr-gate"]["needs"]
-
-
 def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
     ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
     host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))

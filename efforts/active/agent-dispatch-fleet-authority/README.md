@@ -326,6 +326,61 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-14 -- Coverage-selected fleet CI and provider review corrections
+- Narrow renewal PR #6722 back to its issuance/consumption contract.
+  Its incidental CI-budget changes force unrelated whole-fleet and bridge
+  validation despite touching neither runtime. Retain the measured budget
+  corrections under #6733 for the dedicated coverage/CI activation slice,
+  rather than coupling that infrastructure bootstrap to renewal publication.
+  Required checks still run; no timing gate or failing test is waived.
+- The operator subsequently requested a massively more efficient profiling
+  path, not timing-family exemptions. Child instrumentation optimization is
+  now measured against the ordinary five-/fifteen-second boundaries and
+  unchanged process concurrency; no fixture deadline is expanded.
+- The operator requires coverage-based selection for the fleet lane, not a
+  full suite, fixed smoke filter or increased full-suite timeout. Bootstrap
+  the standalone dispatch service's trusted coverage collection/enrollment
+  in the existing full promotion lane first; activate a strict selected-node
+  required runner only after a real accepted baseline is available. Missing
+  or stale evidence must then fail explicitly, without a full-suite fallback.
+- PR #6745's current review found three remaining provider gaps: acknowledged
+  expiry did not fence ambiguous credential delivery, live host admission
+  refused a duplicate with the wrong exit code, and lifecycle only probed
+  Copilot markers rather than the guest-held task lock. The correction keeps
+  a separate attempted-expiry fence before publication, maps the specific
+  busy refusal to exit 75, and probes guest liveness under the lifecycle hold
+  both before rescue and before destruction.
+- The native focused provider contracts passed 116 tests with three opt-in
+  skips. Real Docker proved a live-wrapper duplicate is busy, a guest survives
+  termination of only its wrapper, and stop/remove/recreate all defer after
+  host admission is pruned. No module-size baseline or required CI gate was
+  widened. This is provider lifetime proof, not central task execution.
+- The provider PR's CI also exposed a retry fixture that monkeypatched shared
+  standard-library sleep and counted unrelated subprocess timing. Isolating
+  that module's clock instrumentation preserves real child conflicts and
+  retries; all four native cases passed with containment state checks.
+- Both renewal and provider PRs remain open. Renewal merges first; supervisor
+  integration, container task isolation, central/local authority and fleet
+  placement remain unresolved parent completion gates.
+- A subsequent provider review correctly identified guest helpers surviving
+  Docker-client timeouts and live legacy wrappers using the old lock protocol.
+  Publication now holds a guest lock and checks its own monotonic expiry before
+  replacing the credential. A real timed-out-client regression proves the
+  surviving older guest publisher is rejected after a newer publication.
+- Host lock cutover uses a private directory barrier rather than reusing an
+  unlinkable legacy inode. It waits for legacy lock release and refuses live
+  legacy admission/lifecycle writers without terminating their workers.
+  Native Windows and isolated POSIX process proofs cover mixed-version
+  exclusion; the expanded native lease/admission contracts passed 201 tests
+  with four platform/opt-in skips. Existing explicit stale-corruption recovery
+  remains available without admitting live legacy writers.
+- The coverage prerequisite is PR #6783. Its first required guard refused
+  dynamic runner routing, so the correction uses two literal native runner
+  lanes rather than weakening that guard. Review also requires crash-child
+  coverage persistence and compatibility checks, plus a narrowly optional
+  YAML-only assertion in the minimal manual caller. These corrections and
+  fresh baseline evidence remain pending; no strict selector is activated.
+
 ### 2026-10-14 -- Renewal PR blocked by a measured CI job timeout
 - PR #6722's post-description run 38610631180 passed all bridge test
   batches and the shared SSH contract tests, but the job exceeded its
