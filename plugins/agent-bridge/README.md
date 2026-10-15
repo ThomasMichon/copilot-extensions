@@ -15,6 +15,18 @@ refuses legacy daemons without an authoritative effective-config snapshot.
 Production capture/attestation is not yet wired; ordinary explicit cutover is
 unchanged. Anonymous health and authenticated control remain distinct contracts.
 
+An installer `update` reusing the selected completed slot separately checks the
+daemon actually serving. Healthy/current serving is a no-op; a healthy, adopted
+older daemon uses ordinary guarded cutover from the unchanged slot. The
+installer-internal `deploy --reconcile-serving` mode retains the observed
+PID/start reference, rechecks the predecessor at publication and authenticated
+control, and confirms native exit without force-reaping. Missing, damaged,
+unhealthy or changed ownership fails explicitly; an inactive installation or
+forwarded route is not started locally. This mode neither repairs stale
+cutovers nor substitutes for the effective-config conditional-repair contract.
+A reconcile failure does not publish a success manifest or fall back to
+stop/rebuild.
+
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`
 and `host-wsl`, preserving their exact SSH profiles and physical association.

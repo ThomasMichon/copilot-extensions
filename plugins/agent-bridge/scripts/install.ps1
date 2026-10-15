@@ -3069,6 +3069,13 @@ function Invoke-UpdateSlotBuild {
     Remove-ConsoleTrampolines -VenvDir $VenvDir
 }
 
+function Invoke-ServingRuntimeReconcile {
+    & $VenvPython -m agent_bridge deploy --reconcile-serving --health-timeout 180
+    if ($LASTEXITCODE -ne 0) {
+        throw "Serving runtime reconcile failed (exit $LASTEXITCODE); completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
+    }
+}
+
 function Invoke-Update {
     Write-Host ''
     Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
@@ -3076,23 +3083,8 @@ function Invoke-Update {
 
     if (-not (Ensure-Uv)) { exit 1 }
 
-    # Strict same-content no-op (ce#776/#777) -- checked BEFORE we stop the daemon
-    # or touch the venv. Otherwise the classic same-version path below "downgrades
-    # to stop-and-rebuild" IN PLACE over the live slot: it stops the running
-    # daemon and rewrites its python.exe / site-packages, the WinError-2 crash
-    # cascade (dotfiles#1612). If the active slot already matches the target
-    # content there is nothing to do; a genuine force-restart is a dedicated
-    # command (`service restart`), not an implicit effect of a reconcile.
-    $preLockHash = Get-PayloadHash
-    if (Test-SlotContentCurrent -PayloadHash $preLockHash) {
-        Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no stop, no rebuild)."
-        Write-DeployManifest -PayloadHash $preLockHash
-        return
-    }
-
     # Serialize concurrent installers (see Invoke-Install): don't let an
-    # overlapping install/update rebuild the venv over an in-flight one. Defer on
-    # timeout; re-check the no-op after acquiring in case it just landed.
+    # overlapping install/update race serving convergence or rebuild the venv.
     if (-not (Enter-InstallLock)) {
         Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
         exit 75
@@ -3100,9 +3092,15 @@ function Invoke-Update {
     # The transaction's single payload fingerprint (see Invoke-Install).
     $payloadHash = Get-PayloadHash
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
-        Write-Ok "agent-bridge $SrcVersion already active after lock wait -- no-op."
-        Write-DeployManifest -PayloadHash $payloadHash
-        Exit-InstallLock
+        try {
+            # Slot/import health proves reusable bytes, not the serving version.
+            # This guarded seam never rebuilds, cold-starts or falls back to stop.
+            Invoke-ServingRuntimeReconcile
+            Write-DeployManifest -PayloadHash $payloadHash
+            Write-Ok "agent-bridge $SrcVersion content matched; serving runtime reconciled without rebuilding."
+        } finally {
+            Exit-InstallLock
+        }
         return
     }
 

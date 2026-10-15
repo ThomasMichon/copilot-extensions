@@ -187,6 +187,9 @@ def _assert_outcome(
         assert result.returncode == 0, detail
         assert "PROCEEDED" not in events and "DRAINED" not in events, detail
         assert "MANIFEST" in events, detail
+        assert _tree(tmp_path / "install" / "versions" / _VERSION) == _tree(
+            tmp_path / "before-slot"
+        ), "same-content reconcile changed the completed slot"
     elif expected == _REUSED:
         # The activation stub exits 50: the slot was health-checked and
         # activated, but never rebuilt, reinstalled, or pruned.
@@ -228,6 +231,7 @@ _PS_FUNCTIONS = (
     ("Invoke-InstallSlotBuild", True),
     ("Invoke-UpdateSlotBuild", True),
     ("Invoke-Install", False),
+    ("Invoke-ServingRuntimeReconcile", False),
     ("Invoke-Update", False),
 )
 
@@ -278,6 +282,11 @@ function Enter-InstallLock {{ return $true }}
 function Exit-InstallLock {{ }}
 function Get-BootstrapPython {{ return $RealPython }}
 function FakeSlotPython {{
+    if ($args -contains '--reconcile-serving') {{
+        Rec 'SERVING'
+        $global:LASTEXITCODE = if ($env:SERVING_EXIT_CODE) {{ [int]$env:SERVING_EXIT_CODE }} else {{ 0 }}
+        return
+    }}
     if ($args -contains 'agent_bridge') {{ Rec 'CONFIG'; $global:LASTEXITCODE = 0; return }}
     & $RealPython @args
 }}
@@ -353,6 +362,29 @@ def test_ps1_completed_slot_admission(
 ) -> None:
     result = _run_ps(_ps_harness(tmp_path, scenario, action))
     _assert_outcome(tmp_path, result, expected, failure_code=1)
+    assert ("SERVING" in _events(tmp_path)) is (
+        action == "Invoke-Update" and scenario == "match-active"
+    )
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+@pytest.mark.parametrize("after_wait", [False, True], ids=["selected", "selected-during-lock"])
+def test_ps1_serving_reconcile_failure_never_publishes_or_rebuilds(tmp_path, after_wait):
+    action = "$env:SERVING_EXIT_CODE = '17'\n"
+    if after_wait:
+        action += "function Enter-InstallLock { Activate; return $true }\n"
+    action += "Invoke-Update"
+    result = _run_ps(_ps_harness(
+        tmp_path, "match-inactive" if after_wait else "match-active", action,
+    ))
+    events = _events(tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "SERVING" in events
+    assert not set(events) & {"MANIFEST", "DRAINED", "PROCEEDED", "BUILT", "PRUNED"}
+    assert _tree(tmp_path / "install" / "versions" / _VERSION) == _tree(
+        tmp_path / "before-slot"
+    )
+    assert "Serving runtime reconcile failed" in result.stdout + result.stderr
 
 
 # An unavailable payload hash must never let a same-content shortcut accept a
@@ -620,6 +652,7 @@ _SH_FUNCTIONS = (
     ("_require_install_lock", True),
     ("_update_core", False),
     ("do_install", False),
+    ("_reconcile_serving_runtime", False),
     ("do_update", False),
 )
 
@@ -683,6 +716,9 @@ def _sh_harness(tmp_path: Path, scenario: str, action: str, extra: tuple[str, ..
     # the real machine config; everything else is the real interpreter.
     shim = (
         "#!/bin/sh\n"
+        'case "$*" in *--reconcile-serving*) '
+        f"echo SERVING >> {_sh_quote(_posix(tmp_path / 'events.txt'))}; "
+        'exit "${SERVING_EXIT_CODE:-0}" ;; esac\n'
         'case "$*" in *agent_bridge*) '
         f"echo CONFIG >> {_sh_quote(_posix(tmp_path / 'events.txt'))}; exit 0 ;; esac\n"
         f"exec {_sh_quote(_posix(sys.executable))} \"$@\"\n"
@@ -770,6 +806,29 @@ def test_sh_completed_slot_admission(
 ) -> None:
     result = _run_sh(_sh_harness(tmp_path, scenario, action))
     _assert_outcome(tmp_path, result, expected)
+    assert ("SERVING" in _events(tmp_path)) is (
+        action == "do_update" and scenario == "match-active"
+    )
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize("after_wait", [False, True], ids=["selected", "selected-during-lock"])
+def test_sh_serving_reconcile_failure_never_publishes_or_rebuilds(tmp_path, after_wait):
+    action = "export SERVING_EXIT_CODE=17\n"
+    if after_wait:
+        action += "_enter_install_lock() { activate; return 0; }\n"
+    action += "do_update"
+    result = _run_sh(_sh_harness(
+        tmp_path, "match-inactive" if after_wait else "match-active", action,
+    ))
+    events = _events(tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "SERVING" in events
+    assert not set(events) & {"MANIFEST", "DRAINED", "PROCEEDED", "BUILT", "PRUNED"}
+    assert _tree(tmp_path / "install" / "versions" / _VERSION) == _tree(
+        tmp_path / "before-slot"
+    )
+    assert "Serving runtime reconcile failed" in result.stdout + result.stderr
 
 
 _SH_NO_HASH = "_payload_hash() { :; }\n"

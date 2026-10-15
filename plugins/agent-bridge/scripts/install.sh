@@ -840,7 +840,7 @@ _guard_published_slot() {
         construct) return 1 ;;
         reuse)
             if [[ "$(_versioned_current)" == "$SRC_VERSION" ]]; then
-                _ok "agent-bridge $SRC_VERSION already installed and healthy (content match) -- no-op (no stop, no rebuild)."
+                _ok "agent-bridge $SRC_VERSION content matched -- reusing the immutable runtime slot."
                 return 0
             fi
             return 1 ;;
@@ -2450,6 +2450,13 @@ _update_core() {
     return 0
 }
 
+_reconcile_serving_runtime() {
+    "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --health-timeout 180 || {
+        _fail "Serving runtime reconcile failed; completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
+        return 1
+    }
+}
+
 do_update() {
     echo ""
     echo "=== agent-bridge update ==="
@@ -2471,6 +2478,7 @@ do_update() {
     # or any stop, so a no-op or a refused update never disturbs the live
     # daemon. See do_install.
     if _guard_published_slot; then
+        _reconcile_serving_runtime || return 1
         _write_deploy_manifest
         return 0
     fi

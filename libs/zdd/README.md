@@ -161,6 +161,13 @@ retire it. The sequence is reversible up to an explicit commit point, with
 rollback and commit-forward (if the old endpoint is unreachable, it commits to
 the healthy new one rather than stranding clients).
 
+An ordinary adopter may supply `expected_old=Endpoint(...)` together with
+`refuse_old`. The selected predecessor must equal that observation before port
+selection or passive spawn: listener fallback to another endpoint (or to no
+endpoint) is a refusal, never an implicit cold start. The refusal callback
+still fences publication; the expectation alone does not grant ownership,
+provide effective-config capture or authorize retirement.
+
 #### Conditional owner operation (partial lifecycle support)
 
 `CutoverOrchestrator.run(conditional=ConditionalCutover(...))` adds an opt-in

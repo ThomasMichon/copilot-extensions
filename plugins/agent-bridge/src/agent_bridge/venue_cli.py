@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from zdd.conditional import ConditionalCutover
+    from .serving_reconcile import ServingRuntime
 
 from .parity_harness import (
     CONTAINER_RECREATE_FAULT,
@@ -177,6 +178,7 @@ def _fault_frontend_restart_hostindex_loss(
 def _cmd_deploy(
     args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
     routing_dir: Path | None = None,
+    serving: ServingRuntime | None = None,
 ) -> None:
     from zdd import breadcrumb, routing
     from zdd.cutover import CutoverOrchestrator
@@ -186,11 +188,23 @@ def _cmd_deploy(
     from .config import config_dir, load_config, load_or_create_auth_token
     from .routing_state import active_route_is_forward
 
+    if getattr(args, "reconcile_serving", False) and serving is None:
+        if conditional is not None:
+            raise ValueError("serving reconcile cannot replace a conditional repair")
+        from .serving_reconcile import reconcile_serving
+
+        reconcile_serving(args)
+        return
+
     forwarded_skip = (
         "this machine reaches a host bridge through a forward (active.json); "
         "there is no local daemon to deploy"
     )
     core = _core()
+    if serving is not None and (
+        getattr(args, "force", False) or getattr(args, "recover", False) or conditional is not None
+    ):
+        raise ValueError("serving reconcile cannot force retirement or replace conditional recovery")
     if conditional is not None:
         from zdd.conditional import run_conditional_cutover
 
@@ -249,15 +263,34 @@ def _cmd_deploy(
                 if resp.status != 200:
                     return False
                 body = json.loads(resp.read().decode("utf-8"))
+                if serving is not None:
+                    from .serving_reconcile import compare_serving_version
+
+                    return (
+                        isinstance(body, dict)
+                        and body.get("status") == "ok"
+                        and body.get("service") == "agent-bridge"
+                        and body.get("ready") is True
+                        and compare_serving_version(body.get("version"), __version__) == "current"
+                    )
                 return body.get("status") == "ok" and body.get("ready", True) is True
         except Exception:
             return False
 
     def make_client(base_url: str) -> BridgeClient:
+        if serving is not None:
+            from .serving_reconcile import guarded_client
+
+            return guarded_client(serving, base_url, token, int(args.drain_timeout) + 60)
         return BridgeClient(base_url, token, timeout=int(args.drain_timeout) + 60)
 
-    _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(config_dir())
-    recovery = breadcrumb.recover_stale_cutover(config_dir(), make_client, health_check=health_check)
+    # Serving convergence is not stale-cutover repair: retain any existing
+    # recovery evidence and let the orchestrator's normal admission refuse it.
+    _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(config_dir()) if serving is None else None
+    recovery = (
+        breadcrumb.recover_stale_cutover(config_dir(), make_client, health_check=health_check)
+        if serving is None else {}
+    )
     if recovery.get("refused"):
         reason = breadcrumb.refusal_reason(recovery)
         if getattr(args, "json", False):
@@ -265,7 +298,10 @@ def _cmd_deploy(
         else:
             print(f"[FAIL] {reason}", file=sys.stderr)
         sys.exit(1)
-    passive_reap = core._reap_abandoned_passive(config_dir(), _pre_recovery_breadcrumb)
+    passive_reap = (
+        core._reap_abandoned_passive(config_dir(), _pre_recovery_breadcrumb)
+        if serving is None else {}
+    )
     if passive_reap.get("refused"):
         reason = breadcrumb.refusal_reason(passive_reap)
         if getattr(args, "json", False):
@@ -296,7 +332,11 @@ def _cmd_deploy(
         health_check=health_check,
         make_client=make_client,
         pick_free_port=pick_free_port,
-        refuse_old=lambda active: forwarded_skip if active_route_is_forward(active) else None,
+        refuse_old=(
+            serving.refuse if serving is not None else
+            lambda active: forwarded_skip if active_route_is_forward(active) else None
+        ),
+        expected_old=routing.Endpoint.from_dict(serving.route) if serving is not None else None,
     )
     res = orch.run(health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force)
     # Prepend rather than print eagerly: an eager print corrupts `--json`
@@ -334,15 +374,22 @@ def _cmd_deploy(
         else:
             old_confirmed_gone = False  # confirmed below, or left False
         if old is not None and old.pid and (active is None or old.pid != active.pid):
-            exited, forced = core._ensure_retired_daemon_exited(old.pid)
+            if serving is not None:
+                exited, forced = serving.process.wait(15.0), False
+            else:
+                exited, forced = core._ensure_retired_daemon_exited(old.pid)
             if exited:
                 res.steps.append(f"old daemon exited pid={old.pid}" + (" (forced tree reap)" if forced else ""))
                 old_confirmed_gone = True
             else:
                 res.steps.append(f"FAILED: retired daemon pid={old.pid} is still alive")
                 res.ok = False
+                retirement_kind = (
+                    "graceful retirement" if serving is not None else
+                    "graceful and forced process-tree retirement"
+                )
                 res.error = (
-                    f"retired daemon pid={old.pid} survived graceful and forced process-tree retirement; "
+                    f"retired daemon pid={old.pid} survived {retirement_kind}; "
                     "split-brain is possible"
                 )
         if res.ok and old_confirmed_gone and active is not None:
@@ -367,6 +414,22 @@ def _cmd_deploy(
                 )
             except Exception as exc:  # noqa: BLE001 -- best-effort, never fails the cutover
                 res.steps.append(f"post-cutover reattach failed (non-fatal): {exc}")
+
+    if res.ok and serving is not None:
+        from .serving_reconcile import (
+            ServingReconcileError, compare_serving_version, observe_serving,
+        )
+
+        try:
+            with observe_serving(Path(config_dir())) as current:
+                if (
+                    current is None
+                    or compare_serving_version(current.version, __version__) != "current"
+                ):
+                    raise ServingReconcileError("cutover did not converge the serving runtime")
+        except ServingReconcileError as exc:
+            res.ok = False
+            res.error = str(exc)
 
     if args.json:
         core._json_out(res.to_dict())
@@ -402,6 +465,10 @@ def add_deploy_cutover_flags(
     parser.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
     if include_recover:
         parser.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
+        parser.add_argument(
+            "--reconcile-serving", action="store_true",
+            help="Installer reconcile: cut over only an adopted healthy older daemon; never cold-start, force retirement or repair stale cutovers.",
+        )
     # `default=argparse.SUPPRESS`, not `False`: the top-level `--json` flag
     # (`build_parser()`) already sets `args.json` in the shared Namespace
     # before this subparser is applied. A `False` default here would

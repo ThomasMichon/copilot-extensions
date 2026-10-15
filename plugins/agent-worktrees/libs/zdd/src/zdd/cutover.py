@@ -149,7 +149,10 @@ class CutoverOrchestrator:
         clock: Callable[[], float] = time.monotonic,
         routing_mod: Any = routing,
         drain_before_publish: bool = False,
+        expected_old: Endpoint | None = None,
     ) -> None:
+        if expected_old is not None and refuse_old is None:
+            raise ValueError("an expected predecessor also requires a publication refusal guard")
         self.config_dir = Path(config_dir)
         self.bind = bind
         self.version = version
@@ -162,6 +165,7 @@ class CutoverOrchestrator:
         self.clock = clock
         self.routing = routing_mod
         self.drain_before_publish = drain_before_publish
+        self.expected_old = expected_old
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
@@ -458,6 +462,10 @@ class CutoverOrchestrator:
             old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
         old = conditional.old if conditional else self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
+        if self.expected_old is not None and old != self.expected_old:
+            result.error = "selected predecessor differs from the observed serving daemon"
+            result.steps.append(f"refused: {result.error}")
+            return result
         if self.drain_before_publish:
             selected_raw = (
                 selection_table.get("active") or selection_table.get("previous")
