@@ -85,8 +85,10 @@ def test_ensure_paths_run_their_python_inside_the_env_file():
     assert "AGENT_INDEX_ENGINE_HOME = $EngineHome" in engine
     assert engine.index("Invoke-WithEnvFile") < engine.index("Test-EnginePort")
     assert engine.index("Invoke-WithEnvFile") < engine.index("-m agent_index engine start")
-    # An installer must not accept an engine started inside its own Job.
-    assert "-m agent_index engine start --strict" in engine
+    # An installer must not accept an engine started inside its own Job, and
+    # runs that strict start from the active (updated) index runtime.
+    assert "& $managePy -I -X utf8 -m agent_index engine start --strict" in engine
+    assert "$EngineVenvPython -I -X utf8 -m agent_index engine start" not in engine
     assert "Invoke-WithEnvFile -Path $EnvFile" in service
     assert service.index("Invoke-WithEnvFile") < service.index("-m agent_index deploy")
 
@@ -94,6 +96,37 @@ def test_ensure_paths_run_their_python_inside_the_env_file():
 def _windows_powershell() -> list[str]:
     host = shutil.which("powershell") if sys.platform == "win32" else None
     return [host] if host else []
+
+
+def _run_engine_ensure(tmp_path: Path, host: str, manage_body: str) -> subprocess.CompletedProcess:
+    """Run the extracted Ensure-EngineRunning with a fake active index runtime
+    (``manage.cmd``) and a fake preserved engine runtime that predates
+    ``--strict`` and records any call (``engine.cmd``)."""
+    manage = tmp_path / "manage.cmd"
+    manage.write_text(manage_body)
+    engine = tmp_path / "engine.cmd"
+    engine.write_text("@echo ENGINE-CLI-CALLED %*\r\n@exit /b 2\r\n")
+    install = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
+    helpers = "\n".join(
+        line for line in install.splitlines()
+        if line.startswith(("function Write-Ok ", "function Write-Skip ", "function Write-Warn "))
+    )
+    script = tmp_path / "harness.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$NoService = $false\n$EngineVenvPython = '{engine}'\n"
+        f"$EngineEnvFile = '{tmp_path / 'engine.env'}'\n$EngineHome = '{tmp_path}'\n"
+        f"function Get-ActiveSlotPython {{ '{manage}' }}\n"
+        "function Write-EngineFiles { }\nfunction Test-EnginePort { $false }\n"
+        + helpers + "\n" + _function("Invoke-WithEnvFile") + "\n"
+        + _function("Ensure-EngineRunning") + "\nEnsure-EngineRunning\nWrite-Host 'AFTER'\n",
+        encoding="utf-8-sig",
+    )
+    return subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(script)],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
 
 
 @pytest.mark.skipif(not _windows_powershell(), reason="Windows PowerShell 5.1 is not available")
@@ -106,31 +139,28 @@ def test_engine_ensure_survives_stderr_and_reports_the_exit_under_5_1(
     error under 'Stop'; the engine start logs warnings to stderr even when it
     succeeds, which must not abort the installer before the logon entry is
     registered."""
-    fake = tmp_path / "python.cmd"
-    fake.write_text(f"@echo engine warning on stderr 1>&2\r\n@exit /b {exit_code}\r\n")
-    install = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
-    helpers = "\n".join(
-        line for line in install.splitlines()
-        if line.startswith(("function Write-Ok ", "function Write-Skip ", "function Write-Warn "))
-    )
-    script = tmp_path / "harness.ps1"
-    script.write_text(
-        "$ErrorActionPreference = 'Stop'\n"
-        f"$NoService = $false\n$EngineVenvPython = '{fake}'\n"
-        f"$EngineEnvFile = '{tmp_path / 'engine.env'}'\n$EngineHome = '{tmp_path}'\n"
-        "function Write-EngineFiles { }\nfunction Test-EnginePort { $false }\n"
-        + helpers + "\n" + _function("Invoke-WithEnvFile") + "\n"
-        + _function("Ensure-EngineRunning") + "\nEnsure-EngineRunning\nWrite-Host 'AFTER'\n",
-        encoding="utf-8-sig",
-    )
-    proc = subprocess.run(
-        [_windows_powershell()[0], "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
-         "Bypass", "-File", str(script)],
-        capture_output=True, text=True, timeout=120, check=False,
+    proc = _run_engine_ensure(
+        tmp_path, _windows_powershell()[0],
+        f"@echo engine warning on stderr 1>&2\r\n@exit /b {exit_code}\r\n",
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert any(expected in line for line in proc.stdout.splitlines()), proc.stdout
     assert "AFTER" in proc.stdout
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the fake runtimes are .cmd scripts")
+def test_updated_installer_manages_an_older_preserved_engine_runtime(tmp_path):
+    """Ordinary install/update keeps the durable engine runtime, so its own CLI
+    may predate --strict: the strict start runs from the active index runtime,
+    pointed at the engine home, never from the engine's CLI and never non-strict."""
+    proc = _run_engine_ensure(
+        tmp_path, PWSH,
+        "@echo MANAGE %* home=%AGENT_INDEX_ENGINE_HOME%\r\n@exit /b 0\r\n",
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"MANAGE -I -X utf8 -m agent_index engine start --strict home={tmp_path}" in proc.stdout
+    assert "ENGINE-CLI-CALLED" not in proc.stdout
+    assert "[OK]   Engine ensured" in proc.stdout
 
 
 def test_env_file_overrides_extra_defaults_like_the_launcher(tmp_path):

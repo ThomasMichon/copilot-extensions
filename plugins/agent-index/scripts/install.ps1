@@ -2309,12 +2309,18 @@ function Ensure-EngineRunning {
     # if already serving; else started detached from the durable venv.
     if ($NoService) { Write-Skip 'Engine ensure skipped (-NoService)'; return }
     if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- engine not ensured'; return }
+    # Manage the engine from the active (updated) index runtime: the durable
+    # engine runtime is preserved across updates, so its own CLI may predate
+    # options this installer relies on. The management code still launches the
+    # engine with the preserved engine interpreter (resolved from the home).
+    $managePy = Get-ActiveSlotPython
+    if (-not (Test-Path $managePy)) { Write-Warn 'Index runtime not installed -- the engine is not started'; return }
     Write-EngineFiles
     # As in Ensure-ServiceRunning, 'Continue' is scoped to the body.
     $code = Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{ AGENT_INDEX_ENGINE_HOME = $EngineHome } -Body {
         if (Test-EnginePort) { return 'serving' }
         $ErrorActionPreference = 'Continue'
-        & $EngineVenvPython -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
+        & $managePy -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         $LASTEXITCODE
     }
     if ($code -eq 'serving') { Write-Skip 'Engine already serving -- leaving the warm engine untouched' }
