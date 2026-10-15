@@ -239,6 +239,15 @@ def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
         if (verb == "launch_seed_remove"
                 and tracking_write.endpoint_from_rendezvous(data, verb=verb, min_version=1)
                 and not tracking_write.endpoint_from_rendezvous(data, verb=verb, min_version=5)):
+            pid = data.get("pid")
+            if type(pid) is int and pid > 0:
+                if not locks.pid_alive(pid):
+                    return None
+                recorded = data.get("start_time")
+                if isinstance(recorded, str) and recorded:
+                    current = locks.process_start_time(pid)
+                    if current is not None and str(current) != recorded:
+                        return None
             raise ValueError("launch_seed_remove requires verb version 5; existing monitor is incompatible")
         return data
 

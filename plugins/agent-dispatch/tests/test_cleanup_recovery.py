@@ -363,6 +363,56 @@ def test_supervisor_uses_recovery_reset_after_list_claim_race(held, monkeypatch,
     assert asdict(queue.get(task_id)) == task_before
 
 
+@pytest.mark.parametrize("listed_attempts", [11, 12])
+def test_full_poll_legacy_cleanup_uses_claimed_recovery_snapshot(tmp_path, monkeypatch, listed_attempts):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    fixture = _held_cleanup(tmp_path, labels=["disposable"])
+    queue, task_id, key = fixture
+    task_before = asdict(queue.get(task_id))
+    queue.record_spawn_conclusion(key, conclusion_state="pending", conclusion_detail=json.dumps({
+        "action": "failed", "reason": "legacy failure", "attempts": listed_attempts,
+    }))
+    claims, conclusions = [], []
+    with DispatchClient("http://testserver") as client:
+        client._http.close()
+        client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
+        original_claim = client.claim_spawn_conclusion_retry
+
+        def reset_between_list_and_claim(exact_key, **kwargs):
+            claims.append(exact_key)
+            _, claimed, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
+            assert claimed
+            queue.record_spawn_conclusion(
+                key, conclusion_state="held",
+                conclusion_detail=json.dumps({"action": "failed", "reason": "legacy failure", "attempts": 12}),
+                claim_token=token, claimant_machine="host",
+            )
+            apply(fixture, preview(fixture))
+            return original_claim(exact_key, **kwargs)
+
+        monkeypatch.setattr(client, "claim_spawn_conclusion_retry", reset_between_list_and_claim)
+        supervisor = Supervisor(
+            client, spawn_fn=lambda *a: pytest.fail("business work must not replay"),
+            conclusion_fn=lambda *a: conclusions.append(a) or {"action": "failed", "reason": "retry"},
+            attempt_conclusion_fn=lambda *a: pytest.fail("legacy terminal policy must not change"),
+            repo=TEST_REPO, machine="host", disposable_cli_labels=["disposable"],
+            heartbeat=False, nudge=False, recover=False, consistency_sweep=False,
+        )
+        assert supervisor.poll_once() == []
+    row = queue.get_reservation(key)
+    assert row.conclusion_state == "pending"
+    assert json.loads(row.conclusion_detail)["attempts"] == 1
+    assert claims == [key]
+    assert len(conclusions) == 1
+    assert asdict(queue.get(task_id)) == task_before
+    assert len(queue.cleanup_recovery_history(key)) == 1
+
+
 @pytest.mark.parametrize("kind", ["attempt", "terminal", None])
 def test_session_only_recovery_never_ends_session_without_lease(held, kind):
     from fastapi.testclient import TestClient

@@ -78,6 +78,9 @@ Listed retry state is only a due-time hint: counters, payload and component
 decisions are derived again from the authoritative claimed reservation before
 effects or publication, so an intervening recovery reset cannot be exhausted
 again by stale counters.
+Legacy disposable reconciliation uses the same authoritative claim snapshot
+before deciding retry counters or exhausted state, including a listed exhausted
+row recovered before claim. Its terminal cleanup policy remains unchanged.
 The retained allocation identity includes the execution project, physical
 worktree path, originating reservation, logical creation key/revision, inherited
 worktree and exclusive key. Drifting any of them after acceptance cannot redirect
@@ -163,6 +166,10 @@ for this teardown behavior, retaining the version-4 launch-admission guard.
 An admission-only version-4 monitor does not implement pair-receipt teardown;
 it and earlier monitors are refused before dispatch
 or direct fallback, preserving YAML/seed/receipt state during rolling upgrade.
+That refusal applies to live or unprovable owners. A positive dead-PID or
+PID/birth mismatch makes the stale rendezvous absent for normal monitor startup
+or authorized direct fallback; missing/malformed identity and unreadable birth
+tokens never authorize that inference. No stale-owner record repair is performed.
 The caller does not substitute manual unlink or restart/take over that monitor.
 
 ## API

@@ -2627,25 +2627,33 @@ class Supervisor:
                 if res.get("state") == SpawnState.SETTLED:
                     if not policy_applies or res.get("conclusion_state") != _CONCLUSION_PENDING:
                         continue
+                    if not _conclusion_retry_due(res, now):
+                        continue
+                    try:
+                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
+                        if not claim.get("claimed"):
+                            continue
+                        conclusion_claim_token = claim.get("claim_token")
+                        claimed = claim.get("reservation")
+                        if not isinstance(claimed, dict):
+                            raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
+                        self._conclusion_client.validate_spawn_conclusion_claim(
+                            res["key"], conclusion_claim_token,
+                        )
+                        res = claimed
+                    except DispatchError:
+                        continue
                     prior_attempts, next_attempt_at = self._conclusion_retry_meta(res)
                     if next_attempt_at > now:
                         continue
                     if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         try:
-                            claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
-                            if not claim.get("claimed"):
-                                continue
-                            claim_token = claim.get("claim_token")
-                            self._conclusion_client.validate_spawn_conclusion_claim(
-                                res["key"],
-                                claim_token,
-                            )
                             self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 detail=detail,
                                 conclusion_state=_CONCLUSION_HELD,
                                 conclusion_detail=res.get("conclusion_detail"),
-                                claim_token=claim_token,
+                                claim_token=conclusion_claim_token,
                             )
                         except DispatchError:
                             pass
@@ -2784,6 +2792,11 @@ class Supervisor:
                             res["key"],
                             conclusion_claim_token,
                         )
+                        claimed = claim.get("reservation")
+                        if not isinstance(claimed, dict):
+                            raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
+                        res = claimed
+                        prior_attempts, _ = self._conclusion_retry_meta(res)
                     except DispatchError:
                         continue
                 outcome = (

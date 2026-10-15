@@ -741,3 +741,32 @@ requested contract.
   install/documentation/whitespace/large-file and changefile gates passed.
   An ancestry-preserving publication path and fresh review remain owed, with
   merge and rollout coordinator-owned.
+
+- **Claimed legacy counters and stale rendezvous owners (PR #6542):**
+  Full-poll fail-first cases reproduced both listed attempt 11 and 12 being
+  published as held after an intervening operator recovery. Legacy terminal
+  reconciliation now obtains and validates its authoritative claimed snapshot
+  before retry/exhaustion decisions, retaining the original cleanup policy,
+  lease identity and completed business state. Old removal rendezvous entries
+  are treated as absent only after positive dead-PID or PID/birth mismatch
+  evidence; live, unknown, missing/malformed identity and missing birth remain
+  refused. Positive stale-owner cases failed first while four preservation
+  controls already passed; eight owner variants are now covered.
+  Changed dispatch compatibility passed 177 cases, legacy supervisor selection
+  77 and all seed/admission/removal cases 81. Recorded terminal revalidation
+  completed 50 unique cases before the next group's first case,
+  `test_pair_progress_rejects_raw_pair_keys_after_unlink`, hit its unchanged
+  30-second item timeout. Setup passed; the call did not complete. Its captured
+  stack was in current-branch Git work and a subprocess reader-thread join.
+  Source context identifies `git rev-parse --abbrev-ref HEAD`; actual child
+  PID/argv/cwd and exit/pipe custody were not retained, so causality remains
+  UNKNOWN. Execution stopped without retry, budget change or publication.
+  Seventeen terminal cases and fresh shared-caller revalidation remain owed;
+  prior accepted 67/31 and 418 evidence are not relabeled. Separately, published
+  source CI run 38662415065 cancelled its agent-index job at the workflow's
+  eight-minute limit: two batches completed (298 and 328 passes) before a third
+  reached 54%, with no last test ID retained. No CI retry, exception or change
+  to another source owner's code is made; coordinator inspection remains open.
+  Fatal lint, module ceilings, install/documentation/whitespace/large-file and
+  changefile checks passed for this source slice. These static results do not
+  discharge the retained runtime failure or authorize publication.

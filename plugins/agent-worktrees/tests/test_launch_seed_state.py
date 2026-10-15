@@ -160,6 +160,53 @@ def test_receipt_teardown_retains_launch_admission_at_real_daemon(tmp_path, monk
         server.close()
 
 
+@pytest.mark.parametrize("owner", [
+    "dead", "reused", "live", "unknown", "missing", "malformed", "invalid-pid", "missing-birth",
+])
+def test_old_removal_rendezvous_requires_proven_stale_owner(tmp_path, monkeypatch, owner):
+    from agent_worktrees import locks, status_monitor_runtime
+
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="retain exact receipt authority")
+    receipt = path.with_suffix(".terminal-pair.json")
+    receipt.write_text('{"version":1}', encoding="utf-8")
+    files = (path, state.state_path(path), receipt)
+    before = {file: file.read_bytes() for file in files}
+    old = {
+        "pid": 123, "start_time": "111",
+        "tracking_write_endpoint": "127.0.0.1:49152",
+        "tracking_write_token": "fixture-token",
+        "tracking_write_verbs": ["launch_seed_remove"],
+        "tracking_write_verb_versions": {"launch_seed_remove": 4},
+    }
+    if owner == "missing":
+        old.pop("pid")
+    if owner == "malformed":
+        old["start_time"] = {"invalid": "identity"}
+    if owner == "invalid-pid":
+        old["pid"] = True
+    if owner == "missing-birth":
+        old["start_time"] = None
+    monkeypatch.setattr(locks, "read_lock", lambda *a: old)
+    monkeypatch.setattr(locks, "pid_alive", lambda pid: owner != "dead")
+    monkeypatch.setattr(
+        locks, "process_start_time",
+        lambda pid: None if owner == "unknown" else ("111" if owner == "live" else "222"),
+    )
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(
+        tracking_write, "_send_tracking_write_request",
+        lambda *a, **k: pytest.fail("an incompatible daemon must never be dialed"),
+    )
+    if owner in {"dead", "reused"}:
+        assert state.remove(path, remove_record=True)["record_removed"]
+        assert all(not file.exists() for file in files)
+    else:
+        with pytest.raises(ValueError, match="verb version 5"):
+            state.remove(path, remove_record=True)
+        assert {file: file.read_bytes() for file in files} == before
+
+
 @pytest.mark.parametrize("kind", ["new", "resume"])
 def test_real_daemon_retains_failed_attempt_and_finishes_exactly_one_handoff(
     tmp_path, monkeypatch, kind,
