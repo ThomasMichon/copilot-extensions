@@ -7,7 +7,7 @@
 - **Status:** Draft
 - **Vision:** `visions/installer` Features/plugin-updating-and-alignment; `visions/plugin-services/runtime-assembly` verified immutable assembly
 - **Umbrella issue:** #6812
-- **Sub-issues:** existing #6600, #6086, #6046 and #6796 retain their owners and boundaries
+- **Sub-issues:** #6826 (Bridge serving no-op), #6827 (supervisor result framing); existing #6600, #6086, #6046 and #6796 retain their owners and boundaries
 
 ## Guiding Intent
 
@@ -94,7 +94,7 @@ matrix below are _(agent-recommended)_ implementation details.
 - [ ] Retain per-action exit status and timed start/end/error outcomes in the
   shell launch-maintenance path while preserving its fresh replanning.
 - [ ] Correct the supervisor JSON-framing defect before applying human line
-  formatting; preserve diagnostic stderr and identity-scoped retirement.
+  formatting (#6827); preserve diagnostic stderr and identity-scoped retirement.
 - [ ] Implement the smallest shared extension of the existing formatter
   ownership, covering aggregate progress, plugin installers, nested child
   output and persistent diagnostics.
@@ -110,9 +110,10 @@ matrix below are _(agent-recommended)_ implementation details.
 
 - [ ] Reconcile Bridge serving-version drift through the admitted runtime's
   existing cutover path rather than returning a misleading local-content
-  no-op or rebuilding an already current slot.
-- [ ] Attribute Codespaces package/completion/activation failures and validate
-  exact healthy-slot reuse before eliminating repeated dependency work.
+  no-op or rebuilding an already current slot (#6826).
+- [ ] Verify #6598's existing Codespaces admitted-construction reuse after
+  promotion instead of reimplementing it; attribute any remaining
+  package/completion/activation failure with the new phase outcomes.
 - [ ] Implement the reviewed, evidence-backed reductions in repeated planning,
   probing, building or reconciliation, retaining all actual safety gates.
 - [ ] Make unchanged healthy work a genuine no-op; retain fresh, changed,
@@ -173,6 +174,12 @@ because a process returned zero is explicitly rejected. Codespaces'
 unattributed gaps remain an investigation item, not a promised savings
 number.
 
+The source advanced during the audit: #6598 already added Codespaces'
+admitted-construction reuse. This effort verifies that improvement in the
+consumer flow and does not claim or duplicate its implementation. The
+Bridge serving-version gap and supervisor framing defect survived that
+bounded source delta inspection.
+
 ## Journal
 
 ### 2026-10-14 - Kickoff
@@ -190,3 +197,7 @@ number.
 - A later read-only reconcile plan still selected Bridge running drift and
   Codespaces version drift; Dispatch and Index were no longer selected.
   No further updater was launched to inspect that state.
+- Revalidated the installer delta after #6598 merged: its Codespaces reuse
+  short-circuit supersedes the baseline's unconditional package work.
+  Preserved that implementation owner's scope and retained only verification
+  and any remaining failure attribution here.

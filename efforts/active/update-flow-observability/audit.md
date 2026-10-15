@@ -231,6 +231,21 @@ This establishes an unresolved update, not the precise failed command.
 Instrument the package/completion/activation boundaries and preserve stderr
 and exit status before attributing the two long gaps or removing work.
 
+**Later source delta, not a second implementation:** #6598 landed after the
+reference audit baseline. At `683cc4b06c`, the PowerShell Codespaces
+`Deploy-Venv` path returns for admitted `RuntimeConstructionReuse`
+(lines 866-897), and `Deploy-Package` also returns immediately for that reuse
+state (lines 734-738). New candidates still install packages and retain
+health/completion/activation gates. Therefore unconditional package work on
+every healthy update is a historical finding, not an unfixed current-source
+claim. Verify that existing improvement after promotion rather than
+reimplementing the transactional owner. The precise cause of the old silent
+gaps remains unproved.
+
+The same bounded delta inspection found that #6598 did **not** add a serving
+version check to Bridge's content-match no-op and did not change the
+supervisor JSON parser.
+
 ### Supervisor diagnostics contain a concrete JSON-framing defect
 
 `plugins/agent-dispatch/scripts/install.ps1:2240-2275` invokes the installed
@@ -311,7 +326,9 @@ Prioritize:
 3. Investigate the exact Bridge and Codespaces pass-two predicates before
    removing repeated actions. A successful process exit alone is not proof
    that desired runtime/service/command state is current.
-4. Reuse same-attempt admitted plans and immutable fingerprints only where
-   source identity, policy and health evidence still bind.
+4. Verify #6598's existing admitted-construction reuse in Codespaces rather
+   than implementing another reuse mechanism. Reuse same-attempt plans and
+   immutable fingerprints only where source identity, policy and health
+   evidence still bind.
 5. Measure equivalent healthy, changed-version and first-touch runs after
    implementation. Report work avoided, not merely shorter output.
