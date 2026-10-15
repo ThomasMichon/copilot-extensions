@@ -62,21 +62,87 @@ def _spawn(argv: Sequence[str], cwd: Path | None, env: Mapping[str, str], captur
     return subprocess.Popen(list(argv), cwd=cwd, env=dict(env), **session, **stdio), None
 
 
-def _session_members(sid: int) -> list[int]:
+def _all_pids() -> list[int]:
     if os.path.isdir("/proc"):
-        pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
-    else:
-        listing = subprocess.run(["ps", "-A", "-o", "pid="], capture_output=True,
-                                 text=True, timeout=10, check=False).stdout
-        pids = [int(tok) for tok in listing.split() if tok.isdigit()]
-    members = []
-    for pid in pids:
+        return [int(name) for name in os.listdir("/proc") if name.isdigit()]
+    listing = subprocess.run(["ps", "-A", "-o", "pid="], capture_output=True,
+                             text=True, timeout=10, check=False).stdout
+    return [int(tok) for tok in listing.split() if tok.isdigit()]
+
+
+def _start_time(pid: int) -> str | None:
+    """When ``pid`` started: tells a reused PID apart from the process it was."""
+    if os.path.isdir("/proc"):
         try:
-            if os.getsid(pid) == sid:
-                members.append(pid)
+            with open(f"/proc/{pid}/stat", "rb") as stat:
+                # The command name (field 2) may contain spaces and parentheses.
+                tail = stat.read().rsplit(b")", 1)[1].split()
+        except (OSError, IndexError):
+            return None
+        return None if not tail or tail[0] == b"Z" else tail[19].decode()
+    try:
+        started = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True,
+                                 text=True, timeout=10, check=False).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return started or None
+
+
+def _session_census(sid: int) -> dict[int, str]:
+    """``{pid: start time}`` of every live process in session ``sid``."""
+    census = {}
+    for pid in _all_pids():
+        try:
+            if pid == os.getpid() or os.getsid(pid) != sid:
+                continue
         except OSError:
             continue
-    return [pid for pid in members if pid != os.getpid()]
+        started = _start_time(pid)
+        if started is not None:
+            census[pid] = started
+    return census
+
+
+@dataclasses.dataclass(frozen=True)
+class _Member:
+    pid: int
+    started: str
+    pidfd: int | None
+
+
+def _bind(pid: int, started: str) -> _Member | None:
+    """Pin a census entry to its process (a pidfd on Linux), or None if it is gone."""
+    pidfd = None
+    if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
+        try:
+            pidfd = os.pidfd_open(pid)
+        except ProcessLookupError:
+            return None
+        except OSError:
+            pidfd = None
+    # The census saw this start time; anything else at this PID is another process.
+    if _start_time(pid) != started:
+        if pidfd is not None:
+            os.close(pidfd)
+        return None
+    return _Member(pid, started, pidfd)
+
+
+def _send(member: _Member, sig: int) -> None:
+    try:
+        if member.pidfd is not None:
+            signal.pidfd_send_signal(member.pidfd, sig)
+        elif _start_time(member.pid) == member.started:
+            os.kill(member.pid, sig)
+    except OSError:
+        pass
+
+
+def _still_member(member: _Member, sid: int) -> bool:
+    try:
+        return os.getsid(member.pid) == sid and _start_time(member.pid) == member.started
+    except OSError:
+        return False
 
 
 def _kill_session(proc: subprocess.Popen) -> None:
@@ -85,17 +151,26 @@ def _kill_session(proc: subprocess.Popen) -> None:
     The installers' self-stage watchdog runs the staged copy under ``set -m``,
     which gives it its own process group, so a group kill misses it; it stays
     in the installer's session. Daemons started with ``setsid`` have left the
-    session and survive. A session id cannot be reused while any member lives.
+    session and survive. Each member is pinned to the process the census saw
+    (a reused PID is never signalled) and stopped; a stopped process cannot
+    leave the session, so it is killed only if it is still a member once
+    stopped, and resumed otherwise.
     """
+    sid = proc.pid
     for _ in range(3):  # members forked mid-sweep are caught by the next pass
-        members = _session_members(proc.pid)
+        members = [m for m in (_bind(pid, started)
+                               for pid, started in _session_census(sid).items()) if m]
         if not members:
             break
-        for pid in members:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+        try:
+            for member in members:
+                _send(member, signal.SIGSTOP)
+            for member in members:
+                _send(member, signal.SIGKILL if _still_member(member, sid) else signal.SIGCONT)
+        finally:
+            for member in members:
+                if member.pidfd is not None:
+                    os.close(member.pidfd)
     try:
         proc.kill()
     except OSError:

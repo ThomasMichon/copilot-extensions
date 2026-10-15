@@ -202,6 +202,43 @@ def test_posix_deadline_reaches_a_regrouped_child_but_not_a_daemon(tmp_path, stu
                 pass
 
 
+def _stopped(pid: int) -> bool:
+    state = subprocess.run(["ps", "-o", "state=", "-p", str(pid)], capture_output=True,
+                           text=True, check=False).stdout.strip()
+    return state.startswith("T")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX sessions")
+@pytest.mark.parametrize("stale", ["detached", "replaced"])
+def test_session_sweep_revalidates_each_census_entry(monkeypatch, stale):
+    """Between the census and the signal, an entry can leave the session
+    (``setsid``) or its PID can be reused; either way it must be left running."""
+    sleeper = [sys.executable, "-c", "import time; time.sleep(120)"]
+    leader = subprocess.Popen(sleeper, start_new_session=True)
+    other = subprocess.Popen(sleeper, start_new_session=True)
+    try:
+        assert _wait_for(lambda: installer_run._start_time(other.pid) is not None)
+        # "detached": the census saw this very process inside the session.
+        # "replaced": the census saw an earlier process that had this PID.
+        started = installer_run._start_time(other.pid) if stale == "detached" else "earlier"
+        censuses = iter([{other.pid: started}])
+        monkeypatch.setattr(installer_run, "_session_census", lambda _sid: next(censuses, {}))
+        installer_run._kill_session(leader)
+        assert _wait_dead(leader.pid), "the installer itself still dies"
+        assert other.poll() is None and _alive(other.pid), "a stale entry is never killed"
+        assert not _stopped(other.pid), "a stale entry is never left stopped"
+    finally:
+        for proc in (leader, other):
+            proc.kill()
+            proc.wait()
+
+
+def _wait_for(predicate, seconds: float = 10) -> bool:
+    deadline = time.monotonic() + seconds
+    while not predicate() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return predicate()
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job containment")
 def test_windows_spawn_requires_the_job(monkeypatch, tmp_path):
     seen = {}
