@@ -114,7 +114,7 @@ def test_runtime_resolution_real_helper_read_only(
             "runpy.run_path(sys.argv[0],run_name='__main__')\n"
         )
         return real_run(
-            [command[0], "-c", bootstrap, str(env.home), *command[1:]],
+            [command[0], "-I", "-c", bootstrap, str(env.home), *command[helper_index:]],
             **kwargs,
         )
 

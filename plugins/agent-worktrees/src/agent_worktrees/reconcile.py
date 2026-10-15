@@ -726,7 +726,7 @@ def _installation_context_helper(
         raise ValueError(
             f"platform installation-context helper is missing for {plugin_name}"
         )
-    return required
+    return helper_py if helper_py.is_file() else required
 
 
 def _run_installation_mode_helper(
@@ -750,7 +750,7 @@ def _run_installation_mode_helper(
         "expected_plugin_id": plugin_name,
         "expected_payload_root": str(plugin_dir),
     }
-    if os.name == "nt":
+    if helper.suffix == ".ps1":
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if shell is None:
             raise ValueError(
@@ -787,7 +787,7 @@ def _run_installation_mode_helper(
             command.extend(["-Context", str(context)])
     else:
         command = [
-            sys.executable,
+            sys.executable, "-I",
             str(helper),
             "probe-legacy",
             "--source-json",

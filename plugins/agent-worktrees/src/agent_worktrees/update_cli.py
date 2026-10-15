@@ -695,7 +695,7 @@ def plan_pre_launch() -> dict:
         return {"action": "continue", "reason": "no-repo"}
 
     try:
-        config = cfg.load_config()
+        config = cfg.load_config(include_control_plane_related_pr=False)
     except Exception:
         return {"action": "continue", "reason": "no-config"}
 

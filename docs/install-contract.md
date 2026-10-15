@@ -1234,6 +1234,15 @@ paths, and any foreign plugin context are removed. A missing or invalid receipt
 blocks that plugin's mutation with an explicit diagnostic rather than falling
 through to an unattributed legacy root.
 
+Read-only launch preflight invokes the owning payload's portable
+`installation_context.py` with the running runtime's Python in isolated mode,
+including on Windows. Windows still requires its native helper to be present
+and uses it for older payloads without the portable helper. Probe failures
+remain explicit failures, never reasons to fall back to another authority.
+Pre-launch configuration omits foreign control-plane PR overlays, which do
+not participate in bootstrap-service selection; ordinary PR operations retain
+their full configuration.
+
 A plugin declares whether — and where — its runtime should be reconciled via a
 **`runtimeScope`** field in its `plugin.json`:
 

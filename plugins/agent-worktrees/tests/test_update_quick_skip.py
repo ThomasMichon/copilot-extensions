@@ -232,7 +232,7 @@ def test_prelaunch_selected_context_uses_validated_installer_environment(
     monkeypatch.setattr(
         cfg,
         "load_config",
-        lambda: types.SimpleNamespace(
+        lambda *, include_control_plane_related_pr: types.SimpleNamespace(
             default_repo=types.SimpleNamespace(service_paths=None)
         ),
     )
@@ -304,7 +304,7 @@ def test_prelaunch_uses_marketplace_fingerprint_staleness_for_marketplace_kind(
     monkeypatch.setattr(
         cfg,
         "load_config",
-        lambda: types.SimpleNamespace(
+        lambda *, include_control_plane_related_pr: types.SimpleNamespace(
             default_repo=types.SimpleNamespace(service_paths=None)
         ),
     )
@@ -367,7 +367,7 @@ def test_prelaunch_legacy_default_uses_conventional_runtime(
     monkeypatch.setattr(
         cfg,
         "load_config",
-        lambda: types.SimpleNamespace(
+        lambda *, include_control_plane_related_pr: types.SimpleNamespace(
             default_repo=types.SimpleNamespace(service_paths=None)
         ),
     )
@@ -441,7 +441,7 @@ def test_prelaunch_repo_service_only_bootstrapped_when_opted_in(
     monkeypatch.setattr(
         cfg,
         "load_config",
-        lambda: types.SimpleNamespace(
+        lambda *, include_control_plane_related_pr: types.SimpleNamespace(
             default_repo=types.SimpleNamespace(
                 service_paths=None, bootstrap_services=bootstrap_services
             )
@@ -500,7 +500,7 @@ def test_prelaunch_invalid_other_context_fails_closed(
     monkeypatch.setattr(
         cfg,
         "load_config",
-        lambda: types.SimpleNamespace(
+        lambda *, include_control_plane_related_pr: types.SimpleNamespace(
             default_repo=types.SimpleNamespace(service_paths=None)
         ),
     )
