@@ -698,6 +698,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
     timeout-minutes: 5
+    outputs:
+      run: ${{ steps.python-artifact-builder.outputs.run }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -745,12 +747,31 @@ jobs:
           python -m pytest -q
           tools/test_promotion_control.py tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
           tools/test_promotion_workflow_adapter.py
+
+  promotion-candidate-windows:
+    name: Native promotion candidate contracts (Windows)
+    needs: windows-python-artifact-builder
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    # Retain the native cases without exhausting the builder's cumulative bound.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
       - name: Native candidate readiness and retry contracts (Windows)
-        if: steps.python-artifact-builder.outputs.run == 'true'
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
         run: >-
           python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q
-          tools/test_promotion_artifact_readiness.py           tools/test_promotion_candidate_retry.py
+          tools/test_promotion_artifact_readiness.py tools/test_promotion_candidate_retry.py
           tools/test_verify_promotion_workflows.py
           tools/test_tag_promotion.py
           -k 'native or binary_read'
@@ -1504,6 +1525,7 @@ jobs:
     needs:
       - checks
       - windows-python-artifact-builder
+      - promotion-candidate-windows
       - windows-hooks
       - construction-macos
       - bootstrap-killswitch-powershell-5-1
@@ -1562,6 +1584,7 @@ jobs:
     needs:
       - checks
       - windows-python-artifact-builder
+      - promotion-candidate-windows
       - windows-hooks
       - construction-macos
       - worktree-manager

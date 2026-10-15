@@ -870,8 +870,8 @@ demand through the `Installation context full` workflow. This keeps unrelated
 pull requests incremental and keeps the required fast lane independent from the
 size of the long-form regression portfolio.
 
-Native Windows diagnostic evidence is a separate, bounded selection inside
-the existing `test runner (windows-latest)` job. It runs actual `status` and
+Native Windows diagnostic evidence runs in the separate five-minute
+`Installation-context native diagnostics (Windows)` job. It runs actual `status` and
 `probe-legacy` CLI calls, existing/absent pointer checks, and mutation-entry
 guards from `test_installation_mode_governance.py`; it is not inferred from
 the job merely finishing successfully. The step has a two-minute budget,
@@ -881,10 +881,15 @@ uses Windows PowerShell 5.1 via
 and derived implementation changes trigger it; unrelated docs do not.
 An explicitly requested unavailable shell fails collection rather than
 silently skipping the evidence. No exhaustive adapter matrix is added to PR CI.
-The Windows job has a seven-minute aggregate budget for these diagnostic and
-wrapper selections plus its runner, payload-CWD, and fleet contracts. Individual
-diagnostic/wrapper selections retain their two-minute limits; the Linux runner
-job retains its five-minute budget.
+Individual diagnostic/wrapper selections retain their two-minute limits.
+The separate Windows runner, payload-CWD and Fleet job keeps its ordinary
+seven-minute budget; the Linux runner keeps its ordinary five-minute budget.
+
+Native promotion readiness/retry cases have their own five-minute
+`Native promotion candidate contracts (Windows)` job. It consumes the governed
+artifact builder's changed-path output instead of duplicating detection, and
+both jobs gate PR and promotion snapshots. The same native cases and selectors
+run without exhausting the builder's cumulative five-minute budget.
 
 Source-qualified catalog no-write cases invoke the unchanged PowerShell script
 twice in one real, initialized host. Host-only initialization stops CLR startup

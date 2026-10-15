@@ -737,3 +737,18 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   synchronization/completion-guard cases passed, and all eight canonical
   adopters remain synchronized. Fresh review and required CI still precede
   merge; runtime installation behavior was not changed by this correction.
+- Review then identified the same destination-link defect in the separate
+  versioned-runtime fan-out entry point. Both check and write modes now
+  preflight every destination and ancestor before any destination read or
+  mutation. Forty-five real entry-point cases cover all seven assets,
+  matching/different/dangling targets, linked ancestors, preservation of earlier
+  stale files, and ordinary repair/idempotence. Both synchronization suites
+  passed all 80 cases; runtime/resolver fan-out and thirteen installer contracts
+  remain clean. The release materializer already guards its support destinations.
+- Required Windows artifact CI exhausted its unchanged five-minute aggregate:
+  composed contracts passed in 215 seconds before native readiness was
+  interrupted. Moved the unchanged native selection into its own five-minute
+  required job, sharing the existing detector's output and retaining both PR
+  and promotion aggregation. No case, selector or per-item/job deadline was
+  relaxed. All 37 focused native, real detector and promotion-aggregate checks
+  passed in 102.23 seconds. Fresh-head review and required CI remain blocking.

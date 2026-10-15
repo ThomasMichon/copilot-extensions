@@ -27,6 +27,7 @@ drifted (``tools/check-install-contract.py`` independently enforces the
 ``versioned_runtime.py`` half). A "Python runtime plugin" is one that ships a
 ``pyproject.toml`` **and** a runtime installer (``install.*`` or ``init.*``) --
 the exact set the install contract requires to carry the primitive.
+Both modes refuse linked destinations and ancestors before reading or writing.
 """
 from __future__ import annotations
 
@@ -34,6 +35,9 @@ import argparse
 import hashlib
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uv_editable_ref as uer
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -145,6 +149,12 @@ def main() -> int:
     for plugin in resolver_plugins:
         for name in RESOLVER_NAMES:
             pairs.append((resolver_bytes[name], plugin / "scripts" / name))
+
+    for _want_bytes, dest in pairs:
+        bad_destination = uer._find_symlinked_ancestor(dest, REPO.resolve())
+        if bad_destination is not None:
+            print(f"{bad_destination} is a symlink -- refusing", file=sys.stderr)
+            return 1
 
     drifted: list[str] = []
     written: list[str] = []

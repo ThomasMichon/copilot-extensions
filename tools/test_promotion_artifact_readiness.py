@@ -414,16 +414,39 @@ def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
         pattern = re.search(r"'(\^\(.+\)\$)'", detection["run"])
         assert pattern is not None
         assert all(re.fullmatch(pattern.group(1), path) for path in paths)
-        selected = next(step for step in steps if (
-            step.get("name") == "Governed Python artifact build/toolchain-lock guard tests"
-            if job_id == "checks"
-            else step.get("name") == "Native candidate readiness and retry contracts (Windows)"
-        ))
+        if job_id == "checks":
+            selected = next(
+                step for step in steps
+                if step.get("name") == "Governed Python artifact build/toolchain-lock guard tests"
+            )
+            assert selected["if"] == "steps.python-artifact-builder.outputs.run == 'true'"
+        else:
+            native = jobs["promotion-candidate-windows"]
+            assert native["needs"] == job_id
+            assert native["if"] == jobs[job_id]["if"]
+            assert native["runs-on"] == "windows-latest"
+            assert native["timeout-minutes"] == jobs[job_id]["timeout-minutes"] == 5
+            assert "continue-on-error" not in native
+            assert jobs[job_id]["outputs"]["run"] == "${{ steps.python-artifact-builder.outputs.run }}"
+            assert all(
+                step["if"] == "needs.windows-python-artifact-builder.outputs.run == 'true'"
+                for step in native["steps"]
+            )
+            for gate in ("pr-gate", "promotion-gate"):
+                assert "promotion-candidate-windows" in jobs[gate]["needs"]
+            selected = next(
+                step for step in native["steps"]
+                if step.get("name") == "Native candidate readiness and retry contracts (Windows)"
+            )
+            assert not any(
+                step.get("name") == selected["name"] for step in steps
+            )
+            assert "-k 'native or binary_read'" in selected["run"]
+            assert "tools/seasoned_uv.py" in selected["run"]
+            for name in ("test_verify_promotion_workflows.py", "test_tag_promotion.py"):
+                assert f"tools/{name}" in selected["run"]
         for name in ("test_promotion_artifact_readiness.py", "test_promotion_candidate_retry.py"):
             assert f"tools/{name}" in selected["run"]
-        assert selected["if"] == "steps.python-artifact-builder.outputs.run == 'true'"
-        if job_id != "checks":
-            assert "-k 'native or binary_read'" in selected["run"]
 
 
 @pytest.mark.parametrize("job_id", ["checks", "windows-python-artifact-builder"])
