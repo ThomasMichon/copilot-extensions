@@ -14,6 +14,8 @@ import pytest
 
 from agent_worktrees import installer as inst
 
+pytestmark = pytest.mark.guard
+
 READ_PROJECTS_REGISTRY = inst.read_projects_registry
 
 

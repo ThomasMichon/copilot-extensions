@@ -253,6 +253,8 @@ def write_registry(registry: ReposRegistry) -> None:
                 if plat in entry.paths:
                     lines.append(f"    {plat}: {_quote(entry.paths[plat])}")
             lines.append("")
+    else:
+        lines.append("repos: {}")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

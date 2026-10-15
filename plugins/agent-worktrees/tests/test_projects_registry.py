@@ -9,13 +9,14 @@ preserve-existing semantics, and the ``register-project-entry`` subcommand.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import config_migrations, installer
+from agent_worktrees import config_migrations, installer, repos
 
 # ---------------------------------------------------------------------------
 # v1 -> v2 migrator
@@ -65,6 +66,63 @@ def _patch_registry_path(monkeypatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(installer, "projects_yaml_path", lambda: target)
     monkeypatch.setattr(installer.output, "ok", lambda *_a, **_k: None)
     return target
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("edited", [False, True])
+@pytest.mark.parametrize("source_only", [False, True])
+def test_last_registry_entries_roundtrip_to_command_and_profile_reconciliation(
+    monkeypatch, tmp_path, capsys, edited, source_only,
+):
+    home = tmp_path / "home"
+    root = home / ".agent-worktrees"
+    monkeypatch.setattr(installer, "install_dir", lambda: root)
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: root / "projects.yaml")
+    monkeypatch.setattr(installer, "local_bin", lambda: home / ".local" / "bin")
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: root / "repos.yaml")
+    registry = {"projects": {"demo": {}}}
+    installer.write_projects_registry(registry)
+    installer._deploy_project_binstub("demo")
+    paths = [path for path, _ in installer._project_binstub_specs("demo")]
+    if edited:
+        paths[0].write_text("operator edit\n", encoding="utf-8")
+    before = {path: path.read_bytes() for path in paths}
+    registry["projects"].pop("demo")
+    installer.write_projects_registry(registry)
+    repo_registry = repos.ReposRegistry(
+        srcroot={"windows": str(tmp_path / "src")} if source_only else {},
+        repos={"demo": repos.RepoEntry(name="demo")},
+    )
+    repos.write_registry(repo_registry)
+    assert repos.remove_repo("demo")
+    assert yaml.safe_load((root / "projects.yaml").read_text(encoding="utf-8"))["projects"] == {}
+    assert yaml.safe_load((root / "repos.yaml").read_text(encoding="utf-8"))["repos"] == {}
+    result = installer.reconcile_binstubs()
+    assert result["registered"] == []
+    if edited:
+        assert result["preserved"] == ["demo"]
+        assert {path: path.read_bytes() for path in paths} == before
+    else:
+        assert not any(path.exists() for path in paths)
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "worktree-manager" / "src"))
+    from worktree_manager import harness_state, local_profiles, terminal_fragment
+
+    monkeypatch.setattr(harness_state, "home", lambda: home)
+    monkeypatch.setattr(local_profiles.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(local_profiles, "refresh_shortcuts", lambda projects: 0)
+    fragments = tmp_path / "fragments"
+    state = tmp_path / "state"
+    (fragments / "AgentWorktrees").mkdir(parents=True)
+    state.mkdir()
+    fragment = fragments / "AgentWorktrees" / "agent-worktrees.json"
+    fragment.write_text(json.dumps({"profiles": [{"guid": "{old}", "name": "Demo"}]}), encoding="utf-8")
+    monkeypatch.setattr(terminal_fragment, "_wt_fragments_dir", lambda: fragments)
+    monkeypatch.setattr(terminal_fragment, "_wt_local_state_dir", lambda: state)
+    capsys.readouterr()
+    assert local_profiles.main(["--machine", "host"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "verified_current"
+    assert json.loads(fragment.read_text(encoding="utf-8"))["profiles"] == []
 
 
 def test_register_project_writes_lean(monkeypatch, tmp_path: Path):

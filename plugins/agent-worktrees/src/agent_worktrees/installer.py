@@ -1452,6 +1452,7 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
     if path is None:
         path = projects_yaml_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    projects = registry.get("projects", {})
 
     _phdr = "# ~/.agent-worktrees/projects.yaml"  # marketplace-isolation: allow legacy
     lines = [
@@ -1463,9 +1464,8 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
         "",
         "schema_version: 2",
         "",
-        "projects:",
+        "projects:" if projects else "projects: {}",
     ]
-    projects = registry.get("projects", {})
     for name in sorted(projects.keys()):
         entry = projects[name]
         lines.append(f"  {name}:")
