@@ -57,7 +57,8 @@ def finish(payload: Path, platform_name: str, environment: Mapping[str, str]) ->
     update_events.record("binstubs", "project-commands", status, started=started)
     if platform_name == "windows":
         started = time.monotonic()
-        profiles_current = picker_profiles_cli._refresh_terminal_profiles()
+        with _selected_payload(payload, environment):
+            profiles_current = picker_profiles_cli._refresh_terminal_profiles()
         update_events.record(
             "binstubs", "terminal-profiles", "OK" if profiles_current else "profile refresh failed",
             started=started,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -36,6 +37,56 @@ def test_selected_cell_is_preserved(monkeypatch, tmp_path):
         tmp_path, "linux", {"COPILOT_EXTENSIONS_CONTEXT": "selected-context"},
     ) is True
     assert observed == ["selected-context"]
+
+
+@pytest.mark.parametrize("selected_context", [None, "selected-context"])
+@pytest.mark.parametrize("success", [False, True])
+def test_windows_profile_finishing_resolves_selected_state_and_restores_caller(
+    monkeypatch, tmp_path, selected_context, success,
+):
+    from agent_worktrees import manager_launch_cli
+
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", "inherited-payload")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "inherited-context")
+    monkeypatch.setattr(integration.installer, "reconcile_binstubs", lambda: {})
+    monkeypatch.setattr(picker_profiles_cli.cfg, "project_name", lambda: "demo")
+    monkeypatch.setattr(
+        manager_launch_cli, "_discover_control_plane_provider_manifests",
+        lambda **kwargs: {"worktree-manager": SimpleNamespace(command=("manager",))},
+    )
+    selected, inherited = tmp_path / "selected", tmp_path / "inherited"
+    for path, machine in [(selected, "selected-host"), (inherited, "wrong-host")]:
+        path.mkdir()
+        (path / "config.yaml").write_text(machine, encoding="utf-8")
+    observed = []
+
+    def project_dir(project):
+        assert project == "demo"
+        observed.append((os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"],
+                         os.environ.get("COPILOT_EXTENSIONS_CONTEXT")))
+        return selected if os.environ.get("COPILOT_EXTENSIONS_CONTEXT") == selected_context else inherited
+
+    monkeypatch.setattr(picker_profiles_cli.cfg, "project_dir", project_dir)
+    monkeypatch.setattr(
+        picker_profiles_cli.cfg, "load_config",
+        lambda path, **kwargs: SimpleNamespace(machine=path.read_text(encoding="utf-8")),
+    )
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0 if success else 1, stderr="", stdout=json.dumps({
+            "schema": "copilot-extensions.terminal-profile-refresh",
+            "version": 1, "status": "verified_current" if success else "blocked",
+        }))
+
+    monkeypatch.setattr(picker_profiles_cli.subprocess, "run", run)
+    environment = {"COPILOT_EXTENSIONS_CONTEXT": selected_context} if selected_context else {}
+    assert integration.finish(tmp_path, "windows", environment) is success
+    assert observed == [(str(tmp_path), selected_context)]
+    assert calls == [["manager", "refresh-profiles", "demo", "--machine", "selected-host"]]
+    assert os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] == "inherited-payload"
+    assert os.environ["COPILOT_EXTENSIONS_CONTEXT"] == "inherited-context"
 
 
 @pytest.mark.parametrize("result", [

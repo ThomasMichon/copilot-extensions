@@ -72,6 +72,14 @@ suite budget inside a 15-minute native runner job. PR/push budgets remain
 
 ### Derived native installation diagnostics
 
+The Windows source-provenance/read-only lane separates command-catalog
+contracts, command-lifecycle contracts and native first-touch cases. Every
+previously selected case still runs; each step retains its two-minute deadline
+and the enclosing job retains five minutes. The former combined selection could
+exhaust a step's budget through cumulative successful native calls, without any
+single subprocess exceeding its own deadline. Do not re-combine those groups or
+drop first-touch assertions to make the aggregate appear faster.
+
 `libs/payload-invocation/tests/test_derived_diagnostic_cli.py` executes the
 actual vendored shell entry points selected by the installation-context
 inventory. Each copy has independent legacy/active and absent/retained-pointer

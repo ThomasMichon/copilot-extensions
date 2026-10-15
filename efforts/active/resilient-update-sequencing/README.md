@@ -363,3 +363,24 @@ achieved by rearranging today's combined installer invocations.
 - Four directory-link publication regressions preserve all existing outputs.
   Manager coverage passed 227 cases; native refresh passes measured 2.485 and
   2.062 seconds. Current-head review/CI and actual deployment remain open.
+
+### 2026-10-15 - Finishing context and bounded native CI composition
+- The next summary finding identified profile finishing outside the selected
+  payload/context scope after command reconciliation restored the caller.
+  Profile finishing now uses the same scoped selection and restores inherited
+  state afterward, including on failure. Windows-path regressions resolve
+  distinct selected/inherited machine configurations; the focused integration
+  selection passed 123 cases with two platform skips.
+- Required native diagnostics CI timed out after 260 successful cases, not an
+  assertion failure. The exact six-file selection passed locally in 237.79
+  seconds, confirming that multiple bounded successful native calls exceeded
+  the enclosing two-minute step.
+- Split source/provenance, command catalog, lifecycle contracts and native
+  first-touch into four bounded steps. Exact collection proves the same 279
+  items, partitioned disjointly as 204 + 33 + 37 + 5; no case or assertion was
+  dropped. The original two-minute step bounds and five-minute job bound stay
+  unchanged. Real contained native groups passed in 65.63, 52.44, 67.64 and
+  50.16 seconds (264 passed, fifteen platform skips in total).
+- This is a fix-forward portfolio-composition correction, not a flaky-test
+  waiver or a production installer deadline increase. Current-head review,
+  required hosted CI and rollout remain open.

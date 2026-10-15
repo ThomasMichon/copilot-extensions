@@ -133,9 +133,33 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert "peer_governance_wrapper_read_only" in smoke["run"]
     assert "libs/installation-context/tests/test_payload_source.py" in smoke["run"]
     assert 'payload_source or installation_context_ci_scope' in smoke["run"]
-    assert "libs/payload-invocation/tests/test_command_binding.py" in smoke["run"]
-    assert "libs/payload-invocation/tests/test_command_lifecycle.py" in smoke["run"]
+    assert "libs/payload-invocation/tests/test_command_binding.py" not in smoke["run"]
+    assert "libs/payload-invocation/tests/test_command_lifecycle.py" not in smoke["run"]
     assert "or command_binding" in smoke["run"]
+    lifecycle = next(
+        step for step in steps
+        if step.get("name") == "Command lifecycle read-only contracts (Windows)"
+    )
+    first_touch = next(
+        step for step in steps
+        if step.get("name") == "Command lifecycle native first-touch (Windows)"
+    )
+    native = "real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage"
+    catalog = next(
+        step for step in steps
+        if step.get("name") == "Command catalog native contracts (Windows)"
+    )
+    for step in (catalog, lifecycle, first_touch):
+        assert step["if"] == smoke["if"]
+        assert step["timeout-minutes"] == 2
+        assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+    assert "libs/payload-invocation/tests/test_command_binding.py" in catalog["run"]
+    assert '-k "command_binding"' in catalog["run"]
+    for step in (lifecycle, first_touch):
+        assert "libs/payload-invocation/tests/test_command_lifecycle.py" in step["run"]
+    assert "libs/payload-invocation/tests/test_command_lifecycle_stdio.py" in lifecycle["run"]
+    assert f'-k "command_binding and not ({native})"' in lifecycle["run"]
+    assert f'-k "command_binding and ({native})"' in first_touch["run"]
     manager = next(
         step for step in steps if step.get("name") == "Manager read-only wrapper (Windows)"
     )

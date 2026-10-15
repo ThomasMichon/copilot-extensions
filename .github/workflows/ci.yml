@@ -1071,10 +1071,35 @@ jobs:
           libs/installation-context/tests/test_installation_mode_governance.py
           libs/installation-context/tests/test_diagnostic_consumers.py
           libs/installation-context/tests/test_payload_source.py
+          -k "payload_source or installation_context_ci_scope or command_binding or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+      - name: Command catalog native contracts (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python -m pytest -q
           libs/payload-invocation/tests/test_command_binding.py
+          -k "command_binding"
+      - name: Command lifecycle read-only contracts (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python -m pytest -q
           libs/payload-invocation/tests/test_command_lifecycle.py
           libs/payload-invocation/tests/test_command_lifecycle_stdio.py
-          -k "payload_source or installation_context_ci_scope or command_binding or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+          -k "command_binding and not (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"
+      - name: Command lifecycle native first-touch (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python -m pytest -q
+          libs/payload-invocation/tests/test_command_lifecycle.py
+          -k "command_binding and (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"
       - name: Derived native diagnostics (Windows PowerShell 5.1)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
