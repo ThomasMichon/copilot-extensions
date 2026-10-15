@@ -177,6 +177,18 @@ def _kill_session(proc: subprocess.Popen) -> None:
         pass
 
 
+def _sweep_exited_session(proc: subprocess.Popen) -> None:
+    """After the installers' own watchdog kill (exit 124), clear what is left.
+
+    The watchdog signals only the staged installer's group, so a descendant
+    that ignored the signal or changed groups can still publish. The installer
+    is reaped, but its id stays reserved while any session member lives; a
+    process holding that id now means the session is gone and the id reused.
+    """
+    if _start_time(proc.pid) is None:
+        _kill_session(proc)
+
+
 def _kill_tree(proc: subprocess.Popen, job) -> str:
     """Kill the whole tree; return whatever captured output remains."""
     if job is not None:
@@ -255,6 +267,8 @@ def run_installer(
             # Everything the installer left behind dies with it; daemons it
             # started have broken away.
             job.close()
+    if rc == _WATCHDOG_EXIT and os.name != "nt" and not contained_test_mode():
+        _sweep_exited_session(proc)
     if log is not None:
         for line in out.splitlines():
             log(line)

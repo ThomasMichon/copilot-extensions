@@ -125,6 +125,19 @@ def test_rc0_with_the_target_receipt_is_ok(tmp_path, stub):
     assert run.status == "OK" and run.receipt_complete
 
 
+def test_watchdog_exit_kills_what_the_installer_left(tmp_path, stub):
+    # The installers' own watchdog exits 124 after signalling only its staged
+    # group; whatever survived must not publish after the reported timeout.
+    run = installer_run.run_installer(
+        stub(delay=4, code=124), cwd=tmp_path, env=os.environ, deadline_s=60,
+    )
+    assert run.status == "timed out (deadline hit during build)"
+    grandchild = int((tmp_path / "slot.pid").read_text())
+    assert _wait_dead(grandchild), "the installer's leftover must die with it"
+    time.sleep(5)
+    assert not (tmp_path / "slot").exists(), "no slot may appear after the timeout"
+
+
 @pytest.mark.parametrize("published,expected", [
     (True, "timed out (slot published; deadline hit during cutover)"),
     (False, "timed out (deadline hit during build)"),
