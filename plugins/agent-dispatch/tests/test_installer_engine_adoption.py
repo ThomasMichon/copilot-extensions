@@ -1,4 +1,4 @@
-"""Dispatch installer composition, offline retries, health and snapshot contracts."""
+"""Dispatch contracts in canonical source and real materialized release layouts."""
 
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+
+import installer_engine_ref as ier
+import materialize_main as mm
 
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
@@ -271,9 +274,24 @@ raise SystemExit(2)
 def test_dispatch_composes_canonical_helpers_without_local_engine_copies():
     sh = (PLUGIN / "scripts/install.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts/install.ps1").read_text(encoding="utf-8")
+    layouts = set()
     for ext, text in (("sh", sh), ("ps1", ps1)):
-        assert not (PLUGIN / "scripts" / f"installer-engine.{ext}").exists()
-        assert f"installer-engine.{ext}" in text
+        script = PLUGIN / "scripts" / f"install.{ext}"
+        assert ier.source_match_count(script, ext) == 1
+        ref = ier.find_engine_ref(script, ext)
+        assert ref is not None
+        if ier.is_canonical_ref(ref, PLUGIN, repo_root=REPO):
+            layouts.add("canonical")
+            assert not ref.local_path.exists()
+        else:
+            layouts.add("local")
+            assert ier.is_local_ref(ref, PLUGIN)
+        assert ref.resolved().read_bytes() == ier.canonical_file(
+            ext, repo_root=REPO
+        ).read_bytes()
+        for name in ier.support_files(ENGINE):
+            assert (ref.resolved().parent / name).read_bytes() == (ENGINE / name).read_bytes()
+    assert len(layouts) == 1, "both language variants must select the same layout"
     assert 'invoke_uv_pip_install_resilient "$UV_CMD"' in sh
     assert 'invoke_uv_venv_resilient "$UV_CMD"' in sh
     assert "Invoke-UvPipInstallResilient -UvCommand $UvCommand" in ps1
@@ -582,20 +600,45 @@ if ($third -ne (Get-DispatchSnapshotHash -SnapshotDir '{snapshot}')) {{ throw 'h
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def _fixture_checkout(tmp_path: Path) -> Path:
+def _fixture_checkout(tmp_path: Path, *, materialized: bool = False) -> Path:
     root = tmp_path / "authoring"
     plugin = root / "plugins/agent-dispatch"
     shutil.copytree(PLUGIN / "scripts", plugin / "scripts")
     shutil.copyfile(PLUGIN / "pyproject.toml", plugin / "pyproject.toml")
     shutil.copyfile(PLUGIN / "plugin.json", plugin / "plugin.json")
-    shutil.copytree(ENGINE, root / "libs/installer-engine")
+    refs = ier.plugin_ref_map(plugin)
+    assert set(refs) == {"sh", "ps1"}
+    if any(ier.is_canonical_ref(ref, plugin, repo_root=root) for ref in refs.values()):
+        shutil.copytree(ENGINE, root / "libs/installer-engine")
+    project_sources = tomllib.loads((plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
     for package, lib in LIBRARIES.items():
-        source = root / "libs" / lib
+        source = (plugin / project_sources[package]["path"]).resolve()
         source.mkdir(parents=True)
         project = f'[project]\nname = "{package}"\nversion = "1.0.0"\n'
         if lib == "plugin-activation":
             project += '[tool.uv.sources]\nagent-dropin-registry = { path = "../dropin-registry", editable = true }\n'
         (source / "pyproject.toml").write_text(project, encoding="utf-8")
+        (source / "src").mkdir()
+        (source / "src" / "fixture.py").write_text(f'PACKAGE = "{package}"\n')
+    if materialized:
+        dest = tmp_path / "release" / "plugins" / "agent-dispatch"
+        shutil.copytree(plugin, dest)
+        before = {
+            path: path.read_bytes() for path in root.rglob("*") if path.is_file()
+        }
+        for materializer in (
+            mm.materialize_uv_editable_ref_into,
+            mm.materialize_installer_engine_ref_into,
+        ):
+            log = materializer(
+                source_consumer_dir=plugin, dest_consumer_dir=dest,
+                canonical_root=root, dest_root=dest.parents[1],
+            )
+            assert not any(line.startswith("SKIP") for line in log), log
+        assert before == {
+            path: path.read_bytes() for path in root.rglob("*") if path.is_file()
+        }, "release materialization must not mutate source"
+        return dest
     return plugin
 
 
@@ -654,9 +697,14 @@ if ([IO.File]::ReadAllText((Join-Path $InstallDir 'stamp-candidate-1.2.3')) -cne
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_stamp_materializes_standalone_engine_pair_and_all_libraries(tmp_path):
+@pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
+def test_stamp_materializes_standalone_engine_pair_and_all_libraries(tmp_path, materialized):
     env = _env(tmp_path)
-    plugin = _fixture_checkout(tmp_path)
+    plugin = _fixture_checkout(tmp_path, materialized=materialized)
+    engine = ier.find_engine_ref(plugin / "scripts/install.sh", "sh")
+    assert engine is not None
+    sources = tomllib.loads((plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+    library = (plugin / sources["agent-procutil"]["path"]).resolve()
     runtime = tmp_path / "runtime"
     script = _snapshot_prelude()
     script += f"""
@@ -677,11 +725,11 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 1)
 Invoke-Stamp
 $third = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
 if ($third -eq $second) {{ throw 'plugin edit did not change snapshot identity' }}
-[IO.File]::AppendAllText((Join-Path $PluginDir '../../libs/installer-engine/installer-engine.sh'), "`n# fixture edit")
+[IO.File]::AppendAllText('{engine.resolved()}', "`n# fixture edit")
 Invoke-Stamp
 $fourth = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
 if ($fourth -eq $third) {{ throw 'engine edit did not change snapshot identity' }}
-[IO.File]::WriteAllText((Join-Path $PluginDir '../../libs/agent-procutil/new-lib.py'), 'changed library source')
+[IO.File]::WriteAllText('{library / "new-lib.py"}', 'changed library source')
 Invoke-Stamp
 $fifth = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
 if ($fifth -eq $fourth) {{ throw 'library edit did not change snapshot identity' }}
@@ -699,19 +747,10 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 4)
         assert (snapshot / "scripts" / f"installer-engine.{ext}").read_bytes() == (
             ENGINE / f"installer-engine.{ext}"
         ).read_bytes()
-        text = (snapshot / "scripts" / f"install.{ext}").read_text()
-        if ext == "sh":
-            assert '. "$SCRIPT_DIR/installer-engine.sh"' in text.splitlines()
-            assert (
-                '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"'
-                not in text.splitlines()
-            )
-        else:
-            assert ". (Join-Path $PSScriptRoot 'installer-engine.ps1')" in text.splitlines()
-            assert (
-                ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')"
-                not in text.splitlines()
-            )
+        script = snapshot / "scripts" / f"install.{ext}"
+        assert ier.source_match_count(script, ext) == 1
+        ref = ier.find_engine_ref(script, ext)
+        assert ref is not None and ier.is_local_ref(ref, snapshot)
     for name in (
         "installer_dependency_policy.py",
         "installer_dependency_config.py",
@@ -735,9 +774,10 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 4)
     }
 
 
-def test_materialized_snapshot_admits_install_without_authoring_checkout(tmp_path):
+@pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
+def test_materialized_snapshot_admits_install_without_authoring_checkout(tmp_path, materialized):
     env = _env(tmp_path)
-    plugin = _fixture_checkout(tmp_path)
+    plugin = _fixture_checkout(tmp_path, materialized=materialized)
     runtime = tmp_path / "runtime"
     stamped = _run(
         "ps1", _snapshot_prelude() + f"""
@@ -754,6 +794,8 @@ Invoke-Stamp
     assert stamped.returncode == 0, stamped.stdout + stamped.stderr
     snapshot = Path((runtime / "payload-dir").read_text().strip())
     shutil.move(str(plugin.parents[1]), str(tmp_path / "authoring-unavailable"))
+    if materialized:
+        shutil.move(str(tmp_path / "authoring"), str(tmp_path / "source-unavailable"))
     uv = _fake_uv(tmp_path)
     env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({"agent-dispatch": str(snapshot)})
     proof = _run(
@@ -784,3 +826,39 @@ exit $result.ExitCode
     assert calls[1][-3] == "--exclude-newer"
     assert calls[1][-1] == "--reinstall"
     assert "PipInstallSettings" not in proof.stdout + proof.stderr
+
+
+@pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
+@pytest.mark.parametrize("missing", ["sh", "ps1", "agent-procutil"])
+def test_stamp_refuses_missing_consumed_input(tmp_path, materialized, missing):
+    env = _env(tmp_path)
+    plugin = _fixture_checkout(tmp_path, materialized=materialized)
+    if missing in ("sh", "ps1"):
+        ref = ier.find_engine_ref(plugin / "scripts" / f"install.{missing}", missing)
+        assert ref is not None
+        ref.resolved().unlink()
+        assert not (plugin / "scripts" / f"installer-engine.{missing}").exists()
+        assert not (plugin.parents[1] / "libs/installer-engine" / f"installer-engine.{missing}").exists()
+    else:
+        sources = tomllib.loads((plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+        shutil.rmtree((plugin / sources[missing]["path"]).resolve())
+    runtime = tmp_path / "runtime"
+    result = _run(
+        "ps1", _snapshot_prelude() + f"""
+$PluginDir='{plugin}'
+$InstallDir='{runtime}'
+$LocalBin='{tmp_path / "local-bin"}'
+$SrcVersion='1.2.3'
+$Force=$false
+$script:GlobalActivationLockTimeoutSeconds=10
+function Deploy-SelfProvisioningBinstub {{ throw 'missing input must not publish launchers' }}
+Invoke-Stamp
+""", tmp_path, env,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert (
+        f"installer-engine.{missing}" if missing in ("sh", "ps1")
+        else "Cannot locate required snapshot library: agent-procutil"
+    ) in result.stdout + result.stderr
+    assert not (runtime / "payload-dir").exists()
+    assert not (runtime / "stamped-version").exists()
