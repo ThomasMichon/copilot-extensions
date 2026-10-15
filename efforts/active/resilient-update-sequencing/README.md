@@ -384,3 +384,16 @@ achieved by rearranging today's combined installer invocations.
 - This is a fix-forward portfolio-composition correction, not a flaky-test
   waiver or a production installer deadline increase. Current-head review,
   required hosted CI and rollout remain open.
+
+### 2026-10-15 - Current-base native coverage retained
+- A current-base conflict was confined to CI wiring: the merged hidden-lifecycle
+  diagnostics fix added four stdio cases to the formerly combined selection.
+  Rebased with an owned backup and retained those cases in the lifecycle
+  partition rather than choosing one side or dropping coverage.
+- Current-base collection is exactly 283 disjoint items, partitioned as
+  204 + 33 + 41 + 5. Real contained native groups passed in 64.93, 54.09,
+  87.48 and 51.41 seconds, all within their original 120-second bounds
+  (268 passed, fifteen platform skips).
+- Rebased finishing coverage passed 123 cases with two platform skips; Manager
+  coverage passed 227. Lint, module ceilings and all thirteen install contracts
+  pass. The branch still owes current-head hosted CI/review and actual rollout.
