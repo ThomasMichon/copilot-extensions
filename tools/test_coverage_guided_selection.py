@@ -44,6 +44,7 @@ from tools.coverage_guided_selection import debt  # noqa: E402
 from tools.coverage_guided_selection import decide as decide_mod  # noqa: E402
 from tools.coverage_guided_selection import diff as diff_mod  # noqa: E402
 from tools.coverage_guided_selection import cli as cli_mod  # noqa: E402
+from tools.test_coverage_standalone import TestStandaloneCoverage  # noqa: E402,F401
 
 
 def test_baseline_error_preserves_collection_output_despite_coverage_warning():

@@ -74,7 +74,9 @@ _AMBIENT_PYTEST_SELECTION_ENV_VARS = ("PYTEST_ADDOPTS",)
 # `pytest-json-report` is ever imported in this module's own process.
 _DRIVER_SCRIPT = textwrap.dedent(
     """
+    import hashlib
     import json
+    import os
     import sys
     from pathlib import Path
 
@@ -102,6 +104,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
     if __name__ == "__main__":
         test_paths_json, cov_source, cwd, cov_data_file, json_report_file, out_file, basetemp = sys.argv[1:8]
         test_paths = json.loads(test_paths_json)
+        options = json.loads(sys.argv[8]) if len(sys.argv) > 8 else {}
 
         # Captured via a hook plugin (not pytest-json-report's own
         # "keywords" field, which only records marker NAMES present on an
@@ -114,10 +117,13 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # declared tier even though this driver never registers that
         # guard plugin.
         tier_by_nodeid = {}
+        markers_by_nodeid = {}
+        child_nodeids = {}
 
         class _TierCollector:
             def pytest_collection_modifyitems(self, items):
                 for item in items:
+                    markers_by_nodeid[item.nodeid] = sorted({m.name for m in item.iter_markers()})
                     marker = item.get_closest_marker("portfolio_tier")
                     tier_by_nodeid[item.nodeid] = (
                         str(marker.args[0]).upper()
@@ -151,7 +157,30 @@ _DRIVER_SCRIPT = textwrap.dedent(
                 cov = coverage.Coverage.current()
                 if cov is not None:
                     cov.switch_context(item.nodeid)
+                if options.get("child_context_dir"):
+                    # A distinct config per test prevents a slow-starting child
+                    # from reading the next test's context from a shared file.
+                    identity = hashlib.sha256(item.nodeid.encode()).hexdigest()
+                    context = "cgs:" + identity
+                    child_nodeids[context] = item.nodeid
+                    config = Path(options["child_context_dir"]) / (identity + ".ini")
+                    config.write_text(
+                        "[run]\\nparallel = true\\n"
+                        + "data_file = " + cov_data_file + "\\n"
+                        + "source = " + options["installed_source"] + "\\n"
+                        + "context = " + context + "\\n",
+                        encoding="utf-8",
+                    )
+                    os.environ["COVERAGE_PROCESS_START"] = str(config)
                 return (yield)
+
+        class _CompactPaths:
+            # Keep native artifact paths below MAX_PATH without UNC prefixes:
+            # SQLite file URIs do not accept the extended-path authority.
+            @pytest.fixture
+            def tmp_path(self, request, tmp_path_factory):
+                name = hashlib.sha256(request.node.nodeid.encode()).hexdigest()[:4]
+                return tmp_path_factory.mktemp(name)
 
         # Managed directly via the `coverage` API rather than
         # pytest-cov's own `--cov=`/`--cov-context=test` CLI options --
@@ -194,7 +223,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # downstream project's own coverage config happens to set.
         cov = coverage.Coverage(
             data_file=cov_data_file,
-            source=[cov_source],
+            source=[options.get("installed_source", cov_source)],
             data_suffix=False,
             config_file=False,
         )
@@ -221,11 +250,18 @@ _DRIVER_SCRIPT = textwrap.dedent(
                 "-o",
                 "addopts=",
             ],
-            plugins=[_TierCollector(), _ContextSwitcher()],
+            plugins=[
+                _TierCollector(), _ContextSwitcher(),
+                *([_CompactPaths()] if options.get("compact_tmp_paths") else []),
+            ],
         )
 
         cov.stop()
         cov.save()
+        child_files = list(Path(cov_data_file).parent.glob(Path(cov_data_file).name + ".*"))
+        if options.get("child_context_dir"):
+            cov.combine(strict=False)
+            cov.save()
 
         if exit_code != 0:
             sys.exit(exit_code)
@@ -243,16 +279,22 @@ _DRIVER_SCRIPT = textwrap.dedent(
         phase_suffixes = ("|run", "|setup", "|teardown")
         coverage_map = {}
         for measured_file in cov_data.measured_files():
-            try:
-                rel = str(Path(measured_file).resolve().relative_to(cwd_path))
-            except ValueError:
-                rel = measured_file
+            if options.get("source_mapping"):
+                rel = options["source_mapping"].get(str(Path(measured_file).resolve()))
+                if rel is None:
+                    raise RuntimeError("measured source has no verified installed-source mapping")
+            else:
+                try:
+                    rel = str(Path(measured_file).resolve().relative_to(cwd_path))
+                except ValueError:
+                    rel = measured_file
             per_line = {}
             for lineno, contexts in cov_data.contexts_by_lineno(measured_file).items():
                 tests = set()
                 for ctx in contexts:
                     if not ctx:
                         continue
+                    ctx = child_nodeids.get(ctx, ctx)
                     for suffix in phase_suffixes:
                         if ctx.endswith(suffix):
                             tests.add(ctx[: -len(suffix)])
@@ -279,7 +321,10 @@ _DRIVER_SCRIPT = textwrap.dedent(
 
         Path(out_file).write_text(
             json.dumps(
-                {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map}
+                {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map,
+                 "summary": report.get("summary", {}),
+                 "python_version": sys.version.split()[0], "child_data_files": len(child_files),
+                 "markers": markers_by_nodeid}
             )
         )
         sys.exit(0)
