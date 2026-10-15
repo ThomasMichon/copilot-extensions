@@ -52,6 +52,9 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 _LOCK_FILENAME = "zdd-cutover.lock"
@@ -69,6 +72,10 @@ class CutoverLockedError(Exception):
         super().__init__(
             f"a cutover is already in progress ({who} holds {lock_path})"
         )
+
+
+class CutoverBorrowError(RuntimeError):
+    """A caller tried to share, transfer, or release a borrowed cutover guard."""
 
 
 def lock_path(config_dir: str | os.PathLike[str]) -> Path:
@@ -120,8 +127,8 @@ class CutoverLock:
     Usage::
 
         try:
-            with CutoverLock(config_dir):
-                orchestrator.run(...)
+            with CutoverLock(config_dir) as lease:
+                orchestrator.run(held_lock=lease)
         except CutoverLockedError as exc:
             ...  # lock still held after the wait budget; report and exit
 
@@ -141,11 +148,16 @@ class CutoverLock:
     exhausting the full wait budget without ever acquiring the lock raises
     :class:`CutoverLockedError`. ``timeout=0`` (the default) preserves the
     original fail-immediately behavior for a caller that wants that instead.
+    Borrowing and release belong to the acquiring process and thread; an
+    inherited handle must not unlock its parent's transaction after a fork.
     """
 
     def __init__(self, config_dir: str | os.PathLike[str]) -> None:
         self.path = lock_path(config_dir)
         self._fh = None
+        self._owner: tuple[int, threading.Thread] | None = None
+        self._borrowed = False
+        self._state_lock = threading.RLock()
 
     def acquire(self, *, timeout: float = 0.0, poll: float = 0.2) -> None:
         """Acquire the lock, waiting up to ``timeout`` seconds on contention.
@@ -187,22 +199,70 @@ class CutoverLock:
             os.fsync(fh.fileno())
         except OSError:
             pass
-        self._fh = fh
+        with self._state_lock:
+            self._owner = (os.getpid(), threading.current_thread())
+            self._fh = fh
 
     @property
     def held(self) -> bool:
-        return self._fh is not None
+        fh = self._fh
+        return fh is not None and not fh.closed
+
+    @contextmanager
+    def borrow(self) -> Iterator[CutoverLock]:
+        pid = os.getpid()
+        thread = threading.current_thread()
+        acquired_owner = self._owner
+        if acquired_owner is None:
+            raise CutoverBorrowError("cutover guard has no acquiring execution")
+        if acquired_owner[0] != pid:
+            raise CutoverBorrowError("cutover guard belongs to another process")
+        with self._state_lock:
+            if (
+                self._fh is None or self._fh.closed
+                or self._owner is not acquired_owner
+                or acquired_owner[1] is not thread
+            ):
+                raise CutoverBorrowError(
+                    "cutover guard must be borrowed by its acquiring process and thread"
+                )
+            if self._borrowed:
+                raise CutoverBorrowError("cutover guard already has an active borrower")
+            self._borrowed = True
+        try:
+            yield self
+        finally:
+            with self._state_lock:
+                self._borrowed = False
 
     def release(self) -> None:
         """Release the lock (idempotent)."""
-        if self._fh is None:
-            return
-        _release_os_lock(self._fh)
-        try:
-            self._fh.close()
-        except OSError:
-            pass
-        self._fh = None
+        owner = self._owner
+        if owner is None:
+            if self._fh is None:
+                return
+            raise CutoverBorrowError("cutover guard has no acquiring execution")
+        if owner[0] != os.getpid():
+            raise CutoverBorrowError("cutover guard belongs to another process")
+        if owner[1] is not threading.current_thread():
+            raise CutoverBorrowError(
+                "cutover guard must be released by its acquiring process and thread"
+            )
+        with self._state_lock:
+            if self._owner is not owner:
+                raise CutoverBorrowError("cutover guard ownership changed before release")
+            if self._borrowed:
+                raise CutoverBorrowError("cannot release an actively borrowed cutover guard")
+            if self._fh is None:
+                return
+            if not self._fh.closed:
+                _release_os_lock(self._fh)
+                try:
+                    self._fh.close()
+                except OSError:
+                    pass
+            self._fh = None
+            self._owner = None
 
     def __enter__(self) -> CutoverLock:
         self.acquire()

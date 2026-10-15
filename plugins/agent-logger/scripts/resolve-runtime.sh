@@ -171,13 +171,14 @@ if [ -n "$_rt_root" ]; then
     awk '
       {
         original = $0
-        if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
-          count = split(original, part, /[.-]/)
+        if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?(\+[A-Za-z0-9][A-Za-z0-9._-]*)?$/) {
+          split(original, qualified, /[+]/)
+          count = split(qualified[1], part, /[.-]/)
           phase = (count == 4) ? 0 : 1
           dev = (count == 4) ? part[4] : "dev0"
           sub(/^dev/, "", dev)
-          printf "0:%020d.%020d.%020d.%d.%020d\t%s\n", \
-            part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, original
+          printf "0:%020d.%020d.%020d.%d.%020d.%s\t%s\n", \
+            part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, tolower(qualified[2]), original
           next
         }
         key = ""

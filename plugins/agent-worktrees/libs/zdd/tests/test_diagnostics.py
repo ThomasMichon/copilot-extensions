@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -28,7 +29,9 @@ def _ctx(
             for pid, start_time in sorted(state["live"].items())
         ]
 
-    def _terminate(pid: int, expected_start_time: str | None) -> dict:
+    def _terminate(
+        pid: int, expected_start_time: str | None, *, exit_timeout: float | None = None,
+    ) -> dict:
         if state["live"].get(pid) != expected_start_time:
             return {
                 "killed": False,
@@ -37,7 +40,9 @@ def _ctx(
             }
         state["terminated"].append(pid)
         state["live"].pop(pid, None)
-        return {"killed": True, "identity_verified": True, "method": "fake"}
+        return {
+            "killed": True, "identity_verified": True, "exit_confirmed": True, "method": "fake",
+        }
 
     return diagnostics.DiagnosticContext(
         service="test-daemon",
@@ -129,7 +134,7 @@ def test_audit_reports_duplicate_resident_without_side_effects(tmp_path: Path):
     assert state["terminated"] == []
 
 
-def test_apply_repairs_same_version_duplicate_without_touching_owner(tmp_path: Path):
+def test_apply_retains_duplicate_without_prebirth_custody_evidence(tmp_path: Path):
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
     state = {
         "lock": {"pid": 101, "start_time": "owner"},
@@ -139,11 +144,11 @@ def test_apply_repairs_same_version_duplicate_without_touching_owner(tmp_path: P
 
     result = diagnostics.apply_daemon_health(_ctx(tmp_path, state=state))
 
-    assert state["live"] == {101: "owner"}
-    assert state["terminated"] == [202]
+    assert state["live"] == {101: "owner", 202: "duplicate"}
+    assert state["terminated"] == []
     assert result["before"]["counts"]["duplicate_resident"] == 1
-    assert result["after"]["counts"]["total"] == 0
-    assert result["actions"][0]["termination"]["killed"] is True
+    assert result["after"]["counts"]["total"] == 1
+    assert result["actions"][0]["termination"]["blocked"] is True
 
 
 def test_audit_and_apply_report_abandoned_passive_without_duplicate_noise(tmp_path: Path):
@@ -154,6 +159,10 @@ def test_audit_and_apply_report_abandoned_passive_without_duplicate_noise(tmp_pa
         old={"bind": "127.0.0.1", "port": 9281},
         new_port=9282,
         new_pid=303,
+        new_process_start_time="passive",
+        publication_witness=routing.publication_witness(
+            tmp_path, deadline=time.monotonic() + 1,
+        ),
     )
     _set_breadcrumb_age(tmp_path, record, seconds=9999)
     state = {
@@ -249,7 +258,7 @@ def test_apply_recovers_stranded_survivor_with_make_client_only(tmp_path: Path):
     assert result["actions"][0]["result"]["recovered"] is True
 
 
-def test_audit_and_apply_reap_superseded_generation_without_touching_owner(tmp_path: Path):
+def test_audit_and_apply_retain_superseded_generation_without_owner_retirement(tmp_path: Path):
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=202, version="1.0.0")
     routing.publish_active(
         tmp_path,
@@ -275,23 +284,16 @@ def test_audit_and_apply_reap_superseded_generation_without_touching_owner(tmp_p
     assert report["counts"]["total"] == 1
 
     result = diagnostics.apply_daemon_health(ctx)
-    assert state["live"] == {101: "owner"}
-    assert state["terminated"] == [202]
-    assert result["after"]["counts"]["total"] == 0
+    assert state["live"] == {101: "owner", 202: "old"}
+    assert state["terminated"] == []
+    assert result["after"]["counts"]["total"] == 1
+    assert result["actions"][0]["termination"]["blocked"]
 
 
-def test_audit_and_apply_reap_duplicate_whose_lock_disagrees_with_routed_active(
+def test_audit_and_apply_retain_predecessor_whose_lock_disagrees_with_routed_active(
     tmp_path: Path,
 ):
-    """picker-performance-and-responsiveness: a cutover already rewrote the
-    routing table's ``active`` entry to the new generation (pid 202), but
-    the OLD generation (pid 101) is slow/stuck mid-retire and never got as
-    far as rewriting -- or releasing -- the separate lock file, which
-    still names itself. Both are live, real daemon processes: a genuine
-    duplicate, not an ambiguous one. ``_validated_owner`` must trust the
-    routing table over the stale lock here, so `doctor` can still pick a
-    winner (the new generation) and reap the old one, instead of refusing
-    to vouch for anyone."""
+    """A validated replacement does not authorize raw disposal of admitted work."""
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
     routing.publish_active(
         tmp_path,
@@ -312,13 +314,13 @@ def test_audit_and_apply_reap_duplicate_whose_lock_disagrees_with_routed_active(
     assert report["owner_validation_reason"] is None
     assert report["counts"]["duplicate_resident"] == 1
     finding = next(f for f in report["findings"] if f["kind"] == "duplicate_resident")
-    assert finding["repairable"] is True
+    assert finding["repairable"] is False
     assert [item["pid"] for item in finding["targets"]] == [101]
 
     result = diagnostics.apply_daemon_health(_ctx(tmp_path, state=state))
-    assert state["live"] == {202: "new"}
-    assert state["terminated"] == [101]
-    assert result["after"]["counts"]["total"] == 0
+    assert state["live"] == {101: "old", 202: "new"}
+    assert state["terminated"] == []
+    assert result["after"]["counts"]["total"] == 1
 
 
 def test_routed_active_fallback_still_fails_closed_when_pid_is_not_live(
@@ -380,9 +382,10 @@ def test_apply_does_not_reacquire_nonreentrant_cutover_guard(tmp_path: Path):
         _ctx(tmp_path, state=state, acquire_cutover_guard=_acquire)
     )
 
-    assert state["terminated"] == [202]
-    assert result["actions"][0]["termination"]["killed"] is True
-    assert result["after"]["counts"]["total"] == 0
+    assert state["terminated"] == []
+    assert result["actions"][0]["termination"]["blocked"] is True
+    assert result["after"]["counts"]["total"] == 1
+    assert held["locked"] is False
 
 
 def test_report_marks_busy_cutover_as_skipped_not_healthy(tmp_path: Path):
@@ -583,6 +586,10 @@ def test_apply_reaps_abandoned_passive_even_when_old_survivor_is_recovered(tmp_p
         old={"bind": "127.0.0.1", "port": 9281},
         new_port=9282,
         new_pid=303,
+        new_process_start_time="passive",
+        publication_witness=routing.publication_witness(
+            tmp_path, deadline=time.monotonic() + 1,
+        ),
     )
     _set_breadcrumb_age(tmp_path, record, seconds=9999)
     undrained: list[str] = []

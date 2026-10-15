@@ -45,7 +45,7 @@ specifically when reviewing a pull request, not a replacement for them.
   `release-pipeline/rollback-*`, same PAT, a single mechanically generated
   `commit-tree` commit -- recognized by branch name plus commit count,
   since its diff is deliberately not single-file) --
-  `main-gate` (ci.yml) enforces this by diff content (or commit count for
+  `main-gate` (base-branch-reminder.yml) enforces this by diff content (or commit count for
   the revert shape), not by admin bypass;
   see ThomasMichon/copilot-extensions#3622-erratum for the incident that
   prompted the hardening. Contributors always target `dev` — a PR whose
@@ -90,6 +90,24 @@ specifically when reviewing a pull request, not a replacement for them.
   review, not a pre-code plan still being drafted.)
 - **Concrete over cosmetic.** Prefer flagging concrete violations of
   `AGENTS.md`'s and `CONTRIBUTING.md`'s standards over stylistic nitpicks.
+- **Proportionate safeguards, reliable cooperation.** Apply CONTRIBUTING.md's
+  "Proportionate safeguards and reliable cooperation" to both the implementation
+  and your recommendations. Favor lean, working inter-process cooperation
+  within established OS/identity access controls, closed or private endpoints,
+  and trusted sources and destinations; local reachability is not authority.
+  Trust authorized agents' reasonable decisions within their delegated scope.
+  Before requesting additional hardening, identify a concrete threat or failure,
+  its boundary and impact, and why the proposed check is worth its complexity,
+  latency, recovery and interoperability cost. Hypothetical equally privileged
+  hostile local peers alone do not justify blocking legitimate communication.
+  Cheap revision identifiers, integrity hashes and ownership receipts remain
+  useful for stale work, corruption and wrong-target actions; do not escalate
+  routine authorized IPC into exact-hash/exact-head attestation or proof chains
+  without a specific need simpler checks cannot meet. Continue to flag actual
+  authorization, consent, privacy, destructive/data-loss, stale-process,
+  wrong-owner, corruption/race and test-correctness defects. This lens does not
+  waive existing safeguards, binding invariants, or review/release/CI gates,
+  and does not require public execution artifacts.
 - **Lead with the highest-signal miss: the changefile requirement.** For any
   changed plugin *payload* in a PR targeting `dev`, verify a pending
   changefile names it (`python tools/changefile.py add --plugin <name>

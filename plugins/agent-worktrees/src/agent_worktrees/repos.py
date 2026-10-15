@@ -1290,12 +1290,11 @@ class RepoStatus:
 
 
 def _git(path: str, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", path, *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
+    # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (e.g. from a hook or a
+    # parent git process) must never redirect a registry repo's status or
+    # sync to another repository: always act on `path`.
+    return git_ops.git(
+        "-C", path, *args, check=False, timeout=timeout, isolated_repository=True,
     )
 
 
@@ -1404,7 +1403,7 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
         # credential override when it differs from the active `gh` account.
         # `sync_repo`'s ambient-credential fetch previously bypassed that,
         # failing private repos owned by a non-active account (dotfiles#2069).
-        git_ops.fetch("origin", cwd=path, timeout=180)
+        git_ops.fetch("origin", cwd=path, timeout=180, isolated_repository=True)
         if not target:
             return ("skipped", "no branch to fast-forward")
         ff = _git(path, "merge", "--ff-only", f"origin/{target}")

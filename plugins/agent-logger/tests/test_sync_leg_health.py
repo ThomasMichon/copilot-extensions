@@ -19,6 +19,23 @@ from agent_logger.sync.targets.filesystem import LocalTarget
 pytestmark = pytest.mark.contract("agent_logger.sync.leg_health")
 
 
+def _select_copy_directory_mode(
+    monkeypatch: pytest.MonkeyPatch, directory_fd: bool,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    original_directory = filesystem.archive_directory
+
+    @contextmanager
+    def selected_directory(path: Path) -> Iterator[filesystem.ArchiveDirectory]:
+        with original_directory(path) as directory:
+            yield filesystem.ArchiveDirectory(
+                directory.path, directory.fd if directory_fd else None,
+            )
+
+    monkeypatch.setattr(filesystem, "archive_directory", selected_directory)
+
+
 def test_log_retry_recovers_without_session_transfer(tmp_path: Path) -> None:
     target = LocalTarget({"path": str(tmp_path / "dest")})
     root = tmp_path / "dest" / "machine"
@@ -238,7 +255,7 @@ def test_vanished_log_root_does_not_clear_partial(
     meta.write_process_log_meta(root, "partial", ["prior failure"])
     logs = tmp_path / "logs"
     logs.mkdir()
-    monkeypatch.setattr(filesystem._process_logs, "supports_dir_fd", lambda: directory_fd)
+    _select_copy_directory_mode(monkeypatch, directory_fd)
     real_scandir = filesystem.os.scandir
 
     def vanished(path: object) -> object:
@@ -269,7 +286,7 @@ def test_root_removed_after_scan_remains_partial(
     meta.write_process_log_meta(root, "partial", ["prior failure"])
     logs = tmp_path / "logs"
     logs.mkdir()
-    monkeypatch.setattr(filesystem._process_logs, "supports_dir_fd", lambda: directory_fd)
+    _select_copy_directory_mode(monkeypatch, directory_fd)
     real_scandir = filesystem.os.scandir
 
     def rotated(path: object) -> object:
@@ -350,17 +367,17 @@ def test_root_replaced_before_descriptor_open_is_rejected(
     meta.write_sync_meta(root, "machine", "local", "ok")
     logs = tmp_path / "logs"
     logs.mkdir()
-    real_open = filesystem._process_logs.open_root_dir
+    real_open = filesystem.archive_directory
 
     @contextmanager
-    def replaced(path: Path) -> Iterator[int]:
+    def replaced(path: Path) -> Iterator[filesystem.ArchiveDirectory]:
         path.rename(tmp_path / "original")
         path.mkdir()
         (path / "process-123-456.log").write_text("replacement\n", encoding="utf-8")
-        with real_open(path) as fd:
-            yield fd
+        with real_open(path) as directory:
+            yield directory
 
-    monkeypatch.setattr(filesystem._process_logs, "open_root_dir", replaced)
+    monkeypatch.setattr(filesystem, "archive_directory", replaced)
     result = target.push_process_logs(logs, "machine")
     assert not result.ok
     assert "changed before opening" in result.detail
@@ -413,9 +430,9 @@ def test_root_replacement_after_validation_is_rejected(
     meta.write_sync_meta(root, "machine", "local", "ok")
     logs = tmp_path / "logs"
     logs.mkdir()
-    real_validate = filesystem._existing_real_directory_identity
+    real_validate = filesystem._lstat
 
-    def replaced(path: Path) -> tuple[Path, os.stat_result] | None:
+    def replaced(path: Path) -> os.stat_result:
         result = real_validate(path)
         if path == logs:
             path.rename(tmp_path / "original")
@@ -423,7 +440,7 @@ def test_root_replacement_after_validation_is_rejected(
             (path / "process-123-456.log").write_text("replacement\n", encoding="utf-8")
         return result
 
-    monkeypatch.setattr(filesystem, "_existing_real_directory_identity", replaced)
+    monkeypatch.setattr(filesystem, "_lstat", replaced)
     assert not target.push_process_logs(logs, "machine").ok
     assert not (root / "logs" / "process-123-456.log").exists()
     assert meta.read_sync_meta(root)["status"] == "partial"

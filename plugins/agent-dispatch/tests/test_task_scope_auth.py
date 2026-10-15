@@ -12,9 +12,17 @@ scoped authorization on `/tasks/{id}/progress`, `/complete`, `/abandon`, and
 from __future__ import annotations
 
 import pytest
+import socket
+import threading
+import time
+
+import httpx
+import uvicorn
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from agent_dispatch.coordinator import create_app
+from agent_dispatch.coordinator_auth import TASK_SCOPE_ROUTES
 from agent_dispatch.task_scope import TASK_SCOPE_HEADER
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
@@ -161,6 +169,185 @@ def test_task_token_works_for_heartbeat(api):
         headers={TASK_SCOPE_HEADER: token},
     )
     assert response.status_code == 200, response.text
+
+
+def test_task_token_cannot_list_the_global_queue(api):
+    _task_id, token = _claim_and_start(api)
+    response = api.get("/tasks", headers={TASK_SCOPE_HEADER: token})
+    assert response.status_code == 403
+
+
+def test_task_scope_denies_every_unlisted_http_route(api):
+    task_id, token = _claim_and_start(api)
+    exercised = 0
+    for route in api.app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        for method in route.methods:
+            if (method, route.path) in TASK_SCOPE_ROUTES:
+                continue
+            path = route.path
+            for parameter in route.param_convertors:
+                path = path.replace("{" + parameter + "}", task_id)
+            response = api.request(
+                method, path, headers={TASK_SCOPE_HEADER: token}, json={},
+            )
+            assert response.status_code == 403, (method, route.path, response.text)
+            exercised += 1
+    assert exercised > 50
+
+
+@pytest.mark.parametrize("configured_token", [TOKEN, None])
+def test_scoped_header_cannot_downgrade_to_ambient_authority(queue, configured_token):
+    with TestClient(create_app(
+        queue, token=configured_token, control_token=CONTROL_TOKEN, enable_mcp=False,
+    )) as client:
+        _task_id, token = _claim_and_start(client)
+        headers = {**_auth(TOKEN), TASK_SCOPE_HEADER: token}
+        assert client.get("/tasks", headers=headers).status_code == 403
+        headers[TASK_SCOPE_HEADER] = "invalid"
+        assert client.get("/tasks", headers=headers).status_code == 401
+
+
+def test_scoped_token_reads_only_its_task_and_payload(api):
+    task_id, token = _claim_and_start(api)
+    headers = {TASK_SCOPE_HEADER: token}
+    other_id = api.app.state.queue.create("other", repo=TEST_REPO).id
+    for suffix in ("", "/payload"):
+        assert api.get(f"/tasks/{task_id}{suffix}", headers=headers).status_code == 200
+        assert api.get(f"/tasks/{other_id}{suffix}", headers=headers).status_code == 403
+
+
+@pytest.mark.parametrize("configured_token", [TOKEN, None])
+def test_scoped_token_cannot_enter_mounted_or_documentation_surfaces(queue, configured_token):
+    with TestClient(create_app(
+        queue, token=configured_token, control_token=CONTROL_TOKEN,
+    )) as client:
+        _task_id, token = _claim_and_start(client)
+        headers = {TASK_SCOPE_HEADER: token}
+        for path in ("/mcp", "/mcp/", "/docs", "/redoc", "/openapi.json"):
+            response = client.get(path, headers=headers, follow_redirects=False)
+            assert response.status_code == 403, (path, response.text)
+
+
+@pytest.mark.parametrize("verb,method,body", [
+    ("progress", "record_progress", {"summary": "race"}),
+    ("heartbeat", "heartbeat", {}),
+    ("complete", "complete_with_outcome", {}),
+    ("abandon", "abandon_with_outcome", {"reason": "stop"}),
+])
+def test_scoped_mutation_fences_session_replacement_inside_transaction(
+    api, queue, monkeypatch, verb, method, body,
+):
+    task_id, token = _claim_and_start(api)
+    original = getattr(queue, method)
+
+    def replace_session_then_mutate(*args, **kwargs):
+        with queue._connect() as conn:
+            conn.execute(
+                "UPDATE tasks SET owner_session_id='replacement' WHERE id=?", (task_id,),
+            )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(queue, method, replace_session_then_mutate)
+    response = api.post(
+        f"/tasks/{task_id}/{verb}",
+        json={"worker_id": "worker-1", **body}, headers={TASK_SCOPE_HEADER: token},
+    )
+    assert response.status_code == 409, response.text
+    current = queue.get(task_id)
+    assert current.status == "started"
+    assert current.latest_progress is None
+
+
+def test_scoped_token_rejected_when_generation_changes_with_same_identity(api, queue):
+    task_id, token = _claim_and_start(api)
+    with queue._connect() as conn:
+        conn.execute("UPDATE tasks SET generation=generation+1 WHERE id=?", (task_id,))
+    response = api.post(
+        f"/tasks/{task_id}/heartbeat", json={"worker_id": "worker-1"},
+        headers={TASK_SCOPE_HEADER: token},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("require_verification", [False, True])
+def test_scoped_completion_cannot_backfill_a_replacement_sessions_terminal_result(
+    api, queue, monkeypatch, require_verification,
+):
+    task_id, token = _claim_and_start(api)
+    original = queue.complete_with_outcome
+
+    def replacement_completes_first(*args, **kwargs):
+        with queue._connect() as conn:
+            conn.execute(
+                "UPDATE tasks SET owner_session_id='replacement', require_verification=? "
+                "WHERE id=?", (require_verification, task_id),
+            )
+        original(task_id, "worker-1")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(queue, "complete_with_outcome", replacement_completes_first)
+    response = api.post(
+        f"/tasks/{task_id}/complete",
+        json={"worker_id": "worker-1", "result": {"text": "stale result"}},
+        headers={TASK_SCOPE_HEADER: token},
+    )
+    assert response.status_code == 409, response.text
+    current = queue.get(task_id)
+    assert current.result is None
+    assert current.status == ("submitted" if require_verification else "completed")
+
+
+def test_restricted_worker_over_real_http(queue):
+    task_id = queue.create("assigned work", repo=TEST_REPO).id
+    app = create_app(queue, token=TOKEN, control_token=CONTROL_TOKEN, enable_mcp=False)
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        server = uvicorn.Server(uvicorn.Config(app, log_level="error"))
+        thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]})
+        thread.start()
+        try:
+            deadline = time.monotonic() + 10
+            while not server.started:
+                assert thread.is_alive(), "HTTP coordinator exited before readiness"
+                assert time.monotonic() < deadline, "HTTP coordinator readiness timed out"
+                time.sleep(0.01)
+            url = f"http://127.0.0.1:{listener.getsockname()[1]}"
+            with httpx.Client(base_url=url, timeout=5, trust_env=False) as supervisor:
+                response = supervisor.post(
+                    "/claim", json={"worker_id": "worker-1", "repo": TEST_REPO},
+                    headers=_auth(TOKEN),
+                )
+                assert response.status_code == 200, response.text
+                response = supervisor.post(
+                    f"/tasks/{task_id}/start",
+                    json={"worker_id": "worker-1", "owner_session_id": "session-1"},
+                    headers=_auth(TOKEN),
+                )
+                assert response.status_code == 200, response.text
+                grant = response.json()["task_token"]
+            with httpx.Client(
+                base_url=url, headers={TASK_SCOPE_HEADER: grant},
+                timeout=5, trust_env=False,
+            ) as worker:
+                assert worker.get("/tasks").status_code == 403
+                assert worker.post("/shutdown").status_code == 403
+                assert worker.get(f"/tasks/{task_id}/payload").status_code == 200
+                response = worker.post(
+                    f"/tasks/{task_id}/progress",
+                    json={"worker_id": "worker-1", "summary": "isolated network worker"},
+                )
+                assert response.status_code == 200, response.text
+                response = worker.post(
+                    f"/tasks/{task_id}/complete", json={"worker_id": "worker-1"},
+                )
+                assert response.status_code == 200, response.text
+                assert worker.get(f"/tasks/{task_id}").status_code == 403
+        finally:
+            server.should_exit = True
+            thread.join(timeout=10)
+            assert not thread.is_alive(), "HTTP coordinator failed to shut down"
 
 
 def test_no_control_token_configured_means_no_token_is_minted(tmp_path):

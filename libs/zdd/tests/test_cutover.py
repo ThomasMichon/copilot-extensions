@@ -386,30 +386,46 @@ def test_run_refuses_once_the_wait_budget_is_exhausted(tmp_path: Path):
     assert routing.read_active_endpoint(tmp_path) is None
 
 
-def test_run_waits_for_a_contended_lock_then_succeeds(tmp_path: Path):
+def test_run_waits_for_a_contended_lock_then_succeeds(tmp_path: Path, monkeypatch):
     """A legitimate back-to-back trigger (a fast second update superseding a
     first still in flight) must succeed once the first releases the lock --
     not be flatly refused. This is the exact shape of
     worktree-manager's mux-daemon-cutover convergence flow."""
     import threading
-    import time as _time
-
-    from zdd.cutover_lock import CutoverLock
+    from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
     registry: dict = {}
     orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
 
     held = CutoverLock(tmp_path)
-    held.acquire()
+    acquired = threading.Event()
+    release = threading.Event()
 
-    def _release_shortly() -> None:
-        _time.sleep(0.2)
-        held.release()
+    def hold_until_contention() -> None:
+        with held:
+            acquired.set()
+            assert release.wait(timeout=5)
 
-    threading.Thread(target=_release_shortly, daemon=True).start()
+    holder = threading.Thread(target=hold_until_contention)
+    holder.start()
+    acquire = CutoverLock._try_acquire
 
-    res = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=5.0)
-    assert res.ok is True
+    def observe_contention(lease) -> None:
+        try:
+            acquire(lease)
+        except CutoverLockedError:
+            release.set()
+            raise
+
+    monkeypatch.setattr(CutoverLock, "_try_acquire", observe_contention)
+    try:
+        assert acquired.wait(timeout=2)
+        res = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=5.0)
+        assert res.ok is True
+    finally:
+        release.set()
+        holder.join(timeout=2)
+    assert not holder.is_alive()
 
 
 def test_run_releases_lock_after_completion(tmp_path: Path):
@@ -428,4 +444,3 @@ def test_run_releases_lock_after_completion(tmp_path: Path):
         assert lock_path(tmp_path).exists()
     finally:
         contender.release()
-

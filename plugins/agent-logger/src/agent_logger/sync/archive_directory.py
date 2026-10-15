@@ -18,6 +18,10 @@ from agent_logger.sync.provenance import (
 )
 
 
+class ArchiveRootChangedError(ValueError):
+    """The source root was replaced while its canonical ancestry was being pinned."""
+
+
 def _posix_flags(*names: str) -> int:
     if sys.platform == "win32":
         raise OSError("directory-relative file reads require POSIX")
@@ -137,5 +141,5 @@ def archive_directory(path: Path) -> Iterator[ArchiveDirectory]:
                 raise OSError("missing pinned archive directory descriptor")
             opened = os.fstat(fd)
         if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-            raise ValueError("process-log archive root changed while opening")
+            raise ArchiveRootChangedError("process-log archive root changed while opening")
         yield ArchiveDirectory(canonical, fd)

@@ -2,7 +2,8 @@
 
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
 capacity planning, explicit release-snapshot inspection, installed-client
-resource diagnostics and explicitly authenticated artifact staging.** No
+resource diagnostics, explicitly authenticated artifact staging and an explicit
+local current-observation storage API.** No
 controller, provider invocation, credential lookup, managed install/update/uninstall,
 telemetry sink or managed-runtime/capacity mutation is delivered yet.
 Those remain the [canonical effort](../efforts/active/linux-role-fleet/README.md).
@@ -87,6 +88,19 @@ in a context-owned private spool. It does not execute artifacts or publish a
 runtime selector. Consumers obtain bounded immutable byte snapshots with current
 authentication, not reusable filesystem paths. Default planner/doctor commands
 do not stage anything.
+
+The [explicit selected-release intent](docs/release-selection.md) contract binds
+an independently trusted current owner decision to exact manifest content,
+sequence, scope and role closure. It does not choose or authenticate a decision,
+persist admission, execute artifacts or grant activation. Signed or
+higher-sequence releases are not automatically selected.
+
+The [current-observation storage API](docs/current-observations.md) provides
+separate explicit SQLite current slots, origin-generation comparison, atomic
+accepted-update positions and bounded scoped replay/queries. It is a trusted
+local prerequisite, not an authenticated push endpoint, complete fleet roster,
+resident subscription service or a new domain writer. Default CLI commands do
+not open the store, and no installed service or producer is enrolled by it.
 
 ## Thin client artifacts and local diagnostics
 
@@ -225,8 +239,10 @@ bounded local files against that same manifest:
 `python -m fleet_manager.artifacts --release release.json --sources sources.json --role client`.
 It reports `integrity-match`, not installed/active/ready or authenticated.
 It never reads unselected server artifacts, installs packages or authorizes
-activation. Signed release trust and owned immutable staging remain pending;
-the independently owned client lifecycle/diagnostics lane remains #6424.
+activation. [Release authentication](docs/release-authentication.md),
+[immutable staging](docs/artifact-staging.md) and explicit selection are
+separate prerequisites, not installation or activation. The independently
+owned client lifecycle/diagnostics lane remains #6424.
 
 ## Operation and receipt shapes
 

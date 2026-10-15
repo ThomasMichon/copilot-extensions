@@ -105,21 +105,33 @@ def test_widen_only_keeps_ordinary_ceiling_checks_without_an_exact_baseline_gate
     assert "checks" in workflow["jobs"]["pr-gate"]["needs"]
 
 
-def test_staged_main_gate_keeps_legacy_policy_and_a_read_only_trusted_producer():
+def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
     ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
     host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))
     events = host.get("on", host.get(True))["pull_request_target"]
     assert events["branches"] == ["main"]
     assert set(events["types"]) == {"opened", "reopened", "edited", "synchronize"}
-    assert "pull_request" in ci.get("on", ci.get(True))
-    old = ci["jobs"]["main-gate"]["steps"][-1]
+    ci_events = ci.get("on", ci.get(True))
+    assert ci_events["pull_request"] == {
+        "branches-ignore": ["main"],
+        "types": ["opened", "reopened", "synchronize", "edited"],
+    }
+    assert ci_events["push"] == {"branches": ["main", "dev"]}
+    assert "workflow_dispatch" in ci_events
+    assert "main-gate" not in ci["jobs"]
     gate = host["jobs"]["main-gate"]
     assert gate["name"] == "main source gate"
     assert gate["permissions"] == {"contents": "read"}
     assert gate["timeout-minutes"] == 2
     assert "needs" not in gate
-    assert gate["steps"][-1]["run"] == old["run"]
-    assert gate["steps"][-1]["env"] == old["env"]
+    assert gate["steps"][-1]["env"] == {
+        "HEAD_REF": "${{ github.event.pull_request.head.ref }}",
+        "PR_AUTHOR": "${{ github.event.pull_request.user.login }}",
+        "REPO_OWNER": "${{ github.repository_owner }}",
+        "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
+        "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+        "PR_COMMITS": "${{ github.event.pull_request.commits }}",
+    }
     checkout, fetch = gate["steps"][:2]
     assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0}
     assert checkout["if"] == fetch["if"]
@@ -355,18 +367,17 @@ def test_actual_baseline_fence_and_diff_restriction(baseline_fixture, change, li
         assert output.read_text().strip() == ("changed=true" if expected == "run" else "changed=false")
 
 
-@pytest.mark.parametrize("producer", ["ci.yml", "base-branch-reminder.yml"])
 @pytest.mark.parametrize("branch", [
     "automation/module-size-baseline-widen", "automation/module-size-baseline-widen-dev",
 ])
-def test_real_main_gate_rejects_baseline_automation(baseline_fixture, branch, producer):
+def test_real_main_gate_rejects_baseline_automation(baseline_fixture, branch):
     run, git_run, candidate, baseline, _, base, _ = baseline_fixture
     baseline.write_text('{"source.py": 1001}\n', encoding="utf-8")
     git_run("add", ".")
     git_run("commit", "-qm", "baseline change")
     head = git_run("rev-parse", "HEAD")
-    ci = yaml.safe_load((WORKFLOW.parent / producer).read_text(encoding="utf-8"))
-    code = ci["jobs"]["main-gate"]["steps"][-1]["run"]
+    host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))
+    code = host["jobs"]["main-gate"]["steps"][-1]["run"]
     result = run(
         f'cd "{candidate.as_posix()}"\n{code}',
         HEAD_REF=branch, PR_AUTHOR="owner", REPO_OWNER="owner",

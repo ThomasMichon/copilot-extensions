@@ -11,6 +11,7 @@ copy (size + mtime delta). They differ only in how the root is resolved:
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -19,14 +20,17 @@ import shutil
 import stat
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
 
-from agent_logger import process_logs as _process_logs
 from agent_logger import sessions
 from agent_logger.process_logs import is_process_log_candidate
 from agent_logger.sessions import SessionRef
+from agent_logger.sync.archive_directory import (
+    ArchiveDirectory, ArchiveRootChangedError, archive_directory,
+)
 from agent_logger.sync.detritus import (
     DetritusSummary,
     discover_session_detritus,
@@ -397,32 +401,34 @@ def _same_file_content(src: Path, dst: Path) -> bool:
 def _copy_process_logs(
     source: Path, dest: Path, source_identity: os.stat_result | None = None,
 ) -> tuple[int, int, list[Path]]:
+    """Keep canonical source ancestors pinned for the entire transfer."""
+    with ExitStack() as stack:
+        try:
+            directory = stack.enter_context(archive_directory(source))
+        except ArchiveRootChangedError as exc:
+            raise _SourceChangedDuringCopy(f"{exc}: {source}") from exc
+        except (NotADirectoryError, ValueError) as exc:
+            raise ValueError(f"process-log source is not a directory: {source}") from exc
+        opened = os.fstat(directory.fd) if directory.fd is not None else directory.path.stat()
+        if source_identity is not None and (
+            source_identity.st_dev, source_identity.st_ino,
+        ) != (opened.st_dev, opened.st_ino):
+            raise _SourceChangedDuringCopy("process-log source root changed before opening")
+        return _copy_process_logs_pinned(directory, dest, opened)
+
+
+def _copy_process_logs_pinned(
+    directory: ArchiveDirectory, dest: Path, source_identity: os.stat_result,
+) -> tuple[int, int, list[Path]]:
     """Flat, non-recursive incremental copy of process-log evidence.
 
-    Process logs sit directly under *source* (never a directory tree like a
-    session-state ``<id>/``), so this mirrors the incremental size/mtime copy
-    the session push loop performs, without that loop's recursive
-    directory-walk and detritus-discovery machinery -- neither applies to a
-    flat directory of log files. Returns ``(copied, bytes, locked_paths)``;
-    a locked source file (transient Windows sharing violation on a live
-    in-use log) or one whose identity/size changed mid-copy (a rotation or
-    replacement racing this pass) is recorded in *locked_paths* and
-    skipped, exactly like a deferred session file -- never aborting the
-    whole pass.
+    Returns ``(copied, bytes, locked_paths)`` for flat process-log candidates.
+    Size/mtime comparisons skip unchanged evidence; transient Windows sharing
+    violations and identity/size changes defer individual files for retry.
 
-    On POSIX, *source* is opened once with ``O_NOFOLLOW`` and every entry is
-    scanned and opened relative to that single directory handle, reusing
-    :mod:`agent_logger.process_logs`'s own root-pinning primitives (the same
-    ones :func:`~agent_logger.process_logs.iter_process_log_refs` uses) --
-    a swap of *source* onto a symlink after the caller's own initial
-    validation (e.g. between :func:`_existing_real_directory` and this scan)
-    cannot redirect traversal outside the configured root. This protects the
-    *named, configured* root itself; it does not pin every ancestor
-    component of *source* (see :func:`~agent_logger.process_logs.open_root_dir`'s
-    own docstring for why that's an explicit, deliberate scope boundary
-    rather than an oversight). Windows has no ``openat`` equivalent and
-    keeps the previous path-based behavior, the same documented platform
-    gap ``process_logs.py`` already carries.
+    The caller pins all canonical source ancestors for this entire operation.
+    POSIX entry I/O additionally uses the final directory fd; Windows pathname
+    reads run while ancestor handles prohibit directory rename.
 
     A source file that disappears mid-pass (log rotation or deletion racing
     this copy) is treated as an ordinary skipped candidate, never a
@@ -438,7 +444,7 @@ def _copy_process_logs(
     open descriptor's own identity before and after the byte copy, which a
     rename can never change (the descriptor still refers to the original
     inode throughout). The directory ENTRY's current identity is instead
-    re-stat'd by name (via the pinned ``root_fd``, never by path) and
+    re-stat'd by name (via the pinned directory descriptor, never by path) and
     compared against the identity observed before the copy started, via a
     ``revalidate`` callback :func:`_copy_stream_replace` calls strictly
     *before* committing the replace (see that function's own docstring) --
@@ -449,7 +455,7 @@ def _copy_process_logs(
     copied = 0
     nbytes = 0
     locked: list[Path] = []
-    source_identity = source_identity or _lstat(source)
+    source = directory.path
 
     def _revalidate_root(before: os.stat_result) -> None:
         after = _lstat(source)
@@ -477,67 +483,56 @@ def _copy_process_logs(
         except OSError:
             return None
 
-    if _process_logs.supports_dir_fd():
+    if directory.fd is not None:
         try:
-            with _process_logs.open_root_dir(source) as root_fd:
-                opened_root = os.fstat(root_fd)
-                if (source_identity.st_dev, source_identity.st_ino) != (
-                    opened_root.st_dev, opened_root.st_ino,
-                ):
-                    raise _SourceChangedDuringCopy(
-                        "process-log source root changed before opening",
-                    )
-                entries = sorted(os.scandir(root_fd), key=lambda entry: entry.name)
-                for entry in entries:
-                    name = entry.name
-                    if not is_process_log_candidate(name):
-                        continue
+            _revalidate_root(source_identity)
+            for name in directory.names():
+                if not is_process_log_candidate(name):
+                    continue
+                try:
+                    before = directory.stat(name)
+                except FileNotFoundError:
+                    continue
+                if not stat.S_ISREG(before.st_mode):
+                    continue
+                dst_path = dest / name
+                if not _needs_copy_from_stat(before, dst_path):
+                    continue
+
+                def _same_entry_identity(
+                    name: str = name, before: os.stat_result = before,
+                ) -> bool:
+                    # A renamed inode keeps its fd identity; revalidate the
+                    # directory entry before landing any destination bytes.
+                    _revalidate_root(source_identity)
                     try:
-                        before = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                        after = directory.stat(name)
                     except FileNotFoundError:
-                        continue
-                    if not stat.S_ISREG(before.st_mode):
-                        continue
-                    dst_path = dest / name
-                    if not _needs_copy_from_stat(before, dst_path):
-                        continue
+                        return False
+                    return (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
 
-                    def _same_entry_identity(
-                        name: str = name, before: os.stat_result = before,
-                    ) -> bool:
-                        # Revalidate the DIRECTORY ENTRY's identity against
-                        # `before`, not just the open descriptor's own fstat
-                        # (which `_copy_stream_replace` already checked): a
-                        # rename-based rotation (writer renames the old file
-                        # aside and creates a fresh one under the same name)
-                        # never changes our already-open descriptor's
-                        # identity -- it still refers to the OLD inode
-                        # throughout the copy -- so the fd-only check in
-                        # `_copy_stream_replace` cannot observe it. Only
-                        # re-stat`ing the NAME (via the pinned `root_fd`,
-                        # never by path) can. Called before dst is touched,
-                        # so a rejection never destroys an existing, still-
-                        # good destination copy.
-                        try:
-                            after = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
-                        except FileNotFoundError:
-                            return False
-                        return (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
-
+                try:
+                    _revalidate_root(source_identity)
                     try:
-                        with _process_logs.open_regular_at(root_fd, name) as stream:
-                            size = _land(stream, dst_path, revalidate=_same_entry_identity)
-                    except (FileNotFoundError, ValueError):
-                        # Vanished or changed identity between the stat above
-                        # and this open (rotation/deletion racing the copy) --
-                        # an ordinary skip, never a failure.
+                        source_handle = directory.open(name)
+                    except OSError as exc:
+                        if exc.errno != errno.ELOOP:
+                            raise
                         continue
-                    if size is None:
-                        locked.append(source / name)
-                        continue
-                    copied += 1
-                    nbytes += size
-                _revalidate_root(opened_root)
+                    with source_handle as stream:
+                        opened = os.fstat(stream.fileno())
+                        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+                            raise ValueError(f"process-log evidence changed while opening: {name}")
+                        size = _land(stream, dst_path, revalidate=_same_entry_identity)
+                except (FileNotFoundError, ValueError):
+                    continue
+                if size is None:
+                    _revalidate_root(source_identity)
+                    locked.append(source / name)
+                    continue
+                copied += 1
+                nbytes += size
+            _revalidate_root(source_identity)
         except FileNotFoundError as exc:
             raise OSError("process-log copy path vanished during transfer") from exc
         return copied, nbytes, locked
@@ -1897,32 +1892,34 @@ class FilesystemTarget(Target):
     def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
         """Publish process-log evidence; see :class:`Target`'s base method.
 
-        Scope note on the destination side, stated explicitly rather than
-        left implicit: ``dest`` is validated once via
-        :func:`_ensure_relative_directory` (path-component checks, same as
-        every other destination write in this module -- the session-state
-        push included), then every subsequent write under it
-        (``_copy_stream_replace``'s temp-create/fsync/unlink/replace) is
-        path-based, not re-pinned to a directory handle. A concurrent swap
-        of ``dest`` onto a symlink after that validation could in principle
-        redirect a write outside the configured target -- the same
-        TOCTOU class as the already-documented source-side ancestor gap
-        (see ``_copy_process_logs``'s docstring), but on the write path
-        instead of the read path, and shared by every destination write in
-        this file, not unique to process logs. Closing it needs a broader,
-        dir_fd-pinned rework of ``_copy_replace``/``_durable_replace``'s
-        whole write path -- out of scope for this bounded change; tracked
-        as a known limitation rather than silently assumed safe.
+        Source ancestors are pinned throughout the transfer. Destination
+        directories are only validated before pathname-based writes:
+        ``_copy_stream_replace`` does not pin their handles. A concurrent
+        directory redirect can therefore escape the target. This destination
+        containment limitation, shared with session-state writes, remains
+        tracked in #5727.
         """
         try:
-            safe_source = _existing_real_directory_identity(log_root)
+            log_root = _anchored_path(log_root)
+            try:
+                source_identity = _lstat(log_root)
+            except FileNotFoundError:
+                source_identity = None
+            redirected = source_identity is not None and is_link_or_reparse(
+                log_root, source_identity.st_mode,
+            )
+            if source_identity is not None and (
+                not stat.S_ISDIR(source_identity.st_mode)
+                or redirected
+            ):
+                reason = "symlink/reparse" if redirected else "not a directory"
+                raise OSError(f"process-log source must be a real directory: {log_root} ({reason})")
         except OSError as exc:
             self._record_process_log_health(machine, "partial", reason="unsafe process-log source")
             return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")
-        if safe_source is None:
+        if source_identity is None:
             self._record_process_log_health(machine, "partial", reason="no process-log source")
             return PushResult(ok=True, detail="no process-log source")
-        log_root, source_identity = safe_source
         try:
             root = self._root()
             dest = _ensure_relative_directory(root, Path(machine) / "logs")

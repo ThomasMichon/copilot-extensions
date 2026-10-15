@@ -1,0 +1,24 @@
+{
+  "schema": "copilot-extensions.instruction-projections",
+  "version": 1,
+  "projections": [
+    {
+      "id": "session-guidance",
+      "deliveryMode": "selector",
+      "template": "instructions/session-guidance.instructions.md",
+      "destination": ".github/instructions/budget-guidance/session-guidance.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
+      "id": "posture-boundary",
+      "deliveryMode": "inline",
+      "template": "instructions/posture-boundary.instructions.md",
+      "destination": ".github/instructions/budget-guidance/posture-boundary.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    }
+  ]
+}

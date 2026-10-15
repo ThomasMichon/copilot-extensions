@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 
@@ -3199,15 +3201,17 @@ def test_copy_process_logs_skips_file_rotated_away_mid_pass(
     dest.mkdir()
 
     if os.name != "nt":
-        real_open_regular_at = filesystem._process_logs.open_regular_at
+        real_open = filesystem.ArchiveDirectory.open
 
-        def flaky_open_regular_at(dir_fd, name):
+        def flaky_open(
+            directory: filesystem.ArchiveDirectory, name: str, *, protected: bool = False,
+        ) -> BinaryIO:
             if name == victim.name:
                 victim.unlink()
                 raise FileNotFoundError(2, "No such file or directory", name)
-            return real_open_regular_at(dir_fd, name)
+            return real_open(directory, name, protected=protected)
 
-        monkeypatch.setattr(filesystem._process_logs, "open_regular_at", flaky_open_regular_at)
+        monkeypatch.setattr(filesystem.ArchiveDirectory, "open", flaky_open)
     else:
         real_needs_copy = filesystem._needs_copy
 
@@ -3293,11 +3297,13 @@ def test_copy_process_logs_detects_rename_based_rotation(
     # the fix this test guards must never delete it.
     (dest / "process-111-1.log").write_text("previously synced\n", encoding="utf-8")
 
-    real_open_regular_at = filesystem._process_logs.open_regular_at
+    real_open = filesystem.ArchiveDirectory.open
 
     @contextlib.contextmanager
-    def rotating_open_regular_at(dir_fd, name):
-        with real_open_regular_at(dir_fd, name) as stream:
+    def rotating_open(
+        directory: filesystem.ArchiveDirectory, name: str, *, protected: bool = False,
+    ) -> Iterator[BinaryIO]:
+        with real_open(directory, name, protected=protected) as stream:
             if name == target.name:
                 # The copy now holds an fd to the ORIGINAL inode (opened
                 # before this rename, same as a real rename-rotation race)
@@ -3308,7 +3314,7 @@ def test_copy_process_logs_detects_rename_based_rotation(
             yield stream
 
     monkeypatch.setattr(
-        filesystem._process_logs, "open_regular_at", rotating_open_regular_at,
+        filesystem.ArchiveDirectory, "open", rotating_open,
     )
 
     _copied, _nbytes, locked = _copy_process_logs(logs, dest)

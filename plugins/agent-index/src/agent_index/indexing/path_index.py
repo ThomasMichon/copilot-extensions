@@ -215,6 +215,32 @@ class PathIndex:
         finally:
             conn.close()
 
+    def get_paths_by_family(self, family: str) -> dict[str, set[str]]:
+        """Return only the exact case-sensitive family and its colon descendants."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT source, file_path FROM indexed_files
+                   WHERE source = ? COLLATE BINARY OR instr(source, ?) = 1""",
+                (family, f"{family}:"),
+            ).fetchall()
+            result: dict[str, set[str]] = {}
+            for row in rows:
+                result.setdefault(row["source"], set()).add(row["file_path"])
+            return result
+        finally:
+            conn.close()
+
+    def list_sources(self) -> list[str]:
+        """Return exact stored source identities, including path-only remnants."""
+        conn = self._connect()
+        try:
+            return [row["source"] for row in conn.execute(
+                "SELECT DISTINCT source FROM indexed_files",
+            )]
+        finally:
+            conn.close()
+
     def get_entry(self, source: str, file_path: str) -> tuple[str | None, float] | None:
         """Return ``(content_hash, indexed_at)`` for a file, or None if absent.
 

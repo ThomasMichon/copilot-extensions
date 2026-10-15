@@ -119,11 +119,39 @@ Pass `--purpose`, `--surface`, repeated `--available-model` values, and optional
 context/reasoning/constraint facts to receive a deterministic `decision`. An
 ordinary selection can return only a demonstrated eligible model. Selecting a
 candidate requires both its exact `--trial-model` and a non-empty `--trial-id`.
+An explicit `--operator-model` selects that exact demonstrated eligible model
+instead of the lowest-cost default. It does not qualify a held, failed,
+unavailable, expired, or candidate entry; candidate admission still requires the
+separate trial pair. The operator and trial flags are mutually exclusive.
 
 Start from [`examples/model-routing.json`](examples/model-routing.json) and
 validate against
 [`schemas/model-routing.schema.json`](schemas/model-routing.schema.json). The
 example model IDs are intentionally synthetic.
+
+### Optional budget advice
+
+Pass `--budget-posture <status.json>` alongside selection arguments to attach
+`decision.budgetAdvice`. The bounded regular JSON file must contain the
+budget owner's [routing-advice contract](../budget-guidance/docs/configuration.md#optional-routing-advice);
+the resolver never imports budget-guidance, acquires credentials, runs readers,
+or refreshes a provider. Omit the flag for exactly the ordinary routing output.
+`--budget-at <RFC3339>` supplies a deterministic advice instant; by default the
+consumer uses current UTC independently of the evidence-expiry `--as-of` date.
+
+The advice describes a recommendation, caution, escalation, or no-fit reason.
+It retains the already-cheapest demonstrated eligible choice, or preserves an
+explicit operator choice/trial without proposing an unproven replacement.
+Unavailable, stale, future, malformed, and contradictory input cannot supply a
+recommendation; malformed input also emits a diagnostic. No eligible choice
+means no-fit, never promotion of a candidate or bypass of a hold.
+
+Budget composition does not change the selected model, fallbacks, eligibility,
+direct-versus-delegate strategy, or trial admission. `fit` remains `unknown`
+because account totals and ordinal model ranks do not establish per-task cost;
+`launchBlocked` is always `false`. An escalation requests operator attention,
+not a launch refusal or automatic worker mutation. Posture expiry is issued by
+the budget owner, not reconstructed from billing fields in this plugin.
 
 ## What this plugin provides - and what it doesn't
 

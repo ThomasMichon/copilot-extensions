@@ -39,6 +39,8 @@ import logging
 import os
 from typing import TYPE_CHECKING, TypedDict
 
+from agent_index.store.source_layout import selected_layout
+
 if TYPE_CHECKING:
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.state import IndexState
@@ -54,6 +56,10 @@ class GCSummary(TypedDict):
     kept: list[str]          # live sources, untouched
     chunks_deleted: int
     dry_run: bool
+
+
+class GCDecision(GCSummary, total=False):
+    deferred: list[str]
 
 _FORGE_SUBTYPES = frozenset({"code", "issues", "pulls", "commits"})
 _SERVICE_SOURCES = frozenset({"service-feed:clips", "analysis-feed:videos"})
@@ -135,6 +141,35 @@ def is_configured_source(
     return any(source.startswith(f"{name}:") for name in configured_names)
 
 
+def gc_configured_snapshot(
+    multi_store: MultiModelStore, path_index: PathIndex, state: IndexState, *,
+    configured_names: frozenset[str], source_aware: bool,
+) -> GCDecision:
+    """Retain canonical rows separately from active configured crawl identities."""
+    if not source_aware:
+        return gc_unconfigured_sources(
+            multi_store, path_index, state, configured_names=configured_names,
+        )
+    missing = sorted(name for name in configured_names if not state.stored_families.get(name))
+    if missing:
+        log.warning("Unconfigured-source GC deferred: canonical identities unresolved: %s", missing)
+        return {"purged": {}, "kept": [], "chunks_deleted": 0,
+                "dry_run": False, "deferred": missing}
+    canonical = frozenset(state.stored_families[name] for name in configured_names)
+    result = gc_unconfigured_sources(
+        multi_store, path_index, state, configured_names=canonical, preserve_crawl_state=True,
+    )
+    extra_keep = _extra_keep_sources()
+    for source in path_index.list_sources():
+        if not is_configured_source(source, canonical, extra_keep=extra_keep):
+            path_index.delete_source(source)
+    for alias in (state.sources.keys() | state.stored_families.keys()) - configured_names:
+        state.sources.pop(alias, None)
+        state.stored_families.pop(alias, None)
+    state.total_chunks = sum(source.chunk_count for source in state.sources.values())
+    return result
+
+
 def gc_unconfigured_sources(
     multi_store: MultiModelStore,
     path_index: PathIndex,
@@ -142,6 +177,7 @@ def gc_unconfigured_sources(
     *,
     configured_names: frozenset[str],
     dry_run: bool = False,
+    preserve_crawl_state: bool = False,
 ) -> GCSummary:
     """Delete all chunks whose source is no longer in the CURRENT corpus config.
 
@@ -159,6 +195,8 @@ def gc_unconfigured_sources(
     index, and IndexState. Does NOT compact -- callers should compact after
     (a full reindex already does; an incremental reindex leaves compaction to
     its own periodic pass, consistent with existing incremental behavior).
+    ``preserve_crawl_state`` separates selected stored-row retirement from crawl
+    aliases; the snapshot owner prunes retired aliases only after this pass succeeds.
     """
     extra_keep = _extra_keep_sources()
     counts = multi_store.source_counts()
@@ -177,13 +215,16 @@ def gc_unconfigured_sources(
             try:
                 removed = multi_store.delete_by_source_exact(source)
                 path_index.delete_source(source)
-                if source in state.sources and source not in _LIVE_CRAWL_STATE_KEYS:
+                if (not preserve_crawl_state and not selected_layout()
+                        and source in state.sources and source not in _LIVE_CRAWL_STATE_KEYS):
                     del state.sources[source]
                 total_deleted += removed
                 log.info(
                     "GC: purged unconfigured source %s (%d chunks)", source, removed,
                 )
             except Exception:
+                if selected_layout():
+                    raise
                 log.warning(
                     "GC: failed to purge unconfigured source %s", source, exc_info=True,
                 )
@@ -233,13 +274,16 @@ def gc_stale_sources(
                 # that merely shares this name in the IndexState namespace
                 # (e.g. stale stored "forge:code" chunks vs. the live
                 # "forge:code" crawl cursor).
-                if source in state.sources and source not in _LIVE_CRAWL_STATE_KEYS:
+                if (not selected_layout() and source in state.sources
+                        and source not in _LIVE_CRAWL_STATE_KEYS):
                     del state.sources[source]
                 total_deleted += removed
                 log.info(
                     "GC: purged stale source %s (%d chunks)", source, removed,
                 )
             except Exception:
+                if selected_layout():
+                    raise
                 log.warning(
                     "GC: failed to purge stale source %s", source, exc_info=True,
                 )

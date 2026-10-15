@@ -82,26 +82,22 @@ def test_monitor_direct_interpreter_preserves_posix(monkeypatch):
 @pytest.mark.parametrize("passive", [False, True])
 def test_monitor_spawn_preserves_direct_interpreter_environment(tmp_path, monkeypatch, passive):
     captured = {}
-    monkeypatch.setattr(cutover, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(cutover, "os", SimpleNamespace(name="nt", path=os.path))
     monkeypatch.setattr(runtime, "_daemon_cwd", lambda: str(tmp_path))
     monkeypatch.setattr(
         runtime, "_daemon_environment", lambda: {"KEEP": "yes", "__PYVENV_LAUNCHER__": "old"},
     )
     monkeypatch.setattr(cutover, "routing_dir", lambda: tmp_path / "routing")
     monkeypatch.setattr(
-        runtime._core(), "windowless_daemon_kwargs",
-        lambda **kw: {"creationflags": 123 if kw["breakaway"] else 0},
-    )
-    monkeypatch.setattr(
         cutover if passive else runtime, "direct_monitor_python",
         lambda source: ("base-python", {"__PYVENV_LAUNCHER__": source}),
     )
 
-    def popen(argv, **kwargs):
+    def spawn_daemon(argv, **kwargs):
         captured.update(argv=argv, kwargs=kwargs)
         return SimpleNamespace(pid=77)
 
-    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(cutover, "spawn_daemon", spawn_daemon)
     if passive:
         assert cutover.spawn_passive("venv-python", port=54321).pid == 77
         assert captured["argv"][4:] == ["--passive", "--control-port", "54321"]
@@ -112,8 +108,33 @@ def test_monitor_spawn_preserves_direct_interpreter_environment(tmp_path, monkey
     assert kwargs["env"]["KEEP"] == "yes"
     assert kwargs["env"]["__PYVENV_LAUNCHER__"] == "venv-python"
     assert kwargs["cwd"] == str(tmp_path)
-    assert kwargs["creationflags"] == 123
-    assert all(kwargs[name] == subprocess.DEVNULL for name in ("stdin", "stdout", "stderr"))
+    assert kwargs["log_path"] == tmp_path / "logs" / "status-monitor.log"
+    # Console children share one hidden console; breakaway from the caller's
+    # Job is required (never a contained fallback).
+    assert kwargs["console_children"] is True
+    assert kwargs.get("breakaway", True) is True
+    assert not kwargs.get("contained_fallback", False)
+
+
+def test_posix_passive_monitor_is_a_detached_daemon(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cutover, "os", SimpleNamespace(name="posix", path=os.path))
+    monkeypatch.setattr(runtime, "_daemon_cwd", lambda: str(tmp_path))
+    monkeypatch.setattr(runtime, "_daemon_environment", lambda: {"KEEP": "yes"})
+    monkeypatch.setattr(cutover, "routing_dir", lambda: tmp_path / "routing")
+    monkeypatch.setattr(
+        cutover, "spawn_daemon", lambda argv, **kwargs: captured.update(kwargs) or "proc",
+    )
+    assert cutover.spawn_passive(sys.executable, port=54321) == "proc"
+    assert captured["console_children"] is False
+    assert captured["log_path"] == tmp_path / "logs" / "status-monitor.log"
+
+
+def test_monitor_log_never_lands_in_a_shared_temp_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(cutover.os.path, "expanduser", lambda _p: str(tmp_path))
+    path = cutover.monitor_log_path(str(tmp_path))
+    assert path.parent == tmp_path
+    assert path.name == ".agent-worktrees-status-monitor.log"
 
 
 @pytest.mark.parametrize("passive", [False, True])

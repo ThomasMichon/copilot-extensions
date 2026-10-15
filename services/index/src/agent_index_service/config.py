@@ -59,11 +59,12 @@ class HostConfig:
     batch_size: int = 16
     stream_batch_size: int = 64
     indexer_nice: int = 10
+    store_layout: str | None = None
 
     def core_environment(self) -> dict[str, str]:
         inline = {"role": "host", "corpus": {"sources": list(self.sources)}}
         encoded = base64.urlsafe_b64encode(json.dumps(inline).encode("utf-8")).decode("ascii")
-        return {
+        result = {
             "AGENT_INDEX_HOME": str(self.home),
             "AGENT_INDEX_CONFIG": str(self.config_file),
             "AGENT_INDEX_CONFIG_ROOT": str(self.config_file.parent),
@@ -92,6 +93,9 @@ class HostConfig:
             "AGENT_INDEX_STREAM_BATCH_SIZE": str(self.stream_batch_size),
             "AGENT_INDEX_INDEXER_NICE": str(self.indexer_nice),
         }
+        if self.store_layout is not None:
+            result["AGENT_INDEX_STORE_LAYOUT"] = self.store_layout
+        return result
 
 
 def _source(value: Any, index: int) -> dict[str, Any]:
@@ -125,7 +129,8 @@ def _source(value: Any, index: int) -> dict[str, Any]:
 def parse_config(value: Any, config_file: Path) -> HostConfig:
     raw = _mapping(
         value, "config",
-        {"schema_version", "home", "data", "routing", "listener", "sources", "engine", "limits"},
+        {"schema_version", "home", "data", "routing", "listener", "sources", "engine",
+         "limits", "store"},
     )
     if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
         raise ConfigurationError("schema_version must be 1")
@@ -155,6 +160,12 @@ def parse_config(value: Any, config_file: Path) -> HostConfig:
     limits = _mapping(raw.get("limits", {}), "limits", {
         "batch_size", "stream_batch_size", "indexer_nice",
     })
+    layout = None
+    if "store" in raw:
+        store = _mapping(raw["store"], "store", {"layout"})
+        if store.get("layout") != "source-aware-v1":
+            raise ConfigurationError("store.layout must be source-aware-v1")
+        layout = "source-aware-v1"
     return HostConfig(
         config_file=config_file.resolve(),
         home=home,
@@ -170,6 +181,7 @@ def parse_config(value: Any, config_file: Path) -> HostConfig:
             limits.get("stream_batch_size", 64), "limits.stream_batch_size", 1, 65536,
         ),
         indexer_nice=_integer(limits.get("indexer_nice", 10), "limits.indexer_nice", 0, 19),
+        store_layout=layout,
     )
 
 

@@ -78,17 +78,37 @@ if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
 fi
-# "Provisioned" no longer implies a .venv: the marker runtime model (#581) publishes
-# the active slot via a current-version marker (POSIX keeps a .venv symlink, but a
-# marker+slot is authoritative). Treat a marker whose slot python exists as
-# provisioned too, so a current runtime is a clean no-op, not a needless rebuild.
+# Dependency profiles qualify slot identity without changing package version.
+expected_slot="$("$py" - "$InstallDir" "$current" <<'PROFILE_SLOT'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+version = sys.argv[2]
+path = root / "runtime-profile.json"
+if not path.exists():
+    print(version)
+else:
+    desired = json.loads(path.read_text(encoding="utf-8"))
+    manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    profile = desired.get("profile")
+    if (
+        desired.get("schema") == "copilot-extensions.agent-containers.runtime-profile"
+        and desired.get("version") == 1
+        and profile in ("base", "provider-exec")
+        and manifest.get("runtime_profile") == profile
+        and manifest.get("runtime_version") == f"{version}+{profile}"
+    ):
+        print(f"{version}+{profile}")
+PROFILE_SLOT
+)" || exit 0
 provisioned=0
-[ -e "$InstallDir/.venv" ] && provisioned=1
-if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
+if [ -n "$expected_slot" ] && [ -f "$InstallDir/current-version" ]; then
   cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
   # ...and only when it names the CURRENT payload version (the marker is authoritative
   # for the active slot; a stale marker must not suppress reconcile).
-  if [ -n "$cv" ] && [ "$cv" = "$current" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
+  if [ -n "$cv" ] && [ "$cv" = "$expected_slot" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
 fi
 if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
 

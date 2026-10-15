@@ -114,15 +114,17 @@ def test_powershell_resolver_rejects_invalid_marker_states(
     assert not (slot / "spawned").exists()
 
 
+@pytest.mark.parametrize("profile", ["", "+base"])
 def test_powershell_tier3_is_version_aware_and_cross_platform(
-    tmp_path: Path,
+    tmp_path: Path, profile: str,
 ) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if pwsh is None:
         pytest.skip("PowerShell is unavailable")
     root = tmp_path / "runtime"
-    _slot(root, "0.4.0-dev9", complete=True, interpreter=True)
-    newest = _slot(root, "0.4.0-dev10", complete=True, interpreter=True)
+    _slot(root, "0.3.9", complete=True, interpreter=True)
+    _slot(root, f"0.4.0-dev9{profile}", complete=True, interpreter=True)
+    newest = _slot(root, f"0.4.0-dev10{profile}", complete=True, interpreter=True)
     command = (
         f"$env:AGENT_RT_ROOT = '{root}'; "
         f". '{SCRIPTS / 'resolve-runtime.ps1'}'; "
@@ -140,7 +142,7 @@ def test_powershell_tier3_is_version_aware_and_cross_platform(
     subpath = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
     assert Path(result.stdout) == newest / subpath
 
-    release = _slot(root, "0.4.0", complete=True, interpreter=True)
+    release = _slot(root, f"0.4.0{profile}", complete=True, interpreter=True)
     result = subprocess.run(
         [pwsh, "-NoProfile", "-Command", command],
         text=True,
@@ -224,10 +226,12 @@ def test_posix_resolver_rejects_invalid_marker_states(
     os.name == "nt" or shutil.which("bash") is None,
     reason="a native POSIX bash is unavailable",
 )
-def test_posix_tier3_orders_dev_versions_without_sort_v(tmp_path: Path) -> None:
+@pytest.mark.parametrize("profile", ["", "+base"])
+def test_posix_tier3_orders_dev_versions_without_sort_v(tmp_path: Path, profile: str) -> None:
     root = tmp_path / "runtime"
-    _slot(root, "0.4.0-dev9", complete=True, interpreter=True)
-    newest = _slot(root, "0.4.0-dev10", complete=True, interpreter=True)
+    _slot(root, f"0.4.0-dev9{profile}", complete=True, interpreter=True)
+    newest_version = f"0.4.0-dev10{profile}"
+    newest = _slot(root, newest_version, complete=True, interpreter=True)
     real_sort = shutil.which("sort")
     assert real_sort is not None
     fake_bin = tmp_path / "bin"

@@ -12,6 +12,7 @@ def needs_installation_context_smoke(paths: Iterable[str]) -> bool:
     for path in paths:
         if path in {
             ".github/workflows/ci.yml",
+            ".github/workflows/installation-context-acceptance.yml",
             "tools/sync-installation-context.py",
             "tools/installation_context_ci_scope.py",
             "tools/test_installation_context_ci_scope.py",
@@ -20,7 +21,22 @@ def needs_installation_context_smoke(paths: Iterable[str]) -> bool:
             "worktree-manager/tests/_installation_context_fixtures.py",
             "plugins/agent-worktrees/src/agent_worktrees/reconcile.py",
             "plugins/agent-worktrees/tests/test_reconcile.py",
-        } or path.startswith(("libs/installation-context/", "libs/peer-launch/")):
+            "plugins/agent-worktrees/src/agent_worktrees/installer.py",
+            "plugins/agent-worktrees/src/agent_worktrees/installation_cli.py",
+            "plugins/agent-worktrees/src/agent_worktrees/deploy_manifest.py",
+            "plugins/agent-worktrees/tests/test_installer_command_binding.py",
+            "plugins/agent-worktrees/scripts/command_binding.py",
+            "plugins/agent-worktrees/src/agent_worktrees/_command_binding.py",
+            "plugins/agent-worktrees/scripts/command_lifecycle.py",
+            "plugins/agent-worktrees/src/agent_worktrees/_command_lifecycle.py",
+            "plugins/agent-worktrees/scripts/install.sh",
+            "plugins/agent-worktrees/scripts/install.ps1",
+            "plugins/agent-worktrees/scripts/emit-command-catalog.sh",
+            "plugins/agent-worktrees/scripts/emit-command-catalog.ps1",
+            "plugins/agent-worktrees/payload-invocation.json",
+        } or path.startswith((
+            "libs/installation-context/", "libs/peer-launch/", "libs/payload-invocation/",
+        )):
             return True
         if path.startswith("plugins/") and "/scripts/installation-context/" in path:
             return True

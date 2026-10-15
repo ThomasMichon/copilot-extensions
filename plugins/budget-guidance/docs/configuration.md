@@ -63,3 +63,26 @@ carry no budget values. An `error` reading requires a non-empty `error` string.
 All numeric output is serialized as decimal strings so consumers receive exact,
 stable values. The posture schema is `copilot-extensions.budget-posture`,
 version `1`.
+
+## Optional routing advice
+
+Status also emits `routing_advice`, a version `1`
+`copilot-extensions.budget-routing-advice` object. The budget owner, not a routing
+consumer, calculates its `availability`, `evaluated_at`, `valid_until`,
+`warning_band`, and `reason`. An available advice interval ends at the earliest
+selected field's freshness deadline, the reset instant, or 300 seconds after
+evaluation. It is valid only before `valid_until`, not at that instant. Future
+captures, elapsed reset/freshness boundaries, missing fields, errors, and
+contradictions withhold the band and deadline (`null`); the source posture
+continues to retain its full diagnostic evidence.
+
+This is bounded **point-in-time** advice, not a claim of continuous provider
+refresh. Consumers reject future evaluations and expired advice rather than
+recalculating budget arithmetic or trusting a saved `availability` forever.
+Older posture documents without this optional envelope remain useful as status
+but cannot supply routing advice. Neither a warning band nor an ordinal model
+cost rank establishes the cost or affordability of an individual task.
+
+The delegation module's [optional consumer](../../agent-conduct-guidance/README.md#optional-budget-advice)
+accepts an explicitly supplied status JSON file. No routing plugin is required
+to use budget status or session guidance.

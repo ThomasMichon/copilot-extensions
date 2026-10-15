@@ -83,11 +83,13 @@ def test_read_only_root_can_be_read_but_not_executed(tmp_path, monkeypatch, repo
 
 
 @pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
-def test_read_only_pointer_cannot_expand_relative_executable_declarations(
+def test_read_only_pointer_cannot_execute_relative_executable_declarations(
     tmp_path, monkeypatch, repo_class,
 ):
     from agent_dispatch import registrar_discovery as discovery, repo_config
     from agent_dispatch.registrar_pointer import Pointer
+    from agent_dispatch.producers.emitter import run_tick
+    from tests.test_producers_emitter import FakeClient
     from tests.test_repository_issue_loops import _config
 
     directory = tmp_path / repo_config.CANONICAL_REPO_CONFIG_DIR / "registrar"
@@ -98,10 +100,17 @@ def test_read_only_pointer_cannot_expand_relative_executable_declarations(
                "command": [sys.executable, "backlog.py"], "cwd": "."},
     )), encoding="utf-8")
     _registry(monkeypatch, tmp_path, repo_class=repo_class)
+    _, declarations = discovery.discover_trusted([
+        Pointer(name="tools", kind="repo", repository="tools"),
+    ])
+    source, _ = declarations
+    assert source.spec["cwd"] == "repo:tools:."
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "dispatch"))
     with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
-        discovery.discover_trusted([
-            Pointer(name="tools", kind="repo", repository="tools"),
-        ])
+        run_tick(
+            FakeClient(), dict(source.spec), holder="fixture",
+            runner=lambda *a, **k: pytest.fail("read-only supplier reached subprocess"),
+        )
 
 
 def test_missing_file_is_not_invented(tmp_path, monkeypatch):

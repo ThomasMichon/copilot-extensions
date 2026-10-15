@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-14
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -36,7 +36,10 @@ source.
 - **Release lock** — the exact, closed set of first-party artifacts and
   third-party dependency pins a release or standalone installation resolves
   to, partitioned into a core and optional heavy environments. It is the
-  input to assembly, not something a host re-resolves.
+  input to assembly, not something admission silently re-resolves. A
+  source-build fallback selected by the same installation authority carries
+  its own explicit exact installation lock; it never masquerades as the
+  unavailable artifact lock.
 - **Artifact identity and attestation** — the content-bound identity and
   promotion attestation the release pipeline assigns to first-party
   artifacts. Admission verifies against this identity rather than against a
@@ -61,12 +64,17 @@ interactive install, unattended update, session-triggered detached update,
 repair, cache or seed miss, filling a missing artifact, and container image
 construction. Each verifies the content identity of every first-party
 artifact and every third-party dependency against the release lock before it
-contributes to a generation. A cache, seed, or accelerant speeds up
+contributes to a generation (or against the authority's exact installation
+lock for a selected source fallback). A cache, seed, or accelerant speeds up
 acquisition. It is never a separate trust root. While another approved
-source for the same artifact is reachable, losing it changes only how long
-acquisition takes; when none is, the outcome is deferred (see
-*deferred-not-degraded*), never a different or unverified result. If an
-update leaves the dependency set unchanged, assembly reuses artifacts already
+source for the same artifact within the selected lock/path is reachable,
+losing it changes only how long acquisition takes. Exhausting those sources
+defers that path; admission never substitutes a different or unverified
+result within it. The installation authority may instead select the separate
+governed source-build path and its explicit exact installation lock (see
+*governed-client-source-fallback*). If neither permitted path succeeds, the
+outcome is deferred or refused (see *deferred-not-degraded*). If an update
+leaves the dependency set unchanged, assembly reuses artifacts already
 admitted on the host and needs no access to a package index or feed.
 
 ### first-party-only-public-distribution
@@ -86,7 +94,44 @@ governed source has mirrored it. When the governed source
 lags the lock, the outcome is **deferred**. It names the missing artifact and
 the action that would unblock it, and leaves the current generation serving.
 It never falls back to a public runtime index, relaxes a pin, or substitutes
-another version.
+another version within that lock. The installation authority may instead
+select the governed local-source fallback below; if that cannot satisfy
+policy either, the prior healthy generation remains serving.
+
+### governed-client-source-fallback
+
+Prebuilt first-party artifacts accelerate installation; their availability
+is not a prerequisite for a working client. When artifact discovery,
+acquisition or dependency admission is unavailable, the same installation
+authority can select local assembly from independently verified source for
+the selected release. Clients use that permitted fallback rather than
+treating artifact unavailability as a terminal installation failure.
+The installation authority establishes an exact fallback installation lock
+within declared dependency constraints and approved-source policy before
+assembly, and records the mode and reason rather than claiming to have
+realized the unavailable artifact lock.
+
+Fallback uses the same immutable staging, health, activation and rollback
+contract. It never bypasses a blocked package, seasoning requirement or
+governed feed, and an artifact-integrity or source-provenance failure is not
+an ordinary availability fallback. If no permitted dependency closure can
+be assembled, the outcome is explicit and the current generation survives.
+
+### optional-client-artifacts-complete-promotion
+
+Artifact consumption is optional for install and update: an authorized,
+governed local-source build does not depend on successful artifact
+discovery, matching or publication. Availability evidence required to
+complete a promotion is not an additional client installation gate.
+
+The promotion flow produces, verifies and establishes availability of the
+exact candidate's artifacts before merging its PR or declaring completion.
+Build, signing or publication failure leaves promotion incomplete and its
+candidate unmerged, with visible, idempotent retry rather than a
+source-only success claim. Source validation, signer/source binding, digest
+verification and immutable-publication requirements remain strict.
+Source promotion, asset publication and runtime activation have distinct
+outcomes; success in one never impersonates the others.
 
 ### complete-or-rejected-generations
 
@@ -110,10 +155,11 @@ installation configuration and mounted state.
 
 ### deferred-not-degraded
 
-An unavailable approved source, a lagging governed feed, or a missing
-artifact produces an explicit deferred or refused outcome and leaves the last
-healthy generation in service. It never produces a half-assembled runtime, an
-unverified substitute, or a silently downgraded capability.
+When neither the artifact path nor an authorized governed-source fallback can
+satisfy admission, the outcome is explicitly deferred or refused and the last
+healthy generation remains in service. An unavailable source or lagging feed
+never produces a half-assembled runtime, an unverified substitute, a policy
+bypass or a silently downgraded capability.
 
 ### no-parallel-provenance
 
@@ -140,8 +186,9 @@ silently.
 
 - **Not the builder or the promotion pipeline.** Building, promoting, and
   attesting artifacts belong to the release pipeline
-  ([`docs/pipelines.md`](../../../docs/pipelines.md)). This vision covers
-  their consumption only.
+  ([`docs/pipelines.md`](../../../docs/pipelines.md)). This vision owns
+  consumer admission and the cross-boundary pre-merge availability
+  requirement, not the pipeline mechanism that satisfies it.
 - **Not release selection.** Which release, role closure, or optional
   environment a host should run is decided by the release authority
   ([plugin-services *one-authority-per-lifecycle-decision*](../README.md#one-authority-per-lifecycle-decision)).

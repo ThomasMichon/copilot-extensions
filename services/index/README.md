@@ -1,5 +1,135 @@
 # agent-index-service
 
+For independently owned fresh state, the explicit host option
+`store: {layout: source-aware-v1}` enables the core's
+[cold source-aware layout](../../plugins/agent-index/docs/source-aware-store.md).
+This is not legacy store adoption, data transfer or deployment/migration proof.
+
+## Generic offline Linux image context
+
+`agent-index-service container prepare` creates a runnable, explicit Docker build
+context. It does not build, pull, publish, enroll, activate or deploy anything:
+
+```console
+agent-index-service container prepare --descriptor <absolute-release.json> --expected-source-commit <trusted-40-character-revision> --third-party-lock <absolute-platform-lock.txt> --third-party-wheels <absolute-wheel-directory> --output <absent-absolute-context-directory> --base-image <approved-python-reference@sha256:digest> --python-version <exact-3.x.y> --platform <linux/amd64-or-linux/arm64> --glibc-version <exact-2.x>
+```
+
+The caller supplies the approved Python base **by immutable digest**, its exact
+CPython/glibc versions and platform, the independently trusted release revision,
+and a complete platform-specific third-party wheel closure acquired through the
+operator's governed feed. No registry, package version or image is selected by
+the preparer. The base must already provide `python`, stdlib venv and pip.
+It must also provide the operating-system tools required by the selected source
+connectors (for example Git for an actual Git-corpus ingestion proof). This
+adapter does not install OS tools or silently replace a deficient approved base.
+The build checks the asserted target against the base before installing wheels.
+Only glibc Linux CPython images are admitted by this initial adapter.
+Library callers use `container.ContainerTarget(python_version, platform,
+glibc_version)` and `container.prepare_container_context(descriptor_path, *,
+expected_source_commit, third_party_lock, third_party_wheels, output, base_image,
+target, uid=10001, gid=10001)`. The returned schema-1
+`agent-index-service.container-context` result names the context, selected
+revision/service version, contract digest, build argv and `prepared` versus
+`already_prepared` status.
+
+The first-party descriptor must name exactly `agent-index-service`, `agent-index`,
+`agent-zdd`, `agent-procutil` and `agent-dropin-registry`. The native third-party
+lock uses the same exact-pin/SHA-256 contract as candidate staging. Preparation
+verifies wheel RECORDs, hashes, metadata, Python/platform tags and the complete
+dependency closure, including `agent-index-service[native]` and core
+`agent-index[store,server]`. Missing dependencies, direct URLs, incompatible
+extras/versions/tags, duplicate artifacts and unpinned bases are errors.
+Native third-party members have a bounded 256 MiB allowance for compiled store
+libraries; first-party release members retain their 64 MiB limit. Both profiles
+retain the 256 MiB total decompression, 512 MiB archive, 10,000-entry and 1 MiB
+metadata/RECORD limits. Native admission does not relax hashes or RECORD checks.
+Third-party lock environment markers are intentionally not supported: provide a
+resolved lock for the explicit target. Third-party source builds are not allowed.
+Kernel-dependent requirement markers need separate deployment admission and are
+rejected rather than evaluated against the preparation host or guessed values.
+The service image rejects the embedding-engine/torch/sentence-transformers
+packages; a real warm engine remains an independently provisioned companion.
+
+The context is an immutable snapshot of selected wheels, normalized release/
+install contracts, a stdlib pre-install byte-verification adapter, a native
+probe, Dockerfile and allowlist `.dockerignore`. It never uses `COPY . .`,
+copies sibling configs/credentials or imports code from wheels during
+preparation. Original lock comments and host paths are not embedded. Repeating
+preparation with identical inputs verifies and preserves the context; conflicting
+or unrelated existing output is refused. Keep the prepared context immutable
+between preparation and build. Hash integrity does not establish source
+authenticity or replace the trusted controller's release-acquisition decision.
+
+Run the returned `build_argv` through the installed trusted SDK, not bare
+`docker build` against a mutable directory:
+
+```console
+agent-index-service container build --context <prepared-directory> --expected-contract-sha256 <independently-pinned-context-digest> --docker <absolute-docker-executable> --docker-context <selected-local-context>
+```
+
+The digest must come from the trusted preparation/controller result, never be
+recomputed from possibly modified input immediately before building. It binds
+**all** prepared files, including Dockerfile and `.dockerignore`. The external
+builder validates and captures exact bytes in a private bounded tar before any
+Docker subprocess starts; Docker consumes that snapshot on stdin, never the
+original directory. The recipe takes only the non-secret `CONTEXT_SHA256` build
+argument, avoiding a circular contract/recipe hash. Limits are 1 MiB manifest,
+4,096 files, 512 MiB per file and 1 GiB aggregate tar. Same-content preparation
+replay remains read-only; partial preparation cleanup is ownership-fenced and
+reports the original failure plus cleanup uncertainty rather than deleting an
+unproven output.
+
+Library callers may use `verified_context_snapshot` or
+`build_container_context(context, *, expected_contract_sha256, docker=None,
+docker_context="default", docker_config=None, timeout_seconds=600.0)`.
+An explicit Docker executable is preferred; otherwise the SDK resolves it once.
+An explicitly selected Docker client config directory is never copied into the
+tar or image. With no config override the client uses a fresh empty config
+directory and the named default daemon context, not ambient host credentials.
+The cached approved base must match the Linux target architecture. The SDK
+does not accept arbitrary Docker flags, downstream URLs or headers.
+
+The generated multi-stage build also verifies the context contract/actual bytes
+before installation, installs all locked wheels with `--no-index`,
+`--require-hashes`, `--only-binary` and `--no-deps`, and probes native imports,
+versions, extras/dependency closure and the explicit-source compatibility seam.
+All build RUN networking is disabled. There are no credential-bearing build
+arguments, online fallback, package-manager config mounts or engine/model
+downloads. Only the final-path venv and empty owned state directory reach the
+runtime stage; build-wheel caches do not. The image runs numeric non-root
+UID/GID 10001 by default (explicit positive overrides are supported).
+Docker clients are executed with canonical headless/owned process containment.
+If a build fails, times out or is interrupted, terminating the client cannot
+prove the external Docker daemon cancelled its work: the SDK reports an
+**uncertain daemon outcome**, never a success or automatic cleanup claim.
+Confirmed successful builds return the daemon-produced immutable image ID.
+
+Runtime entry point is direct exec:
+`/opt/agent-index/bin/python -I -m agent_index_service serve --config /etc/agent-index/host.yaml`.
+Supply that config as a **read-only runtime mount**, not an image layer. Mount a
+dedicated writable local state volume at `/var/lib/agent-index` with the selected
+UID/GID ownership, and configure home/data/routing within it. Supply separate,
+explicit corpus checkout paths. The selected numeric UID/GID must be able to
+read config/source files and traverse their mounted directories; read-only
+mounting does not override filesystem permissions. Keep any private host-side
+parent directory private while granting access only to the intentionally mounted
+input. Git connectors label indexed content by repository identity, including a
+separate commit-source suffix; query filters use those indexed identities, not an
+arbitrary configuration alias. Never mount the native host's live SQLite or
+LanceDB into another writer. The image has no `EXPOSE`, public port or wildcard
+listener; the API and external warm engine remain on loopback in the same
+private execution namespace. A real engine's durable model cache belongs on an
+independently managed volume. The image does not start/provision that engine.
+
+Validate real queued synthetic ingestion, a mock-engine query, durable state
+after restart and graceful termination. The test-only mock
+must support both ingestion batch and query embedding without any lifecycle
+or model-loading request. Seeded-store queries alone are not ingestion proof.
+Gateway ingress, controller-issued source-token refresh, production data
+migration and schema-safe rollback remain separate reviewed slices. The chosen
+future target is the **new fleet-manager Gateway**; this adapter does not depend
+on it or alter an older adopter Gateway.
+
 A separately installable Python API/master-controller program, **not a Copilot
 plugin and not `agent-index-engine`**. This first slice composes the existing
 `agent_index` library's hosted API, native persistence, query coordination,
@@ -292,6 +422,9 @@ adopts a live **synthetic** worker PID across cutover. An assertion-failure test
 verifies owned-tree teardown; Windows tests use direct windowless worker identity
 and kill-on-close Job containment rather than trusting venv supervisor PIDs.
 The wheel test requires the declared `test` extra's setuptools/wheel dependencies.
+Distribution tests use short, unique build roots inside the contained runner's
+sandbox to leave room for nested wheel/sdist paths on Windows. Metadata and
+missing/conflicting runtime-resource checks remain unchanged.
 Actual source-ingestion/embedding workers, first-touch installation, updater-Job
 breakaway and release-slot lifecycle remain separate validation requirements;
 synthetic-worker adoption does not prove all of those contracts.

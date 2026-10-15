@@ -120,7 +120,14 @@ check into recurring self-SSH process churn.
 - production plugin and canonical shared-library code may not reference
   `CREATE_NEW_CONSOLE`;
 - a genuine interactive or low-level exception requires an inline
-  `# headless-guard: allow <reason>` marker.
+  `# headless-guard: allow <reason>` marker;
+- in an `agent-procutil` adopter, a raw `subprocess.Popen` that detaches with
+  `detached_kwargs` / `windowless_daemon_kwargs` (in the call or its enclosing
+  function) must instead launch through `spawn_daemon`. A detached child that
+  is not a resident daemon carries `# daemon-spawn: allow <reason>` on its
+  `Popen` line. `tools/daemon-spawn.allow` is a shrink-only, reasoned baseline
+  of the sites not yet migrated: each entry covers one launch, and a stale
+  entry fails the check.
 
 `agent_procutil.spawn_daemon` is an approved headless primitive: a launch
 through it is windowless by construction. It approves only its own call; a raw

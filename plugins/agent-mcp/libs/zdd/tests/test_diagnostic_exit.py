@@ -11,6 +11,41 @@ import pytest
 from zdd import diagnostic_exit, diagnostics
 
 
+@pytest.mark.parametrize("events,confirmed", [([], False), ([(4096, 1)], True)])
+def test_posix_wait_supports_native_descriptors_above_fd_setsize(monkeypatch, events, confirmed):
+    calls = []
+
+    class Poll:
+        def register(self, fd, flags):
+            calls.append(("register", fd, flags))
+
+        def poll(self, milliseconds):
+            calls.append(("poll", milliseconds))
+            return events
+
+    monkeypatch.setattr(diagnostic_exit.select, "poll", Poll, raising=False)
+    for name, value in [("POLLIN", 1), ("POLLERR", 8), ("POLLHUP", 16), ("POLLNVAL", 32)]:
+        monkeypatch.setattr(diagnostic_exit.select, name, value, raising=False)
+    assert diagnostic_exit.wait_posix(4096, 0.05) is confirmed
+    assert calls == [("register", 4096, 1), ("poll", 50)]
+
+
+@pytest.mark.parametrize("flags", [8, 32])
+def test_posix_wait_error_is_not_exit_evidence(monkeypatch, flags):
+    class Poll:
+        def register(self, *_):
+            pass
+
+        def poll(self, _):
+            return [(4096, flags)]
+
+    monkeypatch.setattr(diagnostic_exit.select, "poll", Poll, raising=False)
+    for name, value in [("POLLIN", 1), ("POLLERR", 8), ("POLLHUP", 16), ("POLLNVAL", 32)]:
+        monkeypatch.setattr(diagnostic_exit.select, name, value, raising=False)
+    with pytest.raises(OSError, match="native"):
+        diagnostic_exit.wait_posix(4096, 0)
+
+
 @pytest.mark.parametrize("timeout", [-1, 31, float("inf"), float("nan"), True, "1"])
 def test_invalid_exit_timeout_refuses_before_signaling(monkeypatch, timeout):
     monkeypatch.setattr(

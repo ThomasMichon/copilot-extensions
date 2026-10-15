@@ -959,7 +959,7 @@ def test_manager_acts_on_base_repo_production_picker_decision(monkeypatch):
 
 def test_run_launch_executes_remote_plan(monkeypatch):
     plan = type("Plan", (), {"action": "remote", "exit_code": 0})()
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     calls = []
     from worktree_manager import launcher
 
@@ -980,7 +980,7 @@ def test_run_launch_rejects_crafted_remote_ahp_before_launch(
     from worktree_manager import engine_client, launcher
 
     plan = type("Plan", (), {"action": "remote", "exit_code": 0})()
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(
         engine_client,
         "execution_leg_get",
@@ -1027,7 +1027,7 @@ def test_run_launch_selects_ahp_after_plan_resolution(monkeypatch, tmp_path):
     )()
     hosted = object()
     attachment = object()
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(
         engine_client,
         "execution_leg_get",
@@ -1086,7 +1086,7 @@ def test_run_launch_selects_ahp_without_mux_when_both_requested(
     )()
     hosted = object()
     attachment = object()
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(
         engine_client,
         "execution_leg_get",
@@ -1140,7 +1140,7 @@ def test_run_launch_delegates_to_relocated_script_on_windows(monkeypatch, tmp_pa
     )()
     script = tmp_path / "launch-session.ps1"
     script.write_text("# stub\n", encoding="utf-8")
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
     monkeypatch.setattr(
         ahp_provider,
@@ -1207,7 +1207,7 @@ def test_run_launch_relocated_script_uses_base_flag_for_anchor_mode(
     )()
     script = tmp_path / "launch-session.ps1"
     script.write_text("# stub\n", encoding="utf-8")
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
     monkeypatch.setattr(
         ahp_provider,
@@ -1293,7 +1293,7 @@ def test_run_launch_relocated_script_forwards_staged_identity_not_prompt_text(
     )()
     script = tmp_path / "launch-session.ps1"
     script.write_text("# stub\n", encoding="utf-8")
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
     monkeypatch.setattr(
         engine_client,
@@ -1365,7 +1365,7 @@ def test_run_launch_relocated_script_bare_resume_never_forwards_seed(
     )()
     script = tmp_path / "launch-session.ps1"
     script.write_text("# stub\n", encoding="utf-8")
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
     monkeypatch.setattr(
         engine_client,
@@ -1429,7 +1429,7 @@ def test_run_launch_relocated_script_sets_no_mux_env(monkeypatch, tmp_path):
     )()
     script = tmp_path / "launch-session.ps1"
     script.write_text("# stub\n", encoding="utf-8")
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
     monkeypatch.setattr(
         engine_client,
@@ -1480,7 +1480,7 @@ def test_run_launch_relocated_script_posix_execs_bash(monkeypatch, tmp_path):
     )()
     script = tmp_path / "launch-session.sh"
     script.write_text("# stub\n", encoding="utf-8")
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
     monkeypatch.setattr(
         engine_client,
@@ -1567,7 +1567,7 @@ class TestRunLaunchNewWindow:
 
         script = tmp_path / "launch-session.ps1"
         script.write_text("# stub\n", encoding="utf-8")
-        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (self._plan(), 0))
         monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
         monkeypatch.setattr(
             ahp_provider, "ensure_session",
@@ -1607,7 +1607,7 @@ class TestRunLaunchNewWindow:
 
         script = tmp_path / "launch-session.ps1"
         script.write_text("# stub\n", encoding="utf-8")
-        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (self._plan(), 0))
         monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
         monkeypatch.setattr(
             ahp_provider, "ensure_session",
@@ -1652,7 +1652,7 @@ class TestRunLaunchNewWindow:
 
         script = tmp_path / "launch-session.ps1"
         script.write_text("# stub\n", encoding="utf-8")
-        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (self._plan(), 0))
         monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
         monkeypatch.setattr(
             ahp_provider, "ensure_session",
@@ -1678,19 +1678,19 @@ class TestRunLaunchNewWindow:
 
     def test_new_window_rejects_remote_plan(self, monkeypatch):
         plan = self._plan(action="remote")
-        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
         rc = entrypoint._run_launch(self._request(machine="dev6", environment="prod"))
         assert rc == 1
 
     def test_new_window_rejects_ahp(self, monkeypatch):
-        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (self._plan(), 0))
         rc = entrypoint._run_launch(self._request(ahp=True))
         assert rc == 1
 
     def test_new_window_rejects_missing_relocated_script(self, monkeypatch):
         from worktree_manager import ahp_provider
 
-        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (self._plan(), 0))
         monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: None)
         monkeypatch.setattr(
             ahp_provider, "ensure_session",
@@ -1712,7 +1712,7 @@ def test_run_launch_default_never_calls_ahp(monkeypatch):
             "worktree_id": "demo-1234",
         },
     )()
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
     monkeypatch.setattr(
         ahp_provider,
         "ensure_session",

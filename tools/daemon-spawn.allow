@@ -1,0 +1,35 @@
+# Shrink-only baseline for tools/check-headless-launch.py rule 5: a raw
+# subprocess.Popen that detaches with detached_kwargs()/windowless_daemon_kwargs()
+# instead of launching through agent_procutil.spawn_daemon().
+#
+# One "relative/path.py::qualified.function  reason" entry per line; the reason
+# is required. Each entry covers exactly one launch, so a function with two
+# hand-rolled launches is listed twice and a third launch added there is still
+# reported. An entry that no longer matches a launch is reported as stale, so
+# remove it when the site migrates. New code should not
+# add entries: launch a resident daemon with spawn_daemon(), and mark a detached
+# child that is not a resident daemon with an inline
+# "# daemon-spawn: allow <why>" comment on its Popen line.
+
+# Detached children that are not resident daemons.
+plugins/agent-containers/src/agent_containers/docker_proxy.py::ensure_broker  not a plugin daemon: a per-call Docker relay broker owned by its caller
+plugins/agent-dispatch/src/agent_dispatch/companion.py::_run_captured  one-shot captured helper process, not a daemon
+plugins/agent-dispatch/src/agent_dispatch/execution_cli.py::_spawn_detached_waiter  bounded execution waiter that exits with its task, not a daemon
+plugins/agent-index/src/agent_index/indexing/runner.py::TaskRunner._spawn_worker  per-task index worker with its own rotated worker.log, not a daemon
+plugins/agent-worktrees/src/agent_worktrees/__main__.py::_start_provisioning_if_needed  one-shot provisioning child, not a daemon
+plugins/agent-worktrees/src/agent_worktrees/activity.py::_dispatch_background_prune  one-shot background prune, not a daemon
+plugins/agent-worktrees/src/agent_worktrees/local_cache_worker.py::queue  one-shot cache refresh worker, not a daemon
+plugins/agent-worktrees/src/agent_worktrees/sessions.py::headless_new_session  user-requested headless Copilot session, not a plugin daemon
+plugins/agent-worktrees/src/agent_worktrees/status_updater_cli.py::_spawn_status_updater  per-session status updater that exits with its session, not a resident daemon
+
+# Resident daemons not yet on spawn_daemon (migrate, then delete the entry).
+plugins/agent-bridge/src/agent_bridge/service_process_cli.py::_spawn_detached_argv  resident bridge service; its WMI-broker fallback must move into the shared launch first
+plugins/agent-bridge/src/agent_bridge/service_process_cli.py::_spawn_detached_argv  same service: the contained retry after breakaway and the WMI broker both fail
+plugins/agent-codespaces/src/agent_codespaces/connection_owner.py::ensure_owner_running  resident connection owner; migration pending
+plugins/agent-dispatch/src/agent_dispatch/__main__.py::_spawn_coordinator_process  resident coordinator; spawn_daemon(console_children=True) migration pending
+plugins/agent-dispatch/src/agent_dispatch/coordinator_cli.py::_cmd_cutover.spawn_passive  passive coordinator generation; spawn_daemon(console_children=True) migration pending
+plugins/agent-dispatch/src/agent_dispatch/coordinator_loops.py::_spawn_self_deploy  self-deploy successor; spawn_daemon(console_children=True) migration pending
+plugins/agent-dispatch/src/agent_dispatch/supervise_cli.py::_spawn_supervisor_daemon_detached  resident supervisor; spawn_daemon(console_children=True) migration pending
+plugins/agent-dispatch/src/agent_dispatch/supervisor_registration.py::_spawn_self_update_successor  supervisor successor; spawn_daemon(console_children=True) migration pending
+plugins/agent-index/src/agent_index/engine/daemon.py::_spawn  persistent engine; its uvicorn access log needs a level decision before stdout goes to an append-only log
+plugins/agent-index/src/agent_index/engine/lifecycle.py::_spawn_engine  subprocess-mode engine; same access-log decision as engine/daemon.py

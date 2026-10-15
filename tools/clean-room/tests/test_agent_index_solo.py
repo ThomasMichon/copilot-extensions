@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 from pathlib import Path
 import venv
 
@@ -14,6 +15,27 @@ SPEC = importlib.util.spec_from_file_location("index_solo_witness", SCENARIO / "
 assert SPEC and SPEC.loader
 WITNESS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WITNESS)
+
+
+@pytest.mark.parametrize("returncode", [0, 2])
+def test_managed_host_mcp_witness_requires_missing_extra_refusal(monkeypatch, returncode):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0 if len(calls) == 1 else returncode,
+            "", "explicit [stdio-mcp] extra required"
+        )
+
+    monkeypatch.setattr(WITNESS.subprocess, "run", run)
+    if returncode == 2:
+        WITNESS.main(["mcp", "fixture-python"])
+    else:
+        with pytest.raises(AssertionError):
+            WITNESS.main(["mcp", "fixture-python"])
+    assert "find_spec('mcp') is None" in calls[0][-1]
+    assert calls[1] == ["fixture-python", "-I", "-m", "agent_index", "mcp"]
 
 
 @pytest.mark.parametrize("prefix", ["", "  $ /payload/bin/agent-index status\n"])

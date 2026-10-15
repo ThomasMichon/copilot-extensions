@@ -325,10 +325,22 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
 
 
 def _test_file_groups(
-    name: str, max_files: int, *, filtered: bool = False
+    name: str, max_files: int, *, filtered: bool = False,
+    test_files: list[str] | None = None,
 ) -> list[list[Path]]:
     tests = _plugin_dir(name) / "tests"
     files = sorted(tests.rglob("test_*.py"))
+    if test_files:
+        available = {path.relative_to(tests): path for path in files}
+        requested = {Path(path) for path in test_files}
+        for path in requested:
+            candidate = available.get(path)
+            if (
+                candidate is None or not candidate.is_file()
+                or not candidate.resolve().is_relative_to(tests.resolve())
+            ):
+                raise ValueError(f"test file must name an owned file beneath tests: {path}")
+        files = [path for path in files if path.relative_to(tests) in requested]
     if filtered and files:
         return [files]
     return partition(files, max_files) or [[]]
@@ -349,6 +361,7 @@ def run_plugin(
     prepare_only: bool = False,
     allow_explicit_tiers: bool = False,
     allow_host_state: bool = False,
+    test_files: list[str] | None = None,
 ) -> int:
     if not _has_suite(name):
         print(f"[SKIP] {name}: no test suite")
@@ -366,6 +379,9 @@ def run_plugin(
         return 0
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
+    groups = _test_file_groups(
+        name, max_files_per_subsuite, filtered=bool(guards or kexpr), test_files=test_files,
+    )
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
@@ -392,11 +408,6 @@ def run_plugin(
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
-        groups = _test_file_groups(
-            name,
-            max_files_per_subsuite,
-            filtered=bool(guards or kexpr),
-        )
         plugin_started = time.monotonic()
         for index, group in enumerate(groups, start=1):
             remaining = plugin_timeout - (time.monotonic() - plugin_started)
@@ -467,6 +478,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", default="origin/main", help="diff base for --changed")
     ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
+    ap.add_argument("--test-file", action="append", default=[], metavar="PATH",
+                    help="collect only this file relative to the plugin tests directory (repeatable)")
     ap.add_argument("--guards", action="store_true",
                     help="run only @pytest.mark.guard tests (fast structural/contract checks)")
     ap.add_argument("--collect-only", dest="collect_only", action="store_true",
@@ -567,6 +580,8 @@ def main(argv: list[str] | None = None) -> int:
     if not targets:
         print("No plugin suites to run.")
         return 0
+    if args.test_file and (len(targets) != 1 or args.prepare_only):
+        ap.error("--test-file requires exactly one plugin and cannot be used with --prepare-only")
 
     uv = shutil.which("uv")
     if not uv:
@@ -632,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
                     prepare_only=args.prepare_only,
                     allow_explicit_tiers=args.allow_explicit_tiers,
                     allow_host_state=args.allow_host_state,
+                    test_files=args.test_file,
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)

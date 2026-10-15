@@ -18,13 +18,21 @@ allowance.
 Configuration is inert JSON. The plugin does not source configuration or execute
 commands from it. [Bounded external readers](docs/external-readers.md) require
 an explicit invocation-owned command grant, separate from configuration.
-The plugin does not itself call a provider network service, store a
-longitudinal ledger, qualify models, or alter routing decisions. Provider
-refresh adapters, concise session guidance, and routing composition are later slices.
+Automatic startup does not refresh providers. The plugin does not store a
+longitudinal ledger, qualify models, or alter routing decisions. Status includes
+optional [short-lived routing advice](docs/configuration.md#optional-routing-advice)
+for independent consumers. The opt-in
+[personal GitHub report adapter](docs/github-usage.md) reads usage through a
+host-owned authenticated transport; it does not infer current entitlement,
+reset, or provider freshness from billing reports.
 
-The current `sessionStart` hook is output-free: it only performs bounded,
-restart-safe runtime bootstrap and emits `{}`. The payload retains its command
-catalog emitter, but does not register a competing startup context producer.
+The `sessionStart` hooks are output-free: runtime bootstrap and a bounded
+[exact-session posture cue](docs/session-guidance.md) each emit only `{}`.
+The cue reads inert configuration with the same pure posture, never authorizes
+readers or refreshes a provider, and uses a reviewed pointer plus a separate
+static advisory boundary. It requires an available Python 3.10+ interpreter
+without provisioning one. The payload retains its command catalog emitter,
+but does not register a competing startup context producer.
 Direct plugin-owned startup guidance remains a future seam after native host
 composition is proven at the supported Copilot CLI version floor.
 
@@ -39,5 +47,5 @@ one provider's observation, units, business state, and raw reset separately.
 Qualified incumbent readings reuse posture arithmetic for sustainable pace.
 Compatible monthly usage adds a labeled
 [cycle-average projection and advice-only pacing](docs/provider-pacing.md).
-Provider refresh adapters, session-start injection, and routing integration
-remain later slices.
+Provider-observed entitlement acquisition and requesting-account proof remain
+later slices.

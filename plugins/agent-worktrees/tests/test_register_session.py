@@ -1167,11 +1167,11 @@ class TestDeregisterSessionStdin:
             tmp_tracking_dir / "wt-end.yaml"
         ).session_entry("session-end").ended_at
 
+    @pytest.mark.guard
     def test_exact_session_fallback_scans_record_names_deterministically(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch, monkeypatch_config
     ):
-        tracking_dir = tmp_path / "worktrees"
-        tracking_dir.mkdir()
+        tracking_dir = tmp_tracking_dir
         _save_record(tracking_dir, "z-record", "/tmp/z")
         _save_record(tracking_dir, "a-record", "/tmp/a")
         m.cfg.set_active_project("test-project")

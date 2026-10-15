@@ -6,7 +6,6 @@ import argparse
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
-import os
 from pathlib import Path
 import stat
 import sys
@@ -14,16 +13,13 @@ from typing import Any
 
 from . import __version__
 from .external_reader import CommandReader, acquire_config
-from .models import ModelError, load_json, parse_config, parse_instant
+from .models import ModelError, default_config_path, load_json, parse_config, parse_instant
 from .posture import build_posture, unavailable_posture
 from .quota import normalize_quota
 
 
 def _default_config() -> Path:
-    configured = os.environ.get("BUDGET_GUIDANCE_CONFIG")
-    if configured:
-        return Path(configured).expanduser()
-    return Path.home() / ".budget-guidance" / "config.json"
+    return default_config_path()
 
 
 def _render_human(posture: dict[str, Any]) -> str:

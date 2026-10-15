@@ -38,7 +38,7 @@ class RegistryState:
                     out.append(entry)
             return copy.deepcopy(out)
 
-    def restore_state(self, entries: list[dict]) -> int:
+    def restore_state(self, entries: list[dict], *, strict: bool = False) -> int:
         from .watch_registry import Subscriber, WatchKey
 
         restored = 0
@@ -51,6 +51,18 @@ class RegistryState:
                     or "registration_id" in entry or "deadline_at" in entry
                 )
                 try:
+                    if strict and (
+                        not isinstance(entry, dict)
+                        or any(
+                            not isinstance(entry.get(field), str) or not entry[field].strip()
+                            for field in ("repo", "subscriber_id")
+                        )
+                        or type(entry.get("number")) is not int or entry["number"] <= 0
+                        or not isinstance(entry.get("until"), list) or not entry["until"]
+                        or any(value not in ALL_TRANSITIONS for value in entry["until"])
+                        or not isinstance(entry.get("notify", {}), dict)
+                    ):
+                        raise ValueError("invalid registration")
                     if opted_in and entry.get("notification_protocol") != ACKNOWLEDGED_NOTIFICATIONS:
                         raise ValueError("unsupported notification protocol")
                     if opted_in and any(
@@ -60,7 +72,7 @@ class RegistryState:
                         raise ValueError("invalid acknowledged identity")
                     key = WatchKey(repo=str(entry["repo"]), number=int(entry["number"]))
                     baseline = entry.get("baseline")
-                    if opted_in and baseline is not None:
+                    if (opted_in or strict) and baseline is not None:
                         if (
                             not isinstance(baseline, dict)
                             or set(baseline) != {
@@ -79,6 +91,8 @@ class RegistryState:
                         baseline=Baseline(**baseline) if baseline is not None else None,
                         acknowledged=opted_in,
                     )
+                    if strict:
+                        sub.notify = validate_notify(sub.notify, opted_in)
                     if opted_in:
                         if "deadline_at" not in entry:
                             raise ValueError("missing acknowledged deadline")
@@ -104,20 +118,22 @@ class RegistryState:
                         deadline_at = positive_seconds(entry["deadline_at"])
                         remaining = max(0.0, deadline_at - time.time())
                     if remaining is not None:
-                        if opted_in and remaining != 0:
+                        if (opted_in or strict) and remaining != 0:
                             positive_seconds(remaining)
-                        elif opted_in and (type(remaining) not in (int, float)):
+                        elif (opted_in or strict) and (type(remaining) not in (int, float)):
                             raise ValueError("invalid timeout")
                         sub.deadline = time.monotonic() + float(remaining)
                     bucket = self._subscribers.setdefault(key, {})
                     if sub.subscriber_id in bucket and (
-                        opted_in or bucket[sub.subscriber_id].acknowledged
+                        opted_in or strict or bucket[sub.subscriber_id].acknowledged
                     ):
                         durable_collision = True
                         raise ValueError("duplicate registration")
                     bucket[sub.subscriber_id] = sub
                     restored += 1
                 except (KeyError, TypeError, ValueError, OverflowError):
+                    if strict:
+                        raise ValueError("invalid persisted watch subscription") from None
                     if opted_in or durable_collision:
                         raise ValueError("invalid persisted acknowledged subscription") from None
             return restored

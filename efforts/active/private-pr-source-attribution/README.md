@@ -31,16 +31,17 @@ only protection of each machine's local copy is machine-bound.
 
 ## Context
 
-The root codename layer landed in #5458 and the encrypted identity layer in
-#5578. Encryption currently records the immediate product worktree, not the
-originating control worktree. Portable file-key custody exists but requires
-manual provisioning. Native Windows ARM64 omits encryption when its optional
-platform dependency is unavailable.
+The root codename layer landed in #5458 and encrypted identity in #5578.
+Originating control identity subsequently landed in #6080, native Windows
+local cache protection in #6108, native portable token encryption in #6115,
+and common vault-key sourcing in #6127. Provider-neutral preparation landed
+in #6281 and repository enforcement in #6356.
 
-The vault has a synced-database entry surface and a separate opt-in persistent
-cache. Its Windows KEKs are machine-bound: they must not become the portable
-PR identity key. Existing cache encryption also depends on a package that is
-not normally available on native Windows ARM64.
+The vault's opt-in persistent cache protects a local copy of the common owner
+key. Windows protection is machine-bound; the identity key and AWI1 tokens
+remain portable. Explicit initial population is distinct from routine
+locked-vault reads. A dev merge alone does not prove main deployment,
+required-rule activation, or synchronized fleet adoption.
 
 ## Request
 
@@ -97,7 +98,7 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
   machine key generation.
 - [x] Do not use machine-bound KEKs as the shared identity key. Machine-bound
   protection wraps only the local cached copy of the common vault key.
-- [ ] Serve routine PR publication and lookup from a protected local cached key
+- [x] Serve routine PR publication and lookup from a protected local cached key
   without unlocking the vault after successful initial population.
 - [x] Missing or invalid cache must require explicit provisioning/unlock;
   never create a divergent replacement key or fall back to plaintext storage.
@@ -119,28 +120,35 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
 
 ### Phase 5 — Required dev PR source metadata
 
-- [ ] Review and implement the repository-specific required metadata gate,
+- [x] Review and implement the repository-specific required metadata gate,
   automation origins, manual repair guidance and silent operator-only
   exception in [dev-pr-enforcement.md](dev-pr-enforcement.md) (#6295).
 
+### Phase 6 — Standardized configured-vault setup
+
+- [ ] Review and deliver the reusable local-agent setup/status/verification
+  contract in [standardized-vault-setup.md](standardized-vault-setup.md).
+  An existing configured agent-vault KeePass database is the starting point;
+  private adopter scripts and remote transport are not required.
+
 ## Validation Plan
 
-- [ ] Root identity round trips from a multi-repo ownership chain while public
+- [x] Root identity round trips from a multi-repo ownership chain while public
   marker fields contain no raw origin identifiers.
-- [ ] Cover opt-outs, malformed/cyclic ancestry, remote or missing ancestors,
+- [x] Cover opt-outs, malformed/cyclic ancestry, remote or missing ancestors,
   handoffs and record recreation; document deliberate limitations.
-- [ ] Existing encrypted tokens remain readable; wrong key or tampered data
+- [x] Existing encrypted tokens remain readable; wrong key or tampered data
   produces an explicit error without publishing plaintext or secret diagnostics.
 - [ ] Prove a synced portable key from a disposable vault/database fixture can
   decode tokens from multiple source machines on another installation identity
   without probing each source machine for a key.
-- [ ] Prove lookup with vault locked after cache population, including a
+- [x] Prove lookup with vault locked after cache population, including a
   process restart; cache miss does not prompt invisibly or fabricate success.
 - [x] Native Windows ARM64 exercises real encryption/decryption and protected
   cache reads, not only mocks or platform skips.
-- [ ] Concurrent key/cache writes, malformed cache, rotation and permissions
+- [x] Concurrent key/cache writes, malformed cache, rotation and permissions
   preserve recoverability and do not overwrite authoritative key material.
-- [ ] Exercise initial, refreshed and foreign-PR publish paths plus provider
+- [x] Exercise initial, refreshed and foreign-PR publish paths plus provider
   fallback behavior with disposable fixtures.
 - [ ] Run focused unit, real subprocess and applicable clean-room checks.
   Live synced-fleet checks use explicit authorization and disposable material;
@@ -221,3 +229,70 @@ No production secret is read or written by the planning slice.
 - Merge to `dev`, promotion to `main`, and authorized local rollout remain
   distinct states; no immediate force-update or manual projection sync is
   part of this continuation.
+
+### 2026-10-13 — Implementation and local owner-key proof
+
+- #6281 merged after review. Preparation preserves authored prose and emits
+  provider-neutral source metadata without creating a PR or requiring a
+  particular hosting provider.
+- One authoritative owner key was populated explicitly in the synced vault
+  after verified absence. Routine publication and lookup then used its
+  protected cache with the vault daemon locked, including a fresh process.
+  No divergent machine key was generated and no existing key was replaced.
+- Real native Windows ARM64 exercises proved protected-cache reads and AWI1
+  round trips for two distinct fixture source-machine identities using one
+  shared key. The persisted description of #6356 was independently fetched
+  and decoded in memory; its private immediate and originating identities
+  matched the expected ownership chain. Neither key nor raw identifiers
+  were emitted into public evidence.
+- Focused identity/source, legacy-token/cache, native protection, subprocess
+  timeout/output-bound, and provider-fallback selections passed. The latter
+  covered 17 provider-neutral fallback contracts. Actual synchronized
+  other-machine adoption remains unproved: disposable multi-identity fixtures
+  and a successful local cache are not a fleet rollout.
+- #6356 merged on 2026-10-13 after its current-head approving review and CI
+  run [38388369063](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38388369063).
+  Dev-push CI [38391631615](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38391631615)
+  subsequently passed. Main promotion, live negative/body-only repair and
+  shared-head departure evidence, no-bypass rule activation, and final
+  validation reconciliation are still completion gates.
+- Host installation is owned by the adopter's authorized maintenance lane.
+  This effort did not force-update plugins or manually synchronize projections.
+- An explicitly authorized read-only fleet inspection found no existing
+  protected-cache files or owner-key source configuration on either reachable
+  remote Windows target. Two other declared targets could not be reached
+  through their configured tunnel profiles. No remote cache was populated,
+  vault unlocked, software updated, or key created or replaced. The operator
+  selected retaining fleet deployment as an open, blocked item in this effort,
+  rather than provisioning or transferring it. Local success does not close
+  that item.
+- The first post-implementation promotion run
+  [38395806291](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38395806291)
+  failed in unrelated receiving-authority fixtures. A later run
+  [38474138013](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38474138013)
+  uncovered incomplete obligation-settlement fixtures, tracked in #6589-#6592
+  and owned by #6593. No required release gate was bypassed; the trusted source
+  validator is not yet present on main.
+
+### 2026-10-14 — Trusted deployment and mandatory dev gate
+
+- Normal promotion #6631 actually merged at
+  `f5e4e30353a076aec74781e6ef5cfe5df474e939`. The validator, refresh-budget
+  helper, public dependency lock and both trusted source workflows match the
+  reviewed #6356 blobs at that exact main commit.
+- Covering run
+  [38508930963](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38508930963)
+  subsequently failed in post-merge Python artifact publication. This does
+  not erase the verified source/workflow deployment, but neither the run nor
+  this effort claims successful artifact publication or installed fleet rollout.
+- The live missing-marker, same-head body-only repair, shared-head refusal and
+  untouched remaining-PR departure recovery all passed their stated contracts;
+  exact trusted-run evidence is recorded in the enforcement sidecar.
+- Existing active no-bypass ruleset `24152679` now additionally requires
+  `source-attribution`. Fresh readback and effective dev branch rules confirm
+  the requirement; every existing rule, check, condition, enforcement and
+  bypass field was preserved.
+- The whole effort remains Active. The operator explicitly retained actual
+  synced-fleet provisioning/adoption as blocked here, without authorizing
+  remote unlocks, cache population or replacement keys. Local and fixture
+  evidence does not resolve that remaining Plan/Validation gate.

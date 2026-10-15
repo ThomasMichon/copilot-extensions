@@ -2588,6 +2588,37 @@ def test_named_bootstrap_check_with_json_only_stdout_is_output_free(
     assert report.blocking == 0
 
 
+@pytest.mark.parametrize(("line", "output_free"), [
+    ('print(f"diagnostic: {error}", file=sys.stderr)', True),
+    ('print("diagnostic", file = sys.stderr)', True),
+    ('print("context for the model")', False),
+    ('print("x", file=sys.stdout)', False),
+    ('print("x", file=sys.stderr, end=""); print("leak")', False),
+    ('print("leak"); print("diagnostic", file=sys.stderr)', False),
+    ('print(print("leak"), file=sys.stderr)', False),
+    ('print(\n    "diagnostic",\n    file=sys.stderr,\n)', True),
+    ('emit = print\nemit("leak")', False),
+    ('print("x", file=sys.stderr, **opts)', False),
+    ('import builtins\nbuiltins.print("leak")', False),
+    ('from builtins import print as emit\nemit("leak")', False),
+    ('from builtins import *\nprint("leak", file=sys.stderr)', False),
+    ('import builtins\nemit = builtins.print\nemit("leak")', False),
+    ('import builtins\nemit = getattr(builtins, "print")\nemit("leak")', False),
+    ('emit = __builtins__["print"]\nemit("leak")', False),
+    ('print("unterminated', False),
+    ('x = 1\x00', False),
+], ids=["stderr", "stderr-spaced", "stdout", "explicit-stdout", "stderr-then-stdout",
+        "stdout-then-stderr", "nested-stdout", "multiline-stderr", "aliased-print",
+        "kwargs-destination", "attribute-print", "imported-print-alias",
+        "builtins-star-import", "attribute-alias", "getattr-alias", "subscript-alias",
+        "unparseable", "null-byte"])
+def test_python_hook_stderr_diagnostics_stay_output_free(tmp_path: Path, line, output_free):
+    # stderr never reaches model context; a stdout print may.
+    script = tmp_path / "hook.py"
+    script.write_text(f"import sys\n{line}\n", encoding="utf-8")
+    assert scan._script_has_output_free_contract(script) is output_free
+
+
 def test_session_context_accepts_standard_writer_without_declaration(
     tmp_path: Path,
 ):
@@ -2945,6 +2976,27 @@ def test_multiple_possible_outputs_block(
     )
 
 
+def test_python_output_free_contract_distinguishes_stderr_diagnostics(tmp_path):
+    script = tmp_path / "hook_client.py"
+    for statement, expected in (
+        ('print("diagnostic", file=sys.stderr)', True),
+        ('print(\n    "diagnostic",\n    file=sys.stderr,\n)', True),
+        ('diagnostic = "print( is not a call"', True),
+        ('print("context")', False),
+        ('print("context", file=sys.stdout)', False),
+        ('print("context", file=stream)', False),
+        ('builtins.print("context", file=sys.stderr)', False),
+        ('print("diagnostic", file=sys.stderr', False),
+    ):
+        indented = "\n".join("    " + line for line in statement.splitlines())
+        script.write_text(
+            'import sys\nkind = "sessionStart"\nif kind == "sessionStart":\n'
+            + indented + '\n    sys.stdout.write("{}")\n',
+            encoding="utf-8",
+        )
+        assert scan._script_has_output_free_contract(script) is expected, statement
+
+
 def test_suite_session_start_stack_is_output_free_without_authority():
     root = Path(__file__).resolve().parents[5]
     sources = []
@@ -2961,7 +3013,7 @@ def test_suite_session_start_stack_is_output_free_without_authority():
 
     inventory = scan.scan_session_context(root, sources, report)
 
-    assert inventory["disposition"] == "output-free-stack"
+    assert inventory["disposition"] == "output-free-stack", inventory
     assert report.blocking == 0
     assert all(
         entry["possible_non_empty"] == "no"

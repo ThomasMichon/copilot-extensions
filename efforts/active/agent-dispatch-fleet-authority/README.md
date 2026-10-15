@@ -5,12 +5,12 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase PRs against `dev`
 - **Created:** 2026-10-13
-- **Status:** Draft -- operator reviewed 2026-10-13: scope confirmed with one
-  addition (push notification with a long-interval poll backstop, not
-  poll-only); Phase 2 (projected relay) starts with direct scoped-token
-  calls; container/DevBox-aware fleet host selection is in scope now, not
-  deferred. **Phase 1 landed** (task-scoped capability tokens + fencing
-  guard wiring, PR pending). Proceeding to Phase 2.
+- **Status:** Active. Design merged in #6618; initial task grants merged in
+  #6630. Check-in found missing deny-by-default route authorization and
+  transactional incarnation fences; those corrections merged in #6665.
+  Phase 2 assignment push merged in #6698; restricted-worker delivery is next.
+  Direct restricted-worker calls, container placement
+  and explicit local/central authority remain the completion gate.
 - **Vision:** [`machine-fleet`](../../../visions/machine-fleet/README.md):
   `authenticated-scoped-and-revocable` (routing/control authorized per
   principal, service, operation, fleet scope, target), `one-owner-per-kind-
@@ -82,11 +82,11 @@ not a rewrite:
    (`fleet.py`) only knows SSH + `agent-worktrees`/`agent-bridge`-on-PATH
    liveness. A CDE/container or Dev Box with no SSH-reachable, pre-
    installed binstub has no existing route into fleet dispatch today.
-4. **No push/subscribe transport.** Today's only work-acquisition patterns
+4. **No subscribed assignment consumer.** Existing work-acquisition patterns
    are: spawn-locally, `FleetSpawner`-push-via-SSH-to-a-host-it-selects, or
-   satellite-polls-its-own-affinitied-work. There is no "the coordinator
-   pushes a task notification to a subscribed supervisor" channel --
-   everything is poll/heartbeat-driven. **Operator decision (2026-10-13):
+   satellite-polls-its-own-affinitied-work. The coordinator already exposes
+   SSE events with a subscription-ready barrier, but intake does not consume
+   them. **Operator decision (2026-10-13):
    build push, with the existing poll as a long-interval backstop** (not
    poll-only) -- throughput and avoiding over-polling matter. A **webhook**
    (coordinator calls back into the supervisor) is the wrong shape here: it
@@ -94,16 +94,11 @@ not a rewrite:
    inbound-listener** contract (`federation_runner.py:156-180`,
    `satellite_work_intake.py:1-24`) to grow an inbound port, contradicting
    that effort's own stated security posture. The right shape is an
-   **outbound long-poll** -- the supervisor still only ever makes outbound
-   HTTP requests, preserving the no-inbound-listener invariant -- that
-   blocks server-side until a new affinitied task appears or a bounded
-   timeout elapses, then is immediately re-issued. This mirrors an existing
-   architectural idiom already in this codebase: `queue_run_waiters.py`'s
-   durable waiter-row + wake-on-commit pattern (via
-   `queue_notifications.QueueNotificationMixin`, already used for detached-
-   run resume) -- a new "assignment waiter" is the same idiom applied to "a
-   queued task matching my affinity appeared" instead of "task X reached a
-   terminal state." See Phase 2.
+   **outbound SSE subscription** to the existing event bus. The consumer
+   reconciles the authoritative queue after each ready frame and relevant
+   notification; a slower periodic read recovers non-replayed event gaps.
+   This preserves the no-inbound-listener invariant without another durable
+   assignment waiter or claim transport. See Phase 2.
 5. **"Centralized ... with per-machine supervisors subscribed"** reads most
    naturally as a **deployment/configuration choice**, not new code: point
    every machine's `AGENT_DISPATCH_SHARED_URL` at one `services/dispatch`
@@ -208,43 +203,28 @@ inventing new durable state.
   passed) to confirm no regression to the unchanged full-bearer path.
 
 ### Phase 2 -- Push assignment notification with poll backstop
-Operator decision: try push for throughput, keep poll as a long-interval
-backstop (not poll-only). Builds on the `queue_run_waiters.py` durable-
-waiter + wake-on-commit idiom already in this codebase (used today for
-detached-run resume), applied to a new predicate.
+Operator decision: push-first delivery with slower polling as a correctness
+backstop. Reuse the coordinator's existing `/events`, `EventBus`, and
+subscription-ready frame; no additional long-poll endpoint is needed.
 
-- [ ] Add an **assignment waiter**: a new coordinator endpoint (e.g.
-  `GET /tasks/await-assignment`) that long-polls -- blocks server-side,
-  bounded by a request timeout (e.g. 30-60s), until a `queued` task
-  matching the caller's affinity (`target_machine`, satellite/peer
-  identity) appears, then returns it immediately; on timeout it returns an
-  empty result and the caller re-issues. This is **outbound-only from the
-  supervisor's perspective** -- it never opens an inbound listener on the
-  satellite/peer, preserving the existing no-inbound-listener contract
-  (`federation_runner.py`'s satellite gate) a webhook would have broken.
-- [ ] Wire the wake side through the existing
-  `queue_notifications.QueueNotificationMixin` idiom: a new queue-commit
-  notifier fires when a task is enqueued/reassigned with a `target_machine`
-  affinity, releasing any blocked `await-assignment` call(s) matching that
-  affinity (mirroring how `run_waiters` already wakes on commit for a
-  different predicate).
-- [ ] Update `SatelliteWorkIntake`/the ordinary peer work-intake loop to
-  call `await-assignment` as its primary signal, falling back to today's
-  periodic poll at a **longer** interval than today's default as a
-  backstop -- covers connection drops, coordinator restarts, and anything
-  the long-poll itself misses. Keep the existing poll path's code
-  unchanged (same affinity read, `satellite_work_intake.py:195-225`) --
-  only the trigger cadence/source changes.
-- [ ] Decide bounded concurrency/fairness: a long-poll holds a server
-  worker/connection for its timeout window; cap concurrent waiters (one
-  per distinct target_machine/affinity is the expected shape for this
-  fleet size) and document the limit.
-- [ ] Unit tests: a waiter registered before a matching task is enqueued
-  wakes promptly; one registered with no matching task times out cleanly
-  and the poll backstop still finds the task on its next cycle; multiple
-  waiters with different affinities don't cross-wake each other.
+- [x] Subscribe outbound to coordinator SSE and reconcile the authoritative
+  queue after each ready frame, including reconnect, so pre-subscription work
+  cannot fall into a gap.
+- [x] Coalesce relevant enqueue, assignment and capacity-release notifications
+  by machine/repository affinity; wake the existing intake/supervision loop
+  without making the event stream another claim authority.
+- [x] Keep slower periodic reconciliation for missed events and disconnected
+  streams. Bound reconnect/backoff and report degraded subscription health.
+  Presence heartbeats remain independent of work-intake blocking.
+- [x] Bound each subscription's queue, read/keepalive timing and shutdown.
+  Disable or repoint subscriptions with their owning role/configuration.
+- [x] Test actual enqueue-to-wake latency, pre-ready and reconnect gaps, event
+  coalescing, cross-affinity isolation, missed-event poll recovery and teardown.
 
 ### Phase 3 -- Projected relay component
+- [x] Implement a strict task-only client/CLI boundary before any ordinary
+  endpoint discovery, autostart, identity lookup or fleet credential path.
+  This is the worker call surface only; automatic delivery remains below.
 - [ ] Implement the relay as an **operating mode of the existing local
   supervisor** (`supervisor.py`/`supervisor_daemon.py`), not a new
   standalone process -- per the operator's own "could just be the local
@@ -269,21 +249,26 @@ detached-run resume), applied to a new predicate.
   (401/403, not merely ignored) attempting any other task or the shared-
   bearer-only routes.
 
-### Phase 4 -- Centralization deployment pattern (configuration, not new code)
+### Phase 4 -- Central authority and local projections
+Discovery and a standby role do not replicate queue
+data or fence independent database writers. This phase requires implementation
+and tests, not just configuration documentation. Centrally owned tasks retain
+one central write authority; a local projection cannot claim them offline or
+promote its independent database. Explicitly separate local-only tasks and
+central task references. Any ownership migration must be acknowledged and
+fenced at the durable state owner before activation.
+
 - [ ] Document (in `services/dispatch/README.md` and/or
   `docs/patterns/`) the recommended fleet-centralization shape: one
   `services/dispatch` instance (container or native) as the pinned
   `AGENT_DISPATCH_SHARED_URL`; every other machine's agent-dispatch
   configured `peer` or `satellite` only (never `coordinator`/`standby`)
-  against that URL. This requires **no new code** -- `config.
-  FEDERATION_ROLES` already supports exactly this as a config value.
+  against that URL, with explicit authenticated service authority.
 - [ ] For a machine that genuinely needs to keep running its own local
-  coordinator (e.g. offline-capable), document the federation reading of
-  "syncing/projecting data to ensure authority is clear": configure it as
-  a `standby`-eligible peer against the shared URL so the fenced-epoch
-  lease (already shipped) is the actual authority arbiter, and ensure
-  Phase 1's fencing-guard wiring means a fenced-out local coordinator's
-  stale writes are genuinely rejected, not merely directory-invisible.
+  coordinator, implement explicitly local-only task authority alongside
+  read projections/references for centrally owned tasks. Central mutations
+  must reach the central writer; outages never promote the independent
+  local database. Fence any deliberate ownership transfer at the durable owner.
 - [ ] Clean-room scenario: extend `agent-dispatch-cutover` (or add a new
   scenario) to prove a `peer`/`satellite`-configured machine correctly
   federates against a central `services/dispatch` container -- i.e. this
@@ -311,9 +296,8 @@ deferred.
 - [x] Phase 1: unit tests for token mint/verify/invalidation + fencing-guard
   rejection, run against the real `coordinator_tasks.py` routes (not just
   the token/fencing library functions in isolation). Done -- see Journal.
-- [ ] Phase 2: a long-poll waiter wakes promptly on a matching enqueue, and
-  the poll backstop still finds work if the wake is missed -- proven with
-  a real timing test, not just a mocked notifier call.
+- [x] Phase 2: real SSE enqueue-to-wake timing, ready/reconnect reconciliation,
+  cross-affinity isolation and missed-event recovery through slower polling.
 - [ ] Phase 3: a real clean-room container holding only a task-scoped
   token can only touch its own task; cross-task/cross-worker attempts are
   rejected.
@@ -334,6 +318,188 @@ _Reviewed by the operator 2026-10-13 -- see Journal for the decisions
 recorded against each open fork._
 
 ## Journal
+
+### 2026-10-14 -- Phase 3 strict worker client implemented
+- Task-only CLI mode activates before command handlers or coordinator
+  autostart/discovery, with an explicit task, worker, URL and credential
+  projection. Incomplete projections, mixed fleet credentials, different
+  endpoints, other tasks and fleet/history/cleanup commands fail closed.
+  Authorized reads and transitions use only the task header; no machine
+  identity, credential command, environment proxy or redirect can widen it.
+- Native ordinary CLI/client/task-authority regression selection passed 387
+  with one platform skip. The final task-worker selection passed 48, including
+  a real HTTP coordinator and eight fresh CLI process invocations: own reads,
+  progress, heartbeat, structured completion and terminal invalidation, plus
+  refusal of global/other-task commands. The fresh Linux candidate passed 89
+  task-worker/task-authority/transport contracts, including the real CLI
+  process path. Install-contract and touched-code lint pass.
+- Documentation impact: the plugin README describes the explicit projection,
+  narrower `show`/self-abandon behavior, exact global option spelling and
+  server authorization boundary. This closes the scoped-client part of
+  `machine-fleet`'s authenticated/scoped/revocable intent, without adding a
+  second queue, daemon or credential issuer.
+- This is only the client boundary. Trusted supervisor issuance, incarnation-
+  bound delivery and renewal, real restricted-container execution, and the
+  Phase 4/5 authority/provider proofs remain open. Nothing in this slice
+  changes first-use installation or enrolls an operator's live fleet.
+- Validation tiers: unit/real-route contracts plus simple end-to-end fresh CLI
+  processes on native Windows and in a fresh Linux candidate with a governed
+  dependency-feed fixture. No installer/first-provision path changed, so this
+  slice does not claim that clean-room enrollment gate. A live fleet/provider
+  execution is not exercised by a client-only slice; it remains a required
+  campaign gate rather than being treated as satisfied by a generic image.
+- Review/CI corrections: the first complete CI run found one old TLS test
+  patching the factory's former module. Its patch now follows the extraction
+  and still asserts actual HTTP/HTTPS verification arguments. Review also
+  caught URL userinfo injecting Basic auth into direct Python scoped clients;
+  shared endpoint validation now rejects it before constructing a transport.
+  Missing/unreadable completion-result files report local validation errors
+  without sending a request. The corrected native selection passes 56,
+  including all worker contracts and the existing TLS regression.
+
+### 2026-10-14 -- Phase 2 merged; restricted-worker delivery next
+- PR #6698 squash-merged as `5e2f85636cc9d3e0f47965e71ccf0c041d27faf2`
+  after current-head Copilot approval with zero open findings and required CI
+  success. The umbrella #6617 remains open. Promotion stays automatic; no
+  manual promotion or operator service rollout was triggered.
+- The final production-route burst and admission corrections passed six
+  targeted native contracts and the same six in a fresh Linux container.
+  Earlier native full delivery/cutover selection passed 141; the preceding
+  fresh Linux cutover selection passed 140 and credential follow-up passed 12.
+  All proofs name their actual snapshots; none claim fresh fleet enrollment.
+- Phase 2 Plan items are resolved. The campaign remains Active: Phase 3 must
+  deliver task-only credentials through the trusted supervisor, pin restricted
+  worker CLI calls before discovery/health/autostart or broad-token lookup,
+  renew grants without disclosing issuer authority, and prove own-task access
+  plus denial of other tasks in a real container. Phase 4 local projections
+  and Phase 5 provider-backed container execution remain open.
+- Continue in a fresh phase worktree. First implement the strict task-scoped
+  client/CLI boundary, then integrate trusted credential delivery and renewal
+  with existing admitted launch/provider seams; do not create another daemon
+  or replace the fleet/queue owners.
+
+### 2026-10-14 -- Phase 2 push-first intake implemented
+- Reused `/events` and its ready barrier; added a cancelable async reader with
+  bounded reads and comment keepalives. Its bounded dirty bit wakes a single
+  existing intake, never another claim authority. Ready/reconnect always
+  reconciles; 60-second polling remains the missed-event/disconnect backstop.
+- Presence runs independently of intake discovery/spawn. Gate, shared URL and
+  credential changes retire both owned threads before releasing the client;
+  a still-running bounded intake defers replacement instead of racing it.
+  Local serving-coordinator health reports connection and intake failure state.
+- Native delivery selection: 189 passed; broader coordinator, board relay,
+  MCP, client transport and intake selection: 340 passed. Final focused
+  delivery/event run: 61 passed, including case-insensitive affinity,
+  credential forwarding, finite timing, exponential backoff across repeated
+  ready/EOF failures, partial thread-start and repeated-stop cleanup.
+  Fresh Linux container: 59 delivery/event tests passed, including real TCP.
+  The later minimum-Python compatibility fix passes the native 61-test run
+  plus a built-candidate Python 3.10.20 keepalive/ready/cancellation exercise.
+  Required CI remains a gate on the published head.
+- Validation tiers: unit contracts plus simple end-to-end TCP enqueue, capacity
+  release, startup/reconnect gaps, cancellation and latency below 1.5 seconds.
+  The fresh Linux run used an explicit governed dependency-feed fixture and
+  the contained test runner; it does not claim plugin first-use installation,
+  independent-database migration or live fleet/container enrollment. Those
+  acceptance proofs remain in later phases. No operator service was changed.
+- Documentation impact: the plugin README documents polling/stream timings,
+  compatibility fallback, independent presence, health and retiring ownership.
+  This closes the reviewed delivery slice of the existing fleet vision;
+  it does not extend standing intent or complete the fleet-authority effort.
+- The first PR CI guard caught a real compatibility defect: keepalive caught
+  only builtin `TimeoutError`, and the initial ready wait used the Python
+  3.11-only `asyncio.timeout` despite the runtime's Python 3.10 minimum.
+  Added the distinct legacy asyncio exception, used `wait_for` for the barrier,
+  added portable regressions for both, and exercised the built candidate on
+  actual Python 3.10.20. The CI failure was fixed, not waived or retried away.
+- Cutover self-check found an actual lifecycle gap, not just a missing PR
+  statement: outbound intake was neither route-gated nor counted by drain.
+  Federation now admits directory/intake work only for the active, non-
+  draining generation and tracks admitted work through the synchronous spawn
+  boundary. Self-retirement closes admission first; demoted teardown does not
+  withdraw the successor's stable directory identity. `/claim` rechecks drain
+  inside its counted boundary, eliminating the same check/enter race.
+- Native assignment/federation/lifecycle/self-retirement selection: 131
+  passed, including real routing-table passive/promotion/demotion and a real
+  HTTP drain staying busy during an admitted blocking launch. The TCP
+  read-timeout test uses a 500ms bound (under 2s observed), avoiding a 50ms
+  first-response scheduling race on Windows while still proving quiet reads
+  terminate. Earlier 61/59 counts identify the native/Linux delivery-only
+  snapshots above; they are not the enlarged cutover selection.
+- Fresh Linux final cutover/events selection at `398594942`: 140 passed.
+  A subsequent review found credential commands executing in the per-event
+  enabled predicate. Moved resolution exclusively to the owning federation
+  tick; child readers use the pinned cached credential, and owner-driven
+  rotation still retires both old threads before replacement. A 10,000-event
+  burst regression asserts command fetches run only on that owner tick.
+  Native final assignment/events/federation/cutover selection: 141 passed.
+- Linux credential/ready/retirement/events follow-up at `558df321a`: 12
+  passed. A further review found route-table reads in the same event
+  predicate. Readers now use cached route ownership; owner ticks and actual
+  intake admission still refresh the live route. The burst regression uses
+  the production server routing predicate and bounds filesystem reads while
+  proving a post-flip intake is rejected before its next owner tick.
+  Native production-route burst/admission/cutover regression: 6 passed;
+  the other 140 selection tests passed before the route-spy fixture's keyword
+  forwarding correction. Required CI gates the final published snapshot.
+
+### 2026-10-14 -- Corrective task-authority PR merged; assignment push next
+- PR #6665 merged as `b8d3ec6a710beb376ef655e5a715e7055b783b93` after
+  current-head Copilot approval and required CI. Both review findings were
+  fixed and resolved, including the reproduced terminal-result backfill race.
+  Its worktree was finalized; Phase 2 uses a new isolated worktree.
+- The campaign remains Active. Next is outbound coordinator SSE assignment
+  notification, ready/reconnect reconciliation and slower poll recovery;
+  restricted credential delivery, local projections and container placement
+  still require their own implementation and end-to-end proof.
+
+### 2026-10-13 -- Check-in and corrective authorization slice
+- Operator requested a check-in before continuing. The campaign remains
+  active; merged token helpers are not completion of fleet federation.
+- A regression test proved a narrow task token could list `/tasks` globally
+  (200 instead of 403): global authentication accepted it while unrelated
+  routes had no scoped authorization. Added a deny-by-default route table,
+  with own-task reads and four owned lifecycle verbs only. Scoped headers
+  never downgrade to ambient bearer or unauthenticated local authority.
+- Added task generation to the signed grant and generation/session comparisons
+  inside progress, heartbeat, completion and abandonment write transactions.
+  Token parsing rejects malformed signed shapes, non-finite expiry and invalid
+  encoding explicitly. Restricted workers cannot call start to renew a grant.
+- HTTP tests cover every unlisted coordinator route, cross-task reads,
+  mixed credentials, no-token local configuration and replacement-session
+  races. Queue progress/heartbeat methods moved into `queue_progress.py` to
+  preserve the 1000-line source cap without changing trusted-call behavior.
+- Corrected earlier overclaims: directory discovery does not supply replicated
+  task data or durable writer fencing. Local standby against an independent
+  SQLite database is not a safe central-authority migration.
+- Found existing SSE, EventBus and ready-frame support while preparing the next
+  slice. Phase 2 will reuse that real push transport, with slower reconciliation
+  as a backstop, rather than introduce another long-poll protocol.
+- Earlier proxy `status` exercises did not prove plugin first-use provision
+  or offline fallback; that bootstrap validation remains open despite the
+  sibling effort's earlier checkbox claim.
+- Validation: 39 focused native tests pass, including a real loopback HTTP
+  supervisor/worker round-trip. A fresh Linux container passed 37 scoped-token
+  tests with an explicit governed-feed fixture after the default dependency
+  fetch failed on TLS. The two additional mounted/documentation-surface checks
+  added after that snapshot pass natively. Full affected native selection:
+  389 passed, one platform skip. No live fleet enrollment, data migration or
+  operator service change was exercised or authorized by this slice.
+- Two earlier broad native runs timed out in the Windows reconcile completion
+  fixture; its focused run and subsequent diagnostic broad run passed. Root
+  cause remains unestablished, tracked in #6662. Added bounded synthetic
+  failure evidence without increasing waits or skipping the test. Required CI
+  remains a gate, not a waived check.
+- Documentation impact: `plugins/agent-dispatch/docs/task-authority.md` records
+  exact routes, authenticated-ingress prerequisites, transactional fences and
+  deployment limitations. This is a below-altitude correction to the reviewed
+  task-authority boundary, not new standing intent.
+- PR #6665 review identified a remaining terminal-result backfill race: the
+  completion retry branch wrote a non-null result before the incarnation
+  check. Reproduced both completed and submitted cases, moved the check ahead
+  of all completion mutations, and verified the completion/token selection:
+  174 passed. Replaced superseded long-poll and unsafe standby checklists with
+  one executable SSE/projection plan rather than leave contradictory notes.
 
 ### 2026-10-13 -- Kickoff + research pass
 - Operator directive: build containerization support for agent-dispatch

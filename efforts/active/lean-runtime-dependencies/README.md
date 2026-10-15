@@ -49,6 +49,9 @@ reuse is a first-class investigation, not a preselected mandatory global broker.
 source evidence, recommended reductions and limits of the measurements.
 [Shared-runtime investigation](shared-runtime.md) defines the decision gate for
 installer de-vendoring and candidate shared ZDD fronts.
+[Profile results and remaining acceptance](profile-results.md) consolidates the
+delivered source changes, fresh-install measurements, validation limits and
+explicit unresolved owner boundaries.
 
 Promotion already expands canonical shared-library references into independently
 shippable payloads. That source-sharing mechanism does not itself avoid repeated
@@ -89,34 +92,34 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 - [x] Remove Textual from agent-worktrees while retaining Worktree Manager's UI.
 - [x] Preserve version comparison and Manager process dispatch without relying
   accidentally on removed transitive packages.
-- [ ] Add dependency-minimal regression evidence, update directly related docs
+- [x] Add dependency-minimal regression evidence, update directly related docs
   and ship the slice with a changefile.
 
 ### Phase 3 - Index client and hosted-runtime separation
-- [ ] Complete lightweight client import/install boundaries and route hosted
+- [x] Complete lightweight client import/install boundaries and route hosted
   controller, indexing workers and foreground commands through their owning runtime.
-- [ ] Eliminate duplicated store/server installs only after replacing the
+- [x] Eliminate duplicated store/server installs only after replacing the
   primary-runtime fallback with a supported explicit outcome.
 - [ ] Preserve native and standalone-service contracts, configuration, queue,
   corpus state and the separately managed warm embedding engine.
-- [ ] Isolate legacy stdio MCP in its own opt-in extra without removing
+- [x] Isolate legacy stdio MCP in its own opt-in extra without removing
   agent-facing tool capabilities. _(agent-recommended)_
 
 ### Phase 4 - Largest optional installation costs
 - [ ] Govern explicit compatible CPU/GPU engine wheel profiles; eliminate
   accidental accelerator downloads and unsafe install-then-swap assumptions.
   _(agent-recommended; coordinate artifact ownership with #4876)_
-- [ ] Make restricted-SSH Paramiko provisioning genuinely opt-in.
+- [x] Make restricted-SSH Paramiko provisioning genuinely opt-in.
   _(agent-recommended)_
-- [ ] Replace full-table pandas statistics materialization with projected
+- [x] Replace full-table pandas statistics materialization with projected
   bounded aggregation. _(agent-recommended)_
-- [ ] Decide syntax grammar extras and unseeded installer profiles from measured
+- [x] Decide syntax grammar extras and unseeded installer profiles from measured
   benefit; retain supported fallback installation. _(agent-recommended)_
 
 ### Phase 5 - Installer de-vendoring and shared helpers
-- [ ] Execute the [shared-runtime investigation](shared-runtime.md), including
+- [x] Execute the [shared-runtime investigation](shared-runtime.md), including
   separate-process reuse and a shared ZDD front candidate.
-- [ ] Review the chosen compatibility, lifecycle and installation-cell design
+- [x] Review the chosen compatibility, lifecycle and installation-cell design
   before implementing a reuse mechanism.
 - [ ] Implement the smallest accepted reuse slice, or explicitly transfer an
   accepted-but-deferred design to a named tracked objective. If evidence rejects
@@ -124,7 +127,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   measured costs and the rejection decision; do not transfer rejected work.
 
 ### Phase 6 - Close the measured delta
-- [ ] Publish before/after profile footprint and fresh-install evidence, with
+- [x] Publish before/after profile footprint and fresh-install evidence, with
   running-state proof for any authorized rollout.
 - [ ] Resolve or explicitly transfer every implementation and validation item;
   experimental ONNX/storage replacements remain separately tracked decisions.
@@ -132,9 +135,9 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 
 ## Validation Plan
 
-- [ ] Unit and dependency-contract tests cover each changed declaration,
+- [x] Unit and dependency-contract tests cover each changed declaration,
   optional extra, import boundary and helper compatibility rule.
-- [ ] Simple end-to-end checks exercise actual client/Manager/worker process
+- [x] Simple end-to-end checks exercise actual client/Manager/worker process
   boundaries in dependency-minimal environments, not only mocked imports.
 - [ ] Clean-room first installation proves each affected solo plugin/profile,
   combined installations, reuse and missing/incompatible helper outcomes.
@@ -146,9 +149,9 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   two installers and two independent marketplace installations.
 - [ ] Index integration preserves authenticated routing, HTTP/SSE/MCP contracts,
   background jobs, retrieval semantics and durable state across upgrades.
-- [ ] Every slice records applicable unit, integration, clean-room and available
+- [x] Every slice records applicable unit, integration, clean-room and available
   live-venue evidence, or a specific reason a tier is unavailable.
-- [ ] Measurement separates compressed downloads, unpacked logical files,
+- [x] Measurement separates compressed downloads, unpacked logical files,
   hardlink-aware physical allocation, model/cache data and retained version slots.
 - [ ] Publication checks, changefiles, review, merge and release attribution are
   satisfied; rollout authorization and its completion owner are explicit.
@@ -158,6 +161,23 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 Approved and merged in #6235. Implementation proceeds in reviewed slices.
 Shared reuse is a design investigation; neither one global ZDD process nor one
 shared mutable venv is presumed acceptable.
+
+### Current execution boundary
+
+The delivered dependency reductions, helper investigation and compatibility
+boundary have cleared review. This is not approval to enable a production
+artifact fast path. The remaining engine-profile application (#6737) depends on
+#4876's still-open Phase 2 item to design and publish authority-approved exact
+profiles and their selection/feed-compatibility contract. Its Phase 3 consumer
+admission is also unimplemented; do not invent a substitute resolver here.
+The overlapping held-construction change (#6598) remains open.
+
+The existing owners have the concrete acceptance requests; no reply or accepted
+transfer is assumed. Native/standalone queue, schema, canary, warm-engine and
+Darwin acceptance remain with #5768. The next implementation step is to apply
+the approved profile contract under #6737 once available, composing the owning
+construction path. Until then preserve current runtime/state and the open
+effort binding rather than declaring the campaign Done.
 
 ## Journal
 
@@ -232,3 +252,286 @@ shared mutable venv is presumed acceptable.
   broad procutil extraction. Corrected those harnesses to exercise the required
   host package failure before activation; Linux execution of the corrections
   remains a gate rather than being inferred from Windows skips.
+
+### 2026-10-14 - Merge reconciliation and next slice
+- #6317 merged to `dev` as `a0869fbae` on 2026-10-13 after the POSIX fixture
+  corrections. Its final Linux index suite, Windows checks and required PR gate
+  all passed. The PR description now records the graceful-cutover assessment.
+- Marked the delivered client/host boundary and duplicate-install removal items
+  complete. The broader native/state-preservation validation remains open:
+  passing contained checks are not authorized live rollout or macOS evidence.
+- The Textual slice includes the dependency-minimal regression, docs and patch
+  changefile in merged #6293. Its remaining "ship" checkbox awaits release
+  attribution rather than treating a `dev` merge as a release.
+- Prepared the bounded two-consumer helper experiment for review. It does not
+  introduce a shared runtime or close the compatibility/lifecycle design gate.
+  Next implementation slice: isolate legacy stdio MCP dependencies, retaining
+  the existing CLI bridge and explicit opt-in legacy entry point.
+
+### 2026-10-14 - Helper evidence merged
+- #6643 merged to `dev` as `9015d09d8` after approval and green CI.
+  Review corrected assertion-elision under optimized Python; four process
+  contract tests now pass under `-O`. This closes publication of the bounded
+  probe, not installation deduplication, auth isolation or shared lifecycle work.
+- The full Phase 5 design gate remains open. Proceeding with the already
+  planned optional dependency reduction before choosing a reuse mechanism.
+
+### 2026-10-14 - Explicit legacy stdio MCP profile
+- Moved the MCP SDK requirement out of `[store]` into `[stdio-mcp]`; native
+  `[store,server]` installers do not request it. The normal agent read CLI is
+  unchanged. The legacy adapter is HTTP-client-only and runs in the explicitly
+  opted-in invoking runtime, not a host sibling that no longer installs its SDK.
+- Full contained Windows validation passed: 857 tests, 180 explicit/platform
+  skips. The suite includes a real `agent-index mcp` initialize/tools-list
+  handshake, plus role-parametrized no-host-dispatch and manifest checks.
+- A fresh 12-package base profile has no MCP SDK, NumPy or FastAPI and refuses
+  `mcp` with exit 2 and actionable opt-in guidance. Adding only `[stdio-mcp]`
+  exposes all five real SDK tools and completes the real stdio handshake without
+  NumPy or FastAPI. The SDK has its own transitive HTTP dependencies; the extra
+  is not described as dependency-free.
+- Focused Python lint and the 13-plugin installer contract pass. Linux behavior
+  remains subject to PR CI; no local macOS lane or Docker daemon is available.
+  No managed runtime slot, service, model or production endpoint was changed.
+
+### 2026-10-14 - Optional MCP slice merged
+- #6658 merged to `dev` as `0976e89aa` after a current-head approval and green
+  Linux/Windows checks. Review also removed MCP from both launcher provisioning
+  allowlists, aligned the solo clean-room witness with honest SDK absence, and
+  declared the Python 3.10 test backport.
+- Linux CI exposed premature EOF in a pipelined protocol fixture. The final
+  test uses the actual SDK client to await initialize and list-tools responses
+  before closing its caller-owned transport. No sleep or retry hides the race.
+- This completes the explicit optional-MCP implementation item. Release/rollout
+  and broader native-state validation remain separate outstanding obligations.
+
+### 2026-10-14 - Bounded statistics implementation
+- Confirmed Textual removal in released `main` snapshot `f327cf447` (#6642):
+  required `packaging`, absent Textual and the normalized UI dependency guard
+  are all present. Phase 2 publication is complete; this does not prove local
+  installation or authorize runtime rollout.
+- Replaced full-table pandas materialization with a source/language-only Arrow
+  scan requesting 1,024-row batches. Histograms omit nulls, retain empty strings
+  and preserve the existing empty-store shape. Count and mid-scan failures now
+  propagate rather than manufacturing zero or partial success.
+- A real LanceDB fixture with 2,502 rows proves complete counts beyond the
+  default query limit and across multiple batches without `to_pandas`.
+  Structural coverage pins projection and batch size; failure tests reject both
+  count errors and partial scans.
+- The full contained Windows suite passed: 858 tests, 180 platform/explicit-tier
+  skips. Focused content/statistics checks passed 16 tests. The implementation
+  stays within the existing shrink-only module ceiling; no baseline was widened.
+- This changes status-query execution, not storage layout or service ownership.
+  No fresh installer, production endpoint, embedding model or live deployment
+  was exercised. Linux validation remains a PR CI obligation.
+
+### 2026-10-14 - Bounded statistics merged and next dependency slice
+- #6686 merged to `dev` as `cbbef0837` after current-head approval and complete
+  CI, including the actual Linux index suite. Marked bounded aggregation done.
+  Release promotion and any authorized deployment remain separate.
+- Next: make restricted-SSH Paramiko provisioning genuinely explicit while
+  preserving existing configured provider-exec capabilities and update behavior.
+  Inspect current installer/config profile ownership before selecting a mechanism;
+  no new mutable shared runtime or machine-global default is presumed.
+
+### 2026-10-14 - Persistent optional restricted-SSH profiles
+- Chose a persistent installation profile rather than a transient environment
+  switch or a second always-on helper. This closes the reviewed
+  `capability-sized-runtime-dependencies` intent without extending it.
+- New Containers installations default to base. Explicit provider-exec selection
+  persists across updates; an existing unprofiled selected runtime with Paramiko
+  preserves that capability. Neither incidental repository configuration nor a
+  shared mutable environment selects the dependency closure.
+- Both native installers use one stdlib profile coordinator with canonical
+  source admission, construction/retention leases, immutable completion and
+  marker activation. Slots bind package version plus profile. A failed requested
+  extra never silently activates base; completed slots are reused, not rewritten.
+- Windows contained coverage: 774 passed, 20 skipped. Actual isolated first-touch
+  installs proved base and provider-exec, the whole PowerShell installer, ordinary
+  profile retention, base rollback, real CLI dispatch and plain-pip local-library
+  resolution. The tests cover source conflicts, failure retention, legacy
+  capability migration, bounded diagnostics and current-profile bootstrap.
+- Same-interpreter fresh package-file measurements: base 18 distributions /
+  23.29 MiB versus provider-exec 25 / 36.30 MiB: 7 distributions and 13.01 MiB
+  logical recorded-file delta. Both include pip/setuptools. These are not full
+  venv, compressed-download or hardlink-aware physical-allocation measurements.
+- Linux shell execution remains assigned to PR CI. No Docker daemon or macOS
+  lane is available locally; the isolated fresh-root checks exercise first touch
+  without modifying any deployed installation. No production rollout, listener,
+  container, lease or service activation is part of this slice.
+- Publication, Linux CI and review remain pending; the Plan item is not yet
+  claimed complete.
+
+### 2026-10-14 - Profile review corrections and engine ownership
+- #6735 opened for the persistent profile slice. Review identified relative-root
+  interpretation, Windows PowerShell's unavailable-interpreter stderr handling
+  and fallback ordering of profile-qualified versions. Added focused regressions
+  and corrected all three boundaries rather than widening module ceilings.
+- Canonical Python/PowerShell/POSIX recovery now compares package versions before
+  profile suffixes. Synchronized every primitive/resolver consumer and supplied
+  changefiles for all 13 affected runtime plugins. Focused owning-suite coverage:
+  Containers 34 passed / 7 skipped, Bridge 126 / 4, Codespaces 9 / 8.
+- The native staging smoke check also exposed a receipt deadline shorter than
+  the cold parent startup plus its child's 20-second watchdog. The receipt wait
+  now permits 30 seconds while still rejecting early child exit immediately;
+  18 staging/watchdog tests passed locally, one platform-specific skip.
+- Filed #6737 for complete engine CPU/accelerator dependency profiles, preserving
+  #4876's exact authority-owned lock/profile decision and #6598's seasoning and
+  construction ownership. The current engine's default-install/torch-only-swap
+  assumption is not a safe substitute for an approved compatible closure.
+
+### 2026-10-14 - Native staging and bounded CI follow-through
+- The next review identified caller-relative roots crossing marketplace
+  self-staging and a contradictory profiled development-version fixture.
+  Normalize and forward installation roots before either shell changes CWD;
+  a native staged-child regression preserves the root, profile, action and
+  force flag without provisioning a live runtime. Both recovery parameters now
+  compare development versions before testing the final release.
+- Windows CI then exhausted the fleet lane's 120-second budget in the
+  production-window replay test: over 1,000 independent fully synchronous
+  SQLite transactions. The exact unmodified selection passed locally in
+  61.47 seconds, with that test taking 10.15 seconds; hosted-runner progress
+  stopped at the same boundary. Required CI now runs the identical retention
+  assertions with a four-event window; the full 1,024-event parameter remains
+  in unfiltered and explicit manual validation, with an appropriate full-suite
+  budget. Production retention, durability and required CI timeouts are unchanged.
+- The required fleet selection passed 597 tests / 6 skips in 55.11 seconds
+  under its unchanged 120-second containment budget. The complete suite,
+  including production-window retention and the full artifact matrix, passed
+  605 / 6 in 69.78 seconds. Workflow selection contracts: 17 passed.
+  Containers profile/dependency/transaction coverage: 34 / 8; Codespaces
+  recovery: 8 / 8. Focused lint and the install contract pass.
+- These are candidate checks, not a merge, released payload or production
+  rollout. Current-head review and hosted CI remain required.
+
+### 2026-10-14 - Immutable helper ownership discovered during measurement
+- Two-consumer closure measurement exposed an installer boundary that unit
+  command mocks had not exercised: uv honored development editable-source
+  declarations even when all canonical library paths were explicit. Those
+  helpers could resolve outside a supposedly immutable runtime slot.
+- Profile construction now disables uv source remapping after explicitly
+  supplying the admitted local libraries. Health rejects any Containers/helper
+  module outside the selected slot. A real isolated Python regression proves
+  that an editable `.pth` escape fails rather than activating a partial runtime.
+- Targeted profile/dependency/transaction coverage: 36 passed / 8 skipped;
+  module ceilings, focused lint and the install contract pass. Both profiles
+  were also freshly provisioned with the registered, signed Windows Python
+  3.11.9 interpreter; both copied runtime interpreters retain valid signatures,
+  own every helper and execute the actual CLI outside the checkout.
+- This supersedes the earlier development-source distribution-record census:
+  the corrected self-contained seeded base has 11 distributions / 25,165,401
+  logical RECORD bytes; provider-exec has 18 / 38,810,561. The difference remains
+  7 distributions / 13,645,160 bytes (13.01 MiB). The full runtime trees allocate
+  29,044,088 and 45,901,048 NTFS file-stream bytes respectively on this test host;
+  filesystem metadata, shared interpreter and retained production slots are
+  excluded. No live rollout is claimed.
+
+### 2026-10-14 - Required Windows reconciliation collection bound
+- The approved profile head could not merge because the actual required CI run
+  timed out in the reconciliation wrapper, despite metadata checks reporting
+  success. The merge guard correctly refused the missing required PR gate.
+- Reproduced the exact selection locally: all 18 checks pass, but collecting
+  10,175 items for those checks takes the suite to 145.09 seconds. Each native
+  policy/pointer case still performs both real helper calls and whole-profile
+  byte/mtime snapshots; this is aggregate collection/cold-start cost, not a
+  diagnosed helper deadlock.
+- Added explicit owned test-file selection to the contained plugin runner.
+  The required lane now collects the two owning files, preserving all 18 checks
+  and the existing 120-second budget rather than skipping policy cases or
+  widening the gate. The actual focused native run passed in 102.84 seconds.
+- Runner selection/admission and all directly dependent CI scope contracts:
+  122 passed / one unavailable-symlink skip. Focused lint and source module
+  ceilings pass. Fresh hosted CI and review remain required before merge.
+
+### 2026-10-14 - Persistent profile slice merged; next measured reduction
+- #6735 merged to `dev` as `b54361f6f` after an exact-head approving review and
+  complete successful required CI run `38637358082`, including both native
+  runner lanes, standalone services and all affected plugin suites. Restricted
+  SSH provisioning is now explicitly opt-in with durable compatibility.
+- Retained the continuing effort worktree and pulled forward to the merged
+  contribution branch. No production update, listener, model or corpus mutation
+  occurred. Promotion and an owner-authorized rollout remain separate.
+- Shared helper measurements were supplied to the existing artifact owner
+  (#4876 / #6697); standalone activation, schema/queue rollback, Darwin and warm
+  engine acceptance remain with #5768. No parallel artifact or service owner
+  was introduced.
+- Next implement the measured Windows Containers reduction: when uv performs
+  installation, create signed stdlib venv copies without pip/setuptools seeding.
+  Ordinary-pip fallback still receives its required seed packages. The isolated
+  signed-interpreter proof already preserves the real base CLI with nine
+  runtime distributions and 3,225,176 allocated file-stream bytes, versus
+  29,044,088 for the seeded profile.
+
+### 2026-10-14 - Conditional unseeded Windows construction
+- Implemented the narrow Containers continuation: signed Windows stdlib copies
+  receive `--without-pip` only when uv will install the admitted packages.
+  The ordinary-pip constructor remains seeded; no package is removed from a
+  completed runtime and no shared mutable environment is introduced.
+- Full contained Windows coverage passed 781 tests / 21 skips. Native fresh
+  base and provider-exec construction passed with 9 / 16 distributions, without
+  pip or setuptools; all copied `python.exe` and `pythonw.exe` signatures remain
+  valid. Both actual CLIs, retained provider intent and immutable base rollback
+  pass outside the checkout.
+- The candidate base records 2,265,172 logical package bytes / 3,248,664 allocated
+  runtime file-stream bytes; provider-exec records 15,903,843 / 20,141,176.
+  The real no-uv fallback also constructs and runs successfully with its 11
+  seeded distributions and functioning `python -m pip`. These are isolated
+  source-profile observations, not production storage reclaim or rollout.
+- Focused lint, install contract and module ceilings pass. Linux/native
+  platform coverage, publication and review remain assigned to the next gate.
+
+### 2026-10-14 - Unseeded slice merged and helper decision prepared
+- #6766 merged to `dev` as `5d08c74d7` after Copilot's exact-head approving
+  review and complete successful required CI run `38641865532`. Native Windows
+  and Linux runner checks, Containers and the owning harness suite passed.
+  The first review wait expired without a verdict; an explicit re-request
+  produced the approval. No gate was bypassed.
+- Resolved the remaining syntax/seed decision: retain the five existing host
+  syntax-grammar defaults (5,390,318 logical / 5,639,720 allocated file-stream
+  bytes, about one percent of the measured host closure). Another profile is
+  not justified by that cost; no parsing-quality claim is made. Windows
+  unseeded construction is now conditional on uv, preserving signed copies,
+  ordinary-pip fallback and completed immutable slots.
+- Prepared the [helper closure evidence](helper-closure-evidence.md), its
+  reproducible probes and the compatibility/lifecycle decision table for
+  review. Preserve independent venvs/processes; prefer immutable artifact/file
+  reuse under #4876 rather than a new helper-runtime owner or ZDD broker.
+  This does not approve a production fast path or transfer an unresolved item.
+- The campaign remains Active. Next secure review of this evidence/design,
+  reconcile the remaining engine/standalone-service acceptance with their
+  existing owners and publish the final profile/validation matrix. No
+  production runtime update or warm-engine/corpus mutation occurred.
+- Consolidated the [profile/validation matrix](profile-results.md) for that
+  same evidence review. Measurement and retirement guards remain effective
+  under optimized Python; all eleven retained-probe controls pass with `-O`.
+  The artifact owner has been asked to acknowledge the existing acceptance
+  boundary and name the exact approved profile contract needed by #6737.
+  Pending replies and native/service gates remain open, not completed by
+  relabeling them as another owner's work.
+- Evidence review identified that in-runtime metadata alone could conceal a
+  `.pth` helper import outside the measured environment. Both measurement
+  lanes now check required first-party module origins and refuse escaping
+  RECORD entries. Real disposable-venv regressions cover both failures;
+  the original 9/30 source environments and surviving 30-package artifact
+  environment pass the stronger checks. The retired first artifact consumer
+  was not reconstructed merely to claim a new installation measurement.
+
+### 2026-10-14 - Helper decision and profile matrix merged
+- #6767 merged to `dev` as `9c5ce3bd4` after exact-head Copilot approval and
+  successful complete required CI run `38648816562`. The import-origin finding
+  is fixed across both measurement lanes and the survivor check; its thread
+  is resolved. The fresh review, not the author's own reply review, supplied
+  approval. Required CI completed normally before the authorized self-merge.
+- Re-read this effort after merge and closed the delivered investigation,
+  design-boundary review, measured-profile publication and corresponding
+  changed-code/process/measurement records. The artifact implementation,
+  engine profile, native/service, platform and release/rollout gates remain
+  open. No unacknowledged owner transfer was used to clear them.
+- The accepted choice retains separate owned venvs/processes and prefers
+  immutable helper artifacts under #4876. Reject the measured routing-read
+  broker; do not create a reusable helper runtime without an actual matching
+  closure and a measured end-to-end benefit.
+- Confirmed the remaining dependency in the artifact owner's canonical Plan:
+  exact authority-approved profile design/publication and consumer admission
+  are still unchecked. Requested its selected-contract/acceptance response
+  before applying CPU/accelerator profiles under #6737; no response is
+  presumed. The campaign remains Active at that explicit external gate.

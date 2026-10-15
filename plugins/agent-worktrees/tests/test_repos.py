@@ -1705,3 +1705,40 @@ def test_repos_cli_sync_combines_leading_names_with_a_multi_word_tag(
     assert captured["tag"] == "multi-machine system"
 
 
+
+
+def test_repo_git_ignores_an_inherited_git_dir(tmp_path: Path, monkeypatch) -> None:
+    # A hook or parent git process can export GIT_DIR/GIT_WORK_TREE; registry
+    # status and sync must still act on the registered checkout.
+    target = tmp_path / "target"
+    other = tmp_path / "other"
+    _init_repo(target, branch="main")
+    _init_repo(other, branch="elsewhere")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+    assert repos._git(str(target), "branch", "--show-current").stdout.strip() == "main"
+
+def test_sync_repo_fetches_its_own_checkout_despite_an_inherited_git_dir(
+    home: Path, tmp_path: Path, monkeypatch
+) -> None:
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    work = tmp_path / "work"
+    subprocess.run(["git", "clone", str(upstream), str(work)], check=True, capture_output=True)
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "Test")
+    (upstream / "next.txt").write_text("next\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-m", "next")
+    other = tmp_path / "other"
+    _init_repo(other, branch="main")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    entry = repos.RepoEntry(name="work", repo_class="singleton", default_branch="main",
+                            paths={"windows": str(work)})
+
+    state, detail = repos.sync_repo(entry, plat="windows")
+
+    assert (state, detail) == ("synced", "main")
+    assert (work / "next.txt").exists()

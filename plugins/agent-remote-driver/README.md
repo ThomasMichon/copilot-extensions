@@ -34,23 +34,38 @@ every subsequent `copilot` session on that machine/image write a small
   "host": "127.0.0.1",
   "port": 54321,
   "token": "<bearer token>",
+  "controlProtocol": 2,
+  "instanceId": "<extension-instance-id>",
+  "controlToken": "<administrative re-hook token>",
   "cwd": "/path/to/checkout",
   "startedAt": "2026-10-03T04:00:00.000Z",
   "updatedAt": "2026-10-03T04:00:30.000Z"
 }
 ```
 
-Any local process (a hand-rolled script, a curl one-liner, or a future
-`agent-bridge` consumer) that can read that file can then drive the session
-over plain HTTP, loopback-only, bearer-authenticated:
+Local processes use the loopback endpoint for observation. Control protocol
+**2** additionally fences mutations with a driver claim: the descriptor
+includes `controlProtocol`, a per-extension `instanceId`, and a separate
+`controlToken` for administrative grants/re-hook. Its storage schema `version`
+remains 1. Keep the descriptor private: possession of its administrative
+credential authorizes deliberate ownership transfer.
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/health` | GET | `{ok, sessionId, pid}` -- liveness/identity check |
+| `/health` | GET | `{ok, sessionId, pid, control}` -- identity and credential-free ownership state |
 | `/events` | GET | Server-Sent Events stream of every SDK event, from the moment of attach forward |
-| `/send` | POST | `{content, mode?}` -- send a message into the session |
-| `/steer` | POST | `{content}` -- abort the current turn, then send immediately |
-| `/abort` | POST | Abort the current turn |
+| `/control/claim` | POST | `{target, ownerId, controlToken}` -- claim an available generation |
+| `/control/re-hook` | POST | Same shape -- explicit administrative transfer with a fresh claim |
+| `/control/release` | POST | `{lease, sequence}` -- compare-and-release the current claim |
+| `/send` | POST | `{lease, sequence, content, mode?}` -- owner-only send |
+| `/steer` | POST | `{lease, sequence, content}` -- abort, revalidate ownership, then send |
+| `/abort` | POST | `{lease, sequence}` -- owner-only abort |
+
+Token-only mutations from older clients fail explicitly; they do not bypass
+the ownership fence. Existing read-only discovery/listing remains compatible.
+The old curl snippet below illustrates observation/header handling and the
+**rejected legacy mutation shape**: its `/send` request now returns `409`
+because no claim is supplied. Use the standalone helper for control.
 
 ```bash
 descriptor=~/.copilot/remote-driver/sessions/<session-id>.json
@@ -62,6 +77,72 @@ curl -s -H "Authorization: Bearer $token" -N "$base/events"
 curl -s -H "Authorization: Bearer $token" -H 'content-type: application/json' \
   -d '{"content":"what is the current plan?"}' "$base/send"
 ```
+
+### Human takeover and hooking back up
+
+Targets start **human-held**, including after an extension restart. A root
+`user.message` not correlated with an admitted remote send revokes the driver's
+claim synchronously, before the bounded/lossy SSE forwarding queue. The
+currently installed observer is registered before discovery is published.
+Read-only observers stay attached; the session is not automatically aborted or
+reset just because ownership changed.
+
+This fences this HTTP driver's mutations **after the target processes the
+input event**. It does not prevent physical keyboard submission or every other
+native SDK client, and cannot undo a send/abort already accepted by the runtime.
+Unknown provenance conservatively revokes control. Source labels are
+attribution, not ownership credentials. Native input timing/source preservation
+and full mux concurrency remain explicit validation obligations; fake-SDK
+integration is not that proof.
+
+Use the standalone helper; credentials are read from protected files, not
+passed on the command line or printed:
+
+```powershell
+# Choose a task-private claim-state path, not the discovery descriptor.
+node <plugin-root>\bin\control-session.mjs status --descriptor <descriptor-path>
+node <plugin-root>\bin\control-session.mjs re-hook --descriptor <descriptor-path> --state <private-claim-state> --owner <driver-label>
+node <plugin-root>\bin\control-session.mjs send --descriptor <descriptor-path> --state <private-claim-state> --content-file <prompt-file>
+node <plugin-root>\bin\control-session.mjs steer --descriptor <descriptor-path> --state <private-claim-state> --content-file <prompt-file>
+node <plugin-root>\bin\control-session.mjs release --descriptor <descriptor-path> --state <private-claim-state>
+```
+
+After human takeover, run **`re-hook` deliberately**, then resume sending with
+the newly saved claim. It rotates the generation and credential even for the
+same driver label; revoked credentials never regain authority. Reconnecting an
+observer or retrying an old request does not re-hook automatically. `claim`
+only acquires an available target after voluntary release; it cannot take a
+human-held target or silently replace another live driver.
+
+The administrative re-hook is a deliberate capability, not cryptographic
+proof of a physical human gesture. Only share it with trusted controllers
+authorized to make that transfer. Observation-only clients receive neither
+the administrative credential nor the saved driver claim.
+
+Commands sharing a private state file serialize with an exclusive local lock.
+On POSIX the helper's replacement files request mode `0600`. On Windows
+choose a parent directory whose inherited ACL is restricted to your user;
+Node's POSIX mode argument does not establish a private Windows ACL. Do not
+put descriptor or claim-state files in a shared artifacts/log directory.
+The helper writes the next sequence and a pending marker **before** a mutation.
+A lost response or refusal leaves that marker: never replay an uncertain
+request. Inspect `/health` and its in-flight/generation state, resolve the
+native outcome, and use deliberate re-hook instead. A live native operation
+still settling blocks grants; ownership transfer does not cancel human work.
+Native send/abort failure disables mutation until observation is re-established
+by restarting/rejoining the extension; the helper cannot certify that recovery.
+
+A crashed helper can leave `<state>.lock` with its PID and creation time.
+There is no automatic stale-lock deletion: verify that its owner is gone before
+removing that **specific** lock, preserve the pending state, and reconcile/re-hook.
+PID reuse or uncertain liveness is not proof of a safe unlock. Do not reset the
+session or delete its discovery/history to recover a driver.
+
+An admitted operation consumes its sequence even when it fails. Replayed or
+out-of-order sequences are refused. Steer checks the generation again after
+awaiting abort, so takeover in that gap prevents the stale follow-up send.
+Error responses label abort/send effects `not_started`, `dispatched` or
+`completed`, without pretending that dispatched/accepted work was undone.
 
 ### Install
 
@@ -226,10 +307,11 @@ this plugin addresses both directly:
 
 **Does NOT provide (delegated elsewhere, or future phases of the same
 effort):**
-- **Driver-exclusivity arbitration.** Any holder of a session's bearer token
-  can call `/send`/`/steer`/`/abort` with no claim/generation primitive
-  preventing two concurrent drivers from racing the same session. This is
-  `cli-default-bridging`'s Phase 2 scope, not yet built.
+- **Complete native/mux arbitration proof.** The HTTP control surface now
+  enforces generation-bound claims, observed human takeover and deliberate
+  re-hook. Native source preservation, event timing, other SDK clients and
+  raw mux keyboard writes are not certified by its synthetic tests.
+  `cli-default-bridging` Phase 2's live-concurrency proof remains open.
 - **The blocked-interaction escalation ladder** (pre-decide hooks, best-guess
   `ask_user` answers, elicitation decline, the `/clear`/`/exit` TTY command
   bridge) -- Phase 3 of the same effort.
@@ -261,6 +343,17 @@ directory this process can create and write to.
   the dependency-free HTTP server (health/events/send/steer/abort, with a
   bounded `MAX_SSE_CLIENTS`), decoupled from the SDK so it is directly
   unit-testable with a fake driver.
+- [`extensions/agent-remote-driver/session-driver.mjs`](extensions/agent-remote-driver/session-driver.mjs) --
+  the SDK-free adapter preserving the HTTP `{content, mode}` interface while
+  constructing SDK `{prompt, mode, source?}` sends and forwarding aborts.
+- [`extensions/agent-remote-driver/driver-ownership.mjs`](extensions/agent-remote-driver/driver-ownership.mjs)
+  and [`driver-control.mjs`](extensions/agent-remote-driver/driver-control.mjs) --
+  bounded ownership reduction, fenced mutation, partial-effect reporting and
+  root-input takeover, independent of the SDK and observer queue.
+- [`bin/control-session.mjs`](bin/control-session.mjs) --
+  standalone claim/re-hook/send/steer/abort/release with private pending state;
+  shared [`control-client.mjs`](extensions/agent-remote-driver/control-client.mjs)
+  supplies the checked loopback protocol boundary.
 - [`extensions/agent-remote-driver/discovery.mjs`](extensions/agent-remote-driver/discovery.mjs) --
   pure helpers: descriptor path/shape, token generation, bearer-token
   verification, and the atomic (temp file + rename) descriptor writer.
@@ -290,9 +383,14 @@ directory this process can create and write to.
 - **A request gets `401`.** The bearer token in the descriptor file must
   match exactly; re-read the descriptor rather than caching an old token
   (sessions do not reuse a token across restarts).
-- **Two drivers stepped on each other's `/send`.** Expected today -- see
-  *driver-exclusivity arbitration* above. Track
-  `efforts/active/cli-default-bridging/README.md` Phase 2 for the fix.
+- **A mutation gets `409`.** Read its `code` and fresh `/health` state.
+  A missing/stale claim, replay, human takeover or an in-flight control is
+  not permission to retry blindly. Deliberate re-hook uses the administrative
+  credential and fresh generation; token-only legacy clients must migrate.
+- **A mutation gets `503` or `502`.** Input observation may be unavailable,
+  source tracking may be full, or a native operation's outcome may be unknown.
+  Preserve pending state; reconcile/re-establish native observation rather
+  than treating connection loss as safe idle. See *Human takeover* above.
 - **The discovery directory keeps growing / an entry outlives its session.**
   Every new session self-heals this at its own startup (see *Fleet
   hygiene*); it is not a sign of a leak by itself. A dead entry's physical

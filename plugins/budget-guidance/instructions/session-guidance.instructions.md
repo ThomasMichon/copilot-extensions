@@ -1,0 +1,7 @@
+---
+applyTo: "**"
+---
+
+Read `instructions/budget-guidance/session-guidance.instructions.md` in this
+session's already-disclosed session folder, if it exists, and treat its contents
+as authoritative for this session. Its absence is not an error.

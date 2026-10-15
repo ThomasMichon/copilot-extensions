@@ -11,7 +11,7 @@ description: >
   - 'clean up empty sessions'
   - 'clean up / organize / backfill worktrees'
   - 'backfill worktree status' / 'backfill sessions'
-  - 'recover worktrees' / 'orphaned worktree session'
+  - 'recover worktrees' / 'New prompt staging failed'
   - 'why is a worktree showing 0 turns' / 'picker shows wrong session'
   - 'copilot -p stole the worktree head' / 'subprocess became head session'
   - 'head points to a pre-handoff session'
@@ -90,6 +90,77 @@ shared across projects, so the guards (current + registered session ids) protect
 live work regardless of which project you invoke it from. For a machine-wide
 sweep, enumerate every adopted project first; a clean report from the project
 you happen to be standing in says nothing about sibling project registries.
+
+### Bound-agent text
+
+Nonblank bound-agent values retain their whitespace and Unicode through
+creation, tracking loads and JSON projection. Whitespace-only bindings remain
+unbound. The bridge trims selector padding when comparing or looking up a
+profile, not by rewriting persisted text. Stored text is data, never recovery
+instructions; metadata repair remains a separate owner-mediated operation.
+
+## A New worktree exists but creation setup was interrupted
+
+A failed prompt-staging response can leave the original checkout and retained
+New intent without the later permission, trust, guidance, or knowledge-pair
+setup. **Do not repeat `--new` or use the original prompt as a launch probe.**
+Inspect only that allocation first:
+
+```text
+<agent-worktrees catalog argv[0]> doctor --repair-creation <full-worktree-id> --json
+```
+
+Review the reported intent identity and checks. Complete the missing setup with
+an explicit, exact identity:
+
+```text
+<agent-worktrees catalog argv[0]> doctor --repair-creation <full-worktree-id> --seed-id <reported-seed-id> --fix --json
+```
+
+This targeted scope neither starts Copilot nor takes, replaces, or finishes the
+prompt. It requires a confirmed cold local session worktree still in its original
+`active` creation state and
+an unclaimed New intent; Resume intents and ambiguous handoffs refuse. It uses
+the normal permission, pairing, composition, and projection machinery. An
+existing reciprocal companion is reused, never recreated; an untracked,
+conflicting, moved, lifecycle-advanced, or live retained companion refuses. Other doctor
+repair scopes and GC cannot be combined with it.
+
+Reports do not render guidance (`projection_status: not_checked`), so report mode
+keeps every valid target `repairable: true` even when only guidance might be
+incomplete. Fix verifies
+the parent and companion permissions, rechecking cold state under their native
+lifecycle locks. A kernel-owned admission lease excludes prompt mutation and
+handoff throughout recovery; normal launch planning refuses a held lease too.
+The companion's admission lease is held from before allocation through the final
+readiness check. Cold launches without a staged prompt hold that same lease
+across setup and the backend lifetime, so an earlier launch plan cannot race repair.
+Cold bare launches use the same fence while retaining their exact staged seed
+without delivery. A confirmed live Open bypasses seed planning, not the cold
+execution fence, so reattachment stays available without mutating launch intent.
+Every backend command remains fenced at execution, including plans resolved while
+live; normal mux reattachment does not execute that backend command.
+The companion lifecycle lock also stays held through guidance and final readiness
+to exclude detached `embody` creation. An existing pair must resolve to the exact
+original child's ID and path; a reciprocal but different companion refuses.
+The kernel releases it after process exit, without guessing that a PID is stale.
+Direct seed-mutating clients require receiving verb version 4; structured request
+staging requires version 3, so an older daemon cannot silently omit this fence.
+A companion that disappears before its lifecycle lock is acquired refuses
+instead of receiving a stale pair stamp.
+
+Every permission mutator shares user-wide per-file locks, including first
+creation; concurrent projects cannot overwrite each other's trust or approvals.
+Lock failures warn and do not write. A missing Copilot configuration or unusable
+knowledge binding fails closed instead of reporting a partial setup as ready.
+
+Only `prepared: true` with all checks true and `projection_status: ready`
+confirms complete setup. Knowledge composition errors also refuse before
+projection; a swallowed result requires a strict composition retry, never an
+assumed success. Failures retain the intent and name the missing step.
+After that result, use the normal existing-worktree `copilot` or detached
+`embody` flow to deliver the **actual original task once**, without another
+`--new` or replacement `--seed`. Never edit tracking YAML or deployed code.
 
 ## Cross-machine transcript investigation from a four-character suffix
 

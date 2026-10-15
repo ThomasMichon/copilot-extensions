@@ -148,17 +148,15 @@ def list_versions(root: Path) -> list[str]:
 
 
 def _version_key(v: str):
-    """Stdlib-only ordering key for supported ``X.Y.Z[-devN]`` versions."""
-    supported = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", v)
+    """Order package versions before optional dependency-profile qualifiers."""
+    supported = re.fullmatch(
+        r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?", v
+    )
     if supported:
-        major, minor, patch, dev = supported.groups()
+        major, minor, patch, dev, profile = supported.groups()
         return (
-            0,
-            int(major),
-            int(minor),
-            int(patch),
-            1 if dev is None else 0,
-            int(dev or 0),
+            0, int(major), int(minor), int(patch),
+            1 if dev is None else 0, int(dev or 0), (profile or "").casefold(),
         )
     tokens = re.split(r"(\d+)", v.casefold())
     return (1, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))

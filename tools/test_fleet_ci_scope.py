@@ -13,9 +13,12 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
     assert len(PATTERNS) == 2
     assert PATTERNS[0] == PATTERNS[1]
     assert WORKFLOW.count("if: steps.fleet-contracts.outputs.run == 'true'") == 2
-    assert WORKFLOW.count("""'-m "not client_distribution_full"'""") == 2
     assert WORKFLOW.count(
-        "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 120"
+        """'-m "not client_distribution_full and not observation_retention_full"'"""
+    ) == 2
+    assert WORKFLOW.count(
+        "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 "
+        "--timeout ${{ github.event_name == 'workflow_dispatch' && 600 || 120 }}"
     ) == 2
 
 

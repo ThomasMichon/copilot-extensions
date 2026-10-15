@@ -23,6 +23,7 @@ class PickerConfigurationMixin:
             if values is not None:
                 submitted(values)
             elif editor.section_target is not None:
+                self._configuration_preview_generation = object()
                 self._restore_pivot_descriptor(keys[editor.section_target])
                 self._last_config_key = self._pivot_descriptor_key()
                 self.sel = ("M", 0)
@@ -97,6 +98,7 @@ class PickerConfigurationMixin:
         return text
 
     def _rotate_config_section(self, direction):
+        self._configuration_preview_generation = object()
         indices = self._config_pivots()
         self.htab = indices[(indices.index(self.htab) + direction) % len(indices)]
         self._last_config_key = self._pivot_descriptor_key()
@@ -106,6 +108,7 @@ class PickerConfigurationMixin:
         self.call_after_refresh(self._load_current_config_section)
 
     def _leave_configuration(self):
+        self._configuration_preview_generation = object()
         saved = getattr(self, "_config_return", None)
         if saved is None:
             left = self._left_pivots()

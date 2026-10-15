@@ -53,6 +53,38 @@ by default. A separately reviewed admission adapter must verify the CI source,
 attempt policy and independent venue authentication; a signature/issue label is
 not authorization. Container selection and charter selection remain distinct.
 
+## Task-only worker client
+
+A trusted supervisor can give an isolated worker a coordinator-issued task
+grant without handing it the fleet bearer or control token. The CLI accepts
+four explicit projection fields: `AGENT_DISPATCH_TASK_TOKEN`,
+`AGENT_DISPATCH_TASK_ID`, `AGENT_DISPATCH_TASK_URL`, and
+`AGENT_DISPATCH_TASK_WORKER_ID` (or the corresponding global flags
+`--task-token`, `--task-scope`, `--task-url`, and `--task-worker`).
+Any supplied field selects task-only mode; an incomplete projection fails
+closed rather than falling back to ordinary coordinator discovery. Global
+options require their full spelling, so task-worker flags do not intercept
+existing subcommand flags such as `claim --task` or `doctor --task`.
+
+Only `show`, `payload`, `progress`, `heartbeat`, `complete`, and
+`abandon --permit` are accepted, for the projected task only. `show` returns
+the authorized task snapshot without separate progress-history, attachment,
+or worktree-tracking reads. `heartbeat` retains its explicit worker positional;
+other owner verbs use the projected worker when omitted. Task abandonment
+reports the worker's own failure directly, not a fleet/session cleanup request.
+Fleet/history/cleanup options are refused. The coordinator independently
+checks the signed task, owner, session, generation, expiry and fencing epoch
+on every request; terminal transitions invalidate the grant.
+
+This client pins the supplied HTTP(S) endpoint and sends only the task header.
+It does not discover endpoints, autostart a service, resolve machine identity,
+fetch ambient credentials, use environment proxies, or follow redirects.
+Explicit fleet credentials, `--shared`, and a different `--url` are rejected.
+Python callers can likewise use `DispatchClient(url, task_token=grant)`;
+the server denies every route outside task authority. Credentials must not
+appear in task payloads, prompts, public metadata, or logs. Automatic supervisor
+delivery and renewal are not yet wired by this client boundary.
+
 ## Install
 
 Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifecycle.md)
@@ -884,10 +916,42 @@ duplicate registrations, absent local checkouts and older peers fail explicitly;
 no PATH/ancestor/srcroot discovery substitutes for registration. Acquire or
 adopt an absent checkout through its owner's standard `repos clone`/adoption
 flow before retrying. Read-only discovery never clones or registers it.
-Reference and knowledge registrations may supply read-only recipes and effort
-state, but cannot supply execution context. Active named registrar pointers must
-use worktree or singleton registrations: discovery refuses read-only classes
-before expanding declarations into executable units or implicit checkout paths.
+Reference and knowledge registrations may supply definitions, recipes, script
+files and effort state, but cannot supply execution context. Named registrar
+pointers enumerate the complete valid declaration corpus, independently of
+execution admission or machine placement. For a read-only supplier, discovery
+qualifies implicit and supplier-local emitter cwd values and script-evaluator
+`spec.evaluator_spec.cwd` values as `repo:<supplier>:<relative-path>` rather
+than losing their authority in bare checkout paths. Supplier-local absolute
+script-forge cwd values retain the same qualification. This lets an old,
+inapplicable profile coexist with explicitly harness-bound profiles without
+silently dropping either. Worktree/singleton suppliers retain their legacy
+cwd behavior.
+
+Enumeration grants no execution authority. Repository/effort loops generate
+an explicit named `spec.cwd` from `execution_repo`; script evaluators declare
+their execution cwd in `spec.evaluator_spec.cwd`. Runtime checks the
+named execution cwd against its registered class before resolving source argv:
+read-only source arguments require that independently fenced named cwd.
+Omitting cwd, using an ordinary path, or naming a knowledge/reference cwd does
+not grant permission to execute from a read-only repository.
+
+For example, definitions registered with
+`registrar add-pointer state-notes --kind repo --repository state-notes`
+can declare `execution_repo: control-harness`, script-forge
+`command: ["repo:state-notes:scripts/backlog.py"]`, and
+`cwd: "repo:control-harness:."` in their `forge` mapping. Evaluator scripts use
+the same source URI and harness cwd shape in `spec.evaluator_spec`. Effort
+state can remain `state_root: "repo:state-notes:."`.
+
+`execution_repo` selects the producer's context, **not** its workers'
+workspace. `repo`/worker `repos` remains the queue lane. Select an existing
+harness-bound Bridge agent/namespace in `pool.body.agent` for headless workers;
+do not target the state supplier. Keep `pool.body.no_pair: false` (the default)
+to retain canonical paired-knowledge allocation. CLI workers likewise require
+their execution project to resolve to the harness through existing allocation
+routing. No second root store or supplier checkout path is persisted.
+Discovery/shape validation is not proof of allocation, pairing, or live launch.
 Existing standalone non-repository commands and legacy
 path declarations remain compatible; migration is explicit, not a startup rewrite.
 
@@ -2556,6 +2620,39 @@ node's own heartbeats indefinitely; default `30`), and
 `AGENT_DISPATCH_SATELLITE_DISCOVERY_TIMEOUT` (seconds bounding the whole
 queued-task discovery pagination for one tick, independent of any single
 request's own HTTP timeout; default `10`).
+
+The running satellite subscribes outbound to the shared coordinator's existing
+`/events` SSE stream. Subscription-ready frames trigger authoritative queue
+reconciliation at startup and reconnect; relevant task/capacity events wake
+that same intake, filtered by machine (and repository for scoped embedders).
+An event never assigns ownership. A bounded dirty bit coalesces bursts, with
+at most one reconcile per second; a 60-second poll recovers dropped events
+even while disconnected. Presence heartbeats run independently of discovery
+and spawn. Direct, one-shot federation ticks retain their synchronous read.
+
+Federation hosted by the local coordinator follows its active routing entry.
+Passive, draining and demoted generations admit neither directory mutations
+nor new intake. The existing drain gate counts an admitted reconciliation
+through its synchronous claim/discovery/spawn boundary; `/drain` stays busy
+until that unit finishes. Demoted teardown does not deregister the stable
+identity a successor may already own. Installer-driven `install.ps1` /
+`install.sh` update activation retains the shared zdd flip/drain/retire flow.
+
+The stream emits comment keepalives every 10 quiet seconds. Intake bounds
+reads at 20 seconds, the initial ready barrier at 5 seconds, and reconnect
+backoff at 1-30 seconds. Old coordinators without ready/keepalive support
+degrade to polling while reconnection is retried. Closing the satellite gate
+or changing/removing its shared URL or credential retires the subscription
+and waits for an in-flight intake before closing its client; replacement is
+deferred rather than racing two intakes. Credential-command resolution runs
+only on the owning federation tick, never in the per-event reader predicate.
+Route ownership is refreshed on owner ticks and actual reconciliation
+admission, not per frame; the reader only checks the cached snapshot.
+Actual intake rechecks the live route inside the counted drain boundary;
+rotation is observed at that presence cadence. `GET /health` on the local serving
+coordinator reports `assignment_intake` connection state, sanitized failure
+type and reconciliation count (null when no intake exists). This is delivery
+health, not queue replication, offline authority or container enrollment.
 
 `agent-dispatch federation status` prints the discovered coordinator + live
 peers, plus a `self` section (`role` / `instance` / `gate_state`) reporting

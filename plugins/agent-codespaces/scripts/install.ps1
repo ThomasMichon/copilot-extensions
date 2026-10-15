@@ -159,9 +159,15 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
+                    ForEach-Object {
+                        '"' + ([regex]::Replace(
+                            [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
+                        )) + '"'
+                    }) -join ' '
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
-                    -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd)
+                    -ArgumentList $__selfStageArgs
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -551,7 +557,11 @@ function Invoke-VersionedMarkComplete {
     }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
     $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
+    if (-not $ph) {
+        Write-ServiceErr "Runtime input fingerprint unavailable -- not publishing versions/$SrcVersion"
+        return $false
+    }
+    $mcArgs += @('--payload-hash', $ph)
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
     if ($LASTEXITCODE -ne 0) {
         Write-ServiceErr "Failed to mark runtime slot complete (versions/$SrcVersion)"

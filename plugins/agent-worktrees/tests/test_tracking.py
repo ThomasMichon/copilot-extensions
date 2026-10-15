@@ -2621,9 +2621,8 @@ class TestOwningTrackingDirResolution:
             lambda: {"harness-proj", "knowledge-proj"},
         )
 
-        # session_register's authority fence (execution_spaces.
-        # require_project_record_mutation) resolves
-        # cfg.load_project_config(record.repo) before any mutation; see
+        # session_register's authority fence resolves the registration-specific
+        # config_authority.load_project_authority_config before any mutation; see
         # conftest.py's monkeypatch_config for the full rationale. A REAL
         # (empty) canonical machines.yaml at each fake anchor keeps
         # ``load_machines_yaml`` from falling through to its own
@@ -2653,6 +2652,10 @@ class TestOwningTrackingDirResolution:
             )
 
         monkeypatch.setattr(_cfg, "load_project_config", _fake_load_project_config)
+        monkeypatch.setattr(
+            "agent_worktrees.config_authority.load_project_authority_config",
+            _fake_load_project_config,
+        )
         return harness_dir, knowledge_dir, _t
 
     def test_yaml_path_uses_records_own_repo_not_ambient_project(
@@ -2666,6 +2669,7 @@ class TestOwningTrackingDirResolution:
         assert rec.yaml_path == knowledge_dir / "wt-k.yaml"
         assert rec.yaml_path != harness_dir / "wt-k.yaml"
 
+    @pytest.mark.guard
     def test_bare_id_lookup_falls_back_to_owning_project_without_duplicating(
         self, tmp_path: Path, monkeypatch
     ):
@@ -2683,6 +2687,7 @@ class TestOwningTrackingDirResolution:
         updated = load_record(knowledge_dir / "wt-k.yaml")
         assert updated.sessions and updated.sessions[-1].session_id == "session-1"
 
+    @pytest.mark.guard
     def test_bare_id_lookup_prefers_ambient_when_present_there(
         self, tmp_path: Path, monkeypatch
     ):
@@ -4521,5 +4526,4 @@ class TestFollowUpLedgerConcurrencyMerge:
         save_record(writer_a, path)
         reloaded = load_record(path)
         assert {fu.summary for fu in reloaded.follow_ups} == {"from A", "from B"}
-
 

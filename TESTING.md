@@ -9,6 +9,78 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The registered-repository Git-probe guard follows the real `repos._git` to
+`git_ops.git` call chain. It checks headless options at that subprocess owner,
+the existing 60-second bound and UTF-8 capture policy, and removal of inherited
+repository/config selectors while retaining unrelated environment state.
+The companion real-Git identity test and native registered-only first-touch
+CLI test remain process-boundary coverage rather than mocked-runner evidence.
+
+The optional profile-assignment-state failure guard follows both real command
+layers returned by worktree creation: exact record-bound execution admission,
+then the installed setup launcher. It checks the underlying model arguments,
+fallback profile environment and absence of assignment metadata without
+mocking either launcher or treating a setup host as the Copilot executable.
+
+The create-plan project-scoping guard uses a real `WorktreeRecord` derived from
+the shared fixture, with the selected creation identity and owning project.
+Only external side effects are stubbed: the real creation path assembles its
+launch plan, including the deferred admission command. The guard still requires
+that plan to name the selected repository rather than the stale ambient project.
+
+Agent Logger's PowerShell access-denied classifier guard executes the extracted
+installer functions under both installed PowerShell hosts. Each child uses fresh
+contained home/config/temp roots, noninteractive startup and disabled telemetry
+and update checks; its existing 20-second process deadline and all downgrade/
+rethrow assertions remain unchanged. An immediate stderr marker distinguishes
+entry into the harness from a pre-script startup timeout. The original hosted
+timeout's cause remains tracked under #6747; a passing native run alone is not
+flake acceptance.
+
+The POSIX lean-provision launcher test uses fake uv and excludes runtime `src`
+and `libs` trees from its temporary payload. It still exercises real lifecycle
+admission, self-staging, activation, resolver deployment and both generated
+launchers under the existing 90-second item budget. Package construction and
+whole-source fingerprint coverage belong to their own contracts; this fixture
+must not grow with unrelated runtime source files.
+The healthy and namespace/watchdog cases share this source-free payload builder.
+Healthy provision has a 20-second installer-owned deadline inside the unchanged
+90-second pytest ceiling; failures retain both stdout and stderr diagnostics.
+
+### Fleet replay-retention boundaries
+
+The required native fleet lane runs the replay-expiry/idempotency contract with
+a four-event window and real, fully synchronous SQLite transactions. The same
+parameterized test also crosses the production 1,024-event window under
+`observation_retention_full`; unfiltered local and manual workflow runs retain
+that full-size proof. Required PR/push lanes exclude only that parameter and
+the existing `client_distribution_full` artifact matrix, keeping the
+120-second containment budget unchanged. This avoids making one boundary
+test issue over 1,000 disk flushes on every hosted Windows run; neither the
+production retention limit nor its durability policy changes. Explicit manual
+runs select both windows and the full artifact matrix with a 600-second fleet
+suite budget inside a 15-minute native runner job. PR/push budgets remain
+120 seconds for fleet, five minutes for the Linux job and seven for Windows.
+
+### Derived native installation diagnostics
+
+`libs/payload-invocation/tests/test_derived_diagnostic_cli.py` executes the
+actual vendored shell entry points selected by the installation-context
+inventory. Each copy has independent legacy/active and absent/retained-pointer
+items; each item invokes `status` and `probe-legacy` twice and compares the
+complete fixture profile after every call and after PowerShell-host shutdown.
+The existing initialized-host fixture excludes only host initialization from
+the baseline, never product execution or profile contents.
+
+Required change-scoped CI runs the Agent Worktrees copy's four cases with
+`-m "not derived_diagnostic_full"`; the existing derived-Python API matrix and
+mutation tripwires remain required. The explicit
+`installation-context-acceptance.yml` manual workflow executes every native
+copy on Windows PowerShell 5.1 and POSIX, partitioned by mode and pointer state
+into eight independently bounded four-minute jobs. Run it against the exact
+candidate ref before claiming all-copy native acceptance. A smoke pass or
+byte-identical vendoring check alone does not satisfy that broader gate.
+
 ### Native category view contracts
 
 `plugins/agent-dispatch/tests/test_task_categories.py` gives each native view
@@ -151,6 +223,12 @@ python tools/run-plugin-tests.py agent-dispatch \
 
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
+Use repeatable `--test-file <path-relative-to-tests>` with one plugin to avoid
+collecting unrelated modules before applying `-k`. Unknown, escaping and
+non-file selections fail before environment preparation. The Windows
+reconciliation smoke names `test_reconcile.py` and
+`test_installer_command_binding.py`, retaining all 18 selected checks and the
+120-second budget without collecting the other 10,000-plus tests.
 
 Managed-worktree removal fixtures accept the canonical project loader's
 keyword-only overlay selection while retaining synthetic receiving-side
@@ -733,6 +811,17 @@ uses Windows PowerShell 5.1 via
 and derived implementation changes trigger it; unrelated docs do not.
 An explicitly requested unavailable shell fails collection rather than
 silently skipping the evidence. No exhaustive adapter matrix is added to PR CI.
+The Windows job has a seven-minute aggregate budget for these diagnostic and
+wrapper selections plus its runner, payload-CWD, and fleet contracts. Individual
+diagnostic/wrapper selections retain their two-minute limits; the Linux runner
+job retains its five-minute budget.
+
+Source-qualified catalog no-write cases invoke the unchanged PowerShell script
+twice in one real, initialized host. Host-only initialization stops CLR startup
+profile recording before the full-profile baseline; no product script is warmed.
+Each invocation and host shutdown must preserve every file byte, directory, and
+modification time. This measures diagnostic behavior, not the separate startup
+cache writes made by fresh Windows PowerShell processes.
 
 Run the relevant suite yourself before pushing a runtime change — there is
 intentionally **no** automatic push/PR gate. Fast structural/contract checks are

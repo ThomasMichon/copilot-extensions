@@ -10,9 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
-
-from . import config, rendezvous
+from . import config, launch, rendezvous
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .prompt import prompt_password as gui_prompt_password
 from .winpipe import pipe_send
@@ -357,30 +355,10 @@ def start_service(tcp_port: int | None = None) -> bool:
             return True
         tcp_port = context.port
 
-    python = sys.executable
-    cmd = [windowless_python(python), "-m", "agent_vault.service"]
-    if tcp_port:
-        cmd.extend(["--tcp-port", str(tcp_port)])
-
-    if IS_WINDOWS:
-        cmd.append("--foreground")
-        env = os.environ.copy()
-        env.update(windowless_python_env(python))
-        subprocess.Popen(
-            cmd,
-            env=env,
-            **detached_kwargs(),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    else:
-        subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    # spawn_daemon already detaches the service; --foreground keeps POSIX's
+    # self-daemonize (cwd HOME, stdio to /dev/null) from undoing that launch.
+    args = ["--tcp-port", str(tcp_port)] if tcp_port else []
+    launch.spawn_service([*args, "--foreground"])
 
     for _ in range(20):
         time.sleep(0.25)
@@ -1627,7 +1605,12 @@ def cmd_vault_list(args):
 
 
 def cmd_vault_add(args):
-    config.add_vault(args.name, args.kpdb, group=args.group, port=args.port)
+    # A relative database path names the caller's directory, but the global
+    # settings resolve relative paths against their own directory: anchor it.
+    kpdb = args.kpdb
+    if kpdb and not os.path.isabs(os.path.expandvars(os.path.expanduser(kpdb))):
+        kpdb = os.path.abspath(kpdb)
+    config.add_vault(args.name, kpdb, group=args.group, port=args.port)
     print(f"Vault added: {args.name}")
     return 0
 

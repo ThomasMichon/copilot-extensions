@@ -17,7 +17,7 @@ coordinator's ``control_token`` (mirroring the existing
 :func:`agent_dispatch.coordinator_auth.scoped_control_token` pattern) over the
 claims below. Verification recomputes the HMAC and then the caller re-checks
 the claims against the task's **current** DB state (see
-:mod:`agent_dispatch.coordinator_tasks`'s ``_resolve_task_authority``) -- so a
+:mod:`agent_dispatch.task_authority`'s ``resolve_task_authority``) -- so a
 token naturally and immediately invalidates the instant the task's owner,
 owner_session_id, or fencing epoch changes (reassignment, completion, a
 coordinator takeover), with no revocation list to maintain.
@@ -33,9 +33,11 @@ free; the server-side epoch comparison itself still happens in the caller
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
+import math
 import time
 from dataclasses import dataclass
 
@@ -51,7 +53,7 @@ TASK_SCOPE_HEADER = "X-Agent-Dispatch-Task-Token"
 #: this expiry; the expiry is only a defense-in-depth bound on exposure
 #: window (e.g. a task somehow re-opened with a coincidentally-reused
 #: owner_session_id). A long-running container's supervisor is expected to
-#: re-mint (via its own full-bearer `start`/heartbeat call) well within this
+#: re-mint through its own trusted `start` call well within this
 #: window, not treat one token as good for a whole task's lifetime.
 DEFAULT_TTL_SECONDS = 900.0
 
@@ -80,6 +82,7 @@ class TaskScopeClaims:
     owner_session_id: str
     epoch: int
     exp: float
+    generation: int = 0
 
 
 def _b64encode(data: bytes) -> str:
@@ -88,7 +91,7 @@ def _b64encode(data: bytes) -> str:
 
 def _b64decode(data: str) -> bytes:
     padding = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(data + padding)
+    return base64.b64decode(data + padding, altchars=b"-_", validate=True)
 
 
 def _sign(control_token: str, payload: bytes) -> str:
@@ -104,6 +107,7 @@ def mint_task_scope_token(
     worker_id: str,
     owner_session_id: str,
     epoch: int,
+    generation: int = 0,
     ttl_seconds: float = DEFAULT_TTL_SECONDS,
     now: float | None = None,
 ) -> str:
@@ -113,15 +117,28 @@ def mint_task_scope_token(
     No durable row is created -- the token is self-contained (claims +
     HMAC signature); the caller is responsible for re-checking the claims
     against the task's current DB state on every use (see
-    :mod:`agent_dispatch.coordinator_tasks`).
+    :mod:`agent_dispatch.task_authority`).
     """
     ts = now if now is not None else time.time()
+    if not control_token or not all(
+        isinstance(value, str) and value
+        for value in (task_id, worker_id, owner_session_id)
+    ):
+        raise ValueError("task token requires a signing key and non-empty identities")
+    if (
+        type(epoch) is not int or epoch < 0
+        or type(generation) is not int or generation < 0
+        or not math.isfinite(ts) or not math.isfinite(ttl_seconds)
+        or ttl_seconds <= 0
+    ):
+        raise ValueError("task token requires non-negative fences and finite positive lifetime")
     claims = {
         "v": _VERSION,
         "task_id": task_id,
         "worker_id": worker_id,
         "owner_session_id": owner_session_id,
         "epoch": int(epoch),
+        "generation": generation,
         "exp": ts + max(0.0, ttl_seconds),
     }
     payload = json.dumps(claims, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -140,28 +157,40 @@ def verify_task_scope_token(
     design: staleness is detected by the caller's own DB read, not here).
     """
     try:
+        if len(token) > 8192:
+            raise ValueError("token exceeds size bound")
         encoded_payload, signature = token.rsplit(".", 1)
         payload = _b64decode(encoded_payload)
-    except (ValueError, Exception) as exc:  # malformed input is just an invalid token
+    except (ValueError, binascii.Error, UnicodeError) as exc:
         raise TaskScopeTokenError("malformed task-scoped token") from exc
     expected = _sign(control_token, payload)
-    if not hmac.compare_digest(signature, expected):
+    if not signature.isascii() or not hmac.compare_digest(signature, expected):
         raise TaskScopeTokenError("invalid task-scoped token signature")
     try:
         claims = json.loads(payload)
     except ValueError as exc:
         raise TaskScopeTokenError("malformed task-scoped token payload") from exc
-    if claims.get("v") != _VERSION:
+    if not isinstance(claims, dict) or claims.get("v") != _VERSION:
         raise TaskScopeTokenError("unsupported task-scoped token version")
     try:
-        task_id = str(claims["task_id"])
-        worker_id = str(claims["worker_id"])
-        owner_session_id = str(claims["owner_session_id"])
-        epoch = int(claims["epoch"])
-        exp = float(claims["exp"])
+        task_id = claims["task_id"]
+        worker_id = claims["worker_id"]
+        owner_session_id = claims["owner_session_id"]
+        epoch = claims["epoch"]
+        generation = claims["generation"]
+        exp = claims["exp"]
     except (KeyError, TypeError, ValueError) as exc:
         raise TaskScopeTokenError("malformed task-scoped token claims") from exc
     ts = now if now is not None else time.time()
+    if (
+        not all(isinstance(value, str) and value for value in
+                (task_id, worker_id, owner_session_id))
+        or type(epoch) is not int or epoch < 0
+        or type(generation) is not int or generation < 0
+        or type(exp) not in (int, float) or not math.isfinite(exp)
+        or not math.isfinite(ts)
+    ):
+        raise TaskScopeTokenError("malformed task-scoped token claims")
     if ts >= exp:
         raise TaskScopeTokenError("expired task-scoped token")
     return TaskScopeClaims(
@@ -170,4 +199,5 @@ def verify_task_scope_token(
         owner_session_id=owner_session_id,
         epoch=epoch,
         exp=exp,
+        generation=generation,
     )

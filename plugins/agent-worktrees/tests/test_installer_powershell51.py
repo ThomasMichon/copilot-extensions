@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -406,7 +407,11 @@ def test_slot_clean_uses_an_interpreter_outside_the_target_slot():
     assert "if (-not $py) { return -not (Test-Path $VenvDir) }" in clean_fn
 
     assert "[switch]$ExcludeVenvDir" in bootstrap_fn
-    assert "$dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }" in bootstrap_fn
+    assert "[switch]$ExcludeRuntimeRoot" in bootstrap_fn
+    assert (
+        "$dirs = if ($ExcludeRuntimeRoot) { @() } elseif ($ExcludeVenvDir) "
+        "{ @($LinkDir) } else { @($VenvDir, $LinkDir) }"
+    ) in bootstrap_fn
     # $LinkDir is not guaranteed to differ from $VenvDir (in the current
     # versioned-runtime wiring they are in fact always the same path), so
     # the exclude branch must not simply trust $LinkDir as a safe stand-in
@@ -415,8 +420,9 @@ def test_slot_clean_uses_an_interpreter_outside_the_target_slot():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell execution is Windows-only here")
+@pytest.mark.parametrize("exclusion", ["ExcludeVenvDir", "ExcludeRuntimeRoot"])
 def test_get_bootstrap_python_excludes_the_target_slot_even_when_link_dir_equals_venv_dir(
-    tmp_path: Path,
+    tmp_path: Path, exclusion: str,
 ):
     """Reproduces the exact production invariant a purely textual check
     can't: $LinkDir can equal $VenvDir (the current versioned-runtime
@@ -451,11 +457,14 @@ Invoke-Expression $functionAst.Extent.Text
 # The exact production invariant: $LinkDir equals $VenvDir.
 $VenvDir = $env:TARGET_DIR
 $LinkDir = $env:TARGET_DIR
+$InstallDir = $env:INSTALL_DIR
 
 function Get-Command { $null }               # no `py` launcher resolvable
 function Get-ApplicationPath { 'FALLBACK-USED' }
 
-Get-BootstrapPython -ExcludeVenvDir
+$options=@{}
+$options[$env:EXCLUSION]=$true
+Get-BootstrapPython @options
 """
     proc = subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
@@ -466,6 +475,8 @@ Get-BootstrapPython -ExcludeVenvDir
             **os.environ,
             "INSTALLER": str(INSTALLER),
             "TARGET_DIR": str(target_dir),
+            "INSTALL_DIR": str(tmp_path),
+            "EXCLUSION": exclusion,
         },
         timeout=30,
     )
@@ -479,8 +490,9 @@ Get-BootstrapPython -ExcludeVenvDir
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell execution is Windows-only here")
+@pytest.mark.parametrize("exclusion", ["ExcludeVenvDir", "ExcludeRuntimeRoot"])
 def test_get_bootstrap_python_excludes_a_path_fallback_resolving_into_venv_dir(
-    tmp_path: Path,
+    tmp_path: Path, exclusion: str,
 ):
     """The `py -3` launcher and `Get-ApplicationPath` PATH-search fallbacks
     must be excluded too, not just the initial $dirs candidates: if an
@@ -516,6 +528,7 @@ Invoke-Expression $functionAst.Extent.Text
 
 $VenvDir = $env:VENV_DIR
 $LinkDir = $env:LINK_DIR   # distinct from VenvDir -- no Scripts\python.exe here
+$InstallDir = $env:INSTALL_DIR
 
 function Get-Command { $true }   # `py` launcher IS resolvable
 function Invoke-NativeCapture {
@@ -524,7 +537,9 @@ function Invoke-NativeCapture {
 }
 function Get-ApplicationPath { $env:EXCLUDED_PYTHON }
 
-Get-BootstrapPython -ExcludeVenvDir
+$options=@{}
+$options[$env:EXCLUSION]=$true
+Get-BootstrapPython @options
 """
     proc = subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
@@ -537,6 +552,8 @@ Get-BootstrapPython -ExcludeVenvDir
             "VENV_DIR": str(venv_dir),
             "LINK_DIR": str(link_dir),
             "EXCLUDED_PYTHON": str(excluded_python),
+            "INSTALL_DIR": str(tmp_path),
+            "EXCLUSION": exclusion,
         },
         timeout=30,
     )
@@ -1058,6 +1075,76 @@ def test_early_installer_utilities_are_powershell_51_safe_ascii():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
+def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path):
+    powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+    source = tmp_path / "source [literal]"
+    destination = tmp_path / "snapshot"
+    (source / ".hidden" / "nested").mkdir(parents=True)
+    (source / "empty").mkdir()
+    (source / ".hidden" / "nested" / "payload.bin").write_bytes(bytes(range(256)))
+    (source / "metadata.json").write_text('{"fixture": true}', encoding="utf-8")
+    installer = INSTALLER.read_text(encoding="utf-8")
+    function = "function Copy-StampDirectory" + installer.split(
+        "function Copy-StampDirectory", 1
+    )[1].split("function Invoke-Stamp", 1)[0]
+    script = tmp_path / "copy.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n" + function
+        + "\nCopy-StampDirectory $args[0] $args[1]\n", encoding="utf-8"
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(script), str(source), str(destination)],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert {str(path.relative_to(source)) for path in source.rglob("*")} == {
+        str(path.relative_to(destination)) for path in destination.rglob("*")
+    }
+    for path in source.rglob("*"):
+        if path.is_file():
+            assert (destination / path.relative_to(source)).read_bytes() == path.read_bytes()
+
+
+@pytest.mark.parametrize("paused", [False, True])
+def test_powershell_hook_bootstrap_uses_canonical_lifecycle(tmp_path: Path, paused):
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        pytest.skip("Windows PowerShell 5.1 is unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    state = tmp_path / "killswitch.json"
+    state.write_text(json.dumps({"active": paused}), encoding="utf-8")
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+        "COPILOT_EXTENSIONS_CONTEXT": "",
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(state),
+    }
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(PLUGIN / "scripts" / "bootstrap-check.ps1"),
+         "-BootstrapPython", sys.executable],
+        capture_output=True, text=True, env=env, timeout=25,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {}
+    runtime = home / ".agent-worktrees"
+    if paused:
+        assert not runtime.exists()
+        assert "bootstrap-killswitch" in result.stderr
+    else:
+        assert (runtime / "stamped-version").is_file(), result.stderr
+        snapshot = Path((runtime / "payload-dir").read_text().strip())
+        assert (snapshot / "scripts" / "command_binding.py").is_file()
+        assert (home / ".local" / "bin" / "agent-worktrees.cmd").is_file()
+        assert not (runtime / "versions").exists()
+
+
 def test_powershell_51_stamp_succeeds(tmp_path: Path):
     powershell = shutil.which("powershell.exe")
     if not powershell:

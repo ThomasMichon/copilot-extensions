@@ -55,9 +55,11 @@ evidence explicitly. See [process-log evidence](process-log-evidence.md).
 `session-sync` can publish this evidence alongside session-state for the
 ordinary local-machine sync path (opt-in, filesystem targets only; see the
 doc's "Sync publication" section), with independently recoverable transfer-leg
-health and sustained-partial reporting. Scheduled compression, SSH/ingest
-target support, repo-scoped admission fencing, and accounting ingestion
-remain outstanding.
+health and sustained-partial reporting. Source enumeration, direct reads and
+sync transfers pin canonical ancestors through the same directory boundary
+used by additive ZIP snapshots. Destination containment, source reclamation,
+SSH/ingest target support, repo-scoped admission fencing, and accounting
+ingestion remain outstanding.
 
 ### Segmenter (`agent_logger.segmenter`)
 

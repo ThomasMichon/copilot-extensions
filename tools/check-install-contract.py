@@ -307,6 +307,267 @@ def _exec_stderr_swallow_violations(plugins_dir: Path) -> list[str]:
     return violations
 
 
+# A completion marker is the published proof that a slot is complete: a refused
+# or failed `mark-complete` must stop activation, never be swallowed. The helper
+# must not end its writer pipeline in `|| true` (on one line or across line
+# continuations), and no caller may invoke it -- with or without arguments -- as
+# a statement whose result is ignored, or test it in a conditional whose
+# failure branch does not stop (`if ! helper; then warn; fi`).
+_MARK_COMPLETE_SWALLOW = re.compile(r"mark-complete.*\|\|\s*true|\|\s*sed\b.*\|\|\s*true")
+_MARK_COMPLETE_CALL = re.compile(r"^\s*(?:_versioned_mark_complete|Invoke-VersionedMarkComplete)(?:\s|$)")
+_LINE_CONTINUATION = re.compile(r"(?:\\|`)[ \t]*\n[ \t]*")
+
+
+def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
+    violations: list[str] = []
+    for path in sorted([*plugins_dir.glob("*/scripts/*.sh"), *plugins_dir.glob("*/scripts/*.ps1")]):
+        text = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+        helper = re.search(
+            r"^(?:_versioned_mark_complete\(\) \{|function Invoke-VersionedMarkComplete \{)\n(.*?)^\}",
+            text, re.M | re.S,
+        )
+        rel = path.relative_to(plugins_dir.parent).as_posix()
+        if helper and any(
+            _MARK_COMPLETE_SWALLOW.search(line)
+            for line in _LINE_CONTINUATION.sub(" ", helper.group(1)).splitlines()
+            if not line.lstrip().startswith("#")
+        ):
+            violations.append(f"{rel}: the completion-marker helper swallows a failed mark-complete")
+        elif helper and not _helper_propagates_writer_status(helper.group(1), path.suffix):
+            violations.append(
+                f"{rel}: the completion-marker helper does not fail when the mark-complete "
+                "writer fails"
+            )
+        # Blank PowerShell block comments (keeping line numbers) so prose that
+        # names the helper is not mistaken for a call.
+        text = re.sub(r"<#.*?#>", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+        lines = text.split("\n")
+        for lineno, line in enumerate(lines, 1):
+            # Strings are prose, except a double-quoted `$(...)` that runs the helper.
+            code = re.sub(r"'(?:[^']|'')*'", "''", line)
+            code = re.sub(r'"(?:[^"`$]|`.|\$(?!\())*"', '""', code).split("#", 1)[0]
+            if _MARK_COMPLETE_DEF.match(line) or not _MARK_COMPLETE_MENTION.search(code):
+                continue
+            if _MARK_COMPLETE_CALL.match(line):
+                statement = line
+                index = lineno
+                while re.search(r"(?:\\|`)[ \t]*$", statement) and index < len(lines):
+                    statement = statement.rstrip()[:-1] + " " + lines[index]
+                    index += 1
+                tail = statement.split("||", 1)[1] if "||" in statement else None
+                # `|| return $?` right after the call returns the helper's own status.
+                ps1 = path.suffix == ".ps1"
+                stops = tail is not None and bool(
+                    (not ps1 and _IMMEDIATE_STATUS.match(tail))
+                    or _fails_unconditionally(tail, ps1=ps1)
+                )
+            elif _MARK_COMPLETE_IF_NOT.search(line):
+                tail = "\n".join(lines[lineno - 1:lineno + 20])
+                stops = _fails_unconditionally(
+                    _braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):]), ps1=True
+                )
+            elif _MARK_COMPLETE_IF_PS1.search(line):
+                stops = _ps1_else_fails("\n".join(lines[lineno - 1:lineno + 40]))
+            elif match := _MARK_COMPLETE_SH_IF.match(line):
+                stops = _sh_failure_branch_stops(lines[lineno - 1:], negated=bool(match.group(1)))
+            else:
+                violations.append(
+                    f"{rel}:{lineno}: unrecognized completion-marker call form; call it as a "
+                    "checked statement (`helper || exit 1`) or in an if/else that fails"
+                )
+                continue
+            if not stops:
+                violations.append(
+                    f"{rel}:{lineno}: completion-marker publication result is ignored; "
+                    "stop activation when it fails"
+                )
+    return violations
+
+
+_PS1_HELPER = "Invoke-VersionedMarkComplete"
+_MARK_COMPLETE_MENTION = re.compile(
+    r"(?<![\w-])(?:_versioned_mark_complete|Invoke-VersionedMarkComplete)(?![\w-])"
+)
+_MARK_COMPLETE_DEF = re.compile(
+    r"^\s*(?:_versioned_mark_complete\(\)\s*\{|function\s+Invoke-VersionedMarkComplete\b)"
+)
+_MARK_COMPLETE_IF_PS1 = re.compile(r"\b(?:if|elseif)\s*\(\s*\(?\s*Invoke-VersionedMarkComplete\b")
+
+
+def _ps1_else_fails(text: str) -> bool:
+    """For ``if (Invoke-VersionedMarkComplete) { ... }``: the ``else`` block is
+    the failure branch, and it must fail unconditionally; no ``else`` ignores
+    the failure."""
+    start = text.index("{", text.index(_PS1_HELPER))
+    after = text[start + len(_braced_body(text[start:])) + 2:]
+    branch = re.match(r"\s*else\s*\{", after)
+    return bool(branch) and _fails_unconditionally(
+        _braced_body(after[branch.end() - 1:]), ps1=True
+    )
+_MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMarkComplete\b")
+# A failure branch must report failure in its own language -- never
+# ``return 0``/``exit 0`` or a bare ``return`` (the previous command's status).
+# Shell: a non-zero ``exit``/``return``. PowerShell: ``return $false``,
+# ``throw`` or a non-zero ``exit``; ``return 1`` there is truthy, so a caller's
+# ``if (-not (...))`` would read it as success.
+_IMMEDIATE_STATUS = re.compile(r"\s*(?:return|exit)\s+\"?\$\?\"?(?![\w-])")
+_FAILS = re.compile(r"\b(?:exit|return)\s+[1-9]\d*(?![\w-])")
+_PS1_FAILS = re.compile(r"\bthrow\b|\breturn\s+\$false\b|\bexit\s+[1-9]\d*(?![\w-])")
+_QUOTED_STATUS = re.compile(r'"(\$(?:\{?[A-Za-z_]\w*\}?|\?))"')
+_PARAM_EXPANSION = re.compile(r"\$\{(\w+)[^}]*\}")
+
+
+def _fails_unconditionally(
+    body: str, status_vars: tuple[str, ...] = (), *, ps1: bool = False
+) -> bool:
+    """Whether ``body`` reports failure on every path through it.
+
+    Only a top-level statement counts: a stop nested in a conditional
+    (``if (...) { return $false }``, ``[[ ... ]] && exit 1``, an inner
+    ``if ... fi`` or ``{ ... }`` block) can be skipped, letting the failure
+    fall through to activation. A variable status counts only when it is one of
+    ``status_vars``, a status the caller proved was captured from the failing
+    writer; any other variable (``ok=0; return "$ok"``) may hold success.
+    """
+    fails = _PS1_FAILS if ps1 else _FAILS
+    if status_vars:
+        names = "|".join(map(re.escape, status_vars))
+        fails = re.compile(rf"{fails.pattern}|\b(?:exit|return)\s+\$\{{?(?:{names})\}}?(?![\w-])")
+    code = _PARAM_EXPANSION.sub(r"$\1", _QUOTED_STATUS.sub(r"\1", body))
+    code = _strip_quoted_strings(code).strip()
+    if code.startswith("{") and code.endswith("}"):
+        code = code[1:-1]
+    flat, depth = [], 0
+    for char in code:
+        depth += {"{": 1}.get(char, 0)
+        if depth == 0:
+            flat.append(char)
+        depth -= {"}": 1}.get(char, 0) if depth else 0
+    statements = re.split(r"[;\n]", "".join(flat))
+    nested = 0
+    for statement in (s.strip() for s in statements):
+        if re.match(r"(?:if|while|until|for|case)\b", statement):
+            nested += 1
+        if nested == 0 and fails.match(statement):
+            return True
+        if re.match(r"(?:fi|done|esac)\b", statement) and nested:
+            nested -= 1
+    return False
+
+
+# The writer invocation inside each helper, and how its status must be handled.
+_SH_WRITER = re.compile(r'"\$py"\s+"\$\{args\[@\]\}"')
+_PS1_WRITER = re.compile(r"&\s*\$py\b")
+_PS1_STATUS_CHECK = re.compile(r"\bif\s*\(\s*\$(?:LASTEXITCODE|\w+\.ExitCode)\s+-ne\s+0\s*\)\s*\{")
+
+
+def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
+    """Whether the helper fails when its ``mark-complete`` writer fails.
+
+    PowerShell must branch on the writer's exit code (``$LASTEXITCODE`` or a
+    captured ``.ExitCode``) and return ``$false``/throw/exit there. Shell runs
+    under ``set -o pipefail``; a writer line may not end in an ``||`` fallback
+    that neither keeps the status (``rc=$?``) nor stops. Behavior is exercised
+    end to end by ``tools/test_check_install_contract.py``.
+    """
+    code = "\n".join(
+        line for line in _LINE_CONTINUATION.sub(" ", body).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    if suffix == ".ps1":
+        writer = _PS1_WRITER.search(code)
+        check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
+        return bool(check) and _fails_unconditionally(
+            _braced_body(code[check.end() - 1:]), ps1=True
+        )
+    lines = [line for line in code.splitlines() if line.strip()]
+    found = [i for i, line in enumerate(lines) if _SH_WRITER.search(line)]
+    return bool(found) and all(_sh_writer_status_kept(lines, i) for i in found)
+
+
+_SH_RC_CAPTURE = re.compile(r"(?:^|\|\|)\s*(?:local\s+)?rc=\$\?|PIPESTATUS", re.M)
+_SH_DECLARATION = re.compile(r"^\s*(?:local|declare|typeset|export|readonly)\b")
+_SH_RC_TEST = re.compile(
+    r'^\s*if\s+(?:\[\[\s*"?\$\{?rc\}?"?\s+-ne\s+0\s*\]\]|\(\(\s*rc\s*(?:!=\s*0\s*)?\)\))'
+)
+
+
+def _sh_writer_status_kept(lines: list[str], index: int) -> bool:
+    """Whether the shell writer at ``lines[index]`` decides the helper's result.
+
+    The writer is the helper's last statement (``pipefail`` returns its status);
+    tested by ``if ! writer`` with a failing branch; followed by an ``||``
+    branch that fails; or its status is captured in ``rc`` and then drives a
+    failing return (a top-level ``return "$rc"`` or ``if [[ "$rc" -ne 0 ]]``
+    whose branch fails). Capturing the status and then returning success does
+    not count.
+    """
+    line, rest = lines[index], lines[index + 1:]
+    # `local out="$(writer)"` returns the builtin's status (0), not the writer's.
+    if _SH_DECLARATION.match(line):
+        return False
+    following = "\n".join([line, *rest[:1]])
+    if _SH_RC_CAPTURE.search(following) or any("PIPESTATUS" in r for r in rest):
+        after = "\n".join(rest)
+        tests = [i for i, r in enumerate(rest) if _SH_RC_TEST.match(r)]
+        return _fails_unconditionally(after, ("rc",)) or any(
+            _sh_failure_branch_stops(rest[i:], negated=True, status_vars=("rc",)) for i in tests
+        )
+    if re.match(r"\s*if\s+!", line):
+        return _sh_failure_branch_stops(lines[index:], negated=True)
+    _, sep, tail = line.partition("||")
+    if sep:
+        return _fails_unconditionally(tail)
+    return not rest
+
+
+_MARK_COMPLETE_SH_IF = re.compile(r"^\s*(?:el)?if\s+(!\s*)?_versioned_mark_complete\b")
+_SH_KEYWORD = re.compile(r"(?<![\w$/.-])(then|if|fi|else|elif)(?![\w-])")
+
+
+def _sh_failure_branch_stops(
+    lines: list[str], *, negated: bool, status_vars: tuple[str, ...] = ()
+) -> bool:
+    """Whether the shell ``if``/``elif`` starting ``lines`` stops on helper failure.
+
+    The failure branch is the ``then`` body of ``if ! helper`` and the ``else``
+    body of ``if helper``; a positive test with no ``else`` ignores the failure.
+    """
+    code = "\n".join(
+        _strip_quoted_strings(_QUOTED_STATUS.sub(r"\1", line))
+        for line in lines if not line.lstrip().startswith("#")
+    )
+    keywords = list(_SH_KEYWORD.finditer(code))
+    start = next((k for k in keywords if k.group(1) == "then"), None)
+    # `if helper || true; then` (or `&&`) no longer tests the helper alone.
+    if start is None or re.search(r"\|\||&&", code[:start.start()]):
+        return False
+    depth, branch, bodies, begin = 0, "then", {}, start.end()
+    for keyword in (k for k in keywords if k.start() >= start.end()):
+        word = keyword.group(1)
+        if word == "if":
+            depth += 1
+        elif word == "fi" and depth:
+            depth -= 1
+        elif depth == 0 and word in ("else", "elif", "fi"):
+            bodies.setdefault(branch, code[begin:keyword.start()])
+            if word == "fi":
+                break
+            branch, begin = word, keyword.end()
+    failure = bodies.get("then" if negated else "else")
+    return failure is not None and _fails_unconditionally(failure, status_vars)
+
+
+def _braced_body(text: str) -> str:
+    """The ``{...}`` block that ``text`` starts with (unbalanced: the rest)."""
+    depth = 0
+    for index, char in enumerate(text):
+        depth += {"{": 1, "}": -1}.get(char, 0)
+        if depth == 0:
+            return text[1:index]
+    return text[1:]
+
+
 def _verify_installer_engine_sync() -> list[str]:
     spec = importlib.util.spec_from_file_location("sync_installer_engine", INSTALLER_ENGINE_SYNC)
     if spec is None or spec.loader is None:
@@ -435,6 +696,7 @@ def check() -> int:
 
     violations.extend(_runtime_scope_violations(PLUGINS_DIR))
     violations.extend(_exec_stderr_swallow_violations(PLUGINS_DIR))
+    violations.extend(_mark_complete_result_violations(PLUGINS_DIR))
 
     persistent_environment_blocks: dict[str, str | None] = {}
     for path in sorted(PLUGINS_DIR.rglob("*.ps1")):

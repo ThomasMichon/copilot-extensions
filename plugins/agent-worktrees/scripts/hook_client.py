@@ -9,7 +9,6 @@ post-tool advisory work falls back to nudge_status and bind_nudge.
 from __future__ import annotations
 
 import importlib.util
-import hashlib
 import json
 import math
 import os
@@ -18,7 +17,6 @@ import signal
 import shutil
 import socket
 import stat
-import struct
 import subprocess
 import sys
 import tempfile
@@ -214,38 +212,9 @@ def _probe_terminal() -> dict:
 
 
 def _session_launch_key(payload: dict) -> str:
-    metadata = payload.get("_agentWorktrees")
-    if not isinstance(metadata, dict):
-        return ""
-    version = metadata.get("pluginVersion")
-    session_id = payload.get("sessionId")
-    cwd = payload.get("cwd")
-    source = payload.get("source", "")
-    timestamp = payload.get("timestamp")
-    if (
-        not isinstance(version, str)
-        or not version
-        or not isinstance(session_id, str)
-        or not session_id
-        or not isinstance(cwd, str)
-        or not os.path.isabs(cwd)
-        or not isinstance(source, str)
-        or isinstance(timestamp, bool)
-        or not isinstance(timestamp, (int, float))
-        or not math.isfinite(timestamp)
-    ):
-        return ""
-    timestamp_text = (
-        str(timestamp)
-        if isinstance(timestamp, int)
-        else f"f64:{struct.pack('>d', timestamp).hex()}"
-    )
-    identity = json.dumps(
-        [session_id, os.path.realpath(cwd), source, version, timestamp_text],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(identity).hexdigest()
+    if _RUNTIME is None:
+        raise RuntimeError("Runtime hook helper is unavailable.")
+    return _RUNTIME.session_launch_key(payload)
 
 
 def _additional_context(raw: str) -> str:
@@ -313,33 +282,67 @@ def _registration_context(payload: dict, home: Path) -> str:
 
 def _command_catalog_context() -> str:
     scripts = Path(__file__).resolve().parent
-    if os.name == "nt":
-        script = scripts / "emit-command-catalog.ps1"
-        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        argv = (
-            [shell, "-NoLogo", "-NoProfile", "-File", str(script)]
-            if shell else []
-        )
-    else:
-        script = scripts / "emit-command-catalog.sh"
-        shell = shutil.which("bash")
-        argv = [shell, str(script)] if shell else []
-    if not argv or not script.is_file():
-        return ""
+    windows = os.name == "nt"
+    script = scripts / ("emit-command-catalog.ps1" if windows else "emit-command-catalog.sh")
+    previous_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
-        completed = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            check=False,
-            env={**os.environ, "PYTHONPATH": ""},
+        # The generated declaration is shared with the native catalog emitter.
+        prefix = "# payload-command-catalog-contract: "
+        declaration = next(
+            line[len(prefix):]
+            for line in script.read_text(encoding="utf-8").splitlines()
+            if line.startswith(prefix)
         )
-    except (OSError, subprocess.SubprocessError):
+        contract = json.loads(declaration)
+        if contract["plugin"] != "agent-worktrees":
+            raise ValueError("Catalog declaration belongs to another plugin")
+        suffix = ""
+        shell = "direct"
+        if windows:
+            shim = contract["windowsCatalogShim"]
+            if shim not in {"powershell", "cmd"}:
+                raise ValueError("Unsupported catalog command shim")
+            suffix = ".ps1" if shim == "powershell" else ".cmd"
+            shell = "direct" if shim == "powershell" else "cmd"
+        root = scripts.parent
+        installer = scripts / ("install.ps1" if windows else "install.sh")
+        commands = []
+        for command in contract["commands"]:
+            path = root / (command["relativePath"] + suffix)
+            ready = path.is_file() and installer.is_file()
+            if not windows:
+                ready = ready and os.access(path, os.X_OK)
+            commands.append({
+                "id": command["id"],
+                "argv": [str(path)],
+                "shell": shell,
+                "purpose": command["purpose"],
+                "availability": "ready" if ready else "unavailable",
+            })
+        helper = _load_sibling("command_binding.py")
+        if helper is None:
+            raise ValueError("Payload command binding helper is unavailable")
+        catalog = {
+            "schema": "copilot-extensions.session-command-catalog",
+            "version": 1,
+            "plugin": contract["plugin"],
+            "payload": {"provenance": "payload-local"},
+            "commands": commands,
+            "binding": helper.binding_for_payload(
+                root, contract["plugin"], Path.home() / ".agent-worktrees"
+            ),
+        }
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError, StopIteration) as error:
+        sys.stderr.write(f"[agent-worktrees] Command catalog unavailable: {error}\n")
         return ""
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
     return (
-        _additional_context(completed.stdout)
-        if completed.returncode == 0 else ""
+        _COMMAND_CATALOG_HEADING + "\n\n"
+        "Invoke the exact `argv` below. Do not search `PATH` or substitute a "
+        "same-named command from another payload.\n\n"
+        "```json\n" + json.dumps(catalog, sort_keys=True) + "\n```"
     )
 
 
@@ -454,87 +457,66 @@ def _resident_started(payload: dict, home: Path) -> bool:
     runtime = _selected_runtime_root(home)
     if runtime is None:
         return False
-    receipt = runtime / ".session-context" / f"lifecycle-{launch_key}.json"
-    try:
-        value = json.loads(receipt.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError, TypeError):
-        return False
-    return (
-        isinstance(value, dict)
-        and value.get("launchKey") == launch_key
-        and value.get("state") in {"started", "completed"}
-    )
-
-
-def _complete_runtime_python(runtime: Path, version: str) -> Path | None:
-    if not version or "\\" in version or "/" in version:
-        return None
-    slot = runtime / "versions" / version
-    try:
-        marker = json.loads(
-            (slot / ".install-complete.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, ValueError, TypeError):
-        return None
-    if not isinstance(marker, dict) or marker.get("version") != version:
-        return None
-    for relative in (
-        Path("Scripts") / "python.exe",
-        Path("bin") / "python",
-    ):
-        executable = slot / relative
-        if executable.is_file():
-            return executable
-    return None
-
-
-def _version_key(version: str) -> tuple:
-    import re
-
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", version)
-    if match:
-        major, minor, patch, dev = match.groups()
-        return (0, int(major), int(minor), int(patch), dev is None, int(dev or 0))
-    return (1, version.lower())
+    if _RUNTIME is None:
+        raise RuntimeError("Runtime hook helper is unavailable.")
+    return _RUNTIME.resident_started(runtime, launch_key)
 
 
 def _runtime_python(home: Path) -> Path | None:
     runtime = _selected_runtime_root(home)
     if runtime is None:
         return None
-    for marker_name in ("current-version", "last-known-good"):
-        try:
-            version = (runtime / marker_name).read_text("utf-8").strip()
-        except (OSError, UnicodeError):
-            continue
-        executable = _complete_runtime_python(runtime, version)
-        if executable is not None:
-            return executable
-    try:
-        versions = sorted(
-            (
-                path.name
-                for path in (runtime / "versions").iterdir()
-                if path.is_dir()
-            ),
-            key=_version_key,
-            reverse=True,
-        )
-    except OSError:
-        return None
-    for version in versions:
-        executable = _complete_runtime_python(runtime, version)
-        if executable is not None:
-            return executable
-    return None
+    if _RUNTIME is None:
+        raise RuntimeError("Runtime hook helper is unavailable.")
+    return _RUNTIME.runtime_python(runtime)
+
+
+def _version_key(version: str) -> tuple:
+    if _RUNTIME is None:
+        raise RuntimeError("Runtime hook helper is unavailable.")
+    return _RUNTIME.version_key(version)
 
 
 def _bootstrap_first_install(payload: dict) -> dict:
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        return {}
     scripts = Path(__file__).resolve().parent
+    direct_stamp = False
     if os.name == "nt":
         script = scripts / "bootstrap-check.ps1"
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        argv = [shell, "-NoLogo", "-NoProfile", "-File", str(script)] if shell else []
+        argv = [
+            shell, "-NoLogo", "-NoProfile", "-File", str(script),
+            "-BootstrapPython", sys.executable,
+        ] if shell else []
+        installer = scripts / "install.ps1"
+        binding = scripts / "command_binding.py"
+        if shell and installer.is_file() and binding.is_file():
+            state_path = Path(
+                os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
+                or Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
+            )
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeError, ValueError):
+                state = None
+            if isinstance(state, dict) and state.get("active") is True:
+                reason = state.get("reason")
+                message = f"ACTIVE -- {reason}" if reason else "ACTIVE"
+                return {"_stderr": (
+                    f"[bootstrap-killswitch] {message}; skipping automatic reconcile.\n"
+                )}
+            argv = [
+                sys.executable, "-I", "-B", "-X", "utf8", str(binding),
+                "--payload-root", str(scripts.parent), "--plugin-id", "agent-worktrees",
+                "--legacy-root", str(Path.home() / ".agent-worktrees"),
+                "--source-payload-root", str(scripts.parent),
+                "--deferred-runtime", "--run-lifecycle",
+                "--lifecycle-timeout", str(_SESSION_START_TIMEOUT_S - 2), "--",
+                shell, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(installer), "stamp", "-BootstrapPython", sys.executable,
+            ]
+            direct_stamp = True
     else:
         script = scripts / "bootstrap-check.sh"
         shell = shutil.which("bash")
@@ -546,12 +528,23 @@ def _bootstrap_first_install(payload: dict) -> dict:
             argv,
             input=json.dumps(payload, separators=(",", ":")),
             text=True,
-            timeout=_SESSION_START_TIMEOUT_S,
+            encoding="utf-8",
+            timeout=None if direct_stamp else _SESSION_START_TIMEOUT_S,
             check=False,
             capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as error:
+        if direct_stamp:
+            return {"_stderr": f"[agent-worktrees] Bootstrap stamp unavailable: {error}\n"}
         return {}
+    if direct_stamp:
+        diagnostic = (completed.stdout or "") + (completed.stderr or "")
+        if completed.returncode:
+            diagnostic += (
+                f"[agent-worktrees] Bootstrap stamp failed (exit {completed.returncode}).\n"
+            )
+        return {"_stderr": diagnostic} if diagnostic else {}
     result: dict = {}
     stdout = (completed.stdout or "").strip()
     if stdout:
@@ -821,6 +814,9 @@ def _load_sibling(name: str):
         return module
     except Exception:
         return None
+
+
+_RUNTIME = _load_sibling("hook_runtime.py")
 
 
 def _merge_pre_decisions(current: dict, new: dict) -> dict:

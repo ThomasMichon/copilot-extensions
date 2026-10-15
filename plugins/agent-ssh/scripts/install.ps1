@@ -139,9 +139,15 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
+                    ForEach-Object {
+                        '"' + ([regex]::Replace(
+                            [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
+                        )) + '"'
+                    }) -join ' '
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
-                    -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd)
+                    -ArgumentList $__selfStageArgs
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -421,7 +427,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
-    Invoke-VersionedMarkComplete
+    if (-not (Invoke-VersionedMarkComplete)) { return $false }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
@@ -475,7 +481,8 @@ function Get-BootstrapPython {
        python, then a real base python via the `py` launcher -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none. #>
     foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
+        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
+        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
@@ -524,15 +531,28 @@ function Invoke-VersionedMarkComplete {
     <# Write the slot's completion marker AFTER its isolated health gate passed,
        so "marker present" == "healthy, complete build". A crashed / watchdog-
        killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+       tossable + retryable (#935). No-op in legacy mode. Returns $false (after reporting why) when the
+       marker could not be published; callers must not activate the slot. #>
+    if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
+    if (-not $py) {
+        Write-Fail "Cannot publish the completion marker for versions/$SrcVersion without a bootstrap Python interpreter -- not activating"
+        return $false
+    }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
     $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
+    if (-not $ph) {
+        Write-Fail "Runtime input fingerprint unavailable -- not publishing versions/$SrcVersion"
+        return $false
+    }
+    $mcArgs += @('--payload-hash', $ph)
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to publish the completion marker for versions/$SrcVersion (exit $LASTEXITCODE) -- not activating"
+        return $false
+    }
+    return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
 

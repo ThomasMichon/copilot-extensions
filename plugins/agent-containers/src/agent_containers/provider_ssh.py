@@ -1016,9 +1016,9 @@ def _serve_ssh(
     try:
         import paramiko
     except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "Provider-exec SSH support is unavailable because Paramiko is not installed"
-        ) from exc
+        if exc.name != "paramiko":
+            raise
+        raise RuntimeError("SSH needs provider-exec profile; see README provisioning") from exc
 
     proxy_socket, server_socket = socket.socketpair()
     input_thread = threading.Thread(

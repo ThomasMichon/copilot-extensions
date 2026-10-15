@@ -62,9 +62,10 @@ adapters, with explicit source, freshness, and failure semantics.
 
 The intended implementation is a new independently usable `budget-guidance`
 plugin. It owns budget posture, arithmetic, adapters, current status, and a
-concise context contribution. `delegation-guidance` remains the owner of routing
-strategy and eligibility; it may consume budget-guidance output when both are
-enabled. The checked-in pointer plus exact-session guidance file owns current
+concise context contribution. The delegation module in `agent-conduct-guidance`
+(formerly `delegation-guidance`) owns routing strategy and eligibility; it may
+consume budget-guidance output when both are enabled.
+The checked-in pointer plus exact-session guidance file owns current
 delivery; native host composition may later carry direct plugin output after
 supported-version proof. External accounting systems remain the owners of
 longitudinal ledgers and detailed cost attribution.
@@ -127,13 +128,15 @@ timestamp is not proof that the provider metadata was refreshed.
 
 - [x] Add a manual/static adapter that can provide a complete posture without
   network access or another service.
-- [ ] Add a provider API adapter for available personal or organization
+- [x] Add a provider API adapter for available personal or organization
   AI-usage reports, preserving empty, unauthorized, and unsupported results.
+  The personal GitHub report adapter keeps report quantities separate from
+  current entitlement, reset, provider observation time, and session identity.
 - [x] Add a bounded external-command adapter contract for account surfaces or
   organization-specific readers that cannot live in the public plugin.
 - [x] Make adapter order and field authority configurable without allowing
   repository data to override operator-owned credentials or safety policy.
-- [ ] Ensure no adapter failure becomes a zero-consumption success.
+- [x] Ensure no adapter failure becomes a zero-consumption success.
 
 ### Phase 3 - Plugin, status, and context delivery
 
@@ -141,23 +144,23 @@ timestamp is not proof that the provider metadata was refreshed.
   repository's runtime-plugin and configuration patterns.
 - [x] Expose one machine-readable status result for hooks, dashboards, scripts,
   and routing consumers.
-- [ ] Contribute a concise, attributable session-start cue through the
+- [x] Contribute a concise, attributable session-start cue through the
   checked-in pointer plus exact-session guidance-file pattern.
-- [ ] Keep injected output inside a declared byte/token budget and avoid loading
+- [x] Keep injected output inside a declared byte/token budget and avoid loading
   the detailed adapter/config reference into every session.
 - [x] Preserve source, capture time, freshness, projection, and error status in
   both human and machine-readable output.
 
 ### Phase 4 - Routing composition
 
-- [ ] Let delegation-guidance consume budget posture when available without a
-  hard dependency on budget-guidance.
-- [ ] Refine only demonstrated eligible choices; never qualify candidates,
+- [x] Let the delegation module in agent-conduct-guidance consume budget posture
+  when available without a hard dependency on budget-guidance.
+- [x] Refine only demonstrated eligible choices; never qualify candidates,
   bypass holds, or weaken trial admission.
-- [ ] Preserve explicit operator model/profile choices as authoritative.
-- [ ] Return legible budget-based recommendation, caution, escalation, and
+- [x] Preserve explicit operator model/profile choices as authoritative.
+- [x] Return legible budget-based recommendation, caution, escalation, and
   no-fit reasons without changing direct-versus-delegate decisions.
-- [ ] Keep standalone budget-guidance useful when delegation-guidance is absent.
+- [x] Keep standalone budget-guidance useful when the delegation module is absent.
 
 ### Phase 5 - Validation, publication, and adoption
 
@@ -204,6 +207,10 @@ timestamp is not proof that the provider metadata was refreshed.
   windowless parent, two console-descendant cycles, no visible windows/focus or
   Default Terminal acquisitions, and complete timeout cleanup; batch/stream
   grant refusals run in the same native lane.
+- [x] Deferred to `ThomasMichon/copilot-extensions#6644`: complete native Windows
+  session-cue acceptance and diagnose the subsequent reader-mode deadline
+  failure. The earlier external-reader receipt remains source-specific; the
+  new hook is not claimed desktop-verified.
 - [ ] The quota skill/helper identifies the requesting session's account rather
   than silently reading a fresh runtime's global default.
 - [x] Acquisition time and provider-observation freshness are distinct; cached
@@ -215,21 +222,23 @@ timestamp is not proof that the provider metadata was refreshed.
 - [x] The posture contract is provider-neutral and contains no real account,
   allowance, organization, host, or private service.
 - [x] Manual/static configuration works with no network or external service.
-- [ ] Provider and external adapters retain source, capture time, freshness, and
+- [x] Provider and external adapters retain source, capture time, freshness, and
   explicit availability/error status.
-- [ ] Missing, stale, unauthorized, empty, or contradictory readings are never
+  External-command coverage landed in #6450; the personal report adapter
+  explicitly leaves provider observation freshness unknown.
+- [x] Missing, stale, unauthorized, empty, or contradictory readings are never
   represented as zero consumption or full remaining allowance.
 - [x] Arithmetic handles partial days, reset boundaries, overspend, and zero
   remaining time deterministically.
 - [x] Field-level precedence composes partial sources without allowing a lower
   authority to overwrite a higher-authority field silently.
-- [ ] Machine-readable status and injected guidance derive from the same
+- [x] Machine-readable status and injected guidance derive from the same
   resolved posture.
-- [ ] Context output stays within its declared budget and carries stable owner
+- [x] Context output stays within its declared budget and carries stable owner
   attribution.
-- [ ] Budget posture cannot qualify an unproven model, clear a hold, arm a
+- [x] Budget posture cannot qualify an unproven model, clear a hold, arm a
   trial, or override an explicit operator choice.
-- [ ] Product correctness, safety, review, publication, and deployment gates
+- [x] Product correctness, safety, review, publication, and deployment gates
   remain unchanged.
 - [x] The plugin has no dependency on a private hostname, service, account, or
   downstream repository.
@@ -250,15 +259,145 @@ Build `budget-guidance` as a small runtime plugin with four layers:
    state.
 3. **Presentation:** one status command and one concise context contributor
    derived from the same resolved posture.
-4. **Optional routing integration:** delegation-guidance reads posture status and
-   adds budget-based reasons after eligibility resolution; either plugin remains
-   usable alone.
+4. **Optional routing integration:** agent-conduct-guidance's delegation module
+   reads posture status and adds budget-based reasons after eligibility
+   resolution; either plugin remains usable alone.
 
 The plugin stores at most bounded current/cache state needed for freshness and
 resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-14 - Optional routing composition merged; acquisition next
+
+- PR #6673 merged as `7a89aece0c207c39b6dff23ffb5206d7a9441c53`
+  after exact-head Copilot approval with zero findings and successful named
+  PR-gate, source-attribution, and workflow-lockdown checks.
+- Closed Phase 4. The delegation resolver optionally consumes bounded,
+  owner-issued advice without importing a budget runtime or recalculating
+  billing arithmetic. The owner bounds advice by field freshness, reset, and
+  a 300-second snapshot age. Explicit choices and trial admission remain
+  authoritative; no advice changes model qualification or blocks launches.
+- Account totals and ordinal model ranks do not establish per-task
+  affordability. The output explicitly leaves that fit unknown and never
+  fabricates a cheaper candidate or worker-count estimate.
+- Full bounded Linux suites passed 65 routing cases and 324 budget cases,
+  with three and eleven explicit platform/tool skips respectively and
+  verified cleanup. Corrected a discovered parity-test prerequisite: comparing
+  Bash and PowerShell requires both interpreters. Native Windows acceptance
+  remains separately transferred to #6644, not credited by these results.
+- Re-read the Plan and Validation Plan after merge. Provider acquisition,
+  independently attributable requesting-account evidence, remaining platform
+  validation, release, and authorized rollout keep the effort Active.
+- Next: resume Phase 2 provider acquisition and its explicit unavailable,
+  unauthorized, empty-report, and freshness semantics. Keep API identity and
+  usage quantity separate from included-credit entitlement and reset authority.
+
+### 2026-10-14 - Exact-session delivery merged; routing boundary next
+
+- PR #6646 merged as `d29ee82c3dd46a5fe9ad36235903fb0d4f4fad46`
+  after current-head Copilot approval and the required PR gate,
+  source-attribution, and workflow-lockdown checks passed.
+- Closed Phase 3's implementation/publication boundary. Review corrections arm
+  the POSIX deadline before payload path resolution/import, test all five
+  directory levels with synthetic reparse attributes, and include asynchronous
+  PowerShell stdin delivery within the writer's single deadline.
+- The bounded Linux session-delivery lane passed 46 cases with three explicit
+  platform/tool skips and verified cleanup. Earlier full-plugin and source
+  guards remain recorded; no skipped PowerShell/native execution is credited
+  as a pass.
+- Native acceptance remains transferred to #6644. That objective also owns the
+  reviewed witness-only window/focus attribution defect: unrelated desktop
+  processes must not be counted as fixture descendants. The source receipt
+  for the earlier external-reader launch remains source-specific.
+- Re-read the complete Plan and Validation Plan after merge. The effort stays
+  Active; provider acquisition/account proof, routing, release, and authorized
+  rollout remain open.
+- Next: Phase 4 routing composition through the current delegation owner,
+  `agent-conduct-guidance`, not the deprecated `delegation-guidance` placeholder.
+  Keep eligibility and explicit operator choices authoritative, consume the same
+  resolved posture optionally, and do not infer per-task prices or new model
+  eligibility from account totals.
+
+### 2026-10-13 - Windows acceptance transferred to a tracked objective
+
+- At the operator's direction, transferred the new session-cue desktop proof
+  and unresolved reader-mode deadline failure to
+  [#6644](https://github.com/ThomasMichon/copilot-extensions/issues/6644).
+  Continue the portable session-delivery slice through normal review and CI;
+  deferral does not credit a native pass or relax its acceptance assertions.
+- The bounded native run reported seven passes and two failures with verified
+  supervisor cleanup. Reader acquisitions reached the unchanged deadline with
+  no established cause. The cue collector incorrectly read configuration as
+  process evidence; it now reads only the two literal process-record files.
+- Resolved virtual-environment launchers to the direct base console interpreter
+  and added direct writer-parent checks, so outer Job cleanup cannot hide a
+  redirector child. Forwarding-only test timing output survives failed-run
+  cleanup without changing production reader limits.
+- The exact-source follow-up could not reach the former interactive validation
+  session. No replacement session, service repair, snapshot patch, or
+  pass-chasing retry was performed. Native proof remains owned by #6644.
+- Linux implementation and source guards remain verified. Current-head review,
+  provider/account proof, routing, release, and authorized rollout remain open.
+  The effort stays Active.
+
+### 2026-10-13 - Bounded exact-session posture delivery
+
+- Implemented Phase 3's launch-time cue through an output-free writer and two
+  reviewed projection declarations: a minimal file pointer and a separate static
+  advisory boundary. The owning payload loads its pure posture source without
+  provisioning a runtime, refreshing a provider, or granting any reader.
+- Reused status configuration and posture resolution, including attributable
+  sources, capture times, freshness, contradictions, and explicit failures.
+  Configuration reads are regular-file-only and bounded; opaque adapter errors
+  and detailed arrays stay out of the computed cue.
+- Bounded the entire UTF-8 cue to 4096 bytes and the suite's 1024-token heuristic.
+  Oversize evidence becomes explicit unavailable data with all values withheld.
+  Fresh and resumed writes atomically replace only the requesting session's
+  file and refuse directory symlinks/reparse points.
+- Independent design critique found no blocking flaws. It prompted an internal
+  five-second POSIX process deadline in addition to the outer hook bound, plus
+  explicit native-fixture provenance. The PowerShell writer already suppresses
+  console creation, drains both output streams concurrently, and has its own
+  bounded timeout/cleanup path.
+- Added an opt-in native session-cue mode to the existing Windows desktop
+  witness. It retains the external-reader lane's limits/assertions and adds two
+  cue cycles plus production-wrapper timeout cleanup. Exact-source native
+  acceptance for the new launch path is deferred to #6644; earlier
+  external-reader evidence is not used as proof of this hook.
+- Publication, provider/account proof, routing, release, and authorized rollout
+  remain open. The effort stays Active.
+
+### 2026-10-13 - External-reader contract merged
+
+- PR #6450 merged as `35738f6e095776c824789c37929a8680688688df` after
+  exact-head Copilot approval with zero open findings and both required checks
+  passing. The earlier merge attempt correctly refused the still-pending PR
+  gate; no readiness bypass was used.
+- Closed the external-command implementation and publication boundary, with
+  invocation-owned grants, bounded output/deadlines, explicit failures, and
+  retained source/capture attribution. Unrepresentable Decimal JSON is
+  contained at external and file-input parsing boundaries.
+- Added runtime-only acquisition provenance so direct library and CLI
+  evaluations reject captures later than their evaluation instant. Default CLI
+  evaluation is sampled after acquisition; explicit historical evaluation
+  remains authoritative and manual/static semantics are unchanged.
+- POSIX cleanup now uses an isolated supervisor outside an atomically spawned
+  reader group, retaining the reader root with non-reaping `waitid(WNOWAIT)`.
+  Explicit control requires group teardown, root reap, a private cleanup
+  acknowledgment, and successful host completion. Neither a pipe close nor
+  ordinary zero exit alone proves cleanup.
+- The bounded full Linux suite passed 270 cases with seven platform/opt-in
+  skips; the fast lane passed 19 cases with four skips. The real installer
+  fallback matrix is outside the guard lane. Native Windows launch/Job evidence
+  remains credited to the exact recorded source; the subsequent parsing and
+  POSIX changes did not alter that launch path or its native witness.
+- The effort remains Active. Provider/account identity, native macOS lifecycle
+  evidence, routing, release, and authorized rollout remain open.
+- Next: Phase 3's bounded session-start posture cue and exact-session delivery.
+  Reuse the same pure posture without granting hooks executable authority,
+  introducing a cross-plugin aggregator, or loading detailed references.
 
 ### 2026-10-13 - External-reader native acceptance and safe group ownership
 

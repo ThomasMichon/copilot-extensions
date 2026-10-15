@@ -5,6 +5,7 @@ import io
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -1119,6 +1120,100 @@ def test_session_start_guidance_fails_open_on_resolve_loop(
     )
 
 
+def _hook_catalog(context):
+    return json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0])
+
+
+@pytest.mark.parametrize("status", ["selected", "unresolved", "blocked"])
+def test_session_start_catalog_preserves_binding_without_subprocess(
+    monkeypatch, status
+):
+    binding = {
+        "schema": "copilot-extensions.command-installation-binding",
+        "version": 1,
+        "status": status,
+        "reason": "fixture-ownership",
+        "source": {"sourceFingerprint": "fixture-source"},
+        "installation": {"installationId": "fixture-installation"},
+    }
+    seen = []
+    def resolve(*args):
+        assert sys.dont_write_bytecode
+        seen.append(args)
+        return binding
+
+    helper = SimpleNamespace(binding_for_payload=resolve)
+    monkeypatch.setattr(hook_client, "_load_sibling", lambda name: helper)
+    monkeypatch.setattr(
+        hook_client.subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("Catalog must not launch a subprocess"),
+    )
+    original_bytecode = sys.dont_write_bytecode
+    catalog = _hook_catalog(hook_client._command_catalog_context())
+    assert sys.dont_write_bytecode == original_bytecode
+    root = _SCRIPT.parents[1]
+    assert seen == [(root, "agent-worktrees", Path.home() / ".agent-worktrees")]
+    assert catalog["binding"] == binding
+    assert catalog["commands"][0]["argv"] == [
+        str(root / "bin" / "payload" /
+            ("agent-worktrees.ps1" if os.name == "nt" else "agent-worktrees"))
+    ]
+    assert catalog["commands"][0]["availability"] == "ready"
+
+
+@pytest.mark.parametrize("missing", ["command", "installer"])
+def test_session_start_catalog_preserves_unavailable_commands(monkeypatch, missing):
+    original = Path.is_file
+    target = (
+        "agent-worktrees.ps1" if os.name == "nt" else "agent-worktrees"
+    ) if missing == "command" else ("install.ps1" if os.name == "nt" else "install.sh")
+    monkeypatch.setattr(Path, "is_file", lambda path: (
+        False if path.name == target else original(path)
+    ))
+    monkeypatch.setattr(hook_client, "_load_sibling", lambda _: SimpleNamespace(
+        binding_for_payload=lambda *_: {"status": "unresolved"}
+    ))
+    assert _hook_catalog(hook_client._command_catalog_context())["commands"][0][
+        "availability"
+    ] == "unavailable"
+
+
+def test_session_start_catalog_reports_missing_binding_helper(monkeypatch, capsys):
+    monkeypatch.setattr(hook_client, "_load_sibling", lambda _: None)
+    original_bytecode = sys.dont_write_bytecode
+    assert hook_client._command_catalog_context() == ""
+    assert sys.dont_write_bytecode == original_bytecode
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "[agent-worktrees] Command catalog unavailable: "
+        "Payload command binding helper is unavailable\n"
+    )
+
+
+def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    root = _SCRIPT.parents[1]
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(root))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    if os.name == "nt":
+        shell = hook_client.shutil.which("pwsh") or hook_client.shutil.which("powershell.exe")
+        argv = [shell, "-NoProfile", "-File", str(root / "scripts" / "emit-command-catalog.ps1")]
+    else:
+        shell = hook_client.shutil.which("bash")
+        argv = [shell, str(root / "scripts" / "emit-command-catalog.sh")]
+    if not shell:
+        pytest.skip("Native catalog shell is unavailable")
+    result = hook_client.subprocess.run(
+        argv, capture_output=True, text=True, check=True, timeout=15,
+        env={**os.environ, "PYTHONPATH": ""},
+        **({"creationflags": hook_client.subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    native = _hook_catalog(json.loads(result.stdout)["additionalContext"])
+    assert _hook_catalog(hook_client._command_catalog_context()) == native
+
+
 def test_session_start_main_folds_decision_context_and_emits_empty_result(
     monkeypatch, capsys
 ):
@@ -1218,6 +1313,11 @@ def test_session_start_catalog_exists_before_lifecycle_decision(
 
 
 def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("bootstrap-check.ps1", "bootstrap-check.sh"):
+        (scripts / name).touch()
+    monkeypatch.setattr(hook_client, "__file__", str(scripts / "hook_client.py"))
     monkeypatch.setattr(
         hook_client.subprocess,
         "run",
@@ -1241,6 +1341,11 @@ def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
 
 
 def test_first_install_preserves_non_object_json_output(monkeypatch, tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("bootstrap-check.ps1", "bootstrap-check.sh"):
+        (scripts / name).touch()
+    monkeypatch.setattr(hook_client, "__file__", str(scripts / "hook_client.py"))
     monkeypatch.setattr(
         hook_client.subprocess,
         "run",
@@ -1258,6 +1363,139 @@ def test_first_install_preserves_non_object_json_output(monkeypatch, tmp_path):
     result = hook_client._bootstrap_first_install({"sessionId": "session-1"})
 
     assert result == {"additionalContext": '"runtime not installed"'}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
+@pytest.mark.parametrize("returncode", [0, 3])
+def test_windows_first_install_enters_exact_canonical_lifecycle(
+    monkeypatch, tmp_path, returncode,
+):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
+    shell = str(tmp_path / "powershell.exe")
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: shell)
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, kwargs=kwargs)
+        return SimpleNamespace(returncode=returncode, stdout="stamp diagnostic\n", stderr="warning\n")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", run)
+    result = hook_client._bootstrap_first_install({"sessionId": "session-1"})
+    argv = seen["argv"]
+    assert argv[:6] == [sys.executable, "-I", "-B", "-X", "utf8", str(_SCRIPT.parent / "command_binding.py")]
+    assert argv[argv.index("--payload-root") + 1] == str(_SCRIPT.parents[1])
+    assert argv[argv.index("--legacy-root") + 1] == str(Path.home() / ".agent-worktrees")
+    assert argv[argv.index("--source-payload-root") + 1] == str(_SCRIPT.parents[1])
+    assert argv[argv.index("--deferred-runtime"):argv.index("--") + 2] == [
+        "--deferred-runtime", "--run-lifecycle", "--lifecycle-timeout", "10.0", "--", shell,
+    ]
+    assert argv[-5:] == ["-File", str(_SCRIPT.parent / "install.ps1"), "stamp", "-BootstrapPython", sys.executable]
+    assert "bootstrap-check.ps1" not in " ".join(argv)
+    assert seen["kwargs"]["timeout"] is None
+    assert seen["kwargs"]["encoding"] == "utf-8"
+    assert seen["kwargs"]["creationflags"] == subprocess.CREATE_NO_WINDOW
+    assert result["_stderr"].startswith("stamp diagnostic\nwarning\n")
+    assert "additionalContext" not in result
+    assert ("failed (exit 3)" in result["_stderr"]) == bool(returncode)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ANSI parent / UTF-8 child")
+def test_windows_first_install_decodes_real_non_ascii_child_diagnostics(monkeypatch, tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("bootstrap-check.ps1", "install.ps1"):
+        (scripts / name).touch()
+    (scripts / "command_binding.py").write_text(
+        "import sys\nprint(chr(0x410))\nprint(chr(0x410), file=sys.stderr)\n",
+        encoding="ascii",
+    )
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
+    monkeypatch.setattr(hook_client, "__file__", str(scripts / "hook_client.py"))
+    result = hook_client._bootstrap_first_install({})
+    assert result == {"_stderr": f"{chr(0x410)}\n{chr(0x410)}\n"}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cold hook consumer")
+def test_windows_first_install_direct_hook_stamps_without_runtime(monkeypatch, tmp_path):
+    home = Path.home()
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
+    result = hook_client._bootstrap_first_install({"sessionId": "cold-hook"})
+    assert "Bootstrap stamp failed" not in result.get("_stderr", ""), result
+    runtime = home / ".agent-worktrees"
+    assert (runtime / "stamped-version").is_file(), result
+    snapshot = Path((runtime / "payload-dir").read_text().strip())
+    assert (snapshot / "scripts/hook_runtime.py").is_file()
+    assert (home / ".local/bin/agent-worktrees.cmd").is_file()
+    assert not (runtime / "versions").exists()
+    assert not runtime.with_name(runtime.name + ".command-binding-publication.lock").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
+@pytest.mark.parametrize("state", ['{"active":true,"reason":"maintenance"}', '\ufeff{"active":true}'])
+def test_windows_first_install_paused_before_any_lifecycle_child(
+    monkeypatch, tmp_path, state,
+):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    state_file = tmp_path / "killswitch.json"
+    state_file.write_text(state, encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(state_file))
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: str(tmp_path / name))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Paused bootstrap must not start admission or an installer")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", forbidden)
+    result = hook_client._bootstrap_first_install({})
+    assert "ACTIVE" in result["_stderr"]
+    assert not (tmp_path / ".agent-worktrees").exists()
+
+
+def test_first_install_explicit_context_never_enters_legacy_bootstrap(monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{}")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Explicit installation context must not enter legacy bootstrap")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", forbidden)
+    assert hook_client._bootstrap_first_install({}) == {}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
+@pytest.mark.parametrize("state", ['{"active":false}', "malformed", "[]", "{}"])
+def test_windows_first_install_inactive_or_malformed_switch_fails_open(
+    monkeypatch, tmp_path, state,
+):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    state_file = tmp_path / "killswitch.json"
+    state_file.write_text(state, encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(state_file))
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: str(tmp_path / name))
+    invoked = []
+
+    def run(argv, **kwargs):
+        invoked.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", run)
+    assert hook_client._bootstrap_first_install({}) == {}
+    assert len(invoked) == 1
+    assert "--run-lifecycle" in invoked[0]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
+def test_windows_first_install_launch_error_is_explicit(monkeypatch, tmp_path):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: str(tmp_path / name))
+
+    def run(*args, **kwargs):
+        raise OSError("interpreter launch refused")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", run)
+    assert "interpreter launch refused" in hook_client._bootstrap_first_install({})["_stderr"]
 
 
 def test_project_hook_uses_exact_current_session_environment(

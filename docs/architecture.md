@@ -45,7 +45,7 @@ establish a hosted controller or container manager.
 | [agent-index](../plugins/agent-index/) | Lightweight retrieval CLI + managed host companion | `~/.agent-index/` (client and durable data); dispatch-owned host generations | `~/.local/bin/agent-index` | Explicit configured host service supervised and provisioned only by running agent-dispatch; independent warm engine unchanged |
 | [agent-machines](../plugins/agent-machines/) | Machine-state reconciler CLI | `~/.agent-machines/` | `~/.local/bin/agent-machines` | On-demand CLI (no daemon); reconciled at session launch on its gated machines |
 | [agent-vault](../plugins/agent-vault/) | Local secret store: CLI + vault service | `~/.agent-vault/` | `~/.local/bin/agent-vault` | On-demand CLI + a persistent vault daemon (Windows scheduled task / Linux systemd user unit); ships a `vault-askpass` SUDO_ASKPASS helper |
-| [budget-guidance](../plugins/budget-guidance/) | Current budget-posture CLI | `~/.budget-guidance/` | `~/.local/bin/budget-guidance` | On-demand CLI; offline static readings plus explicitly authorized [external readers](../plugins/budget-guidance/docs/external-readers.md); default-off |
+| [budget-guidance](../plugins/budget-guidance/) | Current budget-posture CLI | `~/.budget-guidance/` | `~/.local/bin/budget-guidance` | On-demand CLI and output-free [exact-session cue](../plugins/budget-guidance/docs/session-guidance.md); offline readings plus explicitly authorized [external readers](../plugins/budget-guidance/docs/external-readers.md); unconfigured budget remains unavailable |
 
 ### Payload-only plugins (no installer, no runtime)
 

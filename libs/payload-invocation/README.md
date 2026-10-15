@@ -46,6 +46,99 @@ which must preserve legacy behavior for absent/false policy and fail closed
 instead of falling back when namespaced evidence is requested, malformed, or
 blocked.
 
+### Source-qualified command binding
+
+`catalogBinding: true` opts a required-context runtime into the additive
+`binding` field of the existing version-1 session catalog. Agent Worktrees is
+the first adopter. Other manifests retain byte-identical catalogs. The optional
+`catalogBindingModule` vendors the same pure ownership code into the runtime
+package for its existing deploy-manifest publisher.
+Binding emitters use isolated Python, including the PowerShell launcher probe
+and selected helper process: neither the project working directory, inherited
+Python import paths, nor user-site startup hooks supply discovery code.
+Only the explicitly addressed payload helper supplies binding code.
+
+The binding contains normalized source identity/fingerprint, plugin identity,
+and a selected installation only when its ownership has been validated.
+`status` is `selected`, `unresolved`, or `blocked`; refusal includes a reason.
+Legacy ownership is the `commandBinding` record in the existing schema-3
+deploy manifest, published by the Python, POSIX, and PowerShell installer
+boundaries. A payload path, display name, repository field, or old manifest
+without that record is not ownership. Publication refuses a conflicting
+incumbent. Validation and atomic manifest replacement share the installation
+primitive's token-owned lifecycle lock. Legacy `stamp`, `provision`, `install`,
+and `update` acquire that lock and validate the incumbent before any shared
+runtime writes and hold it through activation and publication. Native admission
+precedes self-staging, including stage creation and sibling-stage reclamation.
+The admitting parent holds the same lease through the staged child, which
+revalidates the inherited ticket before its own staging decision; an inherited
+stage flag does not waive ownership. A staged-origin hint is used only by a
+child whose live parent lease authenticates that source. Direct callers discard
+an unauthenticated origin override and derive provenance from their own payload.
+Runtime-building
+actions reserve a
+`pending` lifecycle owner in the existing manifest. Partial failures retain
+the reservation and cannot produce a selected binding. Native children borrow
+only a matching live, same-host token whose source and runtime root are
+revalidated; environment-variable presence alone never admits mutation.
+Successful publication marks the reservation `complete`.
+Deferred `stamp` holds the same admission lock but neither reserves an
+unfinished runtime build nor publishes new selectable ownership. First-use
+`provision` performs the runtime-building transaction.
+
+Windows callers with a bounded grace window may supply `--lifecycle-timeout <seconds>`
+with `--run-lifecycle`. The admitting parent owns this deadline: it stops the
+native installer tree and waits for the child before releasing its lease.
+Windows uses the payload's bundled `agent-procutil` strict, non-breakaway
+kill-on-close Job and verifies zero active processes before releasing ownership.
+Bounded mode is refused before admission on other platforms; a POSIX process
+group does not provide the same verified descendant-containment contract.
+A timeout returns exit code 124. Failed cancellation or an unverified empty Job
+is reported and leaves a fail-closed durable lock, not a ready-looking runtime;
+callers must not hard-kill the admitting parent as their normal deadline
+mechanism.
+
+Legacy `uninstall` uses the same ownership-validated transaction without a
+runtime-build reservation. The shared lock is a sibling of the canonical
+runtime root, so deleting that root cannot remove the lock or admit a concurrent
+installer. Obvious foreign ownership is refused before lock creation and is
+revalidated after acquisition. Teardown keeps the lock until the native child
+finishes, including configuration removal, and requires parent and child
+interpreters outside the erased runtime. After teardown, lock ownership is
+verified without requiring the intentionally removed payload or manifest.
+
+An unavailable source on an unowned legacy installation is reported without
+breaking its existing command. An explicit install can still use the canonical
+legacy probe's missing-policy/default-false admission, under the same lock,
+but records only a pending unattributed mutation reservation and emits no
+selectable source binding. Successful unattributed publication clears that
+temporary reservation rather than creating a path-only durable owner that
+would block a later authorized update or source qualification.
+An explicit policy, conflicting source, or invalid incumbent
+cannot use that compatibility path. Namespaced native installers retain their
+separate schema-3 manifest writer; they never publish legacy ownership.
+
+Namespaced selection validates the active install receipt, exact payload,
+source fingerprint, and governance, and carries install/activation generations.
+Legacy selection validates source, plugin, payload, runtime root, and operating
+environment against the lifecycle record. Its installation id remains stable
+across an authorized payload refresh; the old payload cannot use the refreshed
+owner's binding. Discovery never writes metadata, repairs ownership, provisions,
+or activates a cell.
+
+The exact `commands[].argv`, shell convention, and availability remain unchanged.
+Availability means the payload shim and installer exist, not that a runtime is
+provisioned or healthy. Binding selection proves ownership/governance, not build
+completion or liveness. Existing consumers remain compatible; a source-qualified
+consumer must require `binding.status == "selected"` and retain the catalog's
+argument vector rather than deriving an executable from the runtime root.
+Windows binding discovery prefers the real Python 3 interpreter reported by
+`py -3`, then a `python3` or `python` application outside `WindowsApps`;
+Store app-execution aliases are not interpreters. Missing Python reports an
+unresolved binding while retaining the supported payload command.
+Stable out-of-session launchers and other runtime
+adopters remain separate migration work.
+
 ## Usage
 
 ```bash

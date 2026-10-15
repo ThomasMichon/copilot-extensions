@@ -135,15 +135,16 @@ if ($_rtRoot) {
   }
 
   function _Rt-VersionKey([string]$ver) {
-    if ($ver -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') {
+    if ($ver -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?$') {
       $phase = if ($Matches[4]) { '0' } else { '1' }
       $dev = if ($Matches[4]) { $Matches[4] } else { '0' }
-      return '0:{0}.{1}.{2}.{3}.{4}' -f
+      return '0:{0}.{1}.{2}.{3}.{4}.{5}' -f
         $Matches[1].PadLeft(20, '0'),
         $Matches[2].PadLeft(20, '0'),
         $Matches[3].PadLeft(20, '0'),
         $phase,
-        $dev.PadLeft(20, '0')
+        $dev.PadLeft(20, '0'),
+        ([string]$Matches[5]).ToLowerInvariant()
     }
     return '1:' + [regex]::Replace(
       $ver.ToLowerInvariant(), '\d+',

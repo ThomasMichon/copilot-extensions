@@ -22,7 +22,7 @@ from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
 from .client_steering import SteeringClientMixin
 from .client_suspend import SuspendClientMixin
-from .client_transport import ConnectRetryClient
+from .client_transport import make_http_client
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
@@ -34,18 +34,14 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
         *,
         token: str | None = None,
         control_token: str | None = None,
+        task_token: str | None = None,
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
         tunnel: Any = None,
     ):
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
-        verify = not base_url.lower().startswith("http://")
-        self._http = ConnectRetryClient(
-            base_url=base_url.rstrip("/"),
-            headers=headers,
-            timeout=timeout,
-            transport=transport,
-            verify=verify,
+        self._http = make_http_client(
+            base_url, token=token, control_token=control_token, task_token=task_token,
+            timeout=timeout, transport=transport, tunnel=tunnel,
         )
         self._control_token = control_token
         # An optional owned resource (e.g. an SSH failover port-forward) closed
@@ -77,6 +73,8 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
         self.close()
 
     def _unwrap(self, resp: httpx.Response) -> Any:
+        if 300 <= resp.status_code < 400:
+            raise DispatchError(resp.status_code, "coordinator redirect refused")
         if resp.status_code >= 400:
             detail = resp.text
             try:

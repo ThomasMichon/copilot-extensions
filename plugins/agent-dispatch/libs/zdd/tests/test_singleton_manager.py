@@ -277,6 +277,7 @@ def test_reused_persisted_pid_discovers_without_resetting_baseline(tmp_path: Pat
 def test_update_is_polled_before_child_exit_and_preserves_lease(tmp_path: Path) -> None:
     world = World(tmp_path)
     seen: list[tuple[str, list[str], dict[str, str]]] = []
+    command = [str(tmp_path / "python"), "-m", "daemon_manager"]
 
     def exec_image(executable: str, argv: list[str], env: dict[str, str]) -> None:
         seen.append((executable, argv, env))
@@ -284,8 +285,9 @@ def test_update_is_polled_before_child_exit_and_preserves_lease(tmp_path: Path) 
 
     with pytest.raises(OSError, match="exec failure"):
         world.manager(
-            resolve_update=lambda: ["/new/python", "-m", "daemon_manager"], execve=exec_image,
+            resolve_update=lambda: command, execve=exec_image,
         ).run()
+    assert seen[0][:2] == (command[0], command)
     assert seen[0][2][LEASE_ENV] == "50"
     assert world.lease.prepared
     assert world.ticks == 0

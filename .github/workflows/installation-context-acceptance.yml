@@ -1,0 +1,52 @@
+name: Installation context native acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  derived-diagnostics-posix:
+    name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [mode_legacy, mode_active]
+        pointer: [pointer_absent, pointer_retained]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: All derived native copies
+        run: >-
+          uv run --with pytest python -m pytest -q --durations=15
+          libs/payload-invocation/tests/test_derived_diagnostic_cli.py
+          -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
+
+  derived-diagnostics-windows:
+    name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
+    runs-on: windows-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [mode_legacy, mode_active]
+        pointer: [pointer_absent, pointer_retained]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: All derived native copies
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          uv run --with pytest python -m pytest -q --durations=15
+          libs/payload-invocation/tests/test_derived_diagnostic_cli.py
+          -k "${{ matrix.mode }} and ${{ matrix.pointer }}"

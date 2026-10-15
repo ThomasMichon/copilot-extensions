@@ -19,8 +19,8 @@ for local git files + commits, GitHub issues/PRs, and Azure DevOps work
 items/PRs. `--full` is explicit.
 - **Search surfaces**: the `agent-index` **CLI** (the primary, agent-facing
 surface — every agent calls it directly) and HTTP. The optional `agent-index mcp`
-stdio adapter requires the host dependency profile and reports unavailable in
-the base-only client runtime without installing anything. agent-index is a uniform retrieval capability every agent may use, so it
+stdio adapter requires the explicit `[stdio-mcp]` extra and reports unavailable
+without it on either role, without installing anything. agent-index is a uniform retrieval capability every agent may use, so it
 is deliberately **not** wrapped in a sub-agent or an MCP tool; agents learn how
 to search from the sessionStart scope-binding hook's `additionalContext`.
 - **Engine split**: the light service runtime is torch-free by default; embedding
@@ -62,6 +62,27 @@ health must pass before candidate activation. Host search, indexing, workers
 and service starts execute in that complete runtime, preserving original
 arguments and exit codes. A missing host runtime is reported explicitly rather
 than falling back to a client environment.
+
+The legacy `agent-index mcp` stdio adapter is an HTTP client, not part of the
+host's `[store,server]` profile. It requires the explicit `[stdio-mcp]` extra
+and runs in its invoking runtime on either role. Normal retrieval commands and
+the agent CLI bridge need no MCP SDK. Without the extra, `mcp` exits with a
+diagnostic rather than installing packages or launching a host.
+For an isolated opt-in development adapter, from a source checkout:
+
+```text
+uv run --project plugins/agent-index --extra stdio-mcp agent-index mcp
+```
+
+Point `AGENT_INDEX_ENDPOINT` at an existing reachable service, or use local
+endpoint discovery. Do not add packages to an already completed managed runtime
+slot; source-development environments and versioned production slots have
+different ownership.
+
+Content statistics scan only the source/language columns in batches of at most
+1,024 rows; they do not materialize chunk text or require pandas. Counts exclude
+null metadata while retaining empty strings. Storage errors propagate instead of
+reporting an apparently empty or partially counted index.
 
 Complete service cells and standalone explicit-source native services keep
 their independently owned full host runtime; they do not acquire a duplicate

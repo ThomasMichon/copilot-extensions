@@ -193,9 +193,15 @@ def test_registry_install_manifest_git_probes_remain_headless(authority_state, m
     monkeypatch.setattr(installer, "install_dir", lambda: root)
     monkeypatch.setattr(installer, "find_package_source", lambda *a: root / "plugin" / "src" / "agent_worktrees")
     monkeypatch.setattr(installer, "_source_kind", lambda *a: "local")
+    monkeypatch.setattr(installer, "_payload_root", lambda *a: root / "missing-payload")
     observed = []
+    monkeypatch.setenv("GIT_DIR", str(root / "another-repository" / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(root / "another-repository"))
 
     def run(args, **kwargs):
+        environment = kwargs.pop("env")
+        assert "GIT_DIR" not in environment
+        assert "GIT_WORK_TREE" not in environment
         assert kwargs == {"capture_output": True, "text": True, **installer.no_window_kwargs()}
         observed.append(args)
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")

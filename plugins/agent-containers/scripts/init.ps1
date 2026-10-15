@@ -13,18 +13,28 @@
     Override the runtime install directory (default: ~/.agent-containers).
 
 .PARAMETER Force
-    Re-create the venv even if it already exists.
+    Retry an incomplete runtime. Completed immutable slots are never rebuilt.
+
+.PARAMETER Profile
+    Persist base or provider-exec dependencies for this installation and future updates.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('install', 'init', 'stamp', 'provision')]
     [string]$Action = 'install',
     [string]$InstallDir,
+    [ValidateSet('base', 'provider-exec')]
+    [string]$Profile,
     [switch]$Force
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ($InstallDir) {
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -148,9 +158,15 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
+                    ForEach-Object {
+                        '"' + ([regex]::Replace(
+                            [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
+                        )) + '"'
+                    }) -join ' '
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
-                    -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd)
+                    -ArgumentList $__selfStageArgs
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -273,136 +289,11 @@ if ($SrcVersion) {
 }
 # === end install-contract:v3 versioned-venv ===
 
-# credential-relay dir (vendored like the other plugins): plugin-vendored
-# (marketplace layout) or repo-root (git checkout layout). Force-reinstalled
-# below so a local code change propagates even without a version bump.
-$CredRelayDir = Join-Path $PluginDir 'libs\credential-relay'
-if (-not (Test-Path (Join-Path $CredRelayDir 'pyproject.toml'))) {
-    $CredRelayDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\credential-relay'
-}
-# config-migrate dir (vendored like credential-relay): plugin-vendored or repo-root.
-$CfgMigrateDir = Join-Path $PluginDir 'libs\config-migrate'
-if (-not (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml'))) {
-    $CfgMigrateDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\config-migrate'
-}
-# zdd dir (uv-editable canonical reference in a dev checkout, real copy in a
-# materialized release payload): plugin-vendored or repo-root.
-$ZddDir = Join-Path $PluginDir 'libs\zdd'
-if (-not (Test-Path (Join-Path $ZddDir 'pyproject.toml'))) {
-    $ZddDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\zdd'
-}
-# venue-copilot dir (uv-editable canonical reference in a dev checkout, real
-# copy in a materialized release payload): plugin-vendored or repo-root.
-$VenueCopilotDir = Join-Path $PluginDir 'libs\venue-copilot'
-if (-not (Test-Path (Join-Path $VenueCopilotDir 'pyproject.toml'))) {
-    $VenueCopilotDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\venue-copilot'
-}
-# session-liveness-probe dir (uv-editable canonical reference in a dev
-# checkout, real copy in a materialized release payload): plugin-vendored or
-# repo-root.
-$SessionLivenessProbeDir = Join-Path $PluginDir 'libs\session-liveness-probe'
-if (-not (Test-Path (Join-Path $SessionLivenessProbeDir 'pyproject.toml'))) {
-    $SessionLivenessProbeDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\session-liveness-probe'
-}
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-
-# === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
-function Remove-ConsoleTrampolines {
-    <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
-       the venv after install. They are unsigned, zero-reputation PEs that Smart
-       App Control blocks (CodeIntegrity 3077); nothing launches them (binstubs,
-       services, and probes all use "python.exe -m <pkg>"), so remove every
-       agent-*.exe. Best-effort -- rename a locked copy aside, then sweep stale
-       stashes. Windows-only: POSIX console scripts are the sanctioned launch
-       path and must be preserved. #>
-    param([Parameter(Mandatory)][string]$VenvDir)
-    if ($env:OS -ne 'Windows_NT') { return }
-    $scriptsDir = Join-Path $VenvDir 'Scripts'
-    if (-not (Test-Path $scriptsDir)) { return }
-    Get-ChildItem (Join-Path $scriptsDir 'agent-*.exe') -ErrorAction SilentlyContinue | ForEach-Object {
-        try {
-            Remove-Item $_.FullName -Force -ErrorAction Stop
-        } catch {
-            try { Rename-Item $_.FullName "$($_.FullName).old-$(Get-Date -Format yyyyMMddHHmmss)" -ErrorAction Stop } catch {}
-        }
-    }
-    Get-ChildItem (Join-Path $scriptsDir 'agent-*.exe.old-*') -ErrorAction SilentlyContinue |
-        ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
-}
-# === end install-contract:v3 strip-trampolines ===
 
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
 # anything else (a git checkout) => local.
-# === install-contract:v4 marker/toss helpers (#935) ===
-function Get-BootstrapPython {
-    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
-       mark-complete before the link is swapped), then the active link's
-       python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
-    }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
-    }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
-        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
-    }
-    return $null
-}
-
-function Get-PayloadHash {
-    <# Cheap payload fingerprint for the completion marker (#935): sha256 of
-       pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
-    try {
-        $parts = @()
-        $pp = Join-Path $PluginDir 'pyproject.toml'
-        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
-        $libs = Join-Path $PluginDir 'libs'
-        if (Test-Path $libs) {
-            Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
-                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
-        }
-        $joined = [string]::Join("`n", $parts)
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
-    } catch { return '' }
-}
-
-function Invoke-VersionedSlotClean {
-    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
-       --allow-existing` over a corpse (#935); the current/active slot is never
-       tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) { return }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
-}
-
-function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so "marker present" == "healthy, complete build". A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) { return }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
-}
-# === end install-contract:v4 marker/toss helpers ===
-
 function Get-SourceKind {
     param([string]$PluginPath)
     # #935: when the installer self-staged out of the marketplace payload, its
@@ -616,7 +507,11 @@ if (-not (Enter-InstallLock)) {
 }
 
 try {
-if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
+if ($Action -eq 'stamp') {
+    if ($Profile) { throw 'Select a runtime profile with provision, not stamp' }
+    Invoke-Stamp
+    exit 0
+}
 
 # -- Preflight checks --------------------------------------------------
 
@@ -706,241 +601,42 @@ foreach ($dir in @($InstallDir, $LocalBin)) {
 }
 Write-Ok "Directories: $InstallDir"
 
-# -- 2. Create venv ----------------------------------------------------
+# -- 2. Provision the selected immutable profile (uv pip install or pip) --
 
-if ($Force -or -not (Test-Path $VenvPython)) {
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    # Prefer a SAC-trusted signed base Python via `--copies` so the venv
-    # python.exe is signed (Smart App Control blocks the unsigned uv-managed
-    # python); then uv; then plain python -m venv.
-    $signedBase = $null
-    if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
-        foreach ($v in '3.13', '3.12', '3.11') {
+$signedBase = $null
+if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
+    foreach ($v in '3.13', '3.12', '3.11') {
+        $probePreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
             $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
-                try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
-            }
+            $probeExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $probePreference
         }
-    }
-    if ($signedBase -and (Test-Path $VenvPython)) {
-        try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
-    }
-    if ($signedBase -and -not (Test-Path $VenvPython)) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-    }
-    if (-not (Test-Path $VenvPython)) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            Write-Step 'Creating venv via uv...'
-            Invoke-VersionedSlotClean
-            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Step 'uv venv failed -- falling back to python -m venv'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-            }
-        } else {
-            Write-Step 'Creating venv via python -m venv...'
-            & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+        if ($probeExit -eq 0 -and $cand -and (Test-Path $cand)) {
+            if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break }
         }
-    }
-    $ErrorActionPreference = $prevEAP
-    if (-not (Test-Path $VenvPython)) {
-        Write-Fail "Venv creation failed -- $VenvPython not found"
-        exit 1
-    }
-    Write-Ok 'Venv created'
-} else {
-    Write-Skip 'Venv already exists'
-}
-
-# -- 3. Install the package into the venv (uv pip install) -------------
-
-function Invoke-BoundedPackageCommand {
-    param(
-        [Parameter(Mandatory = $true)][string]$Executable,
-        [Parameter(Mandatory = $true)][string[]]$Arguments
-    )
-    $logPath = [System.IO.Path]::GetTempFileName()
-    try {
-        $global:LASTEXITCODE = 1
-        & $Executable @Arguments *> $logPath
-        $code = $LASTEXITCODE
-        $tail = @()
-        if ($code -ne 0) {
-            $tail = @(Get-Content -LiteralPath $logPath -Tail 40 -ErrorAction SilentlyContinue |
-                ForEach-Object {
-                    ([string]$_) `
-                        -replace '(?i)(https?://)[^/\s@]+@', '$1***@' `
-                        -replace '(?i)((?:token|password|secret)=)[^&\s]+', '$1***'
-                })
-        }
-        [pscustomobject]@{ Code = $code; Tail = $tail }
-    } finally {
-        Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
     }
 }
-
-function Write-PackageDiagnostics {
-    param([string[]]$Lines)
-    foreach ($line in $Lines) {
-        Write-Warn "package-manager: $line"
-    }
-}
-
-$prevEAP = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-# Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
-Remove-ConsoleTrampolines -VenvDir $VenvDir
-if (Get-Command uv -ErrorAction SilentlyContinue) {
-    # credential-relay/config-migrate/zdd/venue-copilot/session-liveness-probe
-    # first (workspace path deps), force-reinstalled so local code changes
-    # propagate even without a version bump; then agent-containers.
-    if (Test-Path (Join-Path $CredRelayDir 'pyproject.toml')) {
-        $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
-            'pip', 'install', '--python', $VenvPython, '--reinstall-package',
-            'agent-credential-relay', "$CredRelayDir", '--quiet'
-        )
-        if ($result.Code -ne 0) {
-            Write-Fail 'credential-relay install failed'
-            Write-PackageDiagnostics $result.Tail
-            $ErrorActionPreference = $prevEAP
-            exit 1
-        }
-    } else {
-        Write-Fail "credential-relay source not found at $CredRelayDir"
-        $ErrorActionPreference = $prevEAP
-        exit 1
-    }
-    if (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml')) {
-        $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
-            'pip', 'install', '--python', $VenvPython, '--reinstall-package',
-            'agent-config-migrate', "$CfgMigrateDir", '--quiet'
-        )
-        if ($result.Code -ne 0) {
-            Write-Fail 'config-migrate install failed'
-            Write-PackageDiagnostics $result.Tail
-            $ErrorActionPreference = $prevEAP
-            exit 1
-        }
-    } else {
-        Write-Fail "config-migrate source not found at $CfgMigrateDir"
-        $ErrorActionPreference = $prevEAP
-        exit 1
-    }
-    if (Test-Path (Join-Path $ZddDir 'pyproject.toml')) {
-        $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
-            'pip', 'install', '--python', $VenvPython, '--reinstall-package',
-            'agent-zdd', "$ZddDir", '--quiet'
-        )
-        if ($result.Code -ne 0) {
-            Write-Fail 'zdd install failed'
-            Write-PackageDiagnostics $result.Tail
-            $ErrorActionPreference = $prevEAP
-            exit 1
-        }
-    } else {
-        Write-Fail "zdd source not found at $ZddDir"
-        $ErrorActionPreference = $prevEAP
-        exit 1
-    }
-    if (Test-Path (Join-Path $VenueCopilotDir 'pyproject.toml')) {
-        $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
-            'pip', 'install', '--python', $VenvPython, '--reinstall-package',
-            'agent-venue-copilot', "$VenueCopilotDir", '--quiet'
-        )
-        if ($result.Code -ne 0) {
-            Write-Fail 'venue-copilot install failed'
-            Write-PackageDiagnostics $result.Tail
-            $ErrorActionPreference = $prevEAP
-            exit 1
-        }
-    } else {
-        Write-Fail "venue-copilot source not found at $VenueCopilotDir"
-        $ErrorActionPreference = $prevEAP
-        exit 1
-    }
-    if (Test-Path (Join-Path $SessionLivenessProbeDir 'pyproject.toml')) {
-        $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
-            'pip', 'install', '--python', $VenvPython, '--reinstall-package',
-            'agent-session-liveness-probe', "$SessionLivenessProbeDir", '--quiet'
-        )
-        if ($result.Code -ne 0) {
-            Write-Fail 'session-liveness-probe install failed'
-            Write-PackageDiagnostics $result.Tail
-            $ErrorActionPreference = $prevEAP
-            exit 1
-        }
-    } else {
-        Write-Fail "session-liveness-probe source not found at $SessionLivenessProbeDir"
-        $ErrorActionPreference = $prevEAP
-        exit 1
-    }
-    $providerResult = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
-        'pip', 'install', '--python', $VenvPython,
-        "${PluginDir}[provider-exec]", '--quiet'
-    )
-    if ($providerResult.Code -eq 0) {
-        $pkgResult = 0
-    } else {
-        Write-Warn 'Could not install the optional provider-exec SSH transport; falling back to the base package'
-        Write-PackageDiagnostics $providerResult.Tail
-        $baseResult = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
-            'pip', 'install', '--python', $VenvPython, "$PluginDir", '--quiet'
-        )
-        $pkgResult = $baseResult.Code
-        $pkgTail = $baseResult.Tail
-    }
-} else {
-    $providerResult = Invoke-BoundedPackageCommand -Executable $VenvPython -Arguments @(
-        '-m', 'pip', 'install', '--quiet', "${PluginDir}[provider-exec]"
-    )
-    if ($providerResult.Code -eq 0) {
-        $pkgResult = 0
-    } else {
-        Write-Warn 'Could not install the optional provider-exec SSH transport; falling back to the base package'
-        Write-PackageDiagnostics $providerResult.Tail
-        $baseResult = Invoke-BoundedPackageCommand -Executable $VenvPython -Arguments @(
-            '-m', 'pip', 'install', '--quiet', "$PluginDir"
-        )
-        $pkgResult = $baseResult.Code
-        $pkgTail = $baseResult.Tail
-    }
-}
-$ErrorActionPreference = $prevEAP
-if ($pkgResult -ne 0) {
-    Write-Fail 'Failed to install agent-containers package into venv'
-    Write-PackageDiagnostics $pkgTail
+if ($signedBase) { $pythonCmd = $signedBase }
+$profileArgs = @(
+    (Join-Path $PSScriptRoot 'runtime_profile.py'),
+    '--root', $InstallDir, '--payload', $PluginDir, '--python', $pythonCmd
+)
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if ($uv) { $profileArgs += @('--uv', $uv.Source) }
+if ($Profile) { $profileArgs += @('--profile', $Profile) }
+$profileJson = & $pythonCmd @profileArgs
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail 'Failed to provision the selected agent-containers runtime profile'
     exit 1
 }
-
-# Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused).
-Remove-ConsoleTrampolines -VenvDir $VenvDir
-Write-Ok 'Package installed: agent-containers'
-
-# === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
-if ($VersionedRuntime) {
-    # Point the stable `.venv` link at this version's freshly-built slot, moving a
-    # legacy real `.venv` aside on the first migration. Run via the slot's own
-    # python (stdlib-only helper); a CLI plugin has no daemon holding the link, so
-    # the swap is immediately safe.
-    $VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    # Health-gate (#935): never swap the stable .venv link onto a slot whose
-    # package does not import -- a broken build must not become the live runtime.
-    # The marker is written only after this gate passes (so "marked" == healthy).
-    & $VenvPython -c 'import agent_containers' 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
-        exit 1
-    }
-    Invoke-VersionedMarkComplete
-    & $VenvPython $VrScript --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
-        exit 1
-    }
-    Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
-}
-# === end install-contract:v3 versioned-venv activate ===
+$profileResult = ($profileJson -join "`n") | ConvertFrom-Json
+$VenvDir = [string]$profileResult.venv
+$LinkDir = $VenvDir
+$VenvPython = [string]$profileResult.python
+Write-Ok "Runtime profile: $($profileResult.profile) ($($profileResult.runtimeVersion))"
 
 # -- 4. Deploy binstub -------------------------------------------------
 
@@ -980,6 +676,8 @@ $manifest = [ordered]@{
         dirty   = $dirty
     }
     venv           = ($LinkDir -replace '\\', '/')
+    runtime_version = [string]$profileResult.runtimeVersion
+    runtime_profile = [string]$profileResult.profile
     runtime        = 'python'
 }
 $tmp = "$manifestPath.tmp"

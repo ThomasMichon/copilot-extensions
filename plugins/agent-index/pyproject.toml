@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-index"
-version = "0.10.27-dev1"
+version = "0.10.28-dev1"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -67,12 +67,10 @@ store = [
     "tree-sitter-javascript>=0.25.0,<1.0",
     "tree-sitter-typescript>=0.23.2,<1.0",
     "tree-sitter-bash>=0.25.1,<1.0",
-    # The legacy `agent-index mcp` stdio MCP server (mcp_app). HOST-side and
-    # lazily imported (cmd_mcp) -- a client reaches tools through the agent-mcp
-    # `cli` bridge (which spawns `agent-index <sub>`), never `agent-index mcp`.
-    # Kept out of the client base because `mcp` pulls `cryptography` (a Rust
-    # extension) with no Windows-ARM64 wheel, which fails to build on an ARM64
-    # client (#1516).
+]
+stdio-mcp = [
+    # Legacy HTTP-client tool adapter only; not required by store/server or the
+    # normal read CLI. Opt-in also keeps its cryptography closure off clients.
     "mcp>=2.0,<3.0",
 ]
 server = [
@@ -96,10 +94,11 @@ server = [
 dev = [
     "pytest",
     "httpx",
+    "tomli>=2 ; python_version < '3.11'",
     # The test suite exercises the store/indexing/search/server modules, so dev
-    # pulls the [store]/[server] extras (self-reference) even though a client
-    # runtime does not.
-    "agent-index[store,server]",
+    # pulls all tested extras (self-reference) even though normal installations
+    # do not need the legacy stdio adapter.
+    "agent-index[store,server,stdio-mcp]",
 ]
 
 [project.scripts]

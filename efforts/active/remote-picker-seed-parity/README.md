@@ -463,3 +463,223 @@ hiding the problem or silently dropping text.
   The complete contained obligation-settlement and independent execution-space
   suites pass all 122 cases. The four settlement contracts also run in the
   fast guard lane; production code and fence behavior are unchanged.
+- **2026-10-13** -- The obligation fixture repair merged as #6588 after an
+  Approved current-head review with zero findings, successful CI and the
+  workflow guard. Review correctly required ownership to be passed into
+  record construction, not assigned afterward. The regression now reloads
+  the child and asserts persisted ownership and derived controller provenance;
+  all 122 contained settlement/execution-space cases pass with that correction.
+  Await the containing full release; installed rollout and real Picker proof
+  are not yet established.
+- **2026-10-13** -- The containing release run `38479483177` passed all
+  nine full plugin suites, including Agent Worktrees. Promotion then refused
+  because the enrolled Agent Bridge coverage baseline was missing. That
+  distinct evidence-transfer blocker is already routed through the existing
+  #6535/#4876 release driver. Do not waive the coverage gate or treat the
+  successful suites as a completed promotion; installed proof remains pending.
+- **2026-10-13** -- The operator clarified that no release driver was active;
+  this session took release stewardship instead of relying on stale claims.
+  Prepared the exact reviewed #6611 workflow-only main bootstrap and exercised
+  its ten adapter contracts against the actual main-based workflow. Publication
+  found the pre-push hook's hardcoded dev comparison range; the operator
+  explicitly authorized a temporary main-range correction retaining both
+  unchanged identifier and pushed-blob checks. No review/CI bypass was allowed.
+  Before publication completed, canonical #6619 merged that exact bootstrap.
+  No duplicate PR or remote branch was opened. The unused bootstrap child was
+  aligned and finalized through managed commands using the actual #6619 landing
+  receipt; temporary tooling and hook overrides were removed. Continue driving
+  the real containing release and the original rollout/Picker completion gates.
+- **2026-10-14** -- Release candidate #6631 merged as
+  `f5e4e30353a076aec74781e6ef5cfe5df474e939`, composed from validated dev
+  `e22e05cc54be20f5438a460cb6b192de238e569c`. The engine admission/transport
+  and both Manager prompt-action source blobs match that snapshot exactly.
+  Artifact publication then failed in the content-only tree comparison,
+  tracked and claimed in #6632. A real Git regression reproduces its failure
+  when the merged tree's bookkeeping differs from the trusted checkout.
+  A local index-plumbing candidate fixed the comparison without touching
+  caller files or the real index and kept publisher errors explicit.
+  Rollout stays blocked until actual artifact publication succeeds.
+  The complete affected promotion/publisher portfolio passes all 212 cases.
+  Initial whole-file native runs exceeded local budgets; reran the actual
+  root-tool CI invocation in bounded eight-function groups, each retaining
+  its 300-second containment limit, with no omitted cases or changed assertions.
+  The original failure is reproduced before the index-plumbing correction.
+- **2026-10-14** -- During local validation, the canonical publisher driver
+  independently merged the same root-cause repair as #6633. No competing PR
+  was opened. The operator explicitly chose the merged canonical repair;
+  the alternative implementation and diagnostics remain on a local backup,
+  not in the release path. Continue from the canonical source and drive
+  actual immutable asset publication before installed adoption. Local
+  validation of an unpublished alternative is not shipped evidence.
+- **2026-10-14** -- Canonical #6633 reached main through promotion #6642,
+  but that run's publisher still executed its older pinned trusted checkout
+  and repeated the already-fixed refusal. The operator explicitly authorized
+  one fresh normal validation/promotion run from repaired trusted main.
+  Dispatched run `38524772148`, pinned to
+  `f327cf44793c60321bc205eddadccaeda3d5ee43`; every normal validation and
+  evidence gate remains enabled. No failed-job retry or force promotion was
+  used. Await its actual artifact-publication receipt before rollout.
+- **2026-10-14** -- GitHub coalesced the authorized pending manual run into
+  automatic run `38525777621`, pinned to the same repaired trusted main;
+  no second manual dispatch was requested. The older active run exposed six
+  profile-assignment registration fixture failures, grouped in #6657 with
+  signatures #6651 through #6656. The fixture now supplies the same test data
+  to registration's dedicated config reader while retaining the real mutation
+  fence and original lifecycle/call-count assertions. All 211 assignment,
+  registration and execution-space cases pass; all six registration contracts
+  are also selected and pass in the fast guard lane. One initial unchanged
+  native contention case hit its existing lock deadline, then passed alone and
+  in the complete rerun; #6663 records that intermittent evidence without a
+  timeout increase or CI waiver. Actual artifact publication remains required.
+- **2026-10-14** -- Registration fixture repair #6667 merged as
+  `8bc763c230319e3b3e1e134fa7b8cefeac379f3c` after the exact head received
+  an Approved review with zero findings, successful CI, workflow guard and
+  source attribution. The failed preceding full release still used an older
+  snapshot with the same six fixture signatures. Await a containing full run
+  and actual immutable asset publication; source promotion alone is not
+  installed or delivered Picker evidence.
+- **2026-10-14** -- The next containing full run passed the assignment
+  registration tests and exposed one separate exact-session scan fixture,
+  tracked in #6675. It now reuses the existing shared authority setup and
+  tracking directory rather than patching only the previous policy loader.
+  The first integration attempt also tried to create that already-owned
+  directory; reusing the supplied fixture resolves it. All 186 register,
+  deregister and independent execution-space cases pass, with the exact
+  deterministic-order test also selected in fast guards. Production
+  registration, authority and scan behavior remain unchanged.
+- **2026-10-14** -- Exact-session fixture repair #6682 merged as
+  `be910de4f60b4e24a0c77e4d8971c46baa0d9330` after its exact head received
+  an Approved review with zero findings and all CI, workflow and attribution
+  gates succeeded. Continue through the containing full release and actual
+  artifact publication; the original delivered Picker and resource-lifecycle
+  completion gates remain open.
+- **2026-10-14** -- Newer dev validation exposed a separate budget-guidance
+  declaration/output-free-hook integration failure. Exact logs match #6699;
+  its canonical repair #6701 is currently open under a verified active owner.
+  Retain release stewardship here while following that bounded repair rather
+  than opening a competing change. The prior exact-session failure was from
+  an older snapshot and is already repaired. No validation gate or publication
+  requirement is waived while the containing dev build is blocked.
+- **2026-10-14** -- Budget-guidance repair #6701 merged with green checks.
+  The next full engine gate passed the earlier registration groups and found
+  three receiving-authority fixture mismatches in terminal conclusion and
+  owning-directory lookup. Exact current ownership is confirmed in #6212 and
+  #6693, with actively updated canonical PR #6696 covering that family.
+  Follow its actual reviewed fix without duplicating or weakening the
+  terminal-managed and cross-project assertions. Artifact publication and
+  installed validation remain open.
+- **2026-10-14** -- After the author-owned feature remained in review and
+  its owner was not reachable through the local registries, the operator
+  explicitly authorized a separate fixture-only break-fix. The original
+  #6696 feature, branch, review and PR remain untouched. The bounded change
+  supplies existing terminal and owning-directory test data to the dedicated
+  registration authority reader and adds the three unchanged behavioral
+  contracts to fast guards. Keep every normal review and CI gate.
+  The complete affected terminal, tracking, registration-write and independent
+  execution-space modules pass all 414 cases in bounded groups; the three
+  targeted fast guards also pass. A stale negative-Resume seed mock was updated
+  to accept the production verdict keyword, preserving its refusal/write
+  assertions. An initial broad native run exceeded a GC-test deadline; that
+  unchanged case and the complete grouped portfolio subsequently passed with
+  the original deadlines. No production behavior or timeout was changed.
+- **2026-10-14** -- While #6730 was reviewed, the standalone data-setup fix
+  independently landed as #6726. Preserve its canonical setup and updated
+  comments rather than reimplementing them. Narrow #6730 to the distinct
+  remaining negative-Resume mock contract and fast-guard coverage, with its
+  own refreshed review and checks required after rebasing. The unrelated
+  #6696 feature and its open review remain intact.
+  The narrowed current-base selection passes all five fast guard cases,
+  including both real late-owner refusal branches; canonical fixture data
+  and comments from #6726 are retained unchanged.
+- **2026-10-14** -- Narrowed repair #6730 merged as
+  `3fc5f5b1812c3cab05d26e33eb8d3551be30437c` after current-head Approved
+  review with zero findings and successful CI, workflow and attribution gates.
+  The separate first-install timeout #6727 already has an active diagnosis
+  owner and merged fixture-isolation repair #6734; do not duplicate that work
+  or infer Linux acceptance from its Windows checks. A newer containing full
+  run is still active and has exposed an agent-logger failure requiring its
+  own literal diagnosis. Immutable publication, authorized installed rollout,
+  delivered Picker conversation evidence and managed cleanup remain open.
+- **2026-10-14** -- Literal completed-job logs for full run `38633055933`
+  pin its validation snapshot to `ee4e6b0063dff7eafed04942feec10974de4f52c`,
+  before #6730. Its two negative-Resume mock failures therefore do not justify
+  another Worktrees patch. The separate agent-logger PowerShell classifier
+  timeout is already under active diagnosis in #6747; coordinated there and
+  retained normal release stewardship without duplicating its repair or
+  increasing a deadline. Preserve the original publication and delivered
+  conversation gates while following that canonical repair.
+- **2026-10-14** -- Logger harness isolation #6756 merged through its own
+  review and checks. The next full run, `38637663769`, pins
+  `c45b1430b53a387ddb588ab5c9708d35273393e5` and passes agent-logger, but
+  exposes a distinct create-plan project-scoping fixture failure. Claimed
+  #6759 after checking for an existing repair. Its record mock omitted fields
+  now consumed by the real creation path; derive a real `WorktreeRecord` from
+  the shared fixture and preserve the selected creation identity instead.
+  The unchanged selected-project versus stale-ambient-project assertions pass
+  in all four contained module cases. Mark the affected behavior as a fast
+  guard; production creation, authority and deferred admission remain unchanged.
+  This fixture-only repair does not exercise a new install or external venue;
+  normal full release and delivered Picker evidence remain separate gates.
+- **2026-10-14** -- Create-plan fixture repair #6763 merged as
+  `95d9d6b92208fa79f49fc424cface20602deab57` after its exact head received
+  Approved with zero findings and all required CI, workflow and attribution
+  gates succeeded. All four affected module cases and the selected fast guard
+  pass under the unchanged containment budgets. Resume normal containing
+  release stewardship; the separate artifact-ordering PR #6697 remains with
+  its active author and review. Neither fixture merge nor a source promotion
+  proves immutable asset publication, installed source identity or the still
+  outstanding delivered Picker New/cold Resume conversation contract.
+- **2026-10-14** -- Containing full run `38645036098` pins
+  `5d08c74d7185dcaf3b3f5c61af97c997576e427f` and passes the repaired
+  create-plan fixture, but exposes #6769: Git index discovery can consult a
+  FIFO `info/exclude` before the instruction publisher validates that input.
+  Strengthened the existing portable refusal test and reproduced its ordering
+  failure before the fix. Validate the Git-resolved exclude path before index
+  queries, retaining the original fresh read immediately before appending the
+  rule. No timeout, assertion or authority boundary is weakened.
+  The complete copy module passes 90 Windows cases with five native POSIX
+  skips and all 95 cases on native POSIX, including real FIFOs with no writer
+  and a fresh-exclude regression preserving independent ignore-rule changes.
+  The latter uses current-source dependencies after an older test cache proved
+  incompatible; no installed payload or source candidate was modified. Promote
+  the portable refusal cases and native FIFO cases to fast guards. Normal
+  review, containing publication and delivered Picker proof remain open.
+- **2026-10-14** -- FIFO ordering repair #6773 merged as
+  `23367596f6caabeee879df9bfb1813cdc6ad895c` after current-head Approved
+  with zero findings and successful full required CI, workflow and attribution
+  gates. A lost review-request response was checked against the provider before
+  any retry; the actual review ran on the unchanged candidate. Full run
+  `38647658802` still validated the older source and repeated the same FIFO
+  failure, so it is not evidence of a second regression. A newer normal full
+  run is queued. The separate dispatch reconnect fixture #6771 is owned by
+  active PR #6775; coordinated without copying its repair. Artifact-ordering
+  #6697 also remains with its active author. Continue through actual immutable
+  publication and the original installed Picker proof and cleanup gates.
+- **2026-10-14** -- Full run `38652751643` validates exact dev
+  `23367596f6caabeee879df9bfb1813cdc6ad895c` and clears the FIFO group,
+  then fails the optional-profile creation fallback assertion in #6780.
+  Canonical repair #6781 was already reserved and published by its existing
+  owner: the test must follow both real admission and setup command layers
+  before checking the unchanged Copilot model, environment and no-assignment
+  assertions. Follow that current-head review and CI without a competing patch.
+  The workflow's promotion job reports success only because its admission step
+  exits cleanly with `proceed=false` on the failed full suite; build, attestation
+  and publication are skipped. This is a correctly refused release, not a new
+  source promotion or immutable-asset receipt.
+- **2026-10-15** -- Canonical optional-profile fixture repair #6781 merged
+  as `2e1d19f58789254307fafaf42afc47c4b2de00b2` after its exact head received
+  Approved with zero findings and its checks completed successfully. A newer
+  normal full run is queued. Continue tracking its actual validated source and
+  publication result; dispatch reconnect #6775 and artifact ordering #6697
+  remain with their active owners. No updater or delivered Picker validation
+  has started, and the original completion gates remain open.
+- **2026-10-15** -- Full run `38658267992` validates
+  `2e1d19f58789254307fafaf42afc47c4b2de00b2`, clears the corrected fallback
+  case, then exposes #6784: a repository-probe test still mocks headless options
+  on the old direct caller rather than the shared `git_ops.git` owner.
+  Correct the test's seam and assert the complete current capture/timeout
+  options plus repository-identity environment isolation; production code
+  remains unchanged. All 21 registered-resolution and real inherited-Git-context
+  cases pass on Windows and native POSIX, including the native first-touch CLI
+  contract. Add the corrected probe to fast guards and retain the ordinary
+  review, full release, immutable publication and installed Picker proof gates.

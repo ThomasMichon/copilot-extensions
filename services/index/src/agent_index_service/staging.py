@@ -24,7 +24,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, TypedDict
 from urllib.parse import urlsplit
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -188,13 +188,19 @@ def _write(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _lock_requirements(data: bytes) -> dict[str, str]:
+class HashedRequirement(TypedDict):
+    version: str
+    extras: list[str]
+    sha256: list[str]
+
+
+def hashed_requirements(data: bytes) -> dict[str, HashedRequirement]:
     """Accept a resolved per-platform pip-style lock, no includes/options/markers."""
     try:
         text = data.decode("utf-8").replace("\\\r\n", " ").replace("\\\n", " ")
     except UnicodeDecodeError as exc:
         raise CandidateError("third-party lock must be UTF-8") from exc
-    pins = {}
+    pins: dict[str, HashedRequirement] = {}
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -216,10 +222,18 @@ def _lock_requirements(data: bytes) -> dict[str, str]:
             or name in _BUNDLED or name in pins
         ):
             raise CandidateError("lock must use unique exact third-party pins, no URLs or markers")
-        pins[name] = str(Version(specs[0].version))
+        pins[name] = {
+            "version": str(Version(specs[0].version)),
+            "extras": sorted(canonicalize_name(extra) for extra in requirement.extras),
+            "sha256": sorted({part.strip().removeprefix("sha256:") for part in parts[1:]}),
+        }
     if not pins:
         raise CandidateError("third-party lock must not be empty")
     return pins
+
+
+def _lock_requirements(data: bytes) -> dict[str, str]:
+    return {name: item["version"] for name, item in hashed_requirements(data).items()}
 
 
 def _uv_policy(data: bytes) -> None:
@@ -341,7 +355,7 @@ def descendants():
         parents.update(added)
 code = 125
 try:
-    child = subprocess.Popen(sys.argv[2:], stdin=subprocess.DEVNULL)
+    child = subprocess.Popen(sys.argv[2:], stdin=sys.stdin)
     try:
         code = child.wait(timeout=float(sys.argv[1]))
     except (subprocess.TimeoutExpired, TimeoutError):
@@ -441,14 +455,18 @@ def _teardown(process, job, token: str | None, supervised: bool, operation: str)
         ) from exc
 
 
-def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) -> str:
+def _run(
+    argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float,
+    input_stream: BinaryIO | None = None,
+    operation_label: str | None = None,
+) -> str:
     from agent_procutil import (
         contained_test_mode,
         no_window_kwargs,
         spawn_sync_in_kill_on_close_job,
     )
 
-    operation = _operation(argv)
+    operation = operation_label or _operation(argv)
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise CandidateError(f"{operation}: timeout before spawn")
@@ -473,7 +491,8 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
         with os.fdopen(fd, "wb") as stream:
             try:
                 process, job = spawn_sync_in_kill_on_close_job(
-                    command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                    command, cwd=cwd, env=env,
+                    stdin=input_stream if input_stream is not None else subprocess.DEVNULL,
                     stdout=stream, stderr=subprocess.DEVNULL,
                     require_job=True, allow_breakaway=False, **kwargs,
                 )

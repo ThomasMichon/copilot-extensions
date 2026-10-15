@@ -332,3 +332,129 @@ def test_unreadable_registry_does_not_trigger_heal(tmp_path, monkeypatch):
 
     m._heal_stale_anchor_if_self_missing(cfg.load_config())
     assert called["ff"] == 0
+
+
+def test_bare_anchor_is_synced_through_the_bare_path(anchor_repo, monkeypatch, capsys):
+    # A worktree-class anchor is bare: the work-tree dirty check / merge can't
+    # run there, so update must advance its ref (and files) via the bare path
+    # instead of reporting it "dirty" and leaving it stale forever.
+    seed, anchor = anchor_repo
+    _git("config", "core.bare", "true", cwd=anchor)
+    _advance_origin(seed)
+    _install_config(monkeypatch, anchor)
+
+    m._fast_forward_project_anchors()
+
+    origin_head = subprocess.run(
+        ["git", "rev-parse", "origin/master"], cwd=str(seed),
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    anchor_head = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "refs/heads/master"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert anchor_head == origin_head
+    assert (anchor / "next.txt").exists()
+    out = capsys.readouterr().out
+    assert "synced" in out
+    assert "dirty" not in out
+
+
+def test_failed_anchor_fetch_is_reported(anchor_repo, monkeypatch, capsys):
+    _seed, anchor = anchor_repo
+    _git("remote", "set-url", "origin", str(anchor.parent / "missing-origin.git"), cwd=anchor)
+    _install_config(monkeypatch, anchor)
+
+    m._fast_forward_project_anchors()
+
+    captured = capsys.readouterr()
+    assert "fetch from origin failed" in captured.out + captured.err
+
+def test_bare_anchor_sync_failure_is_reported_without_aborting_update(
+    anchor_repo, monkeypatch, capsys
+):
+    from agent_worktrees import bare_anchor_sync
+
+    _seed, anchor = anchor_repo
+    _git("config", "core.bare", "true", cwd=anchor)
+    _install_config(monkeypatch, anchor)
+
+    def _timeout(*_a, **_k):
+        raise subprocess.TimeoutExpired(["git", "fetch"], 180)
+
+    monkeypatch.setattr(bare_anchor_sync, "sync_bare_anchor", _timeout)
+
+    m._fast_forward_project_anchors()
+
+    captured = capsys.readouterr()
+    assert "error" in captured.out + captured.err
+
+_SECRET_URL = "https://user:hunter2@example.invalid/repo.git"
+
+
+@pytest.mark.parametrize(("detail", "level"), [
+    ("abc..def; files=refreshed", "ok"),
+    ("abc..def; files=refresh-failed: index locked", "warn"),
+    ("abc..def; files=dirty", "warn"),
+], ids=["refreshed", "refresh-failed", "dirty"])
+def test_bare_anchor_file_status_decides_the_report(anchor_repo, monkeypatch, detail, level):
+    # A `synced` ref with files left stale is not a clean sync (as `repos sync`).
+    from agent_worktrees import bare_anchor_sync, output
+
+    _seed, anchor = anchor_repo
+    _git("config", "core.bare", "true", cwd=anchor)
+    _install_config(monkeypatch, anchor)
+    monkeypatch.setattr(bare_anchor_sync, "sync_bare_anchor", lambda *a, **k: ("synced", detail))
+    seen: list[tuple[str, str]] = []
+    for name in ("ok", "warn", "info"):
+        monkeypatch.setattr(output, name, lambda msg, _n=name: seen.append((_n, msg)))
+
+    m._fast_forward_project_anchors()
+
+    assert [n for n, msg in seen if str(anchor) in msg] == [level]
+
+
+def test_bare_anchor_sync_detail_is_redacted(anchor_repo, monkeypatch, capsys):
+    from agent_worktrees import bare_anchor_sync
+
+    _seed, anchor = anchor_repo
+    _git("config", "core.bare", "true", cwd=anchor)
+    _install_config(monkeypatch, anchor)
+    monkeypatch.setattr(
+        bare_anchor_sync, "sync_bare_anchor",
+        lambda *a, **k: ("error", f"fatal: unable to access '{_SECRET_URL}'"),
+    )
+
+    m._fast_forward_project_anchors()
+
+    captured = capsys.readouterr()
+    assert "unable to access" in captured.out + captured.err
+    assert "hunter2" not in captured.out + captured.err
+
+
+def test_anchor_fetch_error_is_redacted(anchor_repo, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    _seed, anchor = anchor_repo
+    _install_config(monkeypatch, anchor)
+    monkeypatch.setattr(
+        git_ops, "fast_forward_worktree",
+        lambda *a, **k: SimpleNamespace(
+            fetch_error=f"fatal: unable to access '{_SECRET_URL}'",
+            updated=False, reason="up-to-date", behind=0,
+        ),
+    )
+
+    m._fast_forward_project_anchors()
+
+    captured = capsys.readouterr()
+    assert "fetch from origin failed" in captured.out + captured.err
+    assert "hunter2" not in captured.out + captured.err
+
+
+def test_update_redaction_works_without_the_telemetry_library(monkeypatch):
+    from agent_worktrees import update_events
+
+    monkeypatch.setattr(update_events, "_ut", None)
+    text = update_events.redact(f"{_SECRET_URL}\nAuthorization: token-value")
+    assert "hunter2" not in text and "token-value" not in text

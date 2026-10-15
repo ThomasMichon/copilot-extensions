@@ -7,6 +7,10 @@ efforts/active/agent-dispatch-fleet-authority/README.md and issue #6617.
 from __future__ import annotations
 
 import pytest
+import base64
+import hashlib
+import hmac
+import json
 
 from agent_dispatch.task_scope import (
     TaskScopeTokenError,
@@ -76,3 +80,24 @@ def test_distinct_tasks_mint_distinct_tokens():
     assert a != b
     assert verify_task_scope_token(CONTROL_TOKEN, a).task_id == "task-a"
     assert verify_task_scope_token(CONTROL_TOKEN, b).task_id == "task-b"
+
+
+@pytest.mark.parametrize("claims", [
+    [], None, {"v": "v1"},
+    {"v": "v1", "task_id": None, "worker_id": "w", "owner_session_id": "s",
+     "epoch": 0, "generation": 0, "exp": float("inf")},
+    {"v": "v1", "task_id": "t", "worker_id": "w", "owner_session_id": "s",
+     "epoch": True, "generation": 0, "exp": float("nan")},
+])
+def test_signed_malformed_claims_fail_as_invalid_credentials(claims):
+    payload = json.dumps(claims).encode()
+    signature = hmac.new(CONTROL_TOKEN.encode(), payload, hashlib.sha256).hexdigest()
+    token = base64.urlsafe_b64encode(payload).decode().rstrip("=") + "." + signature
+    with pytest.raises(TaskScopeTokenError):
+        verify_task_scope_token(CONTROL_TOKEN, token)
+
+
+@pytest.mark.parametrize("token", ["%%%." + "0" * 64, "a." + "\u00e9", "x" * 8193])
+def test_invalid_encoding_is_a_credential_error(token):
+    with pytest.raises(TaskScopeTokenError):
+        verify_task_scope_token(CONTROL_TOKEN, token)

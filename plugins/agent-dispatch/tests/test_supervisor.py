@@ -3853,7 +3853,7 @@ def test_resolving_client_rejects_unknown_attribute():
 
 
 def test_dispatch_client_skips_tls_setup_only_for_plain_http(monkeypatch):
-    from agent_dispatch import client as client_module
+    from agent_dispatch import client_transport as client_module
     from agent_dispatch.client import DispatchClient
 
     created: list[dict] = []

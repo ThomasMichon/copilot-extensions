@@ -1,16 +1,10 @@
 # Posts a one-time, read-only-safe reminder comment on a PR that targets
 # `main` directly, asking the author to retarget to `dev` -- `main` only
 # ever receives automated releases (see docs/pipelines.md > Release &
-# Versioning, and this is the same policy `ci.yml`'s `main-gate` job
-# actually ENFORCES).
+# Versioning). The independent `main-gate` job below enforces that policy.
 #
-# `main-gate` lives inside `ci.yml`, a `pull_request`-triggered workflow.
-# For a first-time or otherwise unapproved external contributor's fork PR,
-# GitHub holds the ENTIRE `ci.yml` run (every job, `main-gate` included) in
-# `action_required` until a maintainer manually approves it -- so such a
-# contributor gets no automated feedback at all unless someone happens to
-# notice and approve the run (confirmed live: PR #5091, a first-time fork
-# contributor's PR against `main`, sat with zero checks ever posted).
+# Main-targeting PRs do not allocate `ci.yml`. This trusted invocation supplies
+# admission and feedback without waiting for fork-code execution approval.
 #
 # The reminder closes that feedback gap with a narrow, safe
 # nudge. It does not weaken `main-gate`, and it does not grant a
@@ -29,11 +23,9 @@
 # head, so it carries none of the usual `pull_request_target`
 # secret-exfiltration risk.
 #
-# Staged consolidation: this same invocation also supplies the unchanged
-# main source gate from trusted default-branch code. ci.yml temporarily keeps
-# its legacy producer until this copy is released and proven; only then can
-# main PRs stop allocating the redundant CI invocation. Main-push validation
-# and contributor CI remain unchanged. The identifier scan below is also staged:
+# This same invocation supplies the main source gate from trusted default-branch
+# code and replaces main-PR CI admission and identifier reporting. Main-push
+# validation and contributor CI remain unchanged. The identifier scan is scoped:
 # only owner-authored, admitted main PRs enter it; uninvited PRs gain no secret
 # denylist oracle outside their existing CI approval boundary.
 name: Base branch reminder
@@ -273,7 +265,7 @@ jobs:
             const { PR_AUTHOR, REPO_OWNER, HEAD_REF } = process.env;
             const pull_number = context.payload.pull_request.number;
 
-            // Mirrors ci.yml's `main-gate` job -- the exact four shapes
+            // Mirrors this workflow's `main-gate` job -- the exact four shapes
             // that legitimately land on `main` directly (the release
             // pipeline's own PR, a workflow-only bootstrap PR,
             // rollback_release.py's own pause/resume state-commit PR and

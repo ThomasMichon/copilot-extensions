@@ -24,7 +24,17 @@ def _display_command(argv: list[str]) -> str:
     return shlex.join(argv)
 
 
-def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
+def is_bare(path: str | os.PathLike[str]) -> bool:
+    """Whether ``path`` is a bare repository (no work tree of its own)."""
+    probe = git_ops.git(
+        "rev-parse", "--is-bare-repository", cwd=path, check=False, isolated_repository=True,
+    )
+    return probe.returncode == 0 and probe.stdout.strip() == "true"
+
+
+def sync_bare_anchor(
+    path: str, declared_branch: str | None, *, remote: str = "origin",
+) -> tuple[str, str]:
     """Fast-forward a bare worktree-class anchor's branch ref directly.
 
     A bare anchor (``core.bare`` with every real edit happening in linked
@@ -96,22 +106,22 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
     # Save and temporarily clear any configured refspec(s) for this fetch so
     # ours is the only one that can land anywhere, then restore them.
     saved_refspecs = _git(
-        "config", "--get-all", "remote.origin.fetch",
+        "config", "--get-all", f"remote.{remote}.fetch",
     ).stdout.splitlines()
-    _git("config", "--unset-all", "remote.origin.fetch")
+    _git("config", "--unset-all", f"remote.{remote}.fetch")
     try:
         # Route the fetch through the same credential-aware auth-config
         # resolution `git_ops.fetch` uses (dotfiles#2069), but with our own
         # explicit refspec into `scratch_ref` only.
         fetched = git_ops.git(
-            *git_ops._auth_config_args("origin", cwd=path),
-            "fetch", "--quiet", "--no-tags", "origin",
+            *git_ops._auth_config_args(remote, cwd=path),
+            "fetch", "--quiet", "--no-tags", remote,
             f"+refs/heads/{target}:{scratch_ref}",
             cwd=path, check=False, timeout=180, isolated_repository=True,
         )
     finally:
         for refspec in saved_refspecs:
-            _git("config", "--add", "remote.origin.fetch", refspec)
+            _git("config", "--add", f"remote.{remote}.fetch", refspec)
     if fetched.returncode != 0:
         _cleanup_scratch()
         return ("error", fetched.stderr.strip() or "git fetch failed")
@@ -119,7 +129,7 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
     new_sha = _git("rev-parse", "--verify", scratch_ref).stdout.strip()
     if not new_sha:
         _cleanup_scratch()
-        return ("skipped", f"origin/{target} not found after fetch")
+        return ("skipped", f"{remote}/{target} not found after fetch")
     if new_sha == old_sha:
         _cleanup_scratch()
         return ("synced", f"{target}; files={bare_anchor_files.current_status(path, old_sha)}")

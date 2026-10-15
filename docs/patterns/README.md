@@ -61,8 +61,14 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    its own installer per the install contract. Nothing at run time depends on a
    git checkout of this repo, and a bare plugin name never selects mutable state.
 4. **Right-size the surface.** Payload-only < runtime CLI < runtime service.
-   Don't add a daemon, a port, or a resolver a plugin doesn't need. If you do
-   add a long-lived resident daemon under any shape, you have taken on the
+   Don't add a daemon, a port, or a resolver a plugin doesn't need.
+   Prefer a simple direct implementation over importing a larger related
+   framework. Reuse code when it reduces total complexity, not merely because
+   its subject is similar. This guides implementation design; it is not a
+   runtime admission policy. For static instruction publication, the resolved
+   plugins' declarations decide what is copied. Content and harness-composition
+   decisions belong in authoring and review, not an on-the-fly evaluator.
+   If you add a long-lived resident daemon under any shape, you have taken on the
    [`graceful-daemon-cutover`](graceful-daemon-cutover.md) obligation at design
    time and must justify any claimed exemption explicitly.
 5. **Cross-platform parity is a feature.** A plugin behaves the same on Windows
@@ -81,6 +87,15 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    registry preserves last-known state rather than masquerading as empty.
    Cleanup belongs to the consumer's report-first doctor command, never a
    destructive startup sweep.
+9. **Make safeguards earn their cost.** Serve the service-model vision's
+   `proportionate-cooperation-safeguards` and the agent-fabric vision's
+   `trusted-cooperation-with-economical-evidence`: prefer the simplest reliable
+   cooperation contract within established OS/identity and endpoint boundaries.
+   Extra hardening needs a concrete threat or failure and proportionate benefit,
+   not a hypothetical equally privileged hostile local peer. Keep useful
+   freshness, ownership and integrity checks; do not turn routine authorized
+   IPC into a redundant attestation chain. This principle does not waive any
+   binding invariant or authorize removal of an existing safeguard.
 
 ## Design invariants (binding contracts)
 

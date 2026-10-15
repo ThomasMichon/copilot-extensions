@@ -9,12 +9,32 @@ import {
   generateToken,
   buildDescriptor,
   authorizes,
+  tokensMatch,
   writeDescriptorAtomic,
 } from "../extensions/agent-remote-driver/discovery.mjs";
 
 function tmpDir() {
   return mkdtempSync(join(tmpdir(), "agent-remote-driver-discovery-test-"));
 }
+
+test("control protocol metadata is distinct from descriptor schema and must be complete", () => {
+  const input = { sessionId: "s", pid: 123, port: 456, token: "observer" };
+  const descriptor = buildDescriptor({ ...input, controlProtocol: 2, instanceId: "i", controlToken: "admin" });
+  assert.equal(descriptor.version, 1);
+  assert.equal(descriptor.controlProtocol, 2);
+  assert.equal(descriptor.instanceId, "i");
+  assert.equal(descriptor.controlToken, "admin");
+  assert.throws(() => buildDescriptor({ ...input, controlProtocol: 2 }), /required together/);
+  assert.equal(buildDescriptor(input).controlToken, undefined);
+});
+
+test("credential comparison rejects malformed credentials without treating owner labels as keys", () => {
+  assert.equal(tokensMatch("driver-secret", "driver-secret"), true);
+  for (const value of [null, undefined, "", "wrong", 123, {}]) {
+    assert.equal(tokensMatch(value, "driver-secret"), false);
+  }
+  assert.equal(tokensMatch("driver-secret", null), false);
+});
 
 test("discoveryDir honors AGENT_REMOTE_DRIVER_CONFIG_DIR override", () => {
   const dir = discoveryDir({ AGENT_REMOTE_DRIVER_CONFIG_DIR: "/tmp/xyz" });
@@ -209,4 +229,3 @@ test("writeDescriptorAtomic's temp filename is unique per pid+timestamp (no cros
   assert.deepEqual(names, [`s1.json.${process.pid}.stale.tmp`, "s1.json"].sort());
   assert.equal(JSON.parse(readFileSync(path, "utf-8")).sessionId, "s1");
 });
-

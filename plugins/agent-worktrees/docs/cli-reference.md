@@ -191,6 +191,33 @@ continue to work unchanged.
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
 
+### Session command catalog
+
+The session-start hook renders its command catalog in-process from the generated
+payload declaration and the payload's read-only installation-binding helper.
+It preserves the native catalog emitter's exact command paths, availability,
+source provenance, and ownership decisions without starting a shell or a second
+Python interpreter. Catalog construction errors are reported on stderr; they
+do not produce a ready-looking replacement catalog. The hook uses its existing
+stderr-write convention so diagnostics preserve the structural output-free
+session-start contract without relaxing the scanner's stdout refusals.
+
+On Windows, the cold hook checks the shared bootstrap killswitch before entering
+the canonical ownership lifecycle with its existing Python interpreter and one
+native installer child. It passes that interpreter to the installer, avoiding
+redundant bootstrap-shell startup and interpreter discovery while keeping both
+installer ownership checks. Explicit installation contexts never enter this
+legacy path. The standalone bootstrap script remains the no-Python/deployed-copy
+fallback; it forwards the supplied interpreter through both ownership admission
+and the staged installer, including paths containing spaces. Stamp diagnostics
+use UTF-8 and stay on stderr, not in session guidance. The lifecycle owner
+enforces the cold stamp's ten-second child deadline, stopping the installer
+tree before releasing its ownership lease rather than killing the owner from
+the hook.
+The stamp copies the same source tree
+through native filesystem APIs; runtime provisioning remains deferred to first
+tool use.
+
 ### Terminal identity
 
 At every `sessionStart` (including resume), the hook client probes what only a

@@ -198,6 +198,11 @@ resolve_runtime_python() {
 # Usage: run_runtime_preflight "<label>" arg1 arg2 ...
 run_runtime_preflight() {
     local label="$1"; shift
+    local stream_progress=0
+    if [[ "${1:-}" == "--stream-progress" ]]; then
+        stream_progress=1
+        shift
+    fi
     local max_attempts=3
     local retry_delay_s=0.4
     local attempt py output rc
@@ -207,11 +212,15 @@ run_runtime_preflight() {
         if [[ -z "$py" || ! -x "$py" ]]; then
             setup_log WARN "$label: runtime python unavailable on attempt $attempt/$max_attempts"
         else
-            if output=$("$py" "$@" 2>&1); then
+            if [[ "$stream_progress" == "1" ]]; then
+                if output=$("$py" "$@"); then rc=0; else rc=$?; fi
+            else
+                if output=$("$py" "$@" 2>&1); then rc=0; else rc=$?; fi
+            fi
+            if ((rc == 0)); then
                 setup_log INFO "$label completed: $output"
                 return 0
             fi
-            rc=$?
             setup_log WARN "$label failed on attempt $attempt/$max_attempts (exit $rc): ${output:-no details}"
         fi
         if ((attempt < max_attempts)); then
@@ -667,7 +676,7 @@ launch_trace resolve_start
 resolve_args=(-m agent_worktrees)
 [[ -n "$LAUNCH_PROJECT" ]] && resolve_args+=(--project "$LAUNCH_PROJECT")
 resolve_args+=(resolve "$@")
-JSON=$("$PYTHON" "${resolve_args[@]}")
+JSON=$(AGENT_WORKTREES_DEFER_PROJECTIONS=1 "$PYTHON" "${resolve_args[@]}")
 RC=$?
 if [[ $RC -ne 0 ]]; then
     setup_log ERROR "agent_worktrees resolve failed (exit $RC)"
@@ -1055,8 +1064,8 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     _KNOWLEDGE_ARGS=(-m agent_worktrees)
     [[ -n "$LAUNCH_PROJECT" ]] \
         && _KNOWLEDGE_ARGS+=(--project "$LAUNCH_PROJECT")
-    _KNOWLEDGE_ARGS+=(knowledge compose-plugins --cwd "$_KNOWLEDGE_CWD" --json)
-    run_runtime_preflight "Knowledge plugin preflight" "${_KNOWLEDGE_ARGS[@]}" || true
+    _KNOWLEDGE_ARGS+=(knowledge compose-plugins --cwd "$_KNOWLEDGE_CWD" --prepare-projections --json)
+    run_runtime_preflight "Knowledge plugin preflight" --stream-progress "${_KNOWLEDGE_ARGS[@]}" || true
 
     _MARKETPLACE_ARGS=(-m agent_worktrees reconcile-marketplaces
         --cwd "$_KNOWLEDGE_CWD" --ensure-ignored --json)

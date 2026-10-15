@@ -288,7 +288,9 @@ def test_allows_spawn_via_kwargs_dict_update_in_same_function(repo):
             "    subprocess.Popen(cmd, **kwargs)\n"
         ),
     )
-    assert guard.verify() == []
+    # Rule 3 accepts the suppression; rule 5 separately reports the
+    # hand-rolled detached launch (see the rule-5 tests below).
+    assert [p for p in guard.verify() if "hand-rolled detached Popen" not in p] == []
 
 
 def test_spawn_daemon_call_alone_is_clean(repo):
@@ -497,3 +499,185 @@ def test_declarative_json_allowlist_file_suppresses(repo, monkeypatch):
     allow.write_text(f"{rel}  reviewed, consumer applies no_window_kwargs\n", encoding="utf-8")
     monkeypatch.setattr(guard, "HEADLESS_GUARD_ALLOWLIST", allow)
     assert guard.verify() == []
+
+
+# Rule 5: a resident daemon launches through agent_procutil.spawn_daemon.
+
+_UPDATE_SHAPE = (
+    "import subprocess\nfrom agent_procutil import detached_kwargs\n"
+    "def start():\n    kwargs = {{'stdin': subprocess.DEVNULL}}\n"
+    "    kwargs.update(detached_kwargs())\n"
+    "    return subprocess.Popen(['svc'], **kwargs){comment}\n"
+)
+
+
+def _daemon_problems(problems):
+    return [p for p in problems if "hand-rolled detached Popen" in p or "daemon-spawn" in p]
+
+
+@pytest.mark.parametrize("body", [
+    _UPDATE_SHAPE.format(comment=""),
+    ("import subprocess\nfrom . import core\nclass Svc:\n    def start(self):\n"
+     "        subprocess.Popen(['svc'], **core.windowless_daemon_kwargs(breakaway=True))\n"),
+    ("from subprocess import Popen as P\nfrom agent_procutil import detached_kwargs\n"
+     "def start():\n    P(['svc'], **detached_kwargs())\n"),
+    ("from agent_procutil import windowless_daemon_kwargs\ndef start():\n"
+     "    import subprocess as _subprocess\n"
+     "    _subprocess.Popen(['svc'], **windowless_daemon_kwargs(breakaway=True))\n"),
+    ("from agent_procutil import detached_kwargs\ndef start():\n"
+     "    sp.Popen(['svc'], **detached_kwargs())\nimport subprocess as sp\n"),
+    ("from agent_procutil import detached_kwargs\ndef start():\n"
+     "    P(['svc'], **detached_kwargs())\nfrom subprocess import Popen as P\n"),
+    ("import subprocess\nfrom agent_procutil import detached_kwargs as daemon_flags\n"
+     "def start():\n    subprocess.Popen(['svc'], **daemon_flags())\n"),
+    ("from agent_procutil import detached_kwargs\nclass Service:\n"
+     "    import subprocess as sp\n    proc = sp.Popen(['svc'], **detached_kwargs())\n"),
+], ids=[
+    "kwargs-update", "attribute-helper-in-method", "imported-popen-alias", "module-alias",
+    "module-alias-imported-after-use", "popen-alias-imported-after-use", "aliased-detach-helper",
+    "class-body-launch",
+])
+def test_hand_rolled_detached_popen_is_flagged(repo, body):
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1
+    assert "plugins/agent-daemon/src/agent_daemon/mod.py:" in problems[0]
+    assert "spawn_daemon" in problems[0]
+
+
+@pytest.mark.parametrize("body", [
+    ("from agent_procutil import spawn_daemon\ndef start(root):\n"
+     "    return spawn_daemon(['svc'], cwd=root, log_path=root / 'svc.log')\n"),
+    "import subprocess\ndef run():\n    return subprocess.Popen(['svc'], creationflags=0)\n",
+    _UPDATE_SHAPE.format(comment="  # daemon-spawn: allow one-shot waiter, exits with its task"),
+    ("import subprocess\nfrom agent_procutil import detached_kwargs\ndef outer():\n"
+     "    def helper():\n        return detached_kwargs()\n"
+     "    class Box:\n        kwargs = detached_kwargs()\n"
+     "    return subprocess.Popen(['tool'], creationflags=0)\n"),
+    ("import subprocess\nfrom agent_procutil import detached_kwargs\ndef outer():\n"
+     "    helper = lambda: detached_kwargs()\n"
+     "    return subprocess.Popen(['tool'], creationflags=0), helper\n"),
+    ("from agent_procutil import detached_kwargs\nclass Service:\n"
+     "    import subprocess as sp\n    def start(self, sp):\n"
+     "        return sp.Popen(['x'], **detached_kwargs())\n"),
+    ("import subprocess\nfrom agent_procutil import detached_kwargs\ndef start():\n"
+     "    return subprocess.Popen(  # daemon-spawn: allow bounded helper\n"
+     "        ['svc'], **detached_kwargs(),\n    )\n"),
+], ids=[
+    "spawn-daemon", "no-detach-helper", "inline-allow-with-reason", "helper-only-in-nested-scope",
+    "helper-only-in-lambda", "class-alias-not-visible-in-method", "multiline-inline-allow",
+])
+def test_daemon_launches_that_pass(repo, body):
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
+    assert _daemon_problems(guard.verify()) == []
+
+
+def test_inline_daemon_allow_needs_a_reason(repo):
+    _mk_plugin(repo, "agent-daemon", adopts=True,
+               body=_UPDATE_SHAPE.format(comment="  # daemon-spawn: allow"))
+    assert len(_daemon_problems(guard.verify())) == 1
+
+
+def test_non_adopting_plugin_is_out_of_daemon_scope(repo):
+    _mk_plugin(repo, "agent-legacy", adopts=False, body=_UPDATE_SHAPE.format(comment=""))
+    assert _daemon_problems(guard.verify()) == []
+
+
+def _write_daemon_allow(repo, text):
+    allow = repo / guard.DAEMON_SPAWN_ALLOWLIST
+    allow.parent.mkdir(parents=True, exist_ok=True)
+    allow.write_text(text, encoding="utf-8")
+
+
+def test_daemon_baseline_entry_suppresses_and_stale_entries_are_reported(repo):
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=_UPDATE_SHAPE.format(comment=""))
+    key = "plugins/agent-daemon/src/agent_daemon/mod.py::start"
+    _write_daemon_allow(repo, f"# header\n{key}  resident daemon; migration pending\n")
+    assert _daemon_problems(guard.verify()) == []
+    _write_daemon_allow(
+        repo,
+        f"{key}  resident daemon; migration pending\n"
+        "plugins/agent-daemon/src/agent_daemon/mod.py::gone  migrated already\n",
+    )
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "stale entry" in problems[0] and "::gone" in problems[0]
+
+
+@pytest.mark.parametrize("entry", [
+    "plugins/agent-daemon/src/agent_daemon/mod.py::start",
+    "plugins/agent-daemon/src/agent_daemon/mod.py:6  path:line is not a function key",
+])
+def test_daemon_baseline_entries_need_a_function_key_and_reason(repo, entry):
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=_UPDATE_SHAPE.format(comment=""))
+    _write_daemon_allow(repo, entry + "\n")
+    assert any("daemon-spawn.allow:1: expected" in p for p in guard.verify())
+
+def test_a_daemon_baseline_entry_covers_exactly_one_launch(repo):
+    body = (
+        "import subprocess\nfrom agent_procutil import detached_kwargs\n"
+        "def start():\n    subprocess.Popen(['a'], **detached_kwargs())\n"
+        "    subprocess.Popen(['b'], **detached_kwargs())\n"
+    )
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
+    key = "plugins/agent-daemon/src/agent_daemon/mod.py::start"
+    _write_daemon_allow(repo, f"{key}  first launch, migration pending\n")
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "hand-rolled detached Popen in start" in problems[0]
+    _write_daemon_allow(repo, f"{key}  first launch\n{key}  second launch\n")
+    assert _daemon_problems(guard.verify()) == []
+    _write_daemon_allow(repo, f"{key}  first\n{key}  second\n{key}  third\n")
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "stale entry" in problems[0]
+
+
+@pytest.mark.parametrize("body", [
+    ("import subprocess\nfrom agent_procutil import detached_kwargs\n"
+     "def helper():\n    import subprocess as sp\n    return sp\n"
+     "def run(sp):\n    return sp.Popen(['x'], **detached_kwargs())\n"),
+    ("from agent_procutil import detached_kwargs\n"
+     "class Box:\n    from subprocess import Popen as P\n"
+     "def run(P):\n    return P(['x'], **detached_kwargs())\n"),
+], ids=["sibling-function-import", "class-body-import"])
+def test_local_subprocess_aliases_do_not_leak_to_other_scopes(repo, body):
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
+    assert _daemon_problems(guard.verify()) == []
+
+
+def test_enclosing_function_alias_reaches_a_nested_function(repo):
+    _mk_plugin(
+        repo, "agent-daemon", adopts=True,
+        body=("from agent_procutil import detached_kwargs\ndef outer():\n"
+              "    import subprocess as sp\n    def inner():\n"
+              "        return sp.Popen(['x'], **detached_kwargs())\n    return inner\n"),
+    )
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "outer.inner" in problems[0]
+
+def test_inline_allowance_never_consumes_a_baseline_entry(repo):
+    one_shot = "    subprocess.Popen(['waiter'], **detached_kwargs())  # daemon-spawn: allow waiter\n"
+    resident = "    subprocess.Popen(['svc'], **detached_kwargs())\n"
+    head = "import subprocess\nfrom agent_procutil import detached_kwargs\ndef start():\n"
+    key = "plugins/agent-daemon/src/agent_daemon/mod.py::start"
+    _mk_plugin(repo, "agent-daemon", adopts=True, body=head + one_shot + resident)
+    _write_daemon_allow(repo, f"{key}  resident daemon, migration pending\n")
+    assert _daemon_problems(guard.verify()) == []
+    # Once the resident launch is gone, the inline-allowed one can't keep the
+    # entry alive: it is reported stale.
+    module = repo / "plugins" / "agent-daemon" / "src" / "agent_daemon" / "mod.py"
+    module.write_text(head + one_shot, encoding="utf-8")
+    problems = _daemon_problems(guard.verify())
+    assert len(problems) == 1 and "stale entry" in problems[0]
+
+
+def test_two_launches_on_one_line_need_two_baseline_entries(repo):
+    _mk_plugin(
+        repo, "agent-daemon", adopts=True,
+        body=("import subprocess\nfrom agent_procutil import detached_kwargs\ndef start():\n"
+              "    a, b = subprocess.Popen(['a'], **detached_kwargs()), "
+              "subprocess.Popen(['b'], **detached_kwargs())\n"),
+    )
+    key = "plugins/agent-daemon/src/agent_daemon/mod.py::start"
+    _write_daemon_allow(repo, f"{key}  one launch, migration pending\n")
+    assert len(_daemon_problems(guard.verify())) == 1
+    _write_daemon_allow(repo, f"{key}  first\n{key}  second\n")
+    assert _daemon_problems(guard.verify()) == []

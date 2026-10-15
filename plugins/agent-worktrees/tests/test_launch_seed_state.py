@@ -38,9 +38,11 @@ def _record(tmp_path):
 
 
 @pytest.mark.parametrize(("name", "old_version"), [
-    ("stage", 1), ("take", 1), ("restore", 1), ("finish", 1), ("remove", 2),
+    (name, version)
+    for name in ("stage", "take", "restore", "finish", "remove")
+    for version in (1, 2, 3)
 ])
-def test_seed_client_never_dials_pre_authority_daemon(tmp_path, monkeypatch, name, old_version):
+def test_seed_client_never_dials_pre_admission_daemon(tmp_path, monkeypatch, name, old_version):
     from agent_worktrees import locks, status_monitor_runtime
 
     path = _record(tmp_path)

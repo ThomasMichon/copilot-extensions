@@ -299,7 +299,7 @@ _versioned_activate() {
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
-    _versioned_mark_complete
+    _versioned_mark_complete || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
@@ -332,7 +332,7 @@ _bootstrap_python() {
 _payload_hash() {
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
+    # changed the payload WITHOUT bumping the version. Fails on any error.
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -341,7 +341,21 @@ _payload_hash() {
             __parts="$__parts"$'\n'"$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    # Fails (no output) when no SHA-256 implementation works: the caller must
+    # then refuse to publish a slot without its fingerprint.
+    local __d
+    if command -v sha256sum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
+    elif command -v openssl >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
+    else
+        return 1
+    fi
+    __d="${__d%% *}"
+    [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$__d"
 }
 
 _versioned_slot_clean() {
@@ -368,13 +382,27 @@ _versioned_mark_complete() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
+    # The freshly built slot's own interpreter: it already passed the health
+    # gate, and an ambient one may be absent or unusable.
+    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
+    if [[ -z "$py" ]]; then
+        _fail "Cannot publish the completion marker for versions/$SRC_VERSION without a bootstrap Python interpreter -- not activating"
+        return 1
+    fi
     local ph
-    ph="$(_payload_hash)"
+    if ! ph="$(_payload_hash)" || [[ -z "$ph" ]]; then
+        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
+        return 1
+    fi
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    local out rc=0
+    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
+    [[ -z "$out" ]] || printf '%s\n' "$out" | sed 's/^/  ...    /'
+    if [[ "$rc" -ne 0 ]]; then
+        _fail "Failed to publish the completion marker for versions/$SRC_VERSION (exit $rc) -- not activating"
+        return "$rc"
+    fi
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===

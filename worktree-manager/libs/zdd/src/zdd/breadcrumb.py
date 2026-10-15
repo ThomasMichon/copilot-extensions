@@ -25,6 +25,7 @@ File layout (``<config_dir>/cutover.json``)::
       "old": {"bind": "127.0.0.1", "port": 9281},
       "new_port": 9282,
       "new_pid": 12401,                 # the spawn_passive daemon's own pid
+      "requires_writer_reconciliation": true,  # opt-in stateful cutovers only
       "error": null
     }
 
@@ -104,6 +105,8 @@ def read_breadcrumb(config_dir: str | os.PathLike[str]) -> dict | None:
 
 def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) -> str | None:
     """Shared refusal for existing custody that legacy paths cannot interpret."""
+    if requires_owner_reconciliation(record):
+        return "stateful cutover requires installation-owner reconciliation"
     if requires_conditional_recovery(record):
         return "conditional cutover requires owner-led recovery"
     if record is not None and record.get("state") == "publication-uncertain":
@@ -129,6 +132,7 @@ def write_breadcrumb(
     started_at: str | None = None,
     publication_witness: str | None = None,
     new_process_start_time: str | None = None,
+    requires_writer_reconciliation: bool = False,
 ) -> dict:
     """Write/update the cutover breadcrumb atomically. Returns the record.
 
@@ -155,6 +159,8 @@ def write_breadcrumb(
         "publication_witness": publication_witness,
         "new_process_start_time": new_process_start_time,
     }
+    if requires_writer_reconciliation:
+        record["requires_writer_reconciliation"] = True
     _atomic_write(breadcrumb_path(config_dir), record)
     return record
 
@@ -191,6 +197,15 @@ def refusal_reason(outcome: dict) -> str:
     message = "native recovery refused without a valid reason; outcome contract invalid"
     log.error(message)
     return message
+
+
+def requires_owner_reconciliation(record: dict | None) -> bool:
+    """Stateful retirement remains unresolved even after the commit point."""
+    return bool(
+        record
+        and record.get("requires_writer_reconciliation")
+        and str(record.get("state")) in _NON_TERMINAL | {"committed"}
+    )
 
 
 def recover_stale_cutover(
@@ -234,6 +249,10 @@ def _recover_stale_cutover_locked(
     (the same client protocol the orchestrator uses). ``health_check(host,
     port)`` is an optional liveness probe; when omitted the undrain is simply
     attempted and its failure tolerated.
+
+    Stateful opt-in records require the installation owner's identity-bound
+    recovery transaction under its cutover guard. This legacy helper refuses
+    them without changing writer admission or rewriting the breadcrumb.
 
     Returns a summary dict: ``{"recovered": bool, "reason": str, ...}``.
 
@@ -456,6 +475,7 @@ def _reap_abandoned_passive_locked(
     Deliberately conservative -- every ambiguous case is a no-op:
 
     - no breadcrumb, or a terminal one (:func:`is_stale` is ``False``),
+    - a stateful record requiring installation-owner reconciliation,
     - the breadcrumb has no recorded ``new_pid`` (a pre-fix breadcrumb, or a
       cutover that aborted before ``spawn_passive`` ever ran),
     - the breadcrumb is younger than ``grace_seconds`` (a genuinely in-flight
@@ -479,10 +499,11 @@ def _reap_abandoned_passive_locked(
     Returns a summary dict: ``{"reaped": bool, "reason": str, "pid": int | None}``.
     """
     rec = record if record is not None else read_breadcrumb(config_dir)
-    if requires_conditional_recovery(rec):
-        log.error("Conditional cutover requires owner-led recovery; passive reap refused")
+    refusal = recovery_refusal(config_dir, rec)
+    if refusal is not None:
+        log.error("Passive reap refused: %s", refusal)
         return {"reaped": False, "refused": True,
-                "reason": "conditional cutover requires owner-led recovery", "pid": None}
+                "reason": refusal, "pid": None}
     if not is_stale(rec):
         return {"reaped": False, "reason": "no stale cutover breadcrumb", "pid": None}
     new_pid = rec.get("new_pid")

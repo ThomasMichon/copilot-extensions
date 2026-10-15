@@ -83,7 +83,7 @@ async function main() {
   // Never print the bearer token: this is a reporting tool, not a credential
   // export -- a consumer that needs to drive a session reads its own
   // descriptor file directly.
-  const redacted = rows.map(({ token, ...rest }) => rest);
+  const redacted = rows.map(({ token, controlToken, ...rest }) => rest);
 
   if (asJson) {
     process.stdout.write(`${JSON.stringify(redacted, null, 2)}\n`);

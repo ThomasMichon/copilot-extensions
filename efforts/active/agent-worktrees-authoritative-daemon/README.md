@@ -982,6 +982,31 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-10-14 - Phase 6d promoted; signed publication and consumer acceptance next
+
+PR #6595 merged as `b4dadce47c97adb0c4bdd1a5236cfdeaf83016f1` after
+current-head Copilot review `5513584244` reported zero findings, all eleven
+threads were resolved, and required CI `38516933011` passed. The bounded
+resident projection, held CLI feed, mandatory local/SSH consumer path and
+review corrections below are now landed source, not installed acceptance.
+The containing main promotion recorded below completed separately.
+Successful signed-artifact publication and installed acceptance remain open.
+
+Re-read the Phase 6d and coupled read-side gates after merge. Source
+implementation is no longer the next stretch: continue Phase 6d.3's real
+generation/row-stability, platform, adoption and consumer proof. The parent
+6d, schema-bounded acceptance and whole-effort completion boxes remain open;
+separately owned Phases 1-5 and other pivots are not closed by this PR.
+Natural dev CI `38520558555` was superseded; successor `38520905507`
+passed on `d8ede62eed83a603af51a1af8ddfb1fd1224b20f`, one commit ahead of
+the merge above. Promotion `38519804724` independently checked out the exact
+merge for its successful full Manager validation. Release #6642 then merged
+as `f327cf44793c60321bc205eddadccaeda3d5ee43`; its post-merge signed
+publication failed at release-state removal in the older trusted workflow
+checkout. The reviewed publisher repair is now on main, but successful hosted
+publication remains required; neither the merged release nor the
+workflow-carrier SHA alone proves that gate.
+
 ### 2026-10-14 - Phase 6d publication, ordering and adoption review corrections
 
 Review of #6595 exposed three availability/provenance gaps: the early mux

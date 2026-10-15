@@ -36,6 +36,44 @@ in. It does not enable a repair worker or supply inference/repository authority.
 
 ## Concepts
 
+### Optional restricted SSH runtime
+
+New installations use the **base** dependency profile: trusted OpenSSH and direct
+restricted `exec` work without Paramiko. Only the optional restricted
+`ssh-stdio` / `ssh-profile` bridge needs **provider-exec**. Select it explicitly
+with the owning payload's installer:
+
+```powershell
+& <payload>\scripts\init.ps1 provision -InstallDir <resolved-runtime-root> -Profile provider-exec
+```
+
+```bash
+bash <payload>/scripts/init.sh provision --install-dir <resolved-runtime-root> --profile provider-exec
+```
+
+Use the exact payload and installation root selected by this installation's
+command/context, not another marketplace's payload or an ambient global command.
+This is an explicit profile-provisioning operation, not a replacement for the
+suite's ordinary unified update flow.
+
+The installation's `runtime-profile.json` records durable desired state;
+subsequent updates retain it. Existing installations without this record preserve
+provider-exec when their selected runtime already contains Paramiko. Fresh
+installs do not infer dependencies from whichever repository/config happens to
+be the installer's working directory.
+
+Each package version/profile has its own immutable `versions/<version>+<profile>`
+slot. Switching with `-Profile base` / `--profile base` leaves older slots intact
+and reuses an already-completed matching slot. Even `--force` never rewrites a
+completed slot. A failed requested profile does **not** fall back silently: the
+old active runtime remains selected and the saved intent is retried next time.
+The deploy manifest records package version separately from runtime slot/profile.
+Profile changes start no service, SSH listener, Docker container or fleet.
+Helper packages are installed non-editably into that slot; health checks reject
+code resolved from a mutable source checkout outside it.
+Windows keeps signed stdlib interpreter copies but skips pip/setuptools seeding
+when uv installs packages. Without uv, the ordinary-pip fallback remains seeded.
+
 With an explicit installation-cell context, configuration loading validates the
 Containers owner before using config overrides. Its optional knowledge-repo
 fallback invokes only that cell's Agent Worktrees through the packaged native

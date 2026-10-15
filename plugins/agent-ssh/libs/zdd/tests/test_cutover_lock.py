@@ -97,30 +97,44 @@ def test_default_timeout_is_zero_fails_immediately(tmp_path: Path):
         first.release()
 
 
-def test_acquire_waits_for_a_released_lock_within_timeout(tmp_path: Path):
+def test_acquire_waits_for_a_released_lock_within_timeout(tmp_path: Path, monkeypatch):
     """A caller with a nonzero timeout waits out contention instead of
     failing immediately -- the piece that lets a legitimate back-to-back
     cutover trigger succeed once the first releases."""
     if sys.platform == "win32":
         pytest.skip("flock semantics -- POSIX only")
     import threading
-    import time
-
     first = CutoverLock(tmp_path)
-    first.acquire()
+    acquired = threading.Event()
+    release = threading.Event()
 
-    def _release_shortly() -> None:
-        time.sleep(0.2)
-        first.release()
+    def hold_until_contention() -> None:
+        with first:
+            acquired.set()
+            assert release.wait(timeout=5)
 
-    threading.Thread(target=_release_shortly, daemon=True).start()
-
+    holder = threading.Thread(target=hold_until_contention)
+    holder.start()
     second = CutoverLock(tmp_path)
-    second.acquire(timeout=5.0, poll=0.05)
+    acquire = second._try_acquire
+
+    def observe_contention() -> None:
+        try:
+            acquire()
+        except CutoverLockedError:
+            release.set()
+            raise
+
+    monkeypatch.setattr(second, "_try_acquire", observe_contention)
     try:
+        assert acquired.wait(timeout=2)
+        second.acquire(timeout=5.0, poll=0.05)
         assert second.held
     finally:
         second.release()
+        release.set()
+        holder.join(timeout=2)
+    assert not holder.is_alive()
 
 
 def test_acquire_raises_once_timeout_is_exhausted(tmp_path: Path):

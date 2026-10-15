@@ -109,8 +109,9 @@ def _reported_path(value: str) -> Path:
 def _wait_for_smoke_receipt(
     receipt: Path,
     poll: Callable[[], int | None],
-    timeout: float = 15,
+    timeout: float = 30,
 ) -> dict[str, object]:
+    # A cold parent shell starts before the staged child's 20-second watchdog.
     deadline = time.monotonic() + timeout
     last_error: FileNotFoundError | json.JSONDecodeError | UnicodeDecodeError | None = None
     while True:

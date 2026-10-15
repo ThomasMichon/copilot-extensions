@@ -51,7 +51,9 @@ def test_bootstrap_stamps_payload_when_runtime_is_unprovisioned() -> None:
 
     assert 'bash "$_installer" stamp' in sh
     assert "! _aw_provisioned" in sh
-    assert "-File $installer stamp" in ps1
+    assert "& $installer stamp" in ps1
+    assert "& $exe -NoProfile" not in ps1
+    assert "--deferred-runtime --run-lifecycle" in ps1
     assert "Test-AwProvisioned" in ps1
     assert "deploy-manifest.json" in sh
     assert "deploy-manifest.json" in ps1
@@ -441,25 +443,7 @@ def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
     assert "Remove-Item $snapDir" not in stamp
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
-# Genuinely heavier than most tests in this file: a real payload copytree,
-# then `install.sh provision` (self-stage re-exec + venv create + package
-# install + versioned-activate + the post-activation monitor seam),
-# followed by two more subprocess invocations of the generated launchers.
-# That's 5+ real subprocess spawns chained together -- reliably ~15s in
-# 20/20 isolated local reproductions, but observed to intermittently exceed
-# the suite-wide 30s pytest-timeout default under real CI concurrency (a
-# `full - agent-worktrees` run hit `Failed: Timeout (>30.0s)` here on an
-# otherwise-unrelated PR, blocking dev->main promotion). No logic bug found
-# -- this is legitimate multi-subprocess work that needs more headroom than
-# the blanket default under load, not a hang to fix. Give it real margin
-# rather than reaching for a global timeout bump that would mask a genuine
-# hang in a lighter test.
-@pytest.mark.timeout(90)
-def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
-    tmp_path: Path,
-) -> None:
-    home = tmp_path / "home"
+def _posix_installer_payload(home: Path) -> Path:
     payload = (
         home
         / ".copilot"
@@ -471,12 +455,29 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
         PLUGIN,
         payload,
         ignore=shutil.ignore_patterns(
+            "src",
+            "libs",
             "__pycache__",
             "*.pyc",
             ".pytest_cache",
             ".test-venvs",
         ),
     )
+    # Do not fingerprint the growing runtime sources for a fake package install.
+    assert not (payload / "src").exists()
+    assert not (payload / "libs").exists()
+    return payload
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
+# Real lifecycle admission, staging, activation and two launcher invocations
+# retain the existing item budget; fake uv does not build the runtime package.
+@pytest.mark.timeout(90)
+def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    payload = _posix_installer_payload(home)
 
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
@@ -520,15 +521,18 @@ esac
     )
     fake_uv.chmod(0o755)
 
+    monkeypatch.setenv("AGENT_WORKTREES_INSTALL_DEADLINE_SEC", "0")
     env = os.environ.copy()
     env.update(
         {
             "HOME": str(home),
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "REAL_PYTHON": sys.executable,
-            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0",
+            "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "20",
+            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "20",
         }
     )
+    assert env["AGENT_WORKTREES_INSTALL_DEADLINE_SEC"] == "20"
     provision = subprocess.run(
         ["bash", str(payload / "scripts" / "install.sh"), "provision"],
         cwd=home,
@@ -536,7 +540,7 @@ esac
         capture_output=True,
         text=True,
     )
-    assert provision.returncode == 0, provision.stderr
+    assert provision.returncode == 0, provision.stdout + provision.stderr
 
     runtime_bin = home / ".agent-worktrees" / "bin"
     resolver = runtime_bin / "resolve-runtime.sh"
@@ -581,29 +585,7 @@ def _assert_posix_namespace_slot_rejected(
     never be activated.
     """
     home = tmp_path / "home"
-    payload = (
-        home
-        / ".copilot"
-        / "installed-plugins"
-        / "copilot-extensions"
-        / "agent-worktrees"
-    )
-    # uv is fake here: copying/fingerprinting the full growing source tree
-    # adds unrelated, load-dependent work before the health gate is reached.
-    # Keep the real staging, slot admission, resolver and activation code.
-    for relative in (
-        "plugin.json",
-        "pyproject.toml",
-        "scripts/install.sh",
-        "scripts/versioned_runtime.py",
-        "scripts/resolve-runtime.sh",
-        "scripts/resolve-runtime.ps1",
-    ):
-        destination = payload / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(PLUGIN / relative, destination)
-    assert not (payload / "src").exists()
-    assert not (payload / "libs").exists()
+    payload = _posix_installer_payload(home)
 
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()

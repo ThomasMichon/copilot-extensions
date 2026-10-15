@@ -22,7 +22,12 @@ def validate_timeout(timeout: float | None) -> None:
 
 
 def wait_posix(fd: int, timeout: float) -> bool:
-    return bool(select.select([fd], [], [], timeout)[0])
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+    events = poller.poll(int(timeout * 1000))
+    if any(flags & (select.POLLERR | select.POLLNVAL) for _, flags in events):
+        raise OSError("native process exit wait failed")
+    return any(flags & (select.POLLIN | select.POLLHUP) for _, flags in events)
 
 
 def wait_windows(kernel32, handle, timeout: float) -> bool:

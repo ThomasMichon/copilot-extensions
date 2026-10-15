@@ -606,6 +606,9 @@ _SH_FUNCTIONS = (
     ("_slot_admission_refusal", True),
     ("_guard_published_slot", True),
     ("_install_slot_build", True),
+    ("_install_lock_timeout", True),
+    ("_exit_install_lock", True),
+    ("_require_install_lock", True),
     ("_update_core", False),
     ("do_install", False),
     ("do_update", False),
@@ -1108,3 +1111,274 @@ def test_sh_provider_prune_never_rewrites_a_published_slot_through_the_venv_link
         assert not any("/venv/bin/python" in e for e in _events(tmp_path)), detail
     else:
         assert not (install / "venv" / "lib" / "agent_codespaces").exists(), detail
+
+
+# --------------------------------------------------------------------------
+# Rollback never deletes a published slot
+# --------------------------------------------------------------------------
+
+
+def _assert_published_slot_survives_failed_update(
+    tmp_path: Path, result: subprocess.CompletedProcess
+) -> None:
+    events = _events(tmp_path)
+    detail = f"rc={result.returncode}\nevents={events}\nstdout={result.stdout}\nstderr={result.stderr}"
+    assert result.returncode == 1, detail
+    assert "HEALTH" in events and "ACTIVATED" not in events, detail
+    assert _slot_marker(tmp_path).exists(), "update rollback deleted an already-published slot"
+    assert _tree(tmp_path / "install" / "versions" / _VERSION) == _tree(tmp_path / "before-slot"), detail
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_failed_update_keeps_a_reused_published_slot(tmp_path: Path) -> None:
+    """A matching completed slot that fails its health check is only not
+    activated: it was published by an earlier run and is create-once."""
+    action = "_runtime_healthy() { rec HEALTH; return 1; }\ndo_update"
+    result = _run_sh(_sh_harness(tmp_path, "match-inactive", action))
+    _assert_published_slot_survives_failed_update(tmp_path, result)
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_failed_update_keeps_a_reused_published_slot(tmp_path: Path) -> None:
+    action = "function Test-RuntimeHealthy { Rec 'HEALTH'; return $false }\nInvoke-Update"
+    result = _run_ps(_ps_harness(tmp_path, "match-inactive", action))
+    _assert_published_slot_survives_failed_update(tmp_path, result)
+
+# --------------------------------------------------------------------------
+# The install lock fails closed and never reports a blocked run as success
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize("action", ["do_install", "do_update"])
+@pytest.mark.parametrize(("lock_rc", "expected_rc"), [(75, 75), (1, 1)], ids=["busy", "fault"])
+def test_sh_blocked_or_faulted_lock_never_proceeds_or_reports_success(
+    tmp_path: Path, action: str, lock_rc: int, expected_rc: int
+) -> None:
+    stub = f"_enter_install_lock() {{ return {lock_rc}; }}\n"
+    result = _run_sh(_sh_harness(tmp_path, "incomplete", stub + action))
+    events = _events(tmp_path)
+    detail = f"rc={result.returncode}\nevents={events}\n{result.stdout}{result.stderr}"
+    assert result.returncode == expected_rc, detail
+    for sentinel in ("PROCEEDED", "DRAINED", "MARKER", "MANIFEST", "ACTIVATED"):
+        assert sentinel not in events, detail
+    expected = "blocked by lock" if lock_rc == 75 else "refusing to proceed unlocked"
+    assert expected in result.stdout + result.stderr, detail
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_pid_fallback_lock_reports_contention_as_75(tmp_path: Path) -> None:
+    """Without flock the pid-symlink fallback still serializes: a live holder
+    makes the waiter time out with 75 (contention), never proceed."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        'MSYS=winsymlinks:nativestrict ln -s "$$" "$INSTALL_DIR/.install.lock.pid"\n'
+        '[[ -L "$INSTALL_DIR/.install.lock.pid" ]] || { echo NOSYMLINK; exit 0; }\n'
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    harness = _sh_harness(tmp_path, "incomplete", action, extra=("_enter_install_lock",))
+    text = harness.read_text(encoding="utf-8").replace("_enter_install_lock() { return 0; }\n", "")
+    harness.write_text(text, encoding="utf-8", newline="\n")
+    result = _run_sh(harness)
+    if "NOSYMLINK" in result.stdout:
+        pytest.skip("this bash cannot create a native symlink")
+    assert "RC=75" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+@pytest.mark.parametrize("action", ["Invoke-Install", "Invoke-Update"])
+def test_ps1_busy_lock_exits_75_without_proceeding(tmp_path: Path, action: str) -> None:
+    stub = "function Enter-InstallLock { return $false }\n"
+    result = _run_ps(_ps_harness(tmp_path, "incomplete", stub + action))
+    events = _events(tmp_path)
+    detail = f"rc={result.returncode}\nevents={events}\n{result.stdout}{result.stderr}"
+    assert result.returncode == 75, detail
+    for sentinel in ("BUILT", "DRAINED", "MARKER", "MANIFEST", "ACTIVATED"):
+        assert sentinel not in events, detail
+    assert "blocked by lock" in result.stdout + result.stderr, detail
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_lock_fault_fails_closed(tmp_path: Path) -> None:
+    """A lock that cannot be opened for a non-contention reason (here the lock
+    path is a directory) exits 1 instead of installing unlocked."""
+    (tmp_path / "install" / ".install.lock").mkdir(parents=True)
+    action = "$r = Enter-InstallLock -TimeoutSec 2\nWrite-Host \"RESULT=$r\"\nexit 0"
+    result = _run_ps(_ps_harness(tmp_path, "incomplete", action, extra=("Enter-InstallLock",)))
+    detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
+    assert result.returncode == 1, detail
+    assert "RESULT=" not in result.stdout, detail
+    assert "refusing to proceed unlocked" in result.stdout + result.stderr, detail
+
+
+_LOCK_HOLDER = """
+import os, sys, time
+path = sys.argv[1]
+handle = open(path, "a+b")
+if os.name != "nt":
+    import fcntl
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+print("HELD", flush=True)
+time.sleep(60)
+"""
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_lock_held_by_another_process_is_contention(tmp_path: Path) -> None:
+    """A lock genuinely held by another process is contention on every OS:
+    Windows reports a sharing violation, Linux/macOS report EWOULDBLOCK (11/35).
+    The installer waits out its deadline and reports busy (exit 75 upstream),
+    never a lock fault (exit 1)."""
+    lock = tmp_path / "install" / ".install.lock"
+    lock.parent.mkdir(parents=True)
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER, str(lock)], stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "HELD"
+        action = "$r = Enter-InstallLock -TimeoutSec 1\nWrite-Host \"RESULT=$r\"\nexit 0"
+        result = _run_ps(_ps_harness(tmp_path, "incomplete", action, extra=("Enter-InstallLock",)))
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+    detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
+    assert result.returncode == 0, detail
+    assert "RESULT=False" in result.stdout, detail
+    assert "refusing to proceed unlocked" not in result.stdout + result.stderr, detail
+
+
+def _sh_real_lock_harness(tmp_path: Path, action: str) -> Path:
+    harness = _sh_harness(tmp_path, "incomplete", action, extra=("_enter_install_lock",))
+    text = harness.read_text(encoding="utf-8").replace("_enter_install_lock() { return 0; }\n", "")
+    harness.write_text(text, encoding="utf-8", newline="\n")
+    return harness
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize(("flock_rc", "expected"), [(75, 75), (1, 1), (66, 1)],
+                         ids=["conflict", "flock-error", "flock-oserr"])
+def test_sh_only_a_flock_conflict_is_contention(tmp_path: Path, flock_rc: int, expected: int) -> None:
+    """flock is asked to exit 75 on a conflict; any other failure is a fault."""
+    action = (
+        f'flock() {{ [[ " $* " == *" -E 75 "* ]] || return 99; return {flock_rc}; }}\n'
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    assert f"RC={expected}" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize(("owner_alive", "expected"), [(True, 75), (False, 1)],
+                         ids=["live-owner", "stale-owner-reap-stuck"])
+def test_sh_pid_fallback_contention_needs_a_live_owner(
+    tmp_path: Path, owner_alive: bool, expected: int
+) -> None:
+    """Only a live holder is contention (75). A stale owner whose recovery
+    cannot proceed (its reap mutex is held) is a lock fault (1) at the
+    deadline. Shims stand in for symlinks so this runs without that privilege."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        "ln() { return 1; }\nreadlink() { echo 424242; }\nrm() { :; }\n"
+        f"kill() {{ return {0 if owner_alive else 1}; }}\n"
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    assert f"RC={expected}" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_pid_fallback_rejects_a_link_created_inside_a_directory(tmp_path: Path) -> None:
+    """`ln -s` into a directory at the lock path succeeds by creating a child;
+    that is not this run's lock, so it is a fault, never an acquisition."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        "ln() { return 0; }\nreadlink() { return 1; }\n"
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    assert "RC=1" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_pid_fallback_reap_path_directory_is_a_fault_not_the_mutex(tmp_path: Path) -> None:
+    """A directory at the reap path makes `ln -s` succeed by creating a child,
+    so every contender would think it holds the recovery mutex and could unlink
+    a lock another contender just took. The run must fail closed without ever
+    touching the lock link. Shims stand in for symlinks (no privilege needed)."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        'ln() { [[ "${@: -1}" == *.reap ]]; }\n'
+        'readlink() { [[ "$1" == *.reap ]] && return 1; echo 424242; }\n'
+        "kill() { return 1; }\n"
+        'rm() { echo "RM:$*"; }\n'
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    detail = result.stdout + result.stderr
+    assert "RC=1" in result.stdout, detail
+    assert not any(
+        line.startswith("RM:") and line.rstrip().endswith("/.install.lock.pid")
+        for line in result.stdout.splitlines()
+    ), detail
+
+
+_FLOCK_HOLDER = """
+import fcntl, sys, time
+handle = open(sys.argv[1], "a+b")
+fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+print("HELD", flush=True)
+time.sleep(60)
+"""
+
+
+@pytest.mark.skipif(_bash() is None or os.name == "nt", reason="needs bash and POSIX flock(2)")
+@pytest.mark.parametrize("held", [True, False], ids=["held-by-flock", "free"])
+def test_sh_without_flock_binary_shares_the_flock_lock(tmp_path: Path, held: bool) -> None:
+    """Without a flock binary the installer still takes flock(2) on
+    .install.lock (through Python), so it excludes a flock or PowerShell
+    holder of the same file instead of using a separate protocol."""
+    lock = tmp_path / "install" / ".install.lock"
+    lock.parent.mkdir(parents=True)
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    holder = None
+    if held:
+        holder = subprocess.Popen(
+            [sys.executable, "-c", _FLOCK_HOLDER, str(lock)], stdout=subprocess.PIPE, text=True,
+        )
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "HELD"
+    try:
+        result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    finally:
+        if holder is not None:
+            holder.kill()
+            holder.wait(timeout=30)
+    assert f"RC={75 if held else 0}" in result.stdout, result.stdout + result.stderr
+    assert not (lock.parent / ".install.lock.pid").exists()
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_pid_fallback_unattributable_lock_path_is_a_fault(tmp_path: Path) -> None:
+    """A lock path that can never be created or attributed (here a regular
+    file) is a lock fault, not another install holding the lock."""
+    action = (
+        "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
+        'mkdir -p "$INSTALL_DIR"\n'
+        'echo not-a-link > "$INSTALL_DIR/.install.lock.pid"\n'
+        "rc=0; _enter_install_lock || rc=$?\n"
+        'echo "RC=$rc"\n'
+    )
+    result = _run_sh(_sh_real_lock_harness(tmp_path, action))
+    assert "RC=1" in result.stdout, result.stdout + result.stderr

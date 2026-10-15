@@ -6,6 +6,8 @@ import importlib.util
 from pathlib import Path
 from typing import Callable
 
+import pytest
+
 MODULE_PATH = Path(__file__).with_name("check-trusted-ci.py")
 SPEC = importlib.util.spec_from_file_location("check_trusted_ci", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
@@ -338,25 +340,46 @@ def test_ci_must_keep_pull_request_trigger(tmp_path: Path) -> None:
     trusted = _workflow(tmp_path, lambda text: text)
     ci_path = tmp_path / "ci.yml"
     ci_path.write_text(
-        ci_path.read_text(encoding="utf-8").replace("  pull_request:\n", ""),
+        ci_path.read_text(encoding="utf-8").replace(
+            "  pull_request:\n"
+            "    branches-ignore: [main]\n"
+            "    # Retargeting main -> dev emits edited, not synchronize.\n"
+            "    types: [opened, reopened, synchronize, edited]\n", "",
+        ),
         encoding="utf-8",
     )
-    assert "ci.yml must run on every pull_request without filters" in (
+    assert "ci.yml must exclude only main-base pull requests and include retarget edits" in (
         MODULE.validate_workflow(trusted)
     )
 
 
-def test_ci_pull_request_trigger_cannot_be_filtered(tmp_path: Path) -> None:
+@pytest.mark.parametrize("trigger", [
+    "",
+    "    paths: [docs/**]\n",
+    "    paths-ignore: [docs/**]\n",
+    "    types: [opened]\n",
+    "    branches: [dev]\n",
+    "    branches-ignore: [dev]\n",
+    "    branches-ignore: [main, dev]\n",
+    "    branches-ignore: [main]\n    paths: [tools/**]\n",
+    "    branches-ignore: [main]\n",
+    "    branches-ignore: [main]\n    types: [opened, reopened, synchronize]\n",
+    "    branches-ignore: [main]\n    types: [edited]\n",
+])
+def test_ci_pull_request_trigger_excludes_only_main(tmp_path: Path, trigger: str) -> None:
     trusted = _workflow(tmp_path, lambda text: text)
     ci_path = tmp_path / "ci.yml"
     ci_path.write_text(
         ci_path.read_text(encoding="utf-8").replace(
-            "  pull_request:\n",
-            "  pull_request:\n    paths: [docs/**]\n",
+            "  pull_request:\n"
+            "    branches-ignore: [main]\n"
+            "    # Retargeting main -> dev emits edited, not synchronize.\n"
+            "    types: [opened, reopened, synchronize, edited]\n",
+            "  pull_request:\n" + trigger,
         ),
         encoding="utf-8",
     )
-    assert "ci.yml must run on every pull_request without filters" in (
+    assert "ci.yml must exclude only main-base pull requests and include retarget edits" in (
         MODULE.validate_workflow(trusted)
     )
 

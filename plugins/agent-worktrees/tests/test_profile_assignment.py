@@ -15,6 +15,7 @@ import yaml
 from agent_worktrees import __main__ as m
 from agent_worktrees import output
 from agent_worktrees import config as cfg
+from agent_worktrees import config_authority
 from agent_worktrees import profile_assignment as assignment
 from agent_worktrees import tracking
 
@@ -124,17 +125,9 @@ def assignment_home(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: project)
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_dir)
 
-    # session_register's authority fence (execution_spaces.
-    # require_project_record_mutation) resolves cfg.load_project_config(
-    # record.repo) before any mutation; see conftest.py's monkeypatch_config
-    # for the full rationale -- same fail-open fake, scoped here since this
-    # fixture patches config independently rather than via monkeypatch_config.
-    # A REAL (empty) canonical machines.yaml at the fake anchor keeps
-    # ``load_machines_yaml`` from falling through to its own
-    # ``_overlay_machines_yaml_path`` probe, which calls the bare
-    # ``load_config()`` as a side effect -- some callers assert an exact
-    # ``load_config`` call count/args and would otherwise see a spurious
-    # extra call.
+    # Supply fixture data to both policy and registration-only config readers;
+    # keep the registration fence and its mutation checks real. The empty
+    # machines file avoids unrelated ambient config lookups in call-count tests.
     fake_anchor = tmp_path / ".aw-authority-fence-anchor"
     (fake_anchor / ".agent-worktrees").mkdir(parents=True, exist_ok=True)
     (fake_anchor / ".agent-worktrees" / "machines.yaml").write_text(
@@ -143,13 +136,16 @@ def assignment_home(tmp_path: Path, monkeypatch):
 
     def _fake_load_project_config(name, **_kwargs):
         return cfg.Config(
-            srcroot=str(tmp_path), machine="test", platform="wsl", repo_name=name,
+            srcroot=str(tmp_path), machine="test-machine", platform="linux", repo_name=name,
             repos={name: cfg.RepoConfig(
                 anchor=str(fake_anchor), worktree_root=str(tracking_dir),
             )},
         )
 
     monkeypatch.setattr(cfg, "load_project_config", _fake_load_project_config)
+    monkeypatch.setattr(
+        config_authority, "load_project_authority_config", _fake_load_project_config,
+    )
     return project, tracking_dir
 
 
@@ -419,6 +415,7 @@ def test_stale_pending_record_sync_cannot_overwrite_abandoned_assignment(
     assert loaded.profile_assignment_revision == 1
 
 
+@pytest.mark.guard
 def test_register_session_binds_environment_token_to_actual_session(
     assignment_home,
     tmp_path: Path,
@@ -467,6 +464,7 @@ def test_register_session_binds_environment_token_to_actual_session(
     ).read_text(encoding="utf-8")
 
 
+@pytest.mark.guard
 def test_double_bind_and_new_session_id_do_not_break_registration(
     assignment_home,
     tmp_path: Path,
@@ -516,6 +514,7 @@ def test_double_bind_and_new_session_id_do_not_break_registration(
     assert "registration continues" in capfd.readouterr().err
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("mismatch", ["expired", "foreign"])
 def test_lifecycle_mismatch_bind_does_not_break_session_start(
     assignment_home,
@@ -1388,6 +1387,7 @@ def test_invalid_numeric_state_falls_back_during_allocation(
         pytest.param("bag_position", "bad", id="malformed-assignment-position"),
     ],
 )
+@pytest.mark.guard
 def test_invalid_numeric_state_does_not_break_session_registration(
     assignment_home,
     tmp_path: Path,
@@ -1473,6 +1473,7 @@ def test_lock_timeout_falls_back_without_assignment(
     assert "state is unavailable" in selected.warning
 
 
+@pytest.mark.guard
 def test_new_worktree_survives_optional_assignment_state_failure(
     assignment_home,
     tmp_path: Path,
@@ -1537,7 +1538,16 @@ def test_new_worktree_survives_optional_assignment_state_failure(
     )
 
     assert Path(result["worktree"]["path"]).exists()
-    assert _inner_command(result["launch"]["cmd"])[:3] == [
+    command = result["launch"]["cmd"]
+    assert command[1:command.index("--")] == [
+        "-m",
+        "agent_worktrees.launch_seed_exec",
+        "--record",
+        str(assignment_home[1] / f"{result['worktree']['id']}.yaml"),
+        "--admission-only",
+    ]
+    setup_command = _inner_command(command)
+    assert _inner_command(setup_command)[:3] == [
         "copilot",
         "--model",
         "model-0",

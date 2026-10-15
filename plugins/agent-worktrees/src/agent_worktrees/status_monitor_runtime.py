@@ -581,19 +581,23 @@ def _windowless_python() -> str:
 
 
 _DAEMON_SESSION_SCOPED_ENV_KEYS = ("COPILOT_AGENT_SESSION_ID",)
+# Re-read from the daemon's own cwd: relative ones are anchored at the caller's.
+_DAEMON_PATH_ENV_KEYS = ("AGENT_HOME", "AGENT_WORKTREES_PAYLOAD_ROOT", "COPILOT_PLUGIN_ROOT")
 
 
 def _daemon_environment() -> dict[str, str]:
     """Env for the resident daemon: no ephemeral session id beyond the
-    existing credential scrub. Deliberately keeps
-    ``COPILOT_EXTENSIONS_CONTEXT``/``COPILOT_PLUGIN_ROOT``: the daemon calls
-    ``cfg.install_dir()``, and ``registry_paths.registry_root()`` treats an
-    absent context as legacy mode -- stripping it would resolve a
-    cell-spawned daemon's own state under the legacy root. Case-insensitive
-    (Windows env names are case-insensitive)."""
+    existing credential scrub; keeps ``COPILOT_EXTENSIONS_CONTEXT`` and
+    ``COPILOT_PLUGIN_ROOT`` (an absent context makes ``cfg.install_dir()``
+    resolve the legacy root, not a cell's). Case-insensitive names."""
     env = _core_helper("_background_environment", status_updater_cli._background_environment)()
     scoped = {key.upper() for key in _DAEMON_SESSION_SCOPED_ENV_KEYS}
-    return {key: value for key, value in env.items() if key.upper() not in scoped}
+    paths = {key.upper() for key in _DAEMON_PATH_ENV_KEYS}
+    return {
+        key: os.path.abspath(value) if key.upper() in paths and value.strip()
+        and not Path(value.strip()).anchor else value
+        for key, value in env.items() if key.upper() not in scoped
+    }
 
 
 def _daemon_cwd() -> str:
@@ -603,31 +607,27 @@ def _daemon_cwd() -> str:
     try:
         root = cfg.install_dir()
         if root.is_dir():
-            return str(root)
+            return os.path.abspath(root)  # spawn_daemon needs an absolute cwd
     except Exception:
         pass
     return os.path.expanduser("~")
 
 def _spawn_detached(argv: list[str]) -> bool:
-    """Spawn in the install dir; never raises. Windows uses direct console
-    Python under ``CREATE_NO_WINDOW``: PID ownership is unambiguous and periodic
-    children inherit one hidden console tree."""
+    """Spawn via ``status_monitor_cutover.spawn_monitor``; never raises.
+    Windows uses direct console Python under ``CREATE_NO_WINDOW``: PID
+    ownership is unambiguous and periodic children inherit one hidden console
+    tree."""
     override = _core_helper("_spawn_detached", _spawn_detached)
     if override is not _spawn_detached:
         return override(argv)
     argv = list(argv)
-    kwargs: dict = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "cwd": _daemon_cwd(),
-        "env": _daemon_environment(),
-    }
-    kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
+    env = _daemon_environment()
     try:
+        from .status_monitor_cutover import spawn_monitor
+
         argv[0], extra_env = direct_monitor_python(argv[0])
-        kwargs["env"].update(extra_env)
-        subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
+        env.update(extra_env)
+        spawn_monitor(argv, env, console_children=True)  # fixed, trusted argv
         return True
     except Exception as exc:
         logging.getLogger(__name__).warning("Cannot spawn status-monitor: %s", exc)

@@ -8,6 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import git_ops, installer as inst, launch_wrapper_assets as lwa, output, picker_profiles_cli
 from . import config as cfg
 from . import repos_cli, status_bar_cli
@@ -309,6 +311,8 @@ def _prepare_namespaced_project_state(
             capture_output=True,
             text=True,
             timeout=5,
+            **no_window_kwargs(),
+            env=git_ops.repository_identity_env(),
         )
         if result.returncode == 0:
             remote = result.stdout.strip()
@@ -356,6 +360,23 @@ def _ensure_ado_pr_cli(pr_cfg) -> None:
         output.warn(f"Could not verify Azure DevOps CLI setup: {e}")
 
 
+def _write_install_manifest(repo_dir: Path, machine: str) -> bool:
+    from . import _command_binding, _installation_context
+
+    try:
+        inst.write_deploy_manifest(repo_dir, machine)
+    except (
+        _command_binding.CommandOwnershipConflict,
+        _installation_context.InstallationContextError,
+        inst.BinstubOwnershipError,
+        OSError,
+        ValueError,
+    ) as error:
+        output.err(f"Deploy manifest publication refused: {error}")
+        return False
+    return True
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     """Deploy the worktree manager shared runtime + register current project."""
     project = cfg.project_name()
@@ -387,6 +408,33 @@ def cmd_install(args: argparse.Namespace) -> int:
         if machine_entry is None:
             return 1
 
+    from . import _command_binding, _command_lifecycle, _installation_context, registry_paths
+    from contextlib import nullcontext
+
+    try:
+        context = registry_paths.installation_context()
+        lifecycle = (
+            nullcontext() if context is not None else
+            _command_lifecycle.legacy_lifecycle(
+                _command_binding, _installation_context,
+                payload_root=inst._payload_root(repo_dir), plugin_id="agent-worktrees",
+                legacy_root=inst.install_dir(), project_root=Path(repo_dir),
+            )
+        )
+        with lifecycle:
+            return _install_project(args, project, repo_dir, machine, plat, machine_entry)
+    except (
+        _command_binding.CommandOwnershipConflict,
+        _installation_context.InstallationContextError, OSError, ValueError,
+    ) as error:
+        output.err(f"Runtime installation refused: {error}")
+        return 1
+
+
+def _install_project(
+    args: argparse.Namespace, project: str, repo_dir: Path, machine: str,
+    plat: str, machine_entry: cfg.MachineEntry | None,
+) -> int:
     # Create shared runtime directories
     runtime_dir = cfg._home() / ".agent-worktrees"  # marketplace-isolation: allow legacy
     for d in [runtime_dir, runtime_dir / "bin", inst.local_bin()]:
@@ -444,6 +492,8 @@ def cmd_install(args: argparse.Namespace) -> int:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                **no_window_kwargs(),
+                env=git_ops.repository_identity_env(),
             )
             if _remote_result.returncode == 0:
                 _remote = _remote_result.stdout.strip()
@@ -496,7 +546,8 @@ def cmd_install(args: argparse.Namespace) -> int:
         pass  # hook is optional
 
     # Deploy manifest (shared runtime)
-    inst.write_deploy_manifest(repo_dir, machine)
+    if not _write_install_manifest(repo_dir, machine):
+        return 1
 
     # PR-workflow git hooks are an ADOPT concern (register), NOT install.
     # install/update are machine-local and read-only w.r.t. the repo's git: if
@@ -569,6 +620,8 @@ def cmd_register(args: argparse.Namespace) -> int:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                **no_window_kwargs(),
+                env=git_ops.repository_identity_env(),
             )
             if r.returncode == 0 and r.stdout.strip():
                 # Normalize through resolve_to_anchor so that running from
@@ -716,6 +769,8 @@ def cmd_register(args: argparse.Namespace) -> int:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                **no_window_kwargs(),
+                env=git_ops.repository_identity_env(),
             )
             if _rru.returncode == 0:
                 _reg_remote_url = _rru.stdout.strip()
@@ -759,6 +814,8 @@ def cmd_register(args: argparse.Namespace) -> int:
             capture_output=True,
             text=True,
             timeout=5,
+            **no_window_kwargs(),
+            env=git_ops.repository_identity_env(),
         )
         if _rr.returncode == 0:
             _reg_remote = _rr.stdout.strip()
@@ -919,4 +976,3 @@ def cmd_unregister(args: argparse.Namespace) -> int:
     from . import unregister_cli
 
     return unregister_cli.cmd_unregister(args)
-

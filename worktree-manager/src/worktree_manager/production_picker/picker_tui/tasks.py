@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import signal
 import subprocess
 import threading
@@ -37,6 +36,7 @@ from collections.abc import Mapping, Sequence
 
 from agent_procutil import no_window_flags
 
+from .command_transport import resolve_command as _resolve_command
 from .pivots import RegisteredPivot, format_template, parse_list_payload
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
@@ -102,10 +102,8 @@ def resolve_dynamic_options(argv: Sequence[str], *, strict: bool = False) -> lis
         if strict:
             raise ValueError("empty options command")
         return []
-    resolved = shutil.which(argv[0])
-    if resolved:
-        argv = [resolved, *argv[1:]]
     try:
+        argv = _resolve_command(argv)
         proc = subprocess.run(
             argv, capture_output=True, text=True,
             timeout=STRICT_OPTIONS_COMMAND_TIMEOUT if strict else OPTIONS_COMMAND_TIMEOUT,
@@ -197,12 +195,7 @@ def _kill_proc_tree(proc: subprocess.Popen) -> None:
 def _resolve_argv(template: Sequence[str], ctx: Mapping[str, object]) -> list[str]:
     """Substitute placeholders and resolve argv[0] via ``PATH`` (so a bare
     ``agent-dispatch`` runs regardless of the picker's own venv)."""
-    argv = format_template(template, ctx)
-    if argv:
-        resolved = shutil.which(argv[0])
-        if resolved:
-            argv = [resolved, *argv[1:]]
-    return argv
+    return _resolve_command(format_template(template, ctx))
 
 
 def _parse_ndjson_line(raw: str):
@@ -525,12 +518,13 @@ class RegisteredPivotRuntime:
         # re-spawning the CLI on every backoff tick instead of ever holding
         # one process open (#4840 review).
         stream_flags = ("--stream", "--subscribe") if self.pivot.subscribe else ("--stream",)
-        argv = _resolve_argv((*self.pivot.list_cmd, *stream_flags), ctx)
+        argv = format_template((*self.pivot.list_cmd, *stream_flags), ctx)
         if not argv:
             self._subscribe_live[machine] = False
             self._finish(machine, ("error", [], "empty list command"), {})
             return
         try:
+            argv = _resolve_command(argv)
             proc = self._spawn_stream(argv)
         except FileNotFoundError:
             self._subscribe_live[machine] = False
@@ -741,13 +735,14 @@ class RegisteredPivotRuntime:
 
 
     def _exec_list(self, ctx: Mapping[str, object]) -> tuple[str, list, str, dict]:
-        argv = _resolve_argv(self.pivot.list_cmd, ctx)
+        argv = format_template(self.pivot.list_cmd, ctx)
         if not argv:
             return ("error", [], "empty list command", {})
         try:
+            argv = _resolve_command(argv)
             proc = subprocess.run(
                 argv, capture_output=True, text=True, timeout=LIST_TIMEOUT,
-                check=False, env=_child_process_env(),
+                check=False, env=_child_process_env(), creationflags=no_window_flags(),
             )
         except FileNotFoundError:
             return ("error", [], f"{argv[0]} not found on PATH", {})
@@ -784,22 +779,9 @@ class RegisteredPivotRuntime:
         :func:`format_form_template`, or a plain template via
         :func:`format_template`). ``preserve_output`` retains full receipts on
         both success and failure for full-content Configuration results."""
-        argv = list(argv)
-        if argv:
-            resolved = shutil.which(argv[0])
-            if resolved:
-                argv = [resolved, *argv[1:]]
-        if not argv:
-            return (False, "empty action command")
-        try:
-            proc = subprocess.run(
-                argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
-                check=False, env=_child_process_env(),
-            )
-        except FileNotFoundError:
-            return (False, f"{argv[0]} not found on PATH")
-        except (OSError, subprocess.SubprocessError) as exc:
-            return (False, str(exc)[:200])
+        proc, error = self._invoke_resolved(argv, timeout=ACTION_TIMEOUT)
+        if proc is None:
+            return False, error
         if preserve_output:
             parts = [(proc.stdout or "").strip()]
             if proc.stderr:
@@ -811,6 +793,36 @@ class RegisteredPivotRuntime:
             detail = (proc.stderr or "").strip().splitlines()
             return (False, (detail[-1] if detail else f"exit {proc.returncode}")[:200])
         return (True, (proc.stdout or "").strip()[:200])
+
+    def preview_resolved(self, argv: Sequence[str]) -> tuple[bool, str]:
+        """Keep successful stdout separate from diagnostics for strict JSON parsing."""
+        proc, error = self._invoke_resolved(argv, timeout=LIST_TIMEOUT)
+        if proc is None:
+            return False, error
+        if proc.returncode:
+            return False, "\n".join(
+                part for part in (proc.stdout.strip(), proc.stderr.strip(), f"exit {proc.returncode}")
+                if part
+            )
+        return True, proc.stdout
+
+    def _invoke_resolved(
+        self, argv: Sequence[str], *, timeout: float,
+    ) -> tuple[subprocess.CompletedProcess[str] | None, str]:
+        argv = list(argv)
+        if not argv:
+            return None, "empty action command"
+        try:
+            argv = _resolve_command(argv)
+            proc = subprocess.run(
+                argv, capture_output=True, text=True, timeout=timeout,
+                check=False, env=_child_process_env(), creationflags=no_window_flags(),
+            )
+        except FileNotFoundError:
+            return None, f"{argv[0]} not found on PATH"
+        except (OSError, subprocess.SubprocessError) as exc:
+            return None, str(exc)[:200]
+        return proc, ""
 
     def run_action_stream(
         self,
@@ -832,10 +844,11 @@ class RegisteredPivotRuntime:
         :meth:`close` also tears it down on picker exit. Falls back to treating a
         non-envelope exit as a plain sync result so a mis-declared ``progress``
         action still completes."""
-        argv = _resolve_argv(action.run, ctx)
+        argv = format_template(action.run, ctx)
         if not argv:
             return (False, "empty action command")
         try:
+            argv = _resolve_command(argv)
             proc = self._spawn_stream(argv)
         except FileNotFoundError:
             return (False, f"{argv[0]} not found on PATH")
@@ -937,17 +950,16 @@ def run_config_section(
     the same run-on-Enter shape, but rides the ⚙ Configuration menu rather than
     a worktree row, and is global (not per-worktree) in scope."""
     if fields is None:
-        argv = _resolve_argv(action.run, ctx)
+        argv = format_template(action.run, ctx)
     else:
         from .pivot_actions import format_form_template
 
         # Field values are inserted once and never reinterpreted as tokens.
         argv = format_form_template(action.run, ctx, fields)
-        if argv and (resolved := shutil.which(argv[0])):
-            argv[0] = resolved
     if not argv:
         return (False, "empty config command")
     try:
+        argv = _resolve_command(argv)
         proc = subprocess.run(
             argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
             check=False, env=_child_process_env(), creationflags=no_window_flags(),
@@ -968,13 +980,14 @@ def run_worktree_action(action, ctx: Mapping[str, object]) -> tuple[bool, str]:
     ``(ok, message)`` and never raises, so the picker can surface the outcome in
     its status line. Mirrors :meth:`RegisteredPivotRuntime.run_action` but is
     stand-alone: worktree actions are not bound to a pivot's runtime."""
-    argv = _resolve_argv(action.run, ctx)
+    argv = format_template(action.run, ctx)
     if not argv:
         return (False, "empty action command")
     try:
+        argv = _resolve_command(argv)
         proc = subprocess.run(
             argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
-            check=False, env=_child_process_env(),
+            check=False, env=_child_process_env(), creationflags=no_window_flags(),
         )
     except FileNotFoundError:
         return (False, f"{argv[0]} not found on PATH")

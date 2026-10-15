@@ -187,24 +187,75 @@ def test_namespaced_root_used_when_policy_enabled_and_context_matches(
 
 
 @pytest.mark.parametrize("pointer_exists", [False, True])
+@pytest.mark.parametrize(
+    ("scenario", "policy_enabled", "selection"),
+    [
+        ("legacy-missing-policy", False, "legacy"),
+        ("legacy-disabled-policy", False, "legacy"),
+        ("active", True, "namespaced"),
+        ("invalid-policy", False, None),
+        ("unsupported-policy", False, None),
+        ("unactivated", True, "legacy"),
+        ("deactivation-required", False, None),
+        ("stale-activation", True, None),
+        ("maintenance", True, None),
+    ],
+)
 def test_runtime_inspection_uses_real_read_only_primitive(
-    monkeypatch, tmp_path: Path, pointer_exists: bool
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    pointer_exists: bool,
+    scenario: str,
+    policy_enabled: bool,
+    selection: str | None,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    install, python = namespaced_fixture(home, windows=apr.os.name == "nt")
-    _write_policy(home, enabled=True)
+    legacy = home / ".agent-worktrees"
+    legacy_python = _write_slot(legacy / "versions" / "0.0.1")
+    (legacy / "current-version").write_text("0.0.1", encoding="utf-8")
+    (legacy / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {"plugin": "agent-worktrees", "version": "0.0.1"},
+        }),
+        encoding="utf-8",
+    )
+    namespaced_python: Path | None = None
+    if scenario != "legacy-missing-policy":
+        _write_policy(home, enabled=policy_enabled)
+    if not scenario.startswith("legacy-"):
+        install, namespaced_python = namespaced_fixture(
+            home, windows=apr.os.name == "nt", activated=scenario != "unactivated",
+        )
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+        if scenario == "invalid-policy":
+            (home / ".copilot-extensions" / "installation-mode.json").write_text(
+                "not valid json\n", encoding="utf-8",
+            )
+        elif scenario == "unsupported-policy":
+            policy = home / ".copilot-extensions" / "installation-mode.json"
+            value = json.loads(policy.read_text(encoding="utf-8"))
+            value["version"] = 2
+            policy.write_text(json.dumps(value), encoding="utf-8")
+        elif scenario == "stale-activation":
+            value = json.loads(install.read_text(encoding="utf-8"))
+            value["generation"] += 1
+            install.write_text(json.dumps(value), encoding="utf-8")
+        elif scenario == "maintenance":
+            (install.parent / "maintenance").write_text("", encoding="utf-8")
     patch_profile(monkeypatch, apr, home)
-    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
-    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy"))
+    monkeypatch.setenv("AGENT_HOME", str(home))
     if pointer_exists:
         pointer = home / ".copilot-extensions" / "agent-worktrees" / "runtime-root"
-        pointer.parent.mkdir()
+        pointer.parent.mkdir(parents=True)
         pointer.write_text("retained-foreign-pointer\n", encoding="utf-8")
     primitive = apr._load_installation_context()
     assert primitive is not None
+    attempted_mutations: list[bool] = []
 
-    def fail_mutation(*args, **kwargs):
+    def fail_mutation(*args: object, **kwargs: object) -> None:
+        attempted_mutations.append(True)
         raise AssertionError("runtime inspection entered lifecycle mutation")
 
     for name in (
@@ -213,7 +264,7 @@ def test_runtime_inspection_uses_real_read_only_primitive(
     ):
         monkeypatch.setattr(primitive, name, fail_mutation)
 
-    def snapshot():
+    def snapshot() -> dict[str, tuple[bool, int, bytes | None]]:
         return {
             path.relative_to(tmp_path).as_posix(): (
                 path.is_dir(), path.stat().st_mtime_ns,
@@ -223,11 +274,20 @@ def test_runtime_inspection_uses_real_read_only_primitive(
         }
 
     before = snapshot()
-    assert apr.marketplace_cells_enabled(os_profile=home)
-    assert apr.resolve_installed_plugin_command("agent-worktrees") == [
-        str(python), "-m", "agent_worktrees"
-    ]
-    assert snapshot() == before
+    selected_python = (
+        namespaced_python if selection == "namespaced" else legacy_python
+    )
+    expected_command = (
+        [str(selected_python), "-m", "agent_worktrees"]
+        if selection is not None else None
+    )
+    for _ in range(2):
+        assert apr.marketplace_cells_enabled(os_profile=home) is policy_enabled
+        assert not attempted_mutations
+        assert snapshot() == before
+        assert apr.resolve_installed_plugin_command("agent-worktrees") == expected_command
+        assert not attempted_mutations
+        assert snapshot() == before
 
 
 def test_namespaced_root_ignored_when_policy_disabled(monkeypatch, tmp_path):

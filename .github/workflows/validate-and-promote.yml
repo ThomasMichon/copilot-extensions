@@ -25,7 +25,7 @@ name: Validate and promote dev to main
 # unthrottled outer workflow) or a human `workflow_dispatch` -- never
 # directly by `workflow_run` any more. The direct `workflow_run:
 # workflows: ["CI"]` trigger this workflow used to declare fired on every
-# "CI" completion repo-wide (`ci.yml` runs on every `pull_request`, not
+# "CI" completion repo-wide (`ci.yml` runs on non-main-base `pull_request`, not
 # just `dev` pushes, and `head_branch` can't be trusted to filter -- see
 # `gate` below), which under this repo's real concurrent-PR volume starved
 # the single-pending-slot concurrency group below: 10+ consecutive runs in
@@ -820,7 +820,7 @@ jobs:
     # never fires other workflow events (including `pull_request`) for
     # content pushed/authored with the default `GITHUB_TOKEN` -- a
     # documented anti-recursion safeguard -- so a `GITHUB_TOKEN`-authored
-    # candidate PR never triggers `ci.yml`'s required `main source gate`
+    # candidate PR never triggers `base-branch-reminder.yml`'s required `main source gate`
     # check and `gh pr merge --auto` sits permanently blocked (confirmed
     # live on the very first real --push run, #3533 -- had to be merged
     # with a manual admin bypass). A PAT-authored push/PR does trigger

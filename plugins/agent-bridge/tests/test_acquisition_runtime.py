@@ -356,6 +356,29 @@ def test_workspace_request_cannot_downgrade_its_protocol():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("binding", ["task-worker", " task-worker \n"])
+async def test_prepare_target_does_not_layer_same_padded_binding_twice(rig, binding):
+    original_args = ["--agent", "task-worker"]
+    target = SpawnTarget(type="local", cwd="/synthetic", copilot_args=original_args)
+    resolver = MagicMock()
+    resolver.resolve_async = AsyncMock(return_value=target)
+    resolver.canonical_agent_name.return_value = "task-worker"
+    resolver.agents = {
+        "task-worker": SimpleNamespace(
+            managed=False, copilot_path="", copilot_args=original_args,
+            mcp_servers=[], env={},
+        )
+    }
+    rig.runtime.resolver = resolver
+    row = {"bound_agent": binding}
+    result, _env = await rig.runtime._prepare_target(req(), row)
+    assert result is target
+    assert result.copilot_args == original_args
+    assert row["bound_agent"] == binding
+    resolver.canonical_agent_name.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("history", ["absent", "journal", "spawned"])
 async def test_missing_owner_preflight_precedes_mark_and_preserves_ambiguity(rig, monkeypatch, history):
     if history == "journal":

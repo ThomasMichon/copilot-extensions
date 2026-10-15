@@ -2,15 +2,11 @@
 and the vector-search post-filter layer (multi_model_store) so the two can't
 silently diverge on what counts as "this repo's" source.
 
-agent-index's OWN source-naming convention is ``git:<repo>`` or
-``github:<owner>/<repo>``, each optionally followed by a derived-byproduct
-suffix such as ``:commits``/``:issues``/``:pulls`` (see
-``_resolve_explicit_source_spec`` in ``indexing/engine.py``). A bare ``repo``
-query (``"odsp-web-harness"``) matches ANY type prefix/owner; an
-``owner/repo``-qualified query (``"gim-home/odsp-web-harness"``) matches ONLY
-that exact ``github:`` owner -- a ``git:`` source never carries an owner
-segment in this scheme, so it's excluded entirely for an owner-qualified
-query, not merely left unmatched by coincidence.
+The identity is the first colon-delimited component after the source scheme,
+optionally followed by a byproduct suffix. This covers ``git:<repo>``,
+``github:<owner>/<repo>`` and ``ado:<org>/<project>:workitems``. A bare repo
+matches that exact identity or its final slash-delimited name; a qualified
+repo matches the entire identity, including any host qualification.
 
 This replaces an inherited, mismatched filter (previously: "matches the
 trailing owner/repo of any Forge source" -- a DIFFERENT source-naming
@@ -54,15 +50,10 @@ def repo_filter_sql(repo: str) -> str:
     fetched rows -- a source the SQL layer never fetches can never reach the
     Python post-filter either.
     """
-    name_like = _like_pattern(repo)
+    if not repo:
+        return "FALSE"
+    identity = "split_part(source, ':', 2)"
+    exact = f"{identity} = '{_sql_str(repo)}'"
     if "/" in repo:
-        return (
-            f"source = 'github:{_sql_str(repo)}' OR "
-            f"source LIKE 'github:{name_like}:%' ESCAPE '\\'"
-        )
-    return (
-        f"source = 'git:{_sql_str(repo)}' OR "
-        f"source LIKE 'git:{name_like}:%' ESCAPE '\\' OR "
-        f"source LIKE 'github:%/{name_like}' ESCAPE '\\' OR "
-        f"source LIKE 'github:%/{name_like}:%' ESCAPE '\\'"
-    )
+        return exact
+    return f"{exact} OR {identity} LIKE '%/{_like_pattern(repo)}' ESCAPE '\\'"

@@ -102,6 +102,18 @@ An unreadable/corrupt routing table is a typed `ActivePublicationRefused` for
 writers and a failed result before spawn for ordinary cutover. Read-only
 client fallback remains tolerant; mutation must not infer an empty namespace
 from unavailable custody evidence.
+This also applies to present, non-null `active` or `previous` rows that cannot
+be parsed as endpoints, including empty objects and non-object values. Mutation
+validates both persisted and proposed rows; missing or null rows remain valid
+absence. A malformed row introduced during drain cannot be overwritten by
+guarded publication.
+Mutation uses the publication-custody validator's exact field types and bounds,
+not the read-only endpoint parser's legacy coercions. Ports are integers in
+1..65535; a PID is null or an integer in 1..2^32-1; generations are integers in
+0..2^63-1. Booleans and numeric strings are not integers for this contract.
+Binds are strings of at most 255 characters, optional versions are strings,
+and optional start tokens are nonempty ASCII decimal strings of at most 64
+characters. Supported boundary values and null PIDs remain unchanged on write.
 Passive adapters bind termination to the breadcrumb's original process token,
 not a newly sampled token. Their five-second exit confirmation waits on the
 same pidfd/Windows handle used to signal; acceptance alone is not successful
@@ -114,6 +126,32 @@ this does not assert activation succeeded. `terminate_pid_if_identity(...,
 exit_timeout=...)` exposes this optional
 native wait with a finite zero-to-30-second budget; existing signal-only callers
 retain their original result shape.
+
+### `zdd.process_exit` -- captured graceful-exit evidence
+
+`open_process(pid, expected_start_time)` captures a live, identity-matched
+native reference **before** an adopter requests graceful lifecycle control.
+`ProcessExitReference.wait(timeout)` confirms exit through that same reference,
+with a finite zero-to-30-second budget including reference-lock contention.
+It never samples the PID again, sends a signal, or opens a replacement handle
+after shutdown. Use its context manager or `close()` to release the reference;
+closed references reject waiting. References remain local to their creating
+process: a forked child refuses wait/close/context entry before touching a
+possibly orphaned inherited lock or its parent's native reference.
+
+Windows validates creation time through the captured query/synchronization
+handle, without requesting termination rights. Linux reuses canonical pidfd
+capture and validates the birth token while that reference remains live.
+The shared POSIX wait uses native polling, including descriptors above
+`FD_SETSIZE`; invalid-descriptor and native wait errors are not exit evidence.
+Missing native proof or mismatched/exited identity refuses explicitly. Other
+platforms, including macOS, raise `NotImplementedError`; there is no
+unverified PID-liveness or signaling fallback.
+
+This is only process-exit evidence. The adopter must independently revalidate
+exact installation, receipt, instance, route and governance authority before
+requesting shutdown or mutating writer custody. A matching process token alone
+does not authorize owner retirement, selection, or rollback.
 
 ### `zdd.cutover` -- the cutover orchestrator
 
@@ -245,8 +283,87 @@ Explicit unconditional cutover remains supported. Linux lock behavior is
 directly tested; Windows uses bounded native byte-lock retries but still needs
 real Windows process-boundary validation. macOS uses flock; native process
 identity availability remains required and unverified identity refuses.
+#### Stateful pre-adoption drain and caller-held authority
+
+Stateful adopters may opt into `drain_before_publish=True`. The predecessor
+then drains before the publication adapter promotes the passive and publishes
+its route; forced incomplete drains are refused. That adapter still owns
+exact-instance promotion, final-state adoption, and selection reconciliation.
+This ordering skips legacy watchdog route healing and validates both endpoint
+rows before spawning or draining; unattributable custody requires owner-led
+recovery rather than fallback predecessor selection.
+The full captured table is revalidated after control-client/method resolution,
+immediately before invoking drain. Changes during port selection, passive
+startup or health waiting only clean up the passive, never drain or reopen
+the stale predecessor. Native publication-witness initialization precedes
+selection capture so adding custody history to a legacy table is not mistaken
+for a later route replacement. Cooperating publishers must share the same
+full-transaction cutover guard.
+On rollback, the orchestrator confirms the successor's exit before restoring
+and undraining the predecessor. It records whether this attempt actually
+invoked predecessor drain, after constructing the client and resolving its
+drain method. Incomplete or raised drain calls still count as attempted.
+Failures before that invocation only clean up the
+passive: they do not republish or reopen a predecessor, including one that was
+independently drained. If exit cannot be confirmed, it does not resume
+a drained predecessor or change an undrained one's state; the actual unresolved
+phase remains in the breadcrumb. With no predecessor, an already-published successor
+is not terminated during rollback: a healthy successor commits forward, while
+an unhealthy one retains its route and reconciliation evidence. Before publication,
+an unsuccessful cold-start successor is still terminated with confirmed exit.
+Every opt-in breadcrumb carries `requires_writer_reconciliation: true`, including
+the pre-drain phase. Legacy stale-cutover recovery refuses these records without
+undraining or rewriting them, and another cutover cannot overwrite an unresolved
+record. The installation owner must reconcile exact process identity, successor
+exit, route ownership and predecessor writer authority under the same guard;
+this library does not supply that adopter-specific recovery adapter. Predecessor
+retirement is unresolved even for a `committed` record left after a crash or
+post-commit error; legacy repair, passive reaping and cutover reentry refuse it.
+The opt-in owner's shutdown adapter must confirm exact predecessor retirement
+with `{"retired": true}` before a clean cutover clears its breadcrumb. A shutdown
+request alone is not confirmation. Commit-forward availability does not clear
+unresolved stateful retirement evidence.
+Route restoration and explicit undrain confirmation must both succeed before rollback
+is terminal. A publication refusal must not reopen a displaced predecessor.
+The opt-in path requires CAS-guarded successor publication even without a
+refusal callback. It retains the returned endpoint's full identity for guarded
+rollback and commit-forward; a republished port/PID with a different process
+start token, version or generation is not that transaction's successor.
+An opt-in routing adapter must return that exact `Endpoint`, either directly
+or as the first item of the canonical `(active, previous)` tuple. An unknown
+result is an uncertain publication, never permission to infer ownership from
+a new read, reopen a predecessor or clear reconciliation evidence.
+Before spawning or draining, it checks that the resolved predecessor agrees
+with the routing snapshot used for publication CAS and that the snapshot has
+not changed. A racing selection (including an ABA route change) is refused
+without touching either writer's admission.
+
+An installation transaction that must serialize selection or recovery outside
+the cutover itself can acquire `zdd.cutover_lock.CutoverLock(config_dir)` and
+pass it as `run(held_lock=lease)`. The orchestrator accepts only a held canonical
+lock for its own routing directory and does not release the caller's lease.
+Borrowing is bound to the acquiring PID and `Thread` object identity, not a
+recyclable numeric thread identifier.
+Only its acquiring process and thread may lend or release that guard. A forked
+child refuses release before touching an inherited thread lock or unlocking its
+parent's native lease. Overlapping or
+nested borrowers and release during a borrow are refused.
+Hold that same guard across the entire transaction, including cold selection,
+rollback, commit-forward, and every mutating repair path.
+The conditional and pre-publication drain opt-ins cannot be combined: conditional
+receiver-bound drain requires an already-published successor, while stateful
+pre-adoption drain requires the predecessor to quiesce before publication.
+Both owned and caller-held authority enforce the same recovery refusals.
 
 ### `zdd.diagnostics` -- daemon-health audit + repair
+
+Diagnostic apply validates canonical guards through `CutoverLock.borrow()`
+before any repair, not by inspecting an open-handle field. Closed, nested,
+foreign-thread or inherited-process guards are blocked without mutation or
+release. The diagnostic acquire callback owns acquisition on behalf of that
+call: a successfully validated guard is released only after its borrow ends,
+including on repair exceptions. A separate consumer guard does not replace
+the native installation guard; both remain held through the repair.
 
 An unavailable native/process census is reported as `census_unavailable`,
 with `census_available: false` and `candidate_count: null`, rather than a

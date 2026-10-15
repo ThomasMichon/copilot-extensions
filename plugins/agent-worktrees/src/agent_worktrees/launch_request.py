@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config as cfg
-from . import launch_seed_state, tracking, tracking_write
+from . import launch_admission, launch_seed_state, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 
 MAX_REQUEST_BYTES = 7 * 1024
@@ -209,7 +209,9 @@ def _apply_stage(args: dict) -> dict:
         if receipt["fingerprint"] != args["fingerprint"]:
             raise ValueError("Launch request identity mismatch")
         path = directory / f"{receipt['worktree_id']}.yaml"
-        with tracking._RecordLock(path, require_sidecar=True):
+        with launch_admission.guard(path, timeout=2.0), tracking._RecordLock(
+            path, require_sidecar=True,
+        ):
             require_project_record_mutation(tracking.load_record(path))
             seed = launch_seed_state.peek(path)
             if receipt.get("accepted"):
@@ -326,7 +328,9 @@ def inspect(request_id: str) -> dict:
 
 
 def _dispatch(verb: str, args: dict) -> dict:
-    result = launch_seed_state._dispatch(verb, args, min_version=2)
+    result = launch_seed_state._dispatch(
+        verb, args, min_version=3 if verb == "launch_request_stage" else 2,
+    )
     if result.get("error"):
         raise ValueError(result["error"])
     return result
@@ -343,6 +347,6 @@ def _guard(handler):
 
 
 tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=2)
-tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=2)
+tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=3)
 tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=2)
 tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=2)

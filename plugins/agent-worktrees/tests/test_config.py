@@ -51,7 +51,7 @@ class TestDetectPlatform:
             return real_open(f, *args, **kwargs)
 
         monkeypatch.setattr("builtins.open", fake_open)
-        monkeypatch.setattr("platform.system", lambda: "Linux")
+        monkeypatch.setattr(cfg.sys, "platform", "linux")
         assert cfg.detect_platform() == "wsl"
 
 

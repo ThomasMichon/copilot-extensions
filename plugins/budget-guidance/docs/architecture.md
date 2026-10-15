@@ -1,6 +1,6 @@
 # budget-guidance architecture
 
-The plugin is an independently installable runtime CLI with four first-slice
+The plugin is an independently installable runtime CLI with shared posture
 layers:
 
 1. `models.py` parses strict, versioned, inert configuration and reading data.
@@ -10,6 +10,14 @@ layers:
    projection, and warning-band calculations.
 4. `posture.py` builds the single machine-readable posture used by `cli.py` for
    both JSON and human output.
+5. `session_guidance.py` projects that posture into a bounded launch-time data
+   cue and atomically writes it to the requesting session's instruction folder.
+   Its [delivery contract](session-guidance.md) owns the pointer, freshness,
+   redaction, byte budget, and hook behavior.
+6. `routing_advice.py` issues optional point-in-time advice with an expiry
+   bounded by the selected fields and reset. The [contract](configuration.md#optional-routing-advice)
+   lets independent routing consumers use it without importing this runtime or
+   reimplementing its arithmetic.
 
 The static adapter is intentionally complete enough for offline operation and
 partial enough to exercise multi-source composition. It performs no I/O beyond
@@ -21,6 +29,14 @@ Repository/configuration data cannot grant execution authority, and the plugin
 does not acquire credentials. An explicit operator grant may authorize a
 repository executable; its location is not itself a trust guarantee.
 The [external-reader contract](external-readers.md) owns bounds and failures.
+
+`github_usage.py` reads personal billing API reports through a caller-owned
+authenticated async transport. It verifies the selected account and reporting
+period before exposing allowlisted quantities. The [provider report contract](github-usage.md)
+keeps those facts separate from a current budget: the API does not establish
+entitlement, reset, provider observation time, or the requesting session's
+account. Its inert budget reading withholds numeric values rather than turning
+an empty or historical billing report into a fresh forecast.
 
 The fast installer stamp copies the exact owning payload into an immutable
 versioned snapshot. Both compatibility and payload-local wrappers provision
@@ -35,7 +51,10 @@ paths pass its local source explicitly rather than resolving an index package.
 Both package build roots clear setuptools `build/` and root/src `*.egg-info`
 artifacts before and after every uv or pip attempt, including the fallback, so
 partial build residue cannot shadow current source.
-The bootstrap hook is declared output-free and emits only `{}`. Command-catalog
+The bootstrap and exact-session writer hooks are declared output-free and emit
+only `{}`. The writer reads inert configuration without reader grants or
+provider refresh and loads the owning payload's pure source, not a stale runtime.
+Command-catalog
 rendering remains a plugin-owned emitter for explicit use and a future native
 host-composition seam; no custom cross-plugin authority invokes it.
 

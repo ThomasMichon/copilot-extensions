@@ -44,14 +44,14 @@ def _build(project, output, operation):
     return result
 
 
-def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(tmp_path):
-    project, primitive = _project(tmp_path)
+def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distribution_root):
+    project, primitive = _project(distribution_root)
     expected = primitive.read_bytes()
-    artifacts = tmp_path / "artifacts"
+    artifacts = distribution_root / "artifacts"
     result = _build(project, artifacts, "build_sdist")
     assert result.returncode == 0, result.stdout + result.stderr
     sdist = next(artifacts.glob("*.tar.gz"))
-    extracted = tmp_path / "extracted"
+    extracted = distribution_root / "x"
     extracted.mkdir()
     with tarfile.open(sdist) as archive:
         names = [
@@ -90,30 +90,30 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(tmp_pat
 
 
 @pytest.mark.parametrize("included_copy", [False, True])
-def test_missing_canonical_and_sdist_resource_fails_build(tmp_path, included_copy):
-    project, primitive = _project(tmp_path)
+def test_missing_canonical_and_sdist_resource_fails_build(distribution_root, included_copy):
+    project, primitive = _project(distribution_root)
     if included_copy:
         shutil.copy2(primitive, project / "src" / "agent_index_service" / "_versioned_runtime.py")
     primitive.unlink()
-    result = _build(project, tmp_path / "artifacts", "build_wheel")
+    result = _build(project, distribution_root / "artifacts", "build_wheel")
     assert result.returncode != 0
     assert "runtime primitive is missing" in result.stderr
 
 
-def test_missing_canonical_helper_cannot_fall_back_to_included_copy(tmp_path):
-    project, primitive = _project(tmp_path)
+def test_missing_canonical_helper_cannot_fall_back_to_included_copy(distribution_root):
+    project, primitive = _project(distribution_root)
     helper = primitive.with_name("standalone_build.py")
     shutil.copy2(helper, project / "_standalone_runtime_build.py")
     helper.unlink()
-    result = _build(project, tmp_path / "artifacts", "build_wheel")
+    result = _build(project, distribution_root / "artifacts", "build_wheel")
     assert result.returncode != 0
-    assert not list((tmp_path / "artifacts").glob("*.whl"))
+    assert not list((distribution_root / "artifacts").glob("*.whl"))
 
 
-def test_conflicting_included_resource_fails_instead_of_preferring_stale_copy(tmp_path):
-    project, _ = _project(tmp_path)
+def test_conflicting_included_resource_fails_instead_of_preferring_stale_copy(distribution_root):
+    project, _ = _project(distribution_root)
     included = project / "src" / "agent_index_service" / "_versioned_runtime.py"
     included.write_text("stale\n", encoding="utf-8")
-    result = _build(project, tmp_path / "artifacts", "build_wheel")
+    result = _build(project, distribution_root / "artifacts", "build_wheel")
     assert result.returncode != 0
     assert "differs from the canonical source" in result.stderr

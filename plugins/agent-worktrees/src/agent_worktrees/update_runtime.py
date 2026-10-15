@@ -14,8 +14,8 @@ import time
 from collections.abc import Collection, Mapping
 from pathlib import Path
 
+from . import bare_anchor_files, bare_anchor_sync, git_ops, output, update_events
 from . import config as cfg
-from . import git_ops, output, update_events
 from .installer_capabilities import posix_zero_downtime_flag_supported
 from .update_gate import (  # noqa: F401 - re-exported for callers and tests
     MACHINE_GATED_SKIP,
@@ -674,6 +674,21 @@ def _fast_forward_project_anchors() -> None:
         if not (anchor_path / ".git").exists():
             output.warn(f"Anchor not checked out, skipping: {anchor}")
             continue
+        if bare_anchor_sync.is_bare(anchor_path):
+            # No work tree: the dirty check / merge below can't run there.
+            try:
+                state, detail = bare_anchor_sync.sync_bare_anchor(
+                    anchor, repo.default_branch, remote=repo.remote)
+            except Exception as exc:  # e.g. a fetch timeout: report, keep updating
+                state, detail = "error", str(exc) or type(exc).__name__
+            # Like `repos sync`: files left stale after the ref moved need attention.
+            files = bare_anchor_files.status_of(detail)
+            stale = files is not None and files not in bare_anchor_files.QUIET_STATUSES
+            report = output.ok if state == "synced" and not stale else output.info
+            (output.warn if state == "error" or stale else report)(
+                f"{anchor}: {state} ({update_events.redact(detail)})"
+            )
+            continue
 
         current = git_ops.current_branch(anchor_path)
         if current is None:
@@ -689,6 +704,9 @@ def _fast_forward_project_anchors() -> None:
             default_branch=repo.default_branch,
             do_fetch=True,
         )
+        if ff.fetch_error:
+            output.warn(f"{anchor}: fetch from {repo.remote} failed; compared against "
+                        f"the last-known upstream ({update_events.redact(ff.fetch_error)})")
         if ff.updated:
             output.ok(
                 f"{anchor}: fast-forwarded {ff.behind} commit(s) to "

@@ -6,6 +6,8 @@
 - **Created:** 2026-10-10
 - **Status:** Active
 - **Vision:** `visions/plugin-services/README.md` - service-scaled process count, transient hooks, discovered local endpoints
+- **Startup guidance vision:** `visions/harness-guidance/README.md` -
+  `simple-local-static-delivery`, `generated-output-is-disposable-source-is-not`
 - **Umbrella issue:** #6086
 - **Sub-issues:** #6087, #4644
 - **Related, independently owned:** #6040, #6077, #6079, #6088, #6092
@@ -68,6 +70,50 @@ mock process calls/output rather than probing host WSL; prioritize reducing
 spawn churn even on powerful hosts. The sessions-times-enabled-plugins idea is
 a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 
+Startup follow-up, summarized from the operator's subsequent sequence review:
+prioritize create/cold-start preparation, keep plugin enablement/dependency
+planning local, and report progress rather than impose broad startup timeouts.
+The configured anchor/default-branch behavior and current plugin-update scope
+are accepted. Update-versus-allocation ordering raises a separate failure and
+recovery concern; it does not authorize rolling back shared updates.
+
+Operator's projection and mux decisions, verbatim:
+
+> Projection ordering: bad. Definitiely should only happen when both the harness and knowledge worktrees are created, and the complete plugin-hoist is computed. We know the set of plugins that need projection ahead of time, but the actual copying should occur all at once
+>
+> Machine preferences: that's fine
+>
+> Mux registration: makes sense. Good that daemon is async, so we can tear it down and restart it independently without breaking the mux pane or copilot. We want as few important pieces between the Mux pane and Copilot, other than to launch the mux pane, so that when we need to update, nothing in that gap needs restarting unless we want to create a new Copilot process.
+
+The operator clarified the publication contract, verbatim:
+
+> One final batch, and failure should be highly unlikely, because it's just file copies into empty space.
+
+This means one final projection pass, not a new rollback-capable filesystem
+transaction. Current machine-preference behavior and asynchronous mux-daemon
+registration remain unchanged.
+
+Further operator decisions, verbatim:
+
+> Our goal is that all the files copy into some folder we've gitignored, so ideally there won't be anything there to collide with. We should probably always force-override what is present, on the assumption it was ours from before. What should cause a hard-fail is copying over a *tracked* file.
+>
+> Great. Drive this update visions or other durable guidance. We want an emphasis on simplicity rather than over reusue of related systems that don't actually fit
+
+The operator's static-delivery clarification, summarized: resolve the selected
+plugins, read their declared static instruction files, then copy them with the
+local-instruction suffix. Do not require a separately packaged projection
+engine for this operation. Overwrite untracked files within the dedicated
+ignored generated namespace; never overwrite tracked repository content.
+
+Operator's clarification of declaration-driven delivery, verbatim:
+
+> What is this "fit-for-purpose reuse" business? If a plugin declares an instruction file to be projected, we project it. Done. We'll review our harness holistically, and make adjustments to what plugins provide, but we won't judge/guard on the fly
+
+Simplicity governs the implementation, not admission of instruction content.
+Every declared static instruction file from the resolved plugin set is copied;
+content review and adjustments belong to the plugins and harness as a whole.
+The tracked-file protection remains a filesystem safeguard, not a content gate.
+
 ## Plan
 
 ### Phase 1 - Reviewed scope and baseline
@@ -125,6 +171,35 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 - [ ] Resolve or explicitly transfer every Plan and Validation Plan item to a
   named tracked objective; journal completion and archive normally.
 
+### Phase 5 - One final startup projection batch
+
+- [ ] Prioritize this bounded startup slice before further classifier tuning.
+  Coordinate with #6600's existing launch timing/rendering owner; do not
+  duplicate its latency work or the separate catalog-rendering proposals.
+- [ ] Publish local projections only after both applicable worktrees exist
+  and the complete combined plugin surface and local overrides are ready.
+  Preserve direct creation and direct launch-plan consumers as well as both
+  shell launchers; avoid early or repeated projection passes.
+- [ ] Replace the startup dependency on the packaged projection manager with
+  a small in-process batch over declared static files. Force-replace untracked
+  generated outputs; refuse tracked destinations before copying the batch.
+  Copy every declared file without content scoring, budget filtering or a
+  second runtime admission policy. Keep authoring/review tools separate.
+- [ ] _(Agent-recommended preservation of existing behavior)_ Keep lightweight
+  per-worktree publication ordering and refresh the source set within it.
+  Reconcile stale generated instructions for disabled/removed sources, with
+  both overwrites and removals covered by the tracked-file preflight.
+- [x] Revise the owning vision and design pattern for simple local delivery
+  and simple implementation before the implementation changes behavior.
+- [ ] Keep maintenance separate from offline planning and final projection.
+  Record allocation/retry behavior when maintenance or later preparation fails;
+  do not invent rollback of shared plugin/runtime updates.
+- [ ] Retain progress and elapsed-time reporting instead of introducing broad
+  startup ceilings. Preserve machine preferences, async mux registration and
+  the minimal pane-to-Copilot process/lifetime boundary.
+- [ ] Review, merge and verify the bounded ordering change through the normal
+  release flow; keep the parent campaign Active for its remaining work.
+
 ## Validation Plan
 
 - [x] First hook slice proves zero client/CLI child processes on daemon success,
@@ -149,6 +224,26 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
   transitions; deliberate interactive launch semantics are unchanged.
 - [ ] Release/deploy behavior is verified after caller cleanup, not inferred
   from merged PRs or updated payload versions.
+- [ ] Startup order tests prove no projection before all applicable allocations
+  and final combined settings, and exactly one final batch for each cold launch.
+  No-pair launches require only their own allocation, not a knowledge sibling.
+- [ ] A plugin enabled only by the paired knowledge worktree appears in the
+  actual resulting projection, not just in a mocked call-order assertion.
+- [ ] Direct create/resolve, cold Resume, no-pair/recovery and Windows/POSIX
+  launcher contracts retain delivery; reattach does not create a new Copilot
+  process or a mandatory daemon bridge.
+- [ ] Failure-path checks retain recoverable worktree identities, surface
+  preparation errors and preserve existing update/ownership safeguards.
+- [ ] Static publication works without the packaged projection engine, its
+  runtime-assets manifest, sibling runtime or network access. Existing
+  untracked generated files are replaced; tracked and staged-added
+  destinations refuse the batch without modifying repository source.
+- [ ] Declared file bytes are copied unchanged and no content-quality,
+  suitability, budget or secondary admission evaluator is invoked.
+- [ ] Concurrent launch/backup publications cannot restore an older source
+  selection; disabled/removed sources leave no stale generated instructions.
+  Incomplete discovery cannot authorize cleanup, and tracked stale outputs
+  are preserved with an explicit publication failure.
 
 ## Proposal
 
@@ -165,7 +260,227 @@ if that is the smallest proven compatibility surface. Extend safety hooks only
 after equivalence and error semantics are established. Keep native integration
 small and explicit while unit policy tests remain in-process.
 
+_(Agent-recommended startup mechanics)_ Let an outer launcher defer projection
+publication until its maintenance and knowledge/settings preflights finish;
+direct callers still prepare their final surface before returning a launch
+plan. Reuse existing progress/reporting and small helpers only where their
+contracts fit the static-copy operation, not a new resident or pane-side helper.
+Replace the oversized packaged-renderer dependency rather than retaining it
+merely for code reuse. Do not add cross-file transaction machinery for this
+single-final-batch contract.
+
 ## Journal
+
+### 2026-10-14 - In-process startup copy implementation
+
+- Closed two further launch-integration gaps. Final preparation now targets the
+  selected checkout, rather than the sibling harness reported by pair composition.
+  A real knowledge-side pair test proves its own output is refreshed. The Manager
+  now defers its initial resolve only for local shell delegation; direct, remote,
+  explicit AHP and persisted AHP consumers retain immediate preparation. Existing
+  backend inspection is reused once, not duplicated, and call-scoped deferral
+  survives the old-engine bare-resume retry without mutating Manager environment.
+  Source/native selection: 95 passed / 7 platform skips; Manager client, entrypoint
+  routing and launch contracts: 184 passed; six headed-launch contracts also pass.
+  Existing module ceilings and containment budgets remain unchanged.
+- Review also identified a mixed-version startup window: a new launcher passed
+  a new resolve argument before reaching its update barrier. Replaced that
+  mandatory argument with a call-scoped environment hint, understood by the new
+  parser and harmless to older runtimes. Both native launcher resolve blocks
+  now execute successfully against a strict old-CLI fixture and restore the
+  caller environment. Current runtimes still defer; direct calls still prepare.
+  Focused source/native compatibility selection: 134 passed / 7 platform skips;
+  all 27 Manager launcher contracts pass. No update barrier was moved earlier.
+- Final review rejects nonregular settings, declarations, templates and exclude
+  inputs before opening them, without inspecting instruction content. Declaration
+  versions must be integers; malformed boolean/float versions cannot authorize
+  stale cleanup. Foreground POSIX Git keeps the Manager-owned group; a Git
+  operation timeout exits preparation so the outer owner can reap descendants
+  before continuation. Backups retain independent ownership and existing bounds.
+  Focused source/native/Git/deadline selection: 432 passed / 7 skips in 181.59s
+  under unchanged limits. Skips cover unavailable symlinks, POSIX FIFOs and native
+  Linux identity-safe cancellation/timeout proof on this Windows host. Those
+  native cases are checked in for supported CI. One preceding Bash native run
+  failed transiently; standalone rerun and the final combined run passed, with
+  fixture diagnostics retained rather than hidden. Installed deployment proof
+  remains pending promotion; no external Linux execution is claimed.
+- Implemented the declaration-driven contract reviewed in #6676. Startup now
+  copies opaque template bytes in process into the dedicated ignored
+  `agent-worktrees-generated` namespace, preserving declared nested destinations.
+  Removed the unused packaged-engine resolver and seven-file asset manifest;
+  the explicit authoring manager remains separate.
+- Direct creation publishes after applicable allocation and pair composition.
+  The outer PowerShell/Bash launchers explicitly defer resolve-time copying,
+  then perform composition and one publication at their existing final
+  preflight after update maintenance. Direct resume composes its selected pair
+  first. Failed composition reports degradation without publishing a partial
+  harness-only set; recoverable allocations remain in place.
+- Retained per-worktree publication serialization, fresh source snapshots,
+  one index preflight protecting tracked/staged outputs, link containment,
+  overwrite of edited untracked files, and stale-output reconciliation confined
+  to the generated namespace. No content budgets, suitability decisions,
+  provenance generation, sibling discovery, or new resident wrapper.
+- Focused contained source groups: 185 passed / 1 platform skip, then 311
+  passed / 4 platform/explicit-tier skips, with unchanged item, sub-suite,
+  aggregate and resource limits. The initial broad filtered runner exhausted
+  its 300-second collection/sub-suite bound; that run is not a pass. Exact-file
+  contained groups avoid unrelated whole-suite collection, not safety budgets.
+- Simple end-to-end / fresh-environment proof: a copied runtime package with
+  no projection assets, no sibling authoring plugin and an absent old snapshot
+  produces byte-identical nested output through a real Python subprocess.
+  Native PowerShell and Git Bash execute the launchers' actual final argument
+  blocks against real knowledge-only activation and the same isolated runtime:
+  all three standalone/native cases pass. The final wrappers stream stderr
+  progress while retaining clean JSON stdout and existing retry/degrade policy.
+  Final focused source/native group: 191 passed / 1 unavailable-symlink skip;
+  adjacent launch group: 311 passed / 4 existing skips; Manager launcher guards:
+  27 passed. Lint, headless subprocess and install/doc contracts pass.
+- Coordinated the new output contract with #6600's retained-New recovery owner,
+  including #6700. No competing updater or promotion repair was started.
+  Source review/merge, normal promotion, coordinated authorized local update
+  and actual installed-consumer proof remain outstanding. No remote rollout is
+  authorized for this slice. The parent campaign remains Active.
+
+- #6706's first CI run required a separate Worktree Manager changefile; added
+  it without changing source behavior. The first current-head review found
+  staged deletions could escape an index-only check. The publication preflight
+  now also includes cached deletions with rename detection disabled; active
+  overwrites and stale cleanup both preserve staged deletion/rename intent.
+  Real Git regression covers staged additions, committed files, staged deletions
+  and renames out of the namespace. Review-fix/native/Manager selection:
+  83 passed / 1 unavailable-symlink skip under unchanged containment budgets.
+- Rebased over #6694's safe-path authoring fix. Its packaged-engine test
+  retirement conflicted mechanically; retained the relevant hostile-CWD and
+  `PYTHONSAFEPATH` false/true regression in the new standalone-copy test instead
+  of resurrecting the removed engine dependency. Canonical authoring changes
+  remain untouched.
+- Follow-up review found user-global relative marketplace paths needed the
+  settings directory as their base, matching canonical activation. Corrected
+  that origin and added a real relative-directory/marketplace-alias case.
+  Existing explicit backup/caller deadlines now flow through discovery and all
+  Git operations, with each child capped to remaining time and publication
+  mutations checked against that same budget. Foreground startup remains
+  deadline-free. Late-preflight expiry and exact remaining-child-budget cases
+  pass. Final focused source/native selection: 202 passed / 1 unavailable-symlink
+  skip, with unchanged test limits.
+- Third review found a deferred carve failure could lose its incomplete-pair
+  state before final preflight. Failed allocation/composition now marks pending
+  preparation in the existing Git-administrative guidance directory, under the
+  same publication gate. Final preflight, direct refresh and hook backup all
+  refuse partial publication; successful paired composition clears the marker
+  for every caller. No-pair creation remains unaffected. Real marker/output
+  tests cover unpaired no-op retention and repaired paired composition.
+- Aligned destination components with canonical portable-path rules, including
+  Unicode and internal spaces, without importing the authoring manager.
+  `RecursionError` already falls under the retained `RuntimeError` diagnostic
+  boundary; an explicit regression verifies that failure remains reported, not
+  thrown into create/resume. The structural ordering test is now a fast guard.
+- Retained captured-child ownership for the new Git preflights through the
+  existing bounded runner, adding opaque bytes/stdin support rather than a
+  separate process wrapper. Native consoleless-parent proof covers binary
+  round-trip, required Job admission, timeout descendants and no new visible
+  windows or foreground transitions. Final expanded contained source/native/
+  Git/deadline selection: 380 passed / 1 unavailable-symlink skip in 162.93s.
+  Headless, lint, install and documentation guards pass without budget changes.
+- Follow-up review found two retained filesystem-contract gaps. Casefolded the
+  publication key so macOS case aliases share the same gate. Complete preflight
+  now permits known untracked stale file/directory blockers, then removes stale
+  files and unused empty generated directories before installing replacements.
+  Active declaration collisions and tracked blockers still fail before any
+  cleanup. Both migration directions are exercised with untracked and
+  force-staged blockers; a case-insensitive alias simulation verifies equal lock
+  identity. Final focused source/native selection: 219 passed / 1 unavailable-
+  symlink skip in 72.40s, under unchanged limits. No native macOS venue or remote
+  rollout was authorized; the portable key behavior is unit-proven, not claimed
+  as a live macOS test.
+- Follow-up overview identified composition failure after a previous success.
+  Paired composition now marks pending before its existing serialized overlay
+  operation, and clears readiness inside that same boundary only on success.
+  Known paired configuration/validation failures retain pending state before
+  degraded return; paired opt-out follows the same preparation ordering.
+  Casefolded the overlay gate as well, keeping readiness ordering consistent
+  for case-insensitive aliases. No new coordination service or transaction
+  framework is introduced.
+- Real post-success cases cover malformed paired settings and unreadable
+  configuration through direct preparation and final CLI preflight, then prove
+  backup refusal, unchanged prior output, successful repair and eventual fresh
+  output. Final focused source/native selection: 223 passed / 1 unavailable-
+  symlink skip in 85.03s, unchanged budgets; lint passes.
+- Follow-up resolution review now reuses the host's existing installed-root
+  helper for non-reparse roots/manifests and exact payload containment, and
+  canonical Git repository-identity environment isolation rather than duplicating
+  those safeguards. Built-in unqualified plugin settings are ignored before
+  value validation; qualified identities retain their canonical validation.
+  Local catalog aliases use the existing explicit `source.manifestName` mapping.
+  Declaration IDs are no longer incorrectly treated as destination filenames.
+  These resolve the source set and protect filesystem identity; no instruction
+  content or source-quality admission policy was added.
+- Expanded actual filesystem/native/ownership selection: 400 passed / 1
+  unavailable-symlink skip in 178.02s under unchanged budgets, including reparse
+  object simulation, relative alias mapping, built-in settings and mixed-case
+  Git context isolation. Source review and normal installed rollout still remain.
+- Concurrent review on the prior head found invalid customization kinds were
+  treated as removed sources. Unsupported/malformed kinds now fail the snapshot
+  before copy or cleanup. Numeric, string, null and object cases preserve actual
+  prior bytes. Final publisher selection: 62 passed / 1 unavailable-symlink skip
+  in 36.74s, unchanged budgets; the expanded native/ownership result above still
+  covers the unchanged process seam.
+- The subsequent review exposed canonically equivalent Unicode destinations
+  and raw marker-clear errors. NFC/casefolded collision and lock keys now cover
+  both destination and preparation/publication identity without rewriting paths
+  or bytes. Marker-clear I/O/lock errors translate to the existing plugin error
+  boundary, preserving degraded create/final preflight behavior and pending state.
+- Added source/output disjointness checks so disposable cleanup cannot delete a
+  declared payload or template stored in its own generated namespace. These are
+  filesystem preservation checks, not content admission. Focused source/native
+  group: 245 passed / 1 unavailable-symlink skip in 99.04s; final publisher file,
+  including the individual-template overlap case: 68 passed / 1 same skip in
+  40.66s. Lint passes; all test budgets remain unchanged.
+- Matched canonical settings JSON behavior for leading comments and opaque
+  built-in values containing case-distinct keys, rather than reusing a
+  filename-oriented case-conflict check. This also removes the incidental
+  reconciler import from the copy parser. The focused source/native selection
+  passes 251 tests / 1 unavailable-symlink skip in 83.51s.
+- Latest overview found an explicitly empty marketplace registration could
+  incorrectly fall back to installed content. Registration presence, not dict
+  truthiness, now distinguishes absent from malformed resolution; the new
+  regression preserves previously published bytes. The settings/built-in
+  selection passes all 9 cases, unchanged budgets.
+- Declared the new real-process filesystem contracts as T2 and the native
+  PowerShell/Git Bash consumer cases as explicit T3, so native fixtures are not
+  prepared in the ordinary lane. Admission proof: default standalone selection
+  2 passed / 2 native skips; explicit selection all 4 passed; the 3 structural/
+  environment guards pass separately. No runtime behavior changed in this
+  classification follow-up.
+- Closed the corresponding index case-alias gap: both tracked/staged-removal
+  queries use an explicit case-insensitive scope, independent of inherited Git
+  pathspec flags. A real index fixture stages an uppercase namespace alias with
+  inherited literal-pathspec behavior, then proves no output is overwritten.
+  All 10 index/environment cases pass; lint passes, with unchanged budgets.
+
+### 2026-10-14 - Declarations decide static publication
+
+- Clarified that simplicity is an implementation-design principle, not a
+  runtime judgment of whether a plugin's declared instructions deserve delivery.
+- The publication contract copies every declared file from the resolved plugin
+  set unchanged. Content-quality, suitability, budget and secondary admission
+  checks do not belong in this copy path; holistic review changes contributions
+  at their plugin/harness source.
+- Tracked-file and path protections remain filesystem safeguards. This intent
+  clarification does not claim that the runtime publisher is implemented.
+
+### 2026-10-13 - Simple static startup publication contract
+
+- Captured the operator's generated-output overwrite policy and explicit
+  preference for simplicity over reuse of related but mismatched systems.
+- Revised the guidance vision and right-sized-design principle; the detailed
+  pattern separates one final local copy batch from the existing packaged
+  renderer and checked-in authoring/review tools.
+- Untracked generated destinations may be replaced without ownership markers.
+  Tracked destinations refuse publication before any copy; reader authority
+  and source safety remain separate from output overwrite policy.
+- This is durable intent and planning, not a claim that the runtime copy path,
+  snapshot-packaging symptom or earlier release obligations are fixed.
 
 ### 2026-10-13 - Real listing workload and request-budget boundary
 

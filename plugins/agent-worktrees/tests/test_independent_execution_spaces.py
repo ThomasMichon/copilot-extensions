@@ -147,6 +147,8 @@ def test_execution_space_registry_reuses_resolved_overlay_config(tmp_path, monke
 
 @pytest.fixture
 def scoped_config(tmp_path, monkeypatch):
+    from agent_worktrees import config_authority
+
     entries = {
         key: MachineEntry(
             key=key, display_name=key, hostname="workstation",
@@ -165,6 +167,10 @@ def scoped_config(tmp_path, monkeypatch):
         )},
     )
     monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
+    monkeypatch.setattr(
+        config_authority, "load_project_authority_config",
+        lambda project, **kwargs: config,
+    )
     return config
 
 
@@ -1465,6 +1471,7 @@ def test_run_reservation_and_settlement_fence_fresh_owner(
 
 
 @pytest.mark.parametrize("json_mode", [False, True])
+@pytest.mark.guard
 def test_resume_reports_raced_authority_rejection_as_structured_error(
     json_mode, tmp_path, scoped_config, monkeypatch, capfd,
 ):
@@ -1478,7 +1485,7 @@ def test_resume_reports_raced_authority_rejection_as_structured_error(
     fresh = tracking.load_record(record.yaml_path)
     fresh.owner_ref = "workstation-wsl/project/wt-new-parent"
     module = resolve_cli if json_mode else resolve_launch_cli
-    monkeypatch.setattr(module, "seed_for_attempt", lambda *args: None)
+    monkeypatch.setattr(module, "seed_for_attempt", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         module, "_preflight_launch", lambda *args: SimpleNamespace(error=None),
     )

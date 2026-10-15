@@ -170,6 +170,13 @@ scope. `agent-machines restore` runs the validator over the selected scope
 before both dry-runs and applies. If a required supplement is unavailable or
 the validator reports any error, restore refuses to continue.
 
+The read-only plan's `managed_keys["copilot.settings"]` is derived through the
+same contribution collector used by settings restore, after package gating and
+per-machine layering. It lists only sorted top-level key names for active
+floor/enforce operations and nonempty activation removals, without values or
+live-state reads. Both plan JSON and restore's nested plan serialize this map;
+it describes the selected scope even when restore uses `--only`.
+
 ## Managed Copilot surfaces
 
 The implemented surfaces live in `src\agent_machines\surfaces\`:

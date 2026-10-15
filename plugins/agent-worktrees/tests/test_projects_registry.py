@@ -184,6 +184,8 @@ def test_subcommand_force_no_expose_agent(monkeypatch, tmp_path: Path):
 
 
 def test_subcommand_registers_repo_identity_before_project(monkeypatch, tmp_path: Path):
+    from agent_worktrees import maintenance_cli
+
     repo = tmp_path / "repo"
     repo.mkdir()
     order: list[str] = []
@@ -192,11 +194,16 @@ def test_subcommand_registers_repo_identity_before_project(monkeypatch, tmp_path
         "agent_worktrees.repos.add_repo",
         lambda *args, **kwargs: order.append("repo"),
     )
-    monkeypatch.setattr(
-        m.subprocess,
-        "run",
-        lambda *args, **kwargs: argparse.Namespace(returncode=1, stdout=""),
-    )
+    monkeypatch.setattr(maintenance_cli, "no_window_kwargs", lambda: {"creationflags": 123})
+    headless_calls = []
+
+    def run(command, **kwargs):
+        assert command == ["git", "-C", str(repo), "remote", "get-url", "origin"]
+        if kwargs.get("creationflags") == 123:
+            headless_calls.append(command)
+        return argparse.Namespace(returncode=1, stdout="")
+
+    monkeypatch.setattr(m.subprocess, "run", run)
     monkeypatch.setattr(
         installer,
         "register_project",
@@ -207,6 +214,7 @@ def test_subcommand_registers_repo_identity_before_project(monkeypatch, tmp_path
 
     assert rc == 0
     assert order == ["repo", "project"]
+    assert len(headless_calls) == 1
 
 
 def test_subcommand_preserves_hidden_repo_with_repo_dir(monkeypatch, tmp_path: Path):

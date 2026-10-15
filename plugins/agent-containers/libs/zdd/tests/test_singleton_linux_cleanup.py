@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import signal
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from zdd import singleton_linux
 from zdd.singleton_linux import LinuxBackend
 from zdd.singleton_state import ProcessIdentity
 
@@ -37,6 +37,9 @@ class Reference:
 def test_cleanup_waits_for_stop_then_rescans_late_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Controlled references simulate Linux signals even on non-Linux test hosts.
+    monkeypatch.setattr(signal, "SIGSTOP", 19, raising=False)
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
     backend = LinuxBackend.__new__(LinuxBackend)
     backend.manager_pid = 999
     events: list[str] = []
@@ -91,6 +94,11 @@ def test_cleanup_timeout_is_enforced_during_a_no_add_scan(
     backend = LinuxBackend.__new__(LinuxBackend)
     backend.manager_pid = 999
     references = {pid: Reference(pid, []) for pid in (100, 101, 102)}
+    clock = SimpleNamespace(now=0.0)
+    probed: list[int] = []
+    test_time = SimpleNamespace(**vars(singleton_linux.time))
+    test_time.monotonic = lambda: clock.now
+    monkeypatch.setattr(singleton_linux, "time", test_time)
     monkeypatch.setattr(Path, "iterdir", lambda path: iter(
         SimpleNamespace(name=str(pid)) for pid in sorted(references)
     ))
@@ -98,19 +106,16 @@ def test_cleanup_timeout_is_enforced_during_a_no_add_scan(
     monkeypatch.setattr(backend, "open_process", lambda identity: references[identity.pid])
 
     def slow_not_owned(reference: Reference, deadline: float | None = None) -> bool:
-        time.sleep(0.05)
+        probed.append(reference.identity.pid)
+        clock.now += 0.05
         return False
 
     monkeypatch.setattr(backend, "owns", slow_not_owned)
     monkeypatch.setattr(backend, "reap_zombies", lambda: None)
-    started = time.monotonic()
     with pytest.raises(TimeoutError, match="quiesce before cleanup deadline"):
         backend.cleanup(timeout=0.08)
-    # Three candidates at 0.05s each would take ~0.15s if the deadline were
-    # only checked between passes; bounded well under that proves the
-    # per-entry check actually fired mid-scan, before every candidate was
-    # even examined.
-    assert time.monotonic() - started < 0.14
+    assert probed == [100, 101]
+    assert clock.now == pytest.approx(0.1)
     assert any(reference.closed for reference in references.values())
 
 

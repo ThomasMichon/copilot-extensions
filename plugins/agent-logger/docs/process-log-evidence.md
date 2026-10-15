@@ -48,13 +48,52 @@ enforce their separate completeness and retention guarantees.
 
 ## Root identity and symlink safety
 
-On POSIX, a ref returned by `iter_process_log_refs` reopens the configured
-root with `O_NOFOLLOW` on every later `iter_lines()` call, rather than
-trusting the root by path name -- so replacing the root with a symlink,
-whether before enumeration or any time after a ref was handed to a caller,
-is rejected rather than silently followed. Windows has no `openat`
-equivalent and keeps the previous path-based behavior; this is a documented
-platform gap, not an equivalent guarantee.
+Enumeration, direct references, and process-log sync reads reuse the ZIP
+snapshot directory boundary. Each operation resolves intentionally relocated
+ancestors once, then pins every canonical ancestor. POSIX reads use directory
+descriptors with required no-follow/nonblocking flags; Windows holds native
+ancestor handles denying directory rename while pathname reads run. Missing
+safety primitives fail explicitly, never degrade to an unprotected open.
+
+Entries and ZIP members are enumerated in filename order. Windows enumeration
+collects ZIP member observations under the same pinned directory boundary as
+the listing, without repinning ancestors for each archive. ZIP entry identity
+is checked against the opened file, and native ZIP read handles deny writes.
+Enumeration releases all native handles before yielding any reference.
+Pausing or abandoning that iterator does not prevent source directory or
+archive renames. Directory-fd read APIs explicitly reject Windows callers.
+POSIX enumeration yields references incrementally without collecting all archive
+observations before the first yield. POSIX transfers reuse the already-pinned
+directory for listing, entry validation and reads; they do not reopen its pathname.
+Source-root changes still report a partial transfer rather than clearing health.
+Transfers check root identity before each candidate open and before its durable
+publication, stopping on root churn without reopening the pinned directory.
+On POSIX, a source entry replaced by a symlink between validation and opening
+is skipped when the no-follow opener reports `ELOOP`; later candidates still
+transfer and any prior good destination copy remains intact. Other source-open
+errors and all destination-publication errors remain transfer failures.
+
+References retain their supplied path for display and reference identity.
+Enumeration anchors a relative configured root to the enumeration-time working
+directory and emits absolute paths without resolving their display aliases.
+Directly constructed references preserve the caller's path, including a
+relative path resolved against the working directory at read time.
+Enumerated Windows references additionally retain the canonical reader root,
+independent of that display path: retargeting an intentional ancestor alias
+cannot redirect later `iter_lines()` calls. Directly constructed references
+continue to resolve their own reader boundary at read time.
+If an entry becomes non-regular between validation and opening, entry-opener
+`ValueError` failures retain their cause and use process-log-specific wording
+with the offending filename. Only `ValueError` from the entry opener is
+normalized; consumer exceptions and entry-opening operating-system failures
+are propagated unchanged.
+
+The configured final root must be a real directory, not an alias. Pinning lasts
+for the operation, not across separate enumeration and read calls: references
+are observations, not immutable snapshots. Concurrent content writes remain
+possible. Sync destination writes and session-state readers retain their
+separate ancestor-containment limitations; this source-read change does not
+close the complete containment tracker.
 
 ## See Also
 
@@ -148,8 +187,9 @@ Windows ancestor handles denying directory rename. Intentionally relocated
 ancestors resolve once before pinning; later redirects cannot redirect archive
 I/O. ZIP file contents are flushed on both platforms; POSIX also flushes the
 containing directory. Windows directory-entry power-loss durability is not
-claimed. This new archive boundary does not retrofit the older sync/reader
-paths or close their remaining ancestor-containment tracker.
+claimed. Process-log source reads also reuse this boundary; older destination
+writes and session-state readers remain outside it, and their containment
+tracker stays open.
 Windows snapshot/verification read handles additionally deny writes and rename.
 Fingerprints use birth time there because native `lstat` and `fstat` can expose
 different `ctime` meanings; POSIX retains change time. Published ZIP verification

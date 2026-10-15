@@ -166,3 +166,39 @@ def test_missing_attribute_still_raises_attribute_error():
     )
     assert result.returncode == 0, result.stderr
     assert "OK" in result.stdout
+
+
+def test_search_and_source_fences_import_without_native_store_dependencies():
+    result = _run(
+        "_Blocker.BLOCKED += ('pyarrow', 'lancedb', 'torch', 'transformers')\n"
+        "import agent_index.search.engine\n"
+        "import agent_index.store.source_layout\n"
+        "assert 'agent_index.store.content_store' not in sys.modules\n"
+        "assert 'agent_index.store.vector_table' not in sys.modules\n"
+        "print('OK')\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_store_exports_stay_discoverable_and_load_only_when_requested():
+    result = _run(
+        "_Blocker.BLOCKED += ('pyarrow', 'lancedb')\n"
+        "import agent_index.store as store\n"
+        "assert set(store.__all__) <= set(dir(store))\n"
+        "assert 'agent_index.store.content_store' not in sys.modules\n"
+        "try:\n"
+        "    store.ContentStore\n"
+        "except ImportError as exc:\n"
+        "    assert 'blocked for this test: pyarrow' in str(exc)\n"
+        "else:\n"
+        "    raise AssertionError('expected native import only at export access')\n"
+        "try:\n"
+        "    store.definitely_not_a_real_attribute\n"
+        "except AttributeError:\n"
+        "    print('OK')\n"
+        "else:\n"
+        "    raise AssertionError('expected AttributeError for unknown export')\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout

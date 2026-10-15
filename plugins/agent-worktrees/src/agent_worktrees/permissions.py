@@ -4,6 +4,10 @@ Handles the permissions-config.json lifecycle:
 - Clone: copy anchor permissions to a new worktree path
 - Merge: merge worktree permissions back to anchor on finalization
 - Remove: clean up the worktree entry after merge
+
+All mutations (including extension approvals and config.json folder trust)
+share persistent per-file, user-wide locks. Acquisition failures warn and skip
+the update; no helper proceeds with an unlocked read-modify-write.
 """
 
 from __future__ import annotations
@@ -12,8 +16,54 @@ import json
 import os
 import platform
 import tempfile
+import warnings
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+
+_PERMISSION_LOCK_TIMEOUT = 2.0
+
+
+def _serialized(path_for_lock: Callable[[], Path], *, merge: bool = False) -> Callable:
+    """Serialize each user-wide file's entire RMW, including first creation.
+
+    Reuse the persistent ``config.lock`` / ``permissions-config.lock`` sidecars
+    and portable OS/thread locking from tracking. Never remove a sidecar: an
+    atomic JSON replacement must not change the inode carrying the lock.
+    Failed acquisition warns and retains the helpers' best-effort return values.
+    """
+    def decorate(mutator: Callable) -> Callable:
+        @wraps(mutator)
+        def locked(*args: Any, **kwargs: Any) -> Any:
+            from .tracking import _RecordLock
+
+            path = path_for_lock()
+            if not path.parent.exists():
+                return [] if merge else False
+            lock = _RecordLock(
+                path, timeout=_PERMISSION_LOCK_TIMEOUT, require_sidecar=True,
+            )
+            try:
+                lock.__enter__()
+                if lock._held is None and not lock._nested_sidecar:
+                    raise OSError("no cross-process locking backend")
+            except (OSError, TimeoutError) as exc:
+                lock.__exit__()
+                warnings.warn(
+                    f"Copilot permission update skipped: could not lock {path.name} "
+                    f"({type(exc).__name__}).",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                return [] if merge else False
+            try:
+                return mutator(*args, **kwargs)
+            finally:
+                lock.__exit__()
+
+        return locked
+    return decorate
 
 
 def _copilot_dir() -> Path:
@@ -44,11 +94,9 @@ def _atomic_json_write(path: Path, data: Any, header: str = "") -> None:
     """
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
-        os.write(fd, (header + json.dumps(data, indent=2)).encode("utf-8"))
-        os.close(fd)
-        if path.exists():
-            path.unlink()
-        os.rename(tmp, str(path))
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            stream.write(header + json.dumps(data, indent=2))
+        os.replace(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -84,6 +132,7 @@ def _read_config_jsonc(config_file: Path) -> tuple[str, Any]:
     return "".join(header_lines), json.loads(body)
 
 
+@_serialized(lambda: _permissions_path())
 def clone_permissions(anchor_path: str, worktree_path: str) -> bool:
     """Clone Copilot permissions from anchor to a new worktree path.
 
@@ -116,6 +165,7 @@ def clone_permissions(anchor_path: str, worktree_path: str) -> bool:
         return False
 
 
+@_serialized(lambda: _permissions_path(), merge=True)
 def merge_permissions(anchor_path: str, worktree_path: str) -> list[str]:
     """Merge worktree permissions back to anchor and remove worktree entry.
 
@@ -182,6 +232,7 @@ _FACILITY_EXTENSION_NAMES: tuple[str, ...] = (
 )
 
 
+@_serialized(lambda: _permissions_path())
 def ensure_extension_permission_approvals(worktree_path: str) -> bool:
     """Pre-approve the facility's own extensions for ``worktree_path`` BEFORE
     Copilot ever spawns there (a known Copilot CLI extension-load gate).
@@ -249,6 +300,7 @@ def ensure_extension_permission_approvals(worktree_path: str) -> bool:
         return False
 
 
+@_serialized(lambda: _config_path())
 def add_trusted_folder(worktree_path: str) -> bool:
     """Add a worktree path to trustedFolders in config.json.
 
@@ -282,6 +334,7 @@ def add_trusted_folder(worktree_path: str) -> bool:
         return False
 
 
+@_serialized(lambda: _config_path())
 def remove_trusted_folder(worktree_path: str) -> bool:
     """Remove a worktree path from trustedFolders in config.json.
 

@@ -57,6 +57,199 @@ def creation_rig(rig, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing_read", [1, 2])
+@pytest.mark.parametrize("projected", [False, True])
+async def test_missing_workspace_observation_retains_allocation_for_exact_replay(
+    creation_rig, monkeypatch, missing_read, projected,
+):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+    reads = 0
+
+    async def lagging_owner(args, project):
+        nonlocal reads
+        result = await command(args, project)
+        if args[0] == "list":
+            reads += 1
+            if reads == missing_read:
+                result["worktrees"] = []
+            if projected:
+                result["projection"] = {"quality": "current"}
+        return result
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", lagging_owner)
+    with pytest.raises(AcquisitionRefused) as refused:
+        await workspace_creation.start(
+            rig.manager, rig.target, key="logical-work", prompt="Do the work",
+        )
+    assert refused.value.code == "workspace_identity_unknown"
+    saved = rig.db.execute_read("SELECT state,session_id,worktree_json FROM workspace_embodiments")[0]
+    assert saved["state"] == "allocated"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    session, receipt = await workspace_creation.start(
+        rig.manager, rig.target, key="logical-work", prompt="Do the work",
+    )
+    assert session.session_id == saved["session_id"]
+    assert receipt["worktree"]["id"] == rig.row["id"]
+    assert receipt["native_session_id"] == rig.head["id"]
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert len(rig.manager.list_sessions()) == len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"projection": {"quality": "advisory"}},
+        {"projection": {"quality": "current"}, "availability": {"status": "stale"}},
+        {"availability": {"status": "stale"}},
+        {"projection": {}},
+        {"projection": "invalid"},
+    ],
+)
+async def test_noncurrent_workspace_observation_cannot_launch_or_terminalize(
+    creation_rig, monkeypatch, metadata,
+):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+
+    async def stale_owner(args, project):
+        result = await command(args, project)
+        if args[0] == "list":
+            result.update(metadata)
+        return result
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", stale_owner)
+    for _ in range(2):
+        with pytest.raises(AcquisitionRefused) as refused:
+            await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+        assert refused.value.code == "workspace_identity_unknown"
+    assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "allocated"
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    assert not any(args[0] == "head-session" for args, _ in rig.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "blocker", [None, "native", "turn", "session", "gate", "head", "status", "count", "nonce"],
+)
+async def test_legacy_terminal_reconciles_only_unstarted_original_allocation(
+    creation_rig, monkeypatch, caplog, blocker,
+):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+
+    async def legacy_missing_owner(args, project):
+        if args[0] == "list":
+            raise AcquisitionRefused("creation_terminal", "original workspace is no longer tracked")
+        return await command(args, project)
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", legacy_missing_owner)
+    with pytest.raises(AcquisitionRefused, match="no longer tracked"):
+        await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Do the work")
+    original = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    assert original["state"] == "terminal" and original["native_session_id"] is None
+    monkeypatch.setattr(workspace_creation, "worktree_command", command)
+    if blocker == "native":
+        rig.db.execute_write("UPDATE workspace_embodiments SET native_session_id='retired-native'")
+    elif blocker == "turn":
+        rig.db.execute_write("UPDATE workspace_embodiments SET turn_index=0")
+    elif blocker == "session":
+        rig.db.execute_write(
+            "INSERT INTO sessions (id,name,status,created_at,updated_at) VALUES (?,?,'ended',?,?)",
+            (original["session_id"], "Retired original", time.time(), time.time()),
+        )
+    elif blocker == "gate":
+        from agent_bridge.acquisition_store import AcquisitionStore
+
+        AcquisitionStore(rig.db).gate_workspace(
+            rig.row["id"], "other-delivery", "acp", "other-session", None, "agent-bridge",
+        )
+    elif blocker == "head":
+        rig.head["id"] = "existing-native"
+    elif blocker == "status":
+        rig.row.pop("status")
+    elif blocker == "count":
+        rig.row["session_count"] = 1
+    elif blocker == "nonce":
+        rig.row["creation_nonce"] = "replacement-allocation"
+    if blocker is not None:
+        with pytest.raises(AcquisitionRefused) as refused:
+            await workspace_creation.start(
+                rig.manager, rig.target, key="logical-work", prompt="Do the work",
+            )
+        assert refused.value.code == ("creation_conflict" if blocker == "nonce" else "creation_terminal")
+        assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "terminal"
+        assert not rig.manager.list_sessions()
+        assert not rig.db.execute_read("SELECT * FROM turns")
+        assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+        assert "Reconciling pre-launch terminal embodiment" not in caplog.text
+        return
+    session, receipt = await workspace_creation.start(
+        rig.manager, rig.target, key="logical-work", prompt="Do the work",
+    )
+    assert session.session_id == original["session_id"]
+    assert receipt["worktree"]["id"] == rig.row["id"]
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert len(rig.manager.list_sessions()) == len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    assert "Reconciling pre-launch terminal embodiment" in caplog.text
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "changed", "code"),
+    [
+        ("creation_nonce", "replacement-allocation", "creation_conflict"),
+        ("status", None, "live_holder"),
+    ],
+)
+async def test_allocation_change_during_revalidation_prevents_native_start(
+    creation_rig, monkeypatch, field, changed, code,
+):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+    reads = 0
+
+    async def changed_owner(args, project):
+        nonlocal reads
+        if args[0] == "list":
+            reads += 1
+            if reads == 2:
+                rig.row[field] = changed
+        return await command(args, project)
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", changed_owner)
+    with pytest.raises(AcquisitionRefused) as refused:
+        await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+    assert refused.value.code == code
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_known_terminal_workspace_still_permanently_refuses_replay(creation_rig):
+    rig = creation_rig
+    rig.row["status"] = "finalized"
+    for _ in range(2):
+        with pytest.raises(AcquisitionRefused) as refused:
+            await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+        assert refused.value.code == "creation_terminal"
+    assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "terminal"
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
 async def test_exact_lost_response_replay_keeps_workspace_session_and_turn(creation_rig):
     rig = creation_rig
     first, result = await workspace_creation.start(

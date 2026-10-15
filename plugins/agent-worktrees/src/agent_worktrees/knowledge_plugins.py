@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import tempfile
+import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -331,7 +332,7 @@ def _write_overlay(path: Path, result: dict[str, Any]) -> bool:
 
 def _overlay_lock_target(path: Path) -> Path:
     """Return a stable machine-local lock target without touching the repo."""
-    normalized = os.path.normcase(os.path.abspath(str(path)))
+    normalized = unicodedata.normalize("NFC", os.path.abspath(str(path))).casefold()
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     return (
         Path(tempfile.gettempdir())
@@ -452,10 +453,15 @@ def _retire_invalid_pair_overlay(
     harness_path: str | Path,
     *,
     pair_error: str,
+    pair_pending: bool = False,
 ) -> dict[str, Any]:
     harness = Path(harness_path).resolve()
     output_path = harness / ".github" / "copilot" / "settings.local.json"
     with _overlay_transaction(output_path):
+        if pair_pending:
+            from .local_cache_refresh import mark_pair_pending
+
+            mark_pair_pending(harness)
         return _retire_invalid_pair_overlay_locked(
             harness,
             pair_error=pair_error,
@@ -749,14 +755,20 @@ def compose(
     knowledge = Path(knowledge_path).resolve()
     _ensure_distinct_checkouts(harness, knowledge)
     output_path = harness / ".github" / "copilot" / "settings.local.json"
+    from .local_cache_refresh import complete_pair_composition, mark_pair_pending
+
     with _overlay_transaction(output_path):
-        return _compose_locked(
+        if pair_id:
+            mark_pair_pending(harness)
+        summary = _compose_locked(
             harness,
             knowledge,
             pair_id=pair_id,
             pair_kind=pair_kind,
             legacy_knowledge_path=legacy_knowledge_path,
         )
+        complete_pair_composition(harness, summary)
+        return summary
 
 
 def _resolve_pair_state(
@@ -879,17 +891,22 @@ def _retire_disabled_overlay(harness_path: str | Path) -> dict[str, Any]:
     (pair stays valid -- only composition is off; see `_retire_invalid_pair_overlay`)."""
     harness = Path(harness_path).resolve()
     output_path = harness / ".github" / "copilot" / "settings.local.json"
+    from .local_cache_refresh import complete_pair_composition, mark_pair_pending
+
+    def completed(changed: bool) -> dict[str, Any]:
+        summary = {
+            "action": "disabled", "paired": True, "changed": changed,
+            "settings_local": str(output_path), "harness_path": str(harness),
+        }
+        complete_pair_composition(harness, summary)
+        return summary
+
     with _overlay_transaction(output_path):
+        mark_pair_pending(harness)
         existing = _load_json_object(output_path)
         marker = _managed_marker(existing, output_path)
         if marker is None or not marker.get("pairId"):
-            return {
-                "action": "disabled",
-                "paired": True,
-                "changed": False,
-                "settings_local": str(output_path),
-                "harness_path": str(harness),
-            }
+            return completed(False)
         marketplaces = _dict_setting(existing, "extraKnownMarketplaces", output_path)
         enabled = _dict_setting(existing, "enabledPlugins", output_path)
         previous_marketplaces = dict(marker["marketplaces"])
@@ -908,13 +925,7 @@ def _retire_disabled_overlay(harness_path: str | Path) -> dict[str, Any]:
         else:
             result.pop("enabledPlugins", None)
         changed = _write_overlay(output_path, result)
-        return {
-            "action": "disabled",
-            "paired": True,
-            "changed": changed,
-            "settings_local": str(output_path),
-            "harness_path": str(harness),
-        }
+        return completed(changed)
 
 
 def compose_from_pair(
@@ -926,21 +937,27 @@ def compose_from_pair(
     resolution, loaded_config, config_error = _resolve_pair_state(
         cwd=cwd, config=config
     )
+    from .local_cache_refresh import mark_failed_pair_composition
+
     if config_error:
         # A config read failure does not prove the pair is invalid. Preserve
         # the last known-good overlay and fail the launch preflight closed.
+        mark_failed_pair_composition(resolution)
         raise KnowledgePluginError(config_error)
     try:
         pair = _validate_pair(resolution, loaded_config, config_error)
     except KnowledgePairIntegrityError:
+        mark_failed_pair_composition(resolution)
         raise
     except KnowledgePluginError as exc:
         pair_error = str(exc)
         if _is_tracked_harness(resolution, loaded_config):
             assert resolution.current is not None
             return _retire_invalid_pair_overlay(
-                resolution.current.path, pair_error=pair_error
+                resolution.current.path, pair_error=pair_error,
+                pair_pending=resolution.paired,
             )
+        mark_failed_pair_composition(resolution)
         return {
             "action": "no-op",
             "paired": False,

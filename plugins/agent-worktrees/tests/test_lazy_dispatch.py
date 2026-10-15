@@ -311,9 +311,9 @@ def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, m
         # Copilot review: this generic smoke test must not start a real
         # detached status-monitor process when none is already live --
         # isolate it exactly like the dedicated monitor-enabled test does.
-        from agent_worktrees import status_monitor_runtime
+        from agent_worktrees import status_monitor_cutover
 
-        monkeypatch.setattr(status_monitor_runtime.subprocess, "Popen", lambda *a, **k: None)
+        monkeypatch.setattr(status_monitor_cutover, "spawn_daemon", lambda *a, **k: None)
 
     try:
         rc = m._dispatch_lazy(command, argv)
@@ -347,7 +347,7 @@ def test_worktree_status_audit_monitor_enabled_path_skips_cluster(monkeypatch):
     exercises this with `--no-log` but doesn't force the monitor-enabled
     branch specifically; this test does, forcing `_status_monitor_enabled`
     True and letting the real `_ensure_status_monitor()` run end-to-end."""
-    from agent_worktrees import status_monitor_runtime
+    from agent_worktrees import status_monitor_cutover, status_monitor_runtime
 
     module_name, _ = m._LAZY_DISPATCH_TABLE["worktree-status-audit"]
     assert module_name in m._CLUSTER_FREE_MODULES
@@ -361,13 +361,13 @@ def test_worktree_status_audit_monitor_enabled_path_skips_cluster(monkeypatch):
     monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
     monkeypatch.setattr(m, "_load_full_command_surface", lambda: calls.append(1))
     monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
-    # Exercise _spawn_detached()'s own body (the env=/kwargs= construction
-    # that reaches _background_environment()/windowless_daemon_kwargs())
+    # Exercise _spawn_detached()'s own body (the env construction that
+    # reaches _background_environment() and spawn_monitor())
     # without actually spawning a real background process -- Copilot review
     # correctly flagged that this test would otherwise start a genuine
     # detached status-monitor and mutate host state when no monitor is
     # already live.
-    monkeypatch.setattr(status_monitor_runtime.subprocess, "Popen", lambda *a, **k: None)
+    monkeypatch.setattr(status_monitor_cutover, "spawn_daemon", lambda *a, **k: None)
 
     result = status_monitor_runtime._ensure_status_monitor()
     assert isinstance(result, bool)

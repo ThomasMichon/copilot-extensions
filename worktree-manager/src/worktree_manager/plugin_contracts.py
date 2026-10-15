@@ -15,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
+from .configuration_preview import validate_preview_actions
 
 from .harness_state import (
     build_projects,
@@ -62,6 +63,8 @@ class ActionContract:
     form: Mapping[str, object] | None = None
     card: Mapping[str, object] | None = None
     available: bool = True
+    preview: tuple[str, ...] = ()
+    preview_error: str = ""
 
 
 @dataclass(frozen=True)
@@ -321,6 +324,8 @@ def _parse_actions(
             internal=internal,
             form=form,
             card=card,
+            preview=tuple(item.get("preview", ())),
+            preview_error=str(item.get("_preview_error") or ""),
         ))
     return tuple(out)
 
@@ -384,6 +389,10 @@ def parse_manifest(
 ) -> PluginContribution:
     if not isinstance(data, Mapping):
         raise ContractError("manifest root must be a JSON object")
+    try:
+        validate_preview_actions(data)
+    except ValueError as exc:
+        raise ContractError(str(exc)) from exc
     raw_version = data.get("schema_version")
     legacy = raw_version is None
     version = CONTRACT_VERSION if legacy else raw_version
@@ -525,6 +534,9 @@ def _probe_commands(
                 if shutil.which(command) is None:
                     available = False
                     missing.append(f"action {action.key}: {command}")
+            if action.preview and (action.preview_error or shutil.which(action.preview[0]) is None):
+                available = False
+                missing.append(f"action {action.key} preview: {action.preview[0]}")
             actions.append(replace(action, available=available))
         pivot = replace(pivot, actions=tuple(actions))
         view_actions = []

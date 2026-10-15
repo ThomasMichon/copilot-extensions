@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import (
-    detached_kwargs,
     no_window_kwargs,
+    spawn_daemon,
     windowless_python,
     windowless_python_env,
 )
@@ -739,8 +739,8 @@ def cmd_mcp(_args: argparse.Namespace) -> int:
     if importlib.util.find_spec("mcp") is None:
         print(
             "agent-index: the optional stdio MCP dependencies are unavailable "
-            "in the lightweight client runtime. Use the read CLI or the hosted "
-            "HTTP service; this command will not install host dependencies.",
+            "in this runtime. Use the read CLI or explicitly provision the "
+            "[stdio-mcp] extra; this command will not install dependencies.",
             file=sys.stderr,
         )
         return 2
@@ -1374,33 +1374,21 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         start_command = "__cell-start" if expected_installation else "start"
         python = str(host_runtime_python())
         cmd = [
-            windowless_python(python),
-            "-I",
-            "-X",
-            "utf8",
-            "-m",
-            "agent_index",
-            start_command,
-            "--host",
-            cfg.host,
-            "--port",
-            str(port),
-            "--passive",
+            windowless_python(python), "-I", "-X", "utf8", "-m", "agent_index",
+            start_command, "--host", cfg.host, "--port", str(port), "--passive",
         ]
-        kwargs: dict[str, Any] = {
-            "cwd": str(install_dir().resolve()),
-            "env": {
-                key: value
-                for key, value in os.environ.items()
-                if key not in {"PYTHONPATH", "PYTHONHOME"}
-            },
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-        }
-        kwargs["env"].update(windowless_python_env(python))
-        kwargs.update(detached_kwargs(breakaway=True))
-        handle = subprocess.Popen(cmd, **kwargs)  # noqa: S603
+        root = install_dir().resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
+        overrides = dict(windowless_python_env(python))
+        # The generation's log is append-only: keep uvicorn's per-request lines
+        # out of it unless the operator set a level.
+        if "AGENT_INDEX_LOG_LEVEL" not in env:
+            overrides["AGENT_INDEX_LOG_LEVEL"] = "warning"
+        handle = spawn_daemon(
+            cmd, cwd=root, log_path=root / "service-stdio.log", env=env, env_overrides=overrides,
+            display=f"agent_index {start_command} --passive --port {port}",
+        )
         passive_instance.update({"port": port, "pid": handle.pid})
         return handle
 
@@ -1840,7 +1828,7 @@ def main(argv: list[str] | None = None) -> int:
         if rc is not None:
             return rc
 
-    if sub in {"index", "index-worker", "search", "similar", "clusters", "mcp"}:
+    if sub in {"index", "index-worker", "search", "similar", "clusters"}:
         role, _indexer = transport.plan_route()
         if role == "host":
             try:

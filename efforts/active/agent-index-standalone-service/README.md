@@ -29,13 +29,14 @@ deployment or destructive migration of durable data.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Coordinator | Integration, implementation and canary rollout | Managed upstream worktree |
-| Service implementer | Bounded independently packaged service slices | Separate managed worktree when delegated |
+| Service implementer | Bounded independently packaged service slices | Exclusive package edit scope; Coordinator owns git and publication |
 
 ## Coordination
 
 - **Topology:** independent per-slice PRs.
 - **Host (owns PRs):** Coordinator.
-- **Delegates:** bounded read-only packaging and vision evidence; no delegated git changes.
+- **Delegates:** bounded packaging evidence and implementation with exclusive
+  file ownership; no delegated git, fleet enrollment or production changes.
 - **Fleet integration:** #6383 owns the index service image, source-credential
   consumption and index-client adapter. #5789 owns Gateway routing/auth,
   #6030 owns fleet deployment/client lifecycle, and #6236 owns integrated
@@ -136,6 +137,14 @@ measured serving blocker. It does not authorize modifying an incumbent store or
 premature Gateway retirement; concrete adoption and prototype reconciliation
 remain downstream.
 
+Later priority clarification, public-safe summary: the operator selected
+`fresh-isolated-reindex` and directed that the independently deployed indexer
+must index on its own. Existing data transfer and migration are explicitly later
+work. The first adoption uses fresh isolated state and authoritative source
+ingestion, not an incumbent database copy. This does not waive new-writer
+ownership, source authorization, persistence or the existing advanced upgrade
+and rollback gates; legacy backfill is not a blocker for cold creation.
+
 ## Plan
 
 ### Phase 1 - Existing recovery and reviewed proposal
@@ -171,8 +180,10 @@ remain downstream.
   immutable executable slots make data rollback safe. _(agent-recommended)_
 
 ### Phase 3 - Deployment adapters and release reconciliation
-- [ ] Review the [fleet integration contract](fleet-integration.md) and agree
-  non-overlapping interfaces with the existing fleet campaign owners (#6383).
+- [x] Review the [fleet integration contract](fleet-integration.md) (#6385).
+- [ ] Agree non-overlapping Gateway and subscribed-controller credential
+  interfaces with the existing fleet campaign owners (#6383); independent image
+  preparation consumes only the existing standalone host contract.
 - [ ] Package the standalone indexer for an independently configured Linux
   container, preserving one local corpus/task writer and ordinary native use.
 - [ ] Consume source/account-scoped, refreshable credentials requested through
@@ -195,10 +206,21 @@ remain downstream.
 
 ### Phase 3a - Authorized-store migration and serving eligibility
 
-- [ ] Review and implement the [authorized-store migration](authorized-store-migration.md)
-  under #6383 with #6240/#6030 lifecycle coordination. Bounded legacy ID
+- [x] Review the [authorized-store migration](authorized-store-migration.md)
+  contract (#6605).
+- [ ] Create source-aware fresh state, maintain new ingestion/deletion, and
+  provide native scoped retrieval under #6383. Bounded legacy ID
   partitions are not eligible for full-corpus Gateway serving within its
   existing transport deadline. _(agent-recommended measured blocker closure)_
+- [ ] Later: implement existing-store projection/backfill with verified legacy
+  writer exclusion and #6240/#6030 lifecycle coordination. Do not mutate an
+  incumbent store or treat this later capability as a cold-creation prerequisite.
+
+**Immediate implementation priority:** create source-aware fresh state and
+maintain canonical provenance during new ingestion/deletion, then prove
+store-native scoped retrieval and autonomous indexing. Existing-store backfill,
+legacy-writer exclusion and data transfer remain tracked for later realization;
+unsupported existing layouts fail explicitly without mutation.
 
 ## Validation Plan
 
@@ -214,7 +236,9 @@ remain downstream.
   with explicit protocol/config schema expectations.
 - [ ] Queued full/incremental sequencing, worker adoption and corpus preservation
   through update, failed activation and supported rollback.
-- [ ] Optional container restart, persistent volumes and graceful termination.
+- [x] Optional container restart, persistent volumes and graceful termination:
+  isolated Linux candidate image, independent synthetic Git corpus and mock
+  embedding RPC. Production model/credentials/Gateway integration remains open.
 - [ ] Actual CLI -> authenticated Gateway -> container retrieval and distinct
   container -> Gateway -> subscribed-controller credential acquisition; prove
   refresh, expiry, controller disconnect and unauthorized/cross-source denial.
@@ -251,6 +275,43 @@ boundaries from implementation decisions and deployment-specific policy.
 
 ## Journal
 
+### 2026-10-13 - Fresh autonomous store implementation prepared
+- Implemented explicit `source-aware-v1` cold initialization, canonical
+  source/language/repository projections maintained by new ingestion, and native
+  prefiltered vector/FTS/hybrid retrieval. Legacy/nonempty stores are rejected
+  for this mode, not migrated; old immutable writers are not claimed excluded.
+- Actual queued Git full/incremental ingestion, unchanged rerun, deletion and
+  reopen exercise fresh state. Only inference is a fixture. The large synthetic
+  store has 140,000 candidates across 18 families; final full-scope vector/FTS/
+  hybrid requests measure approximately 0.32/0.15/0.43 seconds without setup or
+  tracemalloc. Real model, credentials, Gateway and deployment evidence is open.
+- Independent review found serving-read exclusion, FTS child lifetime, uncertain
+  destructive membership and fusion-weight defects. All four were corrected and
+  independently verified. A further FTS completion-versus-availability defect
+  was corrected with explicit success/no-op/failure outcomes and empty-store
+  preparation before queued ingestion.
+- Coordinator independently reran the final contained installed selections:
+  19 cold/process/failure cases, 33 native search/FTS/worker/cluster cases, and
+  93 standalone config/CLI cases passed. Installation contracts pass. This is a
+  code/test slice awaiting publication, not a deployed indexer or corpus parity.
+
+### 2026-10-13 - Authorized-store migration intent reviewed
+- #6605 squash-merged into `dev` at `2026-10-14T01:14:28Z`, commit
+  `3a0099244aea17181139533342f5d81b08cb6aa4`. The owner-authored current-head
+  Comment review had no Medium/High findings; its Low documentation-impact
+  omission was corrected in the PR description and the thread resolved.
+  All checks, including the live required `workflow-lockdown-guard`, passed.
+- Re-read Phase 3a and its Validation Plan after advancing onto the merged
+  default. Start the writer/store implementation next; contract review does not
+  complete migration, serving eligibility, real-model transport or corpus parity.
+- #6383 remains open. No incumbent store, native runtime, Gateway enrollment or
+  deployment changed as a result of this proposal merge.
+- Subsequent interface inspection found no cross-process fence for all legacy
+  writers. The operator selected fresh isolated reindexing and explicitly
+  deferred transfer/migration. Redirect the next implementation to autonomous
+  fresh-store ingestion and serving rather than make legacy backfill a cold
+  deployment prerequisite.
+
 ### 2026-10-12 - Package relocated: agent-index-service/ -> services/index/
 - Driven from the sibling `agent-dispatch-standalone-container` effort as a
   cross-cutting migration under the new
@@ -269,6 +330,53 @@ boundaries from implementation decisions and deployment-specific policy.
   tools/run-standalone-tests.py services/index --prepare --smoke` -- 371
   passed, 2 skipped) in the `agent-dispatch-standalone-container` effort's
   own Journal entry for this date.
+
+### 2026-10-12 - Offline image candidate and clean first-touch proof
+- Implemented verified offline context preparation and the generic non-root
+  image contract. The normal installed-package suite passes 416 tests with three
+  platform/opt-in skips; no source-path import override masks wheel behavior.
+- Actual governed native acquisition exposed a 176 MB compiled store member
+  exceeding the first-party 64 MiB budget. Added a bounded native-only 256 MiB
+  member profile while retaining first-party limits, aggregate/metadata limits
+  and full RECORD/hash checks; exact-boundary and aggregate regressions pass.
+- Built the actual Linux image entirely offline after approved digest-pinned
+  base and governed wheel acquisition. Same-source test wheels model the frozen
+  development versions only; this is not a released or production artifact.
+- A clean empty-volume repeat, without recovery or store seeding, enqueued a
+  real full Git ingestion task and produced two chunks/two vectors. The existing
+  client retrieved both fixture hits; restart retained the same completed task,
+  corpus and vectors. Both direct container stops exited zero. Only model
+  inference was mocked; package installation, API, queue, workers and persistence
+  were real.
+- Corrected proof-fixture task-status, runner-settlement and indexed-source-family
+  expectations before the clean repeat. Removed the exact owned test container
+  and state volume; retained the candidate image for publication follow-up.
+- No native database copy, native engine restart, existing Gateway change or
+  new-Gateway/token integration occurred. Publication and remaining fleet
+  interfaces continue under #6383.
+- Review corrections bind Dockerfile and ignore-file hashes to an independently
+  pinned contract and add trusted pre-Docker bounded tar capture. The actual
+  installed SDK built a new offline image from that snapshot; a tampered recipe
+  was rejected before even resolving a builder. The corrected image passed
+  another clean empty-volume ingestion/query/restart/exit-zero proof. Full
+  installed validation now passes 446 tests with three platform/opt-in skips.
+  Cleanup retains primary failures, hashed lock records are typed, and ARM
+  manylinux admission matches its 2.17 minimum policy.
+
+### 2026-10-12 - Fleet integration intent reviewed; image slice started
+- #6385 squash-merged into `dev` at `2026-10-13T00:37:08Z`, commit
+  `b688933b1df0c27c8327f39bfa4d3410dd8f86e8`, after current-head Copilot
+  APPROVED and actual passing required PR gate. Fixed corpus/source query and
+  status metadata authorization requirements; the stale index finding was
+  already fixed and resolved with its exact anchor.
+- Operator selected the new fleet-manager Gateway; existing adopter Gateways
+  remain untouched. No runtime or data cutover follows from reviewed intent.
+- Re-read the merged Plan. Started the independent container image/preparation
+  slice using the existing standalone host contract. Gateway/credential
+  interface agreement and real subscribed-controller routing remain open.
+- Assigned exclusive package edits to the Service implementer; Coordinator owns
+  integration, git, publication and live-venue validation. Image work does not
+  modify fleet-owned resident routing, credentials or deployment authority.
 
 ### 2026-10-12 - Candidate staging merged; fleet integration prioritized
 - Immutable native candidate staging #6074 merged into `dev` at

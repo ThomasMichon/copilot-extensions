@@ -4,11 +4,103 @@ from __future__ import annotations
 
 import pytest
 import time
+import threading
+from contextlib import ExitStack
+from types import SimpleNamespace
 
 from zdd import breadcrumb, diagnostics, routing
-from zdd.cutover_lock import CutoverLock
+from zdd.cutover_lock import CutoverBorrowError, CutoverLock, CutoverLockedError
 
 from .test_diagnostics import _ctx
+
+
+@pytest.mark.parametrize("invalid", ["closed", "nested", "thread", "process"])
+def test_diagnostic_apply_refuses_invalid_native_borrow_before_mutation(
+    tmp_path, monkeypatch, invalid,
+):
+    from zdd import cutover_lock
+
+    state = {"lock": None, "live": {}, "terminated": []}
+    lease = CutoverLock(tmp_path)
+    lease.acquire()
+    mutations, results, errors = [], [], []
+    monkeypatch.setattr(
+        diagnostics, "_apply_daemon_health_locked",
+        lambda *args, **kwargs: mutations.append(True) or {"mutated": True},
+    )
+    ctx = _ctx(tmp_path, state=state, acquire_cutover_guard=lambda _: lease)
+
+    def apply():
+        try:
+            results.append(diagnostics.apply_daemon_health(ctx))
+        except Exception as exc:
+            errors.append(exc)
+
+    try:
+        with ExitStack() as scope:
+            if invalid == "closed":
+                lease._fh.close()
+            elif invalid == "nested":
+                scope.enter_context(lease.borrow())
+            elif invalid == "process":
+                pid = cutover_lock.os.getpid()
+                patch = scope.enter_context(monkeypatch.context())
+                patch.setattr(cutover_lock, "os", SimpleNamespace(getpid=lambda: pid + 1))
+            if invalid == "thread":
+                thread = threading.Thread(target=apply)
+                thread.start()
+                thread.join(timeout=3)
+                assert not thread.is_alive()
+            else:
+                apply()
+            assert mutations == []
+            assert errors == []
+            assert results[0]["actions"][0]["blocked"] is True
+            assert results[0]["actions"][0]["kind"] == "cutover_guard"
+            assert lease.held is (invalid != "closed")
+            assert lease._borrowed is (invalid == "nested")
+        if lease.held:
+            with pytest.raises(CutoverLockedError):
+                CutoverLock(tmp_path).acquire()
+    finally:
+        lease.release()
+
+
+@pytest.mark.parametrize("same_path", [False, True])
+@pytest.mark.parametrize("fails", [False, True])
+def test_diagnostic_apply_borrows_and_releases_its_acquired_guard(
+    tmp_path, monkeypatch, same_path, fails,
+):
+    state = {"lock": None, "live": {}, "terminated": []}
+    lease = CutoverLock(tmp_path if same_path else tmp_path / "consumer")
+
+    def acquire(_):
+        lease.acquire()
+        return lease
+
+    def mutate(*args, **kwargs):
+        assert lease._borrowed and lease.held
+        with pytest.raises(CutoverLockedError):
+            CutoverLock(tmp_path).acquire()
+        with pytest.raises(CutoverBorrowError):
+            lease.release()
+        if fails:
+            raise RuntimeError("fixture mutation failure")
+        return {"completed": True}
+
+    monkeypatch.setattr(diagnostics, "_apply_daemon_health_locked", mutate)
+    ctx = _ctx(tmp_path, state=state, acquire_cutover_guard=acquire)
+    try:
+        if fails:
+            with pytest.raises(RuntimeError, match="fixture mutation failure"):
+                diagnostics.apply_daemon_health(ctx)
+        else:
+            assert diagnostics.apply_daemon_health(ctx) == {"completed": True}
+        assert not lease.held and not lease._borrowed
+        with CutoverLock(tmp_path):
+            pass
+    finally:
+        lease.release()
 
 
 @pytest.mark.parametrize("reachable", [False, True])

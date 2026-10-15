@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import installer as inst
 from . import output, reclaim, sessions, tracking
@@ -126,57 +128,8 @@ def add_parsers(sub) -> None:
     )
     sp.add_argument("--repo-path", default=None, help="Path inside a repo (defaults to cwd)")
 
-    sp = sub.add_parser(
-        "doctor",
-        help="Diagnose (and with --fix, repair) worktree/session health: "
-        "corrupt tracking records, empty session registries, stale "
-        "status, orphaned empty session shells, cwd/path misalignment, "
-        "and drop-in registry hygiene.",
-    )
-    sp.add_argument(
-        "--fix",
-        action="store_true",
-        help="Apply non-destructive repairs (YAML integrity, "
-        "registry/title backfill, stale status). Default: "
-        "report only.",
-    )
-    sp.add_argument(
-        "--gc-sessions",
-        action="store_true",
-        dest="gc_sessions",
-        help="With --fix, also delete empty (0-user-message) "
-        "session-state shells and purge their session-store "
-        "rows (destructive; guarded by age/lock/current/"
-        "registered).",
-    )
-    sp.add_argument(
-        "--prune-pivots",
-        action="store_true",
-        dest="prune_pivots",
-        help="With --fix, also delete stale Picker pivot manifest "
-        "files (duplicate/identity-mismatch/missing-target/"
-        "invalid-entry) once a live, correct manifest for the "
-        "same plugin already exists elsewhere in the registry "
-        "(destructive; never touches an operator-authored or "
-        "indeterminate manifest -- explicit opt-in, off by "
-        "default even with --fix).",
-    )
-    sp.add_argument(
-        "--apply-daemon-health",
-        action="store_true",
-        dest="apply_daemon_health",
-        help="Apply the resident status-monitor daemon-health repair path "
-        "(identity-bound duplicate/stale generation reap). Default: report only.",
-    )
-    sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
-    from .tracking_yaml_repair import add_doctor_arguments
-    add_doctor_arguments(sp)
-    sp.add_argument(
-        "--projection-budget",
-        type=int,
-        default=256,
-        help="Maximum exact session projection relations to inspect (default: 256)",
-    )
+    from .doctor_cli_parser import add_parser as add_doctor_parser
+    add_doctor_parser(sub)
 
     sp = sub.add_parser(
         "hygiene",
@@ -237,6 +190,7 @@ def cmd_dev(args) -> int:
         result = subprocess.run(
             ["pwsh", "-NoProfile", "-File", str(script), dev_action],
             cwd=str(repo_dir),
+            **no_window_kwargs(),
         )
         return result.returncode
 
@@ -404,6 +358,9 @@ def cmd_backfill_sessions(args) -> int:
 
 def cmd_doctor(args) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
+    if getattr(args, "repair_creation", None) is not None or getattr(args, "seed_id", None):
+        from .creation_tail_repair import targeted_doctor
+        return targeted_doctor(args)
     if getattr(args, "repair_record", None) is not None or getattr(args, "bound_agent_end_field", None):
         from .tracking_yaml_repair import targeted_doctor
         return targeted_doctor(args)
@@ -889,6 +846,7 @@ def cmd_register_project_entry(args) -> int:
                     capture_output=True,
                     text=True,
                     timeout=5,
+                    **no_window_kwargs(),
                 )
                 if result.returncode == 0:
                     remote = result.stdout.strip()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import re
 from dataclasses import dataclass
@@ -304,6 +305,66 @@ def _resolve_session_start_script(
     return script
 
 
+def _is_print_literal(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value == "print"
+
+
+def _python_prints_only_to_stderr(text: str) -> bool:
+    """Whether every ``print`` call in ``text`` writes to ``sys.stderr``.
+
+    stderr never reaches model context; any other print may write stdout.
+    Each call is judged on its own, so a stdout print chained on the same line
+    or nested inside a stderr print still counts. Beyond calls that print to
+    stderr only, any other reference to ``print`` (an alias, ``map(print,
+    ...)``), any ``.print`` attribute or ``getattr(..., "print")`` /
+    ``[...]["print"]`` lookup, a ``builtins`` import of it, a ``**kwargs``
+    destination and unparseable source all fail closed.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        # `from builtins import print as emit` binds print under another name.
+        if isinstance(node, ast.ImportFrom) and node.module == "builtins" and any(
+            alias.name in ("print", "*") for alias in node.names
+        ):
+            return False
+        # `emit = builtins.print`, `getattr(builtins, "print")`, `ns["print"]`.
+        if isinstance(node, ast.Attribute) and node.attr == "print":
+            return False
+        if isinstance(node, ast.Subscript) and _is_print_literal(node.slice):
+            return False
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and any(_is_print_literal(arg) for arg in node.args[1:2])
+        ):
+            return False
+    stderr_calls: set[int] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "print"):
+            continue
+        streams = [keyword.value for keyword in node.keywords if keyword.arg == "file"]
+        if len(streams) != 1 or any(keyword.arg is None for keyword in node.keywords):
+            return False
+        if not (
+            isinstance(streams[0], ast.Attribute)
+            and isinstance(streams[0].value, ast.Name)
+            and streams[0].value.id == "sys"
+            and streams[0].attr == "stderr"
+        ):
+            return False
+        stderr_calls.add(id(node.func))
+    return all(
+        id(node) in stderr_calls
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and node.id == "print"
+    )
+
+
 def _script_has_output_free_contract(script: Path) -> bool:
     try:
         text = script.read_text(encoding="utf-8", errors="replace")
@@ -347,11 +408,11 @@ def _script_has_output_free_contract(script: Path) -> bool:
             return nested.is_file() and _script_has_output_free_contract(nested)
         return False
     if suffix == ".py":
+        if not _python_prints_only_to_stderr(text):
+            return False
         code_lines = [
             line for line in text.splitlines() if line.lstrip() and not line.lstrip().startswith("#")
         ]
-        if any("print(" in line for line in code_lines):
-            return False
         stdout_lines = [line for line in code_lines if "sys.stdout.write(" in line]
         if not stdout_lines:
             return True

@@ -56,6 +56,14 @@ Agent Worktrees has three shipped pieces:
 - **Project binstubs** -- one launcher per registered project, plus the global
   `agent-worktrees` CLI
 
+The existing session command catalog also reports a source-qualified
+installation binding. Its legacy owner is published in the existing deploy
+manifest; its namespaced owner is the validated active installation receipt.
+Old or unattributed installations retain their command but report unresolved
+ownership, not invented readiness. See the
+[shared binding contract](../../libs/payload-invocation/README.md#source-qualified-command-binding)
+for selection/refusal semantics and consumer compatibility.
+
 Project launchers are attributable global entry points. Each launcher invokes
 the absolute payload-local agent-worktrees command that created it and carries
 an ownership receipt under `~/.agent-worktrees/binstub-receipts/`. Routine
@@ -78,6 +86,13 @@ selects its own registry root; cells sharing one harness home still arbitrate
 the same launchers and ownership ledger. This does not isolate the native
 installers or Windows Terminal profile refresh performed by `register`; use
 `register-project-entry` for registry and project-launcher publication only.
+
+Configuration/home discovery, front-door OS routing and Git path comparison
+use interpreter platform identity rather than `platform.system()`/`uname`.
+These OS-only checks do not require Windows WMI; home overrides, installation
+context selection and WSL detection keep their existing precedence.
+Front-door Git discovery also uses the shared headless process helper for
+windowless callers.
 
 The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
@@ -115,7 +130,7 @@ for explicit selection, compatibility and lifecycle fences.
 
 ## Captured child ownership
 
-Bounded Git publication and local-guidance discovery/rendering use a headless
+Bounded Git publication and static-guidance Git preflights use a headless
 captured child on Windows, assigned to a kill-on-close Job before execution.
 Job admission failure is explicit; there is no detached fallback. Timeout or
 caller exit reaps descendants while preserving captured diagnostics.
@@ -123,6 +138,36 @@ Explicit descendant escape is prevented by this bounded Job; durable-service
 launchers retain the shared helper's permissive default outside this seam.
 POSIX retains its process-group timeout cleanup. This is not a durable-daemon
 launch or an interactive terminal.
+
+## Static instruction preparation
+
+Startup copies every declared instruction unchanged in process, after applicable
+worktree allocation and complete paired-plugin composition. The outer launchers
+defer resolve-time copies and run
+`knowledge compose-plugins --prepare-projections` after maintenance, before
+starting Copilot. No packaged projection engine or authoring plugin is required.
+Resolve deferral uses a call-scoped environment hint, not a new mandatory
+argument, so an older runtime can still reach the launcher's update barrier.
+Direct CLI resolve calls retain preparation by default.
+The Manager's initial resolve also defers when it will hand off to those
+launchers. Direct consumers and explicit or persisted AHP sessions still
+prepare immediately. Final preparation targets the selected launch checkout,
+including knowledge-side launches, unless an explicit harness path was supplied.
+Generated instructions live under the ignored
+`.github/instructions/agent-worktrees-generated/` namespace; tracked and staged
+paths are protected before any batch copy or cleanup.
+Inputs must be regular files; a FIFO or other nonregular input fails before it
+can block the in-process publisher. On POSIX, foreground Git preflights retain
+the Manager's owned group. An operation timeout exits that preparation so the
+outer owner reaps remaining descendants before the launcher can continue.
+Bounded backup workers keep independent process-group ownership.
+
+Failed paired allocation or composition retains a small pending marker in this
+worktree's existing Git-administrative guidance metadata. Both the final preflight and hook
+backup refuse partial publication until successful paired composition clears
+that marker. Explicit no-pair creation does not set it. Existing worktree
+identities and checked-in guidance remain usable; pair repair is separate from
+static copying.
 
 ## PowerShell post-tool hook
 

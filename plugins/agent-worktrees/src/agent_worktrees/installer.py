@@ -377,7 +377,8 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py", "anchor_shell_parser.py",
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
-                 "nudge_status.py", "bind_nudge.py", "hook_client.py", "post-tool-hook.ps1", "terminal_probe.py"):
+                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_client.py",
+                 "post-tool-hook.ps1", "terminal_probe.py"):
         src = scripts / name
         if src.exists():
             shutil.copy2(src, bd / name)
@@ -1335,79 +1336,10 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
 
 
 def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
-    """Write the unified schema_version 3 deploy-manifest.json (atomic).
+    """Publish the schema-3 source footprint through the owned lifecycle."""
+    from .deploy_manifest import write_deploy_manifest as publish
 
-    Records the runtime source footprint (local checkout vs marketplace),
-    inferred from where this installer source lives.
-    """
-    manifest_path = install_dir() / "deploy-manifest.json"
-    plugin_dir = find_package_source(repo_dir).parent.parent
-    plugin_path = str(plugin_dir)
-    kind = _source_kind(plugin_path)
-
-    version = "0.0.0"
-    pyproject = plugin_dir / "pyproject.toml"
-    if pyproject.exists():
-        try:
-            for line in pyproject.read_text().splitlines():
-                if line.strip().startswith("version"):
-                    version = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    break
-        except Exception:
-            pass
-
-    # Git provenance only applies to a local checkout.
-    commit = None
-    branch = None
-    dirty = False
-    if kind == "local":
-        try:
-            r = subprocess.run(
-                ["git", "-C", str(repo_dir), "rev-parse", "--short", "HEAD"],
-                capture_output=True, text=True, **no_window_kwargs(),
-            )
-            if r.returncode == 0:
-                commit = r.stdout.strip()
-            r = subprocess.run(
-                ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, **no_window_kwargs(),
-            )
-            if r.returncode == 0:
-                branch = r.stdout.strip()
-            r = subprocess.run(
-                ["git", "-C", str(repo_dir), "status", "--porcelain", "--",
-                 "plugins/agent-worktrees/"],
-                capture_output=True, text=True, **no_window_kwargs(),
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                dirty = True
-        except Exception:
-            pass
-
-    plat = cfg.detect_platform()
-    manifest = {
-        "schema_version": 3,
-        "service": "agent-worktrees",
-        "deployed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "deployed_by": f"{machine}-{plat}",
-        "source": {
-            "kind": kind,
-            "path": plugin_path.replace("\\", "/"),
-            "repo": "copilot-extensions",
-            "plugin": "agent-worktrees",
-            "version": version,
-            "commit": commit,
-            "branch": branch,
-            "dirty": dirty,
-        },
-        "venv": str(venv_dir()).replace("\\", "/"),
-        "runtime": "python",
-    }
-
-    tmp = manifest_path.with_name(manifest_path.name + ".tmp")
-    tmp.write_text(json.dumps(manifest, indent=2))
-    tmp.replace(manifest_path)
-    output.ok(f"Deploy manifest: {manifest_path} (source: {kind})")
+    publish(repo_dir, machine)
 
 
 def show_install_status() -> None:

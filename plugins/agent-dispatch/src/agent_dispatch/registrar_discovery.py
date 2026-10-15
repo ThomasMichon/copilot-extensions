@@ -41,6 +41,7 @@ from . import repo_config
 from .install_paths import install_dir as dispatch_install_dir
 from .registrar import ProfileDeclaration, RegistrarError
 from .registrar_document import expand_declaration_document  # noqa: F401 -- public validation seam
+from .registrar_document import qualify_supplier_context
 from .repository_resources import (
     RepositoryResourceSnapshot,
     is_repository_resource,
@@ -659,11 +660,14 @@ def discover_trusted(
     for pointer in pts:
         owner = pointer.effective_owner()
         if pointer.kind == "repo":
-            root = (
-                registered_repository_root(pointer.repository, execution=True)
-                if pointer.repository is not None else pointer.repo_root()
-            )
+            snapshot = RepositoryResourceSnapshot(execution=False)
+            root = snapshot.root(pointer.repository) if pointer.repository else pointer.repo_root()
             declarations = read_repo_location_layers(root, owner=owner)
+            if pointer.repository and snapshot.is_read_only(pointer.repository):
+                declarations = [
+                    qualify_supplier_context(declaration, pointer.repository, root)
+                    for declaration in declarations
+                ]
         else:
             location = pointer.resolved_location()
             # A supported dir pointer may point directly at an in-repo

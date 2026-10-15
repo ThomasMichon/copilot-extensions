@@ -29,7 +29,7 @@ plugins/agent-logger/src/agent_logger/aggregate.py:827  pre-existing at rule int
 plugins/agent-logger/src/agent_logger/chronicle/sink.py:162  pre-existing at rule introduction, see #5518
 plugins/agent-logger/src/agent_logger/repo_trust.py:95  pre-existing at rule introduction, see #5518
 plugins/agent-logger/src/agent_logger/segmenter/ramp_up.py:236  pre-existing at rule introduction, see #5518
-plugins/agent-vault/src/agent_vault/cli.py:639  pre-existing at rule introduction, see #5518
+plugins/agent-vault/src/agent_vault/cli.py:617  pre-existing at rule introduction, see #5518
 plugins/agent-vault/src/agent_vault/prompt.py:71  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/scripts/service.yaml:16  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/__main__.py:3670  pre-existing at rule introduction, see #5518

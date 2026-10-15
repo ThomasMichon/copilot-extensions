@@ -47,7 +47,33 @@ CASES = [
     ("github:gim-home/odsp-web-harness", "odsp-web-harness-state", False),
     # A source with no colon at all (shouldn't occur in practice) never matches.
     ("not-a-real-source", "odsp-web-harness-state", False),
+    ("ado:org/project:workitems", "project", True),
+    ("ado:org/project:workitems", "org/project", True),
+    ("azure-devops:org/project:pulls", "project", True),
+    ("ado:org/project-extra:workitems", "project", False),
+    ("ado:org/Project:workitems", "project", False),
+    ("ado:host/org/project:workitems", "host/org/project", True),
+    ("ado:host/org/project:workitems", "org/project", False),
+    ("ado:host/org/project:workitems", "project", True),
+    ("forge:code:org/project", "project", False),
+    ("ado:org/all:workitems", "all", True),
+    ("ado:org/project:workitems", "all", False),
+    ("ado:org/project:workitems", "", False),
 ]
+
+
+def _connection():
+    import sqlite3
+
+    con = sqlite3.connect(":memory:")
+    con.execute("PRAGMA case_sensitive_like=ON")
+    con.create_function(
+        "split_part", 3,
+        lambda value, delimiter, part: (
+            value.split(delimiter)[part - 1] if len(value.split(delimiter)) >= part else ""
+        ),
+    )
+    return con
 
 
 @pytest.mark.parametrize("source,repo,expected", CASES)
@@ -62,9 +88,7 @@ def test_repo_filter_sql_agrees_with_repo_matches(source: str, repo: str, expect
     semantics are sqlite-specific enough that hand-checking the string isn't
     good enough; LanceDB's own SQL filter engine shares sqlite's LIKE/ESCAPE
     grammar for this subset)."""
-    import sqlite3
-
-    con = sqlite3.connect(":memory:")
+    con = _connection()
     con.execute("CREATE TABLE t (source TEXT)")
     con.execute("INSERT INTO t VALUES (?)", (source,))
     where = repo_filter_sql(repo)
@@ -75,9 +99,7 @@ def test_repo_filter_sql_agrees_with_repo_matches(source: str, repo: str, expect
 def test_repo_filter_sql_escapes_special_characters() -> None:
     """A repo name containing SQL-quote or LIKE-metacharacters must not break
     out of the generated clause or be treated as a wildcard."""
-    import sqlite3
-
-    con = sqlite3.connect(":memory:")
+    con = _connection()
     con.execute("CREATE TABLE t (source TEXT)")
     # A literal percent/underscore in the name must be matched LITERALLY, not
     # as a LIKE wildcard matching any character.

@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** leaf (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-13
+- **Last revised:** 2026-10-14
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -112,6 +112,19 @@ operations to these owners rather than building competing stores or supervisors.
 Index/search and other harness-side services can be registered independently of
 interactive agent sessions.
 
+### Shared fleet state backing store
+
+An adopted fleet has a durable central current-state view behind its selected
+Gateway. Authorized machine and container origins push their committed
+observations into that view; Worktree Manager, other UX surfaces, CLI tools and
+API clients share its scoped query and subscription contract rather than each
+maintaining a separate remote polling view.
+
+The central projection retains provenance, freshness and coverage without
+becoming another writer of its sources' worktree, task, session or resource
+authority. Centralizing an actual authority requires its separate explicit
+migration; centralizing observation alone does not perform that migration.
+
 ### Role deployments and container managers
 
 A role describes a supported service responsibility and its resource,
@@ -217,6 +230,14 @@ Connection recovery restores a coherent view through replay or an authoritative
 snapshot, with explicit stale/disconnected states. Subscription machinery
 augments the owning services' observation contracts rather than replacing their
 durable records.
+
+The shared backing store accepts attributable push updates and serves coherent
+current queries and subscriptions from the same committed view. Machines and
+containers have independently fenced origin identities. Duplicate, delayed,
+discontinuous or disconnected reporting remains diagnosable without rolling
+back newer facts or manufacturing completeness. Bounded recovery uses replay
+or an authoritative snapshot, and a slow client cannot stall producers or
+other readers. Observation expiry is not evidence that accepted work stopped.
 
 ### bounded-desired-state-control
 

@@ -461,7 +461,9 @@ _versioned_slot_clean() {
 _versioned_mark_complete() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || py=""
+    # The freshly built slot's own interpreter: it already passed the health
+    # gate, and an ambient one may be absent or unusable.
+    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
     if [[ -z "$py" ]]; then
         _fail "Cannot mark versions/$SRC_VERSION complete without a bootstrap Python interpreter"
         return 1

@@ -17,7 +17,7 @@ py="$(command -v python3 || command -v python || true)"
     exit 0
 }
 @@CATALOG_GATE_POSIX@@
-if output="$(COMMAND_PATH="$command_path" AVAILABILITY="$availability" "$py" <<'PY'
+if output="$(@@CATALOG_BINDING_ENV_POSIX@@COMMAND_PATH="$command_path" AVAILABILITY="$availability" "$py"@@CATALOG_BINDING_FLAGS_POSIX@@ <<'PY'
 import json
 import os
 
@@ -36,7 +36,7 @@ catalog = {
         }
     ],
 }
-context = (
+@@CATALOG_BINDING_PYTHON@@context = (
     "## @@COMMAND@@ session command catalog\n\n"
     "Invoke the exact `argv` below. Do not search `PATH` or substitute a "
     "same-named command from another payload.\n\n"

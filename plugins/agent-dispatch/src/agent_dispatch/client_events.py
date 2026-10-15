@@ -8,7 +8,8 @@ rather than grow an already-baselined file.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+import math
+from collections.abc import AsyncIterator, Iterator
 
 import httpx
 
@@ -21,6 +22,31 @@ class EventStreamClientMixin:
     defined in ``client.py`` itself -- that module is the one importing
     this mixin, so a module-level import here would be circular.
     """
+
+    async def async_stream_events(self, *, read_timeout: float = 20.0) -> AsyncIterator[dict]:
+        """Cancelable, bounded SSE subscription for an owned background intake.
+
+        Uses the same pinned endpoint and credentials as the synchronous client,
+        but a separate async transport so cancellation never closes an in-flight
+        queue read or spawn. Quiet coordinators without keepalive time out and
+        reconnect; periodic queue reconciliation remains the correctness floor.
+        """
+        from .client import DispatchError
+
+        if read_timeout <= 0 or not math.isfinite(read_timeout):
+            raise ValueError("assignment stream read timeout must be finite and positive")
+        async with httpx.AsyncClient(
+            base_url=self._http.base_url,
+            headers=self._http.headers,
+            timeout=httpx.Timeout(10.0, read=read_timeout),
+        ) as client:
+            async with client.stream("GET", "/events", params={"ready_frame": "1"}) as resp:
+                if resp.status_code >= 400:
+                    await resp.aread()
+                    raise DispatchError(resp.status_code, resp.text)
+                async for line in resp.aiter_lines():
+                    if line.startswith("data:"):
+                        yield json.loads(line[len("data:"):].strip())
 
     def stream_events(self, *, ready_frame: bool = False) -> Iterator[dict]:
         """Yield task events from the coordinator's SSE stream (blocking).
@@ -35,9 +61,9 @@ class EventStreamClientMixin:
         frame immediately after subscription registration and yields it to
         the caller as the first item -- the daemon-side
         registration-vs-real-event race this handshake exists to close. The
-        read timeout is unbounded for this one long-lived GET (the
-        coordinator emits no periodic keepalive and a quiet board would
-        otherwise trip httpx's shared default timeout mid-stream)."""
+        read timeout remains unbounded for compatibility with quiet older
+        coordinators. New coordinators send periodic comment keepalives,
+        ignored by the data-frame parser."""
         from .client import DispatchError
 
         params = {"ready_frame": "1"} if ready_frame else {}

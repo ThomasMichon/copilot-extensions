@@ -11,6 +11,23 @@ it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
+Agent Containers qualifies immutable runtime slots by its durable dependency
+profile (`<package-version>+base` or `<package-version>+provider-exec`).
+Its installation-owned `runtime-profile.json` preserves explicit desired state
+across updates; an existing unprofiled runtime with Paramiko retains that
+capability, while a fresh installation defaults to base. Package version remains
+unchanged in the deploy manifest's `source.version`; `runtime_version` and
+`runtime_profile` identify the selected slot. Both installers use the same
+stdlib-only profile coordinator and canonical construction/retention leases,
+source admission, completion and activation primitives. Explicit optional-profile
+failure leaves the active selector intact, never a successful base-only downgrade.
+See the plugin README's **Optional restricted SSH runtime** for provisioning.
+
+The canonical Python and native shell recovery resolvers order qualified slots
+by the package-version portion before the profile qualifier. A completed final
+release therefore outranks its development versions even when selectors are
+missing and legacy unqualified slots coexist with profiled slots.
+
 ## Core agent service installation-cell contract
 
 The prescriptive ownership boundary for persistent core `agent-*` runtimes is a
@@ -1685,6 +1702,20 @@ gate + marker**, a
 watchdog-killed build never becomes the live version — the old daemon keeps serving,
 and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 
+A refused or failed `mark-complete` (conflicting evidence, a storage failure, or no
+bootstrap interpreter to run it) **stops activation**: the installer reports why
+and exits non-zero instead of activating a slot whose completion was never
+published. `tools/check-install-contract.py` rejects a completion-marker helper
+that does not fail when its writer fails, and any call site that ignores the
+helper's result. A call is accepted only as a checked statement
+(`helper || exit 1`) or inside an `if` whose failure branch fails on every
+path, in that script's language (shell: a literal non-zero `exit`/`return`
+or the writer's own captured status; PowerShell: `return $false`, `throw` or
+a non-zero `exit`, since `return 1` is truthy there); any other form,
+such as assigning the result, is rejected as unrecognized.
+`tools/test_check_install_contract.py` also runs every shipped shell helper
+against a stub writer.
+
 > **Test it:** `tools/test-install-flow.ps1 -Plugin <name>` (Windows) and
 > `bash tools/test-install-flow.sh --plugin <name>` (Linux/WSL) are the turn-key
 > mini end-to-ends that assert all of the above in an isolated sandbox (STAGED,
@@ -1738,6 +1769,14 @@ install transaction lock and exits non-zero — it never proceeds unlocked.
 Read-only actions (`status`), service controls, and `uninstall` do not take it.
 `agent-logger` differs only in also locking `uninstall` (everything except
 `status`).
+`agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
+`flock` on fd 8; without a `flock` binary, the same `flock(2)` lock taken through
+Python, so it still excludes PowerShell and `flock` holders of `.install.lock`;
+the pid-symlink fallback only when neither is available, which excludes only other
+runs that also lack `flock(2)`; default wait 150s). It
+distinguishes the two non-success outcomes: another install holding the lock for
+the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
+success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call.
 
@@ -2314,7 +2353,11 @@ vision).
 - A separate `sessionStart` command hook runs
   `scripts/emit-command-catalog.{ps1,sh}` from `COPILOT_PLUGIN_ROOT` and emits
   exact payload-local `argv` plus `availability`. It never snapshots dynamic
-  runtime state or falls through to the legacy global wrapper.
+  runtime state or falls through to the legacy global wrapper. Agent Worktrees
+  additionally reports a read-only, source-qualified ownership binding from
+  lifecycle metadata or validated cell receipts; this is not runtime health.
+  The [shared catalog binding contract](../libs/payload-invocation/README.md#source-qualified-command-binding)
+  owns its schema, compatibility, and refusal rules.
 - Roster-wide tests run every runtime `agent-*` plugin's cheap stamp in an
   isolated profile with no installation-mode policy and require all declared
   commands to have a `~/.local/bin` fallback. This protects legacy/default

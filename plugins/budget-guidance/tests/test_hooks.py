@@ -17,14 +17,17 @@ PWSH = shutil.which("pwsh")
 pytestmark = pytest.mark.guard
 
 
-def test_session_start_is_bootstrap_only_and_output_free():
+def test_session_start_bootstrap_and_exact_session_writer_are_output_free():
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     entries = hooks["hooks"]["sessionStart"]
-    assert len(entries) == 1
+    assert len(entries) == 2
     entry = entries[0]
     assert "bootstrap-check" in entry["bash"]
     assert "bootstrap-check" in entry["powershell"]
     assert "invoke-context-contributor" not in json.dumps(entry)
+    assert "write-session-guidance" in entries[1]["bash"]
+    assert "write-session-guidance" in entries[1]["powershell"]
+    assert "additionalContext" not in json.dumps(entries)
 
     declaration = json.loads(
         (PLUGIN / "session-context.json").read_text(encoding="utf-8")

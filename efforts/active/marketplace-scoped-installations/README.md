@@ -495,6 +495,348 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-14 — Native diagnostic slice merged; wrapper acceptance continues
+
+- [#6645](https://github.com/ThomasMichon/copilot-extensions/pull/6645)
+  merged as `9506007202d1447646535551b6656c2634bd3e99` after exact-head
+  approval with zero findings and successful required PR, workflow-lockdown,
+  and source-attribution checks. Native Windows
+  [job 115746049797](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38532070063/job/115746049797)
+  executed the representative derived CLI and transport cases alongside the
+  existing source, Manager, and reconciliation selections.
+- No Phase 8 or original Validation Plan item closes at this boundary.
+  All-copy Windows CLI acceptance still needs the promoted manual workflow.
+  Promotion's six profile-assignment registration failures were already
+  corrected by merged
+  [#6667](https://github.com/ThomasMichon/copilot-extensions/pull/6667).
+  All six passed independently against current source; duplicate
+  [#6671](https://github.com/ThomasMichon/copilot-extensions/issues/6671)
+  is closed. Containing full release proof and existing release custody
+  remain unchanged. Historical host/guest claim
+  settlement is separately tracked by
+  [#5674](https://github.com/ThomasMichon/copilot-extensions/issues/5674).
+  Neither release waits nor claim refusal authorize an ownership rewrite or
+  validation bypass.
+- Continue the real Manager legacy/refusal and reconciliation refusal
+  no-write evidence while the existing owners drive those prerequisites.
+  Manager now checks nine legacy, active, policy, and transition scenarios
+  with absent and retained pointers, mutation-attempt witnesses, and full
+  snapshots after each wrapper in two cycles. Reconciliation checks six
+  policy, maintenance, and orphaned-transfer scenarios through its real
+  helper and selected-runtime wrapper, preserving explicit refusal.
+  The 30 bounded local cases passed; fresh native Windows execution remains
+  required.
+  Persistent diagnostic inspection, activation, release-content proof, and
+  managed rollout remain gated.
+
+### 2026-10-14 — Correct native diagnostic argument transport and matrix admission
+
+- [#6645](https://github.com/ThomasMichon/copilot-extensions/pull/6645)'s
+  first native Windows smoke failed before diagnostic execution:
+  PowerShell array splatting treated named CLI switches as positional values.
+  Fixture-owned launch scripts now spell the unchanged diagnostic command
+  with real named parameters and forward its exit code. The accepted host
+  initialization and complete profile snapshots are unchanged.
+- A real PowerShell regression preserves quoted paths and JSON arguments
+  through that boundary, including successful and refused exit codes over
+  two cycles. The acceptance workflow now participates in its own change
+  detector; explicit mode/pointer tokens and actual pytest collection prove
+  every manual partition selects exactly the dynamic native-copy inventory.
+- The corrected smoke, transport regressions, collection partitions, and CI
+  contracts passed 56 local cases. Current-head review, native Windows
+  execution, and required checks remain necessary; full native copy acceptance
+  and the broader diagnostic prerequisite remain open.
+- The next exact-head native Windows job
+  [115729114342](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38526848012/job/115729114342)
+  executed all four representative CLI cases and both transport cases, but
+  the aggregate correctly remained blocked: the trusted-CI guard forbids
+  dynamic runner routes. The manual workflow now uses two literal hosted
+  platform jobs with the same eight bounded partitions, without a guard
+  exception. Its workflow reference and derived-copy inventory are consistent.
+  Clone-neutral smoke ownership and Unicode/quoted transport are also covered;
+  the corrected smoke, partition, and trusted-CI selection passed 84 cases.
+  Fresh current-head native/aggregate checks and review remain necessary.
+
+### 2026-10-13 — Lifecycle-owned catalogs merged; derived native diagnostic acceptance
+
+- [#6546](https://github.com/ThomasMichon/copilot-extensions/pull/6546)
+  merged after its exact-head review reported zero open findings and both
+  required checks passed. Native Windows
+  [job 115706692559](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38517226519/job/115706692559)
+  executed 231 source/diagnostic/lifecycle cases, two Manager cases, eight
+  reconciliation/publisher cases, and the full fleet selection (493 passed,
+  six skipped). This is the first catalog adopter, not Phase 8 completion.
+- The next accepted stretch executes each dynamically inventoried native
+  installation-context copy's actual `status` and `probe-legacy` CLIs twice
+  in disposable legacy and active-cell fixtures, with absent and retained
+  foreign pointers. It reuses the accepted initialized PowerShell-host
+  fixture and measures the complete profile after every call and shutdown.
+  The initial complete POSIX matrix passed but took 405 seconds, so it does
+  not belong in a two-minute required step. Each copy now has independent
+  test items; required CI keeps the complete four-case Agent Worktrees smoke,
+  while the explicit manual native acceptance workflow runs all copies.
+  The corrected smoke and CI contracts passed 48 local cases in 40 seconds.
+  The final independent all-copy POSIX items and lane contracts passed 89
+  cases in 397 seconds; the slowest native item took 18.80 seconds.
+  Native Windows acceptance remains pending.
+- Broader consumer migration, wrapper refusal coverage, original validation,
+  release-content proof, and authorized managed rollout remain open.
+
+### 2026-10-13 — Authenticate staged-origin inheritance
+
+- Current-head review found that both native preambles could attribute a
+  directly invoked local payload to an ambient staged-origin override.
+  A staged-origin hint now requires an inherited lifecycle ticket, which the
+  existing live parent-lease validation authenticates. Direct callers discard
+  unauthenticated origin hints before entering the ownership transaction.
+- The real full-installer refusal matrix now includes a local payload copy
+  pretending to be the incumbent source. Both native installers refuse all
+  five mutation actions without changing any profile byte, directory, or
+  modification time. A separate live-parent-lease case admits that same
+  staged copy with its authenticated origin, preserving supported staging.
+  The original real self-stage smoke case still runs for the owning payload.
+- The binding/lifecycle selection passed 65 cases; the final authenticated
+  inheritance matrix passed all four native cases. Current-head review, native
+  Windows execution, and required aggregate/lockdown checks remain necessary.
+  No broader effort or rollout gate is closed.
+
+### 2026-10-13 — Isolate both PowerShell discovery processes
+
+- The next current-head review identified the same import-isolation class in
+  the PowerShell emitter's launcher probe and selected helper process. Both
+  now use isolated Python. Their real interpreter selection and supported
+  command argument vectors remain unchanged.
+- A regression uses the actual base interpreter, not a test venv that already
+  disables user sites. It first proves a fixture-owned user-site startup hook
+  executes without isolation, then invokes each unchanged generated emitter
+  twice and proves correct binding with complete profile snapshots unchanged.
+  The PowerShell case executes the real launcher-probe arguments as well as
+  the selected helper. The fixture interpreter preserves the real isolation
+  flags when injecting its account-home lookup.
+- The complete binding/lifecycle selection passed 63 cases locally; the full
+  shared catalog suite passed 163 cases with 14 platform skips. The prior
+  head's native job
+  [115688713237](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38512760080/job/115688713237)
+  succeeded, but is not evidence for this subsequent correction. Current-head
+  review, native execution, and required aggregate/lockdown checks remain
+  necessary; the effort and all broader acceptance gates stay open.
+
+### 2026-10-13 — Admit native self-staging and isolate catalog imports
+
+- Current-head review found two pre-admission mutation paths: both native
+  installers could create or reap legacy runtime staging directories before
+  refusing foreign ownership. Admission now precedes all self-staging. Its
+  parent holds the existing token-owned lease through the staged child; the
+  child revalidates that lease before staging and again before dispatch.
+  The shared self-stage blocks and their watchdog/CWD contract are unchanged.
+- The POSIX catalog binding emitter now uses isolated Python, excluding the
+  repository working directory and inherited Python import paths. A real
+  isolated-interpreter regression places executable shadow modules in both
+  locations, invokes the unchanged generated emitter twice, and proves source
+  selection and complete profile snapshots remain unchanged.
+- Actual native installer regressions cover all five legacy mutation actions
+  with foreign ownership and retained sibling staging evidence. Refusal
+  preserves the complete profile, including directories and modification
+  times; a separately admitted invocation proves the real self-stage block
+  still executes and releases its lease. The two shared binding/lifecycle
+  files passed 61 cases locally. The complete shared suite, both bootstrap
+  files, and payload CWD contracts passed 209 cases with 18 platform skips.
+- The preceding head's native Windows job
+  [115677711112](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38509342997/job/115677711112)
+  succeeded, but cannot validate these new changes. Fresh current-head review
+  and native execution remain necessary. No broader diagnostic prerequisite,
+  Phase 8, installed-copy, release, or rollout gate is closed.
+
+### 2026-10-13 — Native teardown accepted; cleanup assertions and coupled guard correction
+
+- Native job
+  [115669961542](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38506725448/job/115669961542)
+  completed in five minutes nineteen seconds under the seven-minute aggregate
+  bound. It executed 226 source/diagnostic/lifecycle cases, two Manager cases,
+  eight reconciliation/publisher cases, and the complete fleet selection
+  (493 passed, six skipped). Individual diagnostic/wrapper limits remained
+  unchanged. This is executed native evidence, not an aggregate hint.
+- Review resolved both teardown High findings but found three obsolete
+  in-runtime lock cleanup assertions. Those assertions now check the real
+  sibling path; the held-lock case also proves its path matches that expected
+  location before deletion. Foreign manifest refusal now compares the complete
+  profile without the previously necessary runtime-directory mtime exception.
+- The required installer guard exposed one coupled textual assertion that
+  still expected the earlier bootstrap candidate list. It now checks both
+  runtime and slot exclusions without dropping the original slot-safety
+  assertions. Complete shared binding/lifecycle and both bootstrap test files
+  passed 107 cases locally, with seven platform skips, including explicit
+  parent/child interpreter refusals that preserve the complete profile.
+- Fresh current-head review and all required checks remain necessary. No
+  broader diagnostic prerequisite, release, deployment, Phase 8, or original
+  Validation Plan item is closed by this test-only correction.
+
+### 2026-10-13 — Ownership-safe teardown and complete install refusal boundary
+
+- Current-head review found that the native uninstall branches bypassed the
+  newly introduced lifecycle admission. Both platform branches now join the
+  same ownership transaction before any teardown effects. The shared lock is
+  outside the canonical runtime root and survives configuration/root removal;
+  all publishers and builders use that same lock, not a second teardown-only
+  lock. A pure preflight rejects obvious foreign ownership without writing,
+  followed by mandatory revalidation after acquiring the lock.
+- Teardown does not reserve a runtime build. It holds ownership until the
+  native child exits, verifies the retained lock rather than deleted metadata,
+  and excludes the whole erased runtime from bootstrap interpreter selection.
+  The common parent also rejects interpreters inside the root.
+- Moved Python context resolution and lifecycle construction inside the
+  established installation refusal boundary. An invalid or foreign context
+  now returns the documented error rather than escaping with a traceback;
+  the six publisher/CLI contracts are included in the bounded guard lane.
+- Regression cases exercise both actual native uninstall branches with and
+  without configuration removal, foreign refusal, complete runtime deletion,
+  and a competing lock acquisition while teardown still owns the transaction.
+  The shared/catalog/scope and CLI selection passed 200 cases with 14 platform
+  skips locally. The disconnected installed-package selection passed eight
+  cases and skipped two unavailable native PowerShell cases.
+- The preceding head's native Windows job
+  [115659324492](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38503575369/job/115659324492)
+  passed 220 source/diagnostic cases, two Manager cases, seven reconciliation
+  cases, and its admission/CWD contracts. This proves the initialized-host
+  acceptance correction, not the new teardown changes. Current-head review,
+  native teardown evidence, and required aggregate/lockdown checks remain
+  necessary before merge; the effort and all wider acceptance gates stay open.
+- That job still failed its aggregate: its five-minute budget cancelled the
+  final fleet contract at 96% after the earlier selections succeeded.
+  Job timing and the contained runner's interruption log confirm the deadline,
+  not a failing diagnostic assertion. The Windows job now has a seven-minute
+  aggregate limit, while every individual diagnostic/wrapper bound and the
+  Linux job's five-minute limit remain unchanged. Coupled budget guards were
+  updated; no selection or assertion is removed.
+
+### 2026-10-13 — Real launcher selection and initialized-host diagnostic acceptance
+
+- Review on the previous catalog head identified a Store app-execution alias
+  winning over a working Python launcher. Binding discovery now prefers the
+  real Python 3 path returned by `py -3`, then filters aliases from application
+  fallbacks. Regression cases cover launcher plus alias, real Python fallback,
+  and alias-only explicit unresolved binding.
+- Native run [38439977692](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38439977692)
+  disproved the retail CLR `(d)` fixture hypothesis as well: all six failures
+  occurred in the host-only control before product execution. The coupled
+  installer-fixture and bridge precision corrections passed in that run.
+  Earlier warmup and gather-only hypotheses also did not meet this boundary.
+- The approved acceptance shape now initializes one real PowerShell host,
+  stops its CLR recording before a READY handshake, then takes the complete
+  profile baseline externally. Two unchanged diagnostic script calls and host
+  shutdown must preserve bytes, directory membership, and modification times.
+  No product warmup, file exclusion, filesystem restriction, or production
+  policy override is introduced. Manifest publication/refusal uses the same
+  initialized-host fixture; concurrent lifecycle ownership still uses separate
+  actual native processes with its existing runtime-file assertions.
+- The corrected bounded binding/lifecycle/scope selection passed 85 tests,
+  including local PowerShell. This is not native Windows PowerShell 5.1 proof;
+  current-head native CI, review, and aggregate/lockdown gates remain required.
+  Phase 8, release, installed-copy proof, and the overall effort remain open.
+- Subsequent native run [38502677186](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38502677186),
+  job [115653027017](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38502677186/job/115653027017),
+  executed the initialized-host diagnostic and launcher cases successfully.
+  Its one remaining failure (216 passed, nine skipped) was the contextual
+  writer fixture reporting an ignored fingerprint probe's residual native
+  exit code as the script's outcome. The Linux foundation job exposed the
+  same fixture discrepancy with an unavailable runtime import.
+  The host now preserves script success versus explicit exit or exception;
+  three regression cases cover those distinct outcomes. This correction
+  changes no production writer or admission rule. Fresh full native evidence
+  and required checks are still needed on the corrected head.
+
+### 2026-10-13 — Native host controls and source-footprint review follow-up
+
+- Current-head review resolved the earlier lifecycle/contextual findings but
+  identified ambient Git selectors in the extracted footprint publisher.
+  All three probes now use the established repository-identity environment;
+  the coupled install/register probes use it too. The headless regression
+  injects foreign `GIT_DIR`/`GIT_WORK_TREE` values and checks every child.
+- Native Windows host-only controls demonstrated that warming classic
+  PowerShell does not stop its startup profile rewrites. The fixture now
+  requests the retail CLR AutoStartProfile `(d)` option through
+  `MultiCoreJitProfile`, rather than relying on an unverified gather-only
+  switch. The host-only control and whole-profile comparisons remain intact;
+  native confirmation is still required, with no exclusions or policy bypass.
+- Updated the partial-package health fixture to include the new admission
+  helpers, preserving its actual staging and rejection path. Restored the
+  established full .NET type spelling in contextual manifest publication.
+  The disconnected targeted installer suite passed eight cases.
+- Synchronized through the backed worktree flow after the base advanced.
+  Its new bridge telemetry assertion failed only on binary floating-point
+  accumulation order; an atomic test-only correction uses a tight tolerance
+  without changing accounting, identity, or lower-bound assertions.
+  The disconnected native telemetry case passed.
+- None of these local results substitutes for current-head native/aggregate
+  gates, effort completion, release, or installed-copy proof.
+
+### 2026-10-13 — Catalog review correction: admit ownership before runtime mutation
+
+- The first catalog-adopter review identified a real lifecycle boundary gap:
+  the manifest transaction was serialized, but native and Python callers
+  could deploy or activate a foreign runtime before reaching its refusal.
+  The correction moves ownership admission before shared-runtime mutation
+  and holds the same token-owned lock through the entire operation.
+- Independent review caught the deferred stamp boundary: it has no venv or
+  runtime build to finalize. Stamping retains early ownership admission and
+  serialization without publishing a pending build or a new selected owner;
+  first-use provision performs the separate runtime transaction.
+- The existing deploy manifest now retains a pending reservation on partial
+  failure. Discovery refuses to select it; native children must validate a
+  live, same-host token, source, and exact root before dispatch. Runtime-write
+  and activation race coverage executes both actual native admission/dispatch
+  fragments, not only concurrent manifest publication.
+- Native contextual install/update publication was also incorrectly sent
+  through the legacy publisher. Its separate schema-3 writer is restored and
+  tested twice against a disposable active namespaced receipt. The Python
+  source-footprint writer was extracted cohesively to honor the shrink-only
+  module baseline instead of raising it.
+- Legacy compatibility remains explicit: the canonical probe can admit an
+  unowned, unattributed install only under its established missing-policy
+  default-false rule. That flow remains serialized but never claims
+  source-qualified catalog selection. Its reservation persists on failure
+  only; successful unattributed publication removes it so a later authorized
+  update can qualify the installation from real source evidence rather than
+  becoming permanently pinned to an unproven payload path.
+  Classic Windows PowerShell host-cache
+  preparation includes a host-only control and preserves whole-profile
+  byte/directory/mtime comparisons; native provider confirmation remains open.
+- No effort checkbox, release, rollout, or persistent-host permission is
+  changed by this correction.
+
+### 2026-10-13 — Source foundation landed; lifecycle-bound catalog adoption
+
+- [#6539](https://github.com/ThomasMichon/copilot-extensions/pull/6539)
+  merged after a corrected-head Copilot approval with zero open findings and
+  successful required aggregate/lockdown checks.
+  [Native Windows job 115373906641](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38418486165/job/115373906641)
+  actually executed 163 source/diagnostic cases with three POSIX-only skips,
+  both Manager cases, and both real reconciliation cases. The coupled step-name
+  guard was corrected before merge; source-only resolution was not installation
+  acceptance.
+- Added opt-in binding publication to the existing shared catalog generator,
+  with Agent Worktrees as the first adopter. Its existing Python, POSIX, and
+  PowerShell deploy-manifest writers publish normalized legacy ownership.
+  Discovery validates that record or the active namespaced receipt and reports
+  selected, unresolved, or blocked ownership without provisioning or activation.
+  Registration-reused and fallback guidance use the same generated emitter.
+- Existing exact payload `argv`, shell conventions, shim availability, and
+  supported legacy commands remain intact. Old manifests cannot establish
+  source-qualified ownership from their path alone. A conflicting manifest
+  owner refuses publication; an authorized same-source payload refresh preserves
+  installation identity. Binding selection does not claim runtime health.
+- Local acceptance passed 159 generator/catalog/scope cases with 14 platform
+  or tool-availability skips, including two real concurrent lifecycle publishers
+  with one winner. The network-disconnected Python lifecycle selection passed
+  five cases. An independent correctness review found no blocking bugs; its
+  receipt-layout and Python error-boundary observations were addressed. Native
+  Windows/current-head provider acceptance is still required before merge.
+- Other catalog adopters, stable lifecycle launchers, source metadata for
+  owner-resolved marketplace declarations, consumer migration, wider diagnostic
+  acceptance, and release/installed-copy proof remain open. No Phase 8 or
+  original Validation Plan checkbox is closed; persistent-host restrictions
+  remain unchanged.
+
 ### 2026-10-13 — Reconciliation acceptance landed; separate source provenance from cell selection
 
 - [#6532](https://github.com/ThomasMichon/copilot-extensions/pull/6532)

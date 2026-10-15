@@ -248,6 +248,28 @@ def load_manifest(path: Path) -> dict[str, object]:
                 f"{path}: installationContext required needs payloadDispatcher "
                 "for both platforms"
             )
+    catalog_binding = data.get("catalogBinding", False)
+    if not isinstance(catalog_binding, bool):
+        raise ValueError(f"{path}: catalogBinding must be a boolean")
+    binding_module = data.get("catalogBindingModule", "")
+    if (
+        not isinstance(binding_module, str)
+        or binding_module and (
+            not _DISPATCHER.fullmatch(binding_module)
+            or ".." in Path(binding_module).parts
+            or not binding_module.startswith("src/")
+            or not binding_module.endswith("/_command_binding.py")
+        )
+    ):
+        raise ValueError(f"{path}: invalid catalogBindingModule")
+    if binding_module and not catalog_binding:
+        raise ValueError(f"{path}: catalogBindingModule requires catalogBinding")
+    if catalog_binding and (
+        installation_context != "required"
+        or posix_catalog_mode != "python"
+        or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
+    ):
+        raise ValueError(f"{path}: catalogBinding requires a vendored installation primitive")
     data["runtimeRoot"] = data[runtime_root_field]
     data["installationContext"] = installation_context
     data["outputDir"] = output_dir
@@ -260,6 +282,8 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["bootTraceLogFile"] = boot_trace_log_file
     data["payloadDispatcher"] = normalized_dispatcher
     data["catalogGate"] = catalog_gate
+    data["catalogBinding"] = catalog_binding
+    data["catalogBindingModule"] = binding_module
     data["plugin"] = plugin
     data["commands"] = commands
     data["multiCommandManifest"] = raw_commands is not None
@@ -413,6 +437,63 @@ def render(
             "if ($LASTEXITCODE -ne 0) { Write-Output '{}'; exit 0 }\n"
             if data["catalogGate"]
             else ""
+        ),
+        "CATALOG_BINDING_PYTHON": (
+            "import importlib.util\n"
+            "import sys\n"
+            "from pathlib import Path\n\n"
+            "sys.dont_write_bytecode = True\n"
+            "root = Path(os.environ['SELF_ROOT'])\n"
+            "spec = importlib.util.spec_from_file_location(\n"
+            "    '_payload_command_binding', root / 'scripts' / 'command_binding.py'\n"
+            ")\n"
+            "assert spec and spec.loader\n"
+            "binding_module = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(binding_module)\n"
+            "catalog['binding'] = binding_module.binding_for_payload(\n"
+            f"    root, '{data['plugin']}', Path.home() / '{data['runtimeRoot']}'\n"
+            ")\n"
+            if data["catalogBinding"] else ""
+        ),
+        "CATALOG_BINDING_ENV_POSIX": (
+            'SELF_ROOT="$self_root" ' if data["catalogBinding"] else ""
+        ),
+        "CATALOG_BINDING_FLAGS_POSIX": (
+            " -I -B -X utf8" if data["catalogBinding"] else ""
+        ),
+        "CATALOG_BINDING_POWERSHELL": (
+            "$bindingPython = $null\n"
+            "$bindingLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue "
+            "| Select-Object -First 1\n"
+            "if ($bindingLauncher) {\n"
+            "    $candidate = & $bindingLauncher.Source -3 -I -B -E -X utf8 -c "
+            "'import sys; print(sys.executable)' 2>$null\n"
+            "    if ($LASTEXITCODE -eq 0 -and $candidate -and "
+            "[System.IO.File]::Exists([string]$candidate)) { $bindingPython = [string]$candidate }\n"
+            "}\n"
+            "if (-not $bindingPython) {\n"
+            "    foreach ($name in @('python3', 'python')) {\n"
+            "        $candidate = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue "
+            "| Where-Object { $_.Source -notmatch '[\\\\/]WindowsApps[\\\\/]' } | Select-Object -First 1\n"
+            "        if ($candidate) {\n"
+            "            $bindingPython = $candidate.Source; break\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+            "$catalog['binding'] = @{ schema = 'copilot-extensions.command-installation-binding'; "
+            "version = 1; status = 'unresolved'; reason = 'binding-interpreter-unavailable'; "
+            "source = $null; installation = $null }\n"
+            "if ($bindingPython) {\n"
+            "    $bindingHelper = Join-Path $selfRoot 'scripts\\command_binding.py'\n"
+            f"    $legacyRoot = Join-Path $env:USERPROFILE '{data['runtimeRoot']}'\n"
+            "    $bindingJson = & $bindingPython -I -B -E -X utf8 $bindingHelper "
+            f"--payload-root $selfRoot --plugin-id '{data['plugin']}' --legacy-root $legacyRoot\n"
+            "    if ($LASTEXITCODE -eq 0) {\n"
+            "        try { $catalog['binding'] = $bindingJson | ConvertFrom-Json -ErrorAction Stop }\n"
+            "        catch { [Console]::Error.WriteLine($_); $catalog['binding'].reason = 'binding-response-invalid' }\n"
+            "    } else { $catalog['binding'].reason = 'binding-resolver-failed' }\n"
+            "}\n"
+            if data["catalogBinding"] else ""
         ),
         "PAYLOAD_DISPATCH_POSIX": (
             (
@@ -591,6 +672,23 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             (TEMPLATES / template).read_text(encoding="utf-8"),
             data,
         )
+    if data["catalogBinding"]:
+        binding_source = (TEMPLATES.parent / "command_binding.py").read_text(encoding="utf-8")
+        binding_paths = [manifest.parent / "scripts" / "command_binding.py"]
+        if data["catalogBindingModule"]:
+            binding_paths.append(manifest.parent / str(data["catalogBindingModule"]))
+        for path in binding_paths:
+            if path in generated or path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {path}")
+            generated[path] = binding_source
+            lifecycle_path = path.with_name(
+                "_command_lifecycle.py" if path.name.startswith("_") else "command_lifecycle.py"
+            )
+            if lifecycle_path in generated or lifecycle_path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {lifecycle_path}")
+            generated[lifecycle_path] = (TEMPLATES.parent / "command_lifecycle.py").read_text(
+                encoding="utf-8"
+            )
     return generated
 
 

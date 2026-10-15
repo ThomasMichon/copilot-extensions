@@ -7,9 +7,11 @@ import argparse
 import json
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from budget_routing import AdviceError, compose, instant
 
 SCHEMA = "copilot-extensions.model-routing"
 VERSION = 1
@@ -92,6 +94,9 @@ def _parser() -> argparse.ArgumentParser:
         "--as-of",
         help="ISO date used for evidence-expiry checks; defaults to today.",
     )
+    parser.add_argument("--operator-model", help="Explicit demonstrated eligible model choice.")
+    parser.add_argument("--budget-posture", type=Path, help="Optional owner-issued posture JSON.")
+    parser.add_argument("--budget-at", help="RFC 3339 advice evaluation instant; defaults to now.")
     return parser
 
 
@@ -440,6 +445,7 @@ def _decision(
     trial_model: str | None,
     trial_id: str | None,
     as_of: date,
+    operator_model: str | None = None,
 ) -> dict[str, object]:
     available = set(available_models)
     satisfied = set(constraints)
@@ -482,6 +488,16 @@ def _decision(
             selected = eligible_candidates[trial_model]
             mode = "trial"
             reason = "explicit eligible candidate trial"
+    elif operator_model is not None:
+        selected = next(
+            (entry for entry in eligible_demonstrated if entry["model"] == operator_model),
+            None,
+        )
+        mode = "operator" if selected is not None else "none"
+        reason = (
+            "explicit demonstrated eligible operator choice"
+            if selected is not None else "operator choice is not demonstrated and eligible"
+        )
     elif eligible_demonstrated:
         selected = min(eligible_demonstrated, key=_cost_key)
         mode = "ordinary"
@@ -548,6 +564,9 @@ def main() -> int:
             args.trial_model,
             args.trial_id,
             args.as_of,
+            args.operator_model,
+            args.budget_posture,
+            args.budget_at,
         )
     ) or bool(args.available_model or args.constraint)
     if selection_requested:
@@ -561,6 +580,10 @@ def main() -> int:
             raise SystemExit("--trial-id requires --trial-model")
         if args.trial_model and not (args.trial_id and args.trial_id.strip()):
             raise SystemExit("--trial-model requires a non-empty --trial-id")
+        if args.operator_model is not None and args.trial_model is not None:
+            raise SystemExit("--operator-model and --trial-model are mutually exclusive")
+        if args.budget_at is not None and args.budget_posture is None:
+            raise SystemExit("--budget-at requires --budget-posture")
         trial_id = args.trial_id.strip() if args.trial_id else None
         try:
             as_of = _selection_date(args.as_of)
@@ -577,7 +600,20 @@ def main() -> int:
             trial_model=args.trial_model,
             trial_id=trial_id,
             as_of=as_of,
+            operator_model=args.operator_model,
         )
+        if args.budget_posture is not None:
+            try:
+                budget_at = (
+                    instant(args.budget_at) if args.budget_at is not None
+                    else datetime.now(timezone.utc)
+                )
+            except AdviceError as exc:
+                raise SystemExit(str(exc)) from exc
+            advice, diagnostic = compose(args.budget_posture, result["decision"], budget_at)
+            result["decision"]["budgetAdvice"] = advice
+            if diagnostic is not None:
+                diagnostics.append(diagnostic)
     print(json.dumps(result, indent=2, sort_keys=True))
     for diagnostic in diagnostics:
         print(f"[agent-conduct-guidance] {diagnostic}", file=sys.stderr)

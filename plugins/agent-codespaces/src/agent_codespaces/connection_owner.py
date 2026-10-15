@@ -58,6 +58,7 @@ from .config import RUNTIME_DIR, ensure_runtime_dir
 from .owner_identity import beacon_identity, owner_identity_matches, owner_process_identity
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
+from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, wait_for_owner_startup
 
 if TYPE_CHECKING:
     from .session_forwards import SessionForwards
@@ -960,15 +961,16 @@ async def run_owner_daemon(
 
 
 def ensure_owner_running(
-    config: Any, *, spawn_timeout: float = 5.0, poll: float = 0.2
+    config: Any, *, spawn_timeout: float = DEFAULT_OWNER_STARTUP_TIMEOUT, poll: float = 0.2
 ) -> bool:
     """Best-effort on-demand start of the Connection Owner daemon.
 
     Returns ``True`` once the Owner is live -- already running, or freshly
     spawned (detached, surviving this caller's own exit) and observed to become
-    live within ``spawn_timeout``. Returns ``False`` (never raises) on any
-    spawn failure or timeout, so a caller always has a safe fallback: keep
-    owning its own relay exactly as if the Owner did not exist. This is the
+    live within ``spawn_timeout`` (30 seconds by default, including cold imports
+    and configuration loading). Returns ``False`` on spawn failure, child exit
+    before readiness, or timeout. Callers retain their existing refusal or
+    direct-relay fallback rather than treating a spawned process as ready. This is the
     on-demand half of "spins up when needed, exits when idle" -- the daemon is
     never assumed to already be running as a permanent background service.
     """
@@ -988,13 +990,11 @@ def ensure_owner_running(
             "cwd": os.path.expanduser("~"),  # never the caller's cwd
             **windowless_daemon_kwargs(breakaway=True),
         }
-        subprocess.Popen(argv, **popen_kwargs)
+        child = subprocess.Popen(argv, **popen_kwargs)
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False
-    deadline = time.monotonic() + max(0.0, spawn_timeout)
-    while time.monotonic() < deadline:
-        if is_owner_live():
-            return True
-        time.sleep(poll)
-    return is_owner_live()
+    return wait_for_owner_startup(
+        child, is_owner_live, timeout=spawn_timeout, poll=poll,
+        log_path=RUNTIME_DIR / "logs" / "owner.log",
+    )
