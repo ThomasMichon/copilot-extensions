@@ -64,6 +64,7 @@ def test_command_binding_hidden_child_preserves_native_diagnostics(
         "[Console]::Error.WriteLine('CHILD_STDERR')\n"
         "$p = Start-Process -FilePath (Get-Process -Id $PID).Path "
         f"-NoNewWindow -PassThru -ArgumentList '-NoProfile -EncodedCommand {encoded}'\n"
+        "$null = $p.Handle\n"
         "$p.WaitForExit()\n"
         "if ($p.ExitCode -ne 0) { exit $p.ExitCode }\n"
         "exit 37\n",
@@ -99,6 +100,10 @@ def test_command_binding_hidden_child_preserves_native_diagnostics(
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 37, result.stdout + result.stderr
-    recorded = log.read_text(encoding="utf-8-sig")
+    raw = log.read_bytes()
+    recorded = raw.decode("utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig")
     for marker in ("CHILD_STDOUT", "CHILD_STDERR", "GRANDCHILD_STDOUT", "GRANDCHILD_STDERR"):
-        assert recorded.splitlines().count(marker) == 1, recorded
+        assert sum(
+            line == marker or line.endswith(" : " + marker)
+            for line in recorded.splitlines()
+        ) == 1, recorded
