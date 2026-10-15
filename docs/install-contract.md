@@ -2183,6 +2183,16 @@ requested path or working directory. Python 3.10 can use the proper TOML parser
 bundled in its standard `ensurepip` wheel without installing bootstrap packages;
 an interpreter without an available parser fails before dependency writes.
 
+Trusted registry-only tooling can select `--registry-only` before `--`.
+This skips product-root discovery and passes no trusted local project roots
+to the same canonical installer policy. It is mutually exclusive with
+`--trusted-source-root`; ordinary CLI source admission is unchanged. Local
+projects, editable sources and configured local-source mappings remain refused.
+The selected registry, resolver cutoff, dependency resolution, caller-required
+hashes and retained-input checks still apply. In particular, metadata-validator
+bootstrap must not derive unrelated product graphs merely to install its
+hash-pinned registry toolchain.
+
 `tools/check-dependency-age.py` audits canonical declarations against public
 release metadata; configured-feed availability remains an installation check.
 Dependabot's seven-day cooldown is complementary, not a substitute for that

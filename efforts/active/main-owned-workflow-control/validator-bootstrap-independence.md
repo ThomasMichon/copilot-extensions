@@ -75,14 +75,14 @@ review precedes activation; a development merge alone is not deployment.
 
 - [ ] Review this supporting contract and confirm non-overlapping integration
       with the existing release-control and emergency-repair owners.
-- [ ] Prove the default path still discovers and validates canonical sources;
+- [x] Prove the default path still discovers and validates canonical sources;
       registry-only admission never calls product-graph discovery.
-- [ ] Prove direct, editable, requirement-file, configured and transitive local
+- [x] Prove direct, editable, requirement-file, configured and transitive local
       sources remain refused in registry-only mode, with no dependency writes.
-- [ ] Prove resolver seasoning, stricter configured cutoffs, configured indexes,
+- [x] Prove resolver seasoning, stricter configured cutoffs, configured indexes,
       hashes and retained-input checks still execute; invalid or unsupported
       resolver evidence remains a visible failure.
-- [ ] Exercise a real fresh UV/venv consumer with a valid pinned registry
+- [x] Exercise a real fresh UV/venv consumer with a valid pinned registry
       requirement while the materialized product graph is deliberately broken.
       No mocked resolver or pre-provisioned environment substitutes for this.
 - [ ] Require the actual immutable candidate bootstrap recipe in the existing
@@ -99,3 +99,25 @@ Complete only when deny-local bootstrap independence and exact-candidate
 qualification are implemented, reviewed and live-proven through the existing
 release owner. A temporary main seed, a merged plan, a passing development
 test, or a relaxed admission rule is not completion.
+
+## Implementation evidence
+
+Plan #6866 merged as `74f550dadf2b6e76dfee0c7bb205dd7fa2d1f73d` after
+current-head Copilot approval with zero findings and successful required CI.
+The local support selects the existing deny-local API semantics explicitly;
+ordinary source admission and all installer policy functions are unchanged.
+
+Regression-first coverage had twelve failures and one default-behavior pass
+before the new mode. The final automatically selected policy and synchronization
+matrix passes 256 cases with one platform skip. The native fixture invokes
+the actual repository `tools/seasoned_uv.py` wrapper after real materialization,
+removal of canonical product libraries, and deliberate embedded identity
+corruption. Correctly pinned aged registry installation succeeds in a fresh
+venv, while the ordinary graph still refuses and cutoff/hash/age negatives
+remain failures.
+
+All thirteen independent policy copies are synchronized. Touched Python lint,
+module-size and install-contract checks pass. No workflow, validator, signer,
+release trigger, main branch, runtime selection or client preference changed.
+Source review, owned caller/candidate-gate integration and normal live release
+acceptance remain open; this evidence is not activation.

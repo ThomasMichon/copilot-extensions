@@ -170,7 +170,17 @@ Dependency preparation uses the canonical seven-day configured-resolver policy.
 Do not replace a failed admission with plain pip or an alternate index. After
 changing declarations, run `python tools/check-dependency-age.py`; its explicit
 `--ecosystem` lanes are diagnostics, not a replacement for the all-ecosystem CI
-gate. Focused policy tests are:
+gate.
+
+The automatically selected `tools/test_installer_dependency_policy.py` suite
+also exercises the deny-local CLI mode without product discovery. Its native
+bootstrap fixture runs the real materializer,
+removes the original library tree and deliberately corrupts embedded product
+identity, then bootstraps a pinned registry wheel into a fresh venv through
+real UV. Stricter cutoff, unseasoned artifacts and wrong hashes still refuse.
+The ordinary attributed-source path remains covered separately.
+
+Focused policy tests are:
 
 ```bash
 python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_seasoned_npm_install.py

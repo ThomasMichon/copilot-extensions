@@ -969,12 +969,16 @@ def run_uv_install(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uv", required=True)
-    parser.add_argument("--trusted-source-root", action="append", type=Path, default=[])
+    sources = parser.add_mutually_exclusive_group()
+    sources.add_argument("--trusted-source-root", action="append", type=Path, default=[])
+    sources.add_argument(
+        "--registry-only", action="store_true", help="Deny local projects without discovering product roots",
+    )
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
     try:
-        roots = tuple(args.trusted_source_root) or _anchor_roots()
+        roots = () if args.registry_only else (tuple(args.trusted_source_root) or _anchor_roots())
         return run_uv_install(
             args.uv, arguments, trusted_source_roots=roots,
             stdout=sys.stdout, stderr=sys.stderr,

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import io
+import json
+import os
 import shutil
+import subprocess
 import sys
+import threading
+import zipfile
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -1452,3 +1460,257 @@ def test_new_private_snapshot_paths_are_canonicalized_without_trusting_source_al
         "uv", ["--no-config", str(source)], cwd=source, trusted_source_roots=(source,),
     )
     assert result.returncode == 0 and roots and not roots[0].exists()
+
+
+def test_registry_only_cli_does_not_discover_product_roots(monkeypatch):
+    def forbidden():
+        pytest.fail("registry bootstrap attempted product-graph discovery")
+
+    calls = []
+    monkeypatch.setattr(policy, "_anchor_roots", forbidden)
+    monkeypatch.setattr(
+        policy, "run_uv_install",
+        lambda uv, arguments, **kwargs: (
+            calls.append((uv, arguments, kwargs)) or CompletedProcess([], 0)
+        ),
+    )
+    arguments = [
+        "--no-config", "--require-hashes", "--index-url", "https://registry.example/simple",
+        "packaging==25.0",
+    ]
+    assert policy.main(["--uv", "selected-uv", "--registry-only", "--", *arguments]) == 0
+    assert len(calls) == 1
+    assert calls[0][:2] == ("selected-uv", arguments)
+    assert calls[0][2]["trusted_source_roots"] == ()
+
+
+def test_default_cli_retains_product_attribution(monkeypatch, tmp_path):
+    discovered, calls = [], []
+    monkeypatch.setattr(
+        policy, "_anchor_roots", lambda: (discovered.append(True) or (tmp_path,)),
+    )
+    monkeypatch.setattr(
+        policy, "run_uv_install",
+        lambda uv, arguments, **kwargs: (
+            calls.append(kwargs["trusted_source_roots"]) or CompletedProcess([], 0)
+        ),
+    )
+    assert policy.main(["--uv", "selected-uv", "--", "fixture-package"]) == 0
+    assert discovered == [True] and calls == [(tmp_path,)]
+
+
+def test_registry_only_cannot_grant_explicit_source_roots(tmp_path, capsys):
+    with pytest.raises(SystemExit) as error:
+        policy.main([
+            "--uv", "selected-uv", "--registry-only", "--trusted-source-root", str(tmp_path),
+            "--", "fixture-package",
+        ])
+    assert error.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "reference", ["direct", "editable", "requirements", "nested-requirements", "project", "configured"],
+)
+def test_registry_only_refuses_local_sources_before_uv(monkeypatch, tmp_path, capsys, reference):
+    source = source_project(tmp_path / "source")
+    for name in tuple(os.environ):
+        if name.startswith(("UV_", "PIP_")):
+            monkeypatch.delenv(name)
+    for name in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME"):
+        monkeypatch.setenv(name, str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    arguments = [str(source)]
+    if reference == "editable":
+        arguments.insert(0, "-e")
+    elif reference in {"requirements", "nested-requirements"}:
+        requirement = tmp_path / "requirements.txt"
+        requirement.write_text(str(source) + "\n", encoding="utf-8")
+        if reference == "nested-requirements":
+            outer = tmp_path / "outer.txt"
+            outer.write_text("-r requirements.txt\n", encoding="utf-8")
+            requirement = outer
+        arguments = ["-r", str(requirement)]
+    elif reference == "project":
+        arguments = ["--project", str(source), "fixture-package"]
+    elif reference == "configured":
+        config = tmp_path / "configured.toml"
+        config.write_text(
+            '[sources]\nfixture-source={path="source"}\n', encoding="utf-8",
+        )
+        monkeypatch.setenv("UV_CONFIG_FILE", str(config))
+        arguments = ["fixture-package"]
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("refused local-source input reached UV or dependency writes")
+
+    monkeypatch.setattr(policy, "_anchor_roots", forbidden)
+    monkeypatch.setattr(policy.subprocess, "run", forbidden)
+    assert policy.main(["--uv", "selected-uv", "--registry-only", "--", *arguments]) == 1
+    assert "dependency-seasoning:" in capsys.readouterr().err
+
+
+def materialized_broken_helper(root):
+    import materialize_main
+
+    repository = root / "repository"
+    payload = source_project(
+        repository / "plugins" / "fixture-plugin", "fixture-plugin",
+        sources='fixture-lib={path="../../libs/fixture-lib",editable=true}',
+        dependencies='"fixture-lib>=1"',
+    )
+    library = source_project(
+        repository / "libs" / "fixture-lib", "fixture-lib",
+        sources='fixture-leaf={path="../fixture-leaf",editable=true}',
+        dependencies='"fixture-leaf>=1"',
+    )
+    leaf = source_project(repository / "libs" / "fixture-leaf", "fixture-leaf")
+    for project in (library, leaf):
+        (project / "src").mkdir()
+    (payload / "plugin.json").write_text(json.dumps({
+        "name": "fixture-plugin", "version": "1.0",
+        "repository": "https://github.com/ThomasMichon/copilot-extensions",
+    }), encoding="utf-8")
+    roster = repository / ".github" / "plugin" / "marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(json.dumps({
+        "name": "copilot-extensions",
+        "plugins": [{"name": "fixture-plugin", "version": "1.0", "source": "plugins/fixture-plugin"}],
+    }), encoding="utf-8")
+    changes = materialize_main.materialize_uv_editable_ref_into(
+        source_consumer_dir=payload, dest_consumer_dir=payload,
+        canonical_root=repository, dest_root=repository,
+    )
+    assert changes and not any(change.startswith("SKIP") for change in changes)
+    shutil.rmtree(repository / "libs")
+    manifest = payload / "libs" / "fixture-leaf" / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            'name="fixture-leaf"', 'name="wrong-identity"',
+        ),
+        encoding="utf-8",
+    )
+    helper = repository / "libs" / "installer-engine" / PATH.name
+    helper.parent.mkdir(parents=True)
+    shutil.copyfile(PATH, helper)
+    shutil.copyfile(
+        PATH.with_name("installer_dependency_config.py"),
+        helper.with_name("installer_dependency_config.py"),
+    )
+    wrapper = repository / "tools" / "seasoned_uv.py"
+    wrapper.parent.mkdir()
+    shutil.copyfile(PATH.parents[2] / "tools" / wrapper.name, wrapper)
+    assert not (repository / "libs" / "fixture-lib").exists()
+    assert not (repository / "libs" / "fixture-leaf").exists()
+    return wrapper
+
+
+@pytest.mark.parametrize("case", ["accepted", "stricter-cutoff", "wrong-hash", "unseasoned"])
+def test_native_registry_bootstrap_is_independent_of_materialized_product_graph(tmp_path, case):
+    uv = shutil.which("uv")
+    assert uv, "native UV is required for validator-bootstrap coverage"
+    helper = materialized_broken_helper(tmp_path)
+    content = io.BytesIO()
+    with zipfile.ZipFile(content, "w") as wheel:
+        wheel.writestr("fixture_validator.py", "MARKER = 'installed-from-registry'\n")
+        prefix = "fixture_validator-1.0.dist-info/"
+        wheel.writestr(
+            prefix + "METADATA", "Metadata-Version: 2.1\nName: fixture-validator\nVersion: 1.0\n",
+        )
+        wheel.writestr(
+            prefix + "WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        wheel.writestr(prefix + "RECORD", "")
+    artifact = content.getvalue()
+    filename = "fixture_validator-1.0-py3-none-any.whl"
+    digest = hashlib.sha256(artifact).hexdigest()
+    requirement = tmp_path / "validator-requirements.txt"
+    requirement.write_text(
+        f"fixture-validator==1.0 --hash=sha256:{'0' * 64 if case == 'wrong-hash' else digest}\n",
+        encoding="utf-8",
+    )
+    downloads = []
+
+    class Index(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.respond(head=False)
+
+        def do_HEAD(self):
+            self.respond(head=True)
+
+        def respond(self, *, head):
+            if self.path == "/simple/fixture-validator/":
+                body = json.dumps({
+                    "meta": {"api-version": "1.2"}, "name": "fixture-validator",
+                    "files": [{
+                        "filename": filename, "url": "/files/" + filename,
+                        "hashes": {"sha256": digest},
+                        "upload-time": "2099-01-01T00:00:00Z" if case == "unseasoned"
+                        else "2020-01-01T00:00:00Z",
+                    }],
+                }).encode()
+                kind = "application/vnd.pypi.simple.v1+json"
+            elif self.path == "/files/" + filename:
+                if not head:
+                    downloads.append(filename)
+                body, kind = artifact, "application/octet-stream"
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if not head:
+                self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Index)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    environment = offline_environment(tmp_path)
+    environment.pop("UV_OFFLINE", None)
+    target = tmp_path / "fresh-venv"
+    options = dict(
+        cwd=tmp_path, env=environment, capture_output=True, text=True,
+        timeout=30, creationflags=policy._HEADLESS,
+    )
+    try:
+        created = subprocess.run(
+            [uv, "venv", "--offline", "--python", sys._base_executable, str(target)], **options,
+        )
+        assert created.returncode == 0, created.stdout + created.stderr
+        python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        arguments = [
+            "--python", str(python), "--no-config", "--only-binary", ":all:", "--require-hashes",
+            "--index-url", f"http://127.0.0.1:{server.server_port}/simple", "-r", str(requirement),
+        ]
+        if case == "stricter-cutoff":
+            arguments.extend(["--exclude-newer", "2019-01-01T00:00:00Z"])
+        command = [sys.executable, "-I", str(helper), "--uv", uv]
+        default = subprocess.run([*command, "--", *arguments], **options)
+        assert default.returncode != 0 and "library identity" in default.stderr
+        assert downloads == []
+        result = subprocess.run([*command, "--registry-only", "--", *arguments], **options)
+        assert "unrecognized arguments" not in result.stderr
+        if case == "accepted":
+            assert result.returncode == 0, result.stdout + result.stderr
+            installed = subprocess.run(
+                [str(python), "-I", "-c", "import fixture_validator; print(fixture_validator.MARKER)"],
+                **options,
+            )
+            assert installed.returncode == 0
+            assert installed.stdout.strip() == "installed-from-registry"
+            assert downloads
+        else:
+            assert result.returncode != 0, result.stdout + result.stderr
+            if case == "wrong-hash":
+                assert "hash" in result.stderr.lower(), result.stdout + result.stderr
+            else:
+                assert downloads == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)

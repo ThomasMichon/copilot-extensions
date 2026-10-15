@@ -22,8 +22,17 @@ is the default). This exception applies only to the build toolchain:
 dependency resolution or published third-party wheels.
 
 Hosted validator provisioning also hash-pins `packaging`; its binary-only,
-no-dependency install accepts `ARTIFACT_VALIDATION_INDEX_URL` as an explicit
+hash-checked install accepts `ARTIFACT_VALIDATION_INDEX_URL` as an explicit
 feed override, defaulting to the public tooling index on public runners.
+
+The canonical seasoning CLI's explicit `--registry-only` mode admits such
+registry toolchains without discovering product project/library roots. It
+denies local source projects and retains the existing cutoff, selected index,
+hash and retained-input checks; it is not a public-feed fallback or a second
+installer policy. Callers opt in explicitly. Existing main workflow callers
+do not change merely because support has merged on development; reviewed
+control activation and exact materialized bootstrap qualification remain
+separate requirements.
 
 Public mode selects exact non-yanked stable pins from PyPI metadata, measures
 age from the newest file, and installs binary distributions only from one
