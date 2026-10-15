@@ -141,6 +141,9 @@ gate. Focused policy tests are:
 python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_seasoned_npm_install.py
 ```
 
+The editable-retention regression runs the real setuptools backend; the test
+environment must include `setuptools>=83.0.0` and `wheel`, installed through
+`tools/seasoned_uv.py` like CI's guard tooling.
 The native UV lane uses a controlled index to exercise a transitive dependency
 and an isolated build backend, including newer/missing upload timestamps,
 transitive URL refusal and UV's conservative exclusive boundary. The native npm
