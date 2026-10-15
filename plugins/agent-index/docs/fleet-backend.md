@@ -97,6 +97,14 @@ and removed from the 32-connection concurrency budget. No WebSocket upgrade
 or alternate protocol bypass is enabled. Credentials are never stored in manifests,
 arguments, source rows or task receipts.
 
+Renewable source callbacks run in an owned, joined worker with copied context
+variables. Ordinary callback exceptions become a static
+`source-credential-unavailable` error without the original diagnostic or
+exception context entering task results/logged tracebacks. Process-control
+exceptions propagate, and successful, failed and interrupted acquisitions leave
+no callback worker running. The callback retains its transport deadline; this
+is not a new credential daemon, timeout extension or identity provider.
+
 ## Remaining evidence and ownership
 
 Tests use real cold-domain storage, cryptographic grants, verified TLS,

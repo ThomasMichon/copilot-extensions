@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -46,10 +48,12 @@ def gateway_connector_kwargs(spec: SourceSpec) -> dict[str, object]:
 
 
 def acquire_token(provider: TokenProvider) -> str:
-    try:
-        value = provider()
-    except (OSError, ValueError, RuntimeError):
-        raise SourceCredentialError("source-credential-unavailable") from None
+    # Keep provider diagnostics out of the task exception's traceback and context.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="index-source-credential") as executor:
+        result = executor.submit(copy_context().run, provider)
+        if isinstance(result.exception(), Exception):
+            raise SourceCredentialError("source-credential-unavailable") from None
+        value = result.result()
     if (
         not isinstance(value, str) or not value or len(value) > 16384
         or any(ord(char) < 33 or ord(char) == 127 for char in value)

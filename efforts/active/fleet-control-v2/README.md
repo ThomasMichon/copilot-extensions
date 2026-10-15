@@ -377,6 +377,14 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 ## Journal
 
 ### 2026-10-15 - Integrated Gateway prepared for review
+- The current-head overview identified arbitrary synchronous source-provider
+  exceptions bypassing the narrow sanitization tuple. Provider-only result
+  capture now translates every ordinary callback failure into a static
+  credential-unavailable refusal without attaching its diagnostic or exception
+  context. The owned worker copies context variables, joins on success/failure,
+  and propagates process-control exceptions. All 29 renewable-source cases pass,
+  including real Git/HTTPS refresh, arbitrary/CalledProcessError diagnostics,
+  cancellation, interruption, context preservation and worker cleanup.
 - Current upstream placement now permits a snapshot inside the checkout but
   outside every admitted project/resource. Reconciled that safer existing
   contract with the retained long-path filesystem handling; all 164 policy

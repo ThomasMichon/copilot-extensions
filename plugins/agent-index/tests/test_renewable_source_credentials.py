@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 from pathlib import Path
@@ -91,14 +92,67 @@ def test_unavailable_http_credentials_never_make_anonymous_request(value) -> Non
     connector._client.close()
 
 
-def test_credential_provider_failure_is_sanitized() -> None:
+@pytest.mark.parametrize("failure", [
+    RuntimeError("private-provider-diagnostic"),
+    KeyError("private-provider-diagnostic"),
+    subprocess.CalledProcessError(1, ["provider", "private-provider-diagnostic"]),
+    Exception("private-provider-diagnostic"),
+])
+def test_credential_provider_failure_is_sanitized(failure, caplog) -> None:
+    import threading
+    import traceback
+
+    workers = []
+
     def unavailable() -> str:
-        raise RuntimeError("do not leak this provider diagnostic")
+        workers.append(threading.current_thread())
+        raise failure
 
     with pytest.raises(SourceCredentialError) as captured:
         authorization(unavailable)
     assert str(captured.value) == "source-credential-unavailable"
     assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert "private-provider-diagnostic" not in "".join(traceback.format_exception(captured.value))
+    assert "private-provider-diagnostic" not in caplog.text
+    assert workers and all(not worker.is_alive() for worker in workers)
+
+
+@pytest.mark.parametrize("failure", [
+    KeyboardInterrupt(), SystemExit(7), GeneratorExit(), asyncio.CancelledError(),
+])
+def test_credential_provider_process_control_propagates_and_reaps_worker(failure):
+    import threading
+
+    workers = []
+
+    def interrupted():
+        workers.append(threading.current_thread())
+        raise failure
+
+    with pytest.raises(type(failure)) as captured:
+        authorization(interrupted)
+    assert captured.value is failure
+    assert workers and all(not worker.is_alive() for worker in workers)
+
+
+def test_credential_provider_preserves_context_and_reaps_successful_worker():
+    import threading
+    from contextvars import ContextVar
+
+    selected = ContextVar("source-credential-fixture")
+    selection = selected.set("fixture-scoped-token")
+    workers = []
+
+    def provider():
+        workers.append(threading.current_thread())
+        return selected.get()
+
+    try:
+        assert authorization(provider).endswith(" fixture-scoped-token")
+    finally:
+        selected.reset(selection)
+    assert workers and all(not worker.is_alive() for worker in workers)
 
 
 def test_refresh_mode_disallows_http_redirect_even_with_redirecting_client() -> None:
