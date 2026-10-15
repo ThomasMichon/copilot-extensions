@@ -9,6 +9,14 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+Pull Requests' installer wiring contract covers both canonical development
+references and self-contained materialized payloads. Its fixture invokes the
+real installer-engine materializer without changing the source wrappers or
+canonical assets. Both language variants must use the same layout; materialized
+engines and their required support files must exist locally and match the
+canonical bytes. Missing or modified assets and mixed source/local references
+remain failures, not accepted release-layout variations.
+
 The registered-repository Git-probe guard follows the real `repos._git` to
 `git_ops.git` call chain. It checks headless options at that subprocess owner,
 the existing 60-second bound and UTF-8 capture policy, and removal of inherited
