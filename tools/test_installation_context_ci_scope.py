@@ -148,6 +148,8 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert source["if"] == smoke["if"]
     assert source["timeout-minutes"] == 2
     assert source["run"].split() == [
+        "python", "tools/seasoned_uv.py", "--uv", "uv", "--", "--system", "pytest", "pyyaml",
+        "&&",
         "python", "-m", "pytest", "-q",
         "libs/installation-context/tests/test_payload_source.py",
     ]
@@ -190,20 +192,17 @@ def test_native_command_lifecycle_coverage_has_its_own_required_budget() -> None
     steps = job["steps"]
     detection = next(step for step in steps if step.get("id") == "installation-context")
     assert "installation_context_ci_scope.py" in detection["run"]
-    preparation = next(
-        step for step in steps if step.get("name") == "Prepare command lifecycle test dependencies"
-    )
     contracts = next(
         step for step in steps if step.get("name") == "Native command binding and lifecycle contracts"
     )
     condition = "steps.installation-context.outputs.run == 'true'"
-    assert preparation["if"] == contracts["if"] == condition
-    assert preparation["timeout-minutes"] == 1
-    assert "seasoned_uv.py --uv uv -- --system pytest pyyaml" in preparation["run"]
+    assert contracts["if"] == condition
     assert contracts["timeout-minutes"] == 6
     assert contracts["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
     assert not contracts.get("continue-on-error", False)
     assert contracts["run"].split() == [
+        "python", "tools/seasoned_uv.py", "--uv", "uv", "--", "--system", "pytest", "pyyaml",
+        "&&",
         "python", "-m", "pytest", "-q", "--durations=20",
         "libs/payload-invocation/tests/test_command_binding.py",
         "libs/payload-invocation/tests/test_command_lifecycle.py",

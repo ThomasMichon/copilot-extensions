@@ -854,8 +854,8 @@ required, change-scoped CI job. Real installer admission, teardown, and hidden
 child stream tests retain their complete selection and individual deadlines;
 they do not share the read-only provenance lane's two-minute step budget.
 The lifecycle job allows six minutes for tests and eight minutes overall,
-based on a 316-second native run of the former combined selection. Dependency
-preparation is separately bounded, and duration output identifies future
+based on a 316-second native run of the former combined selection. Each pytest
+step first provisions through the canonical seasoning adapter; duration output identifies future
 growth without hiding timeouts or weakening the required aggregate.
 CI-selection contracts and payload-source attribution also have their own
 two-minute steps, so native PowerShell checks of workflow failure propagation

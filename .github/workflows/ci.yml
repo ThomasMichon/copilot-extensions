@@ -1116,6 +1116,7 @@ jobs:
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q
           libs/installation-context/tests/test_installation_mode_governance.py
           libs/installation-context/tests/test_diagnostic_consumers.py
@@ -1123,7 +1124,9 @@ jobs:
       - name: Payload source attribution (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
-        run: python -m pytest -q libs/installation-context/tests/test_payload_source.py
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q libs/installation-context/tests/test_payload_source.py
       - name: Derived native diagnostics (Windows PowerShell 5.1)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
@@ -1176,16 +1179,13 @@ jobs:
         run: |
           run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
           echo "run=$run" >> "$GITHUB_OUTPUT"
-      - name: Prepare command lifecycle test dependencies
-        if: steps.installation-context.outputs.run == 'true'
-        timeout-minutes: 1
-        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml
       - name: Native command binding and lifecycle contracts
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 6
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q --durations=20
           libs/payload-invocation/tests/test_command_binding.py
           libs/payload-invocation/tests/test_command_lifecycle.py
