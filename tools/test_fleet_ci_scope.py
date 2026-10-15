@@ -30,7 +30,7 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
         if job_id == "test-runner-windows":
             assert (
                 "    timeout-minutes: "
-                "${{ github.event_name == 'workflow_dispatch' && 15 || 7 }}\n"
+                "${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}\n"
             ) in job
 
 

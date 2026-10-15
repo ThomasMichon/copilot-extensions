@@ -690,3 +690,24 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   Canonical copies are synchronized across all eleven payload adopters.
   No timeout, selection, filesystem guarantee or review requirement was relaxed.
   Fresh-head native CI is still required before implementation merge.
+- Required CI on that head passed the corrected native Windows diagnostics,
+  Codespaces POSIX development lifecycle, both runner lanes, Windows first-use
+  and stock macOS construction. The remaining Windows archive-source failure
+  matched the already tracked replacement-completion flake #6486 and passed
+  its failed-job rerun. Index's split suites all passed but exceeded the
+  eight-minute job boundary, producing a cancelled aggregate twice; neither
+  result was waived.
+- Replayed the complete implementation onto #6697's already-merged promotion
+  changes, including its independently established twelve-minute Index job.
+  Preserved verified candidate-artifact publication, exact snapshot dispatch
+  and the fast promotion portfolio rather than substituting a manual exhaustive
+  run. New native readiness preparation uses the canonical seasoned resolver,
+  and the promotion aggregate now includes this effort's three additional
+  required native lanes. Ordinary/manual Fleet budgets and native failure
+  propagation retain their existing boundaries.
+- All 379 focused policy, source-attribution, native failure-propagation,
+  Fleet-scope, candidate-readiness/retry and exact promotion-dispatch contracts
+  passed. Failure propagation covers PR, ordinary manual and promotion-snapshot
+  dispatches. Runtime installer and canonical native-helper bytes are unchanged
+  by this replay; previously exercised native proofs still apply. Fresh-head
+  required CI and genuine review remain necessary before merge or rollout.

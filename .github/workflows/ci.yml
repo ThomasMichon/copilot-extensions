@@ -1121,7 +1121,7 @@ jobs:
     name: test runner (windows-latest)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 7 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1505,6 +1505,7 @@ jobs:
       - checks
       - windows-python-artifact-builder
       - windows-hooks
+      - construction-macos
       - bootstrap-killswitch-powershell-5-1
       - worktree-manager
       - agent-dispatch-service
@@ -1512,6 +1513,8 @@ jobs:
       - agent-index-service-windows
       - test-runner-linux
       - test-runner-windows
+      - installation-context-windows
+      - vault-snapshot-windows
       - archive-sources-windows
       - discover
       - smoke

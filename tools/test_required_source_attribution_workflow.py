@@ -94,8 +94,11 @@ def test_contract_tests_are_wired_and_dev_cleanup_has_a_workflow_origin():
     assert workflow["on"]["push"]["branches"] == ["main", "dev"]
     assert workflow["permissions"] == {"contents": "read"}
     steps = workflow["jobs"]["checks"]["steps"]
-    assert steps[0]["uses"] == "actions/checkout@v4"
-    assert steps[0]["with"] == {"fetch-depth": "0"}
+    assert steps[0]["name"] == "Verify the dispatched promotion snapshot before checkout"
+    assert '[ "$RUN_SHA" = "$EXPECTED_SHA" ]' in steps[0]["run"]
+    assert '[ "$WORKFLOW_SHA" = "$EXPECTED_SHA" ]' in steps[0]["run"]
+    assert steps[1]["uses"] == "actions/checkout@v4"
+    assert steps[1]["with"] == {"fetch-depth": "0"}
     assert any("required-pr-attribution.test.cjs" in step.get("run", "") for step in steps)
     install = next(step for step in steps if step.get("name") == "Required source metadata contract tests")
     assert install.get("working-directory", ".") == "."
