@@ -114,6 +114,12 @@ credentials/admissions and drain existing privileged runs first; a pause flag
 alone is insufficient. Restore and prove policy before resuming publication.
 No bypass actor, broader token or direct-main helper implementation is needed.
 
+The supporting [validator-bootstrap independence proposal](validator-bootstrap-independence.md)
+tracks #6865's concrete self-repair deadlock. It preserves the existing
+candidate-gate owner and proposes deny-local bootstrap admission, not another
+installer policy or release writer. Its implementation and activation require
+their own reviewed evidence; an emergency main seed is not its completion.
+
 Keep one release writer. Switch only after old runs settle and one canary proves
 the merged tree and tag, concurrent main repair and rollback. Required statuses
 and caller references migrate before old definitions disappear.
