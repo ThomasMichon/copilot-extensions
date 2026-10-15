@@ -1,4 +1,7 @@
-"""Dispatch contracts in canonical source and real materialized release layouts."""
+"""Dispatch contracts in canonical source and real materialized release layouts.
+
+Each snapshot identity item owns at most two real stamps within its 30-second budget.
+"""
 
 from __future__ import annotations
 
@@ -698,7 +701,10 @@ if ([IO.File]::ReadAllText((Join-Path $InstallDir 'stamp-candidate-1.2.3')) -cne
 
 
 @pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
-def test_stamp_materializes_standalone_engine_pair_and_all_libraries(tmp_path, materialized):
+@pytest.mark.parametrize("mutation", ["unchanged", "plugin", "engine", "library"])
+def test_stamp_materializes_standalone_engine_pair_and_all_libraries(
+    tmp_path, materialized, mutation,
+):
     env = _env(tmp_path)
     plugin = _fixture_checkout(tmp_path, materialized=materialized)
     engine = ier.find_engine_ref(plugin / "scripts/install.sh", "sh")
@@ -706,6 +712,18 @@ def test_stamp_materializes_standalone_engine_pair_and_all_libraries(tmp_path, m
     sources = tomllib.loads((plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
     library = (plugin / sources["agent-procutil"]["path"]).resolve()
     runtime = tmp_path / "runtime"
+    baseline_path = tmp_path / "baseline-path"
+    change = {
+        "unchanged": "",
+        "plugin": (
+            "[IO.File]::WriteAllText((Join-Path $PluginDir 'new-source.py'), "
+            "'changed plugin source')"
+        ),
+        "engine": f"""[IO.File]::AppendAllText('{engine.resolved()}', "`n# fixture edit")""",
+        "library": (
+            f"[IO.File]::WriteAllText('{library / 'new-lib.py'}', 'changed library source')"
+        ),
+    }[mutation]
     script = _snapshot_prelude()
     script += f"""
 $PluginDir='{plugin}'
@@ -717,40 +735,47 @@ $script:GlobalActivationLockTimeoutSeconds=10
 function Deploy-SelfProvisioningBinstub {{ [IO.File]::WriteAllText((Join-Path $LocalBin 'stamp-proof'), 'deployed') }}
 Invoke-Stamp
 $first = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
+[IO.File]::WriteAllText('{baseline_path}', $first)
+$firstHash = Get-DispatchSnapshotHash -SnapshotDir $first
+{change}
 Invoke-Stamp
 $second = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
-if ($first -ne $second) {{ throw 'identical local stamps did not reuse their snapshot' }}
-if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 1) {{ throw 'identical stamps leaked snapshots' }}
-[IO.File]::WriteAllText((Join-Path $PluginDir 'new-source.py'), 'changed plugin source')
-Invoke-Stamp
-$third = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
-if ($third -eq $second) {{ throw 'plugin edit did not change snapshot identity' }}
-[IO.File]::AppendAllText('{engine.resolved()}', "`n# fixture edit")
-Invoke-Stamp
-$fourth = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
-if ($fourth -eq $third) {{ throw 'engine edit did not change snapshot identity' }}
-[IO.File]::WriteAllText('{library / "new-lib.py"}', 'changed library source')
-Invoke-Stamp
-$fifth = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
-if ($fifth -eq $fourth) {{ throw 'library edit did not change snapshot identity' }}
-if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne 4) {{ throw 'unexpected snapshot count' }}
+if (($first -ceq $second) -ne ('{mutation}' -eq 'unchanged')) {{ throw '{mutation}: unexpected snapshot identity' }}
+if ($firstHash -cne (Get-DispatchSnapshotHash -SnapshotDir $first)) {{ throw 'published baseline snapshot was mutated' }}
+if ([IO.File]::ReadAllText((Join-Path $InstallDir 'stamp-candidate-1.2.3')) -cne $second) {{ throw 'candidate and published identity diverged' }}
+if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1 if mutation == "unchanged" else 2}) {{ throw 'unexpected snapshot count' }}
 """
     result = _run("ps1", script, tmp_path, env)
     assert result.returncode == 0, result.stdout + result.stderr
     snapshots = sorted((runtime / "snapshots").iterdir())
-    snapshot = next(path for path in snapshots if not (path / "new-source.py").exists())
+    snapshot = Path(baseline_path.read_text(encoding="utf-8").strip())
+    published = Path((runtime / "payload-dir").read_text(encoding="utf-8").strip())
+    assert snapshot in snapshots and published in snapshots
     assert snapshot.parent == runtime / "snapshots"
     assert (runtime / "stamped-version").read_text() == "1.2.3"
     assert not (runtime / "current-version").exists()
-    assert len(snapshots) == 4
+    assert len(snapshots) == (1 if mutation == "unchanged" else 2)
+    assert (snapshot == published) == (mutation == "unchanged")
+    assert not (snapshot / "new-source.py").exists()
+    assert not (snapshot / "libs/agent-procutil/new-lib.py").exists()
+    if mutation == "plugin":
+        assert (published / "new-source.py").read_text() == "changed plugin source"
+    if mutation == "library":
+        assert (published / "libs/agent-procutil/new-lib.py").read_text() == "changed library source"
     for ext in ("sh", "ps1"):
         assert (snapshot / "scripts" / f"installer-engine.{ext}").read_bytes() == (
             ENGINE / f"installer-engine.{ext}"
         ).read_bytes()
-        script = snapshot / "scripts" / f"install.{ext}"
-        assert ier.source_match_count(script, ext) == 1
-        ref = ier.find_engine_ref(script, ext)
-        assert ref is not None and ier.is_local_ref(ref, snapshot)
+        consumed = ier.find_engine_ref(plugin / "scripts" / f"install.{ext}", ext)
+        assert consumed is not None
+        assert (published / "scripts" / f"installer-engine.{ext}").read_bytes() == (
+            consumed.resolved().read_bytes()
+        )
+        for selected in (snapshot, published):
+            script = selected / "scripts" / f"install.{ext}"
+            assert ier.source_match_count(script, ext) == 1
+            ref = ier.find_engine_ref(script, ext)
+            assert ref is not None and ier.is_local_ref(ref, selected)
     for name in (
         "installer_dependency_policy.py",
         "installer_dependency_config.py",
