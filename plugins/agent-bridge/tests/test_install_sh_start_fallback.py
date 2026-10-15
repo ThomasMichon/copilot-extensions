@@ -53,7 +53,8 @@ def _executable(path: Path, text: str) -> None:
     _BASH is None or os.name == "nt",
     reason="a POSIX bash environment is not available",
 )
-def test_failed_systemd_start_reaches_direct_fallback(tmp_path: Path) -> None:
+@pytest.mark.parametrize("contained", [False, True])
+def test_failed_systemd_start_reaches_direct_fallback(tmp_path: Path, contained: bool) -> None:
     home = tmp_path / "home"
     fake_bin = tmp_path / "bin"
     install_dir = home / ".agent-bridge"
@@ -95,23 +96,25 @@ def test_failed_systemd_start_reaches_direct_fallback(tmp_path: Path) -> None:
     )
     _executable(fake_bin / "curl", "#!/bin/sh\nexit 0\n")
     # Stands in for the slot interpreter. The installer runs it as the
-    # new-session launcher (`-c ...`), which execs it again as
+    # new-session launcher (`-I -c ...`), which execs it again as
     # `python -m agent_bridge start`; that run records its pid and session.
     record = tmp_path / "service-session"
     _executable(
         slot_bin / "python",
         "#!/bin/sh\n"
-        f"if [ \"$1\" = -c ]; then exec '{sys.executable}' \"$@\"; fi\n"
+        f"if [ \"$1\" = -I ]; then exec '{sys.executable}' \"$@\"; fi\n"
         f"exec '{sys.executable}' -c 'import os, sys, time\n"
         "open(sys.argv[1], \"w\").write(\"%d %d\" % (os.getpid(), os.getsid(0)))\n"
         f"time.sleep(30)' '{record}'\n",
     )
 
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_TEST_CONTAINED"},
         "HOME": str(home),
         "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
     }
+    if contained:
+        env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
     installer = subprocess.Popen(
         [_BASH, str(_INSTALL_SH), "start"],
         stdout=subprocess.PIPE,
@@ -130,8 +133,11 @@ def test_failed_systemd_start_reaches_direct_fallback(tmp_path: Path) -> None:
         assert pid_file.is_file()
         service_pid, service_sid = map(int, record.read_text().split())
         assert service_pid == int(pid_file.read_text().strip()), "the pid file names the service"
-        # A deadline that kills the installer's session must not reach it.
-        assert service_sid == service_pid != installer.pid
+        if contained:
+            assert service_sid == installer.pid, "a contained run stays in the runner's session"
+        else:
+            # A deadline that kills the installer's session must not reach it.
+            assert service_sid == service_pid != installer.pid
     finally:
         if pid_file.is_file():
             os.kill(int(pid_file.read_text().strip()), signal.SIGTERM)

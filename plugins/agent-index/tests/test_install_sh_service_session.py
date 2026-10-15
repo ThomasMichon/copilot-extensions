@@ -28,33 +28,50 @@ def _install_text() -> str:
     return _INSTALL_SH.read_text(encoding="utf-8")
 
 
+_START = '-I -X utf8 -c "$_NEW_SESSION_PY" "$LINK_PYTHON" -I -X utf8 -m agent_index start'
+
+
 def test_direct_start_uses_the_new_session_launcher() -> None:
-    start = re.search(r"nohup \"\$LINK_PYTHON\"([^\n]*)\\\n([^\n]*)", _install_text())
+    start = re.search(r"nohup \"\$LINK_PYTHON\"([^\n]*)\\\n", _install_text())
     assert start, "the direct service start is missing"
-    assert start.group(1).strip().startswith('-c "$_NEW_SESSION_PY" "$LINK_PYTHON" -I -X utf8 -m agent_index start')
+    # The launcher's own interpreter is isolated too, not only the exec target.
+    assert start.group(1).strip() == _START
 
 
-def test_new_session_launcher_detaches_and_keeps_the_command(tmp_path: Path) -> None:
+@pytest.mark.parametrize("contained", [False, True])
+def test_new_session_launcher(tmp_path: Path, contained: bool) -> None:
     definition = next(line for line in _install_text().splitlines()
                       if line.startswith("_NEW_SESSION_PY="))
     record = tmp_path / "session"
     script = (
         f"{definition}\n"
-        'py="$1"; record="$2"\n'
-        '"$py" -c "$_NEW_SESSION_PY" "$py" -I -X utf8 -c '
+        'LINK_PYTHON="$1"; record="$2"\n'
+        f'"$LINK_PYTHON" {_START.split(" -m ")[0]} -c '
         "'import os, sys; open(sys.argv[1], \"w\").write(\"%d %d %s\" % "
         "(os.getpid(), os.getsid(0), sys.flags.isolated))' \"$record\" &\n"
         "echo $!\n"
         "wait\n"
     )
-    shell = subprocess.run(
+    env = {k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_TEST_CONTAINED"}
+    # Ignored by -I; without it the launcher itself could not start.
+    env["PYTHONHOME"] = str(tmp_path / "missing-python-home")
+    if contained:
+        env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
+    shell = subprocess.Popen(
         ["bash", "-c", script, "bash", sys.executable, str(record)],
-        capture_output=True, text=True, timeout=30, check=True, start_new_session=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        start_new_session=True,
     )
+    stdout, stderr = shell.communicate(timeout=30)
+    assert shell.returncode == 0, stderr
     deadline = time.monotonic() + 10
     while not record.exists() and time.monotonic() < deadline:
         time.sleep(0.1)
+    assert record.exists(), stderr
     pid, sid, isolated = record.read_text().split()
-    assert pid == shell.stdout.strip(), "the launcher execs in place, so $! is the service"
-    assert sid == pid, "the service leads a session of its own"
+    assert pid == stdout.strip(), "the launcher execs in place, so $! is the service"
     assert isolated == "1", "the original interpreter flags are kept"
+    if contained:
+        assert sid == str(shell.pid), "a contained run stays in the runner's session"
+    else:
+        assert sid == pid, "the service leads a session of its own"

@@ -270,10 +270,11 @@ if [[ -z "$PORT" ]]; then
 fi
 RELAY_PORT=9857   # integrated credential relay (in-process with the bridge)
 SYSTEMD_UNIT="agent-bridge.service"
-# `python -c "$_NEW_SESSION_PY" <python> <args...>` runs `<python> <args...>` in
-# a new session (setsid, then exec in place, so $! stays the service's pid).
+# `python -I -c "$_NEW_SESSION_PY" <python> <args...>` runs `<python> <args...>`
+# in a new session (setsid, then exec in place, so $! stays the service's pid;
+# not under COPILOT_EXTENSIONS_TEST_CONTAINED=1, whose runner owns the tree).
 # It needs only the runtime interpreter, so it also works without setsid(1).
-_NEW_SESSION_PY=$'import os, sys\ntry:\n    os.setsid()\nexcept (AttributeError, OSError):\n    pass\nos.execv(sys.argv[1], sys.argv[1:])'
+_NEW_SESSION_PY=$'import os, sys\nif os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":\n    try:\n        os.setsid()\n    except (AttributeError, OSError):\n        pass\nos.execv(sys.argv[1], sys.argv[1:])'
 
 # === install-contract:v3 versioned-venv (agent-bridge: venv-as-symlink) ===
 # Immutable per-version runtime (#581): build the venv into versions/<version>
@@ -2063,7 +2064,7 @@ do_start() {
     # own, so an installer deadline that kills the installer's session never
     # takes the service with it. Close fd 8 (8>&-) so a daemon launched during
     # do_install/do_update never inherits and holds the install lock (ce#802).
-    nohup "$rt_py" -c "$_NEW_SESSION_PY" "$rt_py" -m agent_bridge start \
+    nohup "$rt_py" -I -c "$_NEW_SESSION_PY" "$rt_py" -m agent_bridge start \
         > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
     local pid=$!
     echo "$pid" > "$PID_FILE"

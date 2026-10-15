@@ -315,10 +315,11 @@ SYSTEMD_UNIT="agent-index.service"
 UNIT_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$INSTALL_DIR/service.env"
 SERVICE_LAUNCHER="$INSTALL_DIR/service.sh"
-# `python -c "$_NEW_SESSION_PY" <python> <args...>` runs `<python> <args...>` in
-# a new session (setsid, then exec in place). It needs only the runtime
-# interpreter, so it also works without setsid(1).
-_NEW_SESSION_PY=$'import os, sys\ntry:\n    os.setsid()\nexcept (AttributeError, OSError):\n    pass\nos.execv(sys.argv[1], sys.argv[1:])'
+# `python -I -X utf8 -c "$_NEW_SESSION_PY" <python> <args...>` runs
+# `<python> <args...>` in a new session (setsid, then exec in place; not under
+# COPILOT_EXTENSIONS_TEST_CONTAINED=1, whose runner owns the tree). It needs
+# only the runtime interpreter, so it also works without setsid(1).
+_NEW_SESSION_PY=$'import os, sys\nif os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":\n    try:\n        os.setsid()\n    except (AttributeError, OSError):\n        pass\nos.execv(sys.argv[1], sys.argv[1:])'
 
 # === engine-daemon: durable, persistent embedding-engine runtime =============
 # The heavy embedding stack (torch + transformers + sentence-transformers) lives
@@ -1939,7 +1940,7 @@ _start() {
         if _service_healthy; then _skip 'Service already running -- not starting a second daemon'; return 0; fi
         # A session of its own: an installer deadline that kills the
         # installer's session must not take the service with it.
-        nohup "$LINK_PYTHON" -c "$_NEW_SESSION_PY" "$LINK_PYTHON" -I -X utf8 -m agent_index start \
+        nohup "$LINK_PYTHON" -I -X utf8 -c "$_NEW_SESSION_PY" "$LINK_PYTHON" -I -X utf8 -m agent_index start \
             >> "$INSTALL_DIR/service.log" 2>&1 &
         _ok "Service process started"
     else
