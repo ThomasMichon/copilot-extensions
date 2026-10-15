@@ -257,6 +257,109 @@ def test_valid_compatibility_pointer_is_reported_but_not_merged_twice(
     )
 
 
+def test_combined_provider_scan_resolves_activation_once_and_refreshes_next_scan(
+    tmp_path, monkeypatch
+):
+    source, root, target = _declared_plugin(tmp_path)
+    d = _config_d(tmp_path, monkeypatch)
+    pointer = _managed_entry(d, source=source, root=root, target=target)
+    activation = _active_report(source, root)
+    calls = []
+
+    def resolve():
+        calls.append(activation)
+        return activation
+
+    monkeypatch.setattr(cfg, "resolve_active_plugins", resolve)
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    first = cfg.scan_config_providers()
+
+    assert calls == [activation]
+    assert [item.target for item in first.active_configs] == [target.resolve()]
+    assert any(
+        finding.entry == str(pointer) and finding.reason == "superseded"
+        for finding in first.config_d.findings
+    )
+
+    activation = ActivationReport(ScanAuthority.COMPLETE, {})
+    second = cfg.scan_config_providers()
+
+    assert len(calls) == 2
+    assert calls[-1] is activation
+    assert not second.active_configs
+    assert any(
+        finding.entry == str(pointer) and finding.reason == "not-enabled"
+        for finding in second.config_d.findings
+    )
+
+
+def test_provider_scans_preserve_supplied_indeterminate_activation(
+    tmp_path, monkeypatch
+):
+    source, root, target = _declared_plugin(tmp_path)
+    d = _config_d(tmp_path, monkeypatch)
+    pointer = _managed_entry(d, source=source, root=root, target=target)
+    activation = ActivationReport(ScanAuthority.INDETERMINATE, {})
+
+    def unexpected_resolution():
+        pytest.fail("A supplied activation snapshot must not be resolved again")
+
+    monkeypatch.setattr(cfg, "resolve_active_plugins", unexpected_resolution)
+
+    active = cfg.scan_active_plugin_config_registry(
+        activation=activation, previous={}
+    )
+    compatibility = cfg.scan_config_dropin_registry(
+        activation=activation, previous={}
+    )
+
+    assert active.snapshot.authority is ScanAuthority.INDETERMINATE
+    assert not active.active_configs
+    assert active.findings[0].reason == "registry-indeterminate"
+    assert not compatibility.active_configs
+    assert compatibility.snapshot.decisions[str(pointer)].status is EntryStatus.INDETERMINATE
+
+
+def test_merged_config_reloads_real_activation_settings_once_per_scan(
+    tmp_path, monkeypatch
+):
+    from plugin_activation import resolve_active_plugins
+
+    home = tmp_path / "home"
+    source, root, target = _declared_plugin(
+        home / ".copilot" / "installed-plugins" / "example-marketplace",
+        source="plugin@example-marketplace",
+    )
+    settings = home / ".copilot" / "settings.json"
+    settings.write_text(json.dumps({"enabledPlugins": {source: True}}), "utf-8")
+    d = _config_d(tmp_path, monkeypatch)
+    _managed_entry(d, source=source, root=root, target=target)
+    reports = []
+
+    def resolve():
+        report = resolve_active_plugins(home=home, include_projects=False)
+        reports.append(report)
+        return report
+
+    monkeypatch.setattr(cfg, "resolve_active_plugins", resolve)
+    monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [])
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    enabled = cfg.load_merged_config(include_cwd=False)
+
+    assert len(reports) == 1
+    assert enabled.repos[_REPO_KEY].workspace_repo == "example-app"
+    assert enabled.credentials.ado_host == "ado.example.com"
+
+    settings.write_text(json.dumps({"enabledPlugins": {source: False}}), "utf-8")
+    disabled = cfg.load_merged_config(include_cwd=False)
+
+    assert len(reports) == 2
+    assert not disabled.repos
+    assert not reports[-1].decisions
+
+
 def test_disabled_plugin_manifest_declaration_is_ignored(tmp_path, monkeypatch):
     _source, _root, _target = _declared_plugin(tmp_path)
     monkeypatch.setattr(

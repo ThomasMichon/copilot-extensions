@@ -731,11 +731,13 @@ def _active_plugin_config_decision(
 def scan_active_plugin_config_registry(
     *,
     previous: dict[str, ConfigDropin] | None = None,
+    activation: ActivationReport | None = None,
 ) -> ConfigDropinRegistryReport:
     """Resolve supplementary configs declared by currently active plugins."""
     global _PLUGIN_CONFIG_LAST_KNOWN
 
-    activation = resolve_active_plugins()
+    if activation is None:
+        activation = resolve_active_plugins()
     decisions: dict[str, EntryDecision[ConfigDropin]] = {}
     entry_classes: dict[str, str] = {}
     findings: list[Finding] = []
@@ -1069,12 +1071,12 @@ def _withdraw_confirmed_disappearances(
 def scan_config_dropin_registry(
     *,
     previous: dict[str, ConfigDropin] | None = None,
+    activation: ActivationReport | None = None,
 ) -> ConfigDropinRegistryReport:
     """Scan, classify, and reconcile config.d without silent stale authority."""
     global _CONFIG_D_LAST_KNOWN, _CONFIG_D_LAST_KNOWN_ROOT
 
     entry_classes: dict[str, str] = {}
-    activation: ActivationReport | None = None
     directory = config_d_dir()
 
     def activation_report() -> ActivationReport:
@@ -1277,15 +1279,13 @@ def _shadow_config_d_with_active_plugins(
 
 def scan_config_providers() -> ConfigProviderReports:
     """Scan active plugin declarations and compatibility config.d entries."""
-    active_plugins = scan_active_plugin_config_registry()
+    activation = resolve_active_plugins()
+    active_plugins = scan_active_plugin_config_registry(activation=activation)
     config_d = _shadow_config_d_with_active_plugins(
-        scan_config_dropin_registry(),
+        scan_config_dropin_registry(activation=activation),
         active_plugins,
     )
-    return ConfigProviderReports(
-        active_plugins=active_plugins,
-        config_d=config_d,
-    )
+    return ConfigProviderReports(active_plugins=active_plugins, config_d=config_d)
 
 
 def _warn_active_plugin_config_findings(
