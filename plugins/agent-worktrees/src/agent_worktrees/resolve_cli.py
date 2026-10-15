@@ -33,13 +33,13 @@ def _target_is_local(
 ) -> bool:
     if not name:
         return False
+    if not environment and config.machine and name.casefold() == config.machine.casefold():
+        return machine_identity.is_local_machine(name, config)
     from .execution_spaces import registry_for_config
 
     entries = registry_for_config(config)
     selected = resolve_machine_selection(entries, name, environment, allow_physical_context=True)
     target = selected.target
-    if not target.environment and config.machine and name.casefold() == config.machine.casefold():
-        return machine_identity.is_local_machine(name, config)
     if entries:
         entry = selected.entry
         if entry is not None:
