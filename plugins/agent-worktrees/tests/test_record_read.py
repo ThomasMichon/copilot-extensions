@@ -454,6 +454,40 @@ def test_record_read_registered_project_ignores_other_global_default(
     assert result["worktree"]["repo"] == data["repo"]
 
 
+@pytest.mark.parametrize("mode", ["fragment-only", "additional-repo", "override", "lexical-order"])
+def test_record_read_operator_fragments_without_activation(record_fixture, monkeypatch, mode):
+    data, path = record_fixture
+    config_path = path.parent.parent / "config.yaml"
+    fragments = path.parent.parent / "config.d"
+    fragments.mkdir()
+    fragment = {"repos": {data["repo"]: {"anchor": str(path.parent / "fragment-anchor")}}}
+    if mode == "fragment-only":
+        config_path.unlink()
+    elif mode == "additional-repo":
+        data["repo"] = "companion"
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        fragment["repos"]["companion"] = {"anchor": str(path.parent / "companion-anchor")}
+    elif mode in {"override", "lexical-order"}:
+        fragment["repos"][data["repo"]]["anchor"] = ""
+        if mode == "lexical-order":
+            config_path.unlink()
+            (fragments / "90-last.yml").write_text(yaml.safe_dump({
+                "repos": {data["repo"]: {"anchor": str(path.parent / "last-anchor")}},
+            }), encoding="utf-8")
+    (fragments / "10-first.yaml").write_text(yaml.safe_dump(fragment), encoding="utf-8")
+    (fragments / "managed.json").write_text('{"not":"an operator fragment"}', encoding="utf-8")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("operator metadata fragments invoked activation, Git, or full policy")
+
+    monkeypatch.setattr("agent_worktrees.config_dropins.resolve_active_plugins", forbidden)
+    monkeypatch.setattr(cfg, "load_config", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["repo"] == data["repo"]
+
+
 def test_record_read_invalid_yaml_date_is_structured(record_fixture):
     data, path = record_fixture
     with path.open("a", encoding="utf-8") as stream:

@@ -58,10 +58,18 @@ def metadata_project(explicit: str | None) -> str | None:
 
 def configured_repositories(project: str) -> frozenset[str]:
     """Read declared membership without loading repository policy or Git."""
-    machine = _mapping(cfg.project_dir(project) / "config.yaml")
+    from .config_dropins import read_operator_config_fragments
+
+    root = cfg.project_dir(project)
+    machine = cfg._deep_merge(
+        read_operator_config_fragments(root / "config.d"),
+        _mapping(root / "config.yaml"),
+    )
     global_defaults = _mapping(cfg.global_config_path())
     platform = machine.get("platform") or global_defaults.get("platform") or cfg.detect_platform()
-    declared = machine.get("repos", {})
+    declared = machine.get("repos")
+    if declared is None:
+        declared = {}
     if not isinstance(declared, dict):
         raise ValueError("Project repositories must be a mapping")
     registry = repos.read_registry(strict=True)

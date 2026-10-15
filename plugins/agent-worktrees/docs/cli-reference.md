@@ -48,6 +48,9 @@ Membership is read from the selected project's machine-local repository
 declarations and registered anchors, not from a global default project or
 Git-backed repository policy. No plugin activation, policy overlays, or Git
 probes are needed to identify these metadata records.
+Validated operator-owned `config.d` YAML fragments merge in lexical order
+beneath `config.yaml`, preserving ordinary repository-declaration precedence.
+Managed plugin pointers are not activated by this metadata-only read.
 Project selection for this command reads Git marker and common-directory files
 without running Git or changing the caller's working directory.
 Git-file layouts without a common-directory marker (including submodules and
