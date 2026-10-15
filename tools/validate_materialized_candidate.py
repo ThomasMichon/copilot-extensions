@@ -8,6 +8,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -105,8 +107,27 @@ def matrix(root: Path, dev_root: Path, dev: str) -> dict[str, list[dict[str, str
     return inventory_matrix(root, python_suites(dev_root), standalone_roster(dev_root))
 
 
-def recipes(root: Path, component: str) -> list[tuple[list[str], Path]]:
+def recipes(
+    root: Path, component: str, *, bootstrap_root: Path | None = None,
+) -> list[tuple[list[str], Path]]:
     plugin_runner = _regular(root, Path("tools") / "run-plugin-tests.py")
+    if component == "validator-bootstrap":
+        if bootstrap_root is None or not bootstrap_root.is_dir() or any(bootstrap_root.iterdir()):
+            raise CandidateValidationError("validator bootstrap requires a fresh isolated workspace")
+        target = bootstrap_root / "validator"
+        interpreter = target / "Scripts" / "python.exe" if os.name == "nt" else target / "bin" / "python"
+        adapter = _regular(root, Path("tools") / "seasoned_uv.py")
+        requirements = _regular(root, Path("tools") / "artifact_validation_requirements.txt")
+        return [
+            (["uv", "venv", "--python", sys.executable, str(target)], root),
+            ([sys.executable, str(adapter), "--registry-only", "--uv", "uv", "--",
+              "--python", str(interpreter), "--no-config", "--only-binary", ":all:",
+              "--require-hashes", "--index-url",
+              os.environ.get("ARTIFACT_VALIDATION_INDEX_URL") or "https://pypi.org/simple",
+              "-r", str(requirements)], root),
+            ([str(interpreter), "-I", "-B", "-c",
+              "import packaging; print(packaging.__version__)"], root),
+        ]
     if component.startswith("plugin:"):
         name = component.removeprefix("plugin:")
         if not PLUGIN.fullmatch(name):
@@ -154,28 +175,38 @@ def run(
     expected = matrix(root, dev_root, dev)["include"]
     if not any(row["component"] == component for row in expected):
         raise CandidateValidationError("requested consumer is absent from the candidate inventory")
-    commands = recipes(root, component)
-    env = _environment()
-    if component == "fleet-manager":
-        env["PYTEST_ADDOPTS"] = '-m "not client_distribution_full and not observation_retention_full"'
-    if not commands:
-        raise CandidateValidationError("required candidate consumer has no executable recipe")
-    for argv, directory in commands:
-        try:
-            minutes = next(row["minutes"] for row in expected if row["component"] == component)
-            result = subprocess.run(
-                argv, cwd=directory, check=False, timeout=int(minutes) * 60, env=env,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
+    workspace = (
+        tempfile.TemporaryDirectory(prefix="materialized-validator-bootstrap-")
+        if component == "validator-bootstrap" else nullcontext(None)
+    )
+    with workspace as temporary:
+        commands = (
+            recipes(root, component, bootstrap_root=Path(temporary))
+            if temporary else recipes(root, component)
+        )
+        env = _environment()
+        if temporary:
+            env["UV_CACHE_DIR"] = str(Path(temporary) / "uv-cache")
+        if component == "fleet-manager":
+            env["PYTEST_ADDOPTS"] = '-m "not client_distribution_full and not observation_retention_full"'
+        if not commands:
+            raise CandidateValidationError("required candidate consumer has no executable recipe")
+        for argv, directory in commands:
+            try:
+                minutes = next(row["minutes"] for row in expected if row["component"] == component)
+                result = subprocess.run(
+                    argv, cwd=directory, check=False, timeout=int(minutes) * 60, env=env,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                validate(root, candidate, dev, main_before)
+                matrix(root, dev_root, dev)
+                raise CandidateValidationError(f"candidate consumer could not complete: {component}") from error
             validate(root, candidate, dev, main_before)
-            matrix(root, dev_root, dev)
-            raise CandidateValidationError(f"candidate consumer could not complete: {component}") from error
-        validate(root, candidate, dev, main_before)
-        if result.returncode:
-            raise CandidateValidationError(
-                f"candidate consumer failed: {component} (exit {result.returncode})"
-            )
+            if result.returncode:
+                raise CandidateValidationError(
+                    f"candidate consumer failed: {component} (exit {result.returncode})"
+                )
     return {**identity, "component": component, "outcome": "success"}
 
 

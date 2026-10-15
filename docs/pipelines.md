@@ -29,10 +29,10 @@ The canonical seasoning CLI's explicit `--registry-only` mode admits such
 registry toolchains without discovering product project/library roots. It
 denies local source projects and retains the existing cutoff, selected index,
 hash and retained-input checks; it is not a public-feed fallback or a second
-installer policy. Callers opt in explicitly. Existing main workflow callers
-do not change merely because support has merged on development; reviewed
-control activation and exact materialized bootstrap qualification remain
-separate requirements.
+installer policy. The build, attestation, promotion and publication validator
+provisioning steps opt in explicitly. A source-support merge alone does not
+activate a main-owned caller; reviewed control activation and exact
+materialized bootstrap qualification remain separate requirements.
 
 Public mode selects exact non-yanked stable pins from PyPI metadata, measures
 age from the newest file, and installs binary distributions only from one
@@ -73,10 +73,25 @@ credential-free checkout of the pinned, validated development input.
 existing plugin recipes (collection plus guards for Worktrees), Manager and
 standalone Dispatch/Index/Fleet on a statically routed Linux host.
 `materialized-candidate-windows` retains Index and Fleet's statically routed
-native Windows lanes; no matrix input can select a runner label. The supported
+native Windows lanes; both platforms also require validator bootstrap. No
+matrix input can select a runner label. The supported
 recipes must cover the validated development input's canonical standalone
 roster. Fleet retains its existing bounded timeouts and exhaustive-test
 exclusions rather than silently expanding ordinary promotion coverage.
+
+Validator bootstrap starts with a fresh venv and private empty UV cache. It
+runs the candidate's actual `seasoned_uv.py --registry-only` with the same
+configured index, binary-only/hash restrictions and pinned requirement file as
+all four trusted workflow callers, then imports the installed validator in
+isolated Python. A broken product graph grants no local-source authority;
+unsupported helper modes, failed installation or missing bootstrap inputs fail
+the gate before merge.
+
+Plugin recipe deadlines derive from the runner's own literal aggregate timeout
+policy, plus three minutes for preparation and verification. Each enclosing job
+allows all recipe invocations plus five minutes for checkout/tool setup.
+Unknown or invalid timeout metadata refuses qualification rather than silently
+substituting a deadline shorter than the established suite budget.
 
 Each consumer gets a fresh public-hosted runner, `contents: read`, no release
 environment or API/release authority, and credential-free checkouts of both
@@ -853,10 +868,12 @@ Native Windows command-binding and lifecycle contracts run in a separate,
 required, change-scoped CI job. Real installer admission, teardown, and hidden
 child stream tests retain their complete selection and individual deadlines;
 they do not share the read-only provenance lane's two-minute step budget.
-The lifecycle job allows six minutes for tests and eight minutes overall,
+The lifecycle job preserves the catalog, read-only lifecycle and native
+first-touch partitions, each bounded at two minutes, with eight minutes overall
 based on a 316-second native run of the former combined selection. Each pytest
-step first provisions through the canonical seasoning adapter; duration output identifies future
-growth without hiding timeouts or weakening the required aggregate.
+step first provisions through the canonical seasoning adapter; duration output
+identifies future growth without hiding timeouts or weakening the required
+aggregate.
 CI-selection contracts and payload-source attribution also have their own
 two-minute steps, so native PowerShell checks of workflow failure propagation
 and source graphs cannot consume the read-only diagnostic API tests' budget.

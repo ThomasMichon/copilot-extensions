@@ -423,7 +423,7 @@ jobs:
       - name: Provision hash-pinned metadata validator tooling for export validation
         run: |
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
-          python tools/seasoned_uv.py --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+          python tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
       - name: Build the composed, versioned promotion candidate without release authority
@@ -478,7 +478,7 @@ jobs:
       - name: Provision hash-pinned metadata validator tooling from trusted sources
         run: |
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
-          python tools/seasoned_uv.py --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+          python tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
       - uses: actions/download-artifact@v4
@@ -913,7 +913,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
-          python tools/seasoned_uv.py --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+          python tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
       - name: Download this run's signed Python artifacts
@@ -1278,7 +1278,7 @@ jobs:
       needs.promote.outputs.pr_number != '' &&
       needs.materialized-candidate-plan.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.minutes }}
+    timeout-minutes: ${{ matrix.job_minutes }}
     permissions:
       contents: read
     strategy:
@@ -1324,11 +1324,17 @@ jobs:
       needs.promote.outputs.pr_number != '' &&
       needs.materialized-candidate-plan.result == 'success'
     runs-on: windows-latest
-    timeout-minutes: 6
+    timeout-minutes: ${{ matrix.job_minutes }}
     strategy:
       fail-fast: false
       matrix:
-        component: [index, fleet-manager]
+        include:
+          - component: index
+            job_minutes: 10
+          - component: fleet-manager
+            job_minutes: 23
+          - component: validator-bootstrap
+            job_minutes: 20
     permissions:
       contents: read
     steps:
@@ -1575,7 +1581,7 @@ jobs:
       - name: Provision hash-pinned metadata validator tooling without release credentials
         run: |
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
-          python tools/seasoned_uv.py --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+          python tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
       - uses: actions/download-artifact@v4

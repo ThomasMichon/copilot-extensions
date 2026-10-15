@@ -71,6 +71,13 @@ Do not relabel the artifact attestation as test evidence.
   failures with real generated fixtures; show refusal before the merge seam.
 - [ ] Prove repaired source and real materialized consumer cases, including the
   existing owners' actual regression selectors rather than unrelated green tests.
+- [ ] Qualify the actual hash-pinned validator bootstrap on Linux and Windows
+  from a fresh venv/cache, using the same deny-local caller recipe as build,
+  attestation, promotion and publication; retain #6865's separate emergency
+  recovery and normal source/control activation boundaries.
+- [ ] Preserve each existing full runner's aggregate execution budget and allow
+  preparation, all recipe invocations and enclosing hosted-job setup; reject
+  unreadable budget metadata rather than shortening a healthy suite's deadline.
 - [ ] Clear current-head review and required CI; land ordinary implementation
   through `dev`, never direct-to-main source changes.
 - [ ] Observe a normal containing promotion and successful exact-generated-tree

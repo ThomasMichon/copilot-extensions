@@ -192,23 +192,36 @@ def test_native_command_lifecycle_coverage_has_its_own_required_budget() -> None
     steps = job["steps"]
     detection = next(step for step in steps if step.get("id") == "installation-context")
     assert "installation_context_ci_scope.py" in detection["run"]
-    contracts = next(
-        step for step in steps if step.get("name") == "Native command binding and lifecycle contracts"
+    catalog = next(
+        step for step in steps
+        if step.get("name") == "Command catalog native contracts (Windows)"
+    )
+    lifecycle = next(
+        step for step in steps
+        if step.get("name") == "Command lifecycle read-only contracts (Windows)"
+    )
+    first_touch = next(
+        step for step in steps
+        if step.get("name") == "Command lifecycle native first-touch (Windows)"
     )
     condition = "steps.installation-context.outputs.run == 'true'"
-    assert contracts["if"] == condition
-    assert contracts["timeout-minutes"] == 6
-    assert contracts["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
-    assert not contracts.get("continue-on-error", False)
-    assert contracts["run"].split() == [
-        "python", "tools/seasoned_uv.py", "--uv", "uv", "--", "--system", "pytest", "pyyaml",
-        "&&",
-        "python", "-m", "pytest", "-q", "--durations=20",
-        "libs/payload-invocation/tests/test_command_binding.py",
-        "libs/payload-invocation/tests/test_command_lifecycle.py",
-        "libs/payload-invocation/tests/test_command_lifecycle_stdio.py",
-        "-k", "command_binding",
-    ]
+    for step in (catalog, lifecycle, first_touch):
+        assert step["if"] == condition
+        assert step["timeout-minutes"] == 2
+        assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+        assert not step.get("continue-on-error", False)
+        assert step["run"].startswith(
+            "python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml && "
+            "python -m pytest -q --durations=20 "
+        )
+    native = "real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage"
+    assert "libs/payload-invocation/tests/test_command_binding.py" in catalog["run"]
+    assert '-k "command_binding"' in catalog["run"]
+    for step in (lifecycle, first_touch):
+        assert "libs/payload-invocation/tests/test_command_lifecycle.py" in step["run"]
+    assert "libs/payload-invocation/tests/test_command_lifecycle_stdio.py" in lifecycle["run"]
+    assert f'-k "command_binding and not ({native})"' in lifecycle["run"]
+    assert f'-k "command_binding and ({native})"' in first_touch["run"]
 
 
 def test_native_vault_snapshot_lane_preserves_bounded_first_use_proof() -> None:

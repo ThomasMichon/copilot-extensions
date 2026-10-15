@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import re
 from pathlib import Path
 
@@ -65,6 +66,35 @@ def standalone_roster(root: Path) -> set[str]:
     return set(value)
 
 
+def plugin_minutes(root: Path, name: str) -> int:
+    try:
+        module = ast.parse(regular(root, Path("tools/run-plugin-tests.py")).read_text("utf-8"))
+        declarations = [
+            node.value for node in module.body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+            and node.target.id == "_PLUGIN_TIMEOUT_OVERRIDES"
+        ]
+        defaults = [
+            node.args[1] for node in ast.walk(module)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "_PLUGIN_TIMEOUT_OVERRIDES" and node.func.attr == "get"
+            and len(node.args) == 2
+        ]
+        overrides = ast.literal_eval(declarations[0]) if len(declarations) == 1 else None
+        default = ast.literal_eval(defaults[0]) if len(defaults) == 1 else None
+        if not isinstance(overrides, dict) or any(
+            not isinstance(key, str) or not PLUGIN.fullmatch(key) for key in overrides
+        ):
+            raise ValueError("expected literal plugin timeout policy")
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+               for value in [default, *overrides.values()]):
+            raise ValueError("expected finite positive recipe budgets")
+    except (OSError, UnicodeError, SyntaxError, ValueError, TypeError, OverflowError) as error:
+        raise CandidateValidationError("candidate plugin recipe budgets are unreadable") from error
+    return math.ceil(overrides.get(name, default) / 60) + 3
+
+
 def matrix(
     root: Path, expected: set[str], standalone: set[str],
 ) -> dict[str, list[dict[str, str | int]]]:
@@ -82,8 +112,13 @@ def matrix(
         )
     rows: list[dict[str, str | int]] = [{
         "os": "ubuntu-latest", "component": f"plugin:{name}",
-        "minutes": 12 if name in ("agent-dispatch", "agent-index", "agent-worktrees") else 8,
+        "minutes": plugin_minutes(root, name),
     } for name in sorted(actual)]
+    for name in ("seasoned_uv.py", "artifact_validation_requirements.txt"):
+        regular(root, Path("tools") / name)
+    rows.extend({
+        "os": platform, "component": "validator-bootstrap", "minutes": 5,
+    } for platform in ("ubuntu-latest", "windows-latest"))
     for component, platforms in (
         ("manager", ("ubuntu-latest",)),
         ("dispatch", ("ubuntu-latest",)),
@@ -100,4 +135,12 @@ def matrix(
         rows.extend({
             "os": platform, "component": component, "minutes": 5 if component == "index" else 6,
         } for platform in platforms)
+    for row in rows:
+        count = (
+            2 if row["component"] == "plugin:agent-worktrees"
+            else 3 if row["component"] in ("fleet-manager", "validator-bootstrap") else 1
+        )
+        row["job_minutes"] = int(row["minutes"]) * count + 5
+        if row["job_minutes"] > 360:
+            raise CandidateValidationError("consumer recipe budget exceeds the hosted job limit")
     return {"include": rows}

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import threading
+import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -16,6 +22,10 @@ import yaml
 import validate_materialized_candidate as candidate
 
 ROOT = Path(__file__).resolve().parents[1]
+RUNNER_POLICY = (
+    "_PLUGIN_TIMEOUT_OVERRIDES: dict[str, float] = {}\n"
+    "def fixture_budget(name):\n return _PLUGIN_TIMEOUT_OVERRIDES.get(name, 900.0)\n"
+)
 
 
 def git(root, *args):
@@ -43,7 +53,7 @@ def subject(tmp_path, monkeypatch):
         "plugins/agent-worktrees/tests/test_owned.py": "def test_owned(): pass\n",
         "plugins/agent-bridge/plugin.json": "{}",
         "plugins/agent-bridge/tests/test_owned.py": "def test_owned(): pass\n",
-        "tools/run-plugin-tests.py": (
+        "tools/run-plugin-tests.py": RUNNER_POLICY + (
             "import json, sys\nfrom pathlib import Path\nfrom fixture_sibling import LABEL\n"
             "with Path('executions.jsonl').open('a') as stream:\n"
             " stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
@@ -55,6 +65,7 @@ def subject(tmp_path, monkeypatch):
             "('worktree-manager', 'services/index', 'fleet-manager', 'services/dispatch')\n"
         ),
         "tools/seasoned_uv.py": "print('fixture preparation executed')\n",
+        "tools/artifact_validation_requirements.txt": "packaging==25.0 --hash=sha256:" + "0" * 64 + "\n",
         "tools/test_fleet_ci_scope.py": (
             "import os\nfrom pathlib import Path\n"
             "def test_fleet_scope():\n"
@@ -154,13 +165,13 @@ def test_modified_checkout_and_foreign_git_selectors_do_not_change_admission(sub
 def test_real_failed_and_mutating_consumers_cannot_authorize_merge(subject):
     root, _, dev, main = subject
     runner = root / "tools" / "run-plugin-tests.py"
-    runner.write_text("raise SystemExit(7)\n")
+    runner.write_text(RUNNER_POLICY + "raise SystemExit(7)\n")
     head = commit(root)
     with pytest.raises(candidate.CandidateValidationError, match="exit 7"):
         candidate.run(
             root, head, dev, main, "plugin:agent-bridge", dev_root=root.parent / "validated-dev",
         )
-    runner.write_text(
+    runner.write_text(RUNNER_POLICY +
         "from pathlib import Path\nPath('owned.txt').write_text('mutated')\n",
     )
     head = commit(root)
@@ -204,6 +215,7 @@ def test_complete_matrix_and_exact_existing_recipes(subject):
         ("manager", "ubuntu-latest"), ("dispatch", "ubuntu-latest"),
         ("index", "ubuntu-latest"), ("index", "windows-latest"),
         ("fleet-manager", "ubuntu-latest"), ("fleet-manager", "windows-latest"),
+        ("validator-bootstrap", "ubuntu-latest"), ("validator-bootstrap", "windows-latest"),
     }
     commands = candidate.recipes(root, "plugin:agent-worktrees")
     assert [command[-1] for command, _ in commands] == ["--collect-only", "--guards"]
@@ -315,6 +327,197 @@ def test_missing_required_fleet_consumer_files_refuse(subject, relative):
         candidate.matrix(root, root.parent / "validated-dev", dev)
 
 
+@pytest.mark.parametrize("relative", [
+    "tools/seasoned_uv.py", "tools/artifact_validation_requirements.txt",
+])
+def test_missing_validator_bootstrap_inputs_refuse_inventory(subject, relative):
+    root, _, dev, _ = subject
+    root.joinpath(*relative.split("/")).unlink()
+    with pytest.raises(candidate.CandidateValidationError, match="absent"):
+        candidate.matrix(root, root.parent / "validated-dev", dev)
+
+
+def test_validator_bootstrap_recipe_keeps_pinned_deny_local_contract(subject, tmp_path, monkeypatch):
+    root = subject[0]
+    workspace = tmp_path / "fresh-bootstrap"
+    workspace.mkdir()
+    monkeypatch.setenv("ARTIFACT_VALIDATION_INDEX_URL", "https://packages.example.invalid/simple")
+    commands = candidate.recipes(root, "validator-bootstrap", bootstrap_root=workspace)
+    target = workspace / "validator"
+    interpreter = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    assert commands == [
+        (["uv", "venv", "--python", sys.executable, str(target)], root),
+        ([sys.executable, str(root / "tools/seasoned_uv.py"), "--registry-only", "--uv", "uv",
+          "--", "--python", str(interpreter), "--no-config", "--only-binary", ":all:",
+          "--require-hashes", "--index-url", "https://packages.example.invalid/simple",
+          "-r", str(root / "tools/artifact_validation_requirements.txt")], root),
+        ([str(interpreter), "-I", "-B", "-c",
+          "import packaging; print(packaging.__version__)"], root),
+    ]
+    jobs = yaml.safe_load((ROOT / ".github/workflows/validate-and-promote.yml").read_text())["jobs"]
+    prefix = "python tools/seasoned_uv.py --registry-only --uv uv --"
+    for job in ("build-python-artifacts", "python-artifacts", "promote", "publish-python-artifacts"):
+        body = next(step["run"] for step in jobs[job]["steps"] if prefix in step.get("run", ""))
+        line = next(line.strip() for line in body.replace("\\\n", "").splitlines() if prefix in line)
+        actual = shlex.split(line)
+        assert actual[actual.index("--python") + 1] == "$RUNNER_TEMP/artifact-validator/bin/python"
+        assert actual[actual.index("--index-url") + 1] == (
+            "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}"
+        )
+        assert actual[actual.index("-r") + 1] == "tools/artifact_validation_requirements.txt"
+        actual[:2] = [sys.executable, str(root / "tools/seasoned_uv.py")]
+        actual[actual.index("--python") + 1] = str(interpreter)
+        actual[actual.index("--index-url") + 1] = "https://packages.example.invalid/simple"
+        actual[actual.index("-r") + 1] = str(root / "tools/artifact_validation_requirements.txt")
+        assert actual == commands[1][0]
+    monkeypatch.setenv("ARTIFACT_VALIDATION_INDEX_URL", "")
+    fallback = candidate.recipes(root, "validator-bootstrap", bootstrap_root=workspace)[1][0]
+    assert fallback[fallback.index("--index-url") + 1] == "https://pypi.org/simple"
+    (workspace / "retained-cache").mkdir()
+    with pytest.raises(candidate.CandidateValidationError, match="fresh isolated"):
+        candidate.recipes(root, "validator-bootstrap", bootstrap_root=workspace)
+
+
+@pytest.mark.parametrize("mode", ["accepted", "wrong-hash", "local-source", "unsupported-helper"])
+def test_real_candidate_bootstrap_is_fresh_and_refuses_bad_inputs(subject, tmp_path, monkeypatch, mode):
+    from test_installer_dependency_policy import materialized_broken_helper
+
+    root, _, dev, main = subject
+    helper = materialized_broken_helper(tmp_path / "broken-source")
+    shutil.copytree(helper.parent.parent, root, dirs_exist_ok=True)
+    content = io.BytesIO()
+    with zipfile.ZipFile(content, "w") as wheel:
+        wheel.writestr("packaging/__init__.py", "__version__ = '25.0'\n")
+        prefix = "packaging-25.0.dist-info/"
+        wheel.writestr(prefix + "METADATA", "Metadata-Version: 2.1\nName: packaging\nVersion: 25.0\n")
+        wheel.writestr(prefix + "WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+        wheel.writestr(prefix + "RECORD", "")
+    artifact = content.getvalue()
+    digest = hashlib.sha256(artifact).hexdigest()
+    filename = "packaging-25.0-py3-none-any.whl"
+    downloads = []
+
+    class Index(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.respond(head=False)
+
+        def do_HEAD(self):
+            self.respond(head=True)
+
+        def respond(self, *, head):
+            if self.path == "/simple/packaging/":
+                body = json.dumps({
+                    "meta": {"api-version": "1.2"}, "name": "packaging",
+                    "files": [{
+                        "filename": filename, "url": "/files/" + filename,
+                        "hashes": {"sha256": digest}, "upload-time": "2020-01-01T00:00:00Z",
+                    }],
+                }).encode()
+                kind = "application/vnd.pypi.simple.v1+json"
+            elif self.path == "/files/" + filename:
+                body, kind = artifact, "application/octet-stream"
+                if not head:
+                    downloads.append(filename)
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if not head:
+                self.wfile.write(body)
+
+    for key in list(os.environ):
+        if key.startswith(("UV_", "PIP_", "PYTHON")) or key == "VIRTUAL_ENV":
+            monkeypatch.delenv(key)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Index)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    monkeypatch.setenv("ARTIFACT_VALIDATION_INDEX_URL", f"http://127.0.0.1:{server.server_port}/simple")
+    requirements = root / "tools" / "artifact_validation_requirements.txt"
+    requirements.write_text(
+        f"packaging==25.0 --hash=sha256:{'0' * 64 if mode == 'wrong-hash' else digest}\n",
+        encoding="utf-8",
+    )
+    if mode == "local-source":
+        requirements.write_text(str(root / "plugins" / "fixture-plugin") + "\n", encoding="utf-8")
+    if mode == "unsupported-helper":
+        (root / "tools" / "seasoned_uv.py").write_text(
+            "import argparse\nargparse.ArgumentParser().parse_args()\n", encoding="utf-8",
+        )
+    head = commit(root)
+    original = candidate.recipes
+    workspaces = []
+
+    def recipes(path, component, **kwargs):
+        workspace = kwargs["bootstrap_root"]
+        assert not any(workspace.iterdir())
+        workspaces.append(workspace)
+        return original(path, component, **kwargs)
+
+    monkeypatch.setattr(candidate, "recipes", recipes)
+    try:
+        if mode == "accepted":
+            assert candidate.run(
+                root, head, dev, main, "validator-bootstrap", dev_root=root.parent / "validated-dev",
+            )["outcome"] == "success"
+            assert downloads
+        else:
+            with pytest.raises(candidate.CandidateValidationError, match="consumer failed"):
+                candidate.run(
+                    root, head, dev, main, "validator-bootstrap", dev_root=root.parent / "validated-dev",
+                )
+            if mode in {"local-source", "unsupported-helper"}:
+                assert not downloads
+        assert workspaces and all(not workspace.exists() for workspace in workspaces)
+        assert candidate.validate(root, head, dev, main)["candidate_sha"] == head
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("name,seconds", [
+    ("agent-dispatch", 1800), ("agent-index", 2700), ("agent-machines", 2700),
+    ("agent-bridge", 900), ("agent-worktrees", 900),
+])
+def test_outer_budget_preserves_real_runner_policy_and_setup_allowance(name, seconds):
+    from materialized_candidate_inventory import plugin_minutes
+
+    assert plugin_minutes(ROOT, name) * 60 >= seconds + 180
+
+
+@pytest.mark.parametrize("policy", [
+    "", RUNNER_POLICY.replace("900.0", "0"), RUNNER_POLICY.replace("900.0", "True"),
+    RUNNER_POLICY.replace("= {}", '= {"agent-bridge": -1}'),
+])
+def test_unknown_or_invalid_recipe_budget_is_not_replaced_by_a_short_default(tmp_path, policy):
+    from materialized_candidate_inventory import plugin_minutes
+
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "run-plugin-tests.py").write_text(policy, encoding="utf-8")
+    with pytest.raises(candidate.CandidateValidationError, match="budgets are unreadable"):
+        plugin_minutes(tmp_path, "agent-bridge")
+
+
+def test_enclosing_jobs_allow_all_recipe_calls_and_host_setup(subject, tmp_path):
+    root, _, dev, _ = subject
+    workspace = tmp_path / "bootstrap"
+    workspace.mkdir()
+    for row in candidate.matrix(root, root.parent / "validated-dev", dev)["include"]:
+        commands = (
+            candidate.recipes(root, row["component"], bootstrap_root=workspace)
+            if row["component"] == "validator-bootstrap" else candidate.recipes(root, row["component"])
+        )
+        assert row["job_minutes"] >= row["minutes"] * len(commands) + 5
+
+
 def test_real_fleet_recipe_preserves_existing_bounded_exclusions(subject):
     root, head, dev, main = subject
     assert candidate.run(
@@ -381,8 +584,12 @@ def test_pipeline_requires_successful_exact_candidate_jobs_and_preserves_old_gat
     assert jobs["materialized-candidate-plan"]["runs-on"] == "ubuntu-latest"
     assert jobs["materialized-candidate-consumers"]["runs-on"] == "ubuntu-latest"
     assert jobs["materialized-candidate-windows"]["runs-on"] == "windows-latest"
-    assert jobs["materialized-candidate-windows"]["strategy"]["matrix"]["component"] == [
-        "index", "fleet-manager",
+    assert jobs["materialized-candidate-consumers"]["timeout-minutes"] == "${{ matrix.job_minutes }}"
+    assert jobs["materialized-candidate-windows"]["timeout-minutes"] == "${{ matrix.job_minutes }}"
+    assert jobs["materialized-candidate-windows"]["strategy"]["matrix"]["include"] == [
+        {"component": "index", "job_minutes": 10},
+        {"component": "fleet-manager", "job_minutes": 23},
+        {"component": "validator-bootstrap", "job_minutes": 20},
     ]
     assert jobs["materialized-candidate-windows"]["strategy"]["fail-fast"] is False
     assert jobs["materialized-candidate-consumers"]["strategy"]["fail-fast"] is False

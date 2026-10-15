@@ -265,17 +265,19 @@ def test_validator_provisioning_never_exposes_release_authority(monkeypatch):
         }, }""", "")
 
     monkeypatch.setattr(policy.subprocess, "run", settings_probe)
+    prefix = "python tools/seasoned_uv.py --registry-only --uv uv --"
     for job in ("build-python-artifacts", "python-artifacts", "promote", "publish-python-artifacts"):
         provision = next(
             step for step in jobs[job]["steps"]
-            if "python tools/seasoned_uv.py --uv uv --" in step.get("run", "")
+            if prefix in step.get("run", "")
             and "artifact_validation_requirements.txt" in step["run"]
         )
         assert "--require-hashes" in provision["run"]
+        assert "--trusted-source-root" not in provision["run"]
         assert "--no-deps" not in provision["run"] and "--no-build-isolation" not in provision["run"]
         assert "--only-binary :all:" in provision["run"]
         assert '--index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}"' in provision["run"]
-        invocation = provision["run"].replace("\\\n", "").split("python tools/seasoned_uv.py --uv uv --", 1)[1]
+        invocation = provision["run"].replace("\\\n", "").split(prefix, 1)[1]
         arguments = shlex.split(invocation)
         admitted = prepare_uv_install("uv", arguments, cwd=root)
         assert "--exclude-newer" in admitted and "--reinstall" in admitted

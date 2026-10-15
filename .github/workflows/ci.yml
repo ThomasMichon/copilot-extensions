@@ -1179,18 +1179,37 @@ jobs:
         run: |
           run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
           echo "run=$run" >> "$GITHUB_OUTPUT"
-      - name: Native command binding and lifecycle contracts
+      - name: Command catalog native contracts (Windows)
         if: steps.installation-context.outputs.run == 'true'
-        timeout-minutes: 6
+        timeout-minutes: 2
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
           python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q --durations=20
           libs/payload-invocation/tests/test_command_binding.py
+          -k "command_binding"
+      - name: Command lifecycle read-only contracts (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q --durations=20
           libs/payload-invocation/tests/test_command_lifecycle.py
           libs/payload-invocation/tests/test_command_lifecycle_stdio.py
-          -k command_binding
+          -k "command_binding and not (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"
+      - name: Command lifecycle native first-touch (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q --durations=20
+          libs/payload-invocation/tests/test_command_lifecycle.py
+          -k "command_binding and (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"
 
   vault-snapshot-windows:
     name: Vault snapshot first-use (Windows)
