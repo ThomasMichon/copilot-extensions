@@ -812,7 +812,7 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
             for key, record in records.items():
                 selected = container is None or record.container == container
                 can_clear = (
-                    legacy_writer_quiesced(record)
+                    legacy_writer_quiesced(record) and not _record_live(record, ttl)
                     if record.lock_protocol == "legacy" else not _record_live(record, ttl)
                 )
                 if selected and can_clear:

@@ -76,7 +76,9 @@ Legacy records from another environment remain blocking even after heartbeat
 expiry: cutover prevents their old writers from refreshing that heartbeat.
 Quiesce them in their owning environment and run `lifecycle-clear` there.
 Its cleanup-only transaction removes only locally verified-dead legacy records
-while preserving foreign and live records, so each environment can clean up
+that are also no longer live. An uncertain destructive hold remains live until
+its fixed expiry even after its wrapper exits. Cleanup preserves foreign and
+live records, so each environment can clean up
 without opening normal admission prematurely. Expiry alone never proves
 foreign legacy quiescence.
 The provider's creation-time binding identity is pinned in both an

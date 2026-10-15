@@ -174,6 +174,30 @@ def test_each_environment_can_clear_only_its_verified_dead_legacy_writer(state, 
         assert lease._LOCK_FILE.is_dir()
 
 
+def test_dead_legacy_uncertain_hold_remains_until_expiry(state, monkeypatch):
+    now = 1000.0
+    monkeypatch.setattr(lease.time, "time", lambda: now)
+    monkeypatch.setattr(lease, "_pid_alive", lambda pid: False)
+    fields = {
+        "container": "pool-1", "token": "legacy", "pid": 123,
+        "host": lease._this_host(), "environment": lease._this_environment(),
+        "operation": "remove", "acquired_at": 1, "heartbeat_at": 1,
+        "expires_at": now + 20, "uncertain": True,
+    }
+    path = lease._DEPLOY_HOLDS_FILE
+    path.write_text(json.dumps({"legacy": fields}), encoding="utf-8")
+    original = path.read_bytes()
+    assert lease.clear_stale_provider_records() == {
+        "deploy_holds": 0, "session_admissions": 0,
+    }
+    assert path.read_bytes() == original
+    now = fields["expires_at"]
+    assert lease.clear_stale_provider_records() == {
+        "deploy_holds": 1, "session_admissions": 0,
+    }
+    assert json.loads(path.read_text()) == {}
+
+
 def test_mixed_version_process_cannot_enter_or_unlink_kernel_namespace(state):
     ready, attempt, result = (state / name for name in ("ready", "attempt", "result"))
     script = r"""
