@@ -14,6 +14,7 @@
     source this file across plugin boundaries.
 #>
 
+# Packaged human-output initialization: installer-human-output.ps1
 $script:InstallerDependencyPolicy = Join-Path $PSScriptRoot 'installer_dependency_policy.py'
 
 function Invoke-NativeCapture {

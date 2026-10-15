@@ -1,0 +1,13 @@
+{
+  "comment": "Frame Python-owned update and launch preparation output with UTC and monotonic operation timing; stream human installer diagnostics without changing exit status",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

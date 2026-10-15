@@ -26,6 +26,7 @@ while retaining installation, ownership, policy and health contracts.
 | Installer evidence reader | Audits runtime construction, activation and healthy no-op work | Coordinator's bounded read-only delegation |
 | Output evidence reader | Audits existing output helpers, protocols and formatting ownership | Coordinator's bounded read-only delegation |
 | Outcome/framing implementation owner | First two Phase 2 items and their focused regressions; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
+| Human-progress implementation owner | Shared timing/line rendering, actual output adapters and focused proofs; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
 
 ## Coordination
 
@@ -34,10 +35,12 @@ while retaining installation, ownership, policy and health contracts.
   mutates Git state in the integration worktree.
 - **Host (owns PRs):** Coordinator.
 - **Delegates:** three non-mutating evidence scopes above. Implementation
-  ownership was assigned after proposal review: the outcome/framing owner
-  may edit shell action-result handling, the supervisor result boundary and
-  directly related tests only. The coordinator does not edit those files
-  or mutate Git concurrently.
+  ownership was assigned after proposal review: the outcome/framing slice
+  is merged, and the human-progress owner now owns formatter/clock helpers,
+  directly dependent output adapters, generated consumers and focused tests.
+  Bridge serving-state algorithms remain outside that assignment. The
+  coordinator owns this effort's journal and all publication, and does not
+  edit the delegate's files or mutate Git concurrently.
 - **Handoff:** keep this README and the operation audit authoritative. A
   completed PR is a slice, not completion of the effort.
 - **Existing owners:** the vendored-installer-engine campaign owns wholesale
@@ -94,9 +97,9 @@ matrix below are _(agent-recommended)_ implementation details.
 
 ### Phase 2 - Make timing and status reporting consistent
 
-- [ ] Retain per-action exit status and timed start/end/error outcomes in the
+- [x] Retain per-action exit status and timed start/end/error outcomes in the
   shell launch-maintenance path while preserving its fresh replanning.
-- [ ] Correct the supervisor JSON-framing defect before applying human line
+- [x] Correct the supervisor JSON-framing defect before applying human line
   formatting (#6827); preserve diagnostic stderr and identity-scoped retirement.
 - [ ] Implement the smallest shared extension of the existing formatter
   ownership, covering aggregate progress, plugin installers, nested child
@@ -153,6 +156,20 @@ matrix below are _(agent-recommended)_ implementation details.
 - [ ] Record all validation tiers and rollout evidence with the corresponding
   implementation PRs.
 
+Equivalent before/after measurements use the same source/payload identities,
+policy, declared dependencies and initial installed-state fixture. Record
+operation counts and measured durations separately; a change in network
+availability or payload state is not an equivalent speed comparison.
+
+| Scenario | Required observable result |
+|----------|----------------------------|
+| Unchanged admitted and healthy runtime | No runtime/package reconstruction; retain the required policy, ownership and health checks. |
+| Admitted Bridge slot current, serving version stale | Use the existing owned health/cutover path; no rebuild or disabled-service activation. |
+| Changed Codespaces payload | Attribute construction, package, completion and activation boundaries; do not mistake silence between lines for command execution time. |
+| First touch with no completed runtime | Perform the required construction and admission work; report its real phases and failures rather than claiming no-op savings. |
+| Failed or missing child command | Preserve its exact failure and continuation policy; do not render aggregate success or contaminate JSON stdout. |
+| Payload-to-runtime dependency ordering | Retain fresh second-pass planning and runtime re-resolution; do not suppress work solely because an earlier child exited zero. |
+
 ## Proposal
 
 The [audit](audit.md) contains the complete reference-run line ledger,
@@ -185,6 +202,131 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-15 - Synchronized presentation candidate and fresh wheel proof
+
+- Synchronized the candidate with the contribution branch and refreshed
+  the three encoding declarations affected by merged installer changes.
+  The synchronized code is bound by
+  `7c947e4d970401db02913cc8f5fa573a618883c8`. Existing merged #6836
+  owns the single final local-integration pass; #6862 owns refusal to
+  mutate runtimes after required payload acquisition fails. Neither is
+  reimplemented or claimed as this effort's new speedup.
+- Canonical Windows preparation now succeeds after #6845. The complete
+  four-file engine/library selection passed 220 cases (one platform
+  skip), and canonical Manager preparation passed all 45 update cases.
+  A fresh exact-source native Linux consumer passed all 38 generator
+  cases, 207 engine/library cases (14 Windows-only skips) and 45 Manager
+  cases, without deselections or changed limits.
+- An agent-free Linux clean-room source-build attempt stopped at an
+  external build-backend TLS `HandshakeFailure`; it is not reported as
+  passing. The existing Docker engine is Linux, so a full fresh Windows
+  PowerShell machine was unavailable; native PS5.1/7 contracts were
+  exercised in contained fixtures.
+- Separately built the exact pure-stdlib library wheel with its declared
+  backend and an explicit seven-day dependency cutoff. A fresh,
+  unauthenticated clean-room container installed that local wheel
+  offline, verified its source/module hashes and installed-prefix origin,
+  then preserved a real Unicode child's exit 23 and timed framing.
+  All three packaging/renderer stages passed. This does not establish
+  source-feed bootstrap, production artifact admission or host rollout.
+- Both owned containers were removed. Native-shell/standalone timing,
+  equivalent update-cost measurements, serving-state convergence and
+  authorized promoted installation remain open.
+
+### 2026-10-15 - Exact-candidate native-storage proof
+
+- Bound the candidate as local commit
+  `062bc917b2f785e90fa95332c47b0220cfda0d60`, tree
+  `1d5addb17928a67eb6aa8bb854264dcf4b31ae9c`; no publication or
+  installation was inferred from that commit.
+- Independent Windows runs passed all four focused engine/library files
+  (215 passes, one platform skip), the Manager update file (45 passes)
+  and the complete generator file (38 passes). Whole-payload producer
+  validation completed in 3.93s.
+- Repeated the complete selection against an exact-HEAD/tree local-only
+  shallow consumer on native Linux storage, with private native temporary
+  state and current-source import assertions. All 38 generator cases
+  passed, including the whole-payload/all-nine-producer case in 0.23s.
+  The four engine/library files passed 202 cases (14 Windows-only skips);
+  Manager update passed 45. There were no deselections.
+- The formerly blocked two-process append case passed in 0.59s. This
+  resolves the storage-dependent validation obstruction without changing
+  source ownership checks or the existing 30-second item / 300-second
+  suite limits. The consumer source remained clean.
+- These measurements explain validation filesystem cost, not installer
+  speedup. This remains a bounded Python-owned presentation slice:
+  standalone/native-shell clock coverage, real work reductions and
+  promoted installed proof remain outstanding.
+
+### 2026-10-15 - Human-output implementation started
+
+- Assigned the next bounded implementation to the existing update phase,
+  telemetry and output ownership, including actual launch-maintenance and
+  nested child streams. There is no separately verified central human
+  update renderer to preserve by name; structured update status remains
+  authoritative, and launch preparation is a distinct progress owner.
+- The implementation must establish an honest portable clock strategy,
+  not assume Bash 3.2 has PowerShell's Stopwatch equivalent. One admitted
+  existing interpreter/stream owner per outer operation may be considered;
+  a reporting process, telemetry write or lock per line remains forbidden.
+- Added explicit equivalent-state measurement scenarios above. These are
+  validation oracles, not measured update savings or installed proof.
+- Release inspection found normal promotion run `38722957706` blocked in
+  metadata-validator tooling preparation by the literal refusal
+  `dependency-seasoning: canonical local graph lacks library attribution`.
+  This is the existing materialized-release admission portfolio tracked by
+  #6806 and #6844, not a new framing failure or a reason to bypass policy.
+  The normal queued promoter retains release ownership; no competing
+  repair, pipeline retry, installed-copy patch or local updater was started.
+  A dev merge is still not promoted or installed proof for this effort.
+- The first contained formatter run exercised 189 engine/library cases
+  (one platform skip) and 43 Manager cases successfully. A subsequent
+  native Unicode regression failed on both Windows PowerShell hosts:
+  redirected producers used IBM437, losing unrepresentable characters
+  before the UTF-8 relay could decode them. The candidate is not green
+  or published; changing the decoder alone cannot repair that loss.
+- The next repair must initialize encoding inside the captured producer
+  process, preserving native invocation, argument, exit, trust and
+  packaging contracts. It must not change a shared console, machine
+  locale, execution policy or global environment to make output pass.
+- Producer-owned initialization now replaces only redirected text writers;
+  native-command decoding and pipeline stdin retain their original
+  encodings. Nine generated producers declare this contract. Native host
+  invocation, arguments and exit handling remain unchanged; unsupported
+  producers keep inherited streams with one scoped presentation notice.
+- Worker coverage reached 305 Windows passes (one platform skip) and
+  290 POSIX passes (14 Windows-only skips). The POSIX run is not fully
+  green: an unchanged bulk-append stress case exhausted the broader
+  selection, and the whole-payload/all-nine-producer proof hit its existing
+  30-second limit on DrvFS. No deadline or ownership check was weakened.
+  Re-execute the complete selection on native Linux storage before
+  classifying this as a code defect or filesystem-specific cost.
+- Coordinator review also corrected completion timing across multiline
+  output and failure reporting when update finalization raises. Two
+  independent contained regressions passed; sink latency must not inflate
+  a completed operation's duration or turn an exception into `done`.
+- A local candidate commit will bind the exact input for a disposable,
+  native-Linux validation consumer. This is not publication, a new work
+  venue, a release or installed proof; no PR proceeds on the blocked
+  selection alone.
+
+### 2026-10-15 - First implementation merged; formatting continues
+
+- Merged #6846 as `6abfb1d7d566474f653417f83c2a7ad8680074d3`
+  after a fresh exact-head approval with zero findings and successful
+  required CI. Dispatch completed in 11m8s under its unchanged 12-minute
+  deadline; the required aggregate passed.
+- This resolves the first two Phase 2 items. It does not resolve the
+  monotonic POSIX formatter-clock obligation, the remaining presentation
+  items, serving-state convergence or installed rollout.
+- Preserved the pre-sync source history, reconciled the merged PR through
+  the native worktree flow and synchronized onto the merged contribution
+  branch. The effort remains Active in its existing worktree.
+- The next slice must extend the actual aggregate **update** presentation
+  owner, not mistake launch preparation progress for that owner. Confirm
+  the native POSIX clock/streaming seam before committing a formatter
+  design; no per-line reporting process or telemetry write is permitted.
 
 ### 2026-10-15 - Retain framing coverage within the existing CI budget
 

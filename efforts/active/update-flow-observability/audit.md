@@ -332,3 +332,15 @@ Prioritize:
    evidence still bind.
 5. Measure equivalent healthy, changed-version and first-touch runs after
    implementation. Report work avoided, not merely shorter output.
+
+### Later source alignment
+
+The ledger above remains evidence for its named historical source and run,
+not an assertion that every old repetition persists. In addition to #6598's
+construction reuse, merged #6836 now defers installer-local finishing and
+performs one required final project-command/profile integration pass against
+the selected payload. Merged #6862 stops runtime and local mutation after
+required payload acquisition fails. Preserve and verify those owners' work;
+do not duplicate it or count it as a newly implemented optimization here.
+Neither a source merge nor a passing formatter fixture measures the installed
+flow's execution count or duration.

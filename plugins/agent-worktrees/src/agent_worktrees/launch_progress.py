@@ -9,6 +9,7 @@ import uuid
 from contextlib import contextmanager
 
 from . import activity
+from . import output
 
 HEARTBEAT_SECONDS = 10
 
@@ -18,7 +19,6 @@ def step(label: str, *, enabled: bool = True, worktree_id: str | None = None):
     started = time.monotonic()
     step_id = uuid.uuid4().hex
     stopped = threading.Event()
-
     def record(state: str, *, error_type: str | None = None):
         activity.log_event(
             "launch_preparation",
@@ -32,30 +32,39 @@ def step(label: str, *, enabled: bool = True, worktree_id: str | None = None):
 
     def report(message: str):
         if enabled:
-            print(f"[launch] {label}: {message}", file=sys.stderr, flush=True)
+            if human is not None:
+                human.progress(message)
+            else:
+                print(f"[launch] {label}: {message}", file=sys.stderr, flush=True)
 
     def heartbeat():
         while not stopped.wait(HEARTBEAT_SECONDS):
             record("waiting")
-            report(f"still working ({time.monotonic() - started:.0f}s elapsed)")
+            report("running" if human is not None
+                   else f"still working ({time.monotonic() - started:.0f}s elapsed)")
 
     record("started")
-    report("starting")
-    thread = None
-    if enabled:
-        thread = threading.Thread(target=heartbeat, name="launch-progress", daemon=True)
-        thread.start()
-    outcome = "finished"
-    error_type = None
-    try:
-        yield
-    except BaseException as exc:
-        outcome = "failed"
-        error_type = type(exc).__name__
-        raise
-    finally:
-        stopped.set()
-        if thread is not None:
-            thread.join()
-        record(outcome, error_type=error_type)
-        report(f"{outcome} ({time.monotonic() - started:.1f}s)")
+    with output.human_operation(f"launch/{label}", enabled=enabled) as human:
+        if human is None:
+            report("starting")
+        thread = None
+        outcome = "finished"
+        error_type = None
+        try:
+            if enabled:
+                thread = threading.Thread(target=heartbeat, name="launch-progress", daemon=True)
+                thread.start()
+            yield
+        except BaseException as exc:
+            outcome = "failed"
+            error_type = type(exc).__name__
+            raise
+        finally:
+            stopped.set()
+            if thread is not None and thread.ident is not None:
+                thread.join()
+            record(outcome, error_type=error_type)
+            if human is not None:
+                human.complete("failed" if outcome == "failed" else "done")
+            elif enabled:
+                report(f"{outcome} ({time.monotonic() - started:.1f}s)")

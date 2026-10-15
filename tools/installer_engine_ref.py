@@ -12,6 +12,8 @@ restoring the shipped self-contained payload.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from pathlib import Path
 import re
 
@@ -33,6 +35,57 @@ ADOPTERS = (
     "agent-dispatch",
     "agent-index",
 )
+HUMAN_HELPER = "installer-human-output.ps1"
+HUMAN_SOURCE_LINE = ". (Join-Path $PSScriptRoot 'installer-human-output.ps1')"
+HUMAN_PROLOGUE = (
+    "if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {\n"
+    "    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {\n"
+    "        throw 'Required installer human-output initializer is unavailable.'\n"
+    "    }\n"
+    f"    {HUMAN_SOURCE_LINE}\n"
+    "}"
+)
+
+
+def human_output_enabled(canonical_dir: Path) -> bool:
+    engine = canonical_dir / "installer-engine.ps1"
+    return engine.is_file() and (
+        f"# Packaged human-output initialization: {HUMAN_HELPER}"
+        in engine.read_text(encoding="utf-8")
+    )
+
+
+def human_output_adopters(repo: Path, adopters) -> tuple[str, ...]:
+    # The engine's own installer does not consume installer-engine functions,
+    # but shares this small, independently packaged native output initializer.
+    return (*adopters, "agent-worktrees") if (
+        repo / "plugins" / "agent-worktrees" / "scripts" / "install.ps1"
+    ).is_file() else tuple(adopters)
+
+
+def human_output_declaration(script: Path) -> dict:
+    helper = script.parent / HUMAN_HELPER
+    text = script.read_text(encoding="utf-8")
+    if text.count(HUMAN_SOURCE_LINE) != 1:
+        raise ValueError(f"{script}: expected one native human-output initializer")
+    prologue = "$ErrorActionPreference = 'Stop'\n\n" + HUMAN_PROLOGUE
+    if prologue not in text:
+        raise ValueError(f"{script}: human-output initializer must follow strict error setup")
+
+    def digest(path: Path) -> str:
+        # Git checkouts may use CRLF; this is a content declaration, not a
+        # replacement for PowerShell's signature/execution-policy enforcement.
+        return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+    return {
+        "version": 1, "encoding": "utf-8", "entrypoint": script.name,
+        "entrypoint_sha256": digest(script), "initializer": HUMAN_HELPER,
+        "initializer_sha256": digest(helper),
+    }
+
+
+def human_output_json(script: Path) -> str:
+    return json.dumps(human_output_declaration(script), indent=2) + "\n"
 
 
 def support_files(canonical_dir: Path) -> tuple[str, ...]:
@@ -41,7 +94,10 @@ def support_files(canonical_dir: Path) -> tuple[str, ...]:
         (canonical_dir / name).read_text(encoding="utf-8")
         for name in FILES if (canonical_dir / name).is_file()
     ]
-    return SUPPORT_FILES if any(SUPPORT_FILES[0] in body for body in bodies) else ()
+    files = SUPPORT_FILES if any(SUPPORT_FILES[0] in body for body in bodies) else ()
+    if human_output_enabled(canonical_dir):
+        files += (HUMAN_HELPER,)
+    return files
 
 _LOCAL_LINES = {
     "ps1": ". (Join-Path $PSScriptRoot 'installer-engine.ps1')",

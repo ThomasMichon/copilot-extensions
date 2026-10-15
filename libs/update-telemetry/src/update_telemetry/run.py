@@ -23,6 +23,7 @@ from pathlib import Path
 from . import outcomes as oc
 from .fold import MAX_DETAIL, RUN_COMPONENT, fold
 from .redact import redact, redact_argv
+from .human import current_operation
 
 ENV_HOME = "COPILOT_EXTENSIONS_UPDATE_HOME"
 ENV_RUN_ID = "COPILOT_EXTENSIONS_UPDATE_RUN_ID"
@@ -46,7 +47,11 @@ _WARNED = False
 def _stderr(message: str) -> None:
     """Best-effort diagnostic: a closed or unencodable stderr is ignored."""
     try:
-        print(message, file=sys.stderr)
+        operation = current_operation()
+        if operation is not None:
+            operation.progress(message)
+        else:
+            print(redact(message), file=sys.stderr)
     except Exception:  # noqa: S110 - a diagnostic must never escape
         pass
 

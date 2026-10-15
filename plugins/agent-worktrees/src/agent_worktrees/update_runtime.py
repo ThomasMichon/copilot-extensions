@@ -7,7 +7,6 @@ import enum
 import functools
 import json
 import os
-import re
 import shutil
 import socket
 import subprocess
@@ -17,53 +16,17 @@ from pathlib import Path
 
 from . import bare_anchor_files, bare_anchor_sync, git_ops, output, update_events
 from . import config as cfg
-from . import installer_run as _installer_run
 from .installer_capabilities import posix_zero_downtime_flag_supported
 from .update_gate import (  # noqa: F401 - re-exported for callers and tests
     MACHINE_GATED_SKIP,
     MachineDetectionError,
     _machine_gate_blocks,
 )
-
-
-def _installer_timeout(
-    name: str, environment: Mapping[str, str], plugin_dir: Path | None = None,
-) -> int:
-    """Leave the installer watchdog time to terminate its tree and publish failure."""
-    variable = re.sub(r"[^A-Za-z0-9]+", "_", name).upper() + "_INSTALL_DEADLINE_SEC"
-    raw = environment.get(variable) or environment.get("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC")
-    deadline = 480
-    if raw:
-        try:
-            deadline = int(raw)
-        except ValueError as error:
-            raise ValueError(f"{name}: invalid installer deadline {raw!r}; expected integer seconds") from error
-    elif plugin_dir is not None:
-        manifest = plugin_dir / "plugin.json"
-        try:
-            manifest_text = manifest.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            pass
-        else:
-            data = json.loads(manifest_text)
-            if not isinstance(data, dict):
-                raise ValueError(f"{name}: installer manifest must be an object")
-            deadline = data.get("installerDeadlineSeconds", 480)
-            if type(deadline) is not int or deadline <= 0:
-                raise ValueError(f"{name}: installerDeadlineSeconds must be a positive integer")
-    # Disabling the inner watchdog must not disable the updater's safety bound.
-    return (deadline if deadline > 0 else 480) + 30
-
-
-def installer_deadline_status(error: Exception) -> str:
-    """Status for a failed :func:`_installer_timeout`, keeping its cause.
-
-    An unreadable manifest is an OS failure (its ``[Errno N]`` marker classifies
-    it), never an invalid deadline value.
-    """
-    if isinstance(error, OSError):
-        return f"installer manifest unreadable: {error}"
-    return f"invalid installer deadline: {error}"
+from .update_installer_process import (
+    _installer_timeout,
+    _run_human_installer,
+    installer_deadline_status,
+)
 
 
 def _core():
@@ -620,8 +583,9 @@ def _reconcile_one_runtime_status(
     except (OSError, ValueError) as error:
         return installer_deadline_status(error)
     output.header(f"Reconciling Runtime: {name}" + (" (forced)" if force else ""))
-    return _installer_run.run_installer(
-        argv, cwd=pdir, env=child_environment, deadline_s=installer_timeout, target_version=pver,
+    return _run_human_installer(
+        argv, label=name, receipt_owned=True,
+        cwd=pdir, env=child_environment, deadline_s=installer_timeout, target_version=pver,
         receipt=lambda: reconcile.runtime_deployed_version(name, root=runtime_root),
     ).status
 
@@ -638,8 +602,9 @@ def _run_engine_installer(
     """
     from . import reconcile
 
-    run = _installer_run.run_installer(
-        argv, cwd=plugin_dir, env=env, deadline_s=timeout,
+    run = _run_human_installer(
+        argv, label="agent-worktrees", receipt_owned=True,
+        cwd=plugin_dir, env=env, deadline_s=timeout,
         target_version=reconcile.payload_version(plugin_dir) if runtime_root else None,
         receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
     )
@@ -917,7 +882,8 @@ def _update_modules(
                 update_args.append("--zero-downtime")
         output.header(f"Updating Module: {name}")
         run = functools.partial(
-            _installer_run.run_installer, cwd=module_dir, env=runtime_env,
+            _run_human_installer, label=name, receipt_owned=True,
+            cwd=module_dir, env=runtime_env,
             deadline_s=installer_timeout, target_version=mod_payload_ver,
             receipt=functools.partial(_reconcile.runtime_deployed_version, name, root=runtime_root),
         )

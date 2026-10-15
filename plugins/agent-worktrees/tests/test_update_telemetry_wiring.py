@@ -7,6 +7,7 @@ import argparse
 import errno
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,367 @@ from agent_worktrees import reconcile, update_cli, update_events, update_gate, u
 from agent_worktrees import update_runtime as runtime
 
 pytestmark = pytest.mark.guard
+
+
+@pytest.fixture
+def declare_human_producer(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "tools"))
+    import installer_engine_ref as contract
+
+    def declare(script):
+        shutil.copyfile(
+            root / "libs" / "installer-engine" / contract.HUMAN_HELPER,
+            script.parent / contract.HUMAN_HELPER,
+        )
+        script.with_suffix(".human-output.json").write_text(
+            contract.human_output_json(script), encoding="utf-8",
+        )
+    declare.prologue = contract.HUMAN_PROLOGUE
+    return declare
+
+
+@pytest.mark.parametrize("shell", ["powershell", "pwsh", "bash"])
+def test_human_installer_frames_native_streams_once_and_retains_failure(
+    shell, tmp_path, capsys, declare_human_producer,
+):
+    """One real child per available native host, not a cold-host outcome matrix."""
+    from update_telemetry.human import HumanOperation
+
+    if (shell == "bash") == (os.name == "nt"):
+        pytest.skip("native host belongs to the other platform")
+    executable = shutil.which(shell)
+    if executable is None:
+        pytest.skip(f"{shell} is not installed")
+    canonical = "[12:00:01.120Z] update/nested running [elapsed 3.1s]"
+    diagnostic = "".join(map(chr, (0x00e9, 0x03bb, 0x4e2d)))
+    if shell == "bash":
+        script = tmp_path / "installer.sh"
+        script.write_text(
+            "printf '%s\\n' 'native detail' '' "
+            "'https://user:private@example.test/a' "
+            f"'{canonical}'\nprintf '%s\\n' '{diagnostic}'\n"
+            f"printf '%s\\n' '{diagnostic}' >&2\n"
+            "printf '%s\\n' diagnostic >&2\nexit 23\n",
+            encoding="utf-8",
+        )
+        argv = [executable, str(script)]
+    else:
+        script = tmp_path / "installer.ps1"
+        script.write_text(
+            "$priorEncoding = [Console]::OutputEncoding\n"
+            "$priorInputEncoding = $OutputEncoding.CodePage\n"
+            "Set-StrictMode -Version 2.0\n"
+            "$ErrorActionPreference = 'Stop'\n\n"
+            + declare_human_producer.prologue + "\n"
+            + "Write-Host 'native detail'\nWrite-Output ''\n"
+            "if ($OutputEncoding.CodePage -ne $priorInputEncoding) { "
+            "throw 'Native stdin encoding changed' }\n"
+            "$native = & $env:FIXTURE_PYTHON -I -c "
+            "'import sys;sys.stdout.buffer.write(bytes([130,10]))'\n"
+            "if ($native -cne $priorEncoding.GetString([byte[]]@(130))) { "
+            "throw 'Native decoder policy changed' }\n"
+            "$diagnostic = -join ([char]0x00e9, [char]0x03bb, [char]0x4e2d)\n"
+            "[Console]::Error.WriteLine('encoding=' + [Console]::Out.Encoding.WebName)\n"
+            "Write-Host $diagnostic\n[Console]::Error.WriteLine($diagnostic)\n"
+            "Write-Output 'https://user:private@example.test/a'\n"
+            f"Write-Output '{canonical}'\n"
+            "[Console]::Error.WriteLine('diagnostic')\nexit 23\n",
+            encoding="utf-8",
+        )
+        declare_human_producer(script)
+        argv = [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
+    with HumanOperation("update/engine") as flow:
+        rc = runtime._run_engine_installer(
+            argv, tmp_path, 20, dict(os.environ, FIXTURE_PYTHON=sys.executable),
+        )
+        flow.complete("failed", f"exit {rc}")
+    assert rc == 23
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "private" not in captured.err
+    lines = captured.err.splitlines()
+    assert lines.count(canonical) == 1
+    assert all(line.startswith("[") for line in lines)
+    assert "native detail [elapsed " in captured.err
+    assert captured.err.count(diagnostic) == 2, (
+        [line for line in lines if "encoding=" in line],
+        [ord(character) for character in captured.err if ord(character) > 127],
+    )
+    assert "diagnostic [elapsed " in captured.err
+    assert "failed exit 23 [duration " in captured.err
+    assert "done exit 0" not in captured.err
+
+
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+@pytest.mark.parametrize("ending", ["explicit", "native-failure", "throw", "policy-refused"])
+def test_human_producer_preserves_file_invocation(
+    shell, ending, tmp_path, capsys, declare_human_producer,
+):
+    from agent_worktrees.installer_capabilities import HUMAN_UTF8_ENV
+    from update_telemetry.human import HumanOperation
+
+    if os.name != "nt":
+        pytest.skip("Windows native File contract")
+    host = shutil.which(shell)
+    if host is None:
+        pytest.skip(f"{shell} is not installed")
+    script = tmp_path / "original target.ps1"
+    receipt = tmp_path / "receipt.json"
+    literal = "space ' ; $ ` & " + "".join(map(chr, (0xe9, 0x3bb, 0x4e2d)))
+    end = {
+        "explicit": "exit 23",
+        "native-failure": "& $env:FIXTURE_PYTHON -I -c 'import sys;sys.exit(17)'",
+        "throw": "throw 'synthetic failure'",
+        "policy-refused": "exit 23",
+    }[ending]
+    script.write_text(
+        "param([string]$Literal, [string]$Receipt)\n"
+        "Set-StrictMode -Version 2.0\n"
+        "$ErrorActionPreference = 'Stop'\n\n"
+        + declare_human_producer.prologue + "\n"
+        + "@{ path=$PSCommandPath; root=$PSScriptRoot; literal=$Literal; "
+        "remaining=$args.Count; policy=[string]$env:PSExecutionPolicyPreference } | "
+        "ConvertTo-Json -Compress | Set-Content -LiteralPath $Receipt -Encoding UTF8\n"
+        + end + "\n", encoding="ascii",
+    )
+    declare_human_producer(script)
+    policy = "Restricted" if ending == "policy-refused" else "Bypass"
+    argv = [host, "-NoProfile", "-ExecutionPolicy", policy, "-File",
+            str(script), "-Literal", literal, "-Receipt", str(receipt)]
+    environment = dict(os.environ, FIXTURE_PYTHON=sys.executable)
+    environment.pop(HUMAN_UTF8_ENV, None)
+    baseline = subprocess.run(
+        argv, env=environment, capture_output=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    original = (
+        json.loads(receipt.read_text(encoding="utf-8-sig"))
+        if receipt.is_file() else None
+    )
+    if receipt.is_file():
+        receipt.unlink()
+    with HumanOperation("update") as flow:
+        candidate = runtime._run_human_installer(
+            argv, label="producer", env=environment, timeout=10,
+        )
+        flow.complete("done" if candidate.returncode == 0 else "failed")
+    if ending == "policy-refused":
+        assert candidate.returncode == baseline.returncode != 0
+        assert original is None and not receipt.exists()
+        assert HUMAN_UTF8_ENV not in environment
+        assert capsys.readouterr().out == ""
+        return
+    assert candidate.returncode == baseline.returncode == {
+        "explicit": 23, "native-failure": 0, "throw": 1,
+    }[ending]
+    assert json.loads(receipt.read_text(encoding="utf-8-sig")) == original
+    assert original == {
+        "path": str(script), "root": str(tmp_path), "literal": literal,
+        "remaining": 0, "policy": "Bypass",
+    }
+    assert HUMAN_UTF8_ENV not in environment
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("declaration", ["absent", "stale"])
+def test_legacy_human_producer_is_not_captured(
+    declaration, tmp_path, monkeypatch, capsys, declare_human_producer,
+):
+    from agent_worktrees import output
+    from agent_worktrees.installer_capabilities import HUMAN_UTF8_ENV
+    from update_telemetry.human import HumanOperation
+
+    # This adapter contract is platform-independent; the host process itself
+    # is already covered by the native File tests above.
+    script = tmp_path / "original.ps1"
+    script.write_text(
+        "Set-StrictMode -Version 2.0\n"
+        "$ErrorActionPreference = 'Stop'\n\n"
+        + declare_human_producer.prologue + "\n", encoding="ascii",
+    )
+    if declaration == "stale":
+        declare_human_producer(script)
+        with script.open("a", encoding="ascii") as stream:
+            stream.write("# changed producer\n")
+    argv = ["powershell.exe", "-NoProfile", "-File", str(script), "literal ; $ value"]
+    environment = dict(os.environ)
+    environment[HUMAN_UTF8_ENV] = "1"
+    seen = {}
+
+    def original_runner(command, **kwargs):
+        seen.update(kwargs)
+        assert command is argv
+        assert "stdout" not in kwargs and "stderr" not in kwargs
+        assert HUMAN_UTF8_ENV not in kwargs["env"]
+        return subprocess.CompletedProcess(command, 23)
+
+    monkeypatch.setattr(runtime.subprocess, "run", original_runner)
+    monkeypatch.setattr(output, "native_output",
+                        lambda: pytest.fail("legacy native stream must not be decoded"))
+    with HumanOperation("update"):
+        result = runtime._run_human_installer(
+            argv, label="legacy", env=environment, timeout=10,
+        )
+    assert result.returncode == 23
+    assert seen["timeout"] == 10
+    assert environment[HUMAN_UTF8_ENV] == "1"
+    assert capsys.readouterr().err.count("retaining inherited installer streams") == 1
+
+
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+def test_legacy_native_bytes_and_file_arguments_pass_through(shell, tmp_path):
+    if os.name != "nt":
+        pytest.skip("Windows native inherited-stream boundary")
+    host = shutil.which(shell)
+    if host is None:
+        pytest.skip(f"{shell} is not installed")
+    script = tmp_path / "legacy.ps1"
+    receipt = tmp_path / "argv.json"
+    script.write_text(
+        "param([string]$Literal,[string]$Receipt)\n"
+        "@{ literal=$Literal; path=$PSCommandPath; root=$PSScriptRoot } | "
+        "ConvertTo-Json -Compress | Set-Content -LiteralPath $Receipt -Encoding UTF8\n"
+        "$bytes=[byte[]]@(0x82,0,255,13,10)\n"
+        "[Console]::OpenStandardOutput().Write($bytes,0,$bytes.Length)\n"
+        "[Console]::OpenStandardError().Write($bytes,0,$bytes.Length)\nexit 23\n",
+        encoding="ascii",
+    )
+    argv = [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+            "-Literal", "space ; $ & " + chr(0x4e2d), "-Receipt", str(receipt)]
+    baseline = subprocess.run(argv, capture_output=True, stdin=subprocess.DEVNULL, timeout=10,
+                              creationflags=subprocess.CREATE_NO_WINDOW)
+    original = json.loads(receipt.read_text(encoding="utf-8-sig"))
+    root = Path(__file__).resolve().parents[3]
+    paths = [root / "plugins" / "agent-worktrees" / "src", *root.glob("libs/*/src")]
+    # Windows inherited handles are not pytest's redirected CRT descriptors.
+    # Capture the real parent process boundary instead of mocking past it.
+    driver = (
+        f"import sys;sys.path[:0]={[str(path) for path in paths]!r};"
+        "import subprocess;"
+        "from agent_worktrees.update_runtime import _run_human_installer;"
+        "from update_telemetry.human import HumanOperation\n"
+        "with HumanOperation('update') as flow:\n"
+        f" result=_run_human_installer({argv!r},label='legacy',timeout=10,stdin=subprocess.DEVNULL,"
+        f"creationflags={subprocess.CREATE_NO_WINDOW})\n"
+        " flow.complete('failed',str(result.returncode))\n"
+        "raise SystemExit(result.returncode)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-X", "utf8", "-c", driver],
+        capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == baseline.returncode == 23
+    assert result.stdout == baseline.stdout == bytes((0x82, 0, 255, 13, 10))
+    assert baseline.stderr in result.stderr
+    assert json.loads(receipt.read_text(encoding="utf-8-sig")) == original
+    assert result.stderr.count(b"retaining inherited installer streams") == 1
+
+
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_path):
+    from agent_worktrees.installer_capabilities import HUMAN_UTF8_ENV
+
+    if os.name != "nt":
+        pytest.skip("Windows native entrypoint")
+    host = shutil.which(shell)
+    if host is None:
+        pytest.skip(f"{shell} is not installed")
+    source = Path(__file__).resolve().parents[1]
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copyfile(source / "scripts" / "install.ps1", scripts / "install.ps1")
+    shutil.copyfile(source / "plugin.json", payload / "plugin.json")
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = dict(
+        os.environ, USERPROFILE=str(home), HOME=str(home),
+        COPILOT_PLUGIN_INSTALL_SMOKE="1", COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP="0",
+    )
+    for key in (HUMAN_UTF8_ENV, "COPILOT_EXTENSIONS_CONTEXT",
+                "COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD"):
+        environment.pop(key, None)
+    result = subprocess.run(
+        [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+         str(scripts / "install.ps1"), "status"],
+        env=environment, cwd=tmp_path, capture_output=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads((home / ".agent-worktrees" / "smoke.json").read_text("utf-8-sig"))
+    assert receipt["ran_from"] == str(scripts)
+    assert not (scripts / "installer-human-output.ps1").exists()
+    (home / ".agent-worktrees" / "smoke.json").unlink()
+    environment[HUMAN_UTF8_ENV] = "1"
+    requested = subprocess.run(
+        [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+         str(scripts / "install.ps1"), "status"],
+        env=environment, cwd=tmp_path, capture_output=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert requested.returncode != 0
+    assert not (home / ".agent-worktrees" / "smoke.json").exists()
+
+
+@pytest.mark.parametrize("telemetry", ["no-run", "missing-library", "broken-store"])
+def test_human_required_failure_without_telemetry(telemetry, monkeypatch, capsys):
+    from update_telemetry import run as run_mod
+    from update_telemetry.human import HumanOperation, current_operation
+
+    if telemetry == "no-run":
+        monkeypatch.setattr(ut.Run, "from_env_or_new", lambda *a: None)
+    elif telemetry == "missing-library":
+        monkeypatch.setattr(update_events, "_ut", None)
+    else:
+        def unavailable(*args):
+            raise OSError("store unavailable")
+        monkeypatch.setattr(run_mod, "append_line", unavailable)
+    with HumanOperation("update") as human:
+        update_events.start()
+        update_events.enter("runtime_reconcile")
+        update_events.record("runtime_reconcile", "agent-example", "installer exited 23")
+        update_events.enter("binstubs")
+        assert update_events.finish(1) == 1
+        human.complete("failed", "exit 1")
+    captured = capsys.readouterr()
+    assert "update/runtime_reconcile failed [duration " in captured.err
+    assert "update/runtime_reconcile done [duration " not in captured.err
+    assert current_operation() is None
+
+
+@pytest.mark.parametrize("flag", ["--json", "--quiet"])
+def test_update_entrypoint_does_not_invent_protocol_flags(flag, monkeypatch, capsys):
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _project: ("fixture", None))
+    monkeypatch.setattr(
+        m, "_cmd_update_in_plugin",
+        lambda *a: pytest.fail("unsupported option reached the effectful updater"),
+    )
+    with pytest.raises(SystemExit) as error:
+        m.main(["update", "--no-manager", flag])
+    assert error.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unrecognized arguments" in captured.err
+    assert update_events._run is None
+
+
+def test_reconcile_apply_entrypoint_retains_json_stdout(tmp_path, monkeypatch, capsys):
+    from update_telemetry.human import current_operation
+
+    summary = {"action": "continue", "executed": []}
+
+    def apply(repo, *, log, **kwargs):
+        log("synthetic reconciliation diagnostic")
+        return summary
+
+    monkeypatch.setattr(reconcile, "apply_plan", apply)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _project: ("fixture", None))
+    assert m.main(["reconcile-plugins", "--repo", str(tmp_path), "--apply"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == summary
+    assert captured.err == "synthetic reconciliation diagnostic\n"
+    assert current_operation() is None
 
 
 @pytest.fixture(autouse=True)
@@ -112,10 +474,14 @@ def test_installer_75_is_blocked_by_lock(wired, _update_home):
     assert update_events.classify_status("installer exited 76")[0] == ut.COMMAND_FAILED
 
 
-def test_failed_step_keeps_legacy_failure_exit(wired, monkeypatch, _update_home):
+def test_failed_step_keeps_legacy_failure_exit(wired, monkeypatch, _update_home, capsys):
     monkeypatch.setattr(m, "_update_modules", lambda *a, **k: False)
     assert m.cmd_update(_args()) == 1
     assert _status(_update_home)["last_failure"]["outcome"] == ut.COMMAND_FAILED
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "update/engine failed exit 1 [duration " in captured.err
+    assert "update/engine done exit 0" not in captured.err
 
 
 @pytest.mark.parametrize("failure", ["engine-exit", "engine-timeout", "engine-os", "registered"])

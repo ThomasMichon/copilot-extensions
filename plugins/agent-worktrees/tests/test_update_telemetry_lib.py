@@ -41,6 +41,234 @@ FIXTURES = LIB / "fixtures"
 ENV_KEYS = (ut.ENV_RUN_ID, ut.ENV_EVENTS, ut.ENV_OWNER)
 
 
+@pytest.mark.guard
+def test_human_operation_clocks_nesting_and_outcomes():
+    import io
+    from datetime import datetime, timezone
+
+    from update_telemetry.human import HumanOperation
+
+    wall = [datetime(2026, 1, 1, 12, 0, 1, 120000, tzinfo=timezone.utc)]
+    clock = [10.0]
+    stream = io.StringIO()
+    with HumanOperation("update", stream=stream, wall=lambda: wall[0],
+                        monotonic=lambda: clock[0]) as flow:
+        clock[0] = 13.1
+        # Wall time goes backwards and then forwards; elapsed remains monotonic.
+        wall[0] = wall[0].replace(hour=11)
+        flow.progress("resolving\n\n")
+        with HumanOperation("agent-example") as child:
+            clock[0] = 14.3
+            wall[0] = wall[0].replace(hour=15)
+            child.complete("current")
+        flow.progress("")
+        flow.complete("skipped")
+    assert stream.getvalue().splitlines() == [
+        "[12:00:01.120Z] update starting [elapsed 0.0s]",
+        "[11:00:01.120Z] update resolving [elapsed 3.1s]",
+        "[11:00:01.120Z] update [elapsed 3.1s]",
+        "[11:00:01.120Z] update/agent-example starting [elapsed 0.0s]",
+        "[15:00:01.120Z] update/agent-example current [duration 1.2s]",
+        "[15:00:01.120Z] update [elapsed 4.3s]",
+        "[15:00:01.120Z] update skipped [duration 4.3s]",
+    ]
+
+
+@pytest.mark.guard
+def test_human_completion_duration_excludes_multiline_sink_delay():
+    import io
+
+    from update_telemetry.human import HumanOperation
+
+    clock = [10.0]
+
+    class SlowSink(io.StringIO):
+        def write(self, text):
+            written = super().write(text)
+            clock[0] += 1
+            return written
+
+    sink = SlowSink()
+    with HumanOperation("update", stream=sink, monotonic=lambda: clock[0]) as flow:
+        clock[0] = 12.0
+        flow.complete("done", "first\nsecond")
+    assert all(line.endswith("[duration 2.0s]") for line in sink.getvalue().splitlines()[-2:])
+
+
+@pytest.mark.guard
+def test_human_operation_redacts_before_sink_and_preserves_canonical_records(monkeypatch):
+    import io
+
+    from update_telemetry.human import HumanOperation, current_operation
+
+    # Human lines never append telemetry or acquire its persistence lock.
+    monkeypatch.setattr(run_mod, "append_line",
+                        lambda *a: pytest.fail("per-line telemetry write"))
+    stream = io.StringIO()
+    with HumanOperation("update", stream=stream) as flow:
+        nested = "[12:00:01.120Z] update/plugin running [elapsed 3.1s]"
+        flow.progress(nested)
+        nested_status = nested.replace("running", "current")
+        flow.progress(nested_status, state="done")
+        framed_secret = (
+            "[12:00:01.120Z] update/plugin "
+            "https://user:private@example.test/a [elapsed 3.1s]"
+        )
+        flow.progress(framed_secret)
+        run_mod._stderr("telemetry diagnostic")
+        flow.progress("https://user:private@example.test/a\nnext")
+        assert "private" not in stream.getvalue()
+        with pytest.raises(ValueError, match="failed"):
+            with HumanOperation("activation"):
+                raise ValueError("failed")
+        flow.progress("continuing", state="warning")
+        flow.complete("failed", "exit 23")
+    lines = stream.getvalue().splitlines()
+    assert lines.count(nested) == 1
+    assert lines.count(nested_status) == 1
+    assert any("update telemetry diagnostic [elapsed " in line for line in lines)
+    assert any("activation failed ValueError: failed [duration " in line for line in lines)
+    assert "warning continuing [elapsed " in lines[-2]
+    assert "failed exit 23 [duration " in lines[-1]
+    assert current_operation() is None
+
+
+def test_human_native_output_is_live_redacted_and_keeps_exit_code(tmp_path):
+    import io
+
+    from update_telemetry.human import HumanOperation, native_output
+
+    release = tmp_path / "release"
+
+    class Sink(io.StringIO):
+        def write(self, text):
+            result = super().write(text)
+            if "first child line" in text:
+                release.write_text("continue", encoding="utf-8")
+            assert "private" not in text, "redaction precedes the display sink"
+            return result
+
+    stream = Sink()
+    producer = (
+        "import pathlib,sys,time; "
+        "print('first child line', flush=True); "
+        f"p=pathlib.Path({str(release)!r}); "
+        "deadline=time.monotonic()+5\n"
+        "while not p.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+        "assert p.exists(), 'output was buffered until process exit'\n"
+        "print('https://user:private@example.test/a', file=sys.stderr, flush=True)\n"
+        "sys.exit(23)\n"
+    )
+    with HumanOperation("update/installer", stream=stream) as operation:
+        with native_output() as fd:
+            result = subprocess.run(
+                [sys.executable, "-I", "-c", producer], stdout=fd, stderr=fd,
+                timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        operation.complete("failed", f"exit {result.returncode}")
+    assert result.returncode == 23
+    lines = stream.getvalue().splitlines()
+    child = [line for line in lines if "first child line" in line or "example.test" in line]
+    assert len(child) == 2
+    assert all("[elapsed " in line and "[duration " not in line for line in child)
+
+
+@pytest.mark.guard
+def test_human_output_keeps_json_stdout_clean(capsys):
+    from agent_worktrees import output
+    from update_telemetry.human import HumanOperation
+
+    with output.capture_json_output() as protocol:
+        with HumanOperation("update"):
+            output.info("human detail\nanother detail")
+            output.warn("https://user:private@example.test/a")
+            output._json_output({"ok": True})
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "private" not in captured.err
+    assert "human detail [elapsed " in captured.err
+    assert "another detail [elapsed " in captured.err
+    assert json.loads(protocol.getvalue()) == {"version": 1, "ok": True}
+
+
+@pytest.mark.guard
+def test_human_broken_sink_and_thread_start_restore_context_and_close_pipes(monkeypatch):
+    import io
+
+    from update_telemetry import human
+
+    class Broken(io.StringIO):
+        def write(self, text):
+            raise OSError("closed human sink")
+
+    with pytest.raises(OSError, match="closed human sink"):
+        with human.HumanOperation("update", stream=Broken()):
+            pytest.fail("broken sink must fail before entering")
+    assert human.current_operation() is None
+    descriptors = []
+    pipe = os.pipe
+
+    def tracked_pipe():
+        pair = pipe()
+        descriptors.extend(pair)
+        return pair
+
+    def refused(thread):
+        raise RuntimeError("thread startup refused")
+
+    monkeypatch.setattr(human.os, "pipe", tracked_pipe)
+    monkeypatch.setattr(human.threading.Thread, "start", refused)
+    with human.HumanOperation("update", stream=io.StringIO()):
+        with pytest.raises(RuntimeError, match="thread startup refused"):
+            with human.native_output():
+                pytest.fail("relay startup must not enter the child scope")
+    assert human.current_operation() is None
+    assert len(descriptors) == 2
+    for fd in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
+def test_human_relay_finishes_before_detached_descendant_eof(tmp_path):
+    import io
+
+    from update_telemetry.human import HumanOperation, native_output
+
+    release = tmp_path / "release"
+    done = tmp_path / "done"
+    descendant = (
+        "import os,pathlib,time; "
+        f"release=pathlib.Path({str(release)!r}); done=pathlib.Path({str(done)!r}); "
+        "deadline=time.monotonic()+5\n"
+        "while not release.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+        "done.write_text('finished',encoding='ascii'); os._exit(0)\n"
+    )
+    producer = (
+        "import subprocess,sys; "
+        f"subprocess.Popen([sys.executable,'-I','-c',{descendant!r}],"
+        "stdout=sys.stdout,stderr=sys.stderr,"
+        f"creationflags={getattr(subprocess, 'CREATE_NO_WINDOW', 0)}); "
+        "print('direct child finished',flush=True)"
+    )
+    stream = io.StringIO()
+    try:
+        with HumanOperation("update", stream=stream):
+            with native_output() as fd:
+                result = subprocess.run(
+                    [sys.executable, "-I", "-c", producer], stdout=fd, stderr=fd,
+                    timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+        assert result.returncode == 0
+        assert "direct child finished" in stream.getvalue()
+        assert not done.exists(), "relay waited for descendant EOF, not direct-child completion"
+    finally:
+        release.write_text("continue", encoding="ascii")
+        deadline = time.monotonic() + 5
+        while not done.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert done.exists(), "owned fixture descendant did not finish"
+
+
 @pytest.fixture
 def telemetry_env(tmp_path):
     return {ut.ENV_HOME: str(tmp_path / "home")}

@@ -1492,12 +1492,7 @@ def _cmd_update_steps(rest: list[str], run) -> int:
     from . import engine_client as ec
     from .self_install import self_update
 
-    print()
-    print(f"  {_BANNER} — update")
-    print()
-
     # 1. Self-update the Manager (best-effort; the new slot takes effect next run).
-    print("  Self-updating the Worktree Manager …")
     with run.self_update_phase():
         su = self_update(dry_run=False)
         cutover = su.cutover if isinstance(su.cutover, dict) else None
@@ -1512,14 +1507,14 @@ def _cmd_update_steps(rest: list[str], run) -> int:
             )
         )
         if su.action == "updated":
-            print(f"    ✓ updated {su.previous or '(none)'} → {su.version} "
-                  "(active on next run)")
+            run.say(f"updated {su.previous or '(none)'} → {su.version} "
+                    "(active on next run)")
         elif su.action == "already-current":
-            print(f"    ✓ already current ({su.version})")
+            run.say(f"already current ({su.version})")
         else:
-            print(f"    ○ self-update {su.action}: {su.reason} — continuing")
+            run.say(f"self-update {su.action}: {su.reason} — continuing")
         if cutover_failed:
-            print(f"    ✗ mux-daemon cutover failed: {cutover}")
+            run.say(f"mux-daemon cutover failed: {cutover}", state="failed")
         # Inside the phase, so a failed cutover is the phase's own outcome.
         run.record_self_update(su.action, cutover_failed,
                                str(cutover) if cutover_failed else su.reason)
@@ -1535,17 +1530,15 @@ def _cmd_update_steps(rest: list[str], run) -> int:
     #    before the verb), not appended to args, so the engine can resolve it
     #    even when this Manager itself runs outside any adopted repo.
     project, forwarded = _extract_project(rest)
-    print()
-    print("  Updating harness plugins + runtimes via agent-worktrees …")
-    print()
+    run.say("Updating harness plugins + runtimes via agent-worktrees")
     try:
         rc = ec.run_engine_passthrough(project, ["update", "--no-manager", *forwarded])
     except ec.EngineError as e:
-        print(f"  ✗ {e}")
+        run.say(str(e), state="failed")
         run.record_engine_error(str(e), missing=bool(getattr(e, "install_hint", False)),
                                 cause=e.__cause__)
         if getattr(e, "install_hint", False):
-            print("    Run `worktree-manager setup --apply` to install the engine first.")
+            run.say("Run `worktree-manager setup --apply` to install the engine first.")
         return 1
     return 1 if cutover_failed and rc == 0 else rc
 

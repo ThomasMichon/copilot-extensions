@@ -523,6 +523,7 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     log.extend(materialize_uv_editable_refs(dest, canonical_root=canonical_root))
     log.extend(materialize_installer_engine_refs(dest, canonical_root=canonical_root))
     log.extend(materialize_launch_wrapper_assets(dest, canonical_root=canonical_root))
+    log.extend(mie.materialize_human_output_declarations(dest, canonical_root=canonical_root))
     return log
 
 

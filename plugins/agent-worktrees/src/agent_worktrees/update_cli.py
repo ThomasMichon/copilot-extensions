@@ -233,18 +233,20 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     Records the run's phases/targets through ``update_events`` and returns an
     exit code from the shared table (0 success, non-zero failure classes).
     """
-    _events.start("engine")
-    try:
-        rc = _update_in_plugin_steps(args)
-    except BaseException as exc:
-        _events.finish(None, exc)
-        raise
-    return _events.finish(rc)
+    with output.human_operation("update/engine") as human:
+        _events.start("engine")
+        try:
+            rc = _update_in_plugin_steps(args)
+        except BaseException as exc:
+            _events.finish(None, exc)
+            raise
+        rc = _events.finish(rc)
+        if human is not None:
+            human.complete("done" if rc == 0 else "failed", f"exit {rc}")
+        return rc
 
 
 def _update_in_plugin_steps(args: argparse.Namespace) -> int:
-    output.header("Updating Agent Worktrees")
-
     if getattr(args, "recreate_venv", False):
         output.warn(
             "--recreate-venv is not supported by the plugin-based "

@@ -133,6 +133,57 @@ def materialize_ref_into(
             log.append(f"SKIP {dest_script}: could not find installer-engine entry to rewrite")
             continue
         log.append(f"OK   {dest_engine} <- {canonical.relative_to(canonical_root).as_posix()}")
+    log.extend(_materialize_human_output_into(
+        source_consumer_dir=source_consumer_dir, dest_consumer_dir=dest_consumer_dir,
+        canonical_root=canonical_root, dest_root=dest_root_r,
+    ))
+    return log
+
+
+def _materialize_human_output_into(
+    *, source_consumer_dir: Path, dest_consumer_dir: Path,
+    canonical_root: Path, dest_root: Path,
+) -> list[str]:
+    source_declaration = source_consumer_dir / "scripts" / "install.human-output.json"
+    if source_declaration.is_file():
+        script = dest_consumer_dir / "scripts" / "install.ps1"
+        declaration = script.with_suffix(".human-output.json")
+        helper = script.parent / ier.HUMAN_HELPER
+        source_script = source_consumer_dir / "scripts" / "install.ps1"
+        source_helper = source_script.parent / ier.HUMAN_HELPER
+        canonical_helper = canonical_root / "libs" / "installer-engine" / ier.HUMAN_HELPER
+        for path in (source_declaration, source_script, source_helper, canonical_helper):
+            if _find_symlinked_ancestor(path, canonical_root) is not None:
+                raise ValueError(f"{path}: linked human-output source refused")
+        for path in (script, declaration, helper):
+            if _find_symlinked_ancestor(path, dest_root) is not None:
+                raise ValueError(f"{path}: linked human-output asset refused")
+        if (
+            source_declaration.read_text(encoding="utf-8") != ier.human_output_json(source_script)
+            or source_helper.read_bytes() != canonical_helper.read_bytes()
+            or (helper.exists() and helper.read_bytes() != canonical_helper.read_bytes())
+        ):
+            raise ValueError(f"{script}: conflicting native human-output assets")
+        if not helper.exists():
+            shutil.copyfile(canonical_helper, helper)
+        expected = ier.human_output_json(script)
+        if not declaration.is_file() or declaration.read_text(encoding="utf-8") != expected:
+            declaration.write_text(expected, encoding="utf-8")
+            return [f"OK   {declaration} <- materialized native output contract"]
+    return []
+
+
+def materialize_human_output_declarations(dest: Path, *, canonical_root: Path) -> list[str]:
+    """Bind every declaring producer after all owners have finished rewriting."""
+    log = []
+    for plugin in ier.human_output_adopters(canonical_root, ier.ADOPTERS):
+        destination = dest / "plugins" / plugin
+        if destination.is_dir():
+            log.extend(_materialize_human_output_into(
+                source_consumer_dir=canonical_root / "plugins" / plugin,
+                dest_consumer_dir=destination, canonical_root=canonical_root,
+                dest_root=dest,
+            ))
     return log
 
 

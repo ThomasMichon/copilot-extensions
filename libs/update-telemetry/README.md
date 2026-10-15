@@ -83,3 +83,76 @@ modules), `runtime_reconcile` (other registered runtimes), `anchor_sync` and
 authorization-scheme credentials, GitHub token shapes, and URL user-info are
 redacted from `argv`, `action`, `error` and `details` before anything is
 written.
+
+## Human operation output
+
+`update_telemetry.human.HumanOperation` is the opt-in presentation extension
+used by the Manager update, engine update phases and launch preparation. It
+does not own another update run, change structured outcomes, persist human
+lines, or acquire a telemetry lock per line.
+
+```text
+[12:00:01.120Z] update/engine/runtime_reconcile/agent-example starting [elapsed 0.0s]
+[12:00:04.220Z] update/engine/runtime_reconcile/agent-example resolving dependencies [elapsed 3.1s]
+[12:00:05.420Z] update/engine/runtime_reconcile/agent-example done exit 0 [duration 4.3s]
+```
+
+UTC wall time is correlation only. Elapsed and duration use the containing
+operation's `time.monotonic()` clock, independently of wall-clock adjustments.
+Nested scopes inherit clocks and sink; completion is emitted once. Multiline,
+empty and unterminated child lines are framed individually. Known credentials
+are redacted before the human sink; already canonical child records are not
+framed twice. Human output goes to stderr; JSON output helpers and unscoped
+legacy output retain their existing behavior.
+
+`native_output()` adapts only explicitly selected human installer streams.
+The existing Python operation reads a pipe live; no reporting interpreter,
+raw-output spool file, daemon or per-line process is introduced. The caller
+still owns the child command, environment, timeout and exact exit status.
+After that command returns, the relay drains bytes already written without
+waiting for EOF from detached service descendants. Parsed JSON commands,
+binary/private protocols and interactive passthroughs must not use this adapter.
+
+### Native producer admission
+
+Captured PowerShell installers opt in through generated
+`scripts/install.human-output.json`, bound to the original entrypoint and its
+packaged `installer-human-output.ps1` initializer. The digests normalize only
+CRLF to LF for portable checkouts. These are fixed build declarations, not user
+configuration or an alternative signature/trust authority.
+`tools/sync-installer-engine.py` owns the helper copies and declarations.
+Re-run it when a declaring installer changes. Materialization refreshes the
+declaration after rewriting an engine reference and refuses linked, missing
+or conflicting helper assets.
+
+The updater requests UTF-8 only in the admitted child's process environment.
+That original producer dot-sources its own helper before installer output;
+without a request, it does not load the helper at all. A requested missing
+helper fails closed before command discovery. The initializer installs UTF-8,
+auto-flushing stdout/stderr text writers only in that redirected, consoleless
+child. It preserves native-command decoding, pipeline stdin encoding, culture
+and console codepages. The host executable, `-File` argv, target file,
+parameter binding, execution policy and native process exit remain unchanged.
+The helper is a native payload asset beside the installer, not a runtime
+Python-wheel dependency. Native signature and execution-policy checks still
+apply to both files; no wrapper, evaluation or policy bypass is introduced.
+Pre-script host parse/policy diagnostics are not evidence that initialization
+ran.
+
+Unknown/legacy PowerShell producers, stale declarations and indirect/private
+invocation prefixes retain their original inherited streams without decoding.
+They receive one scoped presentation-gap notice, not a claim of successful
+UTF-8 capture. Direct POSIX `.sh` installer calls retain the existing Python
+stream owner's UTF-8 human adapter. This is not a claim that an arbitrary
+private protocol or every standalone installer has the same encoding.
+
+This does **not** yet frame every standalone native bootstrap or shell launch
+maintenance line. In particular, the native launchers' bootstrap/self-update
+and two-pass reconcile blocks still own their existing setup-log/status
+adapters; Bash's `SECONDS` timing there is not a monotonic-clock guarantee.
+Before adding a streaming interpreter at that boundary, its admission and
+lifetime must be independent of any runtime the same operation updates or
+collects. A first bootstrap before an interpreter is admitted retains native
+diagnostics rather than claiming fabricated monotonic timing. The Python-owned
+native-child adapter needs no such extra interpreter and does not alter
+runtime-slot retention or activation.

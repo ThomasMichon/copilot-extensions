@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import shutil
 import stat
 from pathlib import Path
 
@@ -15,6 +17,114 @@ _SPEC = importlib.util.spec_from_file_location("sync_installer_engine", MODULE_P
 assert _SPEC is not None and _SPEC.loader is not None
 sync_installer_engine = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(sync_installer_engine)
+
+
+def _human_admission():
+    path = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "installer_capabilities.py"
+    spec = importlib.util.spec_from_file_location("native_human_capability", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.powershell_human_utf8_supported
+
+
+def test_human_output_declarations_bind_real_packaged_entrypoints():
+    contract = sync_installer_engine.ier
+    source = REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
+    supports = _human_admission()
+    for name in contract.human_output_adopters(REPO, contract.ADOPTERS):
+        script = REPO / "plugins" / name / "scripts" / "install.ps1"
+        assert (script.parent / contract.HUMAN_HELPER).read_bytes() == source.read_bytes()
+        assert supports(script), name
+        declaration = json.loads(script.with_suffix(".human-output.json").read_text("utf-8"))
+        assert declaration == contract.human_output_declaration(script)
+
+
+def test_materialized_human_declaration_binds_rewritten_entrypoint(tmp_path):
+    import materialize_installer_engine
+
+    contract = sync_installer_engine.ier
+    source = REPO / "plugins" / "agent-bridge"
+    destination = tmp_path / "payload"
+    scripts = destination / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("install.ps1", "install.sh", contract.HUMAN_HELPER, "install.human-output.json"):
+        shutil.copyfile(source / "scripts" / name, scripts / name)
+    before = (scripts / "install.ps1").read_bytes()
+    log = materialize_installer_engine.materialize_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=destination,
+        canonical_root=REPO, dest_root=tmp_path,
+    )
+    assert any(line.startswith("OK") for line in log)
+    assert (scripts / "install.ps1").read_bytes() != before
+    assert (scripts / "installer-engine.ps1").is_file()
+    assert _human_admission()(scripts / "install.ps1")
+    with (scripts / contract.HUMAN_HELPER).open("a", encoding="ascii") as stream:
+        stream.write("# drift\n")
+    assert not _human_admission()(scripts / "install.ps1")
+    with pytest.raises(ValueError, match="conflicting native human-output assets"):
+        materialize_installer_engine.materialize_ref_into(
+            source_consumer_dir=source, dest_consumer_dir=destination,
+            canonical_root=REPO, dest_root=tmp_path,
+        )
+
+
+def test_whole_payload_human_contract(tmp_path, monkeypatch):
+    import materialize_main
+
+    contract = sync_installer_engine.ier
+    names = contract.human_output_adopters(REPO, contract.ADOPTERS)
+    monkeypatch.chdir(tmp_path)
+    source_root = Path("source")
+    destination = Path("payload")
+    for name in names:
+        source = REPO / "plugins" / name
+        consumer = source_root / "plugins" / name
+        scripts = consumer / "scripts"
+        scripts.mkdir(parents=True)
+        # The complete native producer artifact, not unrelated Python sources
+        # or protocol-test corpora. All materializer owners still run below.
+        for asset in ("install.ps1", "install.sh", contract.HUMAN_HELPER,
+                      "install.human-output.json"):
+            shutil.copyfile(source / "scripts" / asset, scripts / asset)
+        (consumer / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\nversion = "0.0.0"\n', encoding="utf-8",
+        )
+        for manifest in ("launch-wrapper-assets.json", "packaged-assets.json"):
+            if (source / manifest).is_file():
+                shutil.copyfile(source / manifest, consumer / manifest)
+                data = json.loads((source / manifest).read_text(encoding="utf-8"))
+                for asset in data["files"]:
+                    origin = REPO / data["canonicalDir"] / asset
+                    assert origin.resolve().is_relative_to(REPO.resolve())
+                    target = source_root / data["canonicalDir"] / asset
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(origin, target)
+    canonical = source_root / "libs" / "installer-engine"
+    canonical.mkdir(parents=True, exist_ok=True)
+    for asset in (*contract.FILES, *contract.support_files(REPO / "libs" / "installer-engine")):
+        shutil.copyfile(REPO / "libs" / "installer-engine" / asset, canonical / asset)
+    original = materialize_main.materialize_launch_wrapper_assets
+
+    def later_owner(dest, *, canonical_root):
+        result = original(dest, canonical_root=canonical_root)
+        # Exercise ordering after the real final asset materializer, including
+        # the engine's own installer (which has no installer-engine reference).
+        script = dest / "plugins" / "agent-worktrees" / "scripts" / "install.ps1"
+        with script.open("a", encoding="ascii") as stream:
+            stream.write("\n# later owning materializer\n")
+        return result
+
+    monkeypatch.setattr(materialize_main, "materialize_launch_wrapper_assets", later_owner)
+    report = materialize_main.build(destination, source_root=source_root)
+    assert not [line for line in report if line.startswith("SKIP")], report
+    supports = _human_admission()
+    assert len(names) == 9
+    for name in names:
+        script = destination / "plugins" / name / "scripts" / "install.ps1"
+        assert supports(script), name
+        assert (script.parent / contract.HUMAN_HELPER).read_bytes() == (
+            REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
+        ).read_bytes()
 
 
 @pytest.fixture

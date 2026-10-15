@@ -19,6 +19,8 @@ except ImportError:  # pragma: no cover - a runtime built before the library exi
     _ut = None
 
 _run = None
+_human_phase = None
+_human_phase_failed = False
 
 
 def start(proc: str = "engine") -> None:
@@ -29,8 +31,27 @@ def start(proc: str = "engine") -> None:
 
 
 def enter(phase: str) -> None:
+    global _human_phase, _human_phase_failed
+    from . import output
+
+    _close_human_phase()
     if _run is not None:
         _run.enter(phase)
+    if output.current_operation() is not None:
+        _human_phase = output.human_operation(phase)
+        _human_phase.__enter__()
+        _human_phase_failed = False
+
+
+def _close_human_phase(exc: BaseException | None = None) -> None:
+    global _human_phase, _human_phase_failed
+    phase, _human_phase = _human_phase, None
+    if phase is not None:
+        try:
+            phase.complete("failed" if exc or _human_phase_failed else "done")
+        finally:
+            phase.__exit__(type(exc) if exc else None, exc, None)
+    _human_phase_failed = False
 
 
 def redact(text: str) -> str:
@@ -121,6 +142,14 @@ def classify_status(status: str) -> tuple[str, str | None]:
 def record(phase: str, component: str, status: str, *, required: bool = True,
            changed: bool | None = None, started: float | None = None) -> None:
     """Record one target's status string as a target event."""
+    global _human_phase_failed
+    # These are the update owner's own success/skip statuses, independent of
+    # whether the optional telemetry library or durable event store exists.
+    text = str(status).strip()
+    if required and not (
+        text.startswith(("OK", "SKIPPED")) or text == "payload-only"
+    ):
+        _human_phase_failed = True
     if _run is None:
         return
     try:
@@ -142,6 +171,7 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
     (the caller re-raises).
     """
     global _run
+    _close_human_phase(exc)
     run, _run = _run, None
     if run is None:
         return rc

@@ -2155,6 +2155,30 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
+### Captured native human output
+
+Declaring PowerShell installers source their packaged
+`installer-human-output.ps1` after strict error setup and before installer
+output. Only an explicitly requested, redirected child initializes UTF-8;
+ordinary standalone invocation does not load the helper and retains its
+existing output encoding. Requested missing helpers fail closed. The initializer
+changes only the producer's stdout/stderr text writers, preserving native
+command decoding and pipeline stdin encoding.
+`tools/sync-installer-engine.py` vendors this helper and generates
+`install.human-output.json`, binding the declaration to both source files.
+Regenerate after changing either file. Release materialization refreshes the
+entrypoint digests after all owning materializers finish (including the engine's
+own installer, which has no engine reference) and refuses conflicting helper
+assets. The helper is packaged with the installer, under the same
+native execution-policy and payload-ownership requirements.
+
+This declaration admits the existing Python updater's human-stream adapter;
+it does not replace signature/provenance checks or change `-File` arguments,
+script identity, exit handling, runtime construction or activation. Missing,
+unknown or stale declarations retain inherited native streams with a bounded
+presentation-gap notice. Such a producer is not reported as successfully
+captured or universally time-framed.
+
 ### External dependency seasoning
 
 External build, runtime, development and selected optional dependencies must

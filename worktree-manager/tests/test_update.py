@@ -13,7 +13,7 @@ import io
 import json
 import os
 import subprocess
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -21,6 +21,22 @@ import pytest
 from worktree_manager import __main__ as wm
 from worktree_manager import engine_client as ec
 from worktree_manager import self_install
+
+
+def test_update_finish_failure_is_not_rendered_as_success(monkeypatch):
+    from worktree_manager import update_events
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("finish failed")
+
+    monkeypatch.setattr(update_events._ut.Run, "finish", fail)
+    sink = io.StringIO()
+    with redirect_stderr(sink):
+        owner = update_events.UpdateRun()
+        with pytest.raises(RuntimeError, match="finish failed"):
+            owner.finish(0)
+    assert "failed RuntimeError: finish failed [duration " in sink.getvalue()
+    assert " done " not in sink.getvalue()
 
 
 def _symlink_to_or_skip(link, target, *, target_is_directory: bool = False) -> None:
@@ -53,8 +69,9 @@ def _run_update(rest, monkeypatch, *, su_action="already-current", su_kwargs=Non
 
     monkeypatch.setattr(ec, "run_engine_passthrough", fake_passthrough)
     buf = io.StringIO()
-    with redirect_stdout(buf):
+    with redirect_stdout(io.StringIO()) as protocol, redirect_stderr(buf):
         rc = wm._cmd_update(rest)
+    assert protocol.getvalue() == ""
     return rc, calls, buf.getvalue()
 
 
@@ -110,8 +127,9 @@ def test_update_engine_absent_hints_setup(monkeypatch):
 
     monkeypatch.setattr(ec, "run_engine_passthrough", boom)
     buf = io.StringIO()
-    with redirect_stdout(buf):
+    with redirect_stdout(io.StringIO()) as protocol, redirect_stderr(buf):
         rc = wm._cmd_update([])
+    assert protocol.getvalue() == ""
     # An absent engine is a configuration problem (exit 3 in the update table).
     assert rc == 3
     assert "worktree-manager setup" in buf.getvalue()
@@ -162,6 +180,27 @@ def test_extract_project_none_when_absent():
 
 def _telemetry_status(home) -> dict:
     return json.loads((home / "update-status.json").read_text(encoding="utf-8"))
+
+
+def test_update_startup_diagnostics_share_the_human_scope(monkeypatch, update_home, capsys):
+    import update_telemetry as telemetry
+    from update_telemetry import run as telemetry_run
+    from update_telemetry.human import current_operation
+    from worktree_manager.update_events import UpdateRun
+
+    original = telemetry.Run.from_env_or_new
+
+    def startup(proc):
+        telemetry_run._stderr("telemetry startup diagnostic")
+        return original(proc)
+
+    monkeypatch.setattr(telemetry.Run, "from_env_or_new", startup)
+    run = UpdateRun()
+    assert run.finish(0) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "update/manager telemetry startup diagnostic [elapsed " in captured.err
+    assert current_operation() is None
 
 
 @pytest.fixture

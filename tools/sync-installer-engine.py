@@ -262,6 +262,23 @@ def verify() -> list[str]:
         )
     for plugin in ADOPTERS:
         problems.extend(_adopter_problems(plugin))
+    if ier.human_output_enabled(CANONICAL_DIR):
+        source = CANONICAL_DIR / ier.HUMAN_HELPER
+        for plugin in ier.human_output_adopters(REPO, ADOPTERS):
+            scripts = REPO / "plugins" / plugin / "scripts"
+            helper = scripts / ier.HUMAN_HELPER
+            script = scripts / "install.ps1"
+            declaration = script.with_suffix(".human-output.json")
+            try:
+                for path in (source, helper, script, declaration):
+                    if uer._find_symlinked_ancestor(path, REPO.resolve()) is not None:
+                        raise ValueError(f"{path}: linked human-output asset refused")
+                if helper.read_bytes() != source.read_bytes():
+                    raise ValueError(f"{helper}: native human-output initializer differs")
+                if declaration.read_text(encoding="utf-8") != ier.human_output_json(script):
+                    raise ValueError(f"{declaration}: native human-output declaration drift")
+            except (OSError, ValueError) as error:
+                problems.append(str(error))
     return problems
 
 
@@ -303,6 +320,24 @@ def sync() -> list[str]:
             if os.name != "nt":
                 shutil.copymode(source, destination)
             written.append(destination.relative_to(REPO).as_posix())
+    if ier.human_output_enabled(CANONICAL_DIR):
+        source = CANONICAL_DIR / ier.HUMAN_HELPER
+        for plugin in ier.human_output_adopters(REPO, ADOPTERS):
+            scripts = REPO / "plugins" / plugin / "scripts"
+            helper = scripts / ier.HUMAN_HELPER
+            script = scripts / "install.ps1"
+            declaration = script.with_suffix(".human-output.json")
+            for path in (source, helper, script, declaration):
+                linked = uer._find_symlinked_ancestor(path, REPO.resolve())
+                if linked is not None:
+                    raise RuntimeError(f"{linked}: linked human-output asset refused")
+            if not helper.is_file() or helper.read_bytes() != source.read_bytes():
+                shutil.copyfile(source, helper)
+                written.append(helper.relative_to(REPO).as_posix())
+            expected = ier.human_output_json(script)
+            if not declaration.is_file() or declaration.read_text(encoding="utf-8") != expected:
+                declaration.write_text(expected, encoding="utf-8")
+                written.append(declaration.relative_to(REPO).as_posix())
     return written
 
 
