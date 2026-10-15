@@ -26,7 +26,12 @@ def provider_lock(path: Path, *, timeout: float, poll: float) -> Iterator[None]:
             path.mkdir(mode=0o700)
             break
         except FileExistsError:
-            mode = path.lstat().st_mode
+            try:
+                mode = path.lstat().st_mode
+            except FileNotFoundError:
+                if time.monotonic() >= deadline:
+                    raise LockCutoverError("Legacy lease lock release raced until the cutover deadline") from None
+                continue
             if stat.S_ISDIR(mode):
                 break
             if not stat.S_ISREG(mode):

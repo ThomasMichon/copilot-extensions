@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict
+from pathlib import Path
 
 import pytest
 from agent_procutil import no_window_flags
@@ -35,6 +36,45 @@ def test_regular_legacy_lock_is_never_stolen_even_after_age_threshold(state):
         with lease._lease_lock(timeout=0.05, poll=0.01):
             pytest.fail("legacy writer's unowned inode was replaced")
     assert lease._LOCK_FILE.read_text(encoding="ascii") == "legacy-owner-token"
+
+
+def test_legacy_release_between_mkdir_and_lstat_retries_cutover(state, monkeypatch):
+    lease._LOCK_FILE.write_text("legacy-owner-token", encoding="ascii")
+    original = Path.lstat
+    released = []
+
+    def lstat(path):
+        if path == lease._LOCK_FILE and not released:
+            path.unlink()
+            released.append(True)
+            raise FileNotFoundError("legacy owner released after mkdir")
+        return original(path)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    with lease._lease_lock(timeout=0.1):
+        assert released == [True]
+        assert lease._LOCK_FILE.is_dir()
+        assert (lease._LOCK_FILE / "kernel.lock").is_file()
+
+
+def test_repeated_legacy_release_races_remain_bounded(state, monkeypatch):
+    original_mkdir, original_lstat = Path.mkdir, Path.lstat
+
+    def mkdir(path, *args, **kwargs):
+        if path == lease._LOCK_FILE:
+            raise FileExistsError("legacy writer appeared")
+        return original_mkdir(path, *args, **kwargs)
+
+    def lstat(path):
+        if path == lease._LOCK_FILE:
+            raise FileNotFoundError("legacy writer released")
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "mkdir", mkdir)
+    monkeypatch.setattr(Path, "lstat", lstat)
+    with pytest.raises(lease.ProviderAdmissionError, match="cutover deadline"):
+        with lease._lease_lock(timeout=0.05):
+            pytest.fail("unbounded cutover retry entered the critical section")
 
 
 @pytest.mark.parametrize("kind", ["admission", "hold"])
