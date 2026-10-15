@@ -1,0 +1,53 @@
+{
+  "comment": "Keep shared Windows retained-source dependency staging, metadata and snapshot copy/TOML/cleanup long-path safe without weakening resolver age or source attribution",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    }
+  ]
+}

@@ -30,6 +30,36 @@ def test_unknown_or_adoptive_layout_not_accepted(config_data, tmp_path, store):
         parse_config(config_data, tmp_path / "host.yaml")
 
 
+def test_optional_fleet_policy_is_explicit_and_scoped(config_data, tmp_path, monkeypatch):
+    assert "AGENT_INDEX_FLEET_POLICY" not in parse_config(
+        config_data, tmp_path / "host.yaml",
+    ).core_environment()
+    policy = tmp_path / "policy.json"
+    config_data["fleet"] = {"policy": str(policy)}
+    config_data["store"] = {"layout": "source-aware-v1"}
+    selected = parse_config(config_data, tmp_path / "host.yaml")
+    monkeypatch.setenv("AGENT_INDEX_FLEET_POLICY", "ambient-not-selected")
+    with core_environment(selected):
+        assert os.environ["AGENT_INDEX_FLEET_POLICY"] == str(policy.resolve())
+    assert os.environ["AGENT_INDEX_FLEET_POLICY"] == "ambient-not-selected"
+
+
+@pytest.mark.parametrize("fleet", [
+    {"policy": "relative"}, {"policy": None}, {"policy": "x", "token": "not-accepted"},
+])
+def test_invalid_fleet_policy_reference(config_data, tmp_path, fleet):
+    config_data["fleet"] = fleet
+    config_data["store"] = {"layout": "source-aware-v1"}
+    with pytest.raises(ConfigurationError):
+        parse_config(config_data, tmp_path / "host.yaml")
+
+
+def test_fleet_policy_cannot_implicitly_select_or_adopt_store(config_data, tmp_path):
+    config_data["fleet"] = {"policy": str(tmp_path / "policy.json")}
+    with pytest.raises(ConfigurationError, match="explicit store.layout"):
+        parse_config(config_data, tmp_path / "host.yaml")
+
+
 def test_defaults_and_environment(config_data, tmp_path):
     config = parse_config(config_data, tmp_path / "host.yaml")
     env = config.core_environment()
@@ -148,3 +178,45 @@ def test_github_and_source_metadata(config_data, tmp_path):
     config = parse_config(config_data, tmp_path / "host.yaml")
     assert config.sources[0]["auth"] == {"account": "selected"}
     assert config.sources[0]["trust_domain"] == "work"
+
+
+def test_gateway_ingestion_selection_survives_detached_worker_environment(config_data, tmp_path):
+    policy = tmp_path / "worker.json"
+    checkout = tmp_path / "checkouts" / "repo"
+    config_data["sources"] = [
+        {"name": "git:repo", "path": str(checkout), "ref": "origin/dev",
+         "remote": "https://example.test/owner/repo.git",
+         "auth": {"account": "selected", "gateway": str(policy)}},
+        {"name": "github:owner/repo",
+         "auth": {"account": "selected", "gateway": str(policy)}},
+    ]
+    config = parse_config(config_data, tmp_path / "host.yaml")
+    import base64
+    import json
+
+    encoded = config.core_environment()["AGENT_INDEX_CONFIG_DATA_B64"]
+    sources = json.loads(base64.urlsafe_b64decode(encoded))["corpus"]["sources"]
+    assert sources[0]["_repo_path"] == str(checkout.resolve())
+    assert sources[0]["remote"] == "https://example.test/owner/repo.git"
+    assert sources[0]["ref"] == "origin/dev"
+    assert all(s["auth"] == {"account": "selected", "gateway": str(policy)} for s in sources)
+    assert not checkout.exists()
+
+
+@pytest.mark.parametrize("change", [
+    {"remote": "https://user:secret@example.test/repo.git"},
+    {"remote": "http://example.test/repo.git"},
+    {"remote": None},
+    {"auth": {"account": "selected", "gateway": "relative"}},
+    {"auth": {"account": "selected", "gateway": "x", "token": "forbidden"}},
+])
+def test_invalid_gateway_source_selection(config_data, tmp_path, change):
+    source = {
+        "name": "git:repo", "path": str(tmp_path / "checkout"),
+        "remote": "https://example.test/repo.git",
+        "auth": {"account": "selected", "gateway": str(tmp_path / "worker.json")},
+    }
+    source.update(change)
+    config_data["sources"] = [source]
+    with pytest.raises(ConfigurationError):
+        parse_config(config_data, tmp_path / "host.yaml")

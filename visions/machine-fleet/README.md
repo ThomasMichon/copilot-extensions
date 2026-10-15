@@ -38,6 +38,11 @@ mutates worker container managers. A designated service host runs the
 controller/Gateway and its selected deployment-manager integration. Worker hosts
 run only their explicitly adopted connectors and service roles.
 
+Before a Gateway exists, the local CLI provides explicitly authorized bootstrap
+and recovery through the selected substrate owner. Once ready, that Gateway is
+the central service for CLI, workspace-manager and harness clients; ordinary
+clients do not become competing coordinators when it is unavailable.
+
 ### Harness-declared fleet
 
 Harness-side configuration declares the selected fleet driver, machine membership,
@@ -148,6 +153,12 @@ operator control, access to a registered service, and borrowing resource
 credentials are distinct authorities. Providers own issuance, account/audience
 selection, expiry, renewal, and any interaction required to acquire credentials.
 The Gateway is not a blanket credential pool or an implicit source of authority.
+
+Explicitly enrolled, logged-in provider machines maintain the authenticated
+channel needed to answer fresh-token requests. This responder is an installed
+credential-provider service, independent of an interactive client invocation.
+Reuse the credential owner's lifecycle rather than adding a fleet-local duplicate
+custodian or requiring a roaming client to keep remote work alive.
 
 ### Recommended fleet templates and owned configuration
 
@@ -295,6 +306,12 @@ roles require their own authorization and safe transitions; accepting a config
 file does not silently create capacity or activate a previously retired role.
 Restart-only changes are reported explicitly, not disguised as successful reload.
 
+The same configuration-directed lifecycle supports cold installation,
+incremental in-place migration, interrupted-operation recovery and
+data-compatible rollback. Rerunning an unchanged request does not duplicate
+capacity, storage, services or writers. Unsafe data downgrades fail explicitly
+instead of presenting an old executable as successful rollback.
+
 ### safe-template-and-live-refresh
 
 "Set up my fleet" resolves the adopter's existing configuration before planning
@@ -309,6 +326,13 @@ before cleanup. Configuration removal, resource retirement and data destruction
 are separate approved operations; a template difference alone cannot authorize
 them. Stale inventory or uncertain ownership cannot produce a cleanup plan
 presented as safe convergence.
+
+An adopted Gateway can subscribe to the user's versioned configuration and
+reconcile approved changes and releases without continuous client supervision.
+Private configuration repositories need not provide CI: local validation and
+explicit user approval gate major reconfiguration. Approval binds the actual
+change, not arbitrary later revisions. Invalid or unapproved desired state
+preserves the last valid deployment.
 
 ### user-controlled-fleet-observation
 

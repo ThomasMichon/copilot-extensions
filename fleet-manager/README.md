@@ -3,10 +3,12 @@
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
 capacity planning, explicit release-snapshot inspection, installed-client
 resource diagnostics, explicitly authenticated artifact staging and an explicit
-local current-observation storage API.** No
-controller, provider invocation, credential lookup, managed install/update/uninstall,
-telemetry sink or managed-runtime/capacity mutation is delivered yet.
-Those remain the [canonical effort](../efforts/active/linux-role-fleet/README.md).
+local current-observation storage API, and an opt-in authenticated NEW
+Gateway/SDK/subscribed-controller boundary.**
+The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
+no production Gateway/index offload or managed install/update/uninstall,
+telemetry sink or fleet resource mutation is claimed.
+Broader fleet delivery remains the [canonical effort](../efforts/active/linux-role-fleet/README.md).
 
 ```text
 fleet-manager plan --template recommended.json --config adopter.json --inventory live.json --fleet-id example --machine-limit 5
@@ -101,6 +103,9 @@ accepted-update positions and bounded scoped replay/queries. It is a trusted
 local prerequisite, not an authenticated push endpoint, complete fleet roster,
 resident subscription service or a new domain writer. Default CLI commands do
 not open the store, and no installed service or producer is enrolled by it.
+
+Explicit `auth` and `server` extras supply maintained cryptographic dependencies for the
+[new authenticated Gateway](docs/gateway-runtime.md).
 
 The explicit [runtime identity verifier](docs/runtime-authentication.md) adds
 optional maintained-library JWT/DPoP checks and a bounded single-owner replay
@@ -204,7 +209,8 @@ The strict schema-v1 `fleet-manager.release` has:
   The client role cannot require a control/executor component. This is declared
   role isolation, not analysis of executable dependencies.
 
-No actual released Gateway/node artifacts are claimed by these declarations.
+No actual released Gateway/node artifacts are claimed by these declarations;
+the opt-in source Gateway runtime is not a released deployment.
 A manifest is explicit input, not a generated product release or proof of
 artifact availability. Role closures must be stated directly; there is no
 dependency resolver, artifact URL, executable path or apply operation.
@@ -264,9 +270,11 @@ The first [operation contract](docs/operation-contract.md) adds immutable,
 content-bound intent and target-receipt records as a Python API only. Strict
 scope/generation/digest correlation distinguishes acceptance, effect outcome and
 uncertainty. Parsing is not authentication, durable admission, execution,
-monotonic receipt ordering or objective settlement. No CLI mutation or resident
-control runtime is added; existing fixed-service routing contracts remain owned
-by `agent-fleet-contracts`.
+monotonic receipt ordering or objective settlement. This operation contract
+adds no CLI mutation or resident control runtime; the separate opt-in
+[NEW read/credential Gateway](docs/gateway-runtime.md) does not execute these
+operation commands. Existing fixed-service routing contracts remain owned by
+`agent-fleet-contracts`.
 
 An explicit Python [local operation journal](docs/operation-ledger.md) now
 persists admission/outbox/audit and correlated receipt updates transactionally.

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Windows retained-source build resources and long-path copy, metadata and cleanup for scoped fleet integration",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    }
+  ]
+}

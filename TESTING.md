@@ -57,6 +57,17 @@ Healthy provision has a 20-second installer-owned deadline inside the unchanged
 
 ### Fleet replay-retention boundaries
 
+Native index installer snapshot tests separate dependency-content identity
+invalidation from publication ordering and snapshot-local consumer closure.
+Every case retains its real PowerShell boundary and existing 25-second child
+deadline; engine and library changes are independently covered, not omitted
+from the unchanged publication/older-pointer refusal case.
+
+The passive index-service promotion contract supplies an explicit synthetic
+search engine, just as the adjacent drain cases do. Its real HTTP admission
+must reject passive queries without invoking that engine, then admit exactly
+the tested query after owned promotion; it never contacts an embedding service.
+
 The required native fleet lane runs the replay-expiry/idempotency contract with
 a four-event window and real, fully synchronous SQLite transactions. The same
 parameterized test also crosses the production 1,024-event window under
@@ -69,6 +80,22 @@ production retention limit nor its durability policy changes. Explicit manual
 runs select both windows and the full artifact matrix with a 600-second fleet
 suite budget inside a 15-minute native runner job. PR/push budgets remain
 120 seconds for fleet, five minutes for the Linux job and seven for Windows.
+
+The native fleet matrix runs disjoint planner, durable storage, artifact,
+client-distribution/diagnostic, Gateway TLS and Gateway process partitions on
+both operating systems, each with its own unchanged containment and job deadline.
+The exact `-k` selectors are
+declared together in `ci.yml` and checked by `tools/test_fleet_ci_scope.py`.
+The required PR aggregate depends on both static GitHub-hosted
+`fleet-native-linux` and `fleet-native-windows` partition matrices;
+a failed or cancelled partition fails that gate.
+Every otherwise selected test belongs
+to exactly one partition; neither partition is advisory or fail-fast.
+Manual runs use the same complete partition and retain both full markers.
+Native artifact/diagnostic subprocesses and durable planner/ledger tests do not
+consume each other's wall-clock budgets. Gateway TLS/credential tests and
+separate-process acceptance are independently bounded too; none shares the
+unrelated test-runner job's budget.
 
 ### Derived native installation diagnostics
 
@@ -253,6 +280,16 @@ and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
+
+Agent-index's fleet-ingress tests select the same-checkout `fleet-manager[auth]`
+distribution explicitly during development preparation. Its runtime metadata
+keeps an ordinary versioned optional dependency, not an escaping standalone
+project path or a vendored Gateway copy. The runner fingerprints that project's
+dependency metadata and uses an editable test install so source changes remain
+visible. The canonical dependency-seasoning adapter retains the shared
+`libs/versioned-runtime` build resources needed by that standalone distribution,
+just as standalone test preparation does; it does not bypass policy or build
+from a mutable source fallback.
 
 On Windows, contained runs also set the installer test-mode contract
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`. Conforming installers virtualize

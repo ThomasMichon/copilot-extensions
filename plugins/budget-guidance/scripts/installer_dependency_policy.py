@@ -22,6 +22,7 @@ import tempfile
 import types
 import zipimport
 from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -103,7 +104,7 @@ def _toml_parser():
 def _toml(path: Path) -> dict:
     parser = _toml_parser()
     try:
-        return parser.loads(path.read_text(encoding="utf-8"))
+        return parser.loads(Path(_native_retained_path(path)).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise DependencyPolicyError("first-party source TOML could not be read or parsed") from exc
 
@@ -714,6 +715,28 @@ def _config_inputs(arguments, environment, base):
     return [(path, project) for path, project in candidates if path.is_file()]
 
 
+def _native_retained_path(path):
+    value = os.path.abspath(path)
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+
+
+def _copy_retained_file(source, destination):
+    return shutil.copy2(_native_retained_path(source), _native_retained_path(destination))
+
+
+@contextmanager
+def _temporary_inputs(parent):
+    prefix = "uv-" if parent is not None else "seasoned-uv-"
+    temporary = tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
+    try:
+        yield temporary.name
+    finally:
+        temporary.name = _native_retained_path(temporary.name)
+        temporary.cleanup()
+
+
 def run_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
@@ -783,8 +806,7 @@ def run_uv_install(
         temporary_parent = shallowest.parent
         if temporary_parent == shallowest:
             raise DependencyPolicyError("editable retention needs temporary space outside copied inputs")
-    prefix = "uv-" if temporary_parent is not None else "seasoned-uv-"
-    with tempfile.TemporaryDirectory(prefix=prefix, dir=temporary_parent) as temporary:
+    with _temporary_inputs(temporary_parent) as temporary:
         root = _private_retained_root(Path(temporary)).resolve()
         if any(root.is_relative_to(path) for path in (*projects, *resources)):
             raise DependencyPolicyError("retained snapshot must be outside copied inputs")
@@ -828,12 +850,14 @@ def run_uv_install(
             )
 
         for resource in resources:
-            shutil.copytree(resource, mirror(resource), dirs_exist_ok=True)
+            shutil.copytree(_native_retained_path(resource), _native_retained_path(mirror(resource)), dirs_exist_ok=True,
+                            copy_function=_copy_retained_file)
         for project in sorted(projects, key=lambda path: len(path.parts)):
             destination = mirror(project)
-            if not destination.is_dir():
+            if not Path(_native_retained_path(destination)).is_dir():
                 shutil.copytree(
-                    project, destination,
+                    _native_retained_path(project), _native_retained_path(destination),
+                    copy_function=_copy_retained_file,
                     ignore=shutil.ignore_patterns(
                         ".git", ".venv", "__pycache__", "*.egg-info",
                         ".pytest_cache", ".ruff_cache", "node_modules", "build", "dist",
@@ -847,7 +871,7 @@ def run_uv_install(
                     if entry.get("editable") is True and "path" in entry:
                         child = (mirror(project) / entry["path"]).resolve()
                         editables.update(path for path in projects if mirror(path) == child)
-            _write_toml(manifest, data)
+            _write_toml(Path(_native_retained_path(manifest)), data)
         for project in editables:
             manifest = mirror(project) / "pyproject.toml"
             data = _toml(manifest)
@@ -866,11 +890,12 @@ def run_uv_install(
             relative = Path(os.path.relpath(source, mirror(project))).as_posix()
             find["where"] = [relative]
             setuptools["package-dir"] = {"": relative}
-            _write_toml(manifest, data)
+            _write_toml(Path(_native_retained_path(manifest)), data)
         for path in files:
             destination = mirror(path)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(remap(path.read_text(encoding="utf-8")), encoding="utf-8")
+            Path(_native_retained_path(destination.parent)).mkdir(parents=True, exist_ok=True)
+            Path(_native_retained_path(destination)).write_text(
+                remap(Path(_native_retained_path(path)).read_text(encoding="utf-8")), encoding="utf-8")
         retained_config = {}
         for path, is_project in reversed(_config_inputs(arguments, environment, base)):
             data = _toml(path)
@@ -900,7 +925,7 @@ def run_uv_install(
                     str(mirror(base / path)) for path in environment[variable].split()
                 )
         retained_base = mirror(base)
-        retained_base.mkdir(parents=True, exist_ok=True)
+        Path(_native_retained_path(retained_base)).mkdir(parents=True, exist_ok=True)
         retained_environment.pop("UV_WORKING_DIR", None)
         retained_environment.pop("UV_PROJECT", None)
         retained = []
@@ -924,7 +949,7 @@ def run_uv_install(
             retained.extend(["--project", str(mirror(base / context_project))])
         retained_roots = tuple(mirror(path) for path in projects)
         for path in retained_roots:
-            path.mkdir(parents=True, exist_ok=True)
+            Path(_native_retained_path(path)).mkdir(parents=True, exist_ok=True)
         retained_projection = []
         admitted = prepare_uv_install(
             uv, retained, env=retained_environment, cwd=retained_base, now=now,

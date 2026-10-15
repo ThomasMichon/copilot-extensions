@@ -1,4 +1,4 @@
-"""Exercise the exact changed-path selectors checked into both native CI jobs."""
+"""Exercise the native fleet matrix's exact changed-path and coverage selectors."""
 
 import re
 from pathlib import Path
@@ -9,29 +9,59 @@ WORKFLOW = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.
 PATTERNS = re.findall(r"'(\^\(fleet-manager/[^'\n]+)'; then", WORKFLOW)
 
 
-def test_native_fleet_checks_are_both_conditionally_scoped():
-    assert len(PATTERNS) == 2
-    assert PATTERNS[0] == PATTERNS[1]
-    assert WORKFLOW.count("if: steps.fleet-contracts.outputs.run == 'true'") == 2
+def test_native_fleet_partitions_preserve_selection_and_deadlines():
+    assert len(PATTERNS) == 1
+    fleet = WORKFLOW.split("\n  fleet-native-linux:\n", 1)[1].split("\n  fleet-native-windows:", 1)[0]
+    windows = WORKFLOW.split("\n  fleet-native-windows:\n", 1)[1].split("\n  agent-index-service-linux:", 1)[0]
+    assert "runs-on: ubuntu-latest" in fleet
+    assert "runs-on: windows-latest" in windows
+    assert "partition: &fleet-native-partitions" in fleet
+    assert "steps: &fleet-native-steps" in fleet
+    assert "partition: *fleet-native-partitions" in windows
+    assert "steps: *fleet-native-steps" in windows
+    assert "fail-fast: false" in windows
+    assert re.findall(r"          - name: ([a-z-]+)", fleet) == [
+        "planner", "storage", "artifacts", "client-distribution", "gateway", "gateway-processes",
+    ]
+    assert re.findall(r"selector: '([^']+)'", fleet) == [
+        "not gateway_ and not (artifact or client_distribution or client_diagnostics) "
+        "and not (allocation_ or ledger or node_journal or observation_store)",
+        "not gateway_ and not (artifact or client_distribution or client_diagnostics) "
+        "and (allocation_ or ledger or node_journal or observation_store)",
+        "not gateway_ and artifact",
+        "not gateway_ and not artifact and (client_distribution or client_diagnostics)",
+        "gateway_ and not gateway_processes",
+        "gateway_processes",
+    ]
+    assert "fail-fast: false" in fleet
+    assert "continue-on-error" not in fleet
+    assert fleet.count("if: steps.fleet-contracts.outputs.run == 'true'") == 2
+    assert '-k "${{ matrix.partition.selector }}"' in fleet
     assert WORKFLOW.count(
         """'-m "not client_distribution_full and not observation_retention_full"'"""
-    ) == 2
-    for job_id, timeout in (("test-runner-linux", 120), ("test-runner-windows", 300)):
-        match = re.search(
-            rf"(?ms)^  {job_id}:\n(.*?)(?=^  \S|\Z)", WORKFLOW,
-        )
-        assert match is not None
-        job = match.group(1)
-        assert (
-            "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 "
-            "--timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || "
-            f"{timeout}" + " }}"
-        ) in job
-        if job_id == "test-runner-windows":
-            assert (
-                "    timeout-minutes: "
-                "${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}\n"
-            ) in job
+    ) == 1
+    assert WORKFLOW.count(
+        "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 "
+        "--timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}"
+    ) == 1
+    gate = WORKFLOW.split("    name: PR gate (required check)\n", 1)[1]
+    needs = gate.split("    needs:\n", 1)[1].split("    runs-on:", 1)[0]
+    assert "      - fleet-native-linux\n" in needs
+    assert "      - fleet-native-windows\n" in needs
+    promotion = WORKFLOW.split("\n  promotion-gate:\n", 1)[1].split("\n  pr-gate:", 1)[0]
+    assert "      - fleet-native-linux\n" in promotion
+    assert "      - fleet-native-windows\n" in promotion
+    assert "(github.event_name != 'workflow_dispatch' || inputs.promotion_run != '')" in fleet
+    assert "github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15" in fleet
+    assert "&& 15 || 5" in fleet
+    assert "&& 15 || 7" in windows
+    assert (
+        "python tools/seasoned_uv.py --uv uv -- --system pytest && "
+        "python -m pytest -q tools/test_fleet_ci_scope.py"
+    ) in fleet
+    for required in ("installation-context-windows", "vault-snapshot-windows"):
+        assert f"      - {required}\n" in needs
+        assert f"      - {required}\n" in promotion
 
 
 @pytest.mark.parametrize("path,selected", [
@@ -53,6 +83,6 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
     ("libs/agent-procutil-other/src/process.py", False),
 ])
 def test_actual_workflow_regex_selects_only_fleet_and_runner_inputs(path, selected):
-    assert len(PATTERNS) == 2
+    assert len(PATTERNS) == 1
     for pattern in PATTERNS:
         assert bool(re.search(pattern, path)) is selected

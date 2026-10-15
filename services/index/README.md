@@ -5,6 +5,13 @@ For independently owned fresh state, the explicit host option
 [cold source-aware layout](../../plugins/agent-index/docs/source-aware-store.md).
 This is not legacy store adoption, data transfer or deployment/migration proof.
 
+Optional source-authorized fleet hosting is documented in
+[the core backend contract](../../plugins/agent-index/docs/fleet-backend.md).
+An explicit `fleet.policy` host reference and `[fleet]` distribution extra
+enable only the two signed-grant TLS routes; ordinary native hosting is
+unchanged. Gateway CLI routing and live fleet enrollment remain separate gates.
+Worker-local credential consumption is selected explicitly as described below.
+
 ## Generic offline Linux image context
 
 `agent-index-service container prepare` creates a runnable, explicit Docker build
@@ -287,6 +294,36 @@ backups and local provider discovery are selected from this configuration,
 not ambient `AGENT_INDEX_*` values. Treat the home/provider directory as
 operator-owned, trusted state. Credentials remain external; account selection
 uses the existing source connector behavior, not bundled secrets.
+
+### Renewable Gateway ingestion credentials
+
+Install the selected `[fleet]` extra and set a source's
+`auth: {account: selected-account, gateway: /absolute/worker-policy.json}`.
+This absolute, non-secret reference is retained in detached workers' explicit
+source configuration. It selects the
+[credential worker policy](../../fleet-manager/docs/gateway-runtime.md#worker-local-source-consumption)
+and never resolves an ambient `gh` account or environment token.
+
+For Git, also supply `remote: https://example.test/owner/repo.git` and a dedicated
+absolute `path` for the independently materialized **bare** repository. An
+existing non-bare or differently configured repository is rejected, not reused
+or overwritten. `ref` must select a remote-tracking revision such as
+`origin/dev` (the default is remote `HEAD`), not a stale local branch or tag.
+Discovery fetches before recording a cursor and reads the verified commit;
+initialization alone is not successful ingestion.
+
+Each HTTP request/retry and Git fetch obtains a newly verified, acknowledged
+source credential through the configured subscribed controller. Git uses
+URL-scoped child-process configuration, not token-bearing argv or persistent
+Git config; helpers, prompts, redirects and ambient Git tracing are disabled.
+Credential acquisition, unavailable controllers, failed fetches and stale
+Gateway sessions fail explicitly. There is no anonymous, old-checkout or other
+account fallback. Sources without `auth.gateway` retain native behavior.
+
+The issuer and credential custodian own access-token reference renewal,
+private-key custody, enrollment and actual source permission verification.
+This consumer does not issue tokens, provision a controller service, authorize
+deployment or prove the operator's corpus/model parity.
 
 ## Pinned release bundles
 

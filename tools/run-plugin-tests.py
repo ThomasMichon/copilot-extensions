@@ -238,6 +238,8 @@ def _dep_fingerprint(name: str) -> str:
     import hashlib
     pdir = _plugin_dir(name)
     parts = [pdir / "pyproject.toml"]
+    if name == "agent-index":
+        parts.append(REPO / "fleet-manager" / "pyproject.toml")
     libs = pdir / "libs"
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
@@ -306,6 +308,8 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # deps).
             spec = ".[dev]" if _has_dev_extra(name) else "."
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
+            if name == "agent-index":
+                cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
             if reinstall:
                 # A new venv can still consume uv's stale local-path wheels.
                 cmd.append("--reinstall")
@@ -314,6 +318,9 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             cmd.extend(RUNNER_DEPENDENCIES)
             run_uv_install(
                 uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                retained_resource_roots=(
+                    (REPO / "libs" / "versioned-runtime",) if name == "agent-index" else ()
+                ),
             )
         else:
             # A pyproject-less plugin (e.g. a skill-script plugin like

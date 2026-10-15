@@ -35,6 +35,12 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from agent_index.sources.base import FileEntry
+from agent_index.sources.credentials import (
+    SourceCredentialError,
+    TokenProvider,
+    authorization,
+    https_origin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,12 +163,20 @@ class GitRepoConnector:
         ref: str | None = None,
         fetch: bool | None = None,
         token: str | None = None,
+        token_provider: TokenProvider | None = None,
     ):
         self._requested_source = source
         self.repo_path = Path(repo_path or os.environ.get("AGENT_INDEX_GIT_REPO") or os.getcwd())
         self.repo_path = self.repo_path.expanduser().resolve()
+        self._token_provider = token_provider
+        self._bare_repository = (
+            (self.repo_path / "HEAD").is_file() and (self.repo_path / "objects").is_dir()
+            and not (self.repo_path / ".git").exists()
+        )
 
-        self._remote = remote or os.environ.get("AGENT_INDEX_GIT_REMOTE") or "origin"
+        self._remote = remote or (
+            "origin" if token_provider is not None else os.environ.get("AGENT_INDEX_GIT_REMOTE") or "origin"
+        )
         # Identify the source by the REMOTE repo so every checkout/worktree of the
         # same repo shares one source name. A linked worktree's folder basename
         # differs from the anchor's, which otherwise minted a spurious per-worktree
@@ -175,8 +189,12 @@ class GitRepoConnector:
         self._file_source = f"git:{self._name}"
         self._commit_source = f"{self._file_source}:commits"
 
-        self._ref = ref or os.environ.get("AGENT_INDEX_GIT_REF") or f"{self._remote}/HEAD"
-        self._fetch = _env_flag("AGENT_INDEX_GIT_FETCH", True) if fetch is None else fetch
+        self._ref = ref or (
+            f"{self._remote}/HEAD" if token_provider is not None
+            else os.environ.get("AGENT_INDEX_GIT_REF") or f"{self._remote}/HEAD"
+        )
+        self._fetch = (True if token_provider is not None
+                       else _env_flag("AGENT_INDEX_GIT_FETCH", True)) if fetch is None else fetch
         # Optional bearer token (e.g. a resolved ``gh auth token``) for the
         # fetch step only, scoped to that one subprocess call via a transient
         # ``-c http.extraheader=`` override -- never written to this repo's
@@ -185,6 +203,8 @@ class GitRepoConnector:
         # currently-ACTIVE account, which may not be the account this
         # specific repo needs (an EMU org repo vs. a personal one, say).
         self._token = token or None
+        if token_provider is not None and (token is not None or not self._fetch):
+            raise ValueError("renewable Git credentials require fetch and no static token")
 
         # Resolved lazily on first discovery. ``_use_worktree`` True means we fell
         # back to the local HEAD + on-disk working tree; otherwise ``_index_ref``
@@ -227,6 +247,9 @@ class GitRepoConnector:
         fall back to the local working tree. Memoised per connector instance."""
         if self._resolved:
             return
+        if self._token_provider is not None:
+            self._resolve_authenticated()
+            return
         self._resolved = True
         try:
             if self._fetch and self._has_remote(self._remote):
@@ -256,6 +279,89 @@ class GitRepoConnector:
                 self._ref,
             )
 
+    def _resolve_authenticated(self) -> None:
+        if not self._has_remote(self._remote):
+            raise SourceCredentialError("source-remote-required")
+        if self._ref != "HEAD" and not self._ref.startswith(self._remote + "/"):
+            raise SourceCredentialError("source-remote-ref-required")
+        self._fetch_authenticated()
+        for candidate in self._ref_candidates():
+            ref = f"refs/remotes/{candidate}"
+            commit = self._git_quiet(["show-ref", "--verify", "--hash", ref]).strip()
+            if commit:
+                verified = self._git_quiet(["rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}"]).strip()
+                if verified:
+                    self._index_ref, self._index_commit = ref, verified
+                    self._use_worktree, self._resolved = False, True
+                    return
+        raise SourceCredentialError("source-remote-ref-unavailable")
+
+    def _fetch_authenticated(self) -> None:
+        assert self._token_provider is not None
+        url = self._git_quiet(["remote", "get-url", self._remote]).strip()
+        https_origin(url)
+        header = "Authorization: " + authorization(self._token_provider)
+        environment = self._authenticated_environment()
+        settings = [
+            ("credential.helper", ""), ("core.askPass", ""),
+            (f"credential.{url}.helper", ""),
+            ("http.extraHeader", ""), (f"http.{url}.extraHeader", header),
+            ("http.followRedirects", "false"), ("protocol.allow", "never"),
+            ("protocol.https.allow", "always"),
+            (f"http.{url}.sslVerify", "true"), (f"http.{url}.proxy", ""),
+            ("gc.auto", "0"), ("maintenance.auto", "false"), ("core.hooksPath", os.devnull),
+        ]
+        environment["GIT_CONFIG_COUNT"] = str(len(settings))
+        for index, (key, value) in enumerate(settings):
+            environment[f"GIT_CONFIG_KEY_{index}"] = key
+            environment[f"GIT_CONFIG_VALUE_{index}"] = value
+        try:
+            result = subprocess.run(
+                self._git_command(["fetch", "--quiet", "--no-tags", "--prune", url,
+                 f"+refs/heads/*:refs/remotes/{self._remote}/*",
+                 f"+HEAD:refs/remotes/{self._remote}/HEAD"]),
+                cwd=self.repo_path, env=environment, check=False,
+                capture_output=True, timeout=120, **no_window_kwargs(),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise SourceCredentialError("source-fetch-unavailable") from None
+        if result.returncode:
+            raise SourceCredentialError("source-fetch-denied")
+
+    @classmethod
+    def materialize(
+        cls, *, repo_path: Path, remote_url: str, token_provider: TokenProvider,
+        ref: str | None = None,
+    ) -> GitRepoConnector:
+        """Prepare a dedicated bare checkout; discovery must fetch before reading it."""
+        https_origin(remote_url)
+        repo_path = repo_path.expanduser().resolve()
+        if not repo_path.exists():
+            repo_path.mkdir(parents=True)
+            try:
+                result = subprocess.run(
+                    [_GIT, "init", "--bare", "--quiet", str(repo_path)],
+                    check=False, capture_output=True, timeout=15,
+                    env=cls._authenticated_environment(), **no_window_kwargs(),
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                raise SourceCredentialError("source-materialization-unavailable") from None
+            if result.returncode:
+                raise SourceCredentialError("source-materialization-unavailable")
+            connector = cls(repo_path=repo_path, token_provider=token_provider, ref=ref)
+            connector._git(["remote", "add", "origin", remote_url])
+            connector._name = connector._derive_repo_name()
+            connector._file_source = f"git:{connector._name}"
+            connector._commit_source = f"{connector._file_source}:commits"
+        else:
+            connector = cls(repo_path=repo_path, token_provider=token_provider, ref=ref)
+        if (
+            connector._git_quiet(["rev-parse", "--is-bare-repository"]).strip() != "true"
+            or connector._git_quiet(["remote", "get-url", "origin"]).strip() != remote_url
+        ):
+            raise SourceCredentialError("source-materialization-mismatch")
+        return connector
+
     def _fetch_remote(self) -> None:
         """Fetch ``self._remote``, authenticated with ``self._token`` when set.
 
@@ -275,14 +381,15 @@ class GitRepoConnector:
         args.extend(["fetch", "--quiet", self._remote])
         self._git_quiet(args)
 
-    def _resolve_ref(self) -> str | None:
-        """Resolve the configured ref to a verifiable revision, or None."""
+    def _ref_candidates(self) -> list[str]:
         head_sentinels = {f"{self._remote}/HEAD", "origin/HEAD", "HEAD"}
         if self._ref not in head_sentinels:
-            candidates = [self._ref]
-        else:
-            candidates = [f"{self._remote}/HEAD", f"{self._remote}/main", f"{self._remote}/master"]
-        for candidate in candidates:
+            return [self._ref]
+        return [f"{self._remote}/HEAD", f"{self._remote}/main", f"{self._remote}/master"]
+
+    def _resolve_ref(self) -> str | None:
+        """Resolve the configured ref to a verifiable revision, or None."""
+        for candidate in self._ref_candidates():
             out = self._git_quiet(["rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"])
             if out.strip():
                 return candidate
@@ -294,6 +401,8 @@ class GitRepoConnector:
 
     def _index_rev(self) -> str:
         """The revision to read trees/blobs/log from (ref name or 'HEAD')."""
+        if self._token_provider is not None and self._index_commit is not None:
+            return self._index_commit
         return self._index_ref if (self._index_ref and not self._use_worktree) else "HEAD"
 
     # -- discovery -----------------------------------------------------------
@@ -479,15 +588,37 @@ class GitRepoConnector:
         output = self._git(["log", "--format=%H", self._index_rev()])
         return [line.strip() for line in output.splitlines() if line.strip()]
 
+    def _git_command(self, args: list[str]) -> list[str]:
+        prefix = [f"--git-dir={self.repo_path}"] if self._bare_repository else []
+        return [_GIT, *prefix, *args]
+
+    @staticmethod
+    def _authenticated_environment() -> dict[str, str]:
+        environment = {
+            key: value for key, value in os.environ.items()
+            if not key.startswith("GIT_") and key != "SSH_ASKPASS"
+        }
+        environment.update({
+            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_TERMINAL_PROMPT": "0",
+        })
+        return environment
+
+    def _local_git_environment(self) -> dict:
+        return (
+            {"env": self._authenticated_environment()} if self._token_provider is not None else {}
+        )
+
     def _git(self, args: list[str]) -> str:
         completed = subprocess.run(  # noqa: S603
-            [_GIT, *args],
+            self._git_command(args),
             cwd=self.repo_path,
             check=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
+            **self._local_git_environment(),
             **no_window_kwargs(),
         )
         return completed.stdout
@@ -496,13 +627,14 @@ class GitRepoConnector:
         """Run git without raising on failure; return stdout ('' on error)."""
         try:
             completed = subprocess.run(  # noqa: S603
-                [_GIT, *args],
+                self._git_command(args),
                 cwd=self.repo_path,
                 check=False,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                **self._local_git_environment(),
                 **no_window_kwargs(),
             )
         except OSError:
@@ -511,10 +643,11 @@ class GitRepoConnector:
 
     def _git_bytes(self, args: list[str]) -> bytes:
         completed = subprocess.run(  # noqa: S603
-            [_GIT, *args],
+            self._git_command(args),
             cwd=self.repo_path,
             check=True,
             capture_output=True,
+            **self._local_git_environment(),
             **no_window_kwargs(),
         )
         return completed.stdout

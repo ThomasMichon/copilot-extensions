@@ -495,7 +495,7 @@ if ($script:UvCalls -ne 1) {{ throw 'healthy durable engine was rebuilt' }}
     assert result.returncode == 0, result.stderr
 
 
-def test_powershell_snapshot_is_immutable_self_contained_and_ordered(tmp_path: Path):
+def snapshot_source(tmp_path: Path) -> Path:
     # Copy only into a disposable tree; the original source is never mutated.
     source = tmp_path / "source/plugins/agent-index"
     (source / "scripts").mkdir(parents=True)
@@ -516,10 +516,38 @@ def test_powershell_snapshot_is_immutable_self_contained_and_ordered(tmp_path: P
     shutil.copytree(ENGINE, source.parents[1] / "libs/installer-engine")
     (source / "Case.txt").write_text("upper", encoding="utf-8")
     (source / "case.txt").write_text("lower", encoding="utf-8")
+    return source
+
+
+def snapshot_functions() -> str:
     names = ("Get-PayloadHash", "Resolve-VendoredLib", "Publish-FileAtomically",
              "Enter-IndexStampLock", "Materialize-IndexSnapshot", "New-IndexSnapshot",
              "Invoke-Stamp")
-    setup = "\n".join(function(name, "ps1") for name in names) + f"""
+    return "\n".join(function(name, "ps1") for name in names)
+
+
+@pytest.mark.parametrize("library,filename", [
+    ("installer-engine", "installer-engine.sh"),
+    ("zdd", "fixture.py"),
+])
+def test_powershell_snapshot_dependency_content_changes_identity(tmp_path: Path, library, filename):
+    source = snapshot_source(tmp_path)
+    changed = source.parents[1] / "libs" / library / filename
+    result = run_ps(tmp_path, snapshot_functions() + f"""
+$PluginDir = '{source}'
+$PSScriptRoot = '{source / "scripts"}'
+$InstallDir = '{tmp_path / "runtime"}'
+$first = New-IndexSnapshot
+Add-Content '{changed}' '# fixture edit'
+$changed = New-IndexSnapshot
+if ($first -ceq $changed) {{ throw 'dependency content omitted from identity' }}
+""")
+    assert result.returncode == 0, result.stderr
+
+
+def test_powershell_snapshot_is_immutable_self_contained_and_ordered(tmp_path: Path):
+    source = snapshot_source(tmp_path)
+    setup = snapshot_functions() + f"""
 $PluginDir = '{source}'
 $PSScriptRoot = '{source / "scripts"}'
 $InstallDir = '{tmp_path / "runtime"}'
@@ -551,12 +579,6 @@ $newer
     result = run_ps(tmp_path, setup + f"""
 $first = '{snapshots[0]}'
 $newer = '{snapshots[1]}'
-Add-Content '{source.parents[1] / "libs/installer-engine/installer-engine.sh"}' '# fixture edit'
-$engineChanged = New-IndexSnapshot
-if ($engineChanged -ceq $newer) {{ throw 'engine content omitted from identity' }}
-Add-Content '{source.parents[1] / "libs/zdd/fixture.py"}' '# library edit'
-$libraryChanged = New-IndexSnapshot
-if ($libraryChanged -ceq $engineChanged) {{ throw 'library content omitted from identity' }}
 $before = $script:Launchers
 function New-IndexSnapshot {{ return $first }}
 Invoke-Stamp
@@ -591,7 +613,7 @@ $result = Invoke-UvPipInstallResilient -UvCommand '{uv}' -Arguments @('--python'
 if ($result.ExitCode -ne 0) {{ Write-Host $result.Output }}
 exit $result.ExitCode
 """)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("staged", [False, True])

@@ -50,7 +50,15 @@ def test_normal_wheel_metadata_and_console_program(distribution_root):
         core_requirements = [
             Requirement(req) for req in requirements if Requirement(req).name == "agent-index"
         ]
-        assert len(core_requirements) == 2
+        assert len(core_requirements) == 3
+        assert {
+            tuple(sorted(requirement.extras)) for requirement in core_requirements
+        } == {(), ("server", "store"), ("fleet", "server", "store")}
+        fleet_requirement = next(req for req in core_requirements if "fleet" in req.extras)
+        assert fleet_requirement.marker is not None
+        assert fleet_requirement.marker.evaluate({"extra": "fleet"})
+        assert not fleet_requirement.marker.evaluate({"extra": "native"})
+        assert not fleet_requirement.marker.evaluate({"extra": ""})
         for requirement in core_requirements:
             assert not requirement.specifier.contains("0.1.0.dev210", prereleases=True)
             assert not requirement.specifier.contains("0.10.11.dev1", prereleases=True)

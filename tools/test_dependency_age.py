@@ -305,6 +305,7 @@ def test_owned_references_have_existing_source_contract_attribution():
         (REPO / "services" / "dispatch" / "pyproject.toml", "agent-dispatch"),
         (REPO / "services" / "index" / "pyproject.toml", "agent-index"),
         (REPO / "services" / "index" / "pyproject.toml", "agent-procutil"),
+        (REPO / "plugins" / "agent-index" / "pyproject.toml", "fleet-manager"),
     ]
     count = 0
     for path, name in refs:
@@ -316,7 +317,42 @@ def test_owned_references_have_existing_source_contract_attribution():
             if declaration.path == path and req.name == name:
                 assert age.local_source(req, path, projects, REPO)
                 count += 1
-    assert count == 5
+    assert count == 7
+
+
+@pytest.mark.parametrize("mode", [
+    "present", "removed", "other-plugin", "unguarded", "wrong-identity", "escaped",
+])
+def test_plugin_source_contract_requires_exact_runner_and_canonical_identity(tmp_path, mode):
+    path = project(tmp_path, dependencies='"owned[auth]>=1"')
+    source = write(tmp_path / "fleet-manager" / "pyproject.toml",
+                   '[project]\nname = "owned"\nversion = "1.0"\n')
+    implementation = """
+def _ensure_venv(name, uv, reinstall=False):
+    cmd = []
+    if name == "demo":
+        cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
+"""
+    if mode == "removed":
+        implementation = implementation.replace('cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])', "pass")
+    elif mode == "other-plugin":
+        implementation = implementation.replace('name == "demo"', 'name == "other"')
+    elif mode == "unguarded":
+        implementation = implementation.replace('    if name == "demo":\n        ', "    ")
+    elif mode == "wrong-identity":
+        source.write_text('[project]\nname = "unrelated"\n', encoding="utf-8")
+    elif mode == "escaped":
+        implementation = implementation.replace('"fleet-manager"', '"../outside"')
+    write(tmp_path / "tools" / "run-plugin-tests.py", implementation)
+    _, projects = age.inventory(tmp_path)
+    if mode == "escaped":
+        with pytest.raises(age.DeclarationError, match="escapes"):
+            age.contract_source(Requirement("owned"), path, projects, tmp_path)
+        return
+    else:
+        expected = source if mode == "present" else None
+        assert age.contract_source(Requirement("owned"), path, projects, tmp_path) == expected
+    assert age.contract_source(Requirement("unrelated-package"), path, projects, tmp_path) is None
 
 
 def test_standalone_source_contract_revoked_if_paths_or_registration_disappear(tmp_path):

@@ -8,7 +8,7 @@ exclude-newer = "7 days"
 [project]
 name = "fleet-manager"
 version = "0.1.0-dev1"
-description = "Standalone, preservation-safe fleet configuration and capacity planner."
+description = "Standalone fleet planner and opt-in authenticated Gateway runtime and SDK."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -16,8 +16,10 @@ dependencies = []
 
 [project.optional-dependencies]
 release-verification = ["cryptography>=46,<47"]
+auth = ["PyJWT>=2.10,<3", "cryptography>=44", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2"]
+server = ["PyJWT>=2.10,<3", "cryptography>=44", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2"]
 runtime-authentication = ["joserfc>=1.7.5,<2"]
-dev = ["pytest", "setuptools>=83.0.0", "wheel", "cryptography>=46,<47", "joserfc>=1.7.5,<2"]
+dev = ["pytest", "setuptools>=83.0.0", "wheel", "PyJWT>=2.10,<3", "cryptography>=46,<47", "jwcrypto>=1.5.6,<2", "joserfc>=1.7.5,<2"]
 
 [project.scripts]
 fleet-manager = "fleet_manager.__main__:main"

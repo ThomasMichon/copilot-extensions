@@ -26,7 +26,10 @@ def test_legacy_stdio_dependency_is_not_part_of_host_profile():
     assert extras["stdio-mcp"] == ["mcp>=2.0,<3.0"]
     for dependencies in (project["dependencies"], extras["store"], extras["server"]):
         assert not any(value.startswith("mcp") for value in dependencies)
-    assert "agent-index[store,server,stdio-mcp]" in extras["dev"]
+    assert "agent-index[store,server,stdio-mcp,fleet]" in extras["dev"]
+    assert extras["fleet"] == ["fleet-manager[auth]>=0.1.0.dev1"]
+    for dependencies in (project["dependencies"], extras["store"], extras["server"]):
+        assert not any(value.startswith("fleet-manager") for value in dependencies)
 
 
 @pytest.mark.parametrize("role", ["host", "client", "unconfigured"])

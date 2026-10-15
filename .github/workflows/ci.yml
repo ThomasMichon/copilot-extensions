@@ -966,6 +966,35 @@ jobs:
           python -m pytest tools/test_payload_cwd_ci_scope.py -q
           python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or launch_survives"
 
+  fleet-native-linux:
+    name: fleet-manager (ubuntu-latest, ${{ matrix.partition.name }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: &fleet-native-partitions
+          - name: planner
+            selector: 'not gateway_ and not (artifact or client_distribution or client_diagnostics) and not (allocation_ or ledger or node_journal or observation_store)'
+          - name: storage
+            selector: 'not gateway_ and not (artifact or client_distribution or client_diagnostics) and (allocation_ or ledger or node_journal or observation_store)'
+          - name: artifacts
+            selector: 'not gateway_ and artifact'
+          - name: client-distribution
+            selector: 'not gateway_ and not artifact and (client_distribution or client_diagnostics)'
+          - name: gateway
+            selector: 'gateway_ and not gateway_processes'
+          - name: gateway-processes
+            selector: 'gateway_processes'
+    steps: &fleet-native-steps
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
       - id: fleet-contracts
         name: Detect standalone fleet contract changes
         shell: bash
@@ -984,14 +1013,28 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Test thin fleet planner with installed package and host containment
+      - name: Check fleet coverage partition
+        if: steps.fleet-contracts.outputs.run == 'true'
+        shell: bash
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest && python -m pytest -q tools/test_fleet_ci_scope.py
+      - name: Test fleet partition with installed package and host containment
         if: steps.fleet-contracts.outputs.run == 'true'
         env:
-          PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
-        run: |
-          python tools/seasoned_uv.py --uv uv -- --system pytest
-          python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}
+          PYTEST_ADDOPTS: >-
+            ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
+            -k "${{ matrix.partition.selector }}"
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}
+
+  fleet-native-windows:
+    name: fleet-manager (windows-latest, ${{ matrix.partition.name }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: *fleet-native-partitions
+    steps: *fleet-native-steps
 
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
@@ -1205,35 +1248,6 @@ jobs:
           python tools/seasoned_uv.py --uv uv -- --system pytest
           python -m pytest tools/test_payload_cwd_ci_scope.py -q
           python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
-
-      - id: fleet-contracts
-        name: Detect standalone fleet contract changes
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/(single-instance-lease|agent-procutil|versioned-runtime)/|\.github/workflows/ci\.yml$)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Test thin fleet planner with installed package and host containment
-        if: steps.fleet-contracts.outputs.run == 'true'
-        env:
-          PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
-        run: |
-          python tools/seasoned_uv.py --uv uv -- --system pytest
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q tools/test_fleet_ci_scope.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 300 }}
 
   archive-sources-windows:
     name: archive sources (windows-latest)
@@ -1538,6 +1552,8 @@ jobs:
       - test-runner-windows
       - installation-context-windows
       - vault-snapshot-windows
+      - fleet-native-linux
+      - fleet-native-windows
       - archive-sources-windows
       - discover
       - smoke
@@ -1596,6 +1612,8 @@ jobs:
       - test-runner-windows
       - installation-context-windows
       - vault-snapshot-windows
+      - fleet-native-linux
+      - fleet-native-windows
       - archive-sources-windows
       - discover
       - smoke

@@ -180,10 +180,10 @@ def test_native_vault_snapshot_lane_preserves_bounded_first_use_proof() -> None:
 @pytest.mark.parametrize("workflow_file,job_id,step_name,fail_on", [
     ("ci.yml", "installation-context-windows",
      "Derived native diagnostics (Windows PowerShell 5.1)", "tools/seasoned_uv.py"),
-    ("ci.yml", "test-runner-windows",
-     "Test thin fleet planner with installed package and host containment", "tools/seasoned_uv.py"),
-    ("ci.yml", "test-runner-windows",
-     "Test thin fleet planner with installed package and host containment", "-m"),
+    ("ci.yml", "fleet-native-windows",
+     "Check fleet coverage partition", "tools/seasoned_uv.py"),
+    ("ci.yml", "fleet-native-windows",
+     "Check fleet coverage partition", "-m"),
     ("installation-context-acceptance.yml", "derived-diagnostics-windows",
      "All derived native copies", "tools/seasoned_uv.py"),
 ])
@@ -223,10 +223,26 @@ function python {
     $global:LASTEXITCODE = $LASTEXITCODE
 }
 """
+    command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prefix + body]
+    if step.get("shell") == "bash":
+        git = shutil.which("git")
+        candidates = [parent / "bin" / "bash.exe" for parent in Path(git).parents[:3]] if git else []
+        bash = (next((str(path) for path in candidates if path.is_file()), None)
+                if os.name == "nt" else shutil.which("bash"))
+        assert bash, "the selected Windows fleet shell must be available"
+        prefix = """
+set -e
+python() {
+    code=0
+    if [ "$1" = "$FIXTURE_FAIL_ON" ]; then code=23; fi
+    "$FIXTURE_PYTHON" -I -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.open("a").write(sys.argv[2]+"\\n"); raise SystemExit(int(sys.argv[3]))' "$FIXTURE_COMMAND_LOG" "$1" "$code"
+}
+"""
+        command = [bash, "-c", prefix + body]
     result = subprocess.run(
-        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prefix + body],
+        command,
         env={
-            **os.environ, "FIXTURE_PYTHON": sys.executable,
+            **os.environ, "FIXTURE_PYTHON": sys.executable.replace("\\", "/"),
             "FIXTURE_COMMAND_LOG": str(log), "FIXTURE_FAIL_ON": fail_on,
         },
         capture_output=True, text=True, timeout=20,

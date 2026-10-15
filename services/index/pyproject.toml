@@ -21,6 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+fleet = ["agent-index[store,server,fleet]>=0.10.12.dev1"]
 native = ["agent-index[store,server]>=0.10.12.dev1"]
 test = [
     "pytest",

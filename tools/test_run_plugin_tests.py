@@ -62,6 +62,7 @@ def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
     def install(uv, arguments, **kwargs):
         assert kwargs == {
             "cwd": plugin, "trusted_source_roots": (runner.REPO,), "check": True,
+            "retained_resource_roots": (),
         }
         return run([uv, "pip", "install", *arguments])
 
@@ -84,6 +85,146 @@ def selectable_tests(tmp_path, monkeypatch):
     for name in ("test_selected.py", "test_unrelated.py", "nested/test_child.py"):
         (tests / name).write_text("def test_example(): pass\n", encoding="utf-8")
     return tests
+
+
+def test_index_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    plugin = tmp_path / "plugins" / "agent-index"
+    plugin.mkdir(parents=True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    (plugin / "pyproject.toml").write_text(
+        '[project.optional-dependencies]\ndev = ["fleet-manager[auth]>=0.1.0.dev1"]\n',
+        encoding="utf-8",
+    )
+    fleet = tmp_path / "fleet-manager"
+    fleet.mkdir()
+    metadata = fleet / "pyproject.toml"
+    metadata.write_text('[project]\nversion = "0.1.0.dev1"\n', encoding="utf-8")
+    (runner.VENV_ROOT / "agent-index").mkdir(parents=True)
+    before = runner._dep_fingerprint("agent-index")
+    metadata.write_text('[project]\nversion = "0.1.0.dev2"\n', encoding="utf-8")
+    assert runner._dep_fingerprint("agent-index") != before
+    calls = []
+    monkeypatch.setattr(
+        runner.subprocess, "run",
+        lambda command, **kwargs: calls.append(command) or subprocess.CompletedProcess(command, 0),
+    )
+    retained = []
+
+    def prepare(uv, arguments, **kwargs):
+        retained.append(kwargs["retained_resource_roots"])
+        return runner.subprocess.run([uv, "pip", "install", *arguments])
+
+    monkeypatch.setattr(runner, "run_uv_install", prepare)
+    runner._ensure_venv("agent-index", "fixture-uv", reinstall=False)
+    install = calls[-1]
+    assert install[-len(runner.RUNNER_DEPENDENCIES) - 2:] == [
+        "-e", str(fleet) + "[auth]", *runner.RUNNER_DEPENDENCIES,
+    ]
+    assert not any("http" in argument for argument in install)
+    assert retained == [(tmp_path / "libs" / "versioned-runtime",)]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows editable staging contract")
+def test_windows_editable_metadata_is_retained_near_all_sources(tmp_path, monkeypatch):
+    import tomllib
+
+    policy = sys.modules[runner.run_uv_install.__module__]
+    checkout = tmp_path / "checkout"
+    projects = [checkout / "plugins" / "fixture", checkout / "fleet-manager"]
+    for index, source in enumerate(projects):
+        (source / "src").mkdir(parents=True)
+        (source / "pyproject.toml").write_text(
+            '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
+            f'[project]\nname="fixture-{index}"\nversion="1.0"\ndependencies=[]\n'
+            '[tool.setuptools.packages.find]\nwhere=["src"]\n', encoding="utf-8",
+        )
+    retained = []
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            return subprocess.CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
+                index_locations: IndexLocations { indexes: [], flat_index: [], },
+                exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+            }, }""", "")
+        root = Path(kwargs["cwd"])
+        retained.append(root)
+        assert root.is_relative_to(checkout.parent)
+        assert not root.is_relative_to(checkout)
+        for manifest in root.parents[1].rglob("pyproject.toml"):
+            data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+            relative = data["tool"]["setuptools"]["package-dir"][""]
+            target = (manifest.parent / relative).resolve()
+            assert target in [source / "src" for source in projects]
+            # Use the real metadata rename shape, with an absolute origin and
+            # a lexical relative destination, rather than resolving both away.
+            metadata = target / "fixture.egg-info"
+            metadata.mkdir()
+            temporary = metadata / "temporary"
+            temporary.write_text("fixture", encoding="utf-8")
+            destination = manifest.parent / relative / "fixture.egg-info" / "PKG-INFO"
+            assert len(str(destination)) < 260
+            temporary.replace(destination)
+            assert (metadata / "PKG-INFO").read_text(encoding="utf-8") == "fixture"
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    result = policy.run_uv_install(
+        "fixture-uv", ["--no-config", "-e", str(projects[0]), "-e", str(projects[1])],
+        cwd=projects[0], trusted_source_roots=(checkout,),
+    )
+    assert result.returncode == 0 and retained and not retained[0].exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows retained-file copy")
+def test_windows_retained_file_copy_preserves_long_path_bytes(tmp_path):
+    policy = sys.modules[runner.run_uv_install.__module__]
+    root = Path("\\\\?\\" + str(tmp_path.resolve())) / ("nested-" * 15) / ("snapshot-" * 8)
+    root.mkdir(parents=True)
+    source = root / "installer_dependency_policy.py"
+    source.write_bytes(b"fixture retained source\n")
+    destination = root / "copied_installer_dependency_policy.py"
+    plain_source = Path(str(source).removeprefix("\\\\?\\"))
+    plain_destination = Path(str(destination).removeprefix("\\\\?\\"))
+    assert len(str(plain_destination)) > 260
+    policy._copy_retained_file(plain_source, plain_destination)
+    assert destination.read_bytes() == source.read_bytes()
+    with policy._temporary_inputs(tmp_path) as temporary:
+        owned = Path(policy._native_retained_path(temporary))
+        nested = owned / ("snapshot-" * 14) / ("dependency-" * 5)
+        nested.mkdir(parents=True)
+        (nested / "installer_dependency_policy.py").write_bytes(b"retained fixture\n")
+    assert not owned.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows configuration path normalization")
+@pytest.mark.parametrize("selection", ["argument", "environment"])
+def test_windows_parent_relative_configuration_keeps_native_resolver_policy(tmp_path, selection):
+    policy = sys.modules[runner.run_uv_install.__module__]
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text(
+        '[build-system]\nrequires=[]\nbuild-backend="fixture_backend"\n'
+        '[project]\nname="owned-fixture"\nversion="1.0"\ndependencies=[]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "uv.toml").write_text('[pip]\nexclude-newer = "9 days"\n', encoding="utf-8")
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("UV_")}
+    environment["UV_OFFLINE"] = "1"
+    arguments = [str(source)]
+    if selection == "argument":
+        arguments = ["--config-file", "../uv.toml", *arguments]
+    else:
+        environment["UV_CONFIG_FILE"] = "../uv.toml"
+    uv = shutil.which("uv")
+    assert uv, "native UV is required for configuration provenance coverage"
+    admitted = policy.prepare_uv_install(
+        uv, arguments, cwd=source, env=environment, trusted_source_roots=(source,),
+    )
+    assert "--exclude-newer" in admitted
+    assert ".." not in Path(policy._native_retained_path(source / ".." / "uv.toml")).parts
+    assert policy._toml(source / ".." / "uv.toml")["pip"]["exclude-newer"] == "9 days"
 
 
 def test_explicit_test_files_preserve_default_grouping_and_filter_only_collection(selectable_tests):

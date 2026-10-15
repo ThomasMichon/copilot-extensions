@@ -2162,6 +2162,10 @@ have been released for at least **604800 seconds (seven days)** before their
 literal floors/pins are declared or their registry artifacts are installed.
 Attributable repository-owned source dependencies are exempt; their external
 dependency closure is not. Unknown or future upload timestamps never prove age.
+The declaration audit also attributes an ordinary versioned first-party
+dependency when the exact plugin test consumer explicitly installs that
+inventoried project's literal source path. Removing or redirecting that
+consumer binding revokes attribution; a package name alone is never exempt.
 Being a local path is not attribution: local wheels, archives and unattributed
 projects are refused. Source-directory admission verifies project identity,
 resolved containment and the recursive local dependency graph, including
@@ -2226,6 +2230,14 @@ temporary directory; setuptools requires relative package directories.
 Dynamic metadata, other editable backends or
 layouts, competing editable-mode settings and mixed source volumes on Windows
 fail explicitly rather than installing references to disposable source trees.
+On Windows, editable metadata is staged beside the common source ancestry so
+setuptools' relative metadata renames stay short. Retained filesystem copies,
+TOML I/O and cleanup use native extended paths where needed; UV arguments and
+file URLs retain ordinary canonical spelling. This preserves the configured
+resolver and attribution boundary rather than bypassing retention for long
+snapshot paths. Parent-relative config selections are normalized lexically
+before extended prefixing, preserving explicit `--config-file` and
+`UV_CONFIG_FILE` behavior.
 
 The policy does not replace the adopter's configured feed, disable TLS
 verification, or retry against a public index. A selected extra's dependency
