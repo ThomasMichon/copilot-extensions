@@ -17,6 +17,14 @@ engines and their required support files must exist locally and match the
 canonical bytes. Missing or modified assets and mixed source/local references
 remain failures, not accepted release-layout variations.
 
+Bridge's native Bash completed-slot admission and serving-reconcile refusal
+matrices use a minimal plugin payload. Both setup and admission still compute
+the real fingerprint and use real versioned-runtime evidence; dedicated
+shared-library fingerprint cases retain the full transitive fixture. This
+keeps unrelated MSYS hashing subprocesses from consuming the admission cases'
+unchanged 30-second item budget. Install and update partitions retain every
+case without extending the 300-second suite budget.
+
 The registered-repository Git-probe guard follows the real `repos._git` to
 `git_ops.git` call chain. It checks headless options at that subprocess owner,
 the existing 60-second bound and UTF-8 capture policy, and removal of inherited

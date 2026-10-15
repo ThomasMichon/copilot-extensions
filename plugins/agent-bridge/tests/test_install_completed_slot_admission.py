@@ -96,8 +96,8 @@ def _extract_sh(name: str, text: str, *, optional: bool = False) -> str:
     return text[start : text.index("\n}\n", start) + 3]
 
 
-def _fake_plugin(tmp_path: Path) -> Path:
-    """A plugin inside a fake checkout, with the shared libraries it installs.
+def _fake_plugin(tmp_path: Path, *, libraries: bool = True) -> Path:
+    """A plugin inside a fake checkout, optionally with shared libraries.
 
     ``ssh-manager`` is installed explicitly (via the vendored-lib resolver),
     ``plugin-resolve`` only through the plugin's ``[tool.uv.sources]``, and
@@ -108,13 +108,18 @@ def _fake_plugin(tmp_path: Path) -> Path:
     (plugin / "src" / "pkg").mkdir(parents=True)
     (plugin / "pyproject.toml").write_text(
         f'[project]\nname = "pkg"\nversion = "{_VERSION}"\n\n'
-        "[tool.uv.sources]\n"
-        'agent-ssh-manager = { path = "../../libs/ssh-manager", editable = true }\n'
-        'agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }\n',
+        + (
+            "[tool.uv.sources]\n"
+            'agent-ssh-manager = { path = "../../libs/ssh-manager", editable = true }\n'
+            'agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }\n'
+            if libraries else ""
+        ),
         encoding="utf-8",
     )
     (plugin / "src" / "pkg" / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
     (plugin / "README.md").write_text("# pkg\n", encoding="utf-8")
+    if not libraries:
+        return plugin
     for lib, sources in (
         ("ssh-manager", 'agent-procutil = { path = "../agent-procutil", editable = true }\n'),
         ("plugin-resolve", ""),
@@ -704,7 +709,10 @@ def _sh_runtime_scripts(tmp_path: Path) -> Path:
     return scripts
 
 
-def _sh_harness(tmp_path: Path, scenario: str, action: str, extra: tuple[str, ...] = ()) -> Path:
+def _sh_harness(
+    tmp_path: Path, scenario: str, action: str, extra: tuple[str, ...] = (),
+    *, libraries: bool = True,
+) -> Path:
     text = _INSTALL_SH.read_text(encoding="utf-8")
     functions = "".join(
         _extract_sh(name, text, optional=optional)
@@ -727,9 +735,10 @@ def _sh_harness(tmp_path: Path, scenario: str, action: str, extra: tuple[str, ..
         path = shim_dir / name
         path.write_text(shim, encoding="utf-8", newline="\n")
         path.chmod(0o755)
+    plugin = _fake_plugin(tmp_path, libraries=libraries)
     script = f"""set -euo pipefail
 SCRIPT_DIR={_sh_quote(_posix(_sh_runtime_scripts(tmp_path)))}
-PLUGIN_DIR={_sh_quote(_posix(_fake_plugin(tmp_path)))}
+PLUGIN_DIR={_sh_quote(_posix(plugin))}
 INSTALL_DIR={_sh_quote(_posix(tmp_path / "install"))}
 LINK_DIR="$INSTALL_DIR/venv"
 SRC_VERSION={_VERSION}
@@ -804,7 +813,8 @@ def _run_sh(harness: Path) -> subprocess.CompletedProcess:
 def test_sh_completed_slot_admission(
     tmp_path: Path, action: str, scenario: str, expected: str
 ) -> None:
-    result = _run_sh(_sh_harness(tmp_path, scenario, action))
+    # Transitive library hashing has dedicated native cases below.
+    result = _run_sh(_sh_harness(tmp_path, scenario, action, libraries=False))
     _assert_outcome(tmp_path, result, expected)
     assert ("SERVING" in _events(tmp_path)) is (
         action == "do_update" and scenario == "match-active"
@@ -820,6 +830,7 @@ def test_sh_serving_reconcile_failure_never_publishes_or_rebuilds(tmp_path, afte
     action += "do_update"
     result = _run_sh(_sh_harness(
         tmp_path, "match-inactive" if after_wait else "match-active", action,
+        libraries=False,
     ))
     events = _events(tmp_path)
     assert result.returncode == 1, result.stdout + result.stderr
