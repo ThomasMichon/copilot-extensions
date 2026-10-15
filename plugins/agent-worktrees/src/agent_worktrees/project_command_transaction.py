@@ -31,12 +31,19 @@ def _capture(paths: list[Path]) -> dict:
     }
 
 
-def _replace(path: Path, data: bytes | None, mode: int) -> None:
+def _replace(
+    path: Path, data: bytes | None, mode: int,
+    *, expected: tuple[bytes | None, ...] | None = None,
+) -> None:
+    if expected is not None:
+        _check_admitted(path, expected)
     if data is None:
         path.unlink(missing_ok=True)
         return
     if path.is_file() and path.read_bytes() == data:
         if path.stat().st_mode & 0o777 != mode:
+            if expected is not None:
+                _check_admitted(path, expected)
             path.chmod(mode)
         return
     staged = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -46,9 +53,21 @@ def _replace(path: Path, data: bytes | None, mode: int) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         staged.chmod(mode)
+        if expected is not None:
+            _check_admitted(path, expected)
         os.replace(staged, path)
     finally:
         staged.unlink(missing_ok=True)
+
+
+def _check_admitted(path: Path, expected: tuple[bytes | None, ...]) -> None:
+    from . import installer as inst
+
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise inst.BinstubContentError(f"interrupted command has linked/non-file sibling: {path.name}")
+    actual = inst._file_sha256(path) if path.exists() else None
+    if actual not in tuple(_digest(data) for data in expected):
+        raise inst.BinstubContentError(f"interrupted command has modified sibling: {path.name}; restore the recorded command before retry")
 
 
 def _check_states(paths: list[Path], before: dict, after: dict) -> None:
@@ -56,11 +75,7 @@ def _check_states(paths: list[Path], before: dict, after: dict) -> None:
 
     for p in paths:
         key = inst._stub_key(p.name)
-        if p.is_symlink() or (p.exists() and not p.is_file()):
-            raise inst.BinstubContentError(f"interrupted command has linked/non-file sibling: {p.name}")
-        actual = inst._file_sha256(p) if p.exists() else None
-        if actual not in (_digest(_decode(before[key]["bytes"])), _digest(_decode(after[key]["bytes"]))):
-            raise inst.BinstubContentError(f"interrupted command has modified sibling: {p.name}; restore the recorded command before retry")
+        _check_admitted(p, (_decode(before[key]["bytes"]), _decode(after[key]["bytes"])))
 
 
 def _normalize_states(states: object, expected: set[str]) -> dict:
@@ -167,8 +182,11 @@ def recover(
         on_admitted()
     _check_states(paths, before, after)
     for p in paths:
-        entry = after[inst._stub_key(p.name)]
-        _replace(p, _decode(entry["bytes"]), entry["mode"])
+        key = inst._stub_key(p.name)
+        entry = after[key]
+        _replace(p, _decode(entry["bytes"]), entry["mode"],
+                 expected=(_decode(before[key]["bytes"]), _decode(after[key]["bytes"])))
+    _check_states(paths, after, after)
     if final is None:
         inst._receipt_path(project).unlink()
     else:
@@ -221,8 +239,10 @@ def publish(project: str, owner: dict, identity: dict, specs: list[tuple[Path, s
     try:
         _check_states(paths, before, before)
         for p in paths:
-            entry = after[inst._stub_key(p.name)]
-            _replace(p, _decode(entry["bytes"]), entry["mode"])
+            key = inst._stub_key(p.name)
+            entry = after[key]
+            _replace(p, _decode(entry["bytes"]), entry["mode"],
+                     expected=(_decode(before[key]["bytes"]), _decode(after[key]["bytes"])))
         _check_states(paths, after, after)
         if retire:
             inst._receipt_path(project).unlink()
@@ -231,8 +251,11 @@ def publish(project: str, owner: dict, identity: dict, specs: list[tuple[Path, s
     except Exception:
         _check_states(paths, before, after)
         for p in paths:
-            entry = before[inst._stub_key(p.name)]
-            _replace(p, _decode(entry["bytes"]), entry["mode"])
+            key = inst._stub_key(p.name)
+            entry = before[key]
+            _replace(p, _decode(entry["bytes"]), entry["mode"],
+                     expected=(_decode(before[key]["bytes"]), _decode(after[key]["bytes"])))
+        _check_states(paths, before, before)
         if previous_bytes is None:
             inst._receipt_path(project).unlink(missing_ok=True)
         else:

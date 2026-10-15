@@ -48,6 +48,13 @@ identity still match and every existing sibling matches the recorded prior or
 intended bytes. Edited intermediate files or corrupt transactions remain
 precise blockers. This is recoverable multi-file publication, not a promise of
 one atomic filesystem operation across a Windows command pair.
+Every command replacement, deletion and permission change revalidates the
+affected sibling against admitted prior/intended bytes immediately before
+mutation, including after staging a replacement. Publication, recovery and
+rollback also verify the complete resulting pair before settling the receipt.
+Unexpected interleaved edits are preserved, fail visibly and retain the
+journal; retries remain blocked until the recorded state is restored. These
+checks are not atomic filesystem compare-and-swap against uncooperative writers.
 Nested intended-receipt sections are structurally validated before use; a
 corrupt journal is preserved and reported without aborting unrelated projects.
 

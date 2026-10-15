@@ -279,8 +279,8 @@ def test_interrupted_unregistered_retirement_retains_admission(
     _registry(monkeypatch, {})
     original = tx._replace
 
-    def interrupt(path, data, mode):
-        original(path, data, mode)
+    def interrupt(path, data, mode, **kwargs):
+        original(path, data, mode, **kwargs)
         raise KeyboardInterrupt("interrupted retirement")
 
     monkeypatch.setattr(tx, "_replace", interrupt)
@@ -503,9 +503,9 @@ def test_interrupted_sibling_transition(command_home, monkeypatch, retire, edite
     original = tx._replace
     interrupted_path = None
 
-    def interrupted(path, data, mode):
+    def interrupted(path, data, mode, **kwargs):
         nonlocal interrupted_path
-        original(path, data, mode)
+        original(path, data, mode, **kwargs)
         if interrupted_path is None:
             interrupted_path = path
             raise KeyboardInterrupt("interrupted after first sibling")
@@ -650,6 +650,136 @@ def test_reconcile_reuses_one_strict_registry_snapshot(command_home, monkeypatch
     assert calls == [True]
     assert len(writes) == 1
     assert set(writes[0]["projects"]) == {"demo"}
+
+
+@pytest.mark.parametrize("phase", ["publication", "recovery", "rollback"])
+@pytest.mark.parametrize("retire", [False, True])
+@pytest.mark.parametrize("edit_after", ["first", "last"])
+def test_interleaved_windows_sibling_edit_is_never_overwritten(
+    command_home, monkeypatch, phase, retire, edit_after
+):
+    from agent_worktrees import project_command_transaction as tx
+
+    if inst.platform.system() != "Windows":
+        pytest.skip("Windows command pair interleaving")
+    seed_old(monkeypatch, command_home)
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    if retire:
+        monkeypatch.setattr(inst, "_project_is_knowledge_only", lambda _name: True)
+    original_write = inst._write_receipt
+    if phase == "recovery":
+        def interrupt(project, data):
+            original_write(project, data)
+            raise KeyboardInterrupt("interrupt after journal admission")
+
+        monkeypatch.setattr(inst, "_write_receipt", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            inst.reconcile_binstubs()
+        monkeypatch.setattr(inst, "_write_receipt", original_write)
+
+    rollback = False
+    if phase == "rollback":
+        if retire:
+            original_unlink = Path.unlink
+
+            def fail_retirement(path, *args, **kwargs):
+                nonlocal rollback
+                if path == inst._receipt_path("demo") and not rollback:
+                    rollback = True
+                    raise PermissionError("receipt retirement denied")
+                return original_unlink(path, *args, **kwargs)
+
+            monkeypatch.setattr(Path, "unlink", fail_retirement)
+        else:
+            def fail_receipt(project, data):
+                nonlocal rollback
+                if "transaction" not in data and not rollback:
+                    rollback = True
+                    raise PermissionError("final receipt publication denied")
+                original_write(project, data)
+
+            monkeypatch.setattr(inst, "_write_receipt", fail_receipt)
+
+    original_replace = tx._replace
+    edited = False
+    user_bytes = b"operator edit between sibling mutations\n"
+    trigger = paths[0] if edit_after == "first" else paths[1]
+    edited_path = paths[1] if edit_after == "first" else paths[0]
+
+    def interleaved(path, data, mode, **kwargs):
+        nonlocal edited
+        original_replace(path, data, mode, **kwargs)
+        if path == trigger and not edited and (phase != "rollback" or rollback):
+            edited_path.write_bytes(user_bytes)
+            edited = True
+
+    monkeypatch.setattr(tx, "_replace", interleaved)
+    result = inst.reconcile_binstubs()
+    assert edited
+    assert result["blocked"] == result["preserved"] == ["demo"]
+    assert edited_path.read_bytes() == user_bytes
+    assert "transaction" in inst._read_receipt("demo")
+    interrupted_state = {p: p.read_bytes() if p.exists() else None for p in paths}
+    assert inst.reconcile_binstubs()["blocked"] == ["demo"]
+    assert {p: p.read_bytes() if p.exists() else None for p in paths} == interrupted_state
+
+
+@pytest.mark.parametrize("phase", ["publication", "recovery", "rollback"])
+def test_edit_during_staging_is_rechecked_at_replace_boundary(command_home, monkeypatch, phase):
+    from agent_worktrees import project_command_transaction as tx
+
+    if inst.platform.system() != "Windows":
+        pytest.skip("Windows command pair staging")
+    seed_old(monkeypatch, command_home)
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    original_write = inst._write_receipt
+    if phase == "recovery":
+        def interrupt(project, data):
+            original_write(project, data)
+            raise KeyboardInterrupt("interrupt after admission")
+
+        monkeypatch.setattr(inst, "_write_receipt", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            inst.reconcile_binstubs()
+        monkeypatch.setattr(inst, "_write_receipt", original_write)
+    rollback = False
+    if phase == "rollback":
+        def fail_receipt(project, data):
+            nonlocal rollback
+            if "transaction" not in data and not rollback:
+                rollback = True
+                raise PermissionError("final receipt denied")
+            original_write(project, data)
+
+        monkeypatch.setattr(inst, "_write_receipt", fail_receipt)
+
+    active_path = None
+    original_replace, original_fsync = tx._replace, os.fsync
+    edited = False
+    user_bytes = b"operator edit while replacement was staged\n"
+
+    def replacing(path, data, mode, **kwargs):
+        nonlocal active_path
+        active_path = path
+        try:
+            return original_replace(path, data, mode, **kwargs)
+        finally:
+            active_path = None
+
+    def interleaved_fsync(fd):
+        nonlocal edited
+        original_fsync(fd)
+        if active_path == paths[1] and not edited and (phase != "rollback" or rollback):
+            paths[1].write_bytes(user_bytes)
+            edited = True
+
+    monkeypatch.setattr(tx, "_replace", replacing)
+    monkeypatch.setattr(os, "fsync", interleaved_fsync)
+    result = inst.reconcile_binstubs()
+    assert edited
+    assert result["blocked"] == ["demo"]
+    assert paths[1].read_bytes() == user_bytes
+    assert "transaction" in inst._read_receipt("demo")
 
 
 def test_unknown_unreceipted_bytes_are_preserved(command_home, monkeypatch, capsys):
