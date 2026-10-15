@@ -57,11 +57,12 @@ def direct_env(monkeypatch, tmp_path):
 def test_direct_start_spawns_once_and_records_the_daemon_pid(monkeypatch, direct_env):
     state = {"spawned": 0}
 
-    def _spawn():
+    def _launch(argv, *, display, contained_last_resort):
         state["spawned"] += 1
+        assert contained_last_resort is False, "--direct must never start inside the Job"
         return SimpleNamespace(pid=4321)
 
-    monkeypatch.setattr(m, "_spawn_detached_daemon", _spawn)
+    monkeypatch.setattr(m, "_launch_bridge_daemon", _launch)
     monkeypatch.setattr(m, "_service_is_running", lambda: state["spawned"] > 0)
 
     m._service_start(direct=True)
@@ -73,11 +74,11 @@ def test_direct_start_spawns_once_and_records_the_daemon_pid(monkeypatch, direct
 def test_direct_start_never_records_a_brokered_console_pid(monkeypatch, direct_env):
     state = {"spawned": 0}
 
-    def _spawn():
+    def _launch(argv, **_kwargs):
         state["spawned"] += 1
         return m._BrokeredProcessHandle(999)
 
-    monkeypatch.setattr(m, "_spawn_detached_daemon", _spawn)
+    monkeypatch.setattr(m, "_launch_bridge_daemon", _launch)
     monkeypatch.setattr(m, "_service_is_running", lambda: state["spawned"] > 0)
 
     m._service_start(direct=True)
@@ -88,8 +89,8 @@ def test_direct_start_never_records_a_brokered_console_pid(monkeypatch, direct_e
 def test_direct_start_fails_when_the_daemon_never_becomes_healthy(monkeypatch, direct_env):
     spawned = {"n": 0}
     monkeypatch.setattr(
-        m, "_spawn_detached_daemon",
-        lambda: spawned.__setitem__("n", spawned["n"] + 1) or SimpleNamespace(pid=7),
+        m, "_launch_bridge_daemon",
+        lambda *_a, **_k: spawned.__setitem__("n", spawned["n"] + 1) or SimpleNamespace(pid=7),
     )
     monkeypatch.setattr(m, "_service_is_running", lambda: False)
     monkeypatch.setattr(m, "_service_process_is_live", lambda **_k: False)
@@ -104,7 +105,7 @@ def test_direct_start_fails_when_the_daemon_never_becomes_healthy(monkeypatch, d
 def test_direct_start_leaves_a_healthy_daemon_alone(monkeypatch, direct_env):
     monkeypatch.setattr(m, "_service_is_running", lambda: True)
     monkeypatch.setattr(
-        m, "_spawn_detached_daemon", lambda: pytest.fail("already healthy")
+        m, "_launch_bridge_daemon", lambda *_a, **_k: pytest.fail("already healthy")
     )
     m._service_start(direct=True)
     assert not direct_env.exists()
@@ -116,7 +117,7 @@ def test_direct_start_fails_over_an_unanswering_forward_without_spawning(
     monkeypatch.setattr(m, "_service_is_running", lambda: False)
     monkeypatch.setattr(m, "_active_endpoint_is_forward", lambda: True)
     monkeypatch.setattr(
-        m, "_spawn_detached_daemon", lambda: pytest.fail("never spawn over a forward")
+        m, "_launch_bridge_daemon", lambda *_a, **_k: pytest.fail("never spawn over a forward")
     )
 
     with pytest.raises(SystemExit) as info:
@@ -141,3 +142,35 @@ def test_cli_routes_direct_flag(monkeypatch):
     m._cmd_service(parser.parse_args(["service", "start"]))
 
     assert seen == [True, False]
+
+
+def test_direct_start_fails_instead_of_starting_inside_the_callers_job(
+    monkeypatch, direct_env, tmp_path
+):
+    """Breakaway denied and the WMI broker failing must fail a direct start:
+    a daemon started inside the installer's Job would die when it closes."""
+    import agent_procutil
+
+    popens = []
+
+    def _popen(argv, **kwargs):
+        popens.append(kwargs.get("creationflags", 0))
+        exc = OSError(13, "Access is denied")
+        exc.winerror = 5
+        raise exc
+
+    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(m.sys, "platform", "win32")
+    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
+    monkeypatch.setattr(agent_procutil.subprocess, "Popen", _popen)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(m, "_spawn_via_wmi_broker_pid", lambda argv: None)
+    monkeypatch.setattr(m, "_daemon_launch_argv", lambda: ["py", "-m", "agent_bridge", "start"])
+    monkeypatch.setattr(m, "_service_is_running", lambda: False)
+
+    with pytest.raises(SystemExit) as info:
+        m._service_start(direct=True)
+
+    assert info.value.code == 1
+    assert len(popens) == 1, "no contained retry after breakaway and the broker failed"
+    assert not direct_env.exists()

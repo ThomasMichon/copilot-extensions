@@ -1909,16 +1909,18 @@ function Remove-LogonAutostart {
 }
 
 function Invoke-WithEnvFile {
-    # Run $Body with the KEY=VALUE lines of $Path (parsed exactly as the logon
-    # launchers parse them) plus $Extra in this process's environment, then
-    # restore the previous values. The user-mode ensure path then starts a
-    # daemon with the same settings its logon launcher would.
+    # Run $Body with $Extra defaults overlaid by the KEY=VALUE lines of $Path
+    # (parsed, and taking precedence, exactly as in the logon launchers) in this
+    # process's environment, then restore the previous values. The user-mode
+    # ensure path then starts a daemon with the same settings its logon launcher
+    # would.
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][scriptblock]$Body,
         [hashtable]$Extra = @{}
     )
     $values = [ordered]@{}
+    foreach ($k in $Extra.Keys) { $values[$k] = $Extra[$k] }
     if (Test-Path -LiteralPath $Path) {
         foreach ($raw in Get-Content -LiteralPath $Path) {
             $line = $raw.Trim()
@@ -1927,7 +1929,6 @@ function Invoke-WithEnvFile {
             $values[$k.Trim()] = $v.Trim()
         }
     }
-    foreach ($k in $Extra.Keys) { $values[$k] = $Extra[$k] }
     $saved = @{}
     foreach ($k in $values.Keys) {
         $saved[$k] = [Environment]::GetEnvironmentVariable($k, 'Process')
@@ -1955,9 +1956,11 @@ function Install-LogonAutostartEntry {
     }
     # Start now through the user-mode ensure path (agent_procutil.spawn_daemon:
     # Job breakaway, durable cwd, its own log), never a PowerShell process
-    # launch, which would leave the daemon inside the installer's Job.
+    # launch, which would leave the daemon inside the installer's Job. A failed
+    # start-now must not cost the logon registration below.
     if (-not (& $IsHealthy)) {
-        & $Ensure
+        try { & $Ensure }
+        catch { Write-Warn "Could not start $Kind now: $($_.Exception.Message) -- it starts at the next logon" }
     } else {
         Write-Skip "$Kind already running -- not starting a second instance"
     }

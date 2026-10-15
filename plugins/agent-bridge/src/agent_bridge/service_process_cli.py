@@ -715,9 +715,9 @@ def _service_start(direct: bool = False) -> None:
     """Start the daemon, through the platform service manager when one is registered.
 
     ``direct`` skips systemd and the scheduled task -- for an installer that has
-    already tried them -- and starts the daemon through the job-surviving
-    ``spawn_daemon`` launch; it exits non-zero when the daemon does not become
-    healthy.
+    already tried them -- and starts the daemon through the strict job-surviving
+    ``spawn_daemon`` launch (never inside the caller's Job); it exits non-zero
+    when that launch is impossible or the daemon does not become healthy.
     """
     import subprocess as sp
 
@@ -740,7 +740,20 @@ def _service_start(direct: bool = False) -> None:
 
     used_platform_manager = False
     if direct:
-        _record_started_pid(core._spawn_detached_daemon())
+        from agent_procutil import DaemonSpawnError
+
+        # Strict: a daemon started inside the caller's Job would die with it,
+        # so when breakaway and the WMI broker both fail this start fails.
+        try:
+            handle = core._launch_bridge_daemon(
+                core._daemon_launch_argv(),
+                display="agent-bridge service",
+                contained_last_resort=False,
+            )
+        except DaemonSpawnError as exc:
+            print(f"[FAIL] agent-bridge: {exc}", file=sys.stderr)
+            sys.exit(1)
+        _record_started_pid(handle)
     elif core._systemd_available():
         sp.run(["systemctl", "--user", "start", core._SYSTEMD_UNIT])
         used_platform_manager = True
