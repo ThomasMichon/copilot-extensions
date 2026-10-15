@@ -21,6 +21,10 @@ from .update_runtime import describe_copilot_spawn_error as _describe_copilot_sp
 from .update_runtime import (  # noqa: F401 - compatibility seams used by the plan collector
     _installer_timeout, _run_engine_installer, installer_deadline_status,
 )
+from .update_runtime import (
+    _invocation_update_context as _invocation_update_context,
+    _project_update_context as _project_update_context,
+)
 
 
 def _core():
@@ -423,36 +427,6 @@ def _prune_stale_pivots_after_update() -> None:
             "plugin manifest): "
             + ", ".join(str(item.get("entry")) for item in removed)
         )
-
-
-def _project_update_context() -> Path | None:
-    """The active project's anchor, whose settings declare marketplace context."""
-    try:
-        return Path(cfg.load_config().default_repo.anchor)
-    except ValueError as exc:
-        output.warn(
-            f"Could not resolve project marketplace context; using current directory: {exc}"
-        )
-        return Path.cwd()
-
-
-def _invocation_update_context() -> Path | None:
-    """Return the invoking checkout when it carries repository Copilot settings."""
-    from plugin_resolve import SETTINGS_RELS
-
-    update_context_env = getattr(_core(), "_UPDATE_CONTEXT_ENV", "AGENT_WORKTREES_UPDATE_CONTEXT")
-    invocation_cwd = getattr(_core(), "_INVOCATION_CWD", None)
-    transported = os.environ.get(update_context_env)
-    cwd = Path(transported) if transported else (invocation_cwd or Path.cwd())
-    for candidate in (cwd, *cwd.parents):
-        try:
-            if any(candidate.joinpath(*rel).is_file() for rel in SETTINGS_RELS):
-                return candidate
-        except OSError as error:
-            raise ValueError(
-                f"cannot inspect plugin settings under {candidate}: {error}"
-            ) from error
-    return None
 
 
 def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
