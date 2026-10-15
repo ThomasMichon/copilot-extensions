@@ -290,6 +290,8 @@ class _SessionCoreMixin:
                 },
             },
         )
+        from .provider_creation import assert_resume_placement
+        assert_resume_placement(self._db, session.session_id, persisted, refreshed)
         session.target = refreshed
         self._db.update_session_target(
             session.session_id,
@@ -974,4 +976,3 @@ class _SessionCoreMixin:
         if status:
             sessions = [s for s in sessions if s.status.value == status]
         return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
-

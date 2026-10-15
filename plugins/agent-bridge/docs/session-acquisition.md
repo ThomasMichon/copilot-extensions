@@ -118,6 +118,11 @@ caller session fragment: valid owner references are compared by their
 machine/project/worktree scope while the full original reference still
 reaches launch. Invalid provider requests without a creation key are rejected
 by the request model before caller-affinity reuse.
+Cold resume compares the refreshed provider's effective placement with the
+retained target before persisting or spawning it. Changed instance, command,
+workspace or user refuses. ACP load uses the provider's guest workspace just
+as initial creation does; that guest path is never assigned to the host
+subprocess `target.cwd`.
 
 ## Task acquisition request and result
 

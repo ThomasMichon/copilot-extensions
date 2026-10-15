@@ -15,6 +15,7 @@ from .transport import SpawnTarget
 from .workspace_creation import creation_fact_options
 
 if TYPE_CHECKING:
+    from .db import Database
     from .session_manager import Session, SessionManager
 
 
@@ -27,6 +28,19 @@ def _placement(target: SpawnTarget) -> dict:
     if isinstance(facts.get("venue"), dict):
         facts["venue"].pop(_REQUEST_OVERRIDES_KEY, None)
     return facts
+
+
+def assert_resume_placement(
+    db: Database, session_id: str, persisted: SpawnTarget, refreshed: SpawnTarget,
+) -> None:
+    if db.execute_read(
+        "SELECT 1 FROM provider_embodiments WHERE session_id=? LIMIT 1", (session_id,),
+    ) and _placement(persisted) != _placement(refreshed):
+        from .session_manager import ProviderTargetRefreshError
+
+        raise ProviderTargetRefreshError(
+            "Keyed provider placement changed; the original native conversation is retained",
+        )
 
 
 async def start(

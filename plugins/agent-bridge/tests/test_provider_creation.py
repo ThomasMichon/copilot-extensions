@@ -15,7 +15,7 @@ from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.models import SessionStatus
 from agent_bridge.routes.sessions import router
-from agent_bridge.session_manager import DaemonDrainingError, SessionManager
+from agent_bridge.session_manager import DaemonDrainingError, ProviderTargetRefreshError, SessionManager
 from agent_bridge.transport import SpawnTarget
 from test_acquisition_runtime import rig as _connected_rig
 
@@ -207,6 +207,58 @@ async def test_unknown_original_native_cannot_be_created_by_resume(provider_rig)
     session.acp_session_id = None
     with pytest.raises(RuntimeError, match="no ACP session ID"):
         await rig.manager.resume_session(session.session_id, allow_recreate=True)
+    rig.client.new_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["instance", "command", "workspace", "user"])
+async def test_cold_resume_refuses_provider_placement_drift_before_spawn(
+    provider_rig, monkeypatch, change,
+):
+    from agent_bridge import session_manager as core
+
+    rig = provider_rig
+    session, _ = await create(
+        rig.manager, rig.target, key="logical-work", agent_name="container:prepared-original",
+    )
+    retained = session.target
+    saved = rig.db.get_session(session.session_id)["target_json"]
+    changed = replace(rig.target, venue=dict(rig.target.venue))
+    if change == "instance":
+        changed.venue["instance_id"] = "replacement"
+    elif change == "command":
+        changed.spawn_command = ["provider", "exec", "replacement"]
+    elif change == "workspace":
+        changed.venue["workspace_folder"] = "/different-workspace"
+    else:
+        changed.user = "other-user"
+    rig.manager.set_resolver(SimpleNamespace(resolve_async=AsyncMock(return_value=changed)))
+    session.status = SessionStatus.STOPPED
+    session.client = None
+    spawn = AsyncMock(side_effect=AssertionError("placement drift must refuse before spawn"))
+    monkeypatch.setattr(core, "spawn", spawn)
+    with pytest.raises(ProviderTargetRefreshError, match="placement changed"):
+        await rig.manager.resume_session(session.session_id)
+    spawn.assert_not_awaited()
+    rig.client.load_session.assert_not_awaited()
+    assert session.target is retained and session.status == SessionStatus.STOPPED
+    assert rig.db.get_session(session.session_id)["target_json"] == saved
+    rig.client.new_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_successful_cold_resume_uses_guest_workspace_not_host_cwd(provider_rig):
+    rig = provider_rig
+    session, initial = await create(
+        rig.manager, rig.target, key="logical-work", agent_name="container:prepared-original",
+    )
+    rig.manager.set_resolver(SimpleNamespace(resolve_async=AsyncMock(return_value=rig.target)))
+    session.status = SessionStatus.STOPPED
+    session.client = None
+    resumed = await rig.manager.resume_session(session.session_id, drain=False)
+    assert resumed is session and resumed.acp_session_id == initial["native_session_id"]
+    assert rig.client.load_session.await_args.kwargs["cwd"] == "/workspace"
+    assert resumed.target.cwd is None
     rig.client.new_session.assert_awaited_once()
 
 

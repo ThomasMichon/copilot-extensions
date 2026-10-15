@@ -174,7 +174,8 @@ class _SessionResumeMixin:
                             await asyncio.wait_for(
                                 client.load_session(
                                     cwd=(
-                                        session.target.cwd
+                                        _venue_workspace_cwd(session.target)
+                                        or session.target.cwd
                                         or _default_cwd(session.target)
                                     ),
                                     session_id=session.acp_session_id,
@@ -187,7 +188,8 @@ class _SessionResumeMixin:
                             resumed_acp_id = await asyncio.wait_for(
                                 client.new_session(
                                     cwd=(
-                                        session.target.cwd
+                                        _venue_workspace_cwd(session.target)
+                                        or session.target.cwd
                                         or _default_cwd(session.target)
                                     ),
                                     mcp_servers=session.mcp_servers,
