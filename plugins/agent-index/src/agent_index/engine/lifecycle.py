@@ -72,11 +72,16 @@ def _anchor_relative_path_env(env: dict[str, str]) -> None:
 
     A value that is absolute once ``~`` is expanded (as the readers expand it)
     is passed through unchanged, so its documented expansion still applies.
+    ``AGENT_INDEX_MODEL`` is a hub model id or a local model directory; only a
+    relative value naming an existing directory from the caller is anchored.
     """
     for name in _ENGINE_PATH_ENV:
         value = env.get(name)
         if value and not os.path.isabs(os.path.expanduser(value)):
             env[name] = os.path.abspath(value)
+    model = env.get("AGENT_INDEX_MODEL")
+    if model and not os.path.isabs(os.path.expanduser(model)) and os.path.isdir(model):
+        env["AGENT_INDEX_MODEL"] = os.path.abspath(model)
 
 # Child engine processes this module spawned (subprocess mode), keyed by
 # model_id. ``ensure_engine`` and ``stop_engine`` run in the same process (the
@@ -175,7 +180,7 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     env.update(windowless_python_env(python))
     env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
     _anchor_relative_path_env(env)
-    root = Path(os.path.abspath(data_dir()))
+    root = Path(os.path.abspath(os.path.expanduser(data_dir())))
     root.mkdir(parents=True, exist_ok=True)
     model = re.sub(r"[^A-Za-z0-9._-]", "_", str(profile.model_id)) or "engine"
     # The spawning process (e.g. the index-worker, itself niced down via

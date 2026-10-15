@@ -220,6 +220,41 @@ def test_home_relative_path_overrides_keep_their_expansion(monkeypatch, tmp_path
     assert env["AGENT_INDEX_HOME"] == str(tmp_path / "state")
 
 
+def test_home_relative_index_home_roots_the_engine_in_the_home(monkeypatch, tmp_path):
+    """`AGENT_INDEX_HOME="~/index-state"` must root the engine (cwd and stdio
+    log) under the user's home, not under `<caller>/~/...`."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for name in ("AGENT_INDEX_DATA_DIR", "AGENT_INDEX_STATE_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENT_INDEX_HOME", "~/index-state")
+    (tmp_path / "caller").mkdir()
+    monkeypatch.chdir(tmp_path / "caller")
+    captured: dict = {}
+    monkeypatch.setattr(
+        lifecycle, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or object()
+    )
+
+    lifecycle._spawn_engine(_profile())
+
+    data = home / "index-state" / "data"
+    assert captured["cwd"] == data
+    assert captured["log_path"].parent == data / "logs"
+
+
+def test_a_caller_relative_local_model_is_anchored_but_a_hub_id_is_not(monkeypatch, tmp_path):
+    (tmp_path / "models" / "local").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    local = {"AGENT_INDEX_MODEL": "models/local"}
+    hub = {"AGENT_INDEX_MODEL": "jinaai/jina-embeddings-v2-base-code"}
+    lifecycle._anchor_relative_path_env(local)
+    lifecycle._anchor_relative_path_env(hub)
+    assert local["AGENT_INDEX_MODEL"] == str(tmp_path / "models" / "local")
+    assert hub["AGENT_INDEX_MODEL"] == "jinaai/jina-embeddings-v2-base-code"
+
+
 def test_systemd_without_unit_raises():
     with pytest.raises(EngineUnavailableError, match="systemd"):
         lifecycle.ensure_engine(_profile(engine_mode="systemd", systemd_unit=None),
