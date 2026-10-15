@@ -35,18 +35,20 @@ async def start(
 ) -> tuple[Session, dict[str, Any]]:
     """Journal before launch; uncertainty never permits a second native start."""
     venue = target.venue or {}
+    capabilities = venue.get("capabilities")
     if (
         target.type != "command" or not target.spawn_command
         or target.project or target.worktree_id or target.explicit_cwd
         or target.codespace or target.container
         or venue.get("scope") != "provider-instance"
         or venue.get("transport") != "provider-exec" or venue.get("ready") is not True
+        or not isinstance(capabilities, dict) or capabilities.get("instance_pinned_exec") is not True
         or any(not isinstance(venue.get(field), str) or not venue[field]
                for field in ("provider", "kind", "target_id", "instance_id"))
     ):
         raise AcquisitionRefused(
             "creation_venue_unsupported",
-            "keyed provider creation requires an exact ready provider-exec instance",
+            "keyed provider creation requires a ready instance-pinned provider-exec target",
             effect="not_started",
         )
     if not isinstance(key, str) or not key.strip() or len(key) > 1024:

@@ -59,6 +59,9 @@ prepared address participates in namespace readiness and resolution for a
 dispatch-only member; ordinary `container:<name>` remains refused. Every
 resolution rechecks the retained birth binding, exact physical member, live
 restricted posture and lifecycle hold without changing task ownership.
+Its `instance_pinned_exec` capability is backed by the expected physical-ID
+and birth-binding fences in the returned execution command; ordinary
+name-based wrappers do not advertise that guarantee.
 Use Bridge's protocol-36 `create <agent> --creation-key <key>
 --provider-instance` to establish a replay-safe native session without
 inventing a worktree or sending a first prompt. A missing binding or replaced

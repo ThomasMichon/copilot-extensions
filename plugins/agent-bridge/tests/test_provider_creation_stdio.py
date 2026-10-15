@@ -49,6 +49,7 @@ async def test_provider_key_replays_one_real_stdio_native(session_manager, tmp_p
             "target_id": "fixture:original", "instance_id": "original",
             "scope": "provider-instance", "transport": "provider-exec", "ready": True,
             "workspace_folder": str(tmp_path),
+            "capabilities": {"instance_pinned_exec": True},
         },
     )
     session = None

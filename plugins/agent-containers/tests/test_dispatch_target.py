@@ -1,5 +1,7 @@
 """Prepared namespace addresses retain physical identity and provider fences."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from agent_containers import dispatch_projection, dispatch_target, lease, resolver
@@ -40,7 +42,7 @@ async def test_provider_namespace_resolves_exact_prepared_command_without_worktr
     assert spec["venue"]["ready"] is True and spec["venue"]["posture_verified"] is True
     assert spec["venue"]["capabilities"] == {
         "host_credentials": False, "credential_relay": False,
-        "session_host": False, "task_projection": True,
+        "session_host": False, "task_projection": True, "instance_pinned_exec": True,
     }
     assert dispatch_projection._read(PHYSICAL_ID)["owner_session_id"] is None
 
@@ -70,6 +72,20 @@ async def test_reference_does_not_prepare_an_unused_birth(target):
     with pytest.raises(RuntimeError, match="does not match"):
         await resolver.ContainerResolver().resolve_spec(reference)
     assert dispatch_projection._read(PHYSICAL_ID)["task_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_replacement_between_resolution_and_launch_cannot_start_native(prepared):
+    target, binding, reference = prepared
+    spec = await resolver.ContainerResolver().resolve_spec(reference)
+    target.container_id = OTHER_ID
+    args = SimpleNamespace(
+        name="pool-1", dispatch_binding_id=binding["binding_id"],
+        expected_container_id=spec["venue"]["instance_id"], stdio=True,
+    )
+    with pytest.raises(RuntimeError, match="physical identity changed"):
+        dispatch_projection.launch_task(args, lambda *args: pytest.fail("replacement must not launch"))
+    assert dispatch_projection._read(PHYSICAL_ID)["owner_session_id"] is None
 
 
 def test_launch_spec_contains_no_grant_and_reuses_explicit_exec(prepared):

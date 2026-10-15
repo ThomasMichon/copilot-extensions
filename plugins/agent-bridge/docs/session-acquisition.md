@@ -87,7 +87,11 @@ it introduces no resident service or independent session host.
 Protocol **36** adds an explicit `--provider-instance` option alongside
 `--creation-key` (`provider_instance: true` on the same keyed HTTP request).
 It supports a provider-returned command target with a ready, exact
-`provider-instance` identity and `provider-exec` transport. It does not allocate
+`provider-instance` identity, `provider-exec` transport and explicit
+`capabilities.instance_pinned_exec: true`. The provider must enforce that
+physical identity at execution, not merely report a name's observed instance.
+Name-only wrappers without this guarantee refuse before native creation.
+It does not allocate
 a worktree or infer a project. Ordinary keyed callers retain the local-only
 contract; older clients never receive a provider receipt in place of a workspace.
 The newer client refuses an older daemon before sending this option.

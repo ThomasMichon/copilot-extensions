@@ -36,6 +36,7 @@ def provider_rig(rig):
             "target_id": "container:prepared-original", "instance_id": "original-instance",
             "scope": "provider-instance", "transport": "provider-exec", "ready": True,
             "workspace_folder": "/workspace", "security_profile": "restricted",
+            "capabilities": {"instance_pinned_exec": True},
         },
     )
     return rig
@@ -101,6 +102,7 @@ async def test_changed_facts_cannot_reuse_same_key(provider_rig, change):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", [
     "prompt", "worktree", "project", "cwd", "unready", "instance", "scope", "transport",
+    "unpinned",
 ])
 async def test_unsupported_request_refuses_before_any_effect(provider_rig, change):
     rig = provider_rig
@@ -120,11 +122,30 @@ async def test_unsupported_request_refuses_before_any_effect(provider_rig, chang
         target.venue.pop("instance_id")
     elif change == "scope":
         target.venue["scope"] = "unspecified"
-    else:
+    elif change == "transport":
         target.venue["transport"] = "ssh"
+    else:
+        target.venue["capabilities"] = {}
     with pytest.raises(AcquisitionRefused) as refused:
         await create(rig.manager, target, key="logical-work", **options)
     assert refused.value.effect == "not_started"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM provider_embodiments")
+
+
+@pytest.mark.asyncio
+async def test_name_only_command_cannot_claim_an_observed_instance(provider_rig, monkeypatch):
+    rig = provider_rig
+    target = replace(
+        rig.target, spawn_command=["provider", "exec", "reused-name"],
+        venue={**rig.target.venue, "capabilities": {}, "instance_id": "instance-a"},
+    )
+    monkeypatch.setattr(rig.manager, "start_session", lambda *_a, **_k: pytest.fail(
+        "name-based exec could now launch replacement instance-b",
+    ))
+    with pytest.raises(AcquisitionRefused) as refused:
+        await create(rig.manager, target, key="logical-work")
+    assert refused.value.code == "creation_venue_unsupported"
     assert not rig.manager.list_sessions()
     assert not rig.db.execute_read("SELECT * FROM provider_embodiments")
 

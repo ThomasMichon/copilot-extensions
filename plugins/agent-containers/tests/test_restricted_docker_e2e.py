@@ -33,6 +33,24 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _prepare_payload_runtime(root: Path, expected_package: Path) -> None:
+    runtime_version = version("agent-containers")
+    slot = root / "versions" / runtime_version
+    shutil.copytree(Path(sys.prefix), slot, symlinks=True)
+    runtime_python = slot / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    probe = subprocess.run(
+        [str(runtime_python), "-c", "import agent_containers;print(agent_containers.__file__)"],
+        capture_output=True, text=True, timeout=30, creationflags=no_window_flags(),
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert Path(probe.stdout.strip()).resolve() == expected_package.resolve()
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": runtime_version, "completed_at": datetime.now(timezone.utc).isoformat(),
+        "pid": os.getpid(),
+    }), encoding="utf-8")
+    (root / "current-version").write_text(runtime_version, encoding="utf-8")
+
+
 def test_restricted_container_is_writable_only_on_bounded_tmpfs():
     name = f"agent-containers-e2e-{uuid.uuid4().hex[:8]}"
     fleet = FleetConfig(
@@ -118,6 +136,84 @@ def test_restricted_container_is_writable_only_on_bounded_tmpfs():
             text=True,
             timeout=30,
         )
+
+
+def test_prepared_command_refuses_replacement_before_agent_start(monkeypatch, tmp_path):
+    from agent_containers import dispatch_projection as projection
+    from agent_containers import dispatch_target, lease, lifecycle, resolver
+    from agent_containers.config import ContainersConfig
+
+    name = f"agent-containers-race-{uuid.uuid4().hex[:8]}"
+    fleet = FleetConfig(
+        image="node:22-bookworm-slim", security_profile="restricted", dispatch_only=True,
+        exec_user="node", workspace_folder="/workspace", network="none", memory="1g",
+        cpus=1.0, pids_limit=64, workspace_size="128m", home_size="64m",
+        acp_command=(
+            '/usr/local/bin/node -e \'require("fs").writeFileSync('
+            '"/workspace/agent-started","unexpected")\''
+        ),
+    )
+    config = ContainersConfig(fleets={"dispatch-race-e2e": fleet})
+    monkeypatch.setattr(resolver, "load_config", lambda: config)
+    monkeypatch.setattr(projection, "_STATE", tmp_path / "dispatch-bindings")
+    monkeypatch.setattr(lease, "ensure_state_dir", lambda: None)
+    for key, filename in (
+        ("_LOCK_FILE", "leases.lock"), ("_DEPLOY_HOLDS_FILE", "deploy-holds.json"),
+        ("_SESSION_ADMISSIONS_FILE", "session-admissions.json"),
+        ("LEASE_FILE", "leases.json"), ("_LEASE_DETAILS_FILE", "lease-details.json"),
+    ):
+        monkeypatch.setattr(lease, key, tmp_path / filename)
+    config_path = tmp_path / "containers.yaml"
+    config_path.write_text(yaml.safe_dump({"fleets": {
+        "dispatch-race-e2e": {key: value for key, value in asdict(fleet).items() if value is not None},
+    }}), encoding="utf-8")
+    env = {
+        **os.environ, "AGENT_CONTAINERS_CONFIG": str(config_path),
+        "AGENT_CONTAINERS_STATE_DIR": str(tmp_path), "AGENT_CONTAINERS_HOME": str(tmp_path),
+        "AGENT_CONTAINERS_NO_SELFPROVISION": "1",
+    }
+
+    def run(*args):
+        return subprocess.run(
+            ["docker", *args], capture_output=True, text=True, timeout=30,
+            creationflags=no_window_flags(),
+        )
+
+    try:
+        _image_run("dispatch-race-e2e", fleet, name, workspace_folder="/workspace", exec_user="node")
+        original_id = lifecycle.inspect_container(name)["Id"]
+        binding = projection.prepare(name, original_id, {
+            "task_id": "task-race", "worker_id": "worker-race", "generation": 1,
+            "coordinator_epoch": 0, "coordinator_url": "http://coordinator:8080",
+        })
+        _prepare_payload_runtime(tmp_path, Path(projection.__file__).with_name("__init__.py"))
+        resolved = subprocess.run(
+            [sys.executable, "-m", "agent_containers", "namespace-resolve",
+             dispatch_target.reference(name, original_id, binding["binding_id"])],
+            capture_output=True, text=True, timeout=30, env=env,
+            creationflags=no_window_flags(),
+        )
+        assert resolved.returncode == 0, resolved.stderr
+        spec = json.loads(resolved.stdout)
+        assert spec["venue"]["instance_id"] == original_id
+        assert spec["venue"]["capabilities"]["instance_pinned_exec"] is True
+        removed = run("rm", "-f", original_id)
+        assert removed.returncode == 0, removed.stderr
+        _image_run("dispatch-race-e2e", fleet, name, workspace_folder="/workspace", exec_user="node")
+        replacement_id = lifecycle.inspect_container(name)["Id"]
+        assert replacement_id != original_id
+        launched = subprocess.run(
+            spec["spawn_command"], stdin=subprocess.DEVNULL, capture_output=True,
+            text=True, timeout=45, env=env, creationflags=no_window_flags(),
+        )
+        assert launched.returncode != 0 and "binding" in launched.stderr.lower(), launched.stderr
+        untouched = run(
+            "exec", "-u", "node", replacement_id, "/usr/local/bin/node", "-e",
+            'if(require("fs").existsSync("/workspace/agent-started"))process.exit(1)',
+        )
+        assert untouched.returncode == 0, untouched.stderr
+    finally:
+        run("rm", "-f", name)
 
 
 def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp_path):
@@ -220,22 +316,7 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
         )
         # The emitted payload shim requires a completed runtime in this fixture's
         # own state root; do not let this transport proof self-provision a host.
-        runtime_version = version("agent-containers")
-        slot = tmp_path / "versions" / runtime_version
-        shutil.copytree(Path(sys.prefix), slot, symlinks=True)
-        runtime_python = slot / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-        probe = subprocess.run(
-            [str(runtime_python), "-c",
-             "import agent_containers;print(agent_containers.__file__)"],
-            capture_output=True, text=True, timeout=30, creationflags=no_window_flags(),
-        )
-        assert probe.returncode == 0, probe.stderr
-        assert Path(probe.stdout.strip()).resolve() == Path(projection.__file__).with_name("__init__.py").resolve()
-        (slot / ".install-complete.json").write_text(json.dumps({
-            "version": runtime_version, "completed_at": datetime.now(timezone.utc).isoformat(),
-            "pid": os.getpid(),
-        }), encoding="utf-8")
-        (tmp_path / "current-version").write_text(runtime_version, encoding="utf-8")
+        _prepare_payload_runtime(tmp_path, Path(projection.__file__).with_name("__init__.py"))
         env = {
             **os.environ, "AGENT_CONTAINERS_CONFIG": str(config_path),
             "AGENT_CONTAINERS_STATE_DIR": str(tmp_path),
@@ -258,6 +339,7 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
         spec = json.loads(resolved.stdout)
         assert spec["venue"]["instance_id"] == physical_id
         assert spec["venue"]["ready"] is True and spec["venue"]["dispatch_only"] is True
+        assert spec["venue"]["capabilities"]["instance_pinned_exec"] is True
         assert not {"worktree_id", "repo"} & spec.keys()
         ordinary = subprocess.run(
             [*cli, "namespace-ensure-ready", name],

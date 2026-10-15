@@ -70,6 +70,7 @@ def resolve(value: str) -> dict:
                 "capabilities": {
                     "host_credentials": False, "credential_relay": False,
                     "session_host": False, "task_projection": True,
+                    "instance_pinned_exec": True,
                 },
             },
         }
