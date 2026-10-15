@@ -67,6 +67,8 @@ def configured_repositories(project: str) -> frozenset[str]:
     )
     global_defaults = _mapping(cfg.global_config_path())
     platform = machine.get("platform") or global_defaults.get("platform") or cfg.detect_platform()
+    if not isinstance(platform, str):
+        raise ValueError("Configured platform must be a string")
     declared = machine.get("repos")
     if declared is None:
         declared = {}

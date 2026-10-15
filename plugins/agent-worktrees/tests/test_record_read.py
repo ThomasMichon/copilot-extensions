@@ -488,6 +488,32 @@ def test_record_read_operator_fragments_without_activation(record_fixture, monke
     assert result["worktree"]["repo"] == data["repo"]
 
 
+@pytest.mark.parametrize("source", ["project", "global"])
+@pytest.mark.parametrize("platform", [["linux"], {"name": "linux"}, True, 42])
+def test_record_read_rejects_non_string_resolved_platform(record_fixture, source, platform):
+    data, path = record_fixture
+    config_path = path.parent.parent / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"platform": platform} if source == "project" else {}),
+        encoding="utf-8",
+    )
+    if source == "global":
+        cfg.global_config_path().write_text(
+            yaml.safe_dump({"platform": platform}), encoding="utf-8",
+        )
+    repos.write_registry(repos.ReposRegistry(repos={
+        data["repo"]: repos.RepoEntry(
+            name=data["repo"], repo_class="worktree",
+            paths={"linux": str(path.parent / "registered-anchor")},
+        ),
+    }))
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1
+    assert result["error"]["code"] == "project-unavailable"
+    assert "platform must be a string" in result["error"]["message"]
+    assert result["worktree"] is None
+
+
 def test_record_read_invalid_yaml_date_is_structured(record_fixture):
     data, path = record_fixture
     with path.open("a", encoding="utf-8") as stream:
