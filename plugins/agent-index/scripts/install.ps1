@@ -2289,9 +2289,16 @@ function Ensure-ServiceRunning {
     if (-not (Test-Path $activePy)) { Write-Skip 'Runtime not installed -- service not ensured'; return }
     Write-ServiceFiles
     if (Test-ServiceHealthy) { Write-Skip 'Service already healthy (user-mode daemon serving)'; return }
-    Invoke-WithEnvFile -Path $EnvFile -Body { & $activePy -I -X utf8 -m agent_index deploy 2>&1 | Out-Host }
+    # The body runs in its own scope: 'Continue' there keeps Windows PowerShell
+    # 5.1 from turning the command's stderr (progress, warnings) into a
+    # terminating error under this script's 'Stop', and ends with the body.
+    $code = Invoke-WithEnvFile -Path $EnvFile -Body {
+        $ErrorActionPreference = 'Continue'
+        & $activePy -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
+        $LASTEXITCODE
+    }
     if (Test-ServiceHealthy) { Write-Ok 'Service ensured (user-mode daemon)' }
-    else { Write-Warn 'Service ensure attempted -- endpoint not yet healthy (it may still be starting)' }
+    else { Write-Warn "Service ensure attempted (deploy exit $code) -- endpoint not yet healthy (it may still be starting)" }
 }
 
 function Ensure-EngineRunning {
@@ -2300,11 +2307,16 @@ function Ensure-EngineRunning {
     if ($NoService) { Write-Skip 'Engine ensure skipped (-NoService)'; return }
     if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- engine not ensured'; return }
     Write-EngineFiles
-    Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{ AGENT_INDEX_ENGINE_HOME = $EngineHome } -Body {
-        if (Test-EnginePort) { Write-Skip 'Engine already serving -- leaving the warm engine untouched'; return }
+    # As in Ensure-ServiceRunning, 'Continue' is scoped to the body.
+    $code = Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{ AGENT_INDEX_ENGINE_HOME = $EngineHome } -Body {
+        if (Test-EnginePort) { return 'serving' }
+        $ErrorActionPreference = 'Continue'
         & $EngineVenvPython -I -X utf8 -m agent_index engine start 2>&1 | Out-Host
-        Write-Ok 'Engine ensured (user-mode durable daemon)'
+        $LASTEXITCODE
     }
+    if ($code -eq 'serving') { Write-Skip 'Engine already serving -- leaving the warm engine untouched' }
+    elseif ($code -eq 0) { Write-Ok 'Engine ensured (user-mode durable daemon)' }
+    else { Write-Warn "Engine start exited $code -- the durable engine is not serving" }
 }
 
 function Ensure-Running {

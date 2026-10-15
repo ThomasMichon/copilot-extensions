@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -86,3 +87,45 @@ def test_ensure_paths_run_their_python_inside_the_env_file():
     assert engine.index("Invoke-WithEnvFile") < engine.index("-m agent_index engine start")
     assert "Invoke-WithEnvFile -Path $EnvFile" in service
     assert service.index("Invoke-WithEnvFile") < service.index("-m agent_index deploy")
+
+
+def _windows_powershell() -> list[str]:
+    host = shutil.which("powershell") if sys.platform == "win32" else None
+    return [host] if host else []
+
+
+@pytest.mark.skipif(not _windows_powershell(), reason="Windows PowerShell 5.1 is not available")
+@pytest.mark.parametrize("exit_code,expected", [(0, "[OK]   Engine ensured"),
+                                                 (3, "[WARN] Engine start exited 3")])
+def test_engine_ensure_survives_stderr_and_reports_the_exit_under_5_1(
+    tmp_path, exit_code, expected
+):
+    """Windows PowerShell 5.1 turns redirected native stderr into a terminating
+    error under 'Stop'; the engine start logs warnings to stderr even when it
+    succeeds, which must not abort the installer before the logon entry is
+    registered."""
+    fake = tmp_path / "python.cmd"
+    fake.write_text(f"@echo engine warning on stderr 1>&2\r\n@exit /b {exit_code}\r\n")
+    install = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
+    helpers = "\n".join(
+        line for line in install.splitlines()
+        if line.startswith(("function Write-Ok ", "function Write-Skip ", "function Write-Warn "))
+    )
+    script = tmp_path / "harness.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$NoService = $false\n$EngineVenvPython = '{fake}'\n"
+        f"$EngineEnvFile = '{tmp_path / 'engine.env'}'\n$EngineHome = '{tmp_path}'\n"
+        "function Write-EngineFiles { }\nfunction Test-EnginePort { $false }\n"
+        + helpers + "\n" + _function("Invoke-WithEnvFile") + "\n"
+        + _function("Ensure-EngineRunning") + "\nEnsure-EngineRunning\nWrite-Host 'AFTER'\n",
+        encoding="utf-8-sig",
+    )
+    proc = subprocess.run(
+        [_windows_powershell()[0], "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+         "Bypass", "-File", str(script)],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert any(expected in line for line in proc.stdout.splitlines()), proc.stdout
+    assert "AFTER" in proc.stdout
