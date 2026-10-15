@@ -145,6 +145,20 @@ def router_helper(python: str = sys.executable) -> str:
     )
 
 
+def non_repository_environment(env: Mapping[str, str], cwd: Path) -> dict[str, str]:
+    """Keep global/command credentials without discovering a caller's checkout."""
+    from . import git_ops
+
+    original = original_environment(env)
+    selected = git_ops.repository_identity_env(original)
+    selected.update(json.loads(base_config(original)))
+    if "GIT_CONFIG_PARAMETERS" in original:
+        selected["GIT_CONFIG_PARAMETERS"] = original["GIT_CONFIG_PARAMETERS"]
+    selected.pop("CE_UPDATE_AUTH_BASE_CONFIG", None)
+    selected["GIT_CEILING_DIRECTORIES"] = str(cwd.parent)
+    return selected
+
+
 def helper_chain(source: Source, env: Mapping[str, str], runner=run) -> list[str]:
     # Diagnostic values only: Git itself owns execution and matching in the router.
     result = runner(
@@ -157,7 +171,7 @@ def helper_chain(source: Source, env: Mapping[str, str], runner=run) -> list[str
     if result.timed_out or result.truncated or result.status not in (0, 1):
         raise ProbeUnavailable("cannot read effective Git credential configuration")
     helpers: list[str] = []
-    for value in result.stdout.rstrip("\0").split("\0") if result.stdout else []:
+    for value in result.stdout.removesuffix("\0").split("\0") if result.stdout else []:
         if not value:
             helpers.clear()
         else:
@@ -197,9 +211,7 @@ def _probe(
     if candidate is not None:
         key = "GH_TOKEN_" + re.sub(r"[^A-Z0-9]", "_", src.owner.upper())
         probe_env[key] = candidate
-    result = runner(
-        ["git", "ls-remote", "--exit-code", src.url, "HEAD"], cwd=src.cwd, env=probe_env
-    )
+    result = runner(["git", "ls-remote", src.url, "HEAD"], cwd=src.cwd, env=probe_env)
     if result.missing:
         raise ResolverUnavailable("git is not available")
     return (

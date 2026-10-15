@@ -144,3 +144,123 @@ def test_manager_environment_transports_cwd_over_engine_seam(tmp_path, monkeypat
     monkeypatch.setattr(ec, "run_json", report)
     assert update_auth.environment("https://github.com/team/repo", cwd=tmp_path) is None
     assert calls[0][calls[0].index("--auth-cwd") + 1] == str(tmp_path)
+
+
+def test_fresh_clone_preflight_and_acquisition_share_non_repository_context(tmp_path, monkeypatch):
+    seen, git_calls = [], []
+    monkeypatch.setattr(self_install.shutil, "which", lambda _: "git")
+
+    def environment(source, *, cwd=None):
+        seen.append(cwd)
+        assert cwd is not None and cwd.is_dir()
+        return {"GIT_CEILING_DIRECTORIES": str(cwd)}
+
+    monkeypatch.setattr(update_auth, "environment", environment)
+    monkeypatch.setattr(
+        self_install.subprocess, "run", lambda argv, **kwargs: git_calls.append((argv, kwargs))
+    )
+    self_install.self_update(root=tmp_path)
+    assert seen == [tmp_path / "staging"]
+    assert git_calls[0][1]["cwd"] == tmp_path / "staging"
+
+
+def test_first_clone_context_removes_inherited_repository_selectors(tmp_path, monkeypatch):
+    monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
+    monkeypatch.setenv("GIT_DIR", "caller-git-dir")
+    seen = []
+
+    def report(project, args, **kwargs):
+        seen.extend(args)
+        return {
+            "results": [],
+            "failing": [],
+            "environment": {"GIT_CEILING_DIRECTORIES": str(tmp_path)},
+            "unset_environment": ["GIT_DIR"],
+        }
+
+    monkeypatch.setattr(ec, "run_json", report)
+    env = update_auth.environment("https://github.com/team/repo", cwd=tmp_path)
+    assert "--auth-non-repository" in seen
+    assert "GIT_DIR" not in env
+    assert env["GIT_CEILING_DIRECTORIES"] == str(tmp_path)
+
+
+def test_nested_https_sources_keep_existing_git_authentication(monkeypatch, capsys):
+    monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
+    monkeypatch.setattr(
+        ec,
+        "run_json",
+        lambda *a, **k: pytest.fail("unsupported source must not be refused by the engine"),
+    )
+    assert update_auth.environment("https://git.example.test/team/subgroup/tools.git") is None
+    assert "existing Git authentication" in capsys.readouterr().err
+
+
+def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkeypatch):
+    import subprocess
+
+    seed = tmp_path / "source"
+    root = tmp_path / "manager"
+    real_run = subprocess.run
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+    def git(*args):
+        real_run(["git", *args], check=True, capture_output=True, **flags)
+
+    git("init", "-q", "-b", "main", str(seed))
+    git("-C", str(seed), "config", "user.name", "Test")
+    git("-C", str(seed), "config", "user.email", "test@example.invalid")
+    (seed / "worktree-manager").mkdir()
+    (seed / "worktree-manager" / "pyproject.toml").write_text("[project]\nname='fixture'\n")
+    git("-C", str(seed), "add", "worktree-manager")
+    git("-C", str(seed), "commit", "-qm", "fixture")
+    monkeypatch.setattr(self_install, "manager_repo", lambda _: str(seed))
+    monkeypatch.setattr(self_install, "manager_ref", lambda _: "main")
+    monkeypatch.setattr(
+        self_install,
+        "self_install",
+        lambda **kwargs: self_install.SelfInstallResult(
+            action="already-current", version=None, root=str(root)
+        ),
+    )
+    monkeypatch.setattr(
+        self_install.subprocess, "run", lambda argv, **kwargs: real_run(argv, **kwargs, **flags)
+    )
+    result = self_install.self_update(root=root)
+    assert result.action == "already-current"
+    assert (root / "staging" / "worktree-manager" / "pyproject.toml").is_file()
+
+
+@pytest.mark.parametrize("missing", [True, False])
+def test_optional_auth_report_does_not_prevent_independent_manager_updates(
+    monkeypatch, capsys, missing
+):
+    def unavailable(*args, **kwargs):
+        raise ec.EngineError(
+            "engine absent"
+            if missing
+            else "unrecognized arguments: --auth-report --auth-environment",
+            install_hint=missing,
+        )
+
+    monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
+    monkeypatch.setattr(ec, "run_json", unavailable)
+    assert update_auth.environment("https://github.com/team/repo") is None
+    assert "existing Git authentication" in capsys.readouterr().err
+
+
+def test_unsupported_report_shape_preserves_provider_authentication(monkeypatch, capsys):
+    monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
+    monkeypatch.setattr(
+        ec,
+        "run_json",
+        lambda *a, **k: {
+            "supported": False,
+            "reason": "unsupported_https_source",
+            "environment": {},
+            "results": [],
+            "all_ok": False,
+        },
+    )
+    assert update_auth.environment("https://git.example.test/team/repo%20name") is None
+    assert "existing Git authentication" in capsys.readouterr().err

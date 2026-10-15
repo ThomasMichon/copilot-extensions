@@ -562,8 +562,10 @@ def test_managed_anchor_does_not_inject_legacy_header_even_without_fallback(monk
         lambda _: pytest.fail("legacy header bypassed the auth report"),
     )
     with context.session() as session:
-        session.reports[None] = auth.AuthReport([auth.SourceAuth(item, [], status="ok")])
-        session.overlays[None] = None
+        session.anchor_reports[tmp_path] = auth.AuthReport(
+            [auth.SourceAuth(item, [], status="ok")]
+        )
+        session.anchor_overlays[tmp_path] = None
         with context.repository_scope(tmp_path):
             assert git_ops._auth_config_args("origin", cwd=tmp_path) == []
 
@@ -680,3 +682,135 @@ def test_fallback_resets_only_the_failed_repositories_http_headers():
     overlay = auth.fallback(auth.AuthReport([item]))
     assert (f"http.{item.source.url}.extraHeader", "") in overlay.entries
     assert not any(key.lower() == "http.extraheader" for key, _ in overlay.entries)
+
+
+def test_reachable_remote_with_unborn_head_is_not_an_auth_failure(tmp_path, monkeypatch):
+    _clean_git_env(monkeypatch, tmp_path)
+    remote = tmp_path / "unborn.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)], check=True, **git_ops.no_window_kwargs()
+    )
+    item = auth.SourceAuth(_source(), [])
+
+    def local_probe(argv, **kwargs):
+        return process.run(
+            [str(remote) if part == item.source.url else part for part in argv], **kwargs
+        )
+
+    assert auth._probe(item, dict(os.environ), True, local_probe) == "ok"
+
+
+@pytest.mark.parametrize("failed", ["marketplace", "anchor"])
+def test_same_url_different_contexts_do_not_share_a_credential_overlay(
+    tmp_path, monkeypatch, failed
+):
+    market = _source(cwd=tmp_path / "market")
+    anchor = auth.source("anchor:test", market.url, purpose="anchor", cwd=tmp_path / "anchor")
+    monkeypatch.setattr(sources, "marketplaces", lambda _: [market])
+    monkeypatch.setattr(sources, "anchors", lambda: [anchor])
+
+    def report(items):
+        return auth.AuthReport(
+            [
+                auth.SourceAuth(
+                    item, [], status="auth_required" if item.purpose == failed else "ok"
+                )
+                for item in items
+            ]
+        )
+
+    monkeypatch.setattr(auth, "report", report)
+    with context.session() as session:
+        session.prepare(market.cwd, include_anchors=True)
+        if failed == "anchor":
+            assert session.environment(market.cwd) is None
+        else:
+            with context.repository_scope(anchor.cwd):
+                env = context.repository_environment({})
+            assert "CE_UPDATE_AUTH_ROUTES" not in env
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_git_returned_error_http_auth_status_is_not_a_generic_failure(monkeypatch, code):
+    recorded = []
+    monkeypatch.setattr(update_events, "record", lambda *a, **k: recorded.append(a))
+    with context.session() as session:
+        context.anchor_failure("example", f"fatal: The requested URL returned error: {code}")
+        assert session.unresolved
+        assert not session.anchor_failed
+    assert recorded[-1][-1] == "auth_required"
+
+
+def test_local_only_anchor_does_not_abort_auth_source_discovery(tmp_path, monkeypatch):
+    _clean_git_env(monkeypatch, tmp_path)
+    anchor = tmp_path / "local-only"
+    subprocess.run(["git", "init", "-q", str(anchor)], check=True, **git_ops.no_window_kwargs())
+    repo = cfg.RepoConfig(
+        anchor=str(anchor), worktree_root=str(tmp_path / "worktrees"), default_branch="main"
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path),
+        machine="test",
+        platform="windows",
+        repo_name="example",
+        repos={"example": repo},
+    )
+    monkeypatch.setattr(cfg, "active_project", lambda: "example")
+    monkeypatch.setattr(cfg, "load_config", lambda: config)
+    assert sources.anchors() == []
+
+
+def test_first_clone_report_ignores_caller_repository_helper_reset(tmp_path, monkeypatch, capsys):
+    config = _clean_git_env(monkeypatch, tmp_path)
+    config.write_text("[credential]\n    helper = global-fixture\n", encoding="utf-8")
+    caller = tmp_path / "caller"
+    subprocess.run(["git", "init", "-q", str(caller)], check=True, **git_ops.no_window_kwargs())
+    subprocess.run(
+        ["git", "-C", str(caller), "config", "--add", "credential.helper", ""],
+        check=True,
+        **git_ops.no_window_kwargs(),
+    )
+    staging = caller / "manager" / "staging"
+    staging.mkdir(parents=True)
+    chains = []
+
+    def report(items, *, env=None):
+        for item in items:
+            chains.append(auth.helper_chain(item, dict(os.environ) if env is None else env))
+        return auth.AuthReport([])
+
+    monkeypatch.setattr(auth, "report", report)
+    args = argparse.Namespace(
+        auth_source=["https://github.com/team/repo"],
+        auth_cwd=str(staging),
+        auth_non_repository=True,
+        no_anchor_sync=True,
+        auth_environment=True,
+        json=True,
+    )
+    assert context.cmd_report(args) == 0
+    assert chains == [["global-fixture"]]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["environment"]["GIT_CEILING_DIRECTORIES"] == str(staging.parent)
+
+
+def test_helper_diagnostics_preserve_a_trailing_empty_reset():
+    chain = auth.helper_chain(
+        _source(), {}, runner=lambda *a, **k: process.Result(0, "global-fixture\0\0")
+    )
+    assert chain == []
+
+
+def test_unsupported_explicit_source_reports_a_structured_decline(capsys):
+    args = argparse.Namespace(
+        auth_source=["https://git.example.test/team/repo%20name"],
+        auth_cwd=None,
+        auth_non_repository=False,
+        no_anchor_sync=True,
+        auth_environment=True,
+        json=True,
+    )
+    assert context.cmd_report(args) == 3
+    result = json.loads(capsys.readouterr().out)
+    assert result["supported"] is False
+    assert result["all_ok"] is False

@@ -11,10 +11,14 @@ from . import output, update_events
 
 
 def add_update_options(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--auth-report", action="store_true",
-                   help="Report source authentication without updating or changing credentials")
+    p.add_argument(
+        "--auth-report",
+        action="store_true",
+        help="Report source authentication without updating or changing credentials",
+    )
     p.add_argument("--auth-source", action="append", metavar="HTTPS_URL", help=argparse.SUPPRESS)
     p.add_argument("--auth-cwd", metavar="PATH", help=argparse.SUPPRESS)
+    p.add_argument("--auth-non-repository", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--auth-environment", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--json", action="store_true", help="JSON output for --auth-report only")
     p.add_argument(
@@ -43,7 +47,8 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
 
 def validate_auth_flags(args: argparse.Namespace) -> None:
     if not getattr(args, "auth_report", False) and any(
-        getattr(args, name, False) for name in ("auth_source", "auth_cwd", "auth_environment", "json")
+        getattr(args, name, False)
+        for name in ("auth_source", "auth_cwd", "auth_non_repository", "auth_environment", "json")
     ):
         raise ValueError("--auth-source, --auth-environment and --json require --auth-report")
 
@@ -84,8 +89,9 @@ def _deployable(name: str, payload_dir: Path | None, context: Path | None) -> bo
         return True  # the reconciler itself reports the detection failure
 
 
-def eligible_runtimes(args: argparse.Namespace, targets: Mapping[str, object],
-                      plugin_dir: Path) -> set[str]:
+def eligible_runtimes(
+    args: argparse.Namespace, targets: Mapping[str, object], plugin_dir: Path
+) -> set[str]:
     """Runtimes this update would deploy, from the reconcilers' own plan.
 
     agent-worktrees itself, plus every active target (``modules.json`` module or

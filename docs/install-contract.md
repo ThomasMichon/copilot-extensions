@@ -1579,6 +1579,8 @@ own their session and nested helper children remain inside that boundary.
 Owned sessions are swept after success too, including redirected descendants;
 inherited sessions are never swept by an inner helper.
 Contained tests retain their test runner's ownership instead of detaching.
+Reachability does not require an advertised `HEAD`: an unborn or dangling default
+branch is not an authentication failure.
 
 A working setup gets no environment overlay. Only failed sources acquire an
 environment-only Git command-scope overlay, appended after inherited command
@@ -1589,6 +1591,8 @@ the caller's original configuration at the child's actual working directory,
 preserving native helper matching, ordering, resets, and includes. Tokens are
 never written into the overlay. Read-only probes suppress credential approval
 and rejection; no path switches the active `gh` account.
+Marketplace contexts and individual anchors have separate reports and overlays,
+even when they reference the same URL with different local credentials.
 
 Unresolved required sources are denied without retrying a stalled helper and
 contribute `auth_required` (exit 4, unless a worse failure applies). The shared
@@ -1602,6 +1606,11 @@ process seam before its own Git fetch. Its engine environment preserves an
 overlay when present while still discarding parent Python runtime variables.
 Reused staging checkouts supply their own acquisition cwd to the report, so
 local helpers and conditional includes are observed in the right checkout.
+First clones use an empty staging directory with a discovery ceiling for both
+preflight and acquisition, retaining global/command credentials without reading
+the caller's repository-local configuration. The machine report transports
+explicit environment removals as well as additions. Local-only anchors without
+a configured remote produce no HTTPS auth source.
 The internal `--auth-source`/`--auth-environment` report options transport only
 child environment differences over that pipe; never persist or publish that
 environment. Repository-isolated engine Git calls continue to discard arbitrary
@@ -1610,6 +1619,10 @@ the updater's explicitly scoped auth overlay. Anchor preflight uses that same
 isolation. Auth-managed anchors suppress legacy injected headers even when
 configured credentials passed, so acquisition cannot override the report's
 credential authority.
+The Manager's own updater remains independently usable: a missing/older engine
+or a source outside this reporter's supported shape produces an explicit notice
+and retains the existing Git authentication path, not a false auth refusal.
+Known failed credentials reported by a capable engine still block that fetch.
 
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 

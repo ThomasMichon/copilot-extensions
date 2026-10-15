@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import engine_client as ec
 
@@ -20,23 +22,57 @@ def environment(source: str, *, cwd: Path | None = None) -> dict[str, str] | Non
     """
     if os.environ.get("CE_UPDATE_AUTH") == "off" or not source.startswith("https://"):
         return None
+    if len(urlsplit(source).path.strip("/").split("/")) != 2:
+        print(
+            "Manager auth report: nested HTTPS source retains existing Git authentication.",
+            file=sys.stderr,
+        )
+        return None
     location = ["--auth-cwd", str(cwd)] if cwd is not None else []
-    result = ec.run_json(
-        None,
-        [
-            "update",
-            "--no-manager",
-            "--auth-report",
-            "--no-anchor-sync",
-            "--auth-source",
-            source,
-            "--auth-environment",
-            "--json",
-            *location,
-        ],
-        allow_nonzero=True,
-        timeout=90,
-    )
+    if cwd is not None and not (cwd / ".git").is_dir():
+        location.append("--auth-non-repository")
+    try:
+        result = ec.run_json(
+            None,
+            [
+                "update",
+                "--no-manager",
+                "--auth-report",
+                "--no-anchor-sync",
+                "--auth-source",
+                source,
+                "--auth-environment",
+                "--json",
+                *location,
+            ],
+            allow_nonzero=True,
+            timeout=90,
+        )
+    except ec.EngineError as error:
+        detail = ec._engine_error_detail(error)
+        unsupported = "unrecognized arguments" in detail and any(
+            flag in detail
+            for flag in (
+                "--auth-report",
+                "--auth-environment",
+                "--auth-cwd",
+                "--auth-non-repository",
+                "--auth-source",
+            )
+        )
+        if not error.install_hint and not unsupported:
+            raise
+        print(
+            "Manager auth report unavailable; retaining existing Git authentication.",
+            file=sys.stderr,
+        )
+        return None
+    if result.get("supported") is False:
+        print(
+            "Manager auth report declined this source; retaining existing Git authentication.",
+            file=sys.stderr,
+        )
+        return None
     if result.get("failing") and not result.get("environment"):
         raise AuthRequired("Manager source authentication could not be resolved")
     for item in result.get("results", []):
@@ -57,4 +93,8 @@ def environment(source: str, *, cwd: Path | None = None) -> dict[str, str] | Non
         not isinstance(key, str) or not isinstance(value, str) for key, value in overlay.items()
     ):
         raise ec.EngineError("invalid update auth environment from engine")
-    return ec._engine_environment({**os.environ, **overlay}) if overlay else None
+    unset = result.get("unset_environment", [])
+    if not isinstance(unset, list) or any(not isinstance(name, str) for name in unset):
+        raise ec.EngineError("invalid unset environment from engine auth report")
+    env = {key: value for key, value in os.environ.items() if key not in unset}
+    return ec._engine_environment({**env, **overlay}) if overlay or unset else None

@@ -7,6 +7,7 @@ import contextlib
 import contextvars
 import json
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -45,26 +46,36 @@ class Session:
     def __init__(self) -> None:
         self.reports: dict[Path | None, auth.AuthReport] = {}
         self.overlays: dict[Path | None, auth.RunOverlay | None] = {}
+        self.anchor_reports: dict[Path, auth.AuthReport] = {}
+        self.anchor_overlays: dict[Path, auth.RunOverlay | None] = {}
+        self.anchors_prepared = False
         self.unresolved = False
         self.anchor_failed = False
 
     def prepare(self, context: Path | None, *, include_anchors: bool = False) -> auth.AuthReport:
-        if context in self.reports:
-            return self.reports[context]
-        selected = sources.marketplaces(context)
-        if include_anchors:
-            selected += sources.anchors()
+        if context not in self.reports:
+            report, overlay = self._prepare_report(sources.marketplaces(context))
+            self.reports[context], self.overlays[context] = report, overlay
+        if include_anchors and not self.anchors_prepared:
+            for source in sources.anchors():
+                if source.cwd is None:
+                    raise ValueError("anchor auth source requires a checkout context")
+                report, overlay = self._prepare_report([source])
+                self.anchor_reports[source.cwd], self.anchor_overlays[source.cwd] = report, overlay
+            self.anchors_prepared = True
+        return self.reports[context]
+
+    def _prepare_report(self, selected: list[auth.Source]):
         if selected:
             update_events.enter("auth_report")
         report = auth.report(selected)
         overlay = auth.fallback(report, apply_fixes=mode() != "report-only")
-        self.reports[context], self.overlays[context] = report, overlay
         self.unresolved |= bool(overlay and overlay.denies)
         describe(report)
         for item in report.results:
             applied = overlay is not None and item.source.id in overlay.applies_to
             update_events.auth_result(item.summary(), applied=applied)
-        return report
+        return report, overlay
 
     def environment(self, context: Path | None) -> dict[str, str] | None:
         self.prepare(context)
@@ -112,10 +123,10 @@ def anchor_blocked(anchor: Path) -> bool:
     if value is None:
         return False
     id = "anchor:" + str(anchor)
-    for overlay in value.overlays.values():
-        if overlay is not None and id in overlay.denies:
-            output.warn(f"{id}: auth_required")
-            return True
+    overlay = value.anchor_overlays.get(anchor)
+    if overlay is not None and id in overlay.denies:
+        output.warn(f"{id}: auth_required")
+        return True
     return False
 
 
@@ -131,7 +142,7 @@ def anchor_failure(anchor: str, error: str) -> None:
             "repository not found",
             "auth_required",
         )
-    )
+    ) or bool(re.search(r"(?:http(?:/\S+)?\s+|returned error:\s*)(?:401|403)\b", error, re.I))
     update_events.record(
         "anchor_sync",
         "anchor:" + anchor,
@@ -149,14 +160,8 @@ def repository_scope(anchor: Path):
     overlay = None
     managed = False
     if value is not None:
-        for context, report in value.reports.items():
-            if any(
-                item.source.purpose == "anchor" and item.source.cwd == anchor
-                for item in report.results
-            ):
-                overlay = value.overlays[context]
-                managed = True
-                break
+        overlay = value.anchor_overlays.get(anchor)
+        managed = anchor in value.anchor_reports
     token = _repository.set(overlay)
     managed_token = _managed.set(managed)
     try:
@@ -210,18 +215,38 @@ def cmd_report(args: argparse.Namespace) -> int:
     for index, url in enumerate(getattr(args, "auth_source", None) or []):
         item = auth.source(f"source:{index}", url, purpose="manager", cwd=cwd)
         if item is None:
-            output.err("--auth-source requires an HTTPS repository URL")
+            if getattr(args, "json", False):
+                print(
+                    json.dumps(
+                        {
+                            "supported": False,
+                            "reason": "unsupported_https_source",
+                            "all_ok": False,
+                            "results": [],
+                            "environment": {},
+                            "unset_environment": [],
+                        }
+                    )
+                )
+            else:
+                output.err("--auth-source requires a supported HTTPS repository URL")
             return 3
         selected.append(item)
-    report = auth.report(selected)
+    environment = dict(os.environ)
+    if getattr(args, "auth_non_repository", False):
+        environment = auth.non_repository_environment(environment, cwd)
+        report = auth.report(selected, env=environment)
+    else:
+        report = auth.report(selected)
     overlay = auth.fallback(report, apply_fixes=mode() != "report-only")
     payload = report.summary()
     if getattr(args, "auth_environment", False):
         # Only added/replaced variables cross the Manager's process boundary.
-        environment = overlay.environment(os.environ) if overlay else {}
+        environment = overlay.environment(environment) if overlay else environment
         payload["environment"] = {
             key: value for key, value in environment.items() if os.environ.get(key) != value
         }
+        payload["unset_environment"] = [key for key in os.environ if key not in environment]
     if getattr(args, "json", False):
         print(json.dumps(payload))
     else:

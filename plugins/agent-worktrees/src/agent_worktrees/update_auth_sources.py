@@ -66,9 +66,23 @@ def remote_url(remote: str, anchor: Path) -> str:
     parsed = urlsplit(remote)
     if parsed.scheme or remote.startswith(("git@", "/", "\\")):
         return remote
-    return git_ops.git(
-        "remote", "get-url", remote, cwd=anchor, isolated_repository=True
-    ).stdout.strip()
+    result = git_ops.git(
+        "remote",
+        "get-url",
+        remote,
+        cwd=anchor,
+        isolated_repository=True,
+        check=False,
+        timeout=5,
+        kill_tree=True,
+    )
+    if result.returncode == 2:
+        return ""  # Git's documented missing-remote status; local-only anchors are valid.
+    if result.returncode:
+        raise git_ops.GitError(
+            ["git", "remote", "get-url", remote], result.returncode, result.stderr
+        )
+    return result.stdout.strip()
 
 
 def anchors() -> list[Source]:

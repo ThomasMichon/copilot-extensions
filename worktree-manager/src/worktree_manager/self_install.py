@@ -1041,10 +1041,9 @@ def self_update(
     try:
         from . import engine_client, update_auth
 
-        auth_env = update_auth.environment(
-            repo, cwd=staging if (staging / ".git").is_dir() else None) if use_git else None
-        environment = {"env": auth_env} if auth_env is not None else {}
         staging.mkdir(parents=True, exist_ok=True)
+        auth_env = update_auth.environment(repo, cwd=staging) if use_git else None
+        environment = {"env": auth_env} if auth_env is not None else {}
         if use_git:
             if (staging / ".git").is_dir():
                 subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
@@ -1059,7 +1058,7 @@ def self_update(
                 _clear_dir(staging)
                 subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
                                 repo, str(staging)], check=True,
-                               capture_output=True, text=True, timeout=300, **environment)
+                               capture_output=True, text=True, timeout=300, cwd=staging, **environment)
         else:
             url = manager_tarball_url(r, ref)
             if url is None:
