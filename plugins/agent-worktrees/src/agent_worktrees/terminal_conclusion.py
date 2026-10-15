@@ -288,6 +288,16 @@ def _pair_progress_valid(record, sibling, path) -> bool:
     return snapshot is not None and _reciprocal_pair_valid(record, snapshot, path)
 
 
+def _pair_shape_unresolved(record, *, policy, reservation_key, owner) -> bool:
+    return (
+        record.is_paired
+        and policy == DISPATCH_ATTEMPT_POLICY
+        and (record.pair_kind or "").strip() != "anchor"
+        and _dispatch_ownership_confirmed(record, reservation_key=reservation_key, owner=owner)
+        and _resolve_pair_sibling(record) is None
+    )
+
+
 def _sibling_ancestry_reason(sibling: tracking.WorktreeRecord) -> str | None:
     """Conservative git-ancestry gate for the RECIPROCAL sibling of a
     dispatch-owned pair concluding together -- mirrors the harness side's
@@ -563,6 +573,10 @@ def conclude_disposable_worktree(
         "session": {"action": "skipped", "reason": "not-attempted"},
         "managed_gc_eligible": False,
     }
+    # Read-only preservation preflight; eligible paths are revalidated under lock.
+    if _pair_shape_unresolved(record, policy=policy, reservation_key=reservation_key, owner=owner):
+        result.update(action="skipped", reason="pair-sibling-unresolved")
+        return result
 
     lock = finalize.FinalizeLock(
         Path(repo.worktree_root) / ".finalize.lock",
@@ -620,6 +634,9 @@ def conclude_disposable_worktree(
                         reason="driver-owner-mismatch",
                     )
                     return result
+            if _pair_shape_unresolved(record, policy=policy, reservation_key=reservation_key, owner=owner):
+                result.update(action="skipped", reason="pair-sibling-unresolved")
+                return result
             live_reason = _session_is_live(record)
             if live_reason:
                 result.update(action="skipped", reason=live_reason)

@@ -1763,6 +1763,80 @@ class TestReciprocalDisposal:
                 assert sibling_path.read_bytes() == modified_before
                 assert receipt_path.read_bytes() == receipt_before
 
+    @pytest.mark.parametrize("field", ["pair_id", "pair_role", "pair_ref", "pair_kind"])
+    @pytest.mark.parametrize("value", [False, "", None, 0, 1, "unsupported", [], {}],
+                             ids=["false", "empty", "null", "zero", "one", "text", "list", "dict"])
+    @pytest.mark.parametrize("mutation_at", ["early", "locked"])
+    def test_raw_pair_shape_rejected_before_native_or_liveness(
+        self, tmp_path, monkeypatch, field, value, mutation_at,
+    ):
+        from agent_worktrees import terminal_pair_progress
+
+        primary = tracking.create_new_record(
+            "primary", "worktree/primary", str(tmp_path / "primary"), "demo", "host",
+            "windows", tmp_path / "demo" / "worktrees",
+        )
+        sibling = tracking.create_new_record(
+            "sibling", "worktree/sibling", str(tmp_path / "sibling"), "knowledge-proj", "host",
+            "windows", tmp_path / "knowledge-proj" / "worktrees",
+        )
+        primary.origin = "delegate"
+        primary.dispatch_attempt = tracking.DispatchAttempt(
+            task_id="task-1", reservation_key="dispatch-task:task-1:1", attempt=1,
+            driver="dispatcher", supervisor="supervisor-1", creator_machine="host",
+        )
+        primary.owner = sibling.owner = "dispatcher"
+        sibling.kind, sibling.status, sibling.origin = "bridge", "complete", "delegate"
+        for record, role, project, target in (
+            (primary, "harness", "knowledge-proj", "sibling"),
+            (sibling, "knowledge", "demo", "primary"),
+        ):
+            record.pair_id, record.pair_role, record.pair_kind = "pair1", role, "worktree"
+            record.pair_ref = tracking.format_claim_ref("host", project, target)
+            tracking.save_record(record, record.yaml_path)
+        monkeypatch.setattr(tc.cfg, "project_dir", lambda name=None: tmp_path / str(name))
+        assert tc._reciprocal_pair_valid(primary, sibling, sibling.yaml_path)
+        terminal_pair_progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
+        for name in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+            setattr(sibling, name, None)
+        tracking.save_record(sibling, sibling.yaml_path)
+        assert tc._resolve_pair_sibling(primary) is not None
+        receipt = sibling.yaml_path.with_suffix(".terminal-pair.json")
+        before = {}
+
+        def inject():
+            with sibling.yaml_path.open("a", encoding="utf-8") as out:
+                out.write(f"{field}: {json.dumps(value)}\n")
+            before.update({path: path.read_bytes()
+                           for path in (primary.yaml_path, sibling.yaml_path, receipt)})
+
+        if mutation_at == "early":
+            inject()
+        else:
+            original_acquire = tc.finalize.FinalizeLock.acquire
+
+            def acquire(lock):
+                original_acquire(lock)
+                inject()
+
+            monkeypatch.setattr(tc.finalize.FinalizeLock, "acquire", acquire)
+
+        def forbidden(*args, **kwargs):
+            pytest.fail("untrusted raw pair shape reached native/liveness work")
+
+        monkeypatch.setattr(tc, "_session_is_live", forbidden)
+        monkeypatch.setattr(git_ops, "git", forbidden)
+        repo = types.SimpleNamespace(worktree_root=str(tmp_path), anchor=str(tmp_path),
+                                     remote="origin", default_branch="main")
+        result = _conclude(
+            primary.yaml_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+        assert result["reason"] == "pair-sibling-unresolved"
+        assert result["managed_gc_eligible"] is False
+        assert len(before) == 3
+        assert {path: path.read_bytes() for path in before} == before
+
     def test_blocks_on_sibling_with_unpushed_commits(self, tmp_path, monkeypatch):
         """A sibling with no porcelain dirtiness but local-only commits ahead
         of its own upstream must still block -- exactly like the harness

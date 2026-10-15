@@ -134,6 +134,11 @@ reconstruction, regardless of how record loading normalizes false, empty, null,
 numeric or unsupported values. This absence check and the non-pair digest use
 the same parsed document; malformed or reintroduced pair keys preserve both
 records and the receipt with the ordinary pair-preservation reason.
+For a confirmed dispatch-attempt allocation, malformed reciprocal evidence is
+rejected by read-only shape validation before process/liveness or Git work,
+with the same check repeated under the primary record lock. Eligible paths
+still undergo all later identity, liveness, ancestry
+and locked reciprocal revalidation; the preflight never grants disposal authority.
 Managed garbage collection remains the deletion authority.
 The sibling receipt pins the exact primary record, and a primary-side guard
 keeps that record available until the sibling receipt has been collected.

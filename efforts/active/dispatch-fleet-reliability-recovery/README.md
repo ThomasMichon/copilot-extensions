@@ -770,3 +770,30 @@ requested contract.
   Fatal lint, module ceilings, install/documentation/whitespace/large-file and
   changefile checks passed for this source slice. These static results do not
   discharge the retained runtime failure or authorize publication.
+
+- **Raw-pair phase capture and reject-first ordering (PR #6542):** A bounded
+  capture of the exact case, with unchanged execution and 30-second item bound,
+  observed sibling/primary fixture creation at 10.203/16.672 seconds and the
+  initial valid interrupted conclusion completing at 22.812 seconds. Invalid
+  raw retries issued zero Git calls, but primary liveness ran before canonical
+  rejection; the later timeout occurred in lifecycle-lock release/import
+  scanning. This does not explain or clear the older initial Git-reader wait.
+  A deterministic valid-receipt fixture failed first at the forbidden liveness
+  call. Read-only reciprocal-shape refusal now precedes native lifecycle work
+  and is repeated under the primary record lock; eligible paths retain every
+  existing provenance, liveness, ancestry and mutation-time check. All 64
+  early/locked raw-value cases passed, preserving all three record/receipt
+  byte snapshots, then the unchanged native raw-key case passed in 13.72
+  seconds. No earlier timeout is relabeled as passed or an accepted flake.
+  The next affected clean-pair control stopped at its original 30-second item
+  limit inside native process creation during sibling ancestry verification.
+  Setup passed; the call did not complete. No child PID/exit evidence exists,
+  so native-cause attribution remains UNKNOWN. The execution sequence stopped:
+  remaining pair cases and shared-caller checks are still owed. No broad
+  replay, timeout increase, user-environment exemption/repair, role/update
+  operation or source publication occurred. All earlier evidence and backups
+  remain retained.
+  Standard source/module/install/documentation/whitespace/changefile gates
+  passed. Further latency-sensitive validation is paused for a stable host
+  window; temporal overlap with provisioning is not proven failure causality
+  and grants neither a flake designation nor a validation waiver.
