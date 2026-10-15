@@ -181,7 +181,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
-def _refresh_terminal_profiles(project: str | None = None) -> bool:
+def _refresh_terminal_profiles(project: str | None = None, *, machine: str | None = None) -> bool:
     """Invoke the Manager's narrow owner surface, without staging an installer."""
     from .manager_launch_cli import _discover_control_plane_provider_manifests
     from .control_plane_providers import _machine_control_plane_providers_dir
@@ -194,8 +194,15 @@ def _refresh_terminal_profiles(project: str | None = None) -> bool:
         if manager is None:
             output.warn("Could not refresh Windows Terminal profiles: Worktree Manager is unavailable")
             return False
-        arguments = [*manager.command, "refresh-profiles",
-                     cfg.project_name() if project is None else project]
+        target_project = cfg.project_name() if project is None else project
+        if machine is None:
+            machine = cfg.load_config(
+                cfg.project_dir(target_project) / "config.yaml",
+                project=target_project, include_control_plane_related_pr=False,
+            ).machine
+        if not isinstance(machine, str) or not machine.strip():
+            raise ValueError("Cannot resolve machine key for terminal profile refresh")
+        arguments = [*manager.command, "refresh-profiles", target_project, "--machine", machine]
         result = subprocess.run(
             arguments,
             capture_output=True,

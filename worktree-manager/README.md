@@ -339,6 +339,11 @@ touching fragment/state/settings outputs. Actual publishing collection uses
 strict registry reads too; preliminary validation never authorizes a later
 tolerant reload. Genuinely absent optional files remain supported. Read-only
 state views and previews retain their tolerant behavior.
+Present registries require their explicit `projects`/`repos` mapping; an empty,
+null or missing-key document is not permission to retire profiles. Shortcut
+display names are validated before fragment publication, not after it. Engine
+callers pass their resolved `--machine` key so global configuration and machine
+detection do not depend on a project-local machine setting.
 Publishing rejects blank/non-string selection identifiers and unknown kinds,
 including when inputs change during collection; it never silently converts a
 shell typo into an agent launch.

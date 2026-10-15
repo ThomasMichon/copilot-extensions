@@ -102,8 +102,22 @@ def _validate_profile_inputs(project: str | None) -> None:
             raise ValueError(f"Invalid terminal_profiles for project {name}: {error}") from error
 
 
+def _shortcut_rows(projects: list[terminal_fragment.ProjectInput]) -> list[dict]:
+    rows = []
+    for project in projects:
+        if (not isinstance(project.display, str) or not project.display.strip()
+                or any(c in project.display for c in '<>:"/\\|?*\r\n')):
+            raise ValueError(f"Invalid shortcut display name for project {project.name}")
+        rows.append({
+            "display": project.display,
+            "wsl": bool(project.wsl_distro and project.wsl_state),
+        })
+    return rows
+
+
 def refresh_shortcuts(projects: list[terminal_fragment.ProjectInput]) -> int:
     """Keep the existing native/WSL shortcuts, writing only changed properties."""
+    rows = _shortcut_rows(projects)
     home = harness_state.home()
     local_bin = home / ".local" / "bin"
     local_bin.mkdir(parents=True, exist_ok=True)
@@ -113,14 +127,6 @@ def refresh_shortcuts(projects: list[terminal_fragment.ProjectInput]) -> int:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
         raise RuntimeError("LOCALAPPDATA is required to resolve Windows Terminal")
-    rows = []
-    for project in projects:
-        if not project.display or any(c in project.display for c in '<>:"/\\|?*\r\n'):
-            raise ValueError(f"Invalid shortcut display name for project {project.name}")
-        rows.append({
-            "display": project.display,
-            "wsl": bool(project.wsl_distro and project.wsl_state),
-        })
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", _SHORTCUTS],
         input=json.dumps({
@@ -155,6 +161,7 @@ def refresh(project: str | None, machine: str | None = None) -> dict:
     if not isinstance(selected_machine, str) or not selected_machine:
         raise ValueError("Cannot resolve machine key; pass --machine or repair project config")
     projects = terminal_fragment.collect_local_projects(current_project=project, strict=True)
+    _shortcut_rows(projects)
     plan = terminal_fragment.deploy_fragment(
         selected_machine, current_project=project, apply=True, projects=projects,
     )

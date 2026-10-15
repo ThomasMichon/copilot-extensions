@@ -275,3 +275,25 @@ achieved by rearranging today's combined installer invocations.
   2.079/1.609 seconds. A broad guard invocation exceeded its unchanged
   300-second budget without another assertion failure; partitioning must retain
   the complete collected guard portfolio rather than drop slow tests.
+
+### 2026-10-15 - Destructive-boundary review corrections
+- The complete native guard portfolio passed 1,010 cases with eighteen platform
+  skips, using seven explicit file-group invocations under unchanged budgets.
+  The slowest group took 269 seconds; no test or assertion was omitted.
+- Subsequent review found that empty/null/missing-key registry documents could
+  still authorize profile retirement, display-name validation happened after
+  fragment publication, and the engine failed to forward globally resolved or
+  detected machine identity. Present registries now require explicit mappings;
+  publication validates consumed entry shapes and shortcut names before writes.
+  Registration passes its known machine; refresh uses the explicit project's
+  existing layered configuration resolver, independent of ambient context.
+- A separate transaction finding required immediate sibling revalidation, not
+  only a pair-wide precheck. Publication, recovery and rollback now revalidate
+  at each replacement/deletion/permission boundary, including after staging,
+  and verify final pair states before settling receipts. Interleaved edits
+  remain untouched with an unsettled journal and visible retry failure. This
+  is not filesystem compare-and-swap against an uncooperative writer.
+- Independent integrated core checks passed 495 cases with twenty-eight
+  platform skips; Manager coverage passed 189. Native profile command passes
+  measured 2.125 and 1.672 seconds. Review and required CI remain open; no
+  installation has been patched or deployment claimed.

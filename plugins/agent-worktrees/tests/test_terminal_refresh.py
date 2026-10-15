@@ -31,6 +31,7 @@ def manager(monkeypatch):
         lambda **k: {"worktree-manager": selected},
     )
     monkeypatch.setattr(m.cfg, "project_name", lambda: "demo")
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: SimpleNamespace(machine="host"))
     return selected
 
 
@@ -53,7 +54,7 @@ def test_refresh_uses_one_narrow_call_without_installer(manager, monkeypatch):
     assert m._refresh_terminal_profiles() is True
     assert len(calls) == 1
     argv, kwargs = calls[0]
-    assert argv == ["manager", "refresh-profiles", "demo"]
+    assert argv == ["manager", "refresh-profiles", "demo", "--machine", "host"]
     assert not any("install." in value or value == "--version" for value in argv)
     assert kwargs["encoding"] == "utf-8"
     assert kwargs["errors"] == "replace"
@@ -73,7 +74,7 @@ def test_explicit_registration_target_does_not_require_active_context(manager, m
         ),
     )
     assert m._refresh_terminal_profiles("registered") is True
-    assert captured == [["manager", "refresh-profiles", "registered"]]
+    assert captured == [["manager", "refresh-profiles", "registered", "--machine", "host"]]
 
 
 def test_register_without_active_project_refreshes_the_registered_target(monkeypatch, tmp_path):
@@ -126,7 +127,42 @@ def test_register_without_active_project_refreshes_the_registered_target(monkeyp
     )
     assert installation_cli.cmd_register(args) == 0
     assert m.cfg.active_project() is None
-    assert captured == [["manager", "refresh-profiles", "registered"]]
+    assert captured == [["manager", "refresh-profiles", "registered", "--machine", "example-host"]]
+
+
+@pytest.mark.parametrize("source", ["global", "detection"])
+def test_resolved_machine_without_project_machine_setting(monkeypatch, tmp_path, source):
+    config_dir = tmp_path / ".registered"
+    config_dir.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (config_dir / "config.yaml").write_text(
+        json.dumps({"repos": {"registered": {"anchor": str(repo)}}}), encoding="utf-8",
+    )
+    global_config = tmp_path / "global.yaml"
+    if source == "global":
+        global_config.write_text("machine: global-host\n", encoding="utf-8")
+    monkeypatch.setattr(m.cfg, "global_config_path", lambda: global_config)
+    monkeypatch.setattr(m.cfg, "project_dir", lambda name=None: tmp_path / f".{name}")
+    monkeypatch.setattr(m.cfg, "detect_machine", lambda *a: "detected-host")
+    monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(
+        manager_launch_cli, "_discover_control_plane_provider_manifests",
+        lambda **k: {"worktree-manager": SimpleNamespace(command=("manager",))},
+    )
+    captured = []
+
+    def run(argv, **kwargs):
+        if argv[0] != "manager":
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        captured.append(argv)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(SUCCESS), stderr="")
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    assert m._refresh_terminal_profiles("registered")
+    expected = "global-host" if source == "global" else "detected-host"
+    assert captured == [["manager", "refresh-profiles", "registered", "--machine", expected]]
+    assert m.cfg.active_project() is None
 
 
 @pytest.mark.parametrize("response", [
@@ -165,7 +201,7 @@ def test_spawn_and_timeout_errors_are_visible(manager, monkeypatch, capsys, erro
 def test_real_profile_process_protocol(manager):
     manager.command = (
         sys.executable, "-c",
-        "import json,sys; assert sys.argv[1:] == ['refresh-profiles','demo']; "
+        "import json,sys; assert sys.argv[1:] == ['refresh-profiles','demo','--machine','host']; "
         f"print(json.dumps({SUCCESS!r}))",
     )
     assert m._refresh_terminal_profiles() is True
@@ -206,8 +242,8 @@ def test_cell_profile_refresh_uses_machine_manager_registration(monkeypatch, tmp
             returncode=0, stdout=json.dumps(SUCCESS), stderr="",
         ),
     )
-    assert m._refresh_terminal_profiles("demo") is True
-    assert calls == [["registered-manager", "refresh-profiles", "demo"]]
+    assert m._refresh_terminal_profiles("demo", machine="host") is True
+    assert calls == [["registered-manager", "refresh-profiles", "demo", "--machine", "host"]]
 
 
 @pytest.mark.guard

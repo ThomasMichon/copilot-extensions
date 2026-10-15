@@ -231,7 +231,11 @@ def test_collection_revalidates_selection_without_tolerant_coercion(monkeypatch,
     (".demo/config.yaml", "symlink"),
     *[(f".agent-worktrees/{kind}.yaml", damage)
       for kind in ("projects", "repos")
-      for damage in ("yaml", "denied", "entry")],
+      for damage in ("yaml", "denied", "entry", "empty", "null", "missing-key")],
+    *[(".agent-worktrees/projects.yaml", damage)
+      for damage in ("display-number", "display-slash", "display-blank", "wsl-entry", "wsl-value")],
+    *[(".agent-worktrees/repos.yaml", damage)
+      for damage in ("repo-path", "repo-remote", "repo-tags")],
 ])
 def test_strict_collection_failures_preserve_published_outputs(
     monkeypatch, tmp_path, capsys, relative, damage,
@@ -279,7 +283,18 @@ def test_strict_collection_failures_preserve_published_outputs(
                     return read_text(path, *args, **kw)
                 monkeypatch.setattr(Path, "read_text", denied)
             else:
-                text = "[" if damage == "yaml" else f"{target.stem}:\n  demo: invalid\n"
+                text = {
+                    "yaml": "[", "entry": f"{target.stem}:\n  demo: invalid\n",
+                    "empty": "", "null": "null\n", "missing-key": "schema_version: 2\n",
+                    "display-number": "projects:\n  demo: {display_name: 42}\n",
+                    "display-slash": "projects:\n  demo: {display_name: 'Bad/Name'}\n",
+                    "display-blank": "projects:\n  demo: {display_name: '   '}\n",
+                    "wsl-entry": "projects:\n  demo: {wsl: invalid}\n",
+                    "wsl-value": "projects:\n  demo: {wsl: {distro: 42}}\n",
+                    "repo-path": "repos:\n  demo: {windows: 42}\n",
+                    "repo-remote": "repos:\n  demo: {remote: 42}\n",
+                    "repo-tags": "repos:\n  demo: {tags: 42}\n",
+                }[damage]
                 target.write_text(text, encoding="utf-8")
             return collect(**kwargs)
 

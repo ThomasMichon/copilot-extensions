@@ -60,11 +60,15 @@ def _read_json(p: Path) -> dict:
         return {}
 
 
-def _read_yaml(p: Path, *, strict: bool = False) -> dict:
+def _read_yaml(p: Path, *, strict: bool = False, required_key: str | None = None) -> dict:
     try:
         data = yaml.safe_load(p.read_text("utf-8"))
         if strict and data is not None and not isinstance(data, dict):
             raise ValueError(f"Configuration must be a mapping: {p}")
+        if strict and required_key is not None and (
+            not isinstance(data, dict) or required_key not in data
+        ):
+            raise ValueError(f"Registry requires an explicit {required_key} mapping: {p}")
         return data if isinstance(data, dict) else {}
     except FileNotFoundError as error:
         if strict and p.is_symlink():
@@ -185,7 +189,8 @@ class ProjectInfo:
 
 
 def _registry(home_dir: Path | None, kind: str, *, strict: bool) -> dict:
-    data = _read_yaml((home_dir or home()) / ".agent-worktrees" / f"{kind}.yaml", strict=strict)
+    path = (home_dir or home()) / ".agent-worktrees" / f"{kind}.yaml"
+    data = _read_yaml(path, strict=True, required_key=kind) if strict else _read_yaml(path)
     if strict:
         entries = data.get(kind, {})
         if not isinstance(entries, dict) or any(
@@ -196,7 +201,36 @@ def _registry(home_dir: Path | None, kind: str, *, strict: bool) -> dict:
             raise ValueError(f"{kind.title()} registry must contain a {kind} mapping with valid entries")
         if kind == "repos" and not isinstance(data.get("account_map", {}), dict):
             raise ValueError("Repos registry account_map must be a mapping")
+        for name, entry in entries.items():
+            if entry is not None:
+                _validate_registry_entry(kind, name, entry)
     return data
+
+
+def _validate_registry_entry(kind: str, name: str, entry: dict) -> None:
+    string_fields = (
+        ("windows", "linux", "wsl", "remote", "class", "account")
+        if kind == "repos" else ("config_dir", "anchor", "display_name")
+    )
+    for field_name in string_fields:
+        value = entry.get(field_name)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"{kind}.{name}.{field_name} must be a string")
+    if kind == "repos":
+        tags = entry.get("tags")
+        if tags is not None and (
+            not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)
+        ):
+            raise ValueError(f"repos.{name}.tags must be a list of strings")
+    else:
+        wsl = entry.get("wsl")
+        if wsl is not None and (
+            not isinstance(wsl, dict) or any(
+                wsl.get(key) is not None and not isinstance(wsl[key], str)
+                for key in ("distro", "state")
+            )
+        ):
+            raise ValueError(f"projects.{name}.wsl must contain string distro/state values")
 
 
 def repos_registry(home_dir: Path | None = None, *, strict: bool = False) -> dict:
