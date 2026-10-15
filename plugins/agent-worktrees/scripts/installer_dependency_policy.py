@@ -774,11 +774,19 @@ def run_uv_install(
         drives = {path.drive.lower() for path in editables}
         if len(drives) != 1:
             raise DependencyPolicyError("editable input retention requires one source volume")
-        project = next(iter(editables))
-        if project.drive.lower() != Path(tempfile.gettempdir()).drive.lower():
-            temporary_parent = project.parent
-    with tempfile.TemporaryDirectory(prefix="seasoned-uv-", dir=temporary_parent) as temporary:
+        # Keep relative setuptools paths short and outside every copied input.
+        volume_inputs = (
+            path for path in (*projects, *resources) if path.drive.lower() in drives
+        )
+        shallowest = min(volume_inputs, key=lambda path: (len(path.parts), str(path)))
+        temporary_parent = shallowest.parent
+        if temporary_parent == shallowest:
+            raise DependencyPolicyError("editable retention needs temporary space outside copied inputs")
+    prefix = "uv-" if temporary_parent is not None else "seasoned-uv-"
+    with tempfile.TemporaryDirectory(prefix=prefix, dir=temporary_parent) as temporary:
         root = _private_retained_root(Path(temporary)).resolve()
+        if any(root.is_relative_to(path) for path in (*projects, *resources)):
+            raise DependencyPolicyError("retained snapshot must be outside copied inputs")
         context_project = dict(_argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
         paths = [base, *projects, *files, *resources]
         if context_project:

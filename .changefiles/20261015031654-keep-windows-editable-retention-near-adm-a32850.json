@@ -32,6 +32,26 @@
     {
       "plugin": "agent-index",
       "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
     }
   ]
 }
