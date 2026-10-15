@@ -27,20 +27,30 @@ while retaining installation, ownership, policy and health contracts.
 | Output evidence reader | Audits existing output helpers, protocols and formatting ownership | Coordinator's bounded read-only delegation |
 | Outcome/framing implementation owner | First two Phase 2 items and their focused regressions; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
 | Human-progress implementation owner | Shared timing/line rendering, actual output adapters and focused proofs; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
+| Bridge serving source implementer | Only #6826 in an independent managed worktree and source PR; no production update or recovery authority | Coordinator's bounded cooperating-session delegation |
 
 ## Coordination
 
 - **Topology:** one reviewed proposal followed by independently reviewable,
   dependency-ordered implementation PRs. Only the coordinator publishes or
   mutates Git state in the integration worktree.
-- **Host (owns PRs):** Coordinator.
+- **Host (owns integration/presentation PRs):** Coordinator. The Bridge
+  source implementer owns only its isolated #6826 PR through the normal
+  review/CI flow; that PR must not merge before #6869 is merged and the
+  serving branch is synchronized with regenerated native declarations.
 - **Delegates:** three non-mutating evidence scopes above. Implementation
   ownership was assigned after proposal review: the outcome/framing slice
   is merged, and the human-progress owner now owns formatter/clock helpers,
   directly dependent output adapters, generated consumers and focused tests.
   Bridge serving-state algorithms remain outside that assignment. The
-  coordinator owns this effort's journal and all publication, and does not
-  edit the delegate's files or mutate Git concurrently.
+  coordinator owns this effort's journal and publication from the shared
+  integration worktree. Its code edits and Git mutations are serialized
+  with any active delegate using that same worktree.
+- **Independent source cooperation:** #6826 implementation/test/PR work is
+  explicitly delegated separately from the shared integration worktree.
+  The coordinator retains overall effort, production rollout, native
+  recovery, seed and held-work custody. No resource lease or administrative,
+  signer, main-branch or private-role authority is transferred.
 - **Handoff:** keep this README and the operation audit authoritative. A
   completed PR is a slice, not completion of the effort.
 - **Existing owners:** the vendored-installer-engine campaign owns wholesale
@@ -202,6 +212,24 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-15 - Presentation review and bounded serving-source cooperation
+
+- Opened #6869 for the bounded presentation slice. Its first required
+  guard correctly rejected `update_runtime.py` at 1,051 lines against the
+  unchanged 1,000-line cap.
+- Extracted the cohesive installer process/deadline helpers into
+  `update_installer_process.py`, retaining the runtime aliases and test
+  seams. The three function bodies are AST-identical; the original module
+  is now 968 lines. Canonical focused Windows coverage, including deadline
+  and alias regressions, passed 248 cases (one platform skip). No cap,
+  baseline, required check or behavior was waived.
+- A cooperating controller requested the still-reserved #6826 source
+  slice before allocation or edits. Authorized only its isolated source
+  implementation, tests and PR, with the explicit dependency on #6869
+  above. The reservation is recorded on #6826; #5754 and all production,
+  native recovery, held-work and release-acceptance boundaries remain
+  separate and unchanged.
 
 ### 2026-10-15 - Synchronized presentation candidate and fresh wheel proof
 

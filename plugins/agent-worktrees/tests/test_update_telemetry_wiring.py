@@ -42,6 +42,14 @@ def declare_human_producer(tmp_path, monkeypatch):
     return declare
 
 
+def test_installer_process_extraction_preserves_runtime_seams():
+    from agent_worktrees import update_installer_process
+
+    assert runtime._installer_timeout is update_installer_process._installer_timeout
+    assert runtime.installer_deadline_status is update_installer_process.installer_deadline_status
+    assert runtime._run_human_installer is update_installer_process._run_human_installer
+
+
 @pytest.mark.parametrize("shell", ["powershell", "pwsh", "bash"])
 def test_human_installer_frames_native_streams_once_and_retains_failure(
     shell, tmp_path, capsys, declare_human_producer,
