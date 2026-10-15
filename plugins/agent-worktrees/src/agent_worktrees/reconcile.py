@@ -1650,9 +1650,10 @@ def _run_plan_step(
         env.pop(str(key), None)
     for key, value in update.get("environment", {}).items():
         env[str(key)] = str(value)
+    service = str(update.get("service", "plugin"))
     try:
-        deadline = _installer_timeout(str(update.get("service", "plugin")), env)
-    except ValueError as error:
+        deadline = _installer_timeout(service, env, core_installed_payload_dir(service))
+    except (OSError, ValueError) as error:
         log(f"    {error}")
         return 1
     run = run_installer(argv, cwd=None, env=env, deadline_s=deadline,

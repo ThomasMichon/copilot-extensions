@@ -167,6 +167,65 @@ def test_posix_group_killed(tmp_path, stub):
     assert _wait_dead(int((tmp_path / "slot.pid").read_text()))
 
 
+# A stub installer whose staged child leaves its group the way the installers'
+# self-stage watchdog does (``set -m``), and whose daemon leaves the session.
+_REGROUPING_STUB = textwrap.dedent("""
+    import os, subprocess, sys, time
+    out = sys.argv[1]
+    sleeper = [sys.executable, "-c", "import time; time.sleep(120)"]
+    staged = subprocess.Popen(sleeper, preexec_fn=lambda: os.setpgid(0, 0))
+    daemon = subprocess.Popen(sleeper, start_new_session=True)
+    open(out, "w").write(f"{staged.pid} {daemon.pid}")
+    time.sleep(120)
+""")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
+def test_posix_deadline_reaches_a_regrouped_child_but_not_a_daemon(tmp_path, stub):
+    script = tmp_path / "regroup.py"
+    script.write_text(_REGROUPING_STUB, encoding="utf-8")
+    pids = tmp_path / "pids"
+    run = installer_run.run_installer(
+        [sys.executable, str(script), str(pids)], cwd=tmp_path, env=os.environ,
+        deadline_s=3,
+    )
+    staged, daemon = map(int, pids.read_text().split())
+    try:
+        assert run.status.startswith("timed out")
+        assert _wait_dead(staged), "a child in its own group must die with the session"
+        assert _alive(daemon), "a daemon that left the session must survive"
+    finally:
+        for pid in (staged, daemon):
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job containment")
+def test_windows_spawn_requires_the_job(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_spawn(argv, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("Windows descendant Job assignment failed before child resume")
+
+    monkeypatch.setattr(installer_run, "spawn_sync_in_kill_on_close_job", fake_spawn)
+    run = installer_run.run_installer(["installer"], cwd=tmp_path, env={}, deadline_s=5)
+    assert seen["require_job"] is True
+    assert "allow_breakaway" not in seen, "installer daemons may still break away"
+    assert run.rc is None and "Job assignment failed" in run.status
+
+
+def test_a_containment_failure_becomes_the_status(monkeypatch, tmp_path):
+    def refuse(*_a, **_k):
+        raise RuntimeError("failed to resume suspended process 1")
+
+    monkeypatch.setattr(installer_run, "_spawn", refuse)
+    run = installer_run.run_installer(["installer"], cwd=tmp_path, env={}, deadline_s=5)
+    assert run.rc is None and run.status == "failed to resume suspended process 1"
+
+
 def test_plan_step_is_bounded_and_reports_the_deadline(tmp_path, stub, monkeypatch):
     from agent_worktrees import update_runtime
 
@@ -197,3 +256,29 @@ def test_plan_step_applies_the_step_environment(tmp_path, monkeypatch):
     )
     assert rc == 0
     assert "    value None" in logged
+
+
+def test_plan_step_uses_the_service_manifest_deadline(tmp_path, monkeypatch):
+    for var in ("AGENT_X_INSTALL_DEADLINE_SEC", "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"):
+        monkeypatch.delenv(var, raising=False)
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "plugin.json").write_text('{"installerDeadlineSeconds": 7}', encoding="utf-8")
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir",
+                        lambda name: payload if name == "agent-x" else None)
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return installer_run.InstallerRun("OK", 0, None, False, 0.0)
+
+    monkeypatch.setattr(installer_run, "run_installer", fake_run)
+    assert reconcile._run_plan_step(["installer"], {"service": "agent-x"}, lambda _l: None) == 0
+    assert seen["deadline_s"] == 7 + 30
+
+    # An unreadable manifest fails the step instead of escaping the sweep.
+    (payload / "plugin.json").unlink()
+    (payload / "plugin.json").mkdir()
+    logged: list[str] = []
+    assert reconcile._run_plan_step(["installer"], {"service": "agent-x"}, logged.append) == 1
+    assert logged and "plugin.json" in logged[0]
