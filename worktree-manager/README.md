@@ -68,6 +68,18 @@ treated as confirmed drift.
 
 ## Launch preparation
 
+Normal shell launch maintenance reports each reconciliation action's start,
+process exit code and completed duration. Failures (including commands that
+cannot start) are explicitly reported as continuing: maintenance remains
+best-effort, not a launch-wide abort policy. PowerShell uses a Stopwatch;
+Bash uses its native elapsed-seconds counter with whole-second resolution,
+including on Bash 3.2. These durations measure the containing action, not
+individual child lines or a verified serving-state postcondition. Child output
+continues streaming to the setup log; interactive action summaries use the
+existing launch-status gate, leaving quiet/protocol stdout unchanged.
+Each pass still obtains a fresh plan and re-resolves the runtime afterward;
+an exit of zero does not replace the second reconciliation pass.
+
 New and Resume wait for the engine to finish repository synchronization,
 prompt staging and instruction projection rather than imposing a fixed
 aggregate plan timeout. Preparation stages and elapsed-time heartbeats stream

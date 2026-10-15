@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed plan and implementation slices
 - **Created:** 2026-10-14
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/installer` Features/plugin-updating-and-alignment; `visions/plugin-services/runtime-assembly` verified immutable assembly
 - **Umbrella issue:** #6812
 - **Sub-issues:** #6826 (Bridge serving no-op), #6827 (supervisor result framing); existing #6600, #6086, #6046 and #6796 retain their owners and boundaries
@@ -25,6 +25,7 @@ while retaining installation, ownership, policy and health contracts.
 | Orchestration evidence reader | Audits unified update and launch-maintenance ordering | Coordinator's bounded read-only delegation |
 | Installer evidence reader | Audits runtime construction, activation and healthy no-op work | Coordinator's bounded read-only delegation |
 | Output evidence reader | Audits existing output helpers, protocols and formatting ownership | Coordinator's bounded read-only delegation |
+| Outcome/framing implementation owner | First two Phase 2 items and their focused regressions; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
 
 ## Coordination
 
@@ -33,8 +34,10 @@ while retaining installation, ownership, policy and health contracts.
   mutates Git state in the integration worktree.
 - **Host (owns PRs):** Coordinator.
 - **Delegates:** three non-mutating evidence scopes above. Implementation
-  ownership is assigned only after the proposal clears review, with no
-  overlapping edits or concurrent Git operations.
+  ownership was assigned after proposal review: the outcome/framing owner
+  may edit shell action-result handling, the supervisor result boundary and
+  directly related tests only. The coordinator does not edit those files
+  or mutate Git concurrently.
 - **Handoff:** keep this README and the operation audit authoritative. A
   completed PR is a slice, not completion of the effort.
 - **Existing owners:** the vendored-installer-engine campaign owns wholesale
@@ -86,7 +89,7 @@ matrix below are _(agent-recommended)_ implementation details.
   contracts; propose one coherent line and progress vocabulary.
 - [x] Rank safe reductions by measured work avoided; explicitly distinguish
   code-proven causes from hypotheses.
-- [ ] Capture the audit in a linked operation inventory, complete this
+- [x] Capture the audit in a linked operation inventory, complete this
   proposal, and land the reviewed plan before implementation.
 
 ### Phase 2 - Make timing and status reporting consistent
@@ -154,7 +157,8 @@ matrix below are _(agent-recommended)_ implementation details.
 
 The [audit](audit.md) contains the complete reference-run line ledger,
 measured intervals, source map, concrete defects and proposed presentation.
-Implementation remains gated on this proposal's review.
+The proposal cleared review and merged in #6823. Implementation proceeds
+under the phase and validation gates below; the effort is not complete.
 
 The requested timing suffix needs two distinct meanings: a progress line can
 report elapsed time in its current operation, while a completion line can
@@ -181,6 +185,51 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-15 - First implementation slice prepared
+
+- Retained native reconciliation exit codes, timed action outcomes and
+  explicit continued-failure reporting in both shell launchers. Fresh
+  replanning, streamed child output and environment restoration remain.
+- Corrected #6827's complete-stdout JSON framing while preserving native
+  stderr diagnostics, typed failure results and the existing scoped
+  fallback. This removes JSON properties being expanded into warnings;
+  it does not authorize broader process retirement.
+- Independent Windows containment runs passed 27 retirement cases and
+  10 maintenance/status cases (two POSIX-only cases skipped). The latter
+  includes the real setup-log, quiet, interactive and stdio output helpers
+  plus inherited native-error-preference restoration.
+- The canonical Linux retirement lane passed 27 cases; isolated Linux
+  maintenance passed two cases (10 Windows-only cases skipped). Touched
+  Python lint, native PowerShell parsing and the install contract passed.
+- Managed Windows dependency preparation failed before test collection,
+  first on a temporary-file sharing violation and then during editable
+  package construction. Windows code verification used an existing
+  prepared interpreter under the same environment lease and containment
+  APIs, with this worktree's source selected explicitly; preparation is
+  not reported as passing.
+- Fresh isolated child fixtures cover the changed process boundary.
+  A full clean-room installation and live external rollout were not run:
+  this slice changes result interpretation, not runtime construction or
+  activation, and its promoted release does not yet exist.
+- Bash currently reports whole-second native-counter durations. Clock
+  adjustment and actual macOS Bash 3.2 proof remain open with the shared
+  formatter phase; these tests do not prove monotonic clock behavior.
+- No source PR or rollout is complete at this journal entry. Shared
+  formatting, every-line time prefixes/suffixes, Bridge serving-state
+  convergence and equivalent before/after measurements remain open.
+
+### 2026-10-15 - Reviewed plan and implementation transition
+
+- Merged #6823 as `657714e16ee08c957f55c35c5644daea83e860a3` after
+  exact-head approval and successful required CI. This completed Phase 1,
+  not the install/update implementation or rollout.
+- Preserved the pre-sync local history, reconciled the merged PR through the
+  native status flow, and completed native synchronization onto the current
+  contribution branch.
+- Coordinator continues with **Phase 2 - Make timing and status reporting
+  consistent**, starting with per-action outcomes and supervisor
+  machine-result framing before broad human-output normalization.
 
 ### 2026-10-14 - Kickoff
 

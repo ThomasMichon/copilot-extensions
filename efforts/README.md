@@ -105,7 +105,7 @@ that pattern to this repository.
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
-| [Update Flow Observability](active/update-flow-observability/README.md) | Draft; operation audit and consistent timing/status proposal before implementation | #6812; existing update and installer repair owners retained |
+| [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
 
 
 ## Completed effort index

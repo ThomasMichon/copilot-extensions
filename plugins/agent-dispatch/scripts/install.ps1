@@ -2229,7 +2229,7 @@ function Retire-SupervisorProcesses {
     }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $raw = & $py -m agent_dispatch _retire-supervisors --install-dir $InstallDir 2>&1 | Out-String
+    $raw = @(& $py -m agent_dispatch _retire-supervisors --install-dir $InstallDir 2>&1)
     $rc = $LASTEXITCODE
     Invoke-SupervisorAudit -Event retire -Reason windows-generation-inventory -Outcome $(if ($rc -eq 0) { 'ok' } else { 'fail' }) -ExitCode $rc
     $ErrorActionPreference = $prevEAP
@@ -2246,7 +2246,9 @@ function Retire-SupervisorProcesses {
         # Python helper. Do not run a second, broader classifier over a changed
         # process inventory; report the errors and keep its retired count.
         if ($rc -eq 0 -or -not $enumerationFailed) { return $retired }
-    } catch { }
+    } catch {
+        Write-Warn "Supervisor retirement result rejected: $($_.Exception.Message)"
+    }
     Write-Warn 'Full supervisor generation inventory failed; using native CIM supervisor-tree retirement'
     return (Retire-SupervisorProcessesFallback)
 }

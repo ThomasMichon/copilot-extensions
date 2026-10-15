@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -182,3 +185,152 @@ def test_streamed_error_retains_version_skew_detail(monkeypatch, capsys):
     with pytest.raises(ec.EngineFeatureUnavailable, match="predates staged"):
         ec.resolve_launch_plan("demo", new=True, seed="task")
     assert "unrecognized arguments" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("current", [False, True])
+def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, current):
+    if shell != "bash" and os.name != "nt":
+        pytest.skip("Windows launcher contract")
+    if shell != "bash" and not shutil.which(shell):
+        pytest.skip("PowerShell unavailable")
+    if shell == "bash" and os.name != "posix":
+        pytest.skip("POSIX shell contract")
+    root = Path(__file__).resolve().parents[1]
+    # The fixture planner/actions need only stdlib, not the runner's site packages.
+    fixture_python = getattr(sys, "_base_executable", sys.executable)
+    child = tmp_path / "action.py"
+    child.write_text(
+        "import os,sys,time\nfrom pathlib import Path\n"
+        "assert os.environ['MAINTENANCE_FIXTURE'] == 'child'\n"
+        "assert 'MAINTENANCE_UNSET' not in os.environ\n"
+        "print('progress-before-completion', flush=True)\n"
+        "gate=Path(sys.argv[1]); deadline=time.monotonic()+10\n"
+        "while not gate.exists() and time.monotonic()<deadline: time.sleep(.02)\n"
+        "assert gate.exists(), 'progress was buffered'\n"
+        "print('action-diagnostic', file=sys.stderr, flush=True)\n"
+        "sys.exit(int(sys.argv[2]))\n"
+    )
+    gate = tmp_path / "progress-seen"
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    state = tmp_path / "passes"
+    (package / "__main__.py").write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        f"state=Path({str(state)!r})\n"
+        "n=int(state.read_text())+1 if state.exists() else 1\n"
+        "state.write_text(str(n))\n"
+        "assert os.environ['MAINTENANCE_FIXTURE'] == 'parent'\n"
+        "assert os.environ['MAINTENANCE_UNSET'] == 'parent'\n"
+        f"argv=[sys.executable,{str(child)!r},{str(gate)!r}]\n"
+        "updates=[dict(service=label,argv=args,environment={'MAINTENANCE_FIXTURE':'child'},"
+        "unset_environment=['MAINTENANCE_UNSET']) for label,args in "
+        "[('failed',argv+['7']),"
+        f"('spawn-error',[{str(tmp_path / 'missing-executable')!r}]),('success',argv+['0'])]]\n"
+        f"print(json.dumps(dict(action='reconcile' if n==1 and not {current!r} else 'continue',updates=updates)))\n"
+    )
+    env = dict(
+        os.environ, PYTHONPATH=str(tmp_path), MAINTENANCE_FIXTURE="parent",
+        MAINTENANCE_UNSET="parent",
+    )
+    env.pop("WORKTREE_NO_RECONCILE", None)
+    if shell != "bash":
+        text = (root / "bin/launch-session.ps1").read_text()
+        block = text[text.index("    # (3) Plugin reconciliation"):text.index(
+            "\n}\n", text.index("    # (3) Plugin reconciliation"))]
+        script = "\n".join([
+            "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true; $WithReconcile=$true",
+            f"$VenvPython='{fixture_python}'",
+            f"function Resolve-RuntimePython {{ '{fixture_python}' }}",
+            "function Write-PlanDiagnostics { param($Plan,$Prefix) }",
+            f"function Write-SetupLog {{ param($Message,$Level) if($Message -like '*progress-before-completion*'){{[IO.File]::WriteAllText('{gate}','seen')}}; [Console]::Error.WriteLine($Message) }}",
+            "function Write-SetupStatus { param($Message,$Level) Write-SetupLog $Message $Level }",
+            block,
+            "if($env:MAINTENANCE_FIXTURE -ne 'parent' -or $env:MAINTENANCE_UNSET -ne 'parent'){throw 'environment leaked'}",
+            "if($ErrorActionPreference -ne 'Stop'){throw 'error preference leaked'}",
+            "if($PSNativeCommandUseErrorActionPreference -ne $true){throw 'native error preference leaked'}",
+        ])
+        fixture = tmp_path / "maintenance.ps1"
+        fixture.write_text(script)
+        command = [shell, "-NoProfile", "-File", str(fixture)]
+    else:
+        text = (root / "bin/launch-session.sh").read_text()
+        start = text.index('    if [[ "$with_reconcile" == "1"')
+        block = text[start:text.index("\n}\n", start)]
+        script = "\n".join([
+            "set -euo pipefail; with_reconcile=1",
+            f"PYTHON={shlex.quote(fixture_python)}",
+            f"resolve_runtime_python() {{ printf '%s\\n' {shlex.quote(fixture_python)}; }}",
+            f"setup_log() {{ if [[ \"$2\" == *progress-before-completion* ]]; then touch {shlex.quote(str(gate))}; fi; printf '%s\\n' \"$2\" >&2; }}",
+            'setup_status() { setup_log "$@"; }', block,
+            '[[ "$MAINTENANCE_FIXTURE" == parent && "$MAINTENANCE_UNSET" == parent ]]',
+        ])
+        fixture = tmp_path / "maintenance.sh"
+        fixture.write_text(script)
+        command = ["/bin/bash", str(fixture)]
+    result = subprocess.run(
+        command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    if current:
+        assert state.read_text() == "1"
+        assert not gate.exists()
+        assert "no executable actions" in result.stderr
+        assert "starting" not in result.stderr
+        return
+    assert state.read_text() == "2", "success/failure must not replace fresh replanning"
+    assert gate.exists(), "child progress was not streamed"
+    assert "action-diagnostic" in result.stderr
+    assert re.search(r"failed.*exit 7.*duration [0-9.]+s.*continuing", result.stderr)
+    assert re.search(r"success.*exit 0.*duration [0-9.]+s", result.stderr)
+    assert re.search(r"spawn-error.*(exit 127|spawn failed).*duration [0-9.]+s.*continuing", result.stderr)
+    assert "starting" in result.stderr
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+@pytest.mark.parametrize("mode", ["quiet", "interactive", "stdio"])
+def test_native_maintenance_status_uses_production_sinks(tmp_path, shell, mode):
+    if os.name != "nt" or not shutil.which(shell):
+        pytest.skip("Windows launcher contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.ps1").read_text()
+
+    def function(name):
+        start = source.index(f"function {name} {{")
+        return source[start:source.index("\n}\n", start) + 3]
+
+    start = source.index("if ($CopilotPassthrough -contains '--stdio') {")
+    stdio = source[start:source.index("\n# Recovery fast-path", start)]
+    log = tmp_path / "setup.log"
+    fixture = tmp_path / "status.ps1"
+    fixture.write_text("\n".join([
+        "$ErrorActionPreference='Stop'",
+        f"$script:SetupLog='{log}'",
+        f"$script:ShowLaunchStatus=${str(mode != 'quiet').lower()}",
+        "$CopilotPassthrough=@('--stdio')" if mode == "stdio" else "$CopilotPassthrough=@()",
+        function("Write-SetupLog"),
+        function("Write-SetupStatus"),
+        stdio,
+        "Write-SetupStatus 'Plugin reconcile: fixture starting [elapsed 0.0s]'",
+        "Write-SetupStatus 'Plugin reconcile: fixture failed (exit 7) [duration 1.0s]; continuing' 'WARN'",
+    ]))
+    result = subprocess.run(
+        [shell, "-NoProfile", "-File", str(fixture)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    persisted = log.read_text()
+    assert re.search(r"\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}\] \[INFO\] Plugin reconcile: fixture starting", persisted)
+    assert "[WARN] Plugin reconcile: fixture failed (exit 7)" in persisted
+    if mode == "interactive":
+        assert "fixture starting" in result.stdout
+        assert "fixture failed" in result.stdout
+        assert not result.stderr
+    else:
+        assert not result.stdout
+        assert ("fixture starting" in result.stderr) is (mode == "stdio")
+        assert ("fixture failed" in result.stderr) is (mode == "stdio")

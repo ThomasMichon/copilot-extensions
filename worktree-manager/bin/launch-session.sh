@@ -622,8 +622,21 @@ for key, value in update.get('environment', {}).items():
                 while IFS= read -r _reconcile_env; do
                     [[ -n "$_reconcile_env" ]] && _RENV+=("$_reconcile_env")
                 done <<< "$_RENV_TEXT"
-                env ${_RENV[@]+"${_RENV[@]}"} "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl; do setup_log INFO "reconcile: $_rl"; done \
-                    || setup_log WARN "Plugin reconcile: step failed for $_RSVC"
+                # SECONDS is available on stock macOS Bash 3.2 (whole seconds).
+                _raction_start=$SECONDS
+                setup_status INFO "Plugin reconcile: $_RSVC starting (pass $_rpass) [elapsed 0s]"
+                if env ${_RENV[@]+"${_RENV[@]}"} "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl || [[ -n "$_rl" ]]; do setup_log INFO "reconcile: $_rl"; done; then
+                    _raction_status=("${PIPESTATUS[@]}")
+                else
+                    _raction_status=("${PIPESTATUS[@]}")
+                fi
+                _raction_exit=${_raction_status[0]}
+                _raction_duration=$((SECONDS - _raction_start))
+                if [[ "$_raction_exit" == "0" ]]; then
+                    setup_status INFO "Plugin reconcile: $_RSVC done (exit 0) [duration ${_raction_duration}s]"
+                else
+                    setup_status WARN "Plugin reconcile: $_RSVC failed (exit $_raction_exit) [duration ${_raction_duration}s]; continuing"
+                fi
             done
             # Re-resolve before the next pass: this pass's reconcile actions
             # (the runtime-gated pass in particular) may have swapped the

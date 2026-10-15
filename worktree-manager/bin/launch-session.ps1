@@ -727,6 +727,10 @@ function Invoke-UpdateApply {
                 $exe = $rargv[0]
                 $rest = @()
                 if ($rargv.Count -gt 1) { $rest = $rargv[1..($rargv.Count - 1)] }
+                $actionTimer = [Diagnostics.Stopwatch]::StartNew()
+                $actionExitCode = $null
+                $actionSpawnError = $null
+                Write-SetupStatus "Plugin reconcile: $($u.service) starting (pass $rpass) [elapsed 0.0s]"
                 Write-SetupLog "Plugin reconcile: $($u.service) -> $($rargv -join ' ')"
                 $savedEnvironment = @{}
                 if ($u.PSObject.Properties['unset_environment']) {
@@ -745,14 +749,36 @@ function Invoke-UpdateApply {
                         )
                     }
                 }
+                $actionErrorPreference = $ErrorActionPreference
+                $actionNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
                 try {
+                    Get-Command $exe -ErrorAction Stop | Out-Null
+                    # Windows PowerShell surfaces native stderr as ErrorRecords.
+                    # Drain those as progress, not terminating spawn failures.
+                    $ErrorActionPreference = 'Continue'
+                    $PSNativeCommandUseErrorActionPreference = $false
                     & $exe @rest 2>&1 | ForEach-Object { Write-SetupLog "reconcile: $_" }
+                    $actionExitCode = $LASTEXITCODE
+                } catch {
+                    $actionSpawnError = $_.Exception.Message
                 } finally {
+                    $ErrorActionPreference = $actionErrorPreference
+                    $PSNativeCommandUseErrorActionPreference = $actionNativeErrorPreference
+                    $actionTimer.Stop()
                     foreach ($entry in $savedEnvironment.GetEnumerator()) {
                         [Environment]::SetEnvironmentVariable(
                             $entry.Key, $entry.Value, 'Process'
                         )
                     }
+                }
+                $duration = $actionTimer.Elapsed.TotalSeconds.ToString('F1', [Globalization.CultureInfo]::InvariantCulture)
+                if ($actionSpawnError) {
+                    Write-SetupStatus "Plugin reconcile: $($u.service) spawn failed [duration ${duration}s]; continuing" 'WARN'
+                    Write-SetupLog "Plugin reconcile: $($u.service) error: $actionSpawnError" 'WARN'
+                } elseif ($actionExitCode -ne 0) {
+                    Write-SetupStatus "Plugin reconcile: $($u.service) failed (exit $actionExitCode) [duration ${duration}s]; continuing" 'WARN'
+                } else {
+                    Write-SetupStatus "Plugin reconcile: $($u.service) done (exit 0) [duration ${duration}s]"
                 }
             }
             # Re-resolve before the next pass: this pass's reconcile actions
