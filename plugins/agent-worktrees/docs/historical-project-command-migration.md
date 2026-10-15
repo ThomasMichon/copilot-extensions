@@ -14,6 +14,11 @@ also blocks; an empty target set with prior inventory must be explicitly
 declared as `projects: {}`. An absent registry remains supported for a fresh
 installation with no prior commands or receipts. Tolerant read-only views do
 not authorize retirement.
+Both the shared registry reader and the secondary explicit-empty check reject
+duplicate YAML mapping keys at every nesting level before schema migration or
+defaulting. A later `projects: {}` cannot override an earlier populated target
+set and authorize retirement. Tolerant read-only callers retain their existing
+empty-view fallback, but mutation always reports invalid input explicitly.
 
 Automatic physical relocation requires a matching installation receipt and
 marketplace identity, the same runtime root and source repository, and a

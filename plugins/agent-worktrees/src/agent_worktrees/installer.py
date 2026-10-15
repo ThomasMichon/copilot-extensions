@@ -1013,9 +1013,9 @@ def _projects_snapshot_for_mutation() -> dict:
             if not path.is_file():
                 raise ValueError("missing registry with prior command inventory")
             if not projects:
-                import yaml
+                from .projects_registry import load_projects_document
 
-                raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+                raw = load_projects_document(path.read_text(encoding="utf-8"))
                 if not isinstance(raw, dict) or raw.get("projects") != {}:
                     raise ValueError("prior commands require an explicit empty projects mapping")
         return {**registry, "projects": dict(projects)}

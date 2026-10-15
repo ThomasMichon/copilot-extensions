@@ -1106,6 +1106,61 @@ def test_failed_explicit_transfer_restores_exact_prior_owner_and_bytes(
     assert (receipt_path.read_bytes() if receipt_path.exists() else None) == previous_bytes
 
 
+DUPLICATE_PROJECT_DOCUMENTS = [
+    "projects:\n  demo: {}\nprojects: {}\n",
+    "projects:\n  agent-worktrees: {}\n  demo: {}\n  demo: null\n",
+    "projects: {}\nlegacy:\n  anchor: first\n  anchor: second\n",
+    "projects:\n  agent-worktrees: {}\n  demo:\n    anchor: first\n    anchor: second\n",
+]
+
+
+@pytest.mark.parametrize("document", DUPLICATE_PROJECT_DOCUMENTS)
+@pytest.mark.parametrize("receipted", [True, False])
+@pytest.mark.parametrize("reader", ["shared", "secondary-empty"])
+def test_duplicate_registry_keys_never_authorize_command_mutation(
+    command_home, monkeypatch, document, receipted, reader
+):
+    before = seed_old(monkeypatch, command_home, receipted=receipted)
+    receipt_path = inst._receipt_path("demo")
+    receipt_before = receipt_path.read_bytes() if receipt_path.exists() else None
+    inst.projects_yaml_path().write_text(document, encoding="utf-8")
+    if reader == "shared":
+        monkeypatch.setattr(inst, "read_projects_registry", READ_PROJECTS_REGISTRY)
+    else:
+        monkeypatch.setattr(inst, "read_projects_registry", lambda **_kwargs: {"projects": {}})
+    writes = []
+    monkeypatch.setattr(inst, "write_projects_registry", lambda *args: writes.append(args))
+    with pytest.raises(inst.BinstubOwnershipError, match="duplicate"):
+        inst.reconcile_binstubs()
+    assert writes == []
+    assert {p: p.read_bytes() for p in before} == before
+    assert (receipt_path.read_bytes() if receipt_path.exists() else None) == receipt_before
+
+
+@pytest.mark.parametrize("document", DUPLICATE_PROJECT_DOCUMENTS)
+def test_shared_parser_rejects_duplicate_keys_before_migration(
+    tmp_path, monkeypatch, document
+):
+    from agent_worktrees import config_migrations
+    from agent_worktrees.projects_registry import parse_projects_registry
+
+    path = tmp_path / "projects.yaml"
+    path.write_text(document, encoding="utf-8")
+    monkeypatch.setattr(
+        config_migrations, "migrate_loaded",
+        lambda *args: pytest.fail("duplicate YAML reached migration/defaulting"),
+    )
+    with pytest.raises(ValueError, match="duplicate"):
+        parse_projects_registry(path)
+
+
+def test_duplicate_registry_readonly_view_remains_tolerant(command_home, monkeypatch):
+    inst.projects_yaml_path().write_text(DUPLICATE_PROJECT_DOCUMENTS[0], encoding="utf-8")
+    assert READ_PROJECTS_REGISTRY() == {"projects": {}}
+    with pytest.raises(ValueError, match="duplicate"):
+        READ_PROJECTS_REGISTRY(strict=True)
+
+
 def test_unknown_unreceipted_bytes_are_preserved(command_home, monkeypatch, capsys):
     before = seed_old(monkeypatch, command_home, receipted=False)
     p = next(iter(before))
