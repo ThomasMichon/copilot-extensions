@@ -180,7 +180,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
-          "sha256": "37946222a54f25ea917b8b1eb4e213b5e07c912961a1e2aec62e7799ca3fb856",
+          "sha256": "05c928151334e6a7548217f276ce43493ed828c413534e5c00472ef3ec67a7ff",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -518,7 +518,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-36.json",
-          "sha256": "2c528b2b277478f00bb649cdda502094e0c8dff54b944280619d52a6d97082a3",
+          "sha256": "9f1c7f98d582460bca1009792204e00ab2bd1d3136c8e8702fb7a633173a4d0f",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
@@ -548,7 +548,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-36.json",
-          "sha256": "3baba03ddbeaba2e9f2a3fbb93174828d4ceb993dcb3a23bd6849f14f7afdab4",
+          "sha256": "6c6659d7458b28a226d4f40b354f02194e9c5e93421f0350e463654943b3bd5c",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
@@ -566,19 +566,19 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-36.json",
-          "sha256": "f477d111223609784fee4b148ca34a95f539b036769f63b4e790b49ae01faf44",
+          "sha256": "f717e34b7b27b44c4f0518b34586ce246d4b376a0a2dabdf87bed74515c91d44",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-36.json",
-          "sha256": "09f934ab3d2b2e5cb11b7c9df95618c808a4c699b291c0f61124e79cdd793361",
+          "sha256": "4b951a04392dc21d479f218aab77c3ff5868f88ff283342e53e0858cbdf77b7f",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-36.json",
-          "sha256": "2d0b691ad9665f8fe338acd3e5a4cb6593f2b9e3efd1c54a23fbd5727b61d685",
+          "sha256": "f41c46accbd291ee35b8c35826e3449fc97389cc092da43e0d33f1043079524d",
           "role": "Generation-36 provider-native replay and recovery boundary evidence",
           "generation": 36
         }
@@ -1631,6 +1631,46 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
           "source_git_blob": "3ce38f533716cc084a4cdc995b9496a1619dae1c",
           "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "0ea5edff1c18e4f16264a8988526bd29ba5b52e8",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "4a4479c7c4c0138b8ad7ce5fba05869d73b1785a",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "3ce38f533716cc084a4cdc995b9496a1619dae1c",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",

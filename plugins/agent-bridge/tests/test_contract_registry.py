@@ -70,6 +70,7 @@ def test_provider_creation_fixture_requires_explicit_capability() -> None:
     assert fixture["capability"]["provider_creation"] == bridge_protocol.PROVIDER_CREATION_PROTOCOL_VERSION
     response = StartSessionResponse.model_validate(fixture["response"])
     assert response.creation["native_session_id"] and response.creation["venue"]["instance_id"]
+    assert response.creation["venue"]["capabilities"]["instance_pinned_exec"] is True
     assert "worktree" not in response.creation
     assert StartSessionRequest(creation_key="ordinary").provider_instance is False
 

@@ -25,7 +25,10 @@
         "instance_id": "original-instance",
         "scope": "provider-instance",
         "transport": "provider-exec",
-        "ready": true
+        "ready": true,
+        "capabilities": {
+          "instance_pinned_exec": true
+        }
       },
       "native_session_id": "native-a",
       "turn_index": null,
@@ -37,14 +40,18 @@
     "workspace_creation": 34,
     "client_floor_refusal_status": 426,
     "ordinary_provider_instance_default": false,
-    "creation_prompt_supported": false
+    "creation_prompt_supported": false,
+    "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+    "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 36,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
     "source_git_blob": "0ea5edff1c18e4f16264a8988526bd29ba5b52e8",
     "source_sha256": "c35e3becec7ad678a5cc574f220d71df8dfd4ff5e9f4b1d24f504ac2a068173a"
+  },
+  "compatibility": {
+    "name_only_provider_refused": true
   }
 }

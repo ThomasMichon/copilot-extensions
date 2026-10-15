@@ -25,7 +25,10 @@
         "instance_id": "original-instance",
         "scope": "provider-instance",
         "transport": "provider-exec",
-        "ready": true
+        "ready": true,
+        "capabilities": {
+          "instance_pinned_exec": true
+        }
       },
       "native_session_id": "native-a",
       "turn_index": null,
@@ -37,10 +40,11 @@
     "workspace_creation": 34,
     "client_floor_refusal_status": 426,
     "ordinary_provider_instance_default": false,
-    "creation_prompt_supported": false
+    "creation_prompt_supported": false,
+    "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+    "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 36,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
@@ -50,6 +54,7 @@
   "compatibility": {
     "caller_handoff_retains_worktree_scope": true,
     "provider_key_required_before_reuse": true,
-    "provider_native_recreation": false
+    "provider_native_recreation": false,
+    "name_only_provider_refused": true
   }
 }
