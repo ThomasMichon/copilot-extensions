@@ -60,6 +60,7 @@ from pathlib import Path
 
 from . import terminal_profiles as profiles
 from .harness_state import RosterMachine, SshEnvironment
+from .terminal_deploy_inputs import TerminalInputs, read_optional_json as _read_json
 
 __all__ = [
     "COLOR_SCHEME_NAME",
@@ -895,19 +896,6 @@ class WtStateDiagnosis:
         return not self.hidden and not self.duplicate_names
 
 
-def _read_json(path):
-    import json
-    from pathlib import Path
-
-    p = Path(path)
-    if not p.exists():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        return None
-
-
 def _wt_local_state_dir():
     from pathlib import Path
 
@@ -1025,8 +1013,9 @@ class FragmentDeployPlan:
         )
 
 
-def _settings_profile_list(local_state_dir) -> list[dict]:
-    data = _read_json(Path(local_state_dir) / "settings.json") or {}
+def _settings_profile_list(local_state_dir, inputs: TerminalInputs | None = None) -> list[dict]:
+    read = inputs.read if inputs is not None else _read_json
+    data = read(Path(local_state_dir) / "settings.json", kind="settings") or {}
     lst = (((data.get("profiles") or {}).get("list"))
            if isinstance(data, dict) else None)
     return [p for p in (lst or []) if isinstance(p, dict)]
@@ -1073,7 +1062,9 @@ def deploy_fragment(
         (frag_dir / "AgentWorktrees" / "agent-worktrees.json") if frag_dir else None
     )
 
-    old_frag = _read_json(fragment_dst) if fragment_dst is not None else None
+    inputs = TerminalInputs() if apply else None
+    read = inputs.read if inputs is not None else _read_json
+    old_frag = read(fragment_dst) if fragment_dst is not None else None
     old_profiles = [
         p for p in ((old_frag or {}).get("profiles") or []) if isinstance(p, dict)
     ]
@@ -1110,11 +1101,11 @@ def deploy_fragment(
     notes: list[str] = []
 
     if local_state is not None and Path(local_state).exists():
-        settings_profiles = _settings_profile_list(local_state)
+        settings_profiles = _settings_profile_list(local_state, inputs)
         settings_guids = {
             str(p["guid"]).lower() for p in settings_profiles if p.get("guid")
         }
-        state = _read_json(Path(local_state) / "state.json") or {}
+        state = read(Path(local_state) / "state.json", kind="state") or {}
         generated = list(
             (state.get("generatedProfiles") or []) if isinstance(state, dict) else []
         )
@@ -1125,7 +1116,7 @@ def deploy_fragment(
         all_fragment_guids = set(new_guids)
         if frag_dir is not None and Path(frag_dir).exists():
             for jf in Path(frag_dir).rglob("*.json"):
-                data = _read_json(jf)
+                data = read(jf)
                 if isinstance(data, dict):
                     for p in (data.get("profiles") or []):
                         if isinstance(p, dict) and p.get("guid"):
@@ -1176,27 +1167,33 @@ def deploy_fragment(
     )
 
     if apply:
-        _apply_deploy_plan(plan, local_state)
+        _apply_deploy_plan(plan, local_state, inputs)
         plan.applied = plan.fragment_path is not None  # only if it wrote
 
     return plan
 
 
-def _apply_deploy_plan(plan: FragmentDeployPlan, local_state) -> None:
+def _apply_deploy_plan(
+    plan: FragmentDeployPlan, local_state, inputs: TerminalInputs | None = None,
+) -> None:
     """Reconcile WT state before publishing changed fragment content."""
     import json
 
+    inputs = inputs if inputs is not None else TerminalInputs()
+    state = inputs.read(Path(local_state) / "state.json", kind="state") if local_state is not None else None
+    settings = inputs.read(Path(local_state) / "settings.json", kind="settings") if local_state is not None else None
+    if plan.fragment_path is not None:
+        inputs.read(plan.fragment_path)
+    inputs.verify()
     if local_state is not None and Path(local_state).exists():
         if plan.generated_plan is not None and plan.generated_plan.changed:
             state_path = Path(local_state) / "state.json"
-            state = _read_json(state_path)
             if isinstance(state, dict):
                 state["generatedProfiles"] = plan.generated_plan.keep
-                state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                inputs.write(state_path, json.dumps(state, indent=2))
 
         if plan.stale_guids or plan.changed_guids or plan.settings_stale_count:
             settings_path = Path(local_state) / "settings.json"
-            settings = _read_json(settings_path)
             if isinstance(settings, dict):
                 prof = settings.get("profiles")
                 if isinstance(prof, dict) and isinstance(prof.get("list"), list):
@@ -1228,16 +1225,10 @@ def _apply_deploy_plan(plan: FragmentDeployPlan, local_state) -> None:
                             + ".wt-backup-"
                             + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
                         )
-                        backup.write_text(
-                            settings_path.read_text(encoding="utf-8"),
-                            encoding="utf-8",
-                        )
-                        settings_path.write_text(
-                            json.dumps(settings, indent=2), encoding="utf-8"
-                        )
+                        inputs.backup(settings_path, backup)
+                        inputs.write(settings_path, json.dumps(settings, indent=2))
 
-    if plan.fragment_path is not None and _read_json(plan.fragment_path) != plan.fragment:
+    if plan.fragment_path is not None and inputs.read(plan.fragment_path) != plan.fragment:
         plan.fragment_path.parent.mkdir(parents=True, exist_ok=True)
-        plan.fragment_path.write_text(
-            json.dumps(plan.fragment, indent=2), encoding="utf-8"
-        )
+        inputs.write(plan.fragment_path, json.dumps(plan.fragment, indent=2))
+    inputs.verify()

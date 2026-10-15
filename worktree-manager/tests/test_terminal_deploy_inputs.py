@@ -1,0 +1,115 @@
+"""Publishing refuses unreadable Terminal documents without pruning outputs."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from worktree_manager import local_profiles as lp, terminal_fragment as tf
+from worktree_manager.terminal_deploy_inputs import TerminalInputs, read_optional_json
+
+
+@pytest.fixture
+def publication(monkeypatch, tmp_path):
+    home, fragments, state = tmp_path / "home", tmp_path / "fragments", tmp_path / "state"
+    (home / ".demo").mkdir(parents=True)
+    (home / ".demo" / "config.yaml").write_text("machine: host\n", encoding="utf-8")
+    (fragments / "AgentWorktrees").mkdir(parents=True)
+    state.mkdir()
+    fragment = tf.build_fragment([tf.ProjectInput("demo", "Demo")], "host").fragment()
+    guids = [profile["guid"] for profile in fragment["profiles"]]
+    paths = {
+        "fragment": fragments / "AgentWorktrees" / "agent-worktrees.json",
+        "state": state / "state.json",
+        "settings": state / "settings.json",
+        "foreign": fragments / "foreign.json",
+    }
+    documents = {
+        "fragment": fragment, "state": {"generatedProfiles": guids},
+        "settings": {"profiles": {"list": [
+            {"guid": guid, "source": "AgentWorktrees"} for guid in guids
+        ]}},
+        "foreign": {"profiles": []},
+    }
+    for kind, path in paths.items():
+        path.write_text(json.dumps(documents[kind]), encoding="utf-8")
+    monkeypatch.setattr(lp.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(lp.harness_state, "home", lambda: home)
+    monkeypatch.setattr(tf, "_wt_fragments_dir", lambda: fragments)
+    monkeypatch.setattr(tf, "_wt_local_state_dir", lambda: state)
+    monkeypatch.setattr(lp, "refresh_shortcuts", lambda projects: 0)
+    return paths
+
+
+@pytest.mark.parametrize("kind", ["settings", "state", "fragment", "foreign"])
+@pytest.mark.parametrize("damage", ["json", "denied", "shape", "null", "duplicate"])
+def test_invalid_terminal_input_preserves_every_output(publication, monkeypatch, capsys, kind, damage):
+    target = publication[kind]
+    if damage != "denied":
+        bad_shape = {
+            "settings": {"profiles": {"list": ["invalid"]}},
+            "state": {"generatedProfiles": "invalid"},
+            "fragment": {"profiles": {}}, "foreign": {"profiles": {}},
+        }
+        text = {
+            "json": "{", "shape": json.dumps(bad_shape[kind]),
+            "null": "null", "duplicate": '{"profiles": [], "profiles": []}',
+        }[damage]
+        target.write_text(text, encoding="utf-8")
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()}
+    original = Path.read_bytes
+    if damage == "denied":
+        def denied(path):
+            if path == target:
+                raise PermissionError("fixture Terminal input denied")
+            return original(path)
+        monkeypatch.setattr(Path, "read_bytes", denied)
+    assert lp.main(["demo"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "blocked"
+    assert {path: (original(path), path.stat().st_mtime_ns) for path in publication.values()} == before
+    assert read_optional_json(target, kind="fragment" if kind == "foreign" else kind) is None
+
+
+@pytest.mark.parametrize("kind", ["settings", "state"])
+@pytest.mark.parametrize("contents", ['{"profiles": {"list": []}}', "{"])
+def test_input_drift_after_planning_does_not_publish(publication, monkeypatch, capsys, kind, contents):
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in publication.values()}
+    target = publication[kind]
+    apply = tf._apply_deploy_plan
+
+    def interleaved(plan, state, inputs=None):
+        target.write_text(contents, encoding="utf-8")
+        return apply(plan, state, inputs)
+
+    monkeypatch.setattr(tf, "_apply_deploy_plan", interleaved)
+    assert lp.main(["demo"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "blocked"
+    assert target.read_text(encoding="utf-8") == contents
+    for path, original in before.items():
+        if path != target:
+            assert (path.read_bytes(), path.stat().st_mtime_ns) == original
+
+
+def test_valid_jsonc_settings_keep_comments_when_no_cleanup_is_needed(publication, capsys):
+    path = publication["settings"]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["help"] = 'https://example.invalid/"quoted"/*literal*/'
+    text = "// Terminal settings\n" + json.dumps(data)[:-1] + ", /* trailing */ }\n"
+    path.write_text(text, encoding="utf-8")
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    assert lp.main(["demo"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "verified_current"
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.parametrize("kind", ["state", "settings"])
+def test_absent_optional_terminal_input_is_supported(tmp_path, kind):
+    path = tmp_path / f"{kind}.json"
+    assert TerminalInputs().read(path, kind=kind) is None
+    try:
+        path.symlink_to(tmp_path / "absent.json")
+    except OSError as error:
+        pytest.skip(f"Symlink creation unavailable: {error}")
+    with pytest.raises(ValueError, match="Cannot read valid Terminal input"):
+        TerminalInputs().read(path, kind=kind)

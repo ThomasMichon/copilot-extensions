@@ -344,6 +344,12 @@ null or missing-key document is not permission to retire profiles. Shortcut
 display names are validated before fragment publication, not after it. Engine
 callers pass their resolved `--machine` key so global configuration and machine
 detection do not depend on a project-local machine setting.
+Publication also validates existing Terminal fragments, state and settings
+before writing, retaining the input bytes through reconciliation and refusing
+observed drift. Missing optional documents remain valid; malformed or denied
+reads never become empty profile inventories. Terminal settings support JSONC
+comments and trailing commas. When settings need cleanup, their original bytes
+are backed up; unchanged settings are not rewritten.
 Publishing rejects blank/non-string selection identifiers and unknown kinds,
 including when inputs change during collection; it never silently converts a
 shell typo into an agent launch.
