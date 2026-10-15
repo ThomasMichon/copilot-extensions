@@ -573,7 +573,7 @@ jobs:
     # exists to react automatically to real validation runs), so the fix is
     # to just never offer that path, rather than trying to harden a job
     # whose own YAML could be attacker-controlled.
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, promote, merge-promotion, publish-python-artifacts, postmerge-workflows]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, promote, materialized-candidate-plan, materialized-candidate-consumers, merge-promotion, publish-python-artifacts, postmerge-workflows]
     if: >-
       always() &&
       github.event_name == 'repository_dispatch' &&
@@ -586,6 +586,8 @@ jobs:
        needs.build-python-artifacts.result == 'failure' ||
        needs.python-artifacts.result == 'failure' ||
        needs.promote.result == 'failure' ||
+       needs.materialized-candidate-plan.result == 'failure' ||
+       needs.materialized-candidate-consumers.result == 'failure' ||
        needs.merge-promotion.result == 'failure' ||
        needs.publish-python-artifacts.result == 'failure' ||
        needs.postmerge-workflows.result == 'failure')
@@ -1226,10 +1228,90 @@ jobs:
           fi
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
 
+  materialized-candidate-plan:
+    name: Resolve exact materialized consumer inventory
+    needs: [gate, promote]
+    if: needs.promote.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.inventory.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.promote.outputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: inventory
+        env:
+          CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
+        run: |
+          matrix=$(python -I -B trusted/tools/validate_materialized_candidate.py \
+            --root candidate --candidate-sha "$CANDIDATE_SHA" \
+            --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --matrix)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  materialized-candidate-consumers:
+    name: Materialized consumer (${{ matrix.component }}, ${{ matrix.os }})
+    needs: [gate, promote, materialized-candidate-plan]
+    if: >-
+      needs.promote.outputs.pr_number != '' &&
+      needs.materialized-candidate-plan.result == 'success'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.minutes }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.materialized-candidate-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.promote.outputs.candidate_sha }}
+          path: candidate
+          fetch-depth: ${{ matrix.component == 'plugin:agent-bridge' && '0' || '2' }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Execute actual candidate consumer and recheck immutable inputs
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          python -I -B trusted/tools/validate_materialized_candidate.py \
+            --root candidate --candidate-sha "$CANDIDATE_SHA" \
+            --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component "$COMPONENT"
+
   merge-promotion:
     name: Merge the exact ready candidate without administrator authority
-    needs: promote
-    if: needs.promote.outputs.pr_number != ''
+    needs: [promote, materialized-candidate-plan, materialized-candidate-consumers]
+    if: >-
+      needs.promote.outputs.pr_number != '' &&
+      needs.materialized-candidate-plan.result == 'success' &&
+      needs.materialized-candidate-consumers.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 330
     permissions:

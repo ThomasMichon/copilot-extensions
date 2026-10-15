@@ -38,7 +38,11 @@ def waiter(monkeypatch, tmp_path):
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(time, "sleep", lambda _: None)
     assert workflow["concurrency"]["cancel-in-progress"] is False
-    assert merge_job["needs"] == "promote"
+    assert set(merge_job["needs"]) == {
+        "promote", "materialized-candidate-plan", "materialized-candidate-consumers",
+    }
+    assert "needs.materialized-candidate-plan.result == 'success'" in merge_job["if"]
+    assert "needs.materialized-candidate-consumers.result == 'success'" in merge_job["if"]
     assert merge_job["permissions"]["contents"] == "write"
     assert merge_job["permissions"]["pull-requests"] == "write"
     assert "secrets." not in json.dumps(merge_job)

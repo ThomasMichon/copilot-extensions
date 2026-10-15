@@ -62,6 +62,31 @@ Path-scoped CI runs a fresh public toolchain plus real first-party wheel
 builds on a public hosted runner. Managed machines should retain governed
 mode when exercising the builder locally.
 
+### Materialized candidate consumer gate
+
+Before the checkout-free merger can advance `main`, the exact pushed candidate
+has a separate consumer gate. `materialized-candidate-plan` validates its
+immutable candidate/dev/main identities and builds the consumer matrix from
+the actual generated tree. `materialized-candidate-consumers` executes the
+existing plugin recipes (collection plus guards for Worktrees), Manager and
+standalone Dispatch/Index, retaining Index's native Windows lane.
+
+Each consumer gets a fresh public-hosted runner, `contents: read`, no release
+environment or API/release authority, and credential-free checkouts of both
+the pinned trusted validator and the candidate. Candidate test code executes
+only in this unprivileged lane, never the signer, writer or merger. The
+validator checks the candidate checkout, single main parent, composition state
+and unchanged tracked inputs before and after execution. A failed, missing,
+skipped or cancelled consumer cannot authorize merge. The existing expected-head
+freshness, artifact readiness and post-merge verification remain in force.
+
+This intentionally validates a different, materialized input from the earlier
+development-layout suites. Initially it reuses actual consumer recipes rather
+than an unproved reduced selector. The temporary post-merge overlap is not
+silently retired: later consolidation needs the existing exact-input,
+recipe/platform and authoritative-execution equivalence proof. Package
+attestation is not test-suite evidence.
+
 ### Promotion artifact transfer, signing and publication
 
 After the full validation gate, `build-python-artifacts` runs from the default
