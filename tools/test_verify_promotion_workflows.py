@@ -291,6 +291,14 @@ def workflows():
     }
 
 
+def test_index_smoke_budget_covers_setup_and_cleanup_without_widening_other_plugins():
+    smoke = workflows()["ci.yml"]["jobs"]["smoke"]
+    assert smoke["timeout-minutes"] == (
+        "${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index') && 12 || 8 }}"
+    )
+    assert smoke["strategy"]["fail-fast"] is False
+
+
 def test_dispatch_mode_preserves_main_push_coverage_without_manual_exhaustive_tiers():
     ci = workflows()["ci.yml"]
     jobs = ci["jobs"]

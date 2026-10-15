@@ -728,6 +728,18 @@ win grows with build complexity.
   dispatches new consumers; it still uses the original run creation time
   as the inclusive discovery bound. This does not change the implementation
   or claim reuse of a prior attempt's consumer runs.
+- Exact-head hosted CI run `38659619307` exposed a separate measured budget
+  failure, not a test failure to bypass: `agent-index` job `116181814124`
+  exceeded its eight-minute whole-job limit after every test and cleanup
+  step succeeded. The split suites reported 375 passed/23 skipped in 305.64
+  seconds and 99 passed in 2.52 seconds; the runner wrapper also reported
+  success. Hosted setup and teardown brought the job to 8 minutes 2 seconds,
+  and the platform cancellation correctly failed the aggregate gate.
+  The index plugin now shares the existing twelve-minute dispatch bound;
+  all other plugin job limits and every test/aggregate condition remain
+  unchanged. This narrowly fixes the observed setup/test/cleanup allowance,
+  rather than retrying an undocumented failure or skipping the required gate.
+  A new hosted exact-head run must still prove the correction.
 
 ### 2026-10-14 - Candidate-scoped readiness before merge
 
