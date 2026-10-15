@@ -32,7 +32,10 @@ from ssh_manager.locks import pid_alive
 from .config import LEASE_FILE, STATE_DIR, ContainersConfig, ensure_state_dir
 from .lifecycle import list_containers
 from .private_state import atomic_write_json
-from .lease_lock import PROTOCOL, LockCutoverError, provider_lock, require_legacy_writers_quiesced
+from .lease_lock import (
+    PROTOCOL, LockCutoverError, legacy_writer_quiesced, provider_lock,
+    require_legacy_writers_quiesced,
+)
 
 log = logging.getLogger("agent-containers")
 
@@ -134,12 +137,15 @@ def _this_environment() -> str:
 @contextmanager
 def _lease_lock(
     timeout: float = 10.0, poll: float = 0.05, *, clear_expired_corruption: bool = False,
+    cleanup_only: bool = False,
 ) -> Iterator[None]:
     """Serialize admission, lifecycle and binding writers with kernel ownership."""
     ensure_state_dir()
     try:
         with provider_lock(_LOCK_FILE, timeout=timeout, poll=poll):
-            require_legacy_writers_quiesced(clear_expired_corruption=clear_expired_corruption)
+            require_legacy_writers_quiesced(
+                clear_expired_corruption=clear_expired_corruption, cleanup_only=cleanup_only,
+            )
             yield
     except LockCutoverError as exc:
         raise ProviderAdmissionError(str(exc)) from exc
@@ -775,7 +781,7 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
     Windows and WSL cannot safely inspect each other's process IDs.
     """
     cleared = {"deploy_holds": 0, "session_admissions": 0}
-    with _lease_lock(clear_expired_corruption=True):
+    with _lease_lock(clear_expired_corruption=True, cleanup_only=True):
         for path, record_type, ttl, counter in (
             (
                 _DEPLOY_HOLDS_FILE,
@@ -805,7 +811,11 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
             kept = {}
             for key, record in records.items():
                 selected = container is None or record.container == container
-                if selected and not _record_live(record, ttl):
+                can_clear = (
+                    legacy_writer_quiesced(record)
+                    if record.lock_protocol == "legacy" else not _record_live(record, ttl)
+                )
+                if selected and can_clear:
                     cleared[counter] += 1
                     continue
                 kept[key] = record

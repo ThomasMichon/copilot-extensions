@@ -14,7 +14,7 @@ from session_liveness_probe import (
 )
 
 from .config import DISPATCH_ONLY_LABEL, RESTRICTED_PROFILE, SECURITY_UID_LABEL, ContainersConfig, FleetConfig
-from .dispatch_projection import probe_worker_liveness
+from .dispatch_projection import close_worker_admission, probe_worker_liveness
 from .lease import (
     ProviderAdmissionError,
     active_session_admissions,
@@ -632,6 +632,17 @@ def _restricted_member_action(
                     verify_pinned_capture(rescue_pin)
                 _verify_generation(latest.container_id, generation)
                 if action is not None:
+                    if ((inspected.get("Config") or {}).get("Labels") or {}).get(
+                        DISPATCH_ONLY_LABEL,
+                    ) == "true":
+                        guest_gate = close_worker_admission(
+                            latest.name, latest.container_id, inspected, hold_token=hold.token,
+                        )
+                        if guest_gate.state != "idle":
+                            return DestructiveResult(
+                                info.name, "deferred", guest_gate.reason,
+                                rescue=rescue, telemetry_abandoned=telemetry_abandoned,
+                            )
                     _perform_action(
                         info.name,
                         hold.token,

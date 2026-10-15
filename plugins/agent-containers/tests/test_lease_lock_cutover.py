@@ -93,8 +93,9 @@ def test_live_legacy_writers_refuse_cutover_even_with_expired_heartbeats(state, 
     with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
         with lease._lease_lock(timeout=0.1):
             pytest.fail("a live legacy heartbeat writer was ignored")
-    with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
-        lease.clear_stale_provider_records()
+    assert lease.clear_stale_provider_records() == {
+        "deploy_holds": 0, "session_admissions": 0,
+    }
     assert json.loads(path.read_text()) == {"legacy": fields}
 
 
@@ -127,14 +128,48 @@ def test_foreign_legacy_writer_remains_protected_after_blocked_heartbeat(state, 
             with lease._lease_lock(timeout=0.1):
                 pytest.fail("foreign legacy writer was admitted after blocking its heartbeat")
         assert lease._LOCK_FILE.is_dir()
-        with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
-            lease.clear_stale_provider_records()
+        assert lease.clear_stale_provider_records() == {
+            "deploy_holds": 0, "session_admissions": 0,
+        }
         assert path.read_bytes() == original
     monkeypatch.setattr(lease, "_this_environment", lambda: fields["environment"])
     with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
         with lease._lease_lock(timeout=0.1):
             pytest.fail("the owner environment ignored its live legacy PID")
     monkeypatch.setattr(lease, "_pid_alive", lambda pid: False)
+    with lease._lease_lock(timeout=0.1):
+        assert lease._LOCK_FILE.is_dir()
+
+
+@pytest.mark.parametrize("kind", ["admission", "hold"])
+def test_each_environment_can_clear_only_its_verified_dead_legacy_writer(state, monkeypatch, kind):
+    monkeypatch.setattr(lease, "_this_host", lambda: "shared-host")
+    environment = "windows"
+    monkeypatch.setattr(lease, "_this_environment", lambda: environment)
+    monkeypatch.setattr(lease, "_pid_alive", lambda pid: False)
+    fields = {
+        "container": "pool-1", "token": "legacy", "pid": 123,
+        "host": "shared-host", "acquired_at": 1, "heartbeat_at": 1,
+    }
+    if kind == "hold":
+        fields.update(operation="remove", expires_at=2)
+        path, counter = lease._DEPLOY_HOLDS_FILE, "deploy_holds"
+    else:
+        path, counter = lease._SESSION_ADMISSIONS_FILE, "session_admissions"
+    path.write_text(json.dumps({
+        owner: {**fields, "environment": owner} for owner in ("windows", "wsl")
+    }), encoding="utf-8")
+    for environment, remaining in (("windows", {"wsl"}), ("wsl", set())):
+        if environment == "windows":
+            with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
+                with lease._lease_lock(timeout=0.1):
+                    pytest.fail("normal admission bypassed a foreign legacy writer")
+        assert lease.clear_stale_provider_records()[counter] == 1
+        assert set(json.loads(path.read_text())) == remaining
+        if remaining:
+            with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
+                with lease._lease_lock(timeout=0.1):
+                    pytest.fail("local cleanup opened admission past a foreign legacy writer")
     with lease._lease_lock(timeout=0.1):
         assert lease._LOCK_FILE.is_dir()
 

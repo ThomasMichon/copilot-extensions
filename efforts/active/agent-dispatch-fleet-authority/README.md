@@ -326,6 +326,36 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-15 -- Guest lifecycle closure and mixed-environment recovery
+- Current-head #6745 review found that a delayed Docker exec could outlive its
+  wrapper, resume after the final idle probe and start before destruction.
+  The final action now closes root-owned guest admission under the worker lock.
+  Each host launch/closure reserves a monotonic private generation before
+  publication; an admitted launch also receives a fresh nonce. Workers check
+  that exact pair after acquiring the guest lock. Old launches and surviving
+  helpers cannot cross closure or restore an older admission after reopening.
+- Added a cleanup-only kernel transaction for legacy admission and lifecycle
+  records. Each environment can remove only its locally verified-dead writers;
+  foreign and live writers remain protected. Normal admission does not inherit
+  this exception. A two-environment regression proves sequential cleanup restores
+  operation without treating blocked heartbeat expiry as evidence of death.
+- Coupled native projection, replacement, lease and cutover contracts: 183
+  passed. Actual offline, read-only, capability-dropped Docker guest proof:
+  one passed in 24.04 seconds. It kills only the host wrapper before the guest
+  lock, verifies the surviving guest, closes admission, then observes refusal
+  with no application execution. Reopening rejects stale helpers and launch
+  argv while a fresh admitted launch succeeds. Touched Python lint and the
+  13-plugin install contract pass.
+- The first Docker proof hit its unchanged test limit during repeated immutable
+  executable discovery. Its final fixture reuses real verified resolutions
+  only for the same physical instance, start generation, configuration and
+  mounts; no production cache or timeout widening was introduced. The timed-out
+  fixture was explicitly removed, and the final run left no fixture containers.
+  Helpers also have bounded lifetimes and automatic Docker cleanup.
+- This is provider/primitive acceptance, not real central-task delivery,
+  supervisor renewal or first fleet enrollment. Those parent-effort gates
+  remain open; promotion and authorized rollout remain automatic/external.
+
 ### 2026-10-15 -- Foreign legacy cutover cannot expire its own protection
 - Current-head review of #6745 found a real migration defect: replacing the
   legacy lock pathname blocks old heartbeat writers, so elapsed heartbeat

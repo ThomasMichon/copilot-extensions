@@ -52,7 +52,23 @@ def provider_lock(path: Path, *, timeout: float, poll: float) -> Iterator[None]:
         yield
 
 
-def require_legacy_writers_quiesced(*, clear_expired_corruption: bool) -> None:
+def legacy_writer_quiesced(record) -> bool:
+    from . import lease
+
+    if (
+        type(record.pid) is not int or record.pid <= 0
+        or not isinstance(record.host, str) or not record.host
+        or not isinstance(record.environment, str) or not record.environment
+    ):
+        raise lease.ProviderAdmissionError("Legacy provider writer identity is indeterminate")
+    if record.host != lease._this_host() or record.environment != lease._this_environment():
+        return False
+    return not lease._pid_alive(record.pid)
+
+
+def require_legacy_writers_quiesced(
+    *, clear_expired_corruption: bool, cleanup_only: bool = False,
+) -> None:
     from . import lease
 
     for path, record_type, ttl in (
@@ -76,12 +92,13 @@ def require_legacy_writers_quiesced(*, clear_expired_corruption: bool) -> None:
                 continue
             if record.lock_protocol != "legacy":
                 raise lease.ProviderAdmissionError("Provider record has an unknown lock protocol")
+            if cleanup_only:
+                continue
             try:
-                local = record.host == lease._this_host() and record.environment == lease._this_environment()
-                live = lease._pid_alive(record.pid) if local else True
+                quiesced = legacy_writer_quiesced(record)
             except (AttributeError, TypeError, ValueError) as exc:
                 raise lease.ProviderAdmissionError("Legacy provider writer liveness is indeterminate") from exc
-            if live:
+            if not quiesced:
                 raise lease.ProviderAdmissionError(
                     "Legacy provider writers must quiesce before lock protocol cutover"
                 )

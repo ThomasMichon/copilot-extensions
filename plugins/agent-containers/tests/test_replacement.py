@@ -211,6 +211,48 @@ def test_guest_worker_lock_blocks_destructive_lifecycle(monkeypatch, operation, 
     assert actions == []
 
 
+@pytest.mark.parametrize("operation", ["stop", "remove", "recreate"])
+@pytest.mark.parametrize("gate_state", ["idle", "active", "unknown"])
+def test_destructive_action_requires_closed_guest_admission(monkeypatch, operation, gate_state):
+    from agent_containers.config import DISPATCH_ONLY_LABEL
+
+    config, fleet = _config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    inspect = replacement.inspect_container
+    def dispatch_inspect(name):
+        result = inspect(name)
+        result["Config"]["Labels"][DISPATCH_ONLY_LABEL] = "true"
+        return result
+    monkeypatch.setattr(replacement, "inspect_container", dispatch_inspect)
+    monkeypatch.setattr(
+        replacement, "_probe_member_liveness",
+        lambda *args, **kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    monkeypatch.setattr(
+        replacement, "capture_restricted_sessions", lambda *args, **kwargs: {"status": "verified"},
+    )
+    events = []
+    def close(name, physical, inspected, *, hold_token):
+        assert (name, physical, hold_token) == (info.name, info.container_id, "hold-token")
+        events.append("guest-admission")
+        return replacement.SessionLiveness(gate_state, [], [], "restricted guest admission")
+    monkeypatch.setattr(replacement, "close_worker_admission", close)
+    monkeypatch.setattr(
+        replacement, "_perform_action", lambda *args, **kwargs: events.append("action"),
+    )
+    if operation == "stop":
+        result = replacement.stop_restricted_member(config, fleet, info, force_abandon=True)
+    else:
+        result = replacement.destroy_restricted_member(
+            config, fleet, info, operation=operation, force_remove=True, force_abandon=True,
+        )
+    expected = ["guest-admission", "action"] if gate_state == "idle" else ["guest-admission"]
+    assert events == expected
+    if gate_state != "idle":
+        assert result.status == "deferred"
+
+
 def test_unknown_session_probe_blocks_removal(monkeypatch):
     config, fleet = _config()
     info = _member()

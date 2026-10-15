@@ -55,6 +55,16 @@ terminating only the host wrapper does not admit a duplicate surviving worker.
 Destructive lifecycle probes that guest lock under its provider hold, both
 before rescue and immediately before stop/removal/recreation; an active or
 unreadable lock defers the action even without host admission or Copilot markers.
+Before the destructive action, the provider closes guest admission under that
+lock. Root-owned admission generations fence delayed Docker exec commands even
+after their host wrapper dies; a later admitted host launch gets a new nonce
+and cannot revive old launches or delayed helpers. Closure failure defers the
+action. This does not change task ownership, token authority or lease duration.
+The opt-in `test_dispatch_admission_gate.py` acceptance proof uses
+`CE_TEST_DISPATCH_DOCKER=1` with a cached `node:22-bookworm-slim` image.
+Its disposable guest is offline, read-only and capability-dropped; it verifies
+host-wrapper death before guest lock acquisition, delayed-launch refusal,
+monotonic helper fencing and a fresh admitted launch without changing deadlines.
 Lock-protocol cutover waits for an existing legacy lock file to be released;
 it never steals or deletes that file. The new `leases.lock` is a private
 directory with its kernel lock inside, so old O_EXCL/unlink writers cannot
@@ -64,8 +74,11 @@ unidentifiable legacy lock file requires verified operator quiescence rather
 than automatic age-based removal; no active wrapper is forcibly terminated.
 Legacy records from another environment remain blocking even after heartbeat
 expiry: cutover prevents their old writers from refreshing that heartbeat.
-Quiesce them in their owning environment, where dead-PID verification permits
-cleanup; expiry alone never proves foreign legacy quiescence.
+Quiesce them in their owning environment and run `lifecycle-clear` there.
+Its cleanup-only transaction removes only locally verified-dead legacy records
+while preserving foreign and live records, so each environment can clean up
+without opening normal admission prematurely. Expiry alone never proves
+foreign legacy quiescence.
 The provider's creation-time binding identity is pinned in both an
 immutable Docker label and owner-private state. Missing, corrupt or mismatched
 birth state is not an unused slot: preparation refuses it and requires

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import shlex
 import subprocess
 import threading
 import time
@@ -312,15 +313,77 @@ def test_missing_birth_authority_or_forged_birth_label_never_allows_reassignment
 
 def test_worker_argv_contains_nonsecret_projection_and_immutable_bash(target):
     binding = projection.prepare("pool-1", PHYSICAL_ID, FACTS)
-    argv = projection.build_spawn_command(target, binding, "copilot --acp --stdio")
+    argv = projection.build_spawn_command(
+        target, binding, "copilot --acp --stdio", worker_admission=(1, "e" * 32),
+    )
     assert argv[:3] == ["docker", "exec", "-i"]
     assert argv[-6:-1] == [PHYSICAL_ID, "/usr/bin/bash", "--noprofile", "--norc", "-c"]
     assert f"exec 9<{projection.WORKER_LOCK}" in argv[-1]
     assert "/usr/bin/flock --nonblock 9 || exit 75" in argv[-1]
+    assert shlex.quote(projection._CHECK_WORKER_ADMISSION) in argv[-1]
     assert "copilot --acp --stdio" in argv[-1]
     assert f"AGENT_DISPATCH_TASK_TOKEN_FILE={projection.TOKEN_FILE}" in argv
     assert "AGENT_DISPATCH_TASK_TOKEN" not in argv
     assert "GH_TOKEN" not in argv and "AGENT_DISPATCH_CONTROL_TOKEN" not in argv
+
+
+def test_worker_admission_generation_advances_before_guest_publication(target):
+    binding = projection.prepare("pool-1", PHYSICAL_ID, FACTS)
+    inspected = lifecycle.inspect_container(PHYSICAL_ID)
+    with lease.session_admission(
+        "pool-1", dispatch_container_id=PHYSICAL_ID, dispatch_binding_id=binding["binding_id"],
+    ) as admission:
+        first = projection._reserve_worker_admission(
+            "pool-1", PHYSICAL_ID, inspected, admission_token=admission.token,
+        )
+        assert first[0] == 1 and len(first[1]) == 32
+    with lease.deploy_hold("pool-1", "stop") as hold:
+        closed = projection._reserve_worker_admission(
+            "pool-1", PHYSICAL_ID, inspected, hold_token=hold.token,
+        )
+        assert closed == (2, "")
+        assert projection._read(PHYSICAL_ID)["worker_admission_generation"] == 2
+        with pytest.raises(RuntimeError, match="admission changed"):
+            projection._reserve_worker_admission(
+                "pool-1", PHYSICAL_ID, inspected, admission_token=first[1],
+            )
+    with lease.session_admission(
+        "pool-1", dispatch_container_id=PHYSICAL_ID, dispatch_binding_id=binding["binding_id"],
+    ) as admission:
+        reopened = projection._reserve_worker_admission(
+            "pool-1", PHYSICAL_ID, inspected, admission_token=admission.token,
+        )
+        assert reopened[0] == 3 and reopened[1] != first[1]
+    assert projection._read(PHYSICAL_ID)["task_id"] == binding["task_id"]
+
+
+@pytest.mark.parametrize("generation", [-1, True, "1", 2**53])
+def test_invalid_worker_admission_generation_fails_closed(target, generation):
+    binding = projection.prepare("pool-1", PHYSICAL_ID, FACTS)
+    binding["worker_admission_generation"] = generation
+    projection.atomic_write_json(projection._path(PHYSICAL_ID), binding)
+    with pytest.raises(RuntimeError, match="binding is invalid"):
+        projection._read(PHYSICAL_ID)
+
+
+@pytest.mark.parametrize("code,expected", [(0, "idle"), (75, "active"), (1, "unknown")])
+def test_closing_guest_admission_requires_exact_lifecycle_hold(target, monkeypatch, code, expected):
+    calls = []
+    monkeypatch.setattr(
+        projection.subprocess, "run",
+        lambda argv, **kwargs: calls.append(argv) or subprocess.CompletedProcess(argv, code),
+    )
+    inspected = lifecycle.inspect_container(PHYSICAL_ID)
+    with lease.deploy_hold("pool-1", "stop") as hold:
+        result = projection.close_worker_admission(
+            "pool-1", PHYSICAL_ID, inspected, hold_token=hold.token,
+        )
+    assert result.state == expected
+    assert shlex.quote(projection._WRITE_WORKER_ADMISSION) in calls[0][-1]
+    assert "--conflict-exit-code 75" in calls[0][-1]
+    assert projection.close_worker_admission(
+        "pool-1", PHYSICAL_ID, inspected, hold_token="missing",
+    ).state == "unknown"
 
 
 def test_cli_projection_output_never_includes_token(target, monkeypatch, capsys):

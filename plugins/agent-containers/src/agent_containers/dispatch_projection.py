@@ -27,6 +27,7 @@ from .restricted_exec import resolve_executable, sanitized_exec_prefix
 TOKEN_FILE = "/run/agent-dispatch/task-token"
 WORKER_LOCK = "/run/agent-dispatch/worker.lock"
 PUBLICATION_LOCK = "/run/agent-dispatch/publication.lock"
+WORKER_ADMISSION = "/run/agent-dispatch/worker-admission"
 _STATE = STATE_DIR / "dispatch-bindings"
 _FACTS = {"task_id", "worker_id", "generation", "coordinator_epoch", "coordinator_url"}
 _ID = re.compile(r"[0-9a-f]{64}")
@@ -122,6 +123,59 @@ try {
 }
 """
 
+_WRITE_WORKER_ADMISSION = _ROOT_DIRECTORY + r"""
+let tmp;
+try {
+  const generation = Number(process.argv[1]), nonce = process.argv[2];
+  if (!Number.isSafeInteger(generation) || generation <= 0 ||
+      (nonce !== '' && !/^[0-9a-f]{32}$/.test(nonce))) throw Error();
+  const dir = rootDirectory(), dest = dir + '/worker-admission';
+  try {
+    const st = fs.lstatSync(dest);
+    if (!st.isFile() || st.uid !== 0 || (st.mode & 0o777) !== 0o444 ||
+        st.size > 1024) throw Error();
+    const old = JSON.parse(fs.readFileSync(dest, 'utf8'));
+    if (Object.keys(old).sort().join(',') !== 'generation,nonce' ||
+        !Number.isSafeInteger(old.generation) || old.generation <= 0 ||
+        typeof old.nonce !== 'string' ||
+        (old.nonce !== '' && !/^[0-9a-f]{32}$/.test(old.nonce)) ||
+        generation < old.generation ||
+        (generation === old.generation && nonce !== old.nonce)) throw Error();
+  } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  tmp = dir + '/.' + crypto.randomBytes(16).toString('hex');
+  const fd = fs.openSync(tmp, fs.constants.O_CREAT | fs.constants.O_EXCL |
+                        fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o444);
+  try {
+    fs.writeFileSync(fd, JSON.stringify({generation, nonce}));
+    fs.fchmodSync(fd, 0o444); fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
+  fs.renameSync(tmp, dest); tmp = undefined;
+} catch (_) {
+  if (tmp) { try { fs.unlinkSync(tmp); } catch (_) {} }
+  process.stderr.write('Restricted worker admission publication failed\n');
+  process.exitCode = 1;
+}
+"""
+
+_CHECK_WORKER_ADMISSION = r"""
+const fs = require('fs');
+try {
+  const dir = fs.lstatSync('/run/agent-dispatch');
+  const dest = '/run/agent-dispatch/worker-admission', st = fs.lstatSync(dest);
+  if (!dir.isDirectory() || dir.uid !== 0 || (dir.mode & 0o777) !== 0o755 ||
+      !st.isFile() || st.uid !== 0 || (st.mode & 0o777) !== 0o444 ||
+      st.size > 1024) throw Error();
+  const value = JSON.parse(fs.readFileSync(dest, 'utf8'));
+  if (Object.keys(value).sort().join(',') !== 'generation,nonce' ||
+      !Number.isSafeInteger(value.generation) || value.generation <= 0 ||
+      value.generation !== Number(process.argv[1]) || !value.nonce ||
+      value.nonce !== process.argv[2]) throw Error();
+} catch (_) {
+  process.stderr.write('Restricted worker admission is closed or superseded\n');
+  process.exitCode = 75;
+}
+"""
+
 
 def _path(container_id: str) -> Path:
     if not isinstance(container_id, str) or not _ID.fullmatch(container_id):
@@ -172,7 +226,7 @@ def _read(container_id: str) -> dict | None:
     try:
         if (
             not isinstance(raw, dict)
-            or set(raw) - {"attempted_expires_at"} != _FACTS | {
+            or set(raw) - {"attempted_expires_at", "worker_admission_generation"} != _FACTS | {
                 "version", "container_id", "binding_id", "owner_session_id", "expires_at"
             }
             or type(raw["version"]) is not int or raw["version"] != 1
@@ -203,6 +257,9 @@ def _read(container_id: str) -> dict | None:
         if expiry is not None and attempted is None:
             raise ValueError
         if attempted is not None and raw["owner_session_id"] is None:
+            raise ValueError
+        admission_generation = raw.setdefault("worker_admission_generation", 0)
+        if type(admission_generation) is not int or not 0 <= admission_generation < 2**53:
             raise ValueError
     except (KeyError, TypeError, ValueError, RuntimeError):
         raise RuntimeError("Container task binding is invalid; refusing admission") from None
@@ -361,7 +418,9 @@ def environment(binding: dict) -> dict[str, str]:
     }
 
 
-def build_spawn_command(target, binding: dict, acp_command: str) -> list[str]:
+def build_spawn_command(
+    target, binding: dict, acp_command: str, *, worker_admission: tuple[int, str],
+) -> list[str]:
     from . import lifecycle
 
     inspected = lifecycle.inspect_container(target.container_id)
@@ -375,6 +434,10 @@ def build_spawn_command(target, binding: dict, acp_command: str) -> list[str]:
         target.container_id, target.user, inspected, kind="flock",
         deadline=time.monotonic() + 30,
     )
+    node, _ = resolve_executable(
+        target.container_id, target.user, inspected, kind="node",
+        deadline=time.monotonic() + 30,
+    )
     _initialize_worker_lock(target, inspected)
     prefix = sanitized_exec_prefix(target.container_id, target.user, home)
     projected = environment(binding)
@@ -384,6 +447,8 @@ def build_spawn_command(target, binding: dict, acp_command: str) -> list[str]:
     fenced = (
         f"exec 9<{shlex.quote(WORKER_LOCK)}; "
         f"{shlex.quote(flock)} --nonblock 9 || exit 75; "
+        f"{shlex.quote(node)} -e {shlex.quote(_CHECK_WORKER_ADMISSION)} "
+        f"{worker_admission[0]} {shlex.quote(worker_admission[1])} || exit 75; "
         f"exec {shlex.quote(bash)} --noprofile --norc -c {shlex.quote(acp_command)}"
     )
     return [
@@ -430,6 +495,86 @@ def build_publication_command(container_id: str, inspected: dict, expiry: float)
         *prefix[:2], "-i", *prefix[2:], bash, "--noprofile", "--norc", "-c", script,
     ]
 
+def _reserve_worker_admission(
+    name: str, container_id: str, inspected: dict, *, admission_token: str | None = None,
+    hold_token: str | None = None,
+) -> tuple[int, str]:
+    from . import lease
+
+    with lease._lease_lock():
+        binding = _read(container_id)
+        labels = (inspected.get("Config") or {}).get("Labels") or {}
+        if (
+            binding is None or inspected.get("Id") != container_id
+            or labels.get(DISPATCH_BINDING_LABEL) != binding["binding_id"]
+            or (admission_token is None) == (hold_token is None)
+        ):
+            raise RuntimeError("Restricted worker admission authority is missing or mismatched")
+        holds = lease._read_live_records(
+            lease._DEPLOY_HOLDS_FILE, lease.DeployHold, lease.DEPLOY_HOLD_TTL,
+        )
+        if admission_token is not None:
+            admissions = lease._read_live_records(
+                lease._SESSION_ADMISSIONS_FILE, lease.SessionAdmission, lease.SESSION_ADMISSION_TTL,
+            )
+            if name in holds or not any(
+                record.container == name and record.token == admission_token
+                for record in admissions.values()
+            ):
+                raise RuntimeError("Restricted worker launch admission changed")
+            nonce = os.urandom(16).hex()
+        else:
+            if name not in holds or holds[name].token != hold_token:
+                raise RuntimeError("Restricted worker lifecycle admission changed")
+            nonce = ""
+        generation = binding["worker_admission_generation"] + 1
+        if generation >= 2**53:
+            raise RuntimeError("Restricted worker admission generation exhausted")
+        binding["worker_admission_generation"] = generation
+        atomic_write_json(_path(container_id), binding)
+    return generation, nonce
+
+
+def _publish_worker_admission(
+    container_id: str, inspected: dict, admission: tuple[int, str],
+) -> int:
+    _initialize_worker_lock(SimpleNamespace(container_id=container_id), inspected)
+    deadline = time.monotonic() + 30
+    bash, home = resolve_executable(container_id, "0", inspected, kind="bash", deadline=deadline)
+    flock, _ = resolve_executable(container_id, "0", inspected, kind="flock", deadline=deadline)
+    node, _ = resolve_executable(container_id, "0", inspected, kind="node", deadline=deadline)
+    script = (
+        f"exec 9<{shlex.quote(WORKER_LOCK)} || exit 1; "
+        f"{shlex.quote(flock)} --nonblock --conflict-exit-code 75 9 || exit $?; "
+        f"exec {shlex.quote(node)} -e {shlex.quote(_WRITE_WORKER_ADMISSION)} "
+        f"{admission[0]} {shlex.quote(admission[1])}"
+    )
+    result = subprocess.run(
+        [*sanitized_exec_prefix(container_id, "0", home),
+         bash, "--noprofile", "--norc", "-c", script],
+        stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=30,
+        creationflags=no_window_flags(),
+    )
+    return result.returncode
+
+
+def close_worker_admission(
+    name: str, container_id: str, inspected: dict, *, hold_token: str,
+) -> SessionLiveness:
+    """Fence even delayed guest launches before a destructive lifecycle action."""
+    try:
+        admission = _reserve_worker_admission(
+            name, container_id, inspected, hold_token=hold_token,
+        )
+        code = _publish_worker_admission(container_id, inspected, admission)
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        return SessionLiveness("unknown", [], [], "restricted worker admission closure failed")
+    if code == 75:
+        return SessionLiveness("active", [], [], "active restricted worker lock present")
+    if code != 0:
+        return SessionLiveness("unknown", [], [], "restricted worker admission closure failed")
+    return SessionLiveness("idle", [], [])
+
 
 def probe_worker_liveness(container_id: str, inspected: dict) -> SessionLiveness:
     """Probe the guest-held lock, independent of host wrapper process lifetime."""
@@ -472,7 +617,8 @@ def launch_task(args, run_stdio) -> int:
 
 def _launch_task(args, run_stdio) -> int:
     from .config import load_config
-    from .lease import session_admission
+    from .lease import ProviderAdmissionError, session_admission
+    from .lifecycle import inspect_container
     from .resolver import _append_copilot_args, resolve_extra_copilot_args, resolve_live_exec_target
 
     binding_id, expected_id = args.dispatch_binding_id, args.expected_container_id
@@ -483,17 +629,24 @@ def _launch_task(args, run_stdio) -> int:
         raise RuntimeError("Container physical identity changed before task launch")
     with session_admission(
         args.name, dispatch_container_id=expected_id, dispatch_binding_id=binding_id,
-    ):
+    ) as admission:
         target = resolve_live_exec_target(
             args.name, config=load_config(), dispatch_binding_id=binding_id,
         )
         if target.container_id != expected_id:
             raise RuntimeError("Container physical identity changed after task admission")
+        binding = verify_binding(expected_id, binding_id)
+        inspected = inspect_container(expected_id)
+        worker_admission = _reserve_worker_admission(
+            args.name, expected_id, inspected, admission_token=admission.token,
+        )
+        if _publish_worker_admission(expected_id, inspected, worker_admission) != 0:
+            raise ProviderAdmissionError("Restricted worker guest admission is busy or superseded")
         command = build_spawn_command(
-            target, verify_binding(expected_id, binding_id),
+            target, binding,
             _append_copilot_args(
                 target.acp_command, resolve_extra_copilot_args(getattr(args, "copilot_args", None)),
-            ),
+            ), worker_admission=worker_admission,
         )
         env = os.environ.copy()
         if args.stdio:
