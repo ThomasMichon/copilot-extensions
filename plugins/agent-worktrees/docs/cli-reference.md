@@ -45,7 +45,9 @@ reported separately. These are contextual facts, never authorization.
 
 The combined startup lifecycle resolves and writes this block before
 worktree registration and other slower reconciliation. Fresh and resumed
-launches replace the exact-session snapshot; native context rollover reads
+launches replace the exact-session snapshot. A HOME-cwd resume that recovers
+its project during registration refreshes the identity from that project's
+registry before final guidance is read. Native context rollover reads
 the same file through the existing session-guidance pointer. No machine
 inventory or machine-specific value is checked into instruction projections.
 Without usable registry context, the observed hostname remains visible while

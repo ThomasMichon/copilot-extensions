@@ -1049,6 +1049,47 @@ def test_session_machine_rewrite_keeps_caller_payload_catalog(monkeypatch, tmp_p
     assert "No current agent-worktrees session guidance" not in content
 
 
+def test_session_machine_native_deployed_writer_keeps_payload_catalog(tmp_path):
+    deployed = tmp_path / "runtime" / "bin"
+    deployed.mkdir(parents=True)
+    for name in ("hook_client.py", "hook_runtime.py"):
+        (deployed / name).write_bytes((_SCRIPT.parent / name).read_bytes())
+    catalog = hook_client._command_catalog_context()
+    assert catalog.startswith(hook_client._COMMAND_CATALOG_HEADING)
+    payload = {
+        "sessionId": "deployed-writer",
+        "_agentWorktrees": {"commandCatalog": catalog},
+    }
+    child = (
+        "import importlib.util,json,sys; from pathlib import Path; "
+        "spec=importlib.util.spec_from_file_location('hook',sys.argv[1]); "
+        "hook=importlib.util.module_from_spec(spec); spec.loader.exec_module(hook); "
+        "ok=hook._write_session_guidance(json.load(sys.stdin),home=Path(sys.argv[2])); "
+        "print(json.dumps({'ok':ok}))"
+    )
+    environment = {
+        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "PYTHONPATH": "", "AGENT_HOME": str(tmp_path),
+    }
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    result = subprocess.run(
+        [sys.executable, "-c", child, str(deployed / "hook_client.py"), str(tmp_path)],
+        input=json.dumps(payload), capture_output=True, text=True,
+        timeout=20, env=environment,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"ok": True}
+    content = (
+        tmp_path / ".copilot" / "session-state" / "deployed-writer"
+        / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
+    ).read_text(encoding="utf-8")
+    assert catalog in content
+    assert "## Current machine identity" in content
+    assert not (deployed / "emit-command-catalog.ps1").exists()
+    assert not (deployed / "command_binding.py").exists()
+
+
 def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts(tmp_path):
     child = (
         "import importlib.util,json,sys; from pathlib import Path; "
@@ -1082,7 +1123,10 @@ def test_session_machine_native_first_touch_keeps_identity_when_lifecycle_aborts
     assert len(content.encode("utf-8")) <= 4096
 
 
-def test_session_machine_lifecycle_writes_guidance_before_registration(monkeypatch, tmp_path):
+@pytest.mark.parametrize("recover_project", [False, True])
+def test_session_machine_lifecycle_writes_guidance_before_registration(
+    monkeypatch, tmp_path, recover_project,
+):
     from agent_worktrees import local_cache_refresh
 
     (tmp_path / "machines.yaml").write_text(
@@ -1098,8 +1142,9 @@ def test_session_machine_lifecycle_writes_guidance_before_registration(monkeypat
         tmp_path / ".copilot" / "session-state" / "session-1"
         / "instructions" / "agent-worktrees" / "session-guidance.instructions.md"
     )
-    monkeypatch.setattr(main.cfg, "active_project", lambda: "project")
-    monkeypatch.setattr(main.cfg, "set_active_project", lambda value: None)
+    state = {"project": None if recover_project else "project"}
+    monkeypatch.setattr(main.cfg, "active_project", lambda: state["project"])
+    monkeypatch.setattr(main.cfg, "set_active_project", lambda value: state.update(project=value))
     monkeypatch.setattr(
         main.cfg, "load_config",
         lambda **kwargs: SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path))),
@@ -1129,6 +1174,11 @@ def test_session_machine_lifecycle_writes_guidance_before_registration(monkeypat
     def failed_registration(args):
         content = target.read_text(encoding="utf-8")
         assert '"hostname": "VM-ABC"' in content
+        if recover_project:
+            assert '"status": "unresolved"' in content
+            state["project"] = "recovered"
+            args.result_holder.append('{"additionalContext":"recovered binding"}')
+            return 0
         assert '"machine": "worker-a"' in content
         assert '"alias": "builder"' in content
         assert '"status": "resolved"' in content
@@ -1137,7 +1187,8 @@ def test_session_machine_lifecycle_writes_guidance_before_registration(monkeypat
     monkeypatch.setattr(main, "cmd_register_session", failed_registration)
     result = main._run_session_lifecycle(payload, deadline=time.time() + 30)
 
-    assert "Session registration failed" in result["_stderr"]
+    if not recover_project:
+        assert "Session registration failed" in result["_stderr"]
     assert '"machine": "worker-a"' in target.read_text(encoding="utf-8")
     assert len(target.read_bytes()) <= 4096
 
