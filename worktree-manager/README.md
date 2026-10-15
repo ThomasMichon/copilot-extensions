@@ -512,7 +512,9 @@ shared libraries under `libs/`, including their test sources; those suites
 remain owned by their canonical library lanes, not by Manager's default run.
 `tools/test_worktree_manager_collection.py` checks real materialization with a
 bounded selection of actual Manager test modules, preserves their collected
-IDs, and verifies that embedded library code and tests remain intact.
+IDs, and verifies that embedded library code and tests remain intact. It
+reconstructs development references from either checkout layout and compares
+canonical bytes using the materializer's exclusions for generated build metadata.
 
 Python + [uv](https://docs.astral.sh/uv/); the Phase 4 visual worktree-manager uses
 [Textual](https://textual.textualize.io/).

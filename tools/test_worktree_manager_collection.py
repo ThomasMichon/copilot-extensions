@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -16,12 +17,55 @@ REPO = Path(__file__).resolve().parent.parent
 MANAGER = REPO / "worktree-manager"
 
 
-def _files(root: Path) -> dict[str, bytes]:
+def _files(root: Path, *, apply_materializer_ignore: bool = False) -> dict[str, bytes]:
     return {
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in root.rglob("*")
         if path.is_file()
+        and not (
+            apply_materializer_ignore
+            and any(mm._ignore("", [part]) for part in path.relative_to(root).parts)
+        )
     }
+
+
+def _development_pyproject(consumer: Path) -> str:
+    text = (MANAGER / "pyproject.toml").read_text(encoding="utf-8")
+    sources = mm.uer.tomllib.loads(text)["tool"]["uv"]["sources"]
+    span = mm.uer.uv_sources_table_span(text)
+    assert sources and span is not None
+    entries = []
+    for name, entry in sources.items():
+        lib = Path(entry["path"]).name
+        assert mm.uer.is_safe_lib_name(lib)
+        canonical = REPO / "libs" / lib
+        assert (canonical / "pyproject.toml").is_file()
+        path = Path(os.path.relpath(canonical, consumer)).as_posix()
+        entries.append(f"{json.dumps(name)} = {{ path = {json.dumps(path)}, editable = true }}")
+    start, end = span
+    return text[:start] + "\n" + "\n".join(entries) + "\n\n" + text[end:]
+
+
+def test_canonical_bytes_follow_materializer_ignore_at_every_component(tmp_path: Path):
+    canonical = tmp_path / "canonical"
+    owned = canonical / "src" / "package" / "owned.py"
+    owned.parent.mkdir(parents=True)
+    owned.write_bytes(b"VALUE = 1\n")
+    ignored = (
+        "src/package.egg-info/PKG-INFO",
+        "src/package/__pycache__/owned.pyc",
+        "tests/build/nested/test_generated.py",
+        "tests/.pytest_cache/v/cache/nodeids",
+    )
+    for relative in ignored:
+        path = canonical / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"generated metadata\n")
+    copied = tmp_path / "copied"
+    shutil.copytree(canonical, copied, ignore=mm._ignore)
+    assert set(ignored) <= _files(canonical).keys()
+    assert _files(copied) == _files(canonical, apply_materializer_ignore=True)
+    assert _files(copied) == {"src/package/owned.py": b"VALUE = 1\n"}
 
 
 def _collect(consumer: Path, libraries: Path) -> tuple[subprocess.CompletedProcess, set[str]]:
@@ -52,7 +96,9 @@ def _collect(consumer: Path, libraries: Path) -> tuple[subprocess.CompletedProce
 def test_default_collection_keeps_owned_ids_after_real_materialization(tmp_path: Path):
     source = tmp_path / "source" / "worktree-manager"
     source.mkdir(parents=True)
-    shutil.copy2(MANAGER / "pyproject.toml", source / "pyproject.toml")
+    # Release checkouts already use local libs/ entries. Reconstruct escaping
+    # development references so both checkout layouts exercise real expansion.
+    (source / "pyproject.toml").write_text(_development_pyproject(source), encoding="utf-8")
     shutil.copytree(MANAGER / "src", source / "src", ignore=mm._ignore)
     (source / "tests").mkdir()
     # Real, dependency-light Manager modules keep this tool regression bounded;
@@ -63,7 +109,7 @@ def test_default_collection_keeps_owned_ids_after_real_materialization(tmp_path:
     generated = tmp_path / "generated" / "worktree-manager"
     shutil.copytree(source, generated)
     report = mm.materialize_uv_editable_ref_into(
-        source_consumer_dir=MANAGER,
+        source_consumer_dir=source,
         dest_consumer_dir=generated,
         canonical_root=REPO,
     )
@@ -77,11 +123,7 @@ def test_default_collection_keeps_owned_ids_after_real_materialization(tmp_path:
         for subtree in ("src", "tests"):
             canonical = REPO / "libs" / lib.name / subtree
             if canonical.is_dir():
-                assert _files(lib / subtree) == {
-                    path: content for path, content in _files(canonical).items()
-                    if "__pycache__" not in Path(path).parts
-                    and not path.endswith((".pyc", ".pyo"))
-                }
+                assert _files(lib / subtree) == _files(canonical, apply_materializer_ignore=True)
     assert "zdd/tests/test_breadcrumb.py" in before
     assert "zdd/tests/test_claims.py" in before
 
