@@ -187,20 +187,22 @@ def repository_environment(env: Mapping[str, str]) -> dict[str, str]:
     return overlay.environment(env) if overlay is not None else dict(env)
 
 
-def run_update(args: argparse.Namespace, steps) -> int:
+def _marketplace_context() -> Path | None:
     from . import update_cli
 
+    return update_cli._core_helper(
+        "_invocation_update_context", update_cli._invocation_update_context
+    )() or update_cli._core_helper(
+        "_project_update_context", update_cli._project_update_context
+    )()
+
+
+def run_update(args: argparse.Namespace, steps) -> int:
     with session() as value:
         if value is not None:
-            context = (
-                update_cli._core_helper(
-                    "_invocation_update_context", update_cli._invocation_update_context
-                )()
-                or update_cli._core_helper(
-                    "_project_update_context", update_cli._project_update_context
-                )()
+            value.prepare(
+                _marketplace_context(), include_anchors=not getattr(args, "no_anchor_sync", False)
             )
-            value.prepare(context, include_anchors=not getattr(args, "no_anchor_sync", False))
         rc = steps(args)
         if value is not None and rc == 0:
             return 1 if value.anchor_failed else 4 if value.unresolved else 0
@@ -209,7 +211,9 @@ def run_update(args: argparse.Namespace, steps) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     cwd = Path(getattr(args, "auth_cwd", None) or Path.cwd())
-    selected = [] if getattr(args, "auth_source", None) else sources.marketplaces(Path.cwd())
+    selected = (
+        [] if getattr(args, "auth_source", None) else sources.marketplaces(_marketplace_context())
+    )
     if not getattr(args, "no_anchor_sync", False):
         selected += sources.anchors()
     for index, url in enumerate(getattr(args, "auth_source", None) or []):

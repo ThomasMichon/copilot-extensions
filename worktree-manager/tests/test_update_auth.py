@@ -196,7 +196,8 @@ def test_nested_https_sources_keep_existing_git_authentication(monkeypatch, caps
     assert "existing Git authentication" in capsys.readouterr().err
 
 
-def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkeypatch):
+@pytest.mark.parametrize("relative", ["neither", "root", "source", "both", "environment"])
+def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkeypatch, relative):
     import subprocess
 
     seed = tmp_path / "source"
@@ -214,7 +215,13 @@ def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkey
     (seed / "worktree-manager" / "pyproject.toml").write_text("[project]\nname='fixture'\n")
     git("-C", str(seed), "add", "worktree-manager")
     git("-C", str(seed), "commit", "-qm", "fixture")
-    monkeypatch.setattr(self_install, "manager_repo", lambda _: str(seed))
+    monkeypatch.chdir(tmp_path)
+    source = "source" if relative in ("source", "both", "environment") else str(seed)
+    install_root = root.relative_to(tmp_path) if relative in ("root", "both") else root
+    if relative == "environment":
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
+        install_root = None
+    monkeypatch.setattr(self_install, "manager_repo", lambda _: source)
     monkeypatch.setattr(self_install, "manager_ref", lambda _: "main")
     monkeypatch.setattr(
         self_install,
@@ -226,7 +233,7 @@ def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkey
     monkeypatch.setattr(
         self_install.subprocess, "run", lambda argv, **kwargs: real_run(argv, **kwargs, **flags)
     )
-    result = self_install.self_update(root=root)
+    result = self_install.self_update(root=install_root)
     assert result.action == "already-current"
     assert (root / "staging" / "worktree-manager" / "pyproject.toml").is_file()
 
@@ -264,3 +271,28 @@ def test_unsupported_report_shape_preserves_provider_authentication(monkeypatch,
     )
     assert update_auth.environment("https://git.example.test/team/repo%20name") is None
     assert "existing Git authentication" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "https://example.test/team/repo.git",
+        "ssh://git@example.test/team/repo.git",
+        "git@example.test:team/repo.git",
+        "example.test:team/repo.git",
+        "file:///tmp/source.git",
+        "helper::source",
+    ],
+)
+def test_self_update_keeps_remote_source_semantics(tmp_path, monkeypatch, source):
+    calls = []
+    monkeypatch.setattr(self_install, "manager_repo", lambda _: source)
+    monkeypatch.setattr(self_install, "manager_ref", lambda _: "main")
+    monkeypatch.setattr(update_auth, "environment", lambda *a, **k: None)
+    monkeypatch.setattr(self_install.shutil, "which", lambda _: "git")
+    monkeypatch.setattr(
+        self_install.subprocess, "run", lambda argv, **kwargs: calls.append(argv)
+    )
+    self_install.self_update(root=tmp_path)
+    assert calls[0][0:2] == ["git", "clone"]
+    assert calls[0][-2] == source

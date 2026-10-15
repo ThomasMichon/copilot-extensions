@@ -1567,6 +1567,8 @@ Sources and account mappings come from effective user/repository settings and
 the repository registry, not an updater-specific credential configuration.
 User `settings.local.json` overrides `settings.json` before repository overrides;
 an exact registered repository keeps its own account override, not a sibling's.
+The report resolves ancestor or transported marketplace settings through the same
+context selection as normal update, including its active-project fallback.
 
 Public sources short-circuit anonymously. Other sources first exercise the
 caller's configured credentials through a read-only router, then try an
@@ -1588,9 +1590,10 @@ configuration so local helpers cannot override it. Routes are qualified by
 host and repository: fixing or denying one repository must not change another
 working repository under the same owner. Other requests delegate to Git under
 the caller's original configuration at the child's actual working directory,
-preserving native helper matching, ordering, resets, and includes. Tokens are
-never written into the overlay. Read-only probes suppress credential approval
-and rejection; no path switches the active `gh` account.
+preserving native helper matching, ordering, resets, and includes. Credential
+discovery and replay use the source URL's actual path without adding a `.git`
+suffix. Tokens are never written into the overlay. Read-only probes suppress
+credential approval and rejection; no path switches the active `gh` account.
 Marketplace contexts and individual anchors have separate reports and overlays,
 even when they reference the same URL with different local credentials.
 
@@ -1608,7 +1611,9 @@ Reused staging checkouts supply their own acquisition cwd to the report, so
 local helpers and conditional includes are observed in the right checkout.
 First clones use an empty staging directory with a discovery ceiling for both
 preflight and acquisition, retaining global/command credentials without reading
-the caller's repository-local configuration. The machine report transports
+the caller's repository-local configuration. Relative install roots and local Git
+sources are anchored before changing cwd; URLs and SCP-style sources stay intact.
+The machine report transports
 explicit environment removals as well as additions. Local-only anchors without
 a configured remote produce no HTTPS auth source.
 The internal `--auth-source`/`--auth-environment` report options transport only

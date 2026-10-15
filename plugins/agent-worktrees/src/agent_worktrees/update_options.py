@@ -46,11 +46,15 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
 
 
 def validate_auth_flags(args: argparse.Namespace) -> None:
-    if not getattr(args, "auth_report", False) and any(
-        getattr(args, name, False)
+    report_only = [
+        "--" + name.replace("_", "-")
         for name in ("auth_source", "auth_cwd", "auth_non_repository", "auth_environment", "json")
-    ):
-        raise ValueError("--auth-source, --auth-environment and --json require --auth-report")
+        if getattr(args, name, False)
+    ]
+    if not getattr(args, "auth_report", False) and report_only:
+        argparse.ArgumentParser(prog="update").error(
+            "unrecognized arguments: " + " ".join(report_only) + " (requires --auth-report)"
+        )
 
 
 def _module_dirs(plugin_dir: Path) -> dict[str, Path]:

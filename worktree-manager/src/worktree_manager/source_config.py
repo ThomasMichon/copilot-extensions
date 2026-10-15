@@ -20,6 +20,8 @@ the source). It is managed with the ``worktree-manager source`` command
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for 3.10.
@@ -63,6 +65,13 @@ def resolved_repo(root: Path | None = None) -> str:
     """The effective git source: the configured repo, else the canonical default."""
     repo, _ = configured_source(root)
     return repo or DEFAULT_REPO
+
+
+def absolute_local_source(repo: str) -> str:
+    """Anchor filesystem sources before acquisition changes its working directory."""
+    if re.match(r"^[^/\\:]+:", repo) and not (os.name == "nt" and Path(repo).drive):
+        return repo  # URLs, remote helpers and SCP-style remotes retain Git's semantics.
+    return str(Path(repo).resolve())
 
 
 def resolved_ref(root: Path | None = None) -> str:

@@ -250,9 +250,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     plugin_ref = "agent-worktrees@copilot-extensions"
     _events.enter("payload_refresh")
     output.info(f"Updating plugin: {plugin_ref}")
-    update_context = _core_helper(
-        "_invocation_update_context", _invocation_update_context
-    )() or _core_helper("_project_update_context", _project_update_context)()
+    update_context = _auth._marketplace_context()
     payload_status = update_acquisition.acquire(
         "agent-worktrees", "copilot-extensions", _resolve_copilot() or "copilot",
         cwd=update_context, engine=True,

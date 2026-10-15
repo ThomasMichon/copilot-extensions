@@ -293,7 +293,7 @@ def _alternatives(item: SourceAuth, env: Mapping[str, str], runner) -> list[dict
         (f"credential.https://{src.host}.useHttpPath", "true"),
     ]
     fill_env.update(command_scope(env, entries))
-    attributes = f"protocol=https\nhost={src.host}\npath={src.owner}/{src.repo}.git\n"
+    attributes = f"protocol=https\nhost={src.host}\npath={urlsplit(src.url).path.lstrip('/')}\n"
     if expected:
         attributes += f"username={expected}\n"
     fill = runner(

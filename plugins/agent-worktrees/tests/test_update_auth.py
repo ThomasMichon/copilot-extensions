@@ -814,3 +814,101 @@ def test_unsupported_explicit_source_reports_a_structured_decline(capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["supported"] is False
     assert result["all_ok"] is False
+
+
+@pytest.mark.parametrize("suffix", ["", ".git"])
+def test_fill_discovery_and_replay_keep_the_actual_source_path(tmp_path, monkeypatch, suffix):
+    config = _clean_git_env(monkeypatch, tmp_path)
+    path = "team/repo" + suffix
+    helper = (
+        '!f() { while IFS= read -r line; do if test "$line" = path='
+        + path
+        + "; then printf '%s\\n' username=mapped "
+        + router.SECRET_KEY
+        + "=fixture; fi; done; }; f"
+    )
+    subprocess.run(
+        ["git", "config", "--file", str(config), "credential.helper", helper],
+        check=True,
+        **git_ops.no_window_kwargs(),
+    )
+    subprocess.run(
+        ["git", "config", "--file", str(config), "credential.useHttpPath", "true"],
+        check=True,
+        **git_ops.no_window_kwargs(),
+    )
+    before = config.read_bytes()
+    probe = Probe(gh=False)
+
+    def run(argv, **kwargs):
+        if argv == ["git", "credential", "fill"]:
+            return process.run(argv, **kwargs)
+        return probe(argv, **kwargs)
+
+    item = auth.source("source", "https://example.test/" + path, cwd=tmp_path)
+    report = auth.report(
+        [item], env=dict(os.environ), runner=run, account_for=lambda _: "mapped"
+    )
+    assert report.results[0].status == "fixable_by_fallback"
+    assert report.results[0].alternative["method"] == "fill"
+    result = process.run(
+        ["git", "credential", "fill"],
+        cwd=tmp_path,
+        env=auth.fallback(report).environment(os.environ),
+        input=f"protocol=https\nhost=example.test\npath={path}\n\n",
+    )
+    assert result.status == 0, result.stderr
+    assert router.parse_attributes(result.stdout)[router.SECRET_KEY] == "fixture"
+    assert config.read_bytes() == before
+
+
+@pytest.mark.parametrize("invocation", ["nested", "transported", "project"])
+def test_report_uses_the_normal_update_marketplace_context(
+    tmp_path, monkeypatch, capsys, invocation
+):
+    from agent_worktrees import update_cli
+
+    root = tmp_path / "checkout"
+    settings = root / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    (settings / "settings.json").write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {"tool@private": True},
+                "extraKnownMarketplaces": {
+                    "private": {"source": {"source": "github", "repo": "team/private"}}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    nested = root / "src"
+    nested.mkdir()
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(update_cli._core(), "_INVOCATION_CWD", None)
+    monkeypatch.delenv("AGENT_WORKTREES_UPDATE_CONTEXT", raising=False)
+    monkeypatch.setattr(update_cli._core(), "_project_update_context", lambda: root)
+    monkeypatch.chdir(nested if invocation == "nested" else unrelated)
+    if invocation == "transported":
+        monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", str(nested))
+    elif invocation == "project":
+        monkeypatch.setattr(update_cli._core(), "_invocation_update_context", lambda: None)
+    seen = []
+
+    def report(items):
+        seen.extend(items)
+        return auth.AuthReport(
+            [auth.SourceAuth(item, [], status="auth_required") for item in items]
+        )
+
+    monkeypatch.setattr(auth, "report", report)
+    args = argparse.Namespace(
+        auth_source=[], no_anchor_sync=True, auth_environment=False, json=True
+    )
+    assert context.cmd_report(args) == 4
+    assert [(item.id, item.required, item.cwd) for item in seen] == [
+        ("marketplace:private", True, root)
+    ]
+    assert json.loads(capsys.readouterr().out)["all_ok"] is False

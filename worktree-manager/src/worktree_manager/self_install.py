@@ -1031,7 +1031,7 @@ def self_update(
     installed slot takes effect on the *next* ``worktree-manager`` invocation
     (normal versioned-install semantics -- no in-process hot-swap).
     """
-    r = root or default_root()
+    r = (root or default_root()).resolve()
     ref = ref or manager_ref(r)
     repo = manager_repo(r)
     previous = current_version(r)
@@ -1039,8 +1039,9 @@ def self_update(
     staging = r / STAGING_DIR
     use_git = shutil.which("git") is not None
     try:
-        from . import engine_client, update_auth
+        from . import engine_client, source_config, update_auth
 
+        repo = source_config.absolute_local_source(repo)
         staging.mkdir(parents=True, exist_ok=True)
         auth_env = update_auth.environment(repo, cwd=staging) if use_git else None
         environment = {"env": auth_env} if auth_env is not None else {}
