@@ -740,6 +740,23 @@ removes the settings).
 > Manager owns `~/.tmux.conf` or `~/.psmux.conf`.
 
 
+## Remote launch options
+
+Machine-targeted JSON and interactive resolve use the same option policy.
+Ordinary remote plans preserve resume opt-outs (`--no-resume`,
+`--no-fast-forward`), bare/restore mode, dry-run, recovery, projection/seed
+deferral, bridge kind, profile and parent/caller lineage. Valued arguments are
+quoted for the target's declared shell. JSON's internal direct-launch setting
+does not disable remote multiplexing: `--target-no-mux` is the explicit override.
+
+Cross-space `--owner-ref` creation and raw Copilot arguments are unsupported and
+refused before a remote plan is emitted; invoke those operations on the target.
+Structured remote prompt admission supports its New/Resume selector and mux
+choice only (queued seed staging is intrinsic). Additional behavior options
+are rejected before SSH rather than omitted from the request. Staged seed IDs
+and launch-request admission/status options remain target-local, not selectors
+to forward through `--machine`.
+
 ## Keeping worktrees current
 
 The picker keeps idle worktrees aligned with the default branch, fast-forward

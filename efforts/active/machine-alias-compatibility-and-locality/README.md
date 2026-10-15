@@ -157,6 +157,28 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-15 - Context safety and complete remote option policy
+- Automatic Machines discovery can use an observed physical hostname that is
+  also an explicit Windows key to select its registered WSL guest. Manual
+  native-key/profile selections retain conflicting-context rejection.
+- Claimant liveness treats visible foreign-platform ledgers as unconfirmed on
+  Linux as well as Windows/WSL. Actual record-backed prune regressions preserve
+  both the resource shield and the unchanged owner/child ledgers, including
+  anchor actors and terminal-looking foreign owners.
+- JSON and interactive remote resolve now share one selector/option builder.
+  Supported behavior flags and profile/parent/caller values are forwarded using
+  the existing shell-safe command constructor. Remote ownership and raw Copilot
+  arguments reject before a plan; structured seed admission rejects options its
+  existing request cannot represent before SSH. Target-local request options
+  cannot silently execute locally when a machine target was supplied.
+- Bounded focused Worktrees validation passed 341 tests with one conditional
+  skip; final complete guards passed 1,052 tests with 64 conditional skips.
+  Machines discovery/identity validation passed 170 tests. Ruff, install
+  contracts, module ceilings and whitespace checks passed.
+- Native Windows execution, current-head provider review, release and installed
+  acceptance remain coordinator-owned gates; no publication or deployment was
+  performed by the implementation participant.
+
 ### 2026-10-15 - Integrate upstream session identity and preserve source acceptance
 - The coordinator verified normal supported publication of the preceding source.
   A sync-preparation refusal was not a publication refusal; no tracking edits,

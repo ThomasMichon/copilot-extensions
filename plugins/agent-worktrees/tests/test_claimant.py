@@ -22,6 +22,7 @@ def _cfg(machine="anomalous-potato"):
 
 def _seed_owner(tmp_path, monkeypatch, project, wt_id, *, exists=True,
                 machine="anomalous-potato"):
+    monkeypatch.setattr("agent_worktrees.config.detect_platform", lambda: "wsl")
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: _cfg(machine))
     monkeypatch.setattr("agent_worktrees.config.project_dir",
@@ -168,6 +169,7 @@ class TestLocalClaimantAlive:
 
     def _seed_anchor(self, tmp_path, monkeypatch, project, *, path_exists=True,
                      make_record=True, machine="anomalous-potato"):
+        monkeypatch.setattr("agent_worktrees.config.detect_platform", lambda: "wsl")
         monkeypatch.setattr("agent_worktrees.config.load_config",
                             lambda *a, **k: _cfg(machine))
         monkeypatch.setattr("agent_worktrees.config.project_dir",

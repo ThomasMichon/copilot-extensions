@@ -258,17 +258,33 @@ class _ResolveEarlyExit(RuntimeError):
 
 
 def _remote_selector_args(state: ResolveCommandState) -> list[str]:
+    if getattr(state.args, "owner_ref", None):
+        raise ValueError("Remote --owner-ref is unsupported; create owned worktrees on the target.")
+    if getattr(state.args, "copilot_args", None):
+        raise ValueError("Remote Copilot arguments are unsupported; pass them on the target.")
     args = (
         ["--base"] if state.use_base else ["--new"] if state.use_new else
         ["--worktree-id", str(state.worktree_id)] if state.worktree_id else []
     )
-    for name, flag in (("bare_resume", "--bare-resume"), ("restore", "--restore")):
-        if state.worktree_id and getattr(state.args, name, False):
-            args.append(flag)
-    if getattr(state.args, "target_no_mux", False) or getattr(state.args, "no_mux", False):
+    for name in ("bare_resume", "restore"):
+        if getattr(state.args, name, False):
+            args.append("--" + name.replace("_", "-"))
+    if getattr(state.args, "target_no_mux", False) or (
+        not state.use_json and getattr(state.args, "no_mux", False)
+    ):
         args.append("--no-mux")
-    if getattr(state.args, "dry_run", False):
-        args.append("--dry-run")
+    for name in (
+        "dry_run", "no_resume", "no_fast_forward", "recovery", "defer_projections",
+        "bridge", "defer_new_seed", "stage_launch_seed",
+    ):
+        if getattr(state.args, "seed", None) and name in ("defer_new_seed", "stage_launch_seed"):
+            continue  # Structured admission already guarantees queued seed staging.
+        if getattr(state.args, name, False):
+            args.append("--" + name.replace("_", "-"))
+    for name in ("profile", "parent_session", "caller_worktree"):
+        value = getattr(state.args, name, None)
+        if value is not None:
+            args.append("--" + name.replace("_", "-") + "=" + str(value))
     return args
 
 
@@ -411,6 +427,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
     ):
+        if getattr(args, "machine", None):
+            message = "Target-local launch-request options cannot be combined with --machine."
+            if getattr(args, "json", False):
+                return output._json_error(message, exit_code=2)
+            output.err(message)
+            return 2
         from .launch_request import cmd_request
 
         return cmd_request(args)
@@ -524,6 +546,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 registry_for_config(config), state.requested_machine,
                 getattr(args, "environment", None), allow_physical_context=True,
             ).target.environment
+            remote_args: list[str] = []
+            if not target_is_local or (
+                requested_environment and requested_environment != cfg.detect_platform()
+            ):
+                try:
+                    remote_args = _remote_selector_args(state)
+                except ValueError as exc:
+                    output.err(str(exc))
+                    return 2
             if requested_environment:
                 want_platform = requested_environment
                 if not target_is_local or want_platform != cfg.detect_platform():
@@ -534,14 +565,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                         return 1
                     rc = _emit_remote_plan_for_env(
                         config, state.requested_machine, requested_environment,
-                        _remote_selector_args(state),
+                        remote_args,
                     )
                     if rc is not None:
                         return rc
                     output.err("Requested machine environment is unavailable.")
                     return 1
             if not target_is_local:
-                remote_args = _remote_selector_args(state)
                 rc = (
                     _try_machine_handoff(config, state.requested_machine, remote_args)
                     if remote_args else _try_machine_handoff(config, state.requested_machine)
@@ -646,19 +676,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if requested_environment:
         same_environment = requested_environment == cfg.detect_platform()
     if state.requested_machine and not (same_machine and same_environment):
-        remote_args: list[str] = []
-        if state.use_base:
-            remote_args.append("--base")
-        elif state.use_new:
-            remote_args.append("--new")
-        else:
-            remote_args += ["--worktree-id", str(state.worktree_id)]
-            if getattr(state.args, "bare_resume", False):
-                remote_args.append("--bare-resume")
-            if getattr(state.args, "restore", False):
-                remote_args.append("--restore")
-        if getattr(state.args, "target_no_mux", False):
-            remote_args.append("--no-mux")
+        try:
+            remote_args = _remote_selector_args(state)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=2)
         route_args = (config, state.requested_machine,
                       getattr(state.args, "environment", None) or "", remote_args)
         seed = getattr(state.args, "seed", None)

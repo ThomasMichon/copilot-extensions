@@ -274,6 +274,35 @@ def test_known_platform_does_not_choose_among_same_platform_entries(tmp_path):
     })
     with pytest.raises(ManifestError, match="ambiguous wsl entries"):
         resolve_machine("desktop", topology_repos=[repo], execution_platform="wsl")
+
+
+@pytest.mark.parametrize("hostname", ["example-host", "EXAMPLE-HOST"])
+def test_automatic_hostname_key_selects_explicit_guest_but_manual_native_stays_strict(
+    tmp_path, monkeypatch, hostname,
+):
+    from agent_machines import identity as identity_module
+
+    _topology(tmp_path, {
+        "example-host": {
+            "execution_platform": "windows", "physical_host": "example-host",
+            "ssh": {"environments": [{"name": "windows", "alias": "native-profile"}]},
+        },
+        "example-host-wsl": {
+            "execution_platform": "wsl", "physical_host": "example-host",
+            "ssh": {"environments": [{"name": "wsl", "alias": "guest-profile"}]},
+        },
+    })
+    monkeypatch.setattr(identity_module.platform, "node", lambda: hostname)
+    monkeypatch.setattr(identity_module, "detect_platform", lambda: "wsl")
+    assert resolve_machine(topology_repos=[tmp_path]).canonical == "example-host-wsl"
+    assert resolve_machine(
+        "guest-profile", topology_repos=[tmp_path], execution_platform="wsl",
+    ).canonical == "example-host-wsl"
+    for manual in (hostname, "native-profile"):
+        with pytest.raises(ManifestError, match="conflicts"):
+            resolve_machine(manual, topology_repos=[tmp_path], execution_platform="wsl")
+
+
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 def test_default_identity_distinguishes_guest(tmp_path, monkeypatch, environment):
     from agent_machines import identity as identity_module

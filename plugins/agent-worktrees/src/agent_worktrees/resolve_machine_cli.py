@@ -112,12 +112,16 @@ def _try_machine_handoff(
 
     ssh_alias, shell = _resolve_ssh_target(entry)
     project = cfg.project_name()
-    remote_command = " ".join([project, *(remote_args or [])])
+    try:
+        remote_command = _remote_launch_command(shell, project, remote_args)
+    except ValueError as exc:
+        output.err(str(exc))
+        return 2
     _emit_plan(
         {
             "action": "remote",
             "ssh_alias": ssh_alias,
-            "remote_command": _wrap_remote_command(shell, remote_command),
+            "remote_command": remote_command,
             "machine": entry.key,
             "display_name": entry.display_name,
         }
@@ -157,6 +161,14 @@ def _in_ssh_session() -> bool:
         or os.environ.get("SSH_TTY")
         or os.environ.get("SSH_CLIENT")
     )
+
+
+def _remote_launch_command(shell: str, project: str, args: list[str] | None) -> str:
+    if not args:
+        return _wrap_remote_command(shell, project)
+    from .remote_seed_launch import shell_command
+
+    return shell_command(shell, [project, *args])
 
 
 def _emit_remote_plan_for_env(
@@ -212,8 +224,10 @@ def _emit_remote_plan_for_env(
         plan.update(machine=entry.key, display_name=f"{entry.display_name} {env_label}".strip())
         _emit_plan(plan)
         return 0
-    remote_command = " ".join([project, *remote_args]) if remote_args else project
-    remote_command = _wrap_remote_command(shell, remote_command)
+    try:
+        remote_command = _remote_launch_command(shell, project, remote_args)
+    except ValueError as exc:
+        return output._json_error(str(exc), exit_code=2)
     display = f"{entry.display_name} {env_label}".strip()
     _emit_plan(
         {

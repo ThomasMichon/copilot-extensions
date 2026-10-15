@@ -125,7 +125,9 @@ def resolve_machine(
     try:
         entries = normalize_machine_entries(entries)
         name = raw.casefold() if value is None else raw
-        selected = resolve_machine_selection(entries, name, context)
+        selected = resolve_machine_selection(
+            entries, name, context, allow_physical_context=value is None,
+        )
         entry = selected.entry
         name = selected.target.logical_machine if entry is None else entry.key
         if context == "wsl" and (entry is None or not entry.execution_platform):

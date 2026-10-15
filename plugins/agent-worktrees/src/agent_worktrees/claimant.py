@@ -44,7 +44,7 @@ _LOG = logging.getLogger(__name__)
 
 def _record_platform_conflicts(record: tracking.WorktreeRecord) -> bool:
     actual = cfg.detect_platform()
-    conflict = actual in ("windows", "wsl") and record.platform != actual
+    conflict = record.platform != actual
     if conflict:
         _LOG.warning("Claimant record platform conflicts with the actual execution context")
     return conflict
