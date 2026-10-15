@@ -377,6 +377,15 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 ## Journal
 
 ### 2026-10-15 - Integrated Gateway prepared for review
+- Current upstream placement now permits a snapshot inside the checkout but
+  outside every admitted project/resource. Reconciled that safer existing
+  contract with the retained long-path filesystem handling; all 164 policy
+  cases and both projection synchronizers pass. Hosted Windows found the
+  runner fixture still requiring the superseded outside-checkout location.
+  It now checks the actual outside-every-source boundary and requires both
+  manifests to be exercised; real relative metadata rename assertions remain.
+  The complete native runner suite passes 54 cases with two platform skips.
+  No runtime limit, source attribution or dependency-age gate was relaxed.
 - Closed the raw-TCP admission gap before TLS: all accepted connections share
   a 32-peer cap, TLS and first headers share an absolute five-second deadline,
   and shutdown aborts/reaps even peers withholding ClientHello. The maintained

@@ -151,8 +151,10 @@ def test_windows_editable_metadata_is_retained_near_all_sources(tmp_path, monkey
         root = Path(kwargs["cwd"])
         retained.append(root)
         assert root.is_relative_to(checkout.parent)
-        assert not root.is_relative_to(checkout)
-        for manifest in root.parents[1].rglob("pyproject.toml"):
+        assert all(not root.is_relative_to(source) for source in projects)
+        manifests = list(root.parents[1].rglob("pyproject.toml"))
+        assert len(manifests) == len(projects)
+        for manifest in manifests:
             data = tomllib.loads(manifest.read_text(encoding="utf-8"))
             relative = data["tool"]["setuptools"]["package-dir"][""]
             target = (manifest.parent / relative).resolve()
