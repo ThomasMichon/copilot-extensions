@@ -96,7 +96,11 @@ class DrainTrace:
             outcome=outcome, port=self.port, detail=detail,
         ) is None and not self.warned:
             self.warned = True
-            print("status-monitor drain diagnostics unavailable: log-write-failed", file=sys.stderr)
+            try:
+                print("status-monitor drain diagnostics unavailable: log-write-failed", file=sys.stderr)
+            except (OSError, ValueError):
+                # Diagnostics may outlive the caller's warning stream.
+                pass
 
     @contextmanager
     def stage(self, phase: str) -> Iterator[None]:

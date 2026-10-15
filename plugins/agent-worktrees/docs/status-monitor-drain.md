@@ -81,8 +81,9 @@ A daemon drain records state-lock waiting **before** acquisition, admission
 closure, periodic retired-cleanup/busy-check samples, and completion, timeout or
 an aborted call. Progress samples are emitted at most once per five seconds
 (two records per sample), not for every poll. Phase boundaries and terminal
-outcomes are always recorded. An unwritable log produces one sanitized warning
-per trace and does not change the control response.
+outcomes are always recorded. An unwritable log attempts one sanitized warning
+per trace; a closed or unwritable warning stream cannot change the control
+response or replace an original lifecycle exception.
 
 `timeout_s` is the requested daemon drain budget; `rpc_timeout_s` is the
 client's distinct socket deadline. They are not interchangeable. Terminal

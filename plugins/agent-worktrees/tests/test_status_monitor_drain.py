@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 import threading
 import time
 from pathlib import Path
@@ -130,6 +131,39 @@ def test_log_failure_warns_once_without_changing_a_successful_drain(
         directory=tmp_path, port=12345, timeout=1, poll=1, force=False,
     )["clean"] is True
     assert capsys.readouterr().err.count("log-write-failed") == 1
+
+
+@pytest.mark.parametrize("error_type", [ValueError, BrokenPipeError])
+def test_log_and_warning_failures_preserve_the_control_response(
+    tmp_path, monkeypatch, error_type,
+):
+    class FailedWarningStream(io.StringIO):
+        attempts = 0
+
+        def write(self, text):
+            self.attempts += 1
+            raise error_type("fixture unavailable warning stream")
+
+    stream = FailedWarningStream()
+    monkeypatch.setattr(diagnostics, "sys", SimpleNamespace(stderr=stream))
+    monkeypatch.setattr(diagnostics.lifecycle, "record", lambda *args, **kwargs: None)
+    assert diagnostics.drain_with_diagnostics(
+        state_lock=threading.RLock(), enter=lambda: None, cleanup=lambda: None,
+        busy=lambda: [], observe=lambda: {},
+        directory=tmp_path, port=12345, timeout=1, poll=1, force=False,
+    ) == {"drained": True, "clean": True, "forced": False, "busy_sessions": []}
+    assert stream.attempts == 1
+
+
+def test_failed_warning_does_not_replace_the_original_lifecycle_exception(tmp_path, monkeypatch):
+    stream = io.StringIO()
+    stream.close()
+    monkeypatch.setattr(diagnostics, "sys", SimpleNamespace(stderr=stream))
+    monkeypatch.setattr(diagnostics.lifecycle, "record", lambda *args, **kwargs: None)
+    trace = diagnostics.DrainTrace(tmp_path, role="daemon", port=12345, action="promote")
+    with pytest.raises(RuntimeError, match="fixture original lifecycle failure"):
+        with trace.stage("activate-publisher"):
+            raise RuntimeError("fixture original lifecycle failure")
 
 
 def test_trace_omits_unrecognized_content_and_nonfinite_budgets(tmp_path):
