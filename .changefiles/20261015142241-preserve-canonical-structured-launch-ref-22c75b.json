@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve canonical structured-launch refusal envelopes and exit status for machine modifiers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

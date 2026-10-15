@@ -435,12 +435,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
     ):
-        if getattr(args, "machine", None):
-            message = "Target-local launch-request options cannot be combined with --machine."
-            if getattr(args, "json", False):
-                return output._json_error(message, exit_code=2)
-            output.err(message)
-            return 2
         from .launch_request import cmd_request
 
         return cmd_request(args)

@@ -20,6 +20,9 @@ Structured admission/status accepts only its protocol options and `--json`;
 ordinary resolve selectors, modifiers and positional Copilot arguments are
 rejected before reading or mutating target launch state. Exactly one nonempty
 protocol option is required; an empty value never enters ordinary resolve.
+Nonprotocol modifiers, including `--machine`, use the same structured
+launch-request error envelope and exit status 3 for both admission and status;
+they never enter ordinary or remote machine resolution.
 
 The target's existing tracking-write daemon owns admission and seed staging.
 Admission retains a text-free fingerprint and allocated worktree/intent IDs
