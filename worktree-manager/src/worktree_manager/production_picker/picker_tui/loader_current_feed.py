@@ -142,7 +142,7 @@ class CurrentFeedMixin:
         try:
             while self._feed_current(source, gen):
                 raw = proc.stdout.readline(MAX_LINE_CHARS + 1)
-                if not raw:
+                if not self._feed_current(source, gen) or watchdog.expired or not raw:
                     break
                 if len(raw) > MAX_LINE_CHARS or not raw.endswith("\n"):
                     raise ValueError("current-roster feed exceeded its frame bound")

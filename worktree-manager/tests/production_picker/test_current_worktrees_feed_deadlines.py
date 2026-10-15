@@ -71,7 +71,9 @@ def test_feed_process_startup_uses_source_budget_not_publication_budget(monkeypa
         stop_loader(loader, worker, children)
 
 
-@pytest.mark.parametrize("boundary", ["startup", "initial-publication", "publication", "heartbeat"])
+@pytest.mark.parametrize(
+    "boundary", ["startup", "initial-publication", "publication", "partial-frame", "heartbeat"],
+)
 def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
     monkeypatch, tmp_path, boundary,
 ):
@@ -92,7 +94,7 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
         [{"id": "two", "status": "active", "dirty": 3}], generation="b" * 32,
     )
     script = (
-        "import json,time,pathlib\n"
+        "import json,time,pathlib,sys\n"
         f"marker=pathlib.Path({str(marker)!r})\n"
         "second=marker.exists()\nmarker.write_text('started')\n"
         "if not second:\n"
@@ -102,6 +104,8 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
         f"  for frame in {first[:-1]!r}: print(json.dumps(frame),flush=True)\n"
         f" if {boundary!r}=='publication':\n"
         f"  for frame in {pending[:-1]!r}: print(json.dumps(frame),flush=True)\n"
+        f" if {boundary!r}=='partial-frame':\n"
+        "  sys.stdout.write('{\"type\":\"worktree\"'); sys.stdout.flush()\n"
         " time.sleep(10)\n"
         "else:\n"
         f" for frame in {second!r}: print(json.dumps(frame),flush=True)\n"
@@ -131,3 +135,36 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
         assert len(children) == 2 and children[0].poll() is not None
     finally:
         stop_loader(loader, worker, children)
+
+
+def test_feed_unterminated_frame_without_watchdog_expiry_is_terminal(monkeypatch):
+    source = data_ssh.Source("host", "Win", None, local=True, timeout=2)
+    script = "import sys; sys.stdout.write('{\"type\":\"begin\"'); sys.stdout.flush()"
+    loader, worker, children = run_loader(monkeypatch, source, script)
+    try:
+        wait_until(lambda: bool(loader.error_for_source(source.source_id)))
+        worker.join(timeout=3)
+        assert not worker.is_alive()
+        assert "frame bound" in loader.error_for_source(source.source_id)
+        assert loader.records() == [] and loader._state[source.cache_key] == "failed"
+        assert len(children) == 1
+    finally:
+        stop_loader(loader, worker, children)
+
+
+def test_feed_cancellation_during_partial_frame_stops_without_respawn(monkeypatch, tmp_path):
+    marker = tmp_path / "partial-flushed"
+    script = (
+        "import pathlib,sys,time\n"
+        "sys.stdout.write('{\"type\":\"begin\"'); sys.stdout.flush()\n"
+        f"pathlib.Path({str(marker)!r}).write_text('flushed')\n"
+        "time.sleep(10)\n"
+    )
+    source = data_ssh.Source("host", "Win", None, local=True, timeout=2)
+    loader, worker, children = run_loader(monkeypatch, source, script)
+    try:
+        wait_until(marker.exists)
+    finally:
+        stop_loader(loader, worker, children)
+    assert loader.records() == [] and len(children) == 1
+    assert not loader.error_for_source(source.source_id)

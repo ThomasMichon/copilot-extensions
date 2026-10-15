@@ -991,8 +991,9 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   The real-child feed deadline regressions separate process/SSH startup from
   admitted snapshot/update transactions, retain stale rows across transport
   expiry, reconnect to a complete replacement generation, and verify child
-  cleanup on cancellation. Explicit terminal peer refusals retain their
-  existing no-respawn coverage.
+  cleanup on cancellation, including partial JSON lines returned after child
+  termination. Malformed output without watchdog expiry and explicit terminal
+  peer refusals retain no-respawn coverage.
   The configuration-action contracts exercise native forms, Cancel-default
   confirmation, safe argv substitution and visible command failures. For the
   real Workers-to-override acceptance lane, prepare agent-dispatch's test venv

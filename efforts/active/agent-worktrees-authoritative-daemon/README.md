@@ -1011,7 +1011,7 @@ retries transport watchdog expiry through the existing cancellable backoff.
 Explicit terminal peer errors remain terminal; no polling authority is added.
 
 Five real-child regressions failed against the old loader; the corrected
-consumer selection passes 162 tests with one platform skip, including a
+consumer selection passes 165 tests with one platform skip, including a
 separate incomplete-initial-publication guard. Touched Python lint and the
 installation-contract guard pass. A native Windows production-Picker probe
 against the selected installed engine admitted current rows under a held
@@ -1020,6 +1020,14 @@ identified; this is source-consumer evidence, not promoted installed acceptance.
 Implementation review, normal promotion and authorized installed acceptance
 remain open in the [bounded recovery plan](phase-6d-consumer-recovery.md).
 The remaining parent phases, resident reports and other pivots are unchanged.
+
+Review exposed an additional partial-line boundary: terminating a stalled
+child could make `readline` return an unterminated fragment before the
+retryable watchdog outcome was examined. A new real-child regression
+reproduced that terminal misclassification. The loader now checks cancellation
+and expiry immediately after the blocking read, preserving malformed-output
+refusal when no watchdog expired. Recovery, genuine malformed output and
+partial-line cancellation all pass in the updated selection above.
 
 ### 2026-10-14 - Phase 6d promoted; signed publication and consumer acceptance next
 
