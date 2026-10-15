@@ -720,3 +720,10 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   All 86 runner/ownership cases passed with two platform skips, and all 58
   Index daemon/lifecycle cases passed against the new launch API. Fresh-head
   CI and review remain the merge gate; this replay is not a release.
+- Fresh current-head Copilot review again reported zero open findings. Native
+  Bridge CI exposed a newly merged owner-boundary fixture that staged only the
+  former single-file runtime helper. The fixture now copies the complete three-
+  file runtime closure, retaining the real independently owned interpreter,
+  isolated environment, exact launch/resume arguments and workspace-only cleanup.
+  The complete local owner-boundary module passed eight cases with three native
+  POSIX skips; native Linux revalidation remains required CI evidence.
