@@ -160,7 +160,7 @@ class _RegisteredPluginTarget:
 def _update_registered_plugins(
     targets: dict[str, _RegisteredPluginTarget] | None = None,
 ) -> bool:
-    """Refresh every registered copilot-extensions payload (active + inventory)."""
+    """Acquire required payloads first; stop before advisory work on failure."""
     from . import reconcile
 
     targets = dict(
@@ -227,37 +227,39 @@ def _update_registered_plugins(
         ),
         None,
     )
-    purge_results: list[tuple[str, str, _RegisteredPluginTarget]] = []
+    pending_purges: list[tuple[str, _RegisteredPluginTarget]] = []
     if available is not None:
         for name in sorted(list(targets)):
             target = targets[name]
             if target.activation is _PluginActivation.INACTIVE and name not in available:
-                status = uninstall_one_plugin_payload(
-                    name,
-                    reconcile.MARKETPLACE,
-                    cwd=target.context,
-                )
-                purge_results.append((name, status, target))
+                pending_purges.append((name, target))
                 del targets[name]
 
     results: list[tuple[str, str, _RegisteredPluginTarget]] = []
-    for name in sorted(targets):
+    payloads_ok = True
+    for name in sorted(targets, key=lambda name: (not targets[name].required, name)):
         target = targets[name]
-        results.append(
-            (
-                name,
-                update_one_plugin_payload(name, reconcile.MARKETPLACE, cwd=target.context),
-                target,
-            )
+        status = update_one_plugin_payload(
+            name, reconcile.MARKETPLACE, cwd=target.context,
         )
+        results.append((name, status, target))
+        if target.required and not status.startswith("OK"):
+            payloads_ok = False
+            remaining = len(targets) - len(results) + len(pending_purges)
+            output.warn(
+                f"Required payload acquisition failed for {name}; "
+                f"{remaining} remaining payload/inventory target(s) not attempted. "
+                "Resolve the failure and retry update."
+            )
+            break
 
-    if purge_results:
-        output.header("Retired Plugin Purge Summary")
-        for name, status, _target in purge_results:
-            if status.startswith("OK"):
-                output.ok(f"{name} ({status})")
-            else:
-                output.warn(f"{name}: {status} (inactive retired inventory advisory)")
+    purge_results: list[tuple[str, str, _RegisteredPluginTarget]] = []
+    if payloads_ok:
+        for name, target in pending_purges:
+            status = uninstall_one_plugin_payload(
+                name, reconcile.MARKETPLACE, cwd=target.context,
+            )
+            purge_results.append((name, status, target))
 
     output.header("Plugin Payload Update Summary")
     for name, status, target in results:
@@ -267,12 +269,16 @@ def _update_registered_plugins(
             output.warn(f"{name}: {status} (inactive installed inventory advisory)")
         else:
             output.warn(f"{name}: {status}")
-    for name, status, target in (*purge_results, *results):
+    if purge_results:
+        output.header("Retired Plugin Purge Summary")
+        for name, status, _target in purge_results:
+            if status.startswith("OK"):
+                output.ok(f"{name} ({status})")
+            else:
+                output.warn(f"{name}: {status} (inactive retired inventory advisory)")
+    for name, status, target in (*results, *purge_results):
         update_events.record("payload_refresh", f"{name}@{reconcile.MARKETPLACE}", status,
                              required=target.required)
-    payloads_ok = all(
-        status.startswith("OK") or not target.required for _, status, target in results
-    )
     purges_ok = all(
         status.startswith("OK") or not target.required for _, status, target in purge_results
     )

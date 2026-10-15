@@ -253,6 +253,9 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             "update flow; use 'agent-worktrees install' instead"
         )
 
+    registered_targets = dict(_core_helper(
+        "_registered_plugin_targets", _registered_plugin_targets
+    )())
     plugin_ref = "agent-worktrees@copilot-extensions"
     _events.enter("payload_refresh")
     output.info(f"Updating plugin: {plugin_ref}")
@@ -286,12 +289,11 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         payloads_ok, payload_status = False, "timed out"
     _events.record("payload_refresh", plugin_ref, payload_status)
 
-    registered_targets = _core_helper(
-        "_registered_plugin_targets", _registered_plugin_targets
-    )()
     if (
-        _core_helper("_update_registered_plugins", _update_registered_plugins)(
-            registered_targets
+        payloads_ok
+        and _core_helper("_update_registered_plugins", _update_registered_plugins)(
+            {name: target for name, target in registered_targets.items()
+             if name != "agent-worktrees"}
         )
         is False
     ):

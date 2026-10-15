@@ -850,8 +850,16 @@ fails, the engine returns that failure without running runtime installers,
 anchor synchronization, pruning or local command/profile finishing. Successfully
 refreshed payloads remain available for a retry; the error names the cause and
 asks the caller to resolve it and retry `update`. Inactive inventory failures
-remain advisory. This barrier does not make the existing combined installers
-prepare-only or undo Manager's earlier self-update.
+remain advisory.
+
+The engine collects the logical target selection before acquisition, refreshes
+its own payload once, and attempts required registered payloads before inactive
+inventory. A required failure stops remaining payload attempts immediately;
+retired inactive payloads are not removed until acquisition succeeds. The summary
+distinguishes attempted failures from remaining targets that were not attempted.
+This does not persist a resumable runtime plan or add automatic retry. The
+barrier does not make the existing combined installers prepare-only or undo
+Manager's earlier self-update.
 
 `update` (and `worktree-manager update`, which drives it) records each run
 through the shared [`update-telemetry`](../../../libs/update-telemetry/README.md)

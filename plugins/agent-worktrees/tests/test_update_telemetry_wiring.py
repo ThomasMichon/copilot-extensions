@@ -553,7 +553,7 @@ def test_required_acquisition_failure_precedes_all_runtime_mutation(
         if failure == "registered":
             update_events.record("payload_refresh", "required-example", "plugin update failed")
             return False
-        return True
+        pytest.fail("Engine acquisition failure reached another payload operation")
 
     def mutation(*args, **kwargs):
         pytest.fail("Acquisition failure reached runtime planning or local mutation")
@@ -572,6 +572,48 @@ def test_required_acquisition_failure_precedes_all_runtime_mutation(
     status = _status(_update_home)
     assert [phase["phase"] for phase in status["run"]["phases"]] == ["payload_refresh"]
     assert status["run"]["outcome"] != ut.VERIFIED_CURRENT
+
+
+def test_target_selection_precedes_acquisition_and_self_refresh_is_not_repeated(
+    wired, monkeypatch,
+):
+    active = m._PluginActivation.ACTIVE
+    selected = {
+        "agent-worktrees": m._RegisteredPluginTarget(None, active),
+        "context-handoff": m._RegisteredPluginTarget(None, active),
+    }
+    calls = []
+    original_run = subprocess.run
+
+    def collect():
+        calls.append("collect")
+        return selected
+
+    def acquire(argv, *args, **kwargs):
+        if "plugin" in argv:
+            assert calls == ["collect"]
+            calls.append("engine")
+            selected.clear()
+            selected["later"] = m._RegisteredPluginTarget(None, active)
+        return original_run(argv, *args, **kwargs)
+
+    def registered(targets):
+        assert calls == ["collect", "engine"]
+        assert set(targets) == {"context-handoff"}
+        calls.append("registered")
+        return True
+
+    def runtimes(*args, **kwargs):
+        assert set(kwargs["targets"]) == {"agent-worktrees", "context-handoff"}
+        return True
+
+    monkeypatch.setattr(m, "_registered_plugin_targets", collect)
+    monkeypatch.setattr(subprocess, "run", acquire)
+    monkeypatch.setattr(m, "_update_registered_plugins", registered)
+    monkeypatch.setattr(m, "_update_modules", runtimes)
+    monkeypatch.setattr(m, "_reconcile_registered_runtimes", runtimes)
+    assert m.cmd_update(_args()) == 0
+    assert calls == ["collect", "engine", "registered"]
 
 
 def test_real_failed_acquisition_process_never_enters_runtime_stage(

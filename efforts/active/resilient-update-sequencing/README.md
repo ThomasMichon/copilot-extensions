@@ -483,3 +483,80 @@ achieved by rearranging today's combined installer invocations.
   landing proof even with the merged #6836 association. Its committed work is
   preserved; no reset, forced gate or manual removal is used. Cleanup evidence
   is being narrowed separately while the parent effort stays active.
+
+### 2026-10-15 - Acquisition source merge and authorized release bootstrap
+- #6862 squash-merged into `dev` at
+  `d4377bf2c8bcdc09a05de76887c7d7b25bd1915f`. Its exact-head Copilot verdict
+  was Approved; the sole Low documentation-impact omission was corrected in
+  the PR description and resolved. Required CI passed. Pulled the parent
+  worktree forward through the managed sync; Phase 3 remains incomplete.
+- Actual promotion run 38765826569 failed before candidate construction:
+  trusted `main` helper provisioning refused with `canonical local graph
+  lacks library attribution`. #6849 already corrects that attribution on
+  `dev`, but the old trusted-main helper runs before dev composition, creating
+  the independently diagnosed bootstrap deadlock tracked by #6848/#6535.
+- The operator explicitly authorized only the narrow trusted-main attribution
+  bootstrap repair needed to unblock that already-reviewed correction,
+  with normal validation and no dependency-policy weakening. Coordinated the
+  authorization on #6848 before starting another repair. The existing
+  #6849/#6476 source/bootstrap owner retains custody; no competing repair,
+  unchecked retry, signer substitution or hash waiver has been started.
+- Delegate content now exactly matches all eight owned merged paths after
+  incorporating the parent's reviewed refinements (54 tests and lint pass).
+  Its managed finalize still refuses the merged-head boundary even though
+  blob landing is proven; managed pull-forward auto-aborted on a conflict.
+  The child and an owned backup remain preserved, and its cleanup obligation
+  remains open rather than bypassed.
+
+### 2026-10-15 - Workflow-only bootstrap admission and fresh proof
+- No active bootstrap repair was found through the public tracker and available
+  source/session registries. Took the separately authorized release-bootstrap
+  slice in #6867, leaving the durable #6849/#6476 source owner intact.
+- The first exact source backport reproduced the original three attribution
+  failures and passed 239 corrected policy/synchronization cases with one
+  platform skip. The trusted main source gate correctly refused source/test/doc
+  changes; no bypass was attempted. The operator then explicitly selected a
+  workflow-only pinned-helper repair, following #6619/#6558. Reversed the source
+  backport and revised the same PR, preserving the attempted shape in its audit.
+- Current head `0292be0a33d8009ebad08d40b637d9df146a8c2f` changes only two
+  workflow files. Four identical validator-provisioning steps select the exact
+  reviewed helper commit and blob, preserve the ordinary canonical attribution
+  path and restore the original helper before build/sign/publish. No dependency,
+  hash, signer or qualification gate changes.
+- The main source gate passes. Read-only hosted proof 38813975248 executes the
+  actual production blocks: wrong helper identity refuses before provisioning,
+  injected UV failure restores the checkout and retains its failure, and a fresh
+  real hash-pinned, seasoned validator installation succeeds. Native focused
+  workflow/control/readiness coverage passes 94 cases. Fresh current-head
+  review still gates merge; normal containing promotion and installed acceptance
+  remain open.
+- Full CI on the superseded main-based source backport passed guards/lint but
+  exposed separate standalone/materialized-release qualification failures.
+  They are not waived or claimed fixed by this narrow workflow bootstrap.
+
+### 2026-10-15 - Named bootstrap handover and fail-fast continuation
+- The operator explicitly transferred existing #6867 stewardship and its
+  validated review fix to `grimy-axle`; this coordinator stopped publishing to
+  that PR. The complete fix and its evidence are attached in comment
+  6203999889. Its five focused promotion/artifact/control/wheel/adapter modules
+  pass 328 cases. The named owner retains fresh-head proof, review, merge and
+  containing-release execution; affirmative resource transfer is still pending.
+- Continued #6820 separately on current `dev`, consuming #6863's tree-owning
+  installer deadline/receipt judgment and #6869's human framing unchanged.
+  The logical target selection is now copied before acquisition, the engine
+  payload is refreshed once, and required registered payloads precede advisory
+  inventory. Required failure stops remaining acquisition immediately.
+  Retired inactive payloads are not removed before successful acquisition.
+- Regression-first reproduced nine failures with two controls passing. The
+  corrected focused update portfolio passes 205 cases with one platform skip,
+  including a real failed payload subprocess that retains its successful peer
+  and never touches pending inventory/retirement. Existing success, telemetry,
+  runtime skip and finishing contracts remain covered.
+- Final complete changed test files pass 159 cases with one platform skip,
+  including the added successful acquisition/retirement event-order contract.
+  Module ceilings, all thirteen install contracts and whitespace checks pass.
+  Local governed Ruff restoration remains blocked by package-host TLS; hosted
+  lint, current-head review and CI still gate the source merge.
+- This is another bounded acquisition improvement, not the complete immutable
+  runtime-input plan, preparation/readiness protocol, checkpointed retry or
+  installed acceptance. Those parent gates remain open.

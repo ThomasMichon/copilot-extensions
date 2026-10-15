@@ -1,10 +1,9 @@
 """Tests for the ``update`` registered-plugin payload refresh.
 
 ``_update_registered_plugins`` closes the "phantom deploy" gap (test-chamber
-#2554): ``update`` must ``copilot plugin update`` (or install) EVERY
-copilot-extensions plugin registered for the managed repo -- including
-payload-only plugins (``runtimeScope: none``) like ``context-handoff`` -- and
-do so BEFORE the service payload / runtime steps.
+#2554): a healthy ``update`` refreshes every registered copilot-extensions
+payload, including payload-only plugins, before runtime work. Required failure
+stops acquisition before advisory inventory or retirement.
 """
 
 from __future__ import annotations
@@ -681,14 +680,13 @@ def test_missing_plugin_uses_install_path(monkeypatch):
     assert not any(c[:3] == ["copilot", "plugin", "update"] for c in calls)
 
 
-def test_single_failure_warns_and_continues(monkeypatch):
-    """One plugin failing does not abort the rest of the loop.
+def test_required_failure_stops_remaining_acquisition(monkeypatch, capsys):
+    """Required failure retains prior successes without attempting later work.
 
     ``bbb``'s first attempt (``update``, since it's already "installed") fails
     and is retried once with ``install`` (the not-installed-ledger fallback --
     see ``_update_one_plugin_payload``'s docstring); that retry also fails
-    here, so ``bbb`` genuinely fails while ``aaa``/``ccc`` succeed on their
-    first attempt.
+    here, so ``aaa`` remains acquired and ``ccc`` is not attempted.
     """
     _install_config(monkeypatch, "/repo/anchor")
     monkeypatch.setattr(
@@ -716,13 +714,13 @@ def test_single_failure_warns_and_continues(monkeypatch):
     # Must not raise despite bbb failing.
     assert m._update_registered_plugins() is False
 
-    # All three were attempted (loop continued past the failure); bbb is
-    # attempted twice (update, then the install retry).
-    assert updated == ["aaa", "bbb", "bbb", "ccc"]
+    assert updated == ["aaa", "bbb", "bbb"]
+    captured = capsys.readouterr()
+    assert "not attempted" in captured.out + captured.err
 
 
-def test_timeout_on_one_plugin_does_not_abort(monkeypatch):
-    """A marketplace/plugin timeout warns and continues."""
+def test_required_timeout_stops_remaining_acquisition(monkeypatch):
+    """A required plugin timeout fails before later acquisition."""
     _install_config(monkeypatch, "/repo/anchor")
     monkeypatch.setattr(
         reconcile, "read_enabled_plugins", lambda repo_dir: ["aaa", "bbb"]
@@ -746,7 +744,116 @@ def test_timeout_on_one_plugin_does_not_abort(monkeypatch):
 
     assert m._update_registered_plugins() is False
 
-    assert attempted == ["aaa", "bbb"]
+    assert attempted == ["aaa"]
+
+
+@pytest.mark.parametrize("failure", ["update exited 7", "timed out"])
+def test_required_payloads_precede_advisory_work_and_purge(monkeypatch, failure):
+    active = m._PluginActivation.ACTIVE
+    inactive = m._PluginActivation.INACTIVE
+    unknown = m._PluginActivation.UNKNOWN
+    targets = {
+        "aa-inactive": m._RegisteredPluginTarget(None, inactive),
+        "bb-required": m._RegisteredPluginTarget(None, active),
+        "cc-unknown": m._RegisteredPluginTarget(None, unknown),
+        "dd-retired": m._RegisteredPluginTarget(None, inactive),
+        "zz-required": m._RegisteredPluginTarget(None, active),
+    }
+    monkeypatch.setattr(m, "_refresh_marketplace", lambda *a, **k: True)
+    monkeypatch.setattr(
+        m, "_browse_marketplace_plugins", lambda *a, **k: set(targets) - {"dd-retired"},
+    )
+    calls = []
+
+    def acquire(name, *args, **kwargs):
+        calls.append(name)
+        return failure if name == "cc-unknown" else "OK"
+
+    monkeypatch.setattr(m, "_update_one_plugin_payload", acquire)
+    monkeypatch.setattr(
+        m, "_uninstall_one_plugin_payload",
+        lambda *a, **k: pytest.fail("Required failure reached advisory retirement"),
+    )
+    assert m._update_registered_plugins(targets) is False
+    assert calls == ["bb-required", "cc-unknown"]
+    assert set(targets) == {
+        "aa-inactive", "bb-required", "cc-unknown", "dd-retired", "zz-required",
+    }
+
+
+def test_real_failed_payload_keeps_completed_peer_and_blocks_inventory(
+    monkeypatch, tmp_path,
+):
+    import sys
+
+    (tmp_path / "plugin").write_text(
+        "import pathlib, sys\n"
+        "verb, name = sys.argv[1], sys.argv[2].split('@')[0]\n"
+        "with pathlib.Path('attempts').open('a') as output:\n"
+        "    output.write(verb + ' ' + name + '\\n')\n"
+        "if name == 'cc-failure': raise SystemExit(7)\n"
+        "pathlib.Path(name).write_text('acquired')\n", encoding="utf-8",
+    )
+    active, inactive = m._PluginActivation.ACTIVE, m._PluginActivation.INACTIVE
+    targets = {
+        name: m._RegisteredPluginTarget(tmp_path, activation)
+        for name, activation in (
+            ("aa-inactive", inactive), ("bb-first", active),
+            ("cc-failure", active), ("dd-retired", inactive), ("zz-later", active),
+        )
+    }
+    monkeypatch.setattr(m, "_resolve_copilot", lambda: sys.executable)
+    monkeypatch.setattr(m, "_refresh_marketplace", lambda *a, **k: True)
+    monkeypatch.setattr(
+        m, "_browse_marketplace_plugins", lambda *a, **k: set(targets) - {"dd-retired"},
+    )
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: tmp_path / name)
+    monkeypatch.setattr(
+        m, "_uninstall_one_plugin_payload",
+        lambda *a, **k: pytest.fail("Failed real acquisition reached retirement"),
+    )
+
+    assert m._update_registered_plugins(targets) is False
+    assert (tmp_path / "bb-first").read_text() == "acquired"
+    assert (tmp_path / "attempts").read_text().splitlines() == [
+        "update bb-first", "update cc-failure", "install cc-failure",
+    ]
+    assert not any((tmp_path / name).exists() for name in ("aa-inactive", "dd-retired", "zz-later"))
+
+
+def test_successful_acquisition_and_telemetry_keep_retirement_last(monkeypatch):
+    active, inactive = m._PluginActivation.ACTIVE, m._PluginActivation.INACTIVE
+    targets = {
+        name: m._RegisteredPluginTarget(None, activation)
+        for name, activation in (
+            ("aa-inactive", inactive), ("bb-required", active), ("cc-retired", inactive),
+        )
+    }
+    monkeypatch.setattr(m, "_refresh_marketplace", lambda *a, **k: True)
+    monkeypatch.setattr(
+        m, "_browse_marketplace_plugins", lambda *a, **k: set(targets) - {"cc-retired"},
+    )
+    actions, events = [], []
+
+    def acquire(name, *args, **kwargs):
+        actions.append(("acquire", name))
+        return "OK"
+
+    def retire(name, *args, **kwargs):
+        actions.append(("retire", name))
+        return "OK (purged)"
+
+    monkeypatch.setattr(m, "_update_one_plugin_payload", acquire)
+    monkeypatch.setattr(m, "_uninstall_one_plugin_payload", retire)
+    monkeypatch.setattr(
+        "agent_worktrees.update_events.record",
+        lambda phase, name, status, **kwargs: events.append(name.split("@")[0]),
+    )
+    assert m._update_registered_plugins(targets) is True
+    assert actions == [
+        ("acquire", "bb-required"), ("acquire", "aa-inactive"), ("retire", "cc-retired"),
+    ]
+    assert events == ["bb-required", "aa-inactive", "cc-retired"]
 
 
 def test_no_config_is_non_fatal(monkeypatch):
