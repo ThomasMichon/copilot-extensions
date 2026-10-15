@@ -128,9 +128,10 @@ def test_real_missing_socket_probe_does_not_start_a_server(tmp_path: Path) -> No
         pytest.skip("native tmux is unavailable")
     socket = tmp_path / "unstarted.sock"
     result = subprocess.run(
-        [binary, "-S", str(socket), "list-sessions"],
+        [binary, "-S", socket.name, "list-sessions"],
         capture_output=True,
         text=True,
+        cwd=tmp_path,
         timeout=5,
         **no_window_kwargs(),
     )
