@@ -44,17 +44,19 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+    "commit": "270cf0110d0675be3b4262d0b12aa7c008b89e21",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 36,
     "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
-    "source_git_blob": "4a4479c7c4c0138b8ad7ce5fba05869d73b1785a",
-    "source_sha256": "05c928151334e6a7548217f276ce43493ed828c413534e5c00472ef3ec67a7ff"
+    "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+    "source_sha256": "a85d7ef19f9afa05d6c40f06fb6a5e6a5956b18c260be6cd4666f0c01623880e"
   },
   "compatibility": {
     "caller_handoff_retains_worktree_scope": true,
     "provider_key_required_before_reuse": true,
     "provider_native_recreation": false,
-    "name_only_provider_refused": true
+    "name_only_provider_refused": true,
+    "cold_resume_placement_drift_refused_before_spawn": true,
+    "guest_workspace_preserved_on_load": true
   }
 }

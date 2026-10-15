@@ -180,13 +180,19 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
-          "sha256": "05c928151334e6a7548217f276ce43493ed828c413534e5c00472ef3ec67a7ff",
+          "sha256": "a85d7ef19f9afa05d6c40f06fb6a5e6a5956b18c260be6cd4666f0c01623880e",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-          "sha256": "23eeb485c10755726c634e3a926bdee2abea3fdcb37bbd5b65c55bc62718b841",
+          "sha256": "42244351a7410e153e87077d9e25f04b7521fa2de4ebbb58dce376312fc669c8",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "sha256": "df76e1cf1f4e7d13ef937f939b1008f0c443abb9f567bb75be88387fd5bd35bb",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -572,14 +578,20 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-36.json",
-          "sha256": "4b951a04392dc21d479f218aab77c3ff5868f88ff283342e53e0858cbdf77b7f",
+          "sha256": "d3b3fb29e6f63f8ba5327cadd09013b79a40d359982c33a3f84e285791f957c2",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-36.json",
-          "sha256": "f41c46accbd291ee35b8c35826e3449fc97389cc092da43e0d33f1043079524d",
+          "sha256": "7d5f8e731230ab23792f3634566839200454fbe3de245056f4fe3a3e0cdb1813",
           "role": "Generation-36 provider-native replay and recovery boundary evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-36.json",
+          "sha256": "267072cac9433d04b3d4632c09555a4ca8ce3aa0dd364b6ff948ec5b50be9fa8",
+          "role": "Generation-36 provider cold-resume placement and native continuity evidence",
           "generation": 36
         }
       ],
@@ -1671,6 +1683,30 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
           "source_git_blob": "3ce38f533716cc084a4cdc995b9496a1619dae1c",
           "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "270cf0110d0675be3b4262d0b12aa7c008b89e21",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Freeze keyed provider cold-resume corrections: effective placement drift refuses before persistence/spawn, ACP load retains the guest workspace without changing host cwd. Real offline ACP stop/load and native provider/ordinary refresh compatibility tests exercise these boundaries."
+        },
+        {
+          "commit": "270cf0110d0675be3b4262d0b12aa7c008b89e21",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "95d0d8d3a14c8c9b9513abf8fcbbeb5931cf6b5f",
+          "capture_method": "Freeze keyed provider cold-resume corrections: effective placement drift refuses before persistence/spawn, ACP load retains the guest workspace without changing host cwd. Real offline ACP stop/load and native provider/ordinary refresh compatibility tests exercise these boundaries."
+        },
+        {
+          "commit": "270cf0110d0675be3b4262d0b12aa7c008b89e21",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1b251b41ec48c41d47ff4026edce83f29b0db97f",
+          "capture_method": "Freeze keyed provider cold-resume corrections: effective placement drift refuses before persistence/spawn, ACP load retains the guest workspace without changing host cwd. Real offline ACP stop/load and native provider/ordinary refresh compatibility tests exercise these boundaries."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
