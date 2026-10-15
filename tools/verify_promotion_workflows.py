@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from urllib.parse import quote
 
 WORKFLOWS = {
@@ -67,16 +68,35 @@ def _snapshot(repository: str, merge_sha: str, tag: str) -> None:
 
 
 def _runs(
-    repository: str, filename: str, title: str, *, merge_sha: str, branch: str, deadline: float,
+    repository: str, filename: str, title: str, *, merge_sha: str, branch: str,
+    created_at: str, deadline: float,
 ) -> list[dict]:
     scope = f"branch={quote(branch, safe='')}" if branch == "main" else f"head_sha={merge_sha}"
     return [
         run for run in _pages(
-            f"repos/{repository}/actions/workflows/{filename}/runs?event=workflow_dispatch&{scope}",
+            f"repos/{repository}/actions/workflows/{filename}/runs?event=workflow_dispatch&{scope}"
+            f"&created={quote('>=' + created_at, safe='')}",
             "workflow_runs", deadline=deadline,
         )
         if run.get("display_title") == title
     ]
+
+
+def _promotion_created_at(repository: str, promotion_run: str) -> str:
+    run_id = int(promotion_run.split("-")[0])
+    run = _api(f"repos/{repository}/actions/runs/{run_id}")
+    created_at = run.get("created_at") if isinstance(run, dict) else None
+    if (
+        not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] != run_id
+        or not isinstance(created_at, str)
+        or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", created_at)
+    ):
+        raise VerificationError("owning promotion has no immutable creation time")
+    try:
+        datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise VerificationError("owning promotion has an invalid creation time") from exc
+    return created_at
 
 
 def _identity(
@@ -114,6 +134,8 @@ def verify(
         raise VerificationError("explicit workflow authority is unavailable")
     deadline = time.monotonic() + wait_seconds
     _snapshot(repository, merge_sha, tag)
+    # Reruns retain created_at; their later start time would hide an earlier dispatch.
+    created_at = _promotion_created_at(repository, promotion_run)
     pending = {}
     receipts = {}
     for filename, (name, required) in WORKFLOWS.items():
@@ -127,7 +149,8 @@ def verify(
         title = f"{name} promotion {promotion_run} at {merge_sha}"
         branch = "main" if filename == "workflow-lockdown-guard.yml" else tag
         existing = _runs(
-            repository, filename, title, merge_sha=merge_sha, branch=branch, deadline=deadline,
+            repository, filename, title, merge_sha=merge_sha, branch=branch,
+            created_at=created_at, deadline=deadline,
         )
         if len(existing) > 1:
             raise VerificationError(f"ambiguous promotion workflow runs: {filename}")
@@ -144,7 +167,8 @@ def verify(
     while pending:
         for filename, (workflow_id, title, required, branch) in list(pending.items()):
             runs = _runs(
-                repository, filename, title, merge_sha=merge_sha, branch=branch, deadline=deadline,
+                repository, filename, title, merge_sha=merge_sha, branch=branch,
+                created_at=created_at, deadline=deadline,
             )
             if len(runs) > 1:
                 raise VerificationError(f"ambiguous promotion workflow runs: {filename}")

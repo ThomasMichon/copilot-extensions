@@ -709,6 +709,19 @@ win grows with build complexity.
   the unmerged PR head with a no-common-ancestor error; no fetched code
   executed. Hosted review/publication proof and strict-rule activation are
   still outstanding.
+- Review caught a real post-merge liveness defect: scanning all retained main
+  dispatches would exhaust the bounded pagination limit even with the exact
+  matching run on the first page. Both workflow lookups now use the owning
+  promotion's immutable API `created_at` as an inclusive lower bound, never
+  a retry's later start time. A 1,500-row unrelated-history regression proves
+  exact-run reuse and duplicate-run refusal; malformed owning-run identities
+  or timestamps fail before dispatch. The focused workflow/readiness/retry
+  selection passed 119 cases in 75.92 seconds, and touched Python lint and
+  whitespace checks passed. A read-only live GitHub query accepted the encoded
+  timestamp qualifier and returned no out-of-scope rows. This is API-filter
+  evidence, not an actual publication or Linux workflow execution.
+  The operational reference now correctly distinguishes the merge job's
+  non-admin write-capable Actions token from the owner release PAT.
 
 ### 2026-10-14 - Candidate-scoped readiness before merge
 

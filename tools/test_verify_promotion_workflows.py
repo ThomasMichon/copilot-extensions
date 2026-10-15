@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
@@ -16,6 +17,7 @@ import verify_promotion_workflows as verification
 SHA = "a" * 40
 TAG = "promote-20260102030405-aaaaaaaa"
 RUN = "123-1"
+CREATED_AT = "2026-01-02T00:00:00Z"
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -27,6 +29,7 @@ def backend(monkeypatch):
         "calls": [], "dispatched": [], "runs": {}, "main": "ahead",
         "tag_sha": SHA, "annotation": True, "conclusion": "success", "missing": set(),
         "control_sha": SHA, "ancestry": {},
+        "promotion": {"id": 123, "created_at": CREATED_AT, "run_started_at": "2026-01-03T00:00:00Z"},
     }
 
     def api(path, *, body=None, timeout=60):
@@ -40,6 +43,8 @@ def backend(monkeypatch):
         if "/compare/" in path:
             comparison = path.split("/compare/")[1]
             return {"status": state["ancestry"].get(comparison, state["main"])}
+        if path == "repos/example/project/actions/runs/123":
+            return state["promotion"]
         if "/actions/workflows/" in path:
             filename = path.split("/actions/workflows/")[1].split("/")[0].split("?")[0]
             name, required = verification.WORKFLOWS[filename]
@@ -58,6 +63,7 @@ def backend(monkeypatch):
                 }]
                 return None
             if "/runs?" in path:
+                assert parse_qs(urlsplit(path).query)["created"] == [">=" + CREATED_AT]
                 return {"workflow_runs": state["runs"].get(filename, [])}
             return {"id": workflow_id, "state": "active", "path": f".github/workflows/{filename}",
                     "name": name}
@@ -98,6 +104,50 @@ def test_repeat_verification_uses_the_exact_existing_run_instead_of_dispatching_
     assert verify()
     assert verify()
     assert len(backend["dispatched"]) == 2
+
+
+@pytest.mark.parametrize("duplicates", [False, True])
+def test_large_unrelated_history_is_excluded_without_hiding_retries_or_duplicates(
+    backend, monkeypatch, duplicates,
+):
+    verify()
+    backend["promotion"]["run_started_at"] = "2026-02-01T00:00:00Z"
+    if duplicates:
+        backend["runs"]["workflow-lockdown-guard.yml"] *= 2
+    api = verification._api
+    old_runs = [{"display_title": "unrelated", "created_at": "2026-01-01T00:00:00Z"}] * 1500
+    queried = []
+
+    def history(path, **kwargs):
+        if "/workflow-lockdown-guard.yml/runs?" not in path:
+            return api(path, **kwargs)
+        query = parse_qs(urlsplit(path).query)
+        queried.append(query)
+        rows = old_runs + backend["runs"]["workflow-lockdown-guard.yml"]
+        if query.get("created") == [">=" + CREATED_AT]:
+            rows = backend["runs"]["workflow-lockdown-guard.yml"]
+        page = int(query["page"][0])
+        return {"workflow_runs": rows[(page - 1) * 100:page * 100]}
+
+    monkeypatch.setattr(verification, "_api", history)
+    if duplicates:
+        with pytest.raises(verification.VerificationError, match="ambiguous"):
+            verify()
+    else:
+        assert verify() == {"ci.yml": 110, "workflow-lockdown-guard.yml": 111}
+    assert queried and all(query["created"] == [">=" + CREATED_AT] for query in queried)
+    assert len(backend["dispatched"]) == 2
+
+
+@pytest.mark.parametrize("field,value", [
+    ("id", 124), ("id", True), ("created_at", None),
+    ("created_at", "2026-02-30T00:00:00Z"), ("created_at", "2026-01-02"),
+])
+def test_invalid_owning_promotion_clock_never_dispatches(backend, field, value):
+    backend["promotion"][field] = value
+    with pytest.raises(verification.VerificationError, match="creation time"):
+        verify()
+    assert not backend["dispatched"]
 
 
 @pytest.mark.parametrize("key,value", [("tag_sha", "b" * 40), ("main", "diverged"), ("main", "behind")])

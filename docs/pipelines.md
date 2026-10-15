@@ -208,10 +208,12 @@ existing bytes. The generated PR links its ready set, and merge authorization
 and the merge waiter retain the SHA appended directly by the trusted promoter
 to the step's GitHub output file. A remote branch lookup never selects that
 identity: both the lookup and fetched ref must equal the promoter's SHA before
-any readiness publication. The waiter polls
-required checks with read-only credentials, then issues a direct squash merge
-with an atomic expected-head condition using release authority only for that
-write. It never arms auto-merge: GitHub's auto-merge request can survive a moved
+any readiness publication. A separate checkout-free merge job polls
+required checks and issues a direct squash merge with an atomic expected-head
+condition using its non-admin Actions token, which has contents and pull-request
+write permissions. That job never receives the owner release PAT and executes
+no checkout, setup actions or repository code. It never arms auto-merge:
+GitHub's auto-merge request can survive a moved
 head, so checking a head only when enabling it is not durable candidate binding.
 An existing matching PR can be resumed; a different head, cross-repository PR,
 closed-unmerged PR or ambiguous match fails rather than creating a replacement.
@@ -226,6 +228,9 @@ job therefore recomputes the identical complete candidate SHA and tag stem.
 An existing branch is accepted only when that exact recomputed SHA matches;
 normalized source/state comparison, altered timestamps or pre-seeded refs never
 establish provenance. Changed inputs fail rather than force-pushing a replacement.
+Post-merge workflow discovery uses that same immutable creation time as its
+inclusive lower bound, excluding unrelated retained history while reusing
+earlier dispatches on retries and still refusing duplicate matching runs.
 
 After the exact candidate PR really merges, the final publisher fetches the
 candidate commit explicitly (squash does not preserve its ancestry), repeats
@@ -686,7 +691,7 @@ release-candidate invocation.
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (publish/read back candidate inputs, open a generated `release/promote-<run id>` PR against `main`, wait for required checks, and squash-merge that exact head via `APERTURE_RELEASE_TOKEN`). See [Promotion: dev → main](#promotion-dev--main). |
+| `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (publish/read back candidate inputs and open a generated `release/promote-<run id>` PR against `main` using `APERTURE_RELEASE_TOKEN`) → a separate checkout-free `merge-promotion` job (wait for required checks and squash-merge that exact head using the non-admin Actions token) → final publication and explicit post-merge workflow verification. See [Promotion: dev → main](#promotion-dev--main). |
 | `purge-consumed-changefiles.yml` | `schedule` (daily), `repository_dispatch: [purge-changefiles-requested]` | Standalone daily (or on-demand) companion to the promotion pipeline: opens the "clear consumed changefiles on dev" housekeeping PR for whatever changefiles a promotion has already consumed by then -- pure housekeeping, not per-promotion and never load-bearing for promotion correctness. |
 
 **Scheduled sweeps and watchdogs** (`stale-branch-sweep.yml` acts on
