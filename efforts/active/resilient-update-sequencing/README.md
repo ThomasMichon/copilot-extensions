@@ -318,3 +318,12 @@ achieved by rearranging today's combined installer invocations.
 - The preceding published head cleared required CI. The new admission/writer
   head still owes current-head review and CI; promotion and live proof remain
   open.
+
+### 2026-10-15 - Preserve the out-of-process validation boundary
+- Required CI rejected the writer/profile integration test's direct Manager
+  import from plugin test code. Replaced it with the real native Manager CLI
+  process under contained home/config/output roots, retaining the canonical
+  writer and last-entry-removal assertions. No architecture guard was weakened.
+- The 21-case registry file passed with the actual process boundary, and all
+  five Manager dependency-boundary contracts passed. The prior CI run's other
+  2,307 Manager cases passed; current-head required CI and review remain open.

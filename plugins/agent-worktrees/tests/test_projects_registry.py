@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config_migrations, installer, repos
@@ -72,7 +76,7 @@ def _patch_registry_path(monkeypatch, tmp_path: Path) -> Path:
 @pytest.mark.parametrize("edited", [False, True])
 @pytest.mark.parametrize("source_only", [False, True])
 def test_last_registry_entries_roundtrip_to_command_and_profile_reconciliation(
-    monkeypatch, tmp_path, capsys, edited, source_only,
+    monkeypatch, tmp_path, edited, source_only,
 ):
     home = tmp_path / "home"
     root = home / ".agent-worktrees"
@@ -105,23 +109,27 @@ def test_last_registry_entries_roundtrip_to_command_and_profile_reconciliation(
     else:
         assert not any(path.exists() for path in paths)
 
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "worktree-manager" / "src"))
-    from worktree_manager import harness_state, local_profiles, terminal_fragment
-
-    monkeypatch.setattr(harness_state, "home", lambda: home)
-    monkeypatch.setattr(local_profiles.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(local_profiles, "refresh_shortcuts", lambda projects: 0)
-    fragments = tmp_path / "fragments"
-    state = tmp_path / "state"
+    if os.name != "nt":
+        return  # Windows profile publication is exercised through its native CLI.
+    local = home / "local"
+    fragments = local / "Microsoft" / "Windows Terminal" / "Fragments"
+    state = local / "Packages" / "Microsoft.WindowsTerminal_8wekyb3d8bbwe" / "LocalState"
     (fragments / "AgentWorktrees").mkdir(parents=True)
-    state.mkdir()
+    state.mkdir(parents=True)
     fragment = fragments / "AgentWorktrees" / "agent-worktrees.json"
     fragment.write_text(json.dumps({"profiles": [{"guid": "{old}", "name": "Demo"}]}), encoding="utf-8")
-    monkeypatch.setattr(terminal_fragment, "_wt_fragments_dir", lambda: fragments)
-    monkeypatch.setattr(terminal_fragment, "_wt_local_state_dir", lambda: state)
-    capsys.readouterr()
-    assert local_profiles.main(["--machine", "host"]) == 0
-    assert json.loads(capsys.readouterr().out)["status"] == "verified_current"
+    manager_src = Path(__file__).resolve().parents[3] / "worktree-manager" / "src"
+    environment = {
+        **os.environ, "USERPROFILE": str(home), "HOME": str(home), "LOCALAPPDATA": str(local),
+        "PYTHONPATH": os.pathsep.join([str(manager_src), os.environ.get("PYTHONPATH", "")]),
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "worktree_manager", "refresh-profiles", "--machine", "host"],
+        cwd=home, env=environment, capture_output=True, text=True, encoding="utf-8",
+        timeout=10, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert json.loads(result.stdout)["status"] == "verified_current"
     assert json.loads(fragment.read_text(encoding="utf-8"))["profiles"] == []
 
 
