@@ -1619,6 +1619,14 @@ worktrees self-installer retains its existing 600-second minimum, extended when
 a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
 values fail explicitly before launching the installer.
 
+The shared command-lifecycle runner passes the caller's stdout and stderr
+explicitly to its native installer child, including the strict Windows Job
+containment path. On Windows, a hidden child with only implicit OS stream
+inheritance can lose both streams when the caller was launched through a
+PowerShell native-command pipeline. Explicit handles preserve installer and
+self-staged grandchild diagnostics without capturing them in memory, changing
+their destinations, or changing admission, containment, or exit-code behavior.
+
 Plugins with a watchdog default other than 480 seconds declare that positive
 integer as `installerDeadlineSeconds` in `plugin.json`; unified update reads it
 only when neither deadline environment override is set. The declaration must
