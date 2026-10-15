@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import importlib.util
 import json
 import os
 import re
@@ -15,7 +16,14 @@ import uuid
 from contextlib import ExitStack
 from pathlib import Path
 
-import versioned_runtime as runtime
+_runtime_spec = importlib.util.spec_from_file_location(
+    "containers_profile_runtime", Path(__file__).with_name("versioned_runtime.py"),
+)
+if _runtime_spec is None or _runtime_spec.loader is None:
+    raise RuntimeError("The owning Containers runtime helper is unavailable")
+runtime = importlib.util.module_from_spec(_runtime_spec)
+sys.modules[_runtime_spec.name] = runtime
+_runtime_spec.loader.exec_module(runtime)
 
 PROFILE_SCHEMA = "copilot-extensions.agent-containers.runtime-profile"
 PROFILE_FILE = "runtime-profile.json"

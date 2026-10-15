@@ -752,3 +752,14 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   and promotion aggregation. No case, selector or per-item/job deadline was
   relaxed. All 37 focused native, real detector and promotion-aggregate checks
   passed in 102.23 seconds. Fresh-head review and required CI remain blocking.
+- The subsequent head passed required CI and genuine Copilot review with zero
+  open findings. Before merge, an operator-observed staged Containers update
+  exposed a sibling-import assumption: safe-path or isolated Python does not
+  add the script directory to module search. The profile coordinator now loads
+  its exact adjacent runtime helper explicitly, and both shell launchers use
+  isolated mode. Real copied-payload subprocesses cover safe-path and isolated
+  startup from a hostile ambient directory, while the actual selected-dependency
+  refusal also runs isolated and preserves prior selection. All 47 profile,
+  dependency and lock cases passed with eight platform skips; installer
+  contracts, touched Python lint and PowerShell parsing passed. Fresh-head
+  publication gates remain required; no installed payload was patched.

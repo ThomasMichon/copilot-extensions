@@ -529,7 +529,7 @@ _ok "Directories: $INSTALL_DIR"
 
 # -- 2. Provision the selected immutable profile (uv pip install or pip) --
 profile_args=(
-    "$SCRIPT_DIR/runtime_profile.py" --root "$INSTALL_DIR"
+    -I "$SCRIPT_DIR/runtime_profile.py" --root "$INSTALL_DIR"
     --payload "$PLUGIN_DIR" --python "$PYTHON_CMD" --tsv
 )
 if [[ "$HAVE_UV" -eq 1 ]]; then profile_args+=(--uv "$(command -v uv)"); fi

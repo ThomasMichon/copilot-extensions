@@ -15,6 +15,31 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
+@pytest.mark.parametrize("isolated", [False, True], ids=["safe-path", "isolated"])
+def test_staged_profile_loads_only_its_owned_runtime_with_safe_path(tmp_path, isolated):
+    staged = tmp_path / "staged payload" / "scripts"
+    staged.mkdir(parents=True)
+    for name in (
+        "runtime_profile.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_construction.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, staged / name)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    (foreign / "versioned_runtime.py").write_text(
+        "raise AssertionError('loaded an ambient runtime helper')\n", encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, *(["-I"] if isolated else []), str(staged / "runtime_profile.py"), "--help"],
+        cwd=foreign, env={**os.environ, "PYTHONSAFEPATH": "1", "PYTHONPATH": str(foreign)},
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--profile" in result.stdout
+    assert result.stderr == ""
+
+
 @pytest.fixture
 def profiles(monkeypatch):
     monkeypatch.syspath_prepend(str(SCRIPTS))
@@ -200,7 +225,7 @@ def test_native_profile_policy_refusal_retains_selected_runtime(
     marker = (previous / ".install-complete.json").read_bytes()
     completed = subprocess.run(
         [
-            sys.executable, str(scripts / "runtime_profile.py"),
+            sys.executable, "-I", str(scripts / "runtime_profile.py"),
             "--root", str(root), "--payload", str(payload),
             "--python", sys.executable, "--uv", uv, "--profile", "provider-exec",
         ],

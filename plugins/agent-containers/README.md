@@ -75,6 +75,9 @@ Every selected profile uses the canonical seven-day dependency resolver against
 the configured feed; unavailable UV or a selected dependency fails closed
 without replacing the active slot. Windows keeps signed stdlib interpreter
 copies without pip/setuptools seeding; unrestricted pip fallback is unsupported.
+The staged profile coordinator runs in Python isolated mode and loads its
+runtime helper from the same payload directory explicitly, so safe-path
+settings and ambient Python modules cannot redirect that import.
 
 With an explicit installation-cell context, configuration loading validates the
 Containers owner before using config overrides. Its optional knowledge-repo
