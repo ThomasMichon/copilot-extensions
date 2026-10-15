@@ -2160,7 +2160,11 @@ resolved containment and the recursive local dependency graph, including
 symlink escapes and hidden requirement-file references.
 
 The CLI authenticates its own canonical repository or materialized payload
-anchor. Other callers provide separately attested absolute roots with repeated
+anchor. In a materialized repository, transitive sibling references retain the
+roster-owned plugin's embedded `libs` namespace; only explicitly named,
+identity-matching projects enter the admitted graph, not unrelated directories
+or another payload's libraries. Other callers provide separately attested
+absolute roots with repeated
 `--trusted-source-root` options before `--`; the Python API's
 `trusted_source_roots` defaults to empty and does not infer trust from the
 requested path or working directory. Python 3.10 can use the proper TOML parser

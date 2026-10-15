@@ -1071,20 +1071,23 @@ def test_explicit_project_context_does_not_trust_an_escaping_source_graph(tmp_pa
         )
 
 
-@pytest.mark.parametrize("anchor", ["canonical", "canonical-vendored", "payload"])
+@pytest.mark.parametrize("anchor", ["canonical", "canonical-vendored", "canonical-materialized", "payload"])
 def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anchor):
     import json
 
     repository = tmp_path / "repository"
+    canonical_libraries = anchor.startswith("canonical")
+    editable = ", editable=true" if anchor == "canonical-materialized" else ""
     payload = source_project(
         repository / "plugins" / "fixture-plugin", "fixture-plugin",
-        sources='fixture-lib={path="../../libs/fixture-lib"}' if anchor.startswith("canonical")
+        sources=f'fixture-lib={{path="../../libs/fixture-lib"{editable}}}' if canonical_libraries
         else 'fixture-lib={path="libs/fixture-lib"}',
     )
     lib = source_project(
-        repository / "libs" / "fixture-lib" if anchor.startswith("canonical") else payload / "libs" / "fixture-lib",
-        "fixture-lib",
+        repository / "libs" / "fixture-lib" if canonical_libraries else payload / "libs" / "fixture-lib",
+        "fixture-lib", sources=f'fixture-leaf={{path="../fixture-leaf"{editable}}}',
     )
+    leaf = source_project(lib.parent / "fixture-leaf", "fixture-leaf")
     manifest = {
         "name": "fixture-plugin", "version": "1.0",
         "repository": "https://github.com/ThomasMichon/copilot-extensions",
@@ -1101,6 +1104,20 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
             "name": "copilot-extensions",
             "plugins": [{"name": "fixture-plugin", "version": "1.0", "source": "plugins/fixture-plugin"}],
         }), encoding="utf-8")
+        if anchor == "canonical-materialized":
+            import materialize_main
+
+            for project in (lib, leaf):
+                (project / "src").mkdir()
+            log = materialize_main.materialize_uv_editable_ref_into(
+                source_consumer_dir=payload, dest_consumer_dir=payload,
+                canonical_root=repository, dest_root=repository,
+            )
+            assert log and not any(entry.startswith("SKIP") for entry in log), log
+            lib = payload / "libs" / "fixture-lib"
+            leaf = payload / "libs" / "fixture-leaf"
+            assert (lib / "pyproject.toml").is_file() and (leaf / "pyproject.toml").is_file()
+            shutil.rmtree(repository / "libs")
     else:
         helper = payload / "scripts" / PATH.name
     helper.parent.mkdir(parents=True, exist_ok=True)
@@ -1120,7 +1137,7 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     import os
 
     python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    for source in (payload, lib):
+    for source in (payload, lib, leaf):
         result = subprocess.run(
             [sys.executable, "-I", str(helper), "--uv", uv, "--",
              "--no-config", "--no-index", "--python", str(python), str(source)],
@@ -1136,6 +1153,53 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     )
     assert rejected.returncode != 0
     assert "trusted source roots" in rejected.stderr
+
+
+@pytest.mark.parametrize("helper_owner", ["canonical", "payload"])
+@pytest.mark.parametrize("target", ["sibling", "unowned", "foreign-payload", "wrong-identity"])
+def test_canonical_materialized_graph_retains_only_its_owned_library_namespace(
+    tmp_path, monkeypatch, helper_owner, target,
+):
+    import json
+
+    repository = tmp_path / "repository"
+    payload = source_project(
+        repository / "plugins" / "fixture-plugin", "fixture-plugin",
+        sources='fixture-lib={path="libs/fixture-lib"}',
+    )
+    library = source_project(payload / "libs" / "fixture-lib", "fixture-lib")
+    target_path = {
+        "sibling": payload / "libs" / "fixture-leaf",
+        "unowned": payload / "unowned" / "fixture-leaf",
+        "foreign-payload": repository / "plugins" / "unlisted" / "libs" / "fixture-leaf",
+        "wrong-identity": payload / "libs" / "fixture-leaf",
+    }[target]
+    import os
+
+    reference = os.path.relpath(target_path, library).replace("\\", "/")
+    with (library / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(f'[tool.uv.sources]\nfixture-leaf={{path="{reference}"}}\n')
+    leaf = source_project(target_path, "different-name" if target == "wrong-identity" else "fixture-leaf")
+    (payload / "plugin.json").write_text(json.dumps({
+        "name": "fixture-plugin", "version": "1.0",
+        "repository": "https://github.com/ThomasMichon/copilot-extensions",
+    }), encoding="utf-8")
+    roster = repository / ".github" / "plugin" / "marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(json.dumps({
+        "name": "copilot-extensions",
+        "plugins": [{"name": "fixture-plugin", "version": "1.0", "source": "plugins/fixture-plugin"}],
+    }), encoding="utf-8")
+    helper = (
+        repository / "libs" / "installer-engine" / PATH.name if helper_owner == "canonical"
+        else payload / "scripts" / PATH.name
+    )
+    monkeypatch.setattr(policy, "__file__", str(helper))
+    if target == "sibling":
+        assert set(policy._anchor_roots()) == {payload, library, leaf}
+    else:
+        with pytest.raises(policy.DependencyPolicyError, match="library (attribution|identity)"):
+            policy._anchor_roots()
 
 
 def test_payload_metadata_alone_without_owner_provenance_grants_no_roots(tmp_path, monkeypatch):

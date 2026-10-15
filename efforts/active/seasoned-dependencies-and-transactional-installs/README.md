@@ -783,3 +783,57 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   and repeated package-refresh options and the mandatory full reinstall.
   The fix is synchronized across all thirteen runtime payloads; it still owes
   its own review/CI and a successful native instrumented release run.
+- #6825 merged as `080963723459da1f754c0b42a77ad2c835a8cb73`
+  after genuine current-head Copilot approval and successful required CI.
+  The documentation-assessment finding was addressed and resolved without
+  changing source or weakening any gate. Post-merge CI run `38707494139`
+  now owns the next release trigger. Successful instrumented SSH baseline
+  collection, exact promotion and authorized runtime rollout remain open.
+- Refocused validation on the operator's primary completion criterion: local
+  managed worktree creation and conversation resumption, not merely CI.
+  The installed Windows runtime successfully created a fresh harness worktree
+  and paired knowledge worktree. Its exact normalized launch plan started
+  Copilot headlessly, which returned the requested startup marker with exit
+  zero and no file changes. A subsequent ordinary managed resume selected the
+  same native session and returned a second marker conditional on remembering
+  the previous response, again with exit zero and no file changes.
+  Both unchanged probe worktrees were finalized through their managed lifecycle
+  after explicitly concluding the exited test session. Local creation and
+  actual conversation resumption are therefore working; the independently
+  tracked release and rollout obligations are not implied complete.
+- The existing SSH incident owner independently completed the remaining
+  snapshot repair in #6831, merged as
+  `e493fac14e3fc8d815a0cdc92bdb99995485c7ef` after genuine approval and
+  successful required CI. Root and transitive UV source declarations now
+  point into the copied snapshot and consistently use non-editable sources.
+  Its native Linux coverage collector exercised both real fresh-runtime
+  first-use paths after removing the original sources, earning 506 test
+  records and 11 covered source files under unchanged deadlines. No competing
+  implementation was opened. The containing promotion must still earn its
+  own enrolled baseline; local evidence does not replace that gate.
+- The containing release `38716225239` earned the actual SSH baseline and
+  passed every full plugin suite, artifact build, attestation and publication.
+  Release #6842 merged to `8abb234719a922e5a8e280f2bb0b6864adfae474`.
+  Verified 231 changed implementation files against the validated development
+  snapshot, allowing only the sixteen declared installer-engine reference
+  localizations, plus all 42 released engine/support copies against canonical
+  bytes. The final immutable-main verifier nevertheless failed because
+  exact-main CI `38722150186` exposed materialized consumer failures (#6844).
+  Source/artifact integrity is proved, not functional release qualification;
+  authorized local rollout remains held.
+- Reserved only the newly exposed canonical source-attribution defect under
+  #6844; existing #6237 owners retain standalone preparation, Manager collection,
+  fixture/corpus repairs and pre-publication validation. The policy traversal
+  admitted the first embedded library but discarded its roster-owned namespace
+  for sibling transitive references. Three regression failures reproduced the
+  exact refusal before the correction. Traversal now retains the originating
+  library namespace while admitting only explicitly named, identity-matching
+  projects; unowned directories and foreign payloads remain refused.
+- A real native CLI regression uses the production release materializer for
+  root and transitive libraries, deletes the canonical sources, then installs
+  from the self-contained graph. Source, canonical-helper, vendored-helper and
+  payload-only controls also pass. All 240 policy and synchronization cases,
+  touched-code lint, thirteen installer contracts and fan-out checks passed.
+  Thirteen runtime change entries carry the synchronized correction. Fresh
+  review/CI, containing release qualification and configured-feed rollout
+  remain required; no production or installed copy was patched.
