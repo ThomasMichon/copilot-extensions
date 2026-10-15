@@ -7,7 +7,7 @@ from dataclasses import replace
 
 from machine_transport import default_shell_for_env_name as _default_shell_for_env_name
 from machine_transport import find_machine_entry
-from machine_transport import split_machine_environment
+from machine_transport import normalize_environment, resolve_machine_selection
 from machine_transport import resolve_ssh_target as _resolve_ssh_target
 from machine_transport import wrap_remote_command as _wrap_remote_command
 
@@ -33,17 +33,7 @@ _ENV_LABEL_TO_NAME = {"win": "windows", "wsl": "wsl", "linux": "linux"}
 def _entry_for_environment(
     entries: dict[str, cfg.MachineEntry], name: str, environment: str | None = None,
 ) -> cfg.MachineEntry | None:
-    target = split_machine_environment(name, environment)
-    if not target.environment:
-        return find_machine_entry(entries, name, reject_ambiguous=True)
-    entry = find_machine_entry(
-        entries, name, reject_ambiguous=True, execution_platform=target.environment,
-    )
-    if entry is None and target.machine != name:
-        entry = find_machine_entry(
-            entries, target.machine, reject_ambiguous=True, execution_platform=target.environment,
-        )
-    return entry
+    return resolve_machine_selection(entries, name, environment, allow_physical_context=True).entry
 
 
 def _load_remote_machines(
@@ -184,11 +174,15 @@ def _emit_remote_plan_for_env(
     except (FileNotFoundError, ValueError):
         return None
 
-    if env_label and env_label.strip().casefold() not in {"win", "windows", "wsl", "linux"}:
+    try:
+        normalize_environment(env_label)
+    except ValueError:
         return None
     try:
-        want = split_machine_environment(machine_display, env_label).environment
-        entry = _entry_for_environment(entries, machine_display, env_label)
+        selection = resolve_machine_selection(
+            entries, machine_display, env_label, allow_physical_context=True,
+        )
+        want, entry = selection.target.environment, selection.entry
     except ValueError as exc:
         return output._json_error(str(exc))
     if entry is None or not entry.ssh_environments:

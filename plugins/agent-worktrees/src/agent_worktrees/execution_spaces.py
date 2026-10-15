@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from machine_transport.registry import MachineEntry, find_machine_entry, machine_name
+from machine_transport.registry import MachineEntry, find_machine_entry, machine_name, resolve_machine_selection
+from machine_transport import split_machine_environment
 
 
 class ExecutionSpaceError(RuntimeError):
@@ -51,7 +52,7 @@ def detect_legacy_machine(entries: dict[str, MachineEntry], hostname: str) -> st
     return hostname
 
 
-def canonicalize_legacy_config(config: Any) -> Any:
+def canonicalize_legacy_config(config: Any, *, configured: bool = False) -> Any:
     from . import config as cfg
 
     repo = config.repos.get(config.repo_name)
@@ -61,11 +62,19 @@ def canonicalize_legacy_config(config: Any) -> Any:
         entries = cfg.load_machines_yaml(repo.anchor, config=config)
     except FileNotFoundError:
         return config
-    selected = find_machine_entry(
-        entries, config.machine, reject_ambiguous=True,
-        execution_platform=cfg.detect_platform(),
-    )
-    return replace(config, machine=selected.key) if selected and selected.legacy_key else config
+    selected = resolve_machine_selection(entries, config.machine, cfg.detect_platform())
+    entry = selected.entry
+    if (
+        configured and entry is not None and not entry.execution_platform
+        and cfg.detect_platform() != "wsl"
+        and not split_machine_environment(config.machine).environment
+    ):
+        return config
+    if entry is not None and (configured or entry.legacy_key):
+        return replace(config, machine=entry.key)
+    if configured and not entries and selected.target.environment:
+        return replace(config, machine=selected.target.logical_machine)
+    return config
 
 
 def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None, str, str | None]:
@@ -223,21 +232,22 @@ def require_record_mutation(record: Any, config: Any) -> None:
     if record is None:
         return
     entries = registry_for_config(config)
-    if not any(entry.execution_platform for entry in entries.values()):
-        return
     from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
     legacy_path = None
-    if getattr(record, "repo", "") and getattr(record, "platform", "") == "wsl":
+    if (
+        getattr(record, "repo", "") and getattr(record, "worktree_id", "")
+        and getattr(record, "platform", "") in ("wsl", "windows", "linux")
+    ):
         legacy_ref = tracking.parse_claim_ref(
             tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
         )
         legacy_path = resolve_legacy_wsl_owner_ref(legacy_ref, config)
     if (
-        legacy_path is not None and record.platform == "wsl"
+        legacy_path is not None
         and record.worktree_path == tracking.load_record(legacy_path).worktree_path
     ):
-        if record.owner_ref:
+        if record.owner_ref and any(entry.execution_platform for entry in entries.values()):
             owner = tracking.parse_claim_ref(record.owner_ref)
             if owner is None or not owner.is_qualified:
                 raise ExecutionSpaceError("owned record has an unqualified owner reference")

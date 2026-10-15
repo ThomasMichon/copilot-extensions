@@ -94,11 +94,16 @@ def test_automatic_legacy_display_gate_never_shadows_another_identity(tmp_path, 
     assert "Legacy label" not in resolve_machine(topology_repos=[tmp_path]).accepted
 
 
-def test_explicit_space_display_metadata_never_becomes_a_package_gate(tmp_path):
+def test_explicit_space_display_aliases_require_selected_context(tmp_path):
     _topology(tmp_path, {"guest": {
         "execution_platform": "wsl", "physical_host": "example-host", "display_name": "Legacy label",
     }})
-    assert resolve_machine("guest", topology_repos=[tmp_path]).accepted == ("guest",)
+    accepted = resolve_machine("guest", topology_repos=[tmp_path]).accepted
+    assert accepted[0] == "guest"
+    assert "Legacy label (WSL)" in accepted
+    from machine_transport import find_machine_entry, parse_machines_yaml_file
+    with pytest.raises(ValueError, match="does not select an execution space"):
+        find_machine_entry(parse_machines_yaml_file(tmp_path / "machines.yaml"), "Legacy label")
 
 
 def test_legacy_windows_wsl_identity_and_gate_aliases_are_independent(tmp_path):
@@ -116,7 +121,9 @@ def test_legacy_windows_wsl_identity_and_gate_aliases_are_independent(tmp_path):
     assert native.physical_host == guest.physical_host == "desktop"
     assert (native.execution_platform, guest.execution_platform) == ("windows", "wsl")
     assert "native-compat" in native.accepted
-    assert guest.accepted == ("desktop-wsl", "guest-profile")
+    assert guest.accepted[:2] == ("desktop-wsl", "guest-profile")
+    assert "desktop (WSL)" in guest.accepted
+    assert "native-compat" not in guest.accepted
     assert resolve_machine(
         "generated-host", topology_repos=[repo], execution_platform="wsl",
     ).canonical == "desktop-wsl"
@@ -146,7 +153,9 @@ def test_explicit_logical_identity_preserves_physical_relationship(tmp_path):
     guest = resolve_machine("guest", topology_repos=[repo])
     assert guest.canonical == "guest"
     assert guest.physical_host == "desktop"
-    assert guest.accepted == ("guest",)
+    assert guest.accepted[0] == "guest"
+    assert "desktop (WSL)" in guest.accepted
+    assert "desktop" not in guest.accepted
 
 
 @pytest.mark.parametrize("reverse", [False, True])
@@ -181,7 +190,10 @@ def test_mixed_topologies_ignore_transport_details_in_identity_and_native_cli(
     assert identity.canonical == ("desktop" if platform_name == "windows" else "desktop-wsl")
     assert identity.execution_platform == platform_name
     assert identity.physical_host == "desktop"
-    assert identity.accepted == (identity.canonical, requested)
+    assert identity.accepted[:2] == (identity.canonical, requested)
+    assert (
+        "desktop (WSL)" if platform_name == "wsl" else "desktop (Windows)"
+    ) in identity.accepted
     assert identity.warnings == ()
 
     for repo in repos:

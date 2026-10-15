@@ -21,7 +21,7 @@ from .execution_identity import (
     resolve_machine_identity,
 )
 from .identity import is_local_machine, local_execution_platform
-from .machine_environment import MachineEnvironment, split_machine_environment
+from .machine_environment import MachineEnvironment, legacy_alias_forms, normalize_environment, split_machine_environment
 from .registry import (
     AmbiguousMachineError,
     MachineEntry,
@@ -33,6 +33,10 @@ from .registry import (
     merge_machines_yaml,
     parse_machines_yaml,
     parse_machines_yaml_file,
+    MachineSelection,
+    entry_physical_host,
+    resolve_machine_selection,
+    find_machine_metadata,
 )
 from .transport import (
     TransportPlan,
@@ -47,6 +51,12 @@ __all__ = [
     "IdentityError",
     "MachineEntry",
     "MachineEnvironment",
+    "MachineSelection",
+    "entry_physical_host",
+    "normalize_environment",
+    "legacy_alias_forms",
+    "resolve_machine_selection",
+    "find_machine_metadata",
     "Resolution",
     "SSHEnvironment",
     "TopologyEntry",

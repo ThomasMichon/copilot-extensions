@@ -31,7 +31,7 @@ from .claim_handoff_accept_support import (
     local_record_ref,
     same_local_records,
     accept_child_path,
-    same_machine as _same_machine,
+    local_transition_actor,
 )
 from .lease_config import load_lease_settings
 from .lease_store import GitLeaseStore, LeaseLost
@@ -792,7 +792,7 @@ def transition(
     path = registry_path()
     try:
         actor_ref = _qualified_ref(actor, "actor")
-        if not _same_machine(actor_ref.machine, actor_ref.machine, project=actor_ref.project):
+        if not local_transition_actor(actor_ref):
             raise ClaimHandoffError("claim-bundle actor is not the current registered execution space")
         with tracking._RecordLock(path, require_sidecar=True):
             bundles = _load_registry_strict(path)

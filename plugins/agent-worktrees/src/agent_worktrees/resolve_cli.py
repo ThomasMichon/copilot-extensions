@@ -9,12 +9,12 @@ import platform
 import sys
 import threading
 
-from machine_transport import split_machine_environment
+from machine_transport import split_machine_environment, resolve_machine_selection
 
 from . import activity, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
 from . import codename_tracking, config as cfg, machine_identity
 from .launch_trace import append_launch_event
-from .execution_spaces import ExecutionSpaceError
+from .execution_spaces import ExecutionSpaceError, registry_for_config
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
@@ -33,15 +33,15 @@ def _target_is_local(
 ) -> bool:
     if not name:
         return False
-    target = split_machine_environment(name, environment)
-    if not target.environment and config.machine and name.casefold() == config.machine.casefold():
-        return machine_identity.is_local_machine(name, config)
     from .execution_spaces import registry_for_config
-    from .resolve_machine_cli import _entry_for_environment
 
     entries = registry_for_config(config)
+    selected = resolve_machine_selection(entries, name, environment, allow_physical_context=True)
+    target = selected.target
+    if not target.environment and config.machine and name.casefold() == config.machine.casefold():
+        return machine_identity.is_local_machine(name, config)
     if entries:
-        entry = _entry_for_environment(entries, name, environment)
+        entry = selected.entry
         if entry is not None:
             if target.environment and target.environment != cfg.detect_platform():
                 return False
@@ -53,7 +53,7 @@ def _target_is_local(
     if target.environment and target.environment != cfg.detect_platform():
         return False
     if target.environment and config.machine:
-        current = split_machine_environment(config.machine, cfg.detect_platform())
+        current = resolve_machine_selection(entries, config.machine, cfg.detect_platform()).target
         if target.machine.casefold() == current.machine.casefold():
             return target.environment == current.environment
     if not target.environment and config.machine and name.casefold() == config.machine.casefold():
@@ -517,9 +517,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             except (ValueError, ExecutionSpaceError) as exc:
                 output.err(str(exc))
                 return 1
-            requested_environment = split_machine_environment(
-                state.requested_machine, getattr(args, "environment", None),
-            ).environment
+            from .execution_spaces import registry_for_config
+            requested_environment = resolve_machine_selection(
+                registry_for_config(config), state.requested_machine,
+                getattr(args, "environment", None), allow_physical_context=True,
+            ).target.environment
             if requested_environment:
                 want_platform = requested_environment
                 if not target_is_local or want_platform != cfg.detect_platform():
@@ -633,9 +635,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     except (ValueError, ExecutionSpaceError) as exc:
         return output._json_error(str(exc))
     requested_environment = (
-        split_machine_environment(
-            state.requested_machine, getattr(state.args, "environment", None),
-        ).environment if state.requested_machine else ""
+        resolve_machine_selection(
+            registry_for_config(config), state.requested_machine,
+            getattr(state.args, "environment", None), allow_physical_context=True,
+        ).target.environment if state.requested_machine else ""
     )
     same_environment = True
     if requested_environment:

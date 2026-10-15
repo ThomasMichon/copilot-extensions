@@ -20,9 +20,10 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from machine_transport import (
-    find_machine_entry,
     local_execution_platform,
     split_machine_environment,
+    entry_physical_host,
+    resolve_machine_selection,
 )
 
 from .. import project_config as cfg
@@ -40,7 +41,7 @@ _HOST_SHORT = {"Win": "Win", "WSL": "WSL", "Linux": "Lx"}
 
 def display_machine(entry: cfg.MachineEntry) -> str:
     """Group execution siblings without changing their routing keys."""
-    return entry.physical_host or physical_machine(entry.key)
+    return entry_physical_host(entry)
 
 
 def physical_machine(machine: str) -> str:
@@ -92,7 +93,14 @@ def apply_display_machine(sources, entry):
 
 def local_entry(entries, config_machine, hostname, execution_platform):
     """Resolve the running execution space, not every sibling on its host."""
-    selected = find_machine_entry(entries, config_machine, reject_ambiguous=True)
+    try:
+        selected = resolve_machine_selection(
+            entries, config_machine or hostname, execution_platform,
+        ).entry
+    except ValueError as exc:
+        raise ValueError(
+            f"configured machine {config_machine!r} is not the local {execution_platform} space: {exc}"
+        ) from exc
     if (
         selected is not None and selected.execution_platform
         and selected.execution_platform != execution_platform
@@ -104,10 +112,7 @@ def local_entry(entries, config_machine, hostname, execution_platform):
     for name in (config_machine, hostname):
         if not name:
             continue
-        entry = find_machine_entry(
-            entries, name, reject_ambiguous=True,
-            execution_platform=execution_platform,
-        )
+        entry = resolve_machine_selection(entries, name, execution_platform).entry
         if entry is not None:
             return entry
     return None

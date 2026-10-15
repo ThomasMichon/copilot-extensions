@@ -6,6 +6,7 @@ from rich.text import Text
 import pytest
 
 from agent_worktrees.config import MachineEntry
+from machine_transport import legacy_alias_forms, normalize_machine_entries, parse_machines_yaml
 from worktree_manager.production_picker.picker_tui import data_ssh, roster
 from worktree_manager.production_picker.picker_tui.engine_rendering import PickerScreenRenderingMixin
 from worktree_manager.production_picker.picker_tui.engine_input import PickerScreenInputMixin
@@ -103,3 +104,36 @@ def test_nonadjacent_siblings_share_render_and_keyboard_order_without_routing_ch
     assert tabs._current_tab_key() == guest.source_id
     assert before == [(source.machine, source.source_id, source.alias, source.argv) for source in sources]
     assert guest.resolve_argv == ["resolve", "--machine", guest_key]
+
+
+MANAGER_CELLS = [
+    (platform, alias)
+    for platform in ("windows", "wsl")
+    for base in ("Example-Host", "Generated-Host", "Legacy-Alias", "Example Workstation")
+    for form in legacy_alias_forms(base, platform)
+    for alias in (form, form.swapcase())
+]
+
+
+@pytest.mark.parametrize("platform,alias", MANAGER_CELLS)
+def test_manager_local_roster_and_grouping_alias_grid(platform, alias):
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "Example-Host": {
+            "hostname": "Generated-Host", "alias": "Legacy-Alias",
+            "display_name": "Example Workstation", "ssh": {"environments": [
+                {"name": "windows", "alias": "native-profile"},
+                {"name": "wsl", "alias": "guest-profile"},
+            ]},
+        },
+    }}))
+    selected = roster.local_entry(entries, alias, "Generated-Host", platform)
+    expected = "Example-Host-wsl" if platform == "wsl" else "Example-Host"
+    assert selected.key == expected
+    assert roster.display_machine(selected) == "Example-Host"
+    source = data_ssh.Source(
+        selected.key, "WSL" if platform == "wsl" else "Win", None,
+        alias=selected.ssh_environments[0].alias, display_machine=roster.display_machine(selected),
+    )
+    tab, = data_ssh.source_tabs([source])
+    assert tab["machine"] == expected and tab["physical_machine"] == "Example-Host"
+    assert source.alias == ("guest-profile" if platform == "wsl" else "native-profile")

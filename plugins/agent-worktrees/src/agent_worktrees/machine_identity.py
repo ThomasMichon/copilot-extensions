@@ -24,7 +24,8 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 
-from machine_transport import MachineEntry, find_machine_entry, machine_entries_to_topology, machine_name, resolve_identity
+from machine_transport import MachineEntry, machine_entries_to_topology, machine_name, resolve_identity
+from machine_transport import resolve_machine_selection, split_machine_environment
 from machine_transport import is_local_machine as _mt_is_local_machine
 
 from . import config as cfg
@@ -35,8 +36,6 @@ def resolve_execution_machine(
     load_entries: Callable[[], dict[str, MachineEntry]] | None,
 ) -> str:
     """Resolve local identity without inferring registered-space authority."""
-    if configured and not guest:
-        return resolve_identity(name).canonical
     entries: dict[str, MachineEntry] = {}
     if load_entries is not None:
         try:
@@ -44,15 +43,21 @@ def resolve_execution_machine(
         except FileNotFoundError:
             pass
     explicit = any(entry.execution_platform and not entry.legacy_key for entry in entries.values())
-    selected = find_machine_entry(
-        entries, name, reject_ambiguous=True, execution_platform=cfg.detect_platform(),
-    ) if not explicit else None
+    selection = resolve_machine_selection(entries, name, "wsl" if guest else cfg.detect_platform())
+    selected = selection.entry
+    if configured:
+        if selected is not None and not selected.execution_platform and not guest:
+            return name if not split_machine_environment(name).environment else selected.key
+        return selected.key if selected is not None else selection.target.logical_machine
     if explicit or (selected is not None and selected.execution_platform):
-        if configured:
-            return resolve_identity(name).canonical
         from .execution_spaces import detect_legacy_machine
 
         return detect_legacy_machine(entries, name)
+    if selected is not None:
+        if not guest:
+            return machine_name(selected)
+        if split_machine_environment(selected.key).environment == "wsl":
+            return selected.key
     resolved = resolve_identity(name, machine_entries_to_topology(entries), guest=guest)
     for warning in resolved.warnings:
         print(f"warning: {warning}", file=sys.stderr)

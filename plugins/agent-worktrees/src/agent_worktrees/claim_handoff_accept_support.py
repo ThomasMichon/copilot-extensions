@@ -44,7 +44,7 @@ def require_handoff_record(record: tracking.WorktreeRecord, error_type: type[Exc
         expected_record = cfg.project_dir(record.repo) / "worktrees" / f"{record.worktree_id}.yaml"
         if record.yaml_path != expected_record or record.yaml_path.is_symlink():
             raise ExecutionSpaceError("handoff record does not match its receiving project's record path")
-        if cfg.detect_platform() == "wsl" and config.machine.casefold().endswith("-wsl"):
+        if cfg.detect_platform() == "wsl" or record.machine != config.machine:
             ref = tracking.parse_claim_ref(
                 tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
             )
@@ -53,10 +53,10 @@ def require_handoff_record(record: tracking.WorktreeRecord, error_type: type[Exc
                     raise ExecutionSpaceError("handoff record has no verified local legacy WSL authority")
             else:
                 if (
-                    record.platform != "wsl"
+                    record.platform != cfg.detect_platform()
                     or not legacy_wsl_record_locality.record_namespace_matches(record, config)
                 ):
-                    raise ExecutionSpaceError("handoff record has unproven WSL platform or namespace")
+                    raise ExecutionSpaceError("handoff record has unproven execution platform or namespace")
     except ExecutionSpaceError as exc:
         raise error_type(str(exc)) from exc
 
@@ -98,6 +98,15 @@ def same_local_records(
             right.project, include_control_plane_related_pr=False,
         ).machine
     return local_record_ref(right, machine=machine) and local_record_ref(left, machine=machine)
+
+
+def local_transition_actor(ref: tracking.ClaimRef) -> bool:
+    config = cfg.load_project_config(ref.project, include_control_plane_related_pr=False)
+    if local_record_ref(ref, machine=config.machine):
+        return True
+    path = cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
+    # Cancelling intent after a vanished canonical source moves no claims.
+    return not path.exists() and not path.is_symlink() and require_owner_identity(ref.machine, config)
 
 
 def accept_child_path(

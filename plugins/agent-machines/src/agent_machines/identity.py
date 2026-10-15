@@ -16,6 +16,7 @@ from machine_transport import (
     normalize_machine_entries,
     parse_machines_yaml,
     qualify_guest,
+    resolve_machine_selection,
 )
 
 from .manifest import ManifestError
@@ -124,12 +125,14 @@ def resolve_machine(
     try:
         entries = normalize_machine_entries(entries)
         name = raw.casefold() if value is None else raw
-        entry = find_machine_entry(entries, name, reject_ambiguous=True, execution_platform=context)
+        selected = resolve_machine_selection(entries, name, context)
+        entry = selected.entry
+        name = selected.target.logical_machine if entry is None else entry.key
         if context == "wsl" and (entry is None or not entry.execution_platform):
             native = entry
             name = qualify_guest(native.key if native else name)
             entry = find_machine_entry(entries, name, reject_ambiguous=True)
-            if entry is not None and not entry.key.casefold().endswith("-wsl"):
+            if entry is not None and selected.target.environment != "wsl":
                 raise ValueError(
                     f"guest identity {name!r} collides with native machine {entry.key!r}; "
                     "configure a separate guest identity"

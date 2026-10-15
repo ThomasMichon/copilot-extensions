@@ -20,7 +20,8 @@ import socket
 from collections.abc import Callable, Mapping
 
 from .execution_identity import detect_platform, qualify_guest
-from .registry import MachineIdentity, find_machine_entry
+from .machine_environment import split_machine_environment
+from .registry import MachineIdentity, find_machine_entry, resolve_machine_selection
 
 __all__ = ["is_local_machine", "local_execution_platform"]
 
@@ -78,6 +79,15 @@ def is_local_machine(
         entries = load_entries()
     except (FileNotFoundError, ValueError, KeyError):
         return False
+    if not entries and config_machine:
+        target = resolve_machine_selection(entries, name).target
+        current = resolve_machine_selection(
+            entries, config_machine, "wsl" if guest else local_execution_platform(),
+        ).target
+        return (
+            bool(target.environment) and target.environment == current.environment
+            and target.machine.casefold() == current.machine.casefold()
+        )
     target = find_machine_entry(entries, name)
     if target is None:
         return False
@@ -92,7 +102,7 @@ def is_local_machine(
             execution_platform = getattr(this, "execution_platform", "")
             if guest and (
                 execution_platform != "wsl" if execution_platform
-                else not this.key.casefold().endswith("-wsl")
+                else split_machine_environment(this.key).environment != "wsl"
             ):
                 return False
             return target is this
@@ -102,7 +112,7 @@ def is_local_machine(
     target_hostname = target.hostname
     if guest:
         hostname = qualify_guest(hostname)
-        if target.key.casefold().endswith("-wsl") and target_hostname:
+        if split_machine_environment(target.key).environment == "wsl" and target_hostname:
             target_hostname = qualify_guest(target_hostname)
     if target_hostname and target_hostname.lower() == hostname:
         return True

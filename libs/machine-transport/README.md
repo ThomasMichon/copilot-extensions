@@ -69,6 +69,32 @@ resolved -- network call to reach a host that is actually the caller itself.
 
 ## Usage
 
+### Contextual historical aliases
+
+`resolve_machine_selection()` is the shared address map; format parsing belongs
+only to `machine_environment`. Case-insensitive keys, registered aliases and SSH
+profiles are checked before legacy inference. Fallback forms include `-win`,
+`-wsl`, `(Windows)`, `(Win)` and `(WSL)`, including mixed case and whitespace.
+Hostname/display families require a supplied execution context when multiple
+logical environments are possible. Conflicting inline and supplied contexts
+refuse; an exact registered identity is never renamed because its spelling
+resembles a legacy form.
+
+| Slot | Context and authority | Regression grid |
+|---|---|---|
+| Config/detection and Machines discovery | Actual platform; configured selection remains distinct from automatic independent-space admission | `test_alias_matrix.py`, `test_machine_alias_matrix.py` |
+| JSON/non-JSON launch, local creation/resume | Explicit environment or selected logical entry; exact SSH profile | `test_machine_alias_slots.py`, `test_resolve_seed_delivery.py` |
+| Stored record, owner/claim ref, liveness, handoff and settlement | Record platform, actual execution and named receiving-project record/namespace proof | `test_machine_alias_slots.py` |
+| Manager local roster and physical grouping | Same selected entry and explicit physical association; logical IDs and routes unchanged | `test_machine_environment_grouping.py` |
+
+The grids cover native Windows and WSL contexts, key/hostname/alias/display
+families, mixed case, legacy projected and explicitly registered records.
+Stored machine/config/reference strings are not rewritten. A historical
+projected host label can identify its WSL record only with full record proof;
+an explicitly foreign registered space cannot borrow that exception, even on
+the same physical host and platform. Unqualified ambiguous metadata without
+an environment remains a refusal, not an implicit preference for Windows/WSL.
+
 ### Independent execution spaces
 
 An entry may opt into execution-space identity with

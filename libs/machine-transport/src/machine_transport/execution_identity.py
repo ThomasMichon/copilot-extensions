@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .registry import MachineIdentity
+from .machine_environment import split_machine_environment
 
 __all__ = [
     "IdentityError",
@@ -60,7 +61,7 @@ def detect_platform() -> str:
 
 
 def qualify_guest(value: str) -> str:
-    return value if value.casefold().endswith("-wsl") else f"{value}-wsl"
+    return split_machine_environment(value, "wsl").logical_machine
 
 
 def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
@@ -82,7 +83,7 @@ class TopologyEntry:
     @property
     def accepted(self) -> tuple[str, ...]:
         hostname = self.hostname
-        if hostname and self.key.casefold().endswith("-wsl"):
+        if hostname and split_machine_environment(self.key).environment == "wsl":
             hostname = qualify_guest(hostname)
         return _dedupe((self.key, hostname, self.alias))
 
@@ -147,24 +148,25 @@ def resolve_identity(
                 "use a machine key, hostname, or alias"
             )
         match = labels[next(iter(keys))] if keys else None
-        if guest_only and match is not None and not match[0].casefold().endswith("-wsl"):
+        if guest_only and match is not None and split_machine_environment(match[0]).environment != "wsl":
             raise IdentityError(
                 f"guest identity {label!r} collides with native machine {match[0]!r}; "
                 "configure a separate guest identity"
             )
         return match
 
-    requested = qualify_guest(raw) if guest else raw
+    parsed = split_machine_environment(raw, "wsl" if guest else None)
+    requested = parsed.logical_machine if parsed.environment else raw
     match = lookup(requested, guest_only=guest)
-    if match is not None and (not guest or match[0].casefold().endswith("-wsl")):
+    if match is not None and (not guest or split_machine_environment(match[0]).environment == "wsl"):
         key, accepted = match
         return Resolution(key, _dedupe((*accepted, requested)), key)
     if guest:
-        host = lookup(raw[:-4] if raw.casefold().endswith("-wsl") else raw)
+        host = lookup(parsed.machine)
         if host is not None:
             requested = qualify_guest(host[0])
             match = lookup(requested, guest_only=True)
-            if match is not None and match[0].casefold().endswith("-wsl"):
+            if match is not None and split_machine_environment(match[0]).environment == "wsl":
                 key, accepted = match
                 return Resolution(key, _dedupe(accepted), key)
         warnings = (
@@ -194,4 +196,17 @@ def resolve_machine_identity(
     entries: Mapping[str, MachineIdentity], name: str, *, guest: bool = False,
 ) -> Resolution:
     """Ambiguity-checked identity resolution directly over a machine registry."""
-    return resolve_identity(name, machine_entries_to_topology(entries), guest=guest)
+    from .registry import machine_identity_names, resolve_machine_selection
+
+    selected = resolve_machine_selection(entries, name, "wsl" if guest else None)
+    if selected.entry is not None:
+        return Resolution(
+            selected.entry.key, machine_identity_names(selected.entry, entries=entries),
+            selected.entry.key,
+        )
+    canonical = selected.target.logical_machine
+    warnings = (
+        (f"machine topology has no guest entry for {canonical!r}; using qualified identity",)
+        if guest and entries else ()
+    )
+    return Resolution(canonical, (canonical,), warnings=warnings)

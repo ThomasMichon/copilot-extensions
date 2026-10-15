@@ -88,7 +88,7 @@ def _entries() -> dict[str, cfg.MachineEntry]:
 
 @pytest.mark.parametrize(("name", "environment"), [
     ("Example-Host", "WSL"), ("example-host-wsl", "WSL"),
-    ("EXAMPLE-HOST-WSL", None), ("native-label", "WSL"),
+    ("EXAMPLE-HOST-WSL", None),
 ])
 def test_tuple_and_logical_key_select_the_same_guest(name, environment) -> None:
     entries = _entries()
@@ -113,6 +113,8 @@ def test_unsplit_legacy_host_retains_its_environment_transport() -> None:
 
 def test_native_target_does_not_select_a_guest() -> None:
     entries = _entries()
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_machine_cli._entry_for_environment(entries, "native-label", "WSL")
     assert resolve_machine_cli._entry_for_environment(
         entries, "example-host", "Win",
     ) is entries["example-host"]

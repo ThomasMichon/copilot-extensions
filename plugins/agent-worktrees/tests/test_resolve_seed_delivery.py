@@ -382,6 +382,57 @@ def test_resume_preserves_historical_host_and_separate_wsl_platform(
     assert (record.machine, record.platform, record.resume_count) == ("example-host", "wsl", 1)
 
 
+from machine_transport import legacy_alias_forms
+
+ALIAS_RESUME_CELLS = [
+    (platform, alias)
+    for platform in ("windows", "wsl")
+    for base in ("Example-Host", "Generated-Host", "Legacy-Alias", "Example Workstation")
+    for form in legacy_alias_forms(base, platform)
+    for alias in (form, form.swapcase())
+]
+
+
+@pytest.mark.parametrize("platform,alias", ALIAS_RESUME_CELLS)
+def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, capfd, platform, alias):
+    directory = tmp_path / "state" / "worktrees"
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
+    monkeypatch.setattr(cfg, "project_dir", lambda _project=None: directory.parent)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    current = "Example-Host-wsl" if platform == "wsl" else "Example-Host"
+    config = _create_config(tmp_path, machine=current, platform=platform)
+    (directory.parent / "config.yaml").write_text(json.dumps({
+        "repo_name": config.repo_name, "machine": current, "platform": platform,
+        "repos": {config.repo_name: {
+            "anchor": config.default_repo.anchor, "worktree_root": config.default_repo.worktree_root,
+        }},
+    }), encoding="utf-8")
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(json.dumps({"machines": {
+        "Example-Host": {
+            "hostname": "Generated-Host", "alias": "Legacy-Alias",
+            "display_name": "Example Workstation", "ssh": {"environments": [
+                {"name": "windows", "alias": "native-profile"},
+                {"name": "wsl", "alias": "guest-profile"},
+            ]},
+        },
+    }}), encoding="utf-8")
+    checkout = Path(config.default_repo.worktree_root) / "wt-a"
+    checkout.mkdir(parents=True)
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(checkout), config.repo_name, alias, platform, directory,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *_args, **_kwargs: pytest.fail("same execution tuple must not self-SSH"),
+    )
+    assert resolve_cli.cmd_resolve(_args(machine=alias, environment=platform)) == 0
+    assert json.loads(capfd.readouterr().out)["launch"]["work_dir"] == str(checkout)
+    record = tracking.load_record(directory / "wt-a.yaml")
+    assert (record.machine, record.platform, record.resume_count) == (alias, platform, 1)
+
+
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell consumer unavailable")
 def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     tmp_path: Path, monkeypatch,

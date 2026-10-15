@@ -24,6 +24,7 @@ from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exp
 from machine_transport import find_machine_entry as _mt_find_machine_entry
 from machine_transport import machine_name  # noqa: F401 (re-export)
 from machine_transport import detect_platform as _detect_execution_platform
+from machine_transport import find_machine_metadata as _mt_find_machine_metadata
 from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
@@ -721,10 +722,7 @@ def find_machine_metadata(
     entries: dict[str, MachineEntry], name: str,
 ) -> MachineEntry | None:
     """Guest identity may borrow host metadata, never host execution ownership."""
-    entry = find_machine_entry(entries, name)
-    if entry is None and name.casefold().endswith("-wsl"):
-        entry = find_machine_entry(entries, name[:-4])
-    return entry
+    return _mt_find_machine_metadata(entries, name)
 
 
 def detect_machine(
@@ -1133,7 +1131,7 @@ def _load_config_uncached(
     )
     from .execution_spaces import canonicalize_legacy_config
 
-    config = canonicalize_legacy_config(config)
+    config = canonicalize_legacy_config(config, configured=bool(configured_machine))
     # Explicit execution-space keys are not a migration surface.
     if detect_platform() != "wsl":
         return config

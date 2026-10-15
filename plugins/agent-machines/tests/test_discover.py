@@ -60,6 +60,12 @@ def test_current_machine_is_execution_identity(monkeypatch, environment, hostnam
     monkeypatch.setattr(discover.platform, "node", lambda: hostname)
     monkeypatch.setattr(identity, "detect_platform", lambda: environment)
     monkeypatch.setattr(discover, "candidate_repos", lambda *_args, **_kwargs: [])
+    from machine_transport import split_machine_environment
+    encoded = split_machine_environment(hostname).environment
+    if encoded and encoded != environment:
+        with pytest.raises(ManifestError, match="conflicts"):
+            discover.current_machine()
+        return
     expected = "example-host-wsl" if environment == "wsl" else hostname
     assert discover.current_machine() == expected
 

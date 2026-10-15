@@ -1,34 +1,14 @@
-"""Record-scoped locality for pre-guest-split legacy WSL owner-refs.
+"""Record-scoped locality for historical machine aliases.
 
-Before the native-host/WSL-guest identity split, a WSL worktree's tracking
-record could be written under the
-bare native host's machine name (e.g. ``example-host``) rather than its own
-qualified guest alias (``example-host-wsl``). Those historical records are
-real and still local to the WSL guest -- but a plain
-``ref.machine == config.machine`` comparison (and
-:func:`agent_worktrees.machine_identity.is_local_machine`, which
-deliberately treats the native host as foreign to its WSL guest -- no
-global native-host alias) both read them as a different, cross-machine
-owner.
+The shared registry owns label/format mapping. This adapter grants locality
+only with an exact project/worktree record, actual execution platform and named
+receiving-project namespace. The stored reference and record labels must select
+that same logical entry; physical association alone never joins independent
+execution spaces. Legacy projection provenance can license a historical bare
+host label on a WSL record, but an explicitly foreign entry cannot borrow it.
 
-:func:`resolve_legacy_wsl_owner_ref` is a narrow, **record-scoped**
-exception, not a relaxation of the native/guest boundary: it recognizes a
-ref as this legacy-local case only when EVERY one of these holds --
-
-  * this machine is itself a WSL guest (``config.machine`` ends with
-    ``-wsl`` and the detected platform is ``wsl`` -- the ACTUAL execution
-    platform, never the overridable ``config.platform`` path-selection
-    setting);
-  * the ref's machine label resolves -- through the SAME topology sources
-    used for identity qualification (key/alias/hostname/display_name), not
-    a literal string compare -- to this guest's native counterpart (its
-    ``-wsl`` suffix stripped);
-  * a tracking record actually exists at the ref's resolved project path;
-  * that record's own ``platform`` field is explicitly ``"wsl"`` and its
-    ``machine`` field resolves (through the same topology sources) to the
-    same native identity -- i.e. the record itself is unambiguous, trusted
-    evidence that it was created by (and belongs to) this same WSL guest,
-    just under an old unqualified label.
+The old WSL-named entry points remain compatibility wrappers for existing
+readers. No stored machine, config or reference string is rewritten.
 """
 
 from __future__ import annotations
@@ -38,7 +18,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
-from machine_transport import MachineEntry
+from machine_transport import resolve_machine_selection
+from machine_transport.registry import PhysicalMachineError
 
 from . import config as cfg
 from .execution_spaces import ExecutionSpaceError
@@ -72,92 +53,56 @@ def record_namespace_matches(record: "WorktreeRecord", config: cfg.Config) -> bo
     )
 
 
-def _native_counterpart_entry(
-    config: cfg.Config,
-) -> tuple[str, dict[str, MachineEntry], MachineEntry | None] | None:
-    """This WSL guest's native-host registry entry, or ``None`` when this
-    isn't (actually executing as, not merely configured as) a WSL guest.
-
-    Returns ``(native_key, entries, native_entry)``; ``entries``/
-    ``native_entry`` may be empty/``None`` when the registry can't load --
-    callers then fall back to a literal ``native_key`` string compare.
-    """
-    machine = config.machine or ""
-    if not machine.casefold().endswith("-wsl"):
-        return None
-    if cfg.detect_platform() != "wsl":
-        return None
-    native_key = machine[: -len("-wsl")]
-    if not native_key:
-        return None
-    from .execution_spaces import registry_for_config
-
-    entries = registry_for_config(config)
-    if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
-        return None
-    native_entry = cfg.find_machine_entry(entries, native_key) if entries else None
-    if native_entry is not None and native_entry.execution_platform:
-        current = cfg.find_machine_entry(entries, machine)
-        if (
-            current is None or current.execution_platform != "wsl"
-            or not current.legacy_key or native_entry is None
-            or native_entry.execution_platform != "windows"
-            or current.legacy_key != native_entry.legacy_key
-            or current.physical_host != native_entry.physical_host
-        ):
-            return None
-    return native_key, entries, native_entry
-
-
-def machine_label_is_legacy_local(label: str, config: cfg.Config) -> bool:
-    """True when ``label`` names this WSL guest's legacy native-host
-    identity (topology-equivalent to its ``-wsl``-stripped counterpart),
-    independent of any specific record -- the pure machine-label half of
-    :func:`resolve_legacy_wsl_owner_ref`'s identity test, for comparing two
-    bare machine-ref strings rather than resolving one ref's on-disk
-    record."""
-    if not label:
-        return False
-    try:
-        counterpart = _native_counterpart_entry(config)
-        if counterpart is None:
-            return False
-        native_key, entries, native_entry = counterpart
-        if entries:
-            if native_entry is not None and native_entry.legacy_key:
-                from dataclasses import replace
-                from machine_transport import find_machine_entry
-
-                legacy = {
-                    entry.legacy_key: replace(entry, execution_platform="")
-                    for entry in entries.values()
-                    if entry.execution_platform == "windows" and entry.legacy_key
-                }
-                label_entry = find_machine_entry(legacy, label, reject_ambiguous=True)
-                return label_entry is not None and label_entry.key == native_entry.key
-            label_entry = cfg.find_machine_entry(entries, label)
-            return label_entry is not None and label_entry is native_entry
-    except _RESOLUTION_ERRORS as exc:
-        _LOG.warning("Cannot establish legacy WSL machine locality: %s", exc)
-        return False
-    return label.casefold() == native_key.casefold()
-
-
 def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | None:
-    """Resolve a legacy WSL owner-ref to its local record path, else ``None``.
+    """Resolve a historical alias ref with actual-platform and namespace proof.
 
     Expected configuration and record errors are logged and fail closed.
-    Never recognizes a non-WSL record or an unrelated machine.
+    The legacy function name is retained for existing callers. Windows, WSL and
+    Linux records must match the actual execution and selected receiving entry;
+    this never makes a physical-host label a global guest-local identity.
     """
     from . import tracking
 
     if ref is None or not ref.is_qualified:
         return None
+    actual = cfg.detect_platform()
+    if actual not in ("windows", "wsl", "linux"):
+        return None
+    from .execution_spaces import registry_for_config
+
     try:
-        if _native_counterpart_entry(config) is None:
+        caller_entries = registry_for_config(config)
+        current = resolve_machine_selection(caller_entries, config.machine, actual)
+        # Exact foreign logical entries are rejected before any ledger lookup.
+        try:
+            direct = resolve_machine_selection(caller_entries, ref.machine)
+        except PhysicalMachineError:
+            direct = None
+        if direct is not None and direct.entry is not None and direct.exact:
+            declared = direct.entry.execution_platform
+            if declared and declared != actual and not direct.entry.legacy_key:
+                return None
+            if (
+                declared and not direct.entry.legacy_key and current.entry is not None
+                and direct.entry.key.casefold() != current.entry.key.casefold()
+            ):
+                return None
+        if (
+            any(entry.execution_platform and not entry.legacy_key for entry in caller_entries.values())
+            and (direct is None or direct.entry is None)
+            and (direct is None or not direct.target.environment)
+            and (
+                any(ref.machine.casefold() == entry.physical_host.casefold()
+                    for entry in caller_entries.values())
+                or not any(
+                    ref.machine.casefold() in {entry.hostname.casefold(), entry.display_name.casefold()}
+                    for entry in caller_entries.values()
+                )
+            )
+        ):
             return None
     except _RESOLUTION_ERRORS as exc:
-        _LOG.warning("Cannot establish legacy WSL execution locality: %s", exc)
+        _LOG.warning("Cannot establish record alias execution locality: %s", exc)
         return None
     path = cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
     if not path.exists():
@@ -171,18 +116,36 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         from .execution_spaces import project_record_config
 
         receiving_config = project_record_config(record)
-        if receiving_config.machine.casefold() != config.machine.casefold():
+        receiver_entries = registry_for_config(receiving_config)
+        receiving = resolve_machine_selection(receiver_entries, receiving_config.machine, actual)
+        caller_key = current.entry.key if current.entry is not None else current.target.logical_machine
+        receiving_key = receiving.entry.key if receiving.entry is not None else receiving.target.logical_machine
+        if caller_key.casefold() != receiving_key.casefold():
             return None
-        if not machine_label_is_legacy_local(ref.machine, receiving_config):
+        if (
+            receiving.target != current.target
+            and (receiving.target.machine.casefold(), receiving.target.environment)
+            != (current.target.machine.casefold(), current.target.environment)
+        ):
             return None
-        if not machine_label_is_legacy_local(record.machine or "", receiving_config):
+        if record.platform != actual:
+            return None
+        requested = resolve_machine_selection(receiver_entries, ref.machine, record.platform)
+        stored = resolve_machine_selection(receiver_entries, record.machine or "", record.platform)
+        if any(
+            (
+                selected.entry.key.casefold() != receiving.entry.key.casefold()
+                if selected.entry is not None and receiving.entry is not None
+                else (selected.target.machine.casefold(), selected.target.environment)
+                != (receiving.target.machine.casefold(), receiving.target.environment)
+            )
+            for selected in (requested, stored)
+        ):
             return None
         if not record_namespace_matches(record, receiving_config):
             return None
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot establish legacy WSL record locality: %s", exc)
-        return None
-    if record.platform != "wsl":
         return None
     # The record's own ``machine`` field is the trusted ground truth for
     # "which legacy label it was actually written under" -- but it may name
