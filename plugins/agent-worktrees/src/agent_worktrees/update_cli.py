@@ -384,7 +384,9 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             _events.record("engine_runtime", plugin_ref, installer_deadline_status(error))
             return 1
         aw_runtime_env["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] = "1"
-        rc = _run_engine_installer(argv, plugin_dir, installer_timeout, aw_runtime_env)
+        rc = _run_engine_installer(
+            argv, plugin_dir, installer_timeout, aw_runtime_env, runtime_root=aw_runtime_root
+        )
         if rc != 0:
             return rc
 

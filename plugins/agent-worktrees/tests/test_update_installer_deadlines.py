@@ -203,8 +203,10 @@ def test_real_windows_installer_failure_survives_watchdog_cleanup_budget(payload
         return original_run(argv, **kwargs)
 
     monkeypatch.setattr(runtime.subprocess, "run", run)
+    # Exit 124 is the installer's own watchdog deadline; without a published
+    # receipt that is a build-phase timeout.
     assert runtime._reconcile_one_runtime(
         "agent-example", "windows", force=True,
-    ) == "installer exited 124"
+    ) == "timed out (deadline hit during build)"
     assert calls[0]["timeout"] == 31
     assert calls[0]["env"]["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] == "1"

@@ -54,11 +54,15 @@ def wired(monkeypatch, tmp_path):
     (plugin_dir / "scripts").mkdir(parents=True)
     (plugin_dir / "scripts" / "install.sh").write_text("#!/usr/bin/env bash\n")
     installer_rc = {"value": 0}
+    deployed = {"version": "1.0.0"}
 
     def run(argv, *a, **k):
-        rc = installer_rc["value"] if "install.sh" in " ".join(map(str, argv)) else 0
+        installer = "install.sh" in " ".join(map(str, argv))
+        rc = installer_rc["value"] if installer else 0
         if rc == "timeout":
             raise subprocess.TimeoutExpired(argv, k.get("timeout"))
+        if installer and rc == 0:
+            deployed["version"] = "1.0.1"  # a successful installer publishes its receipt
         return subprocess.CompletedProcess(argv, rc, "", "")
 
     monkeypatch.setattr(subprocess, "run", run)
@@ -70,7 +74,8 @@ def wired(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_invocation_update_context", lambda: None)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.0.1")
-    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "1.0.0")
+    monkeypatch.setattr(reconcile, "runtime_deployed_version",
+                        lambda *a, **k: deployed["version"])
     monkeypatch.setattr(
         reconcile, "runtime_installer_environment",
         lambda *a, **k: (dict(os.environ), tmp_path / "aw-runtime"),
@@ -170,7 +175,7 @@ def test_registered_runtime_timeout_is_timeout_whatever_the_slot(
     _write_slot(registered_runtime, "2.0.0", slot)
     update_events.start("engine")
     status = runtime._reconcile_one_runtime("agent-example", "linux", force=False)
-    assert status == "timed out"
+    assert status == "timed out (deadline hit during build)"
     assert update_events.finish(1) == 6
     target = _status(_update_home)["plugins"]["agent-example@copilot-extensions"]
     assert target["outcome"] == ut.TIMEOUT
@@ -178,7 +183,8 @@ def test_registered_runtime_timeout_is_timeout_whatever_the_slot(
 
 def test_timeout_without_slot_exits_6(registered_runtime, _update_home):
     update_events.start("engine")
-    assert runtime._reconcile_one_runtime("agent-example", "linux", force=False) == "timed out"
+    assert runtime._reconcile_one_runtime(
+        "agent-example", "linux", force=False).startswith("timed out")
     assert update_events.finish(1) == 6
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import functools
 import json
 import os
 import re
@@ -16,6 +17,7 @@ from pathlib import Path
 
 from . import bare_anchor_files, bare_anchor_sync, git_ops, output, update_events
 from . import config as cfg
+from . import installer_run as _installer_run
 from .installer_capabilities import posix_zero_downtime_flag_supported
 from .update_gate import (  # noqa: F401 - re-exported for callers and tests
     MACHINE_GATED_SKIP,
@@ -618,33 +620,31 @@ def _reconcile_one_runtime_status(
     except (OSError, ValueError) as error:
         return installer_deadline_status(error)
     output.header(f"Reconciling Runtime: {name}" + (" (forced)" if force else ""))
-    try:
-        r = subprocess.run(
-            argv,
-            cwd=pdir,
-            timeout=installer_timeout,
-            env=child_environment,
-        )
-    except subprocess.TimeoutExpired:
-        return "timed out"
-    except Exception as exc:
-        return update_events.bounded(str(exc), 120)
-    return "OK" if r.returncode == 0 else f"installer exited {r.returncode}"
+    return _installer_run.run_installer(
+        argv, cwd=pdir, env=child_environment, deadline_s=installer_timeout, target_version=pver,
+        receipt=lambda: reconcile.runtime_deployed_version(name, root=runtime_root),
+    ).status
 
 
 def _run_engine_installer(
     argv: list[str], plugin_dir: Path, timeout: int, env: Mapping[str, str],
+    runtime_root: Path | None = None,
 ) -> int:
     """Run agent-worktrees' own runtime installer and record its result.
 
     A timeout is reported as such (never as success: a completed version slot
-    does not prove this attempt activated it) and returns a failure code.
+    does not prove this attempt activated it) and returns a failure code; with
+    ``runtime_root`` an exit 0 that left the runtime off the payload version fails.
     """
-    try:
-        rc = subprocess.run(argv, cwd=plugin_dir, timeout=timeout, env=env).returncode
-        status = "OK" if rc == 0 else f"installer exited {rc}"
-    except subprocess.TimeoutExpired:
-        rc, status = 1, "timed out"
+    from . import reconcile
+
+    run = _installer_run.run_installer(
+        argv, cwd=plugin_dir, env=env, deadline_s=timeout,
+        target_version=reconcile.payload_version(plugin_dir) if runtime_root else None,
+        receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
+    )
+    rc, status = (0 if run.status == "OK" else (run.rc or 1)), run.status
+    if run.status.startswith("timed out"):
         output.err("agent-worktrees installer timed out")
     update_events.record("engine_runtime", "agent-worktrees@copilot-extensions", status,
                          changed=status.startswith("OK"))
@@ -914,44 +914,25 @@ def _update_modules(
             elif posix_zero_downtime_flag_supported(module_dir):
                 update_args.append("--zero-downtime")
         output.header(f"Updating Module: {name}")
-        try:
-            r = subprocess.run(
-                [*shell_prefix, *update_args],
-                cwd=module_dir,
-                timeout=installer_timeout,
-                env=runtime_env,
-            )
-            if r.returncode == 0:
-                results.append((name, "OK"))
-                continue
-        except subprocess.TimeoutExpired:
-            output.warn(f"Module '{name}' update timed out")
-            results.append((name, "timed out"))
-            continue
-        except Exception as exc:
-            output.warn(f"Module '{name}' update failed: {exc}")
-            results.append((name, str(exc)))
+        run = functools.partial(
+            _installer_run.run_installer, cwd=module_dir, env=runtime_env,
+            deadline_s=installer_timeout, target_version=mod_payload_ver,
+            receipt=functools.partial(_reconcile.runtime_deployed_version, name, root=runtime_root),
+        )
+        status = run([*shell_prefix, *update_args]).status
+        if status == "OK" or not status.startswith("installer exited"):
+            if status != "OK":
+                output.warn(f"Module '{name}' update: {status}")
+            results.append((name, status))
             continue
 
         output.info(f"Module '{name}' update failed (not installed?), trying install...")
-        try:
-            r = subprocess.run(
-                [*shell_prefix, "install"],
-                cwd=module_dir,
-                timeout=installer_timeout,
-                env=runtime_env,
-            )
-            if r.returncode == 0:
-                results.append((name, "OK (installed)"))
-            else:
-                output.warn(f"Module '{name}' install exited with code {r.returncode}")
-                results.append((name, f"install exited {r.returncode}"))
-        except subprocess.TimeoutExpired:
-            output.warn(f"Module '{name}' install timed out")
-            results.append((name, "timed out"))
-        except Exception as exc:
-            output.warn(f"Module '{name}' install failed: {exc}")
-            results.append((name, str(exc)))
+        status = run([*shell_prefix, "install"]).status
+        if status == "OK":
+            results.append((name, "OK (installed)"))
+        else:
+            output.warn(f"Module '{name}' install: {status}")
+            results.append((name, status.replace("installer exited", "install exited", 1)))
 
     for name, status in results:
         target = targets.get(name) if targets is not None else None
