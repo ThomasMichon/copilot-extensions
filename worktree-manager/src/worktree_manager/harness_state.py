@@ -59,11 +59,17 @@ def _read_json(p: Path) -> dict:
         return {}
 
 
-def _read_yaml(p: Path) -> dict:
+def _read_yaml(p: Path, *, strict: bool = False) -> dict:
     try:
         data = yaml.safe_load(p.read_text("utf-8"))
+        if strict and data is not None and not isinstance(data, dict):
+            raise ValueError(f"Configuration must be a mapping: {p}")
         return data if isinstance(data, dict) else {}
-    except (OSError, yaml.YAMLError):
+    except FileNotFoundError:
+        return {}
+    except (OSError, yaml.YAMLError) as error:
+        if strict:
+            raise ValueError(f"Cannot read configuration mapping: {p}") from error
         return {}
 
 

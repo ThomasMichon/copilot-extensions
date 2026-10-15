@@ -2168,6 +2168,9 @@ reconcile_binstubs() {
     # for every registered project and remove signature-matched stubs for
     # deregistered ones. Delegates to the Python implementation (single,
     # cross-platform source of truth) so it runs regardless of project context.
+    if [[ "${AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION:-}" == "1" ]]; then
+        return 0
+    fi
     if [[ ! -x "$VENV_PYTHON" ]]; then
         return 0
     fi

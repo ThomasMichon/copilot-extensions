@@ -28,7 +28,7 @@ def manager(monkeypatch):
     selected = SimpleNamespace(command=("manager",))
     monkeypatch.setattr(
         manager_launch_cli, "_discover_control_plane_provider_manifests",
-        lambda: {"worktree-manager": selected},
+        lambda **k: {"worktree-manager": selected},
     )
     monkeypatch.setattr(m.cfg, "project_name", lambda: "demo")
     return selected
@@ -36,7 +36,7 @@ def manager(monkeypatch):
 
 def test_missing_manager_is_explicit(monkeypatch, capsys):
     monkeypatch.setattr(
-        manager_launch_cli, "_discover_control_plane_provider_manifests", lambda: {},
+        manager_launch_cli, "_discover_control_plane_provider_manifests", lambda **k: {},
     )
     assert m._refresh_terminal_profiles() is False
     assert "Worktree Manager is unavailable" in capsys.readouterr().out
@@ -83,7 +83,7 @@ def test_register_without_active_project_refreshes_the_registered_target(monkeyp
     (repo / ".git").mkdir(parents=True)
     monkeypatch.setattr(
         manager_launch_cli, "_discover_control_plane_provider_manifests",
-        lambda: {"worktree-manager": SimpleNamespace(command=("manager",))},
+        lambda **k: {"worktree-manager": SimpleNamespace(command=("manager",))},
     )
     monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", None)
     monkeypatch.setattr(m.cfg, "project_dir", lambda name: tmp_path / "config")
@@ -169,6 +169,98 @@ def test_real_profile_process_protocol(manager):
         f"print(json.dumps({SUCCESS!r}))",
     )
     assert m._refresh_terminal_profiles() is True
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_cell_profile_refresh_uses_machine_manager_registration(monkeypatch, tmp_path, override):
+    from agent_worktrees import control_plane_providers as providers
+
+    home = tmp_path / "home"
+    registered = (tmp_path / "explicit-providers" if override else
+                  home / ".agent-worktrees" / "control-plane-providers.d")
+    registered.mkdir(parents=True)
+    (registered / "worktree-manager.json").write_text(json.dumps({
+        "schema_version": 1, "provider": "worktree-manager",
+        "command": ["registered-manager"], "minimum_version": "0.1.0-dev21",
+    }), encoding="utf-8")
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "plugin-sandbox"))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell" / "install.json"))
+    if override:
+        monkeypatch.setenv(providers._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(registered))
+    else:
+        monkeypatch.delenv(providers._CONTROL_PLANE_PROVIDERS_DIR_ENV, raising=False)
+    monkeypatch.setattr(
+        m.cfg, "install_dir",
+        lambda: pytest.fail("profile Manager discovery must not inspect the plugin cell"),
+    )
+    monkeypatch.setattr(
+        manager_launch_cli, "_discover_control_plane_provider_manifests",
+        providers._discover_control_plane_provider_manifests,
+    )
+    calls = []
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda argv, **k: calls.append(argv) or SimpleNamespace(
+            returncode=0, stdout=json.dumps(SUCCESS), stderr="",
+        ),
+    )
+    assert m._refresh_terminal_profiles("demo") is True
+    assert calls == [["registered-manager", "refresh-profiles", "demo"]]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize(("defer", "expected"), [("1", 0), ("", 2)])
+def test_native_powershell_installer_defers_both_reconcile_passes(defer, expected):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell is unavailable")
+    source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    function = source.split("function Reconcile-Binstubs {", 1)[1].split(
+        "\n# -- Actions", 1,
+    )[0]
+    script = (
+        "$ErrorActionPreference='Stop'; $VenvPython='Invoke-FixtureRuntime'; "
+        "$PluginDir='fixture'; $global:count=0; "
+        "function Test-Path { param($Path) $true }; "
+        "function Write-ServiceWarn { param($Message) throw $Message }; "
+        "function Invoke-FixtureRuntime { "
+        "if (($args -join '|') -ne '-m|agent_worktrees|reconcile-binstubs') "
+        "{ throw 'wrong runtime arguments' }; $global:count++ }; "
+        "function Reconcile-Binstubs {" + function
+        + "\nReconcile-Binstubs; Reconcile-Binstubs; "
+        + f"if ($global:count -ne {expected}) {{ throw 'wrong reconciliation count' }}"
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command", script],
+        env={**os.environ, "AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION": defer},
+        capture_output=True, encoding="utf-8", errors="replace", timeout=10,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize(("defer", "expected"), [("1", 0), ("", 2)])
+def test_native_posix_installer_defers_both_reconcile_passes(tmp_path, defer, expected):
+    if os.name == "nt":
+        pytest.skip("Requires native POSIX, not Git Bash compatibility")
+    source = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    function = source.split("reconcile_binstubs() {", 1)[1].split("\ndeploy_binstub() {", 1)[0]
+    runtime, counter = tmp_path / "runtime", tmp_path / "counter"
+    runtime.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$COUNT_FILE"\n', encoding="utf-8")
+    runtime.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-c", "set -euo pipefail\nwarn() { echo \"$*\" >&2; exit 1; }\n"
+         "reconcile_binstubs() {" + function + "\nreconcile_binstubs\nreconcile_binstubs\n"],
+        env={**os.environ, "AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION": defer,
+             "VENV_PYTHON": str(runtime), "PLUGIN_DIR": "fixture", "COUNT_FILE": str(counter)},
+        capture_output=True, encoding="utf-8", errors="replace", timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = counter.read_text(encoding="utf-8").splitlines() if counter.exists() else []
+    assert lines == ["-m agent_worktrees reconcile-binstubs"] * expected
 
 
 def test_installers_keep_single_registry_and_fragment_owners():

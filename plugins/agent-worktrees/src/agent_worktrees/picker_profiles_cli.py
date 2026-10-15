@@ -184,10 +184,13 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def _refresh_terminal_profiles(project: str | None = None) -> bool:
     """Invoke the Manager's narrow owner surface, without staging an installer."""
     from .manager_launch_cli import _discover_control_plane_provider_manifests
+    from .control_plane_providers import _machine_control_plane_providers_dir
     from .update_events import bounded
 
     try:
-        manager = _discover_control_plane_provider_manifests().get("worktree-manager")
+        manager = _discover_control_plane_provider_manifests(
+            directory=_machine_control_plane_providers_dir(),
+        ).get("worktree-manager")
         if manager is None:
             output.warn("Could not refresh Windows Terminal profiles: Worktree Manager is unavailable")
             return False

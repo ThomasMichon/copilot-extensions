@@ -12,9 +12,8 @@ import subprocess
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
-import yaml
 
-from . import harness_state, terminal_fragment
+from . import harness_state, terminal_fragment, terminal_profiles
 
 SCHEMA = "copilot-extensions.terminal-profile-refresh"
 
@@ -77,19 +76,7 @@ try {
 
 
 def _read_profile_input(path: Path) -> dict:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return {}
-    try:
-        value = yaml.safe_load(text)
-    except yaml.YAMLError as error:
-        raise ValueError(f"Invalid YAML in profile input: {path}") from error
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError(f"Profile input must be a mapping: {path}")
-    return value
+    return harness_state._read_yaml(path, strict=True)
 
 
 def _validate_profile_inputs(project: str | None) -> None:
@@ -111,11 +98,10 @@ def _validate_profile_inputs(project: str | None) -> None:
             raise ValueError("Invalid project name in profile inputs")
         config = _read_profile_input(home / f".{name}" / "config.yaml")
         selection = config.get("terminal_profiles", [])
-        if not isinstance(selection, list) or any(
-            not isinstance(row, dict) or not row.get("machine") or not row.get("env")
-            for row in selection
-        ):
-            raise ValueError(f"Invalid terminal_profiles selection for project {name}")
+        try:
+            terminal_profiles._coerce(selection, strict=True)
+        except ValueError as error:
+            raise ValueError(f"Invalid terminal_profiles for project {name}: {error}") from error
 
 
 def refresh_shortcuts(projects: list[terminal_fragment.ProjectInput]) -> int:
@@ -170,7 +156,7 @@ def refresh(project: str | None, machine: str | None = None) -> dict:
     ).get("machine") if project is not None else None)
     if not isinstance(selected_machine, str) or not selected_machine:
         raise ValueError("Cannot resolve machine key; pass --machine or repair project config")
-    projects = terminal_fragment.collect_local_projects(current_project=project, strict_rosters=True)
+    projects = terminal_fragment.collect_local_projects(current_project=project, strict=True)
     plan = terminal_fragment.deploy_fragment(
         selected_machine, current_project=project, apply=True, projects=projects,
     )

@@ -23,10 +23,9 @@ key there is implicitly scoped to this repo + this machine):
 The ``machine`` field is the roster **key** (the canonical full name), not the
 cosmetic ``display_name``.
 
-This module only models + persists the *selection*. Mirroring it to terminal
-apps is the installer's job: it captures the fragment JSON from the Python
-generator (``agent_worktrees.terminal_fragment``) and writes it to the Windows
-Terminal fragments dir.
+This module models and persists selection. The Manager's ``terminal_fragment``
+and ``local_profiles`` own mirroring. Publishing uses strict selection parsing;
+read-only views retain tolerant legacy coercion.
 
 This is a DIFFERENT system from ``config.copilot_profiles`` (the agent *backend*
 cloud/local-model selection) -- the two must not be conflated.
@@ -125,19 +124,30 @@ def default_selection(
     return normalize_selection(chosen, self_machine, self_env)
 
 
-def _coerce(raw) -> list[TargetSel]:
+def _coerce(raw, *, strict: bool = False) -> list[TargetSel]:
     """Parse a raw ``terminal_profiles`` value into validated TargetSel rows.
 
-    Tolerant: skips malformed entries, normalizes ``kind`` to the known set
-    (defaulting to ``agent``), and de-duplicates while preserving order.
+    Views tolerate malformed entries and default unknown kinds to ``agent``.
+    Strict publishing rejects them; both modes de-duplicate in source order.
     """
     out: list[TargetSel] = []
     seen: set[tuple[str, str, str]] = set()
     if not isinstance(raw, list):
+        if strict:
+            raise ValueError("terminal_profiles must be a list")
         return out
     for item in raw:
         if not isinstance(item, dict):
+            if strict:
+                raise ValueError("terminal_profiles entries must be mappings")
             continue
+        if strict:
+            if any(not isinstance(item.get(key), str) or not item[key].strip()
+                   for key in ("machine", "env")):
+                raise ValueError("terminal_profiles machine/env must be nonblank strings")
+            selected_kind = item.get("kind", "agent")
+            if not isinstance(selected_kind, str) or selected_kind.strip().lower() not in KINDS:
+                raise ValueError("terminal_profiles kind must be agent or shell")
         machine = str(item.get("machine") or "").strip()
         env = str(item.get("env") or "").strip()
         kind = str(item.get("kind") or "agent").strip().lower()

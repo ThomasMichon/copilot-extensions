@@ -178,6 +178,52 @@ def test_invalid_inputs_do_not_rewrite_profiles(monkeypatch, tmp_path, relative,
         profiles.refresh("demo", "host")
 
 
+@pytest.mark.parametrize("selection", [
+    [{"machine": " ", "env": "Win", "kind": "shell"}],
+    [{"machine": "host", "env": " ", "kind": "shell"}],
+    [{"machine": 7, "env": "Win", "kind": "shell"}],
+    [{"machine": "host", "env": "Win", "kind": "shel"}],
+    [{"machine": "host", "env": "Win", "kind": None}],
+])
+def test_invalid_selection_values_preserve_outputs(monkeypatch, tmp_path, selection):
+    monkeypatch.setattr(profiles.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(profiles.harness_state, "home", lambda: tmp_path)
+    (tmp_path / ".demo").mkdir()
+    (tmp_path / ".demo" / "config.yaml").write_text(
+        json.dumps({"machine": "host", "terminal_profiles": selection}), encoding="utf-8",
+    )
+    existing = tmp_path / "existing-fragment.json"
+    existing.write_text('{"profiles": ["retained"]}', encoding="utf-8")
+    before = existing.read_bytes(), existing.stat().st_mtime_ns
+
+    def unexpected(*args, **kwargs):
+        existing.write_text("overwritten", encoding="utf-8")
+        pytest.fail("Invalid selection reached publishing")
+
+    monkeypatch.setattr(tf, "deploy_fragment", unexpected)
+    with pytest.raises(ValueError, match="Invalid terminal_profiles"):
+        profiles.refresh("demo")
+    assert (existing.read_bytes(), existing.stat().st_mtime_ns) == before
+
+
+def test_collection_revalidates_selection_without_tolerant_coercion(monkeypatch, tmp_path):
+    monkeypatch.setattr(profiles.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(profiles.harness_state, "home", lambda: tmp_path)
+    (tmp_path / ".demo").mkdir()
+    config = tmp_path / ".demo" / "config.yaml"
+    config.write_text("machine: host\n", encoding="utf-8")
+    collect = tf.collect_local_projects
+
+    def changed(**kwargs):
+        config.write_text("machine: host\nterminal_profiles:\n- {machine: host, env: Win, kind: shel}\n",
+                          encoding="utf-8")
+        return collect(**kwargs)
+
+    monkeypatch.setattr(tf, "collect_local_projects", changed)
+    with pytest.raises(ValueError, match="kind must be"):
+        profiles.refresh("demo")
+
+
 @pytest.mark.parametrize("relative", [".agent-worktrees/machines.yaml", "machines.yaml"])
 @pytest.mark.parametrize("content", ["machines: [", "machines: []", "", None])
 def test_bad_resolved_roster_preserves_all_existing_outputs(monkeypatch, tmp_path, relative, content, capsys):

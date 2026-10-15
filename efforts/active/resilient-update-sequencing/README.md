@@ -230,3 +230,20 @@ achieved by rearranging today's combined installer invocations.
   roster/profile tests passed 101. The native two-pass fixture measured
   1.922 and 1.750 seconds. Migration review fixes are integrated separately
   before the current-head review/CI gate is retried.
+
+### 2026-10-15 - Additional review boundary corrections
+- The intermediate-head review identified four additional concrete defects:
+  non-UTF-8 explicit receipt repair, cell-scoped discovery of the global Manager,
+  repeated native installer command reconciliation, and tolerant selection-value
+  coercion during publishing.
+- Kept Manager registration in its owning machine-global namespace while
+  preserving validated manifests and explicit directory overrides. Both native
+  reconciliation helpers now honor unified finishing custody; standalone
+  behavior is unchanged, with native helper regressions in the required guard
+  lane.
+- Reused strict YAML/model parsing for actual publishing collection, not only a
+  preliminary check. Invalid selection values cannot remove or reinterpret
+  profiles; read-only coercion remains compatible.
+- Focused core checks passed 283 cases with two native-POSIX skips; Manager
+  checks passed 164. Native fixture timings were 2.015 and 1.797 seconds.
+  Final integrated UTF-8 repair, required CI and current-head review remain open.

@@ -3664,6 +3664,7 @@ function Reconcile-Binstubs {
        remove signature-matched stubs for deregistered ones. Delegates to the
        Python implementation (single, cross-platform source of truth) so it runs
        regardless of whether this install has a project context. #>
+    if ($env:AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION -eq '1') { return }
     if (-not (Test-Path $VenvPython)) { return }
     $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
     try {

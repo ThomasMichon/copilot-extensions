@@ -578,23 +578,16 @@ def _resolve_icon(project_dir_fn, name: str) -> tuple[str, str]:
 
 
 def collect_local_projects(
-    current_project: str | None = None, *, home_dir=None, strict_rosters: bool = False,
+    current_project: str | None = None, *, home_dir=None, strict: bool = False,
 ) -> list[ProjectInput]:
-    """Build :class:`ProjectInput` rows from this machine's on-disk config.
-
-    Reads ``repos.yaml``/``projects.yaml``/per-project ``machines.yaml``
-    roster via ``harness_state.build_projects()`` (Phase 3e Step 2's
-    direct-file-read boundary), plus each project's own
-    ``~/.<name>/config.yaml`` terminal-profile selection -- exactly the
-    sources ``Build-TerminalFragment`` consults. The ``current_project`` (if
-    any) is placed first, matching the installer's ordering (so GUID de-dup
-    resolves identically).
-    """
+    """Collect registry, roster and selection inputs, with the current project
+    first. Publishing uses strict parsing instead of tolerant view defaults."""
     from .harness_state import build_projects as hs_build_projects
     from .harness_state import home as hs_home
+    from .harness_state import _read_yaml
 
     projects = (hs_build_projects(home_dir, strict_rosters=True)
-                if strict_rosters else hs_build_projects(home_dir))
+                if strict else hs_build_projects(home_dir))
     by_name = {p.name: p for p in projects}
 
     ordered: list[str] = []
@@ -621,7 +614,12 @@ def collect_local_projects(
         wsl_state = info.wsl_state if info else None
 
         cfg_path = project_dir(name) / "config.yaml"
-        if profiles.has_selection(cfg_path):
+        if strict:
+            config = _read_yaml(cfg_path, strict=True)
+            sel = (frozenset(f"{s.machine}|{s.env}|{s.kind}" for s in
+                             profiles._coerce(config[profiles.CONFIG_KEY], strict=True))
+                   if profiles.CONFIG_KEY in config else None)
+        elif profiles.has_selection(cfg_path):
             sel = frozenset(
                 f"{s.machine}|{s.env}|{s.kind}"
                 for s in profiles.load_selection(cfg_path)
@@ -650,11 +648,11 @@ def preview_local(
     *,
     current_project: str | None = None,
     self_env: str = "Win",
-    strict_rosters: bool = False,
+    strict: bool = False,
 ) -> FragmentResult:
     """Collect this machine's inputs and build the fragment (no disk write)."""
-    projects = (collect_local_projects(current_project=current_project, strict_rosters=True)
-                if strict_rosters else collect_local_projects(current_project=current_project))
+    projects = (collect_local_projects(current_project=current_project, strict=True)
+                if strict else collect_local_projects(current_project=current_project))
     return build_fragment(projects, self_machine, self_env=self_env)
 
 
@@ -1084,7 +1082,7 @@ def deploy_fragment(
     ]
 
     result = (
-        preview_local(machine, current_project=current_project, strict_rosters=apply)
+        preview_local(machine, current_project=current_project, strict=apply)
         if projects is None else build_fragment(projects, machine)
     )
     new_fragment = result.fragment()

@@ -336,6 +336,9 @@ result and nonzero exit rather than claiming synchronized profiles.
 Publishing also refuses present malformed or unreadable resolved machine
 rosters before touching fragment/state/settings outputs. Read-only state views
 and previews retain their tolerant roster behavior.
+Publishing rejects blank/non-string selection identifiers and unknown kinds,
+including when inputs change during collection; it never silently converts a
+shell typo into an agent launch.
 
 The **worktrees** views are the first slice of the extracted Picker: they read
 **live** worktrees by shelling out to the `agent-worktrees` engine
