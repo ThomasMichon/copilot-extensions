@@ -326,6 +326,16 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-15 -- Returned provider argv supports appended agent arguments
+- Review identified an actual parser defect in the returned task launch command:
+  identity options after the container name interrupted `nargs="*"` parsing.
+  Both physical/binding identity options now precede the container name.
+- A regression drives the actual CLI parser with the returned command plus
+  `-- --agent worker`, asserts the exact identities and forwarded arguments,
+  and failed with argparse exit two before this correction. Final projection
+  selection passes 63 in 6.08 seconds; touched Python lint passes. No task,
+  credential or launch authority changed.
+
 ### 2026-10-15 -- Complete provider consumer acceptance remains runnable
 - Review found the original opt-in Docker scenario still invoking the old
   builder signature. It now reserves and publishes the actual generation/nonce

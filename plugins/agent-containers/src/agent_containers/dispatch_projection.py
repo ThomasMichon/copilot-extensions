@@ -730,9 +730,9 @@ def _command(args, action) -> int:
     result = {
         **binding, "task_token_file": TOKEN_FILE,
         "spawn_command": [
-            *payload_command_argv(), "exec", "--stdio", args.name,
+            *payload_command_argv(), "exec", "--stdio",
             "--dispatch-binding-id", binding["binding_id"],
-            "--expected-container-id", binding["container_id"],
+            "--expected-container-id", binding["container_id"], args.name,
         ],
     }
     print(json.dumps(result))

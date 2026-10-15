@@ -435,9 +435,32 @@ def test_cli_projection_output_never_includes_token(target, monkeypatch, capsys)
     assert "task-credential" not in output
     result = json.loads(output)
     assert result["task_token_file"] == projection.TOKEN_FILE
-    assert result["spawn_command"][-4:] == [
-        "--dispatch-binding-id", binding["binding_id"], "--expected-container-id", PHYSICAL_ID,
+    assert result["spawn_command"][-7:] == [
+        "exec", "--stdio", "--dispatch-binding-id", binding["binding_id"],
+        "--expected-container-id", PHYSICAL_ID, "pool-1",
     ]
+
+
+def test_returned_task_command_parses_appended_copilot_arguments(target, monkeypatch, capsys):
+    import sys
+    from agent_containers import __main__ as cli
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(FACTS)))
+    args = SimpleNamespace(name="pool-1", expected_container_id=PHYSICAL_ID)
+    assert projection._command(args, projection.prepare) == 0
+    command = json.loads(capsys.readouterr().out)["spawn_command"]
+    binding = projection._read(PHYSICAL_ID)
+    launches = []
+    monkeypatch.setattr(
+        projection, "launch_task", lambda args, run_stdio: launches.append(args) or 0,
+    )
+    assert cli.main(command[command.index("exec"):] + ["--", "--agent", "worker"]) == 0
+    assert len(launches) == 1
+    parsed = launches[0]
+    assert (parsed.name, parsed.dispatch_binding_id, parsed.expected_container_id) == (
+        "pool-1", binding["binding_id"], PHYSICAL_ID,
+    )
+    assert parsed.copilot_args == ["--agent", "worker"]
 
 
 @pytest.mark.parametrize("raw", ["{bad", "x" * 16385, "\udcff"])
