@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; isolated runtime identity verifier in review preparation; policy/integration/lifecycle open
+- **Status:** Active; isolated runtime identity verifier in review; policy/integration/lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -1132,3 +1132,23 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   on the same local host. Full unchanged-coverage portfolio passes 670 with
   six skips in 72.23 seconds. This improvement still needs current-head
   hosted native validation and re-review; local timing is not that proof.
+- The optimized candidate subsequently received exact-head Copilot APPROVED
+  with zero open findings and passing hosted checks, but could not merge after
+  a concurrent upstream retention-test change. Consulted rather than choosing
+  between the overlapping approaches unilaterally; the operator selected
+  `preserve-upstream`.
+- Rebased onto current `dev` and dropped this slice's fixture optimization.
+  The retention test now matches upstream exactly, including its existing
+  small/full portfolio and valid-history setup. The optional JOSE extra,
+  verifier, real-crypto regressions and client-isolation assertions remain.
+  The previous fixture timing describes a superseded experiment, not the final
+  source. Revalidation and exact-new-head review/CI are required before merge;
+  an approval or green check on the earlier head is not carried forward.
+- Rebased full validation passes 672 with six skips in 161.01 seconds under
+  the existing full/manual budget. The exact preserved upstream required
+  selection separately passes 664 with six skips and eight full-matrix
+  deselections in 107.47 seconds under its unchanged 120-second deadline.
+  Updated the product README's test command to match that canonical upstream
+  split; no test, marker, workflow or budget is changed by this slice.
+  Touched lint, install-contract validation and exact upstream retention-file
+  equality pass.

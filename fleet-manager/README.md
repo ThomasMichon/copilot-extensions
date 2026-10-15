@@ -154,11 +154,14 @@ linked-helper refusal and first-touch install/removal proofs. The additional
 native build/refusal matrix is marked `client_distribution_full` and runs in
 unfiltered standalone validation and the existing manual native CI lane.
 Local full validation uses `tools/run-standalone-tests.py fleet-manager`;
-`PYTEST_ADDOPTS='-m "not client_distribution_full"'` selects the same fast
+`PYTEST_ADDOPTS='-m "not client_distribution_full and not observation_retention_full"'`
+selects the same fast
 portfolio as required PR CI without removing the real installation boundary.
-The aggregate native fleet-suite deadline is 120 seconds, inside the existing
-five-minute job budget; this includes the growing journal/claim suite and the
-real packaging boundary. Each artifact subprocess retains its 30-second limit.
+The required fleet selection retains its 120-second deadline; unfiltered local
+and explicit manual runs retain the production-size replay window and full
+artifact matrix under the existing 600-second budget. See
+[TESTING.md](../TESTING.md) for the canonical portfolio and job budgets.
+Each artifact subprocess retains its 30-second limit.
 
 Vision reconciliation: this prerequisite closes part of machine-fleet
 `unified-coordination-product` and the reviewed standalone-system distribution
