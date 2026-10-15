@@ -1826,6 +1826,7 @@ jobs:
       - construction-macos
       - bootstrap-killswitch-powershell-5-1
       - worktree-manager
+      - repositories-configuration
       - agent-dispatch-service
       - agent-index-service-linux
       - agent-index-service-windows

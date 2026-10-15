@@ -109,6 +109,7 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     job = workflow["jobs"]["installation-context-windows"]
     assert job["timeout-minutes"] == 5
     assert "installation-context-windows" in workflow["jobs"]["pr-gate"]["needs"]
+    assert "installation-context-windows" in workflow["jobs"]["promotion-gate"]["needs"]
     assert job["if"] == workflow["jobs"]["test-runner-windows"]["if"]
     assert not any(
         step.get("id") == "installation-context"

@@ -18,6 +18,7 @@ def test_real_native_consumer_is_separate_bounded_and_required():
     assert JOB["runs-on"] == "ubuntu-latest"
     assert JOB["if"] == WORKFLOW["jobs"]["worktree-manager"]["if"]
     assert "repositories-configuration" in WORKFLOW["jobs"]["pr-gate"]["needs"]
+    assert "repositories-configuration" in WORKFLOW["jobs"]["promotion-gate"]["needs"]
     assert WORKFLOW["jobs"]["worktree-manager"]["timeout-minutes"] == 6
     full = WORKFLOW["jobs"]["worktree-manager"]["steps"][-1]
     assert full["run"] == "uv run --extra dev pytest -q"
