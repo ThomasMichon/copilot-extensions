@@ -34,6 +34,8 @@ def _target_is_local(
     if not name:
         return False
     target = split_machine_environment(name, environment)
+    if not target.environment and config.machine and name.casefold() == config.machine.casefold():
+        return machine_identity.is_local_machine(name, config)
     from .execution_spaces import registry_for_config
     from .resolve_machine_cli import _entry_for_environment
 

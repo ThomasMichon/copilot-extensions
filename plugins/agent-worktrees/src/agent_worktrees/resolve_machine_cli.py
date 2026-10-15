@@ -182,6 +182,8 @@ def _emit_remote_plan_for_env(
     except (FileNotFoundError, ValueError):
         return None
 
+    if env_label and env_label.strip().casefold() not in {"win", "windows", "wsl", "linux"}:
+        return None
     try:
         want = split_machine_environment(machine_display, env_label).environment
         entry = _entry_for_environment(entries, machine_display, env_label)
