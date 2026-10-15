@@ -1,0 +1,21 @@
+{
+  "comment": "Expose safe bounded SSH carrier startup failure diagnostics without changing raw framing or operation semantics (#6847).",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

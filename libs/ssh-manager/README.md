@@ -29,6 +29,13 @@ agent-codespaces) import this library instead of spawning SSH directly.
   target (a readable prefix plus a digest). Recording is best-effort and never raises into a dial (on an event loop's thread it does no file I/O: a bounded background writer appends the line, dropping it when saturated);
   `ssh_manager.dial_log.summary()` counts dials per outcome over the last 10
   minutes and hour.
+- **Safe carrier startup diagnostics** -- failed framed-HELLO negotiation reports
+  its stage, exception type, observed pre-cleanup exit code (or unknown), and an
+  allowlisted stderr reason. Stderr is drained concurrently with raw protocol
+  stdout, including after successful startup; raw stderr, arguments and request
+  payloads are never included in these diagnostics. A reason is a diagnostic
+  hint, not proof of the remote failure's cause. `carrier.diagnostics()` adds
+  `startup_failure` after failure and clears it on successful negotiation.
 
 ## Usage
 
