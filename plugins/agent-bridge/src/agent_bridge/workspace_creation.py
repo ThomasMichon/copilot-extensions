@@ -28,6 +28,18 @@ if TYPE_CHECKING:
     from .session_manager import Session, SessionManager
 
 
+def creation_fact_options(options: dict[str, Any]) -> dict[str, Any]:
+    facts = {name: value for name, value in options.items()
+             if name not in {"caller_id", "caller_session_id"}}
+    owner_ref = facts.get("caller_owner_ref")
+    if isinstance(owner_ref, str):
+        owner_scope = owner_ref.partition("#")[0]
+        owner_parts = owner_scope.split("/")
+        if len(owner_parts) == 3 and all(owner_parts):
+            facts["caller_owner_ref"] = owner_scope
+    return facts
+
+
 async def start_request(
     request: StartSessionRequest, manager: SessionManager, target: SpawnTarget, *,
     agent_name: str | None, env: dict[str, str], source: PreferenceSource,
@@ -143,17 +155,9 @@ async def start(
     db = manager.db
     store = AcquisitionStore(db)
     digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
-    fact_options = {name: value for name, value in options.items()
-                    if name not in {"caller_id", "caller_session_id"}}
-    owner_ref = fact_options.get("caller_owner_ref")
-    if isinstance(owner_ref, str):
-        owner_scope = owner_ref.partition("#")[0]
-        owner_parts = owner_scope.split("/")
-        if len(owner_parts) == 3 and all(owner_parts):
-            fact_options["caller_owner_ref"] = owner_scope
     facts = {
         "target": json.loads(target.to_json()), "prompt": prompt,
-        "options": fact_options,
+        "options": creation_fact_options(options),
     }
     facts_digest = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
     with executor(db, f"creation:{digest}"):

@@ -76,6 +76,12 @@ class _SessionResumeMixin:
         async with session._lifecycle_lock:
             from .acquisition_gates import assert_resume_allowed
             assert_resume_allowed(self._db, session)
+            if self._db.execute_read(
+                "SELECT 1 FROM provider_embodiments WHERE session_id=? LIMIT 1",
+                (session_id,),
+            ):
+                # Creation identity survives an interrupted acknowledgement too.
+                allow_recreate = False
             core = _core()
             if session.status != SessionStatus.STOPPED:
                 raise ValueError(

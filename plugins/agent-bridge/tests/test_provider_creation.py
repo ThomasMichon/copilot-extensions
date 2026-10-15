@@ -4,6 +4,7 @@ import asyncio
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -148,6 +149,68 @@ async def test_lost_native_ack_recovers_only_original_session(provider_rig, monk
 
 
 @pytest.mark.asyncio
+async def test_lost_ack_then_ordinary_send_cannot_recreate_native(provider_rig, monkeypatch):
+    rig = provider_rig
+    original = rig.manager.start_session
+
+    async def interrupted(*args, **kwargs):
+        await original(*args, **kwargs)
+        raise RuntimeError("lost acknowledgement")
+
+    monkeypatch.setattr(rig.manager, "start_session", interrupted)
+    with pytest.raises(RuntimeError, match="lost acknowledgement"):
+        await create(rig.manager, rig.target, key="logical-work")
+    session = rig.manager.list_sessions()[0]
+    native = session.acp_session_id
+    assert rig.db.execute_read("SELECT native_session_id FROM provider_embodiments")[0][0] is None
+    session.status = SessionStatus.STOPPED
+    session.client = None
+    rig.client.load_session = AsyncMock(side_effect=RuntimeError("original native cannot load"))
+    rig.client.stderr_tail.return_value = ""
+    with pytest.raises(RuntimeError, match="original native cannot load"):
+        await rig.manager.submit_prompt(session.session_id, "ordinary automatic resume")
+    rig.client.new_session.assert_awaited_once()
+    assert session.acp_session_id == native and session.status == SessionStatus.STOPPED
+    replay, receipt = await create(rig.manager, rig.target, key="logical-work")
+    assert replay is session and receipt["native_session_id"] == native
+    with pytest.raises(RuntimeError, match="original native cannot load"):
+        await rig.manager.resume_session(session.session_id, allow_recreate=True)
+    rig.client.new_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_unknown_original_native_cannot_be_created_by_resume(provider_rig):
+    rig = provider_rig
+    session, _ = await create(rig.manager, rig.target, key="logical-work")
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = None
+    with pytest.raises(RuntimeError, match="no ACP session ID"):
+        await rig.manager.resume_session(session.session_id, allow_recreate=True)
+    rig.client.new_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_caller_handoff_keeps_creation_worktree_scope(provider_rig):
+    rig = provider_rig
+    original_ref = "machine/project/worktree#session-one"
+    first, _ = await create(
+        rig.manager, rig.target, key="logical-work", caller_owner_ref=original_ref,
+    )
+    second, receipt = await create(
+        rig.manager, rig.target, key="logical-work",
+        caller_owner_ref="machine/project/worktree#session-two",
+    )
+    assert second is first and receipt["replayed"]
+    assert first.target.caller_owner_ref == original_ref
+    with pytest.raises(AcquisitionRefused, match="different provider facts"):
+        await create(
+            rig.manager, rig.target, key="logical-work",
+            caller_owner_ref="machine/project/other-worktree#session-two",
+        )
+    assert len(rig.manager.list_sessions()) == 1
+
+
+@pytest.mark.asyncio
 async def test_uncertain_launch_is_not_retry_permission(provider_rig, monkeypatch):
     rig = provider_rig
     calls = []
@@ -253,6 +316,27 @@ def test_http_keyed_provider_creation_has_no_fabricated_worktree(provider_rig):
     assert replay.json()["creation"]["replayed"]
     assert "worktree" not in replay.json()["creation"]
     assert rig.manager._active_acquisitions == 0
+
+
+def test_http_missing_provider_key_refuses_before_caller_affinity(provider_rig):
+    rig = provider_rig
+    app = FastAPI()
+    app.state.session_manager = rig.manager
+
+    async def resolve(_name, **_kwargs):
+        return replace(rig.target)
+
+    app.state.resolver = SimpleNamespace(resolve_async=resolve)
+    app.include_router(router)
+    ordinary = {"agent": "container:prepared-original", "caller_id": "same-caller"}
+    with TestClient(app) as client:
+        initial = client.post("/api/v1/sessions", json=ordinary)
+        assert initial.status_code == 201, initial.text
+        refused = client.post("/api/v1/sessions", json={**ordinary, "provider_instance": True})
+        assert refused.status_code == 422, refused.text
+        assert "provider_instance requires creation_key" in refused.text
+    assert len(rig.manager.list_sessions()) == 1
+    assert not rig.db.execute_read("SELECT * FROM provider_embodiments")
 
 
 @pytest.mark.asyncio

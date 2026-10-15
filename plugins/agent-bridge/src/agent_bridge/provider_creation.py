@@ -12,6 +12,7 @@ from .acquisition_contract import AcquisitionRefused
 from .acquisition_executor import executor
 from .models import SessionStatus
 from .transport import SpawnTarget
+from .workspace_creation import creation_fact_options
 
 if TYPE_CHECKING:
     from .session_manager import Session, SessionManager
@@ -60,8 +61,7 @@ async def start(
         raise AcquisitionRefused("creation_draining", "bridge is draining", effect="not_started")
     facts = {
         "target": _placement(target),
-        "options": {name: value for name, value in options.items()
-                    if name not in {"caller_id", "caller_session_id"}},
+        "options": creation_fact_options(options),
     }
     digest = hashlib.sha256(json.dumps(key).encode()).hexdigest()
     facts_digest = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
@@ -106,7 +106,8 @@ async def start(
             target, copilot_args=[*target.copilot_args, *(options.get("copilot_args") or [])],
         )
         if (
-            session is None or not session.acp_session_id
+            session is None or session.session_id != operation["session_id"]
+            or not session.acp_session_id
             or session.status not in {SessionStatus.IDLE, SessionStatus.RUNNING, SessionStatus.STOPPED}
             or _placement(session.target) != _placement(expected)
             or operation["native_session_id"] is not None
