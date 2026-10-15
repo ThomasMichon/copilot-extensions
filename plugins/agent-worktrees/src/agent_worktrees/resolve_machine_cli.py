@@ -96,6 +96,7 @@ def _load_remote_machines(
 def _try_machine_handoff(
     config: cfg.Config,
     machine_name: str,
+    remote_args: list[str] | None = None,
 ) -> int | None:
     """Handle --machine flag for a remote machine.
 
@@ -121,11 +122,12 @@ def _try_machine_handoff(
 
     ssh_alias, shell = _resolve_ssh_target(entry)
     project = cfg.project_name()
+    remote_command = " ".join([project, *(remote_args or [])])
     _emit_plan(
         {
             "action": "remote",
             "ssh_alias": ssh_alias,
-            "remote_command": _wrap_remote_command(shell, project),
+            "remote_command": _wrap_remote_command(shell, remote_command),
             "machine": entry.key,
             "display_name": entry.display_name,
         }

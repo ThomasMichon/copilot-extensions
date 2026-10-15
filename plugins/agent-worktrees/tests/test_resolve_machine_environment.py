@@ -13,6 +13,46 @@ from agent_worktrees import config as cfg, resolve_cli, resolve_machine_cli
 pytestmark = pytest.mark.guard
 
 
+@pytest.mark.parametrize(("name", "environment"), [
+    ("example-host-wsl", None), ("example-host", "WSL"),
+])
+def test_host_only_legacy_topology_preserves_local_wsl_launch(
+    monkeypatch, name: str, environment: str | None,
+) -> None:
+    config = SimpleNamespace(
+        machine="example-host-wsl", default_repo=SimpleNamespace(anchor="example-repo"),
+    )
+    host = cfg.MachineEntry(key="example-host", display_name="Example")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args, **_kwargs: {host.key: host})
+    assert resolve_cli._target_is_local(config, name, environment)
+
+
+@pytest.mark.parametrize("label", ["Win", "Windows", " Windows "])
+def test_json_native_labels_share_normalization(monkeypatch, label: str) -> None:
+    config = SimpleNamespace(machine="example-host")
+    state = resolve_cli.ResolveCommandState.from_args(SimpleNamespace(
+        json=True, new_worktree=True, machine="example-host", environment=label,
+        worktree_id=None,
+    ))
+    state.config = config
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(resolve_cli, "_validate_profile_assignment_config", lambda *_args: None)
+    monkeypatch.setattr(resolve_cli, "_resolve_profile", lambda *_args: None)
+    monkeypatch.setattr(resolve_cli, "_create_worktree_core", lambda *_args, **_kwargs: {"action": "exec"})
+    assert resolve_cli._resolve_json_mode(state) == 0
+
+
+def test_remote_selector_preserves_resume_actions() -> None:
+    state = resolve_cli.ResolveCommandState.from_args(SimpleNamespace(
+        json=False, worktree_id="example-worktree", machine="remote-host",
+        bare_resume=True, restore=True, no_mux=True,
+    ))
+    assert resolve_cli._remote_selector_args(state) == [
+        "--worktree-id", "example-worktree", "--bare-resume", "--restore", "--no-mux",
+    ]
+
+
 def test_json_route_reports_execution_authority_error_without_starting_a_launch(monkeypatch, capfd):
     from agent_worktrees.execution_spaces import ExecutionSpaceError
 

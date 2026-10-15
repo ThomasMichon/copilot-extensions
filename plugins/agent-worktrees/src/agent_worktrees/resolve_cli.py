@@ -45,7 +45,10 @@ def _target_is_local(
         if entry is not None:
             if target.environment and target.environment != cfg.detect_platform():
                 return False
-            return machine_identity.is_local_machine(entry.key, config)
+            if machine_identity.is_local_machine(entry.key, config):
+                return True
+            if entry.execution_platform:
+                return False
     if target.environment and target.environment != cfg.detect_platform():
         return False
     if target.environment and config.machine:
@@ -251,6 +254,19 @@ class _ResolveEarlyExit(RuntimeError):
     def __init__(self, exit_code: int):
         super().__init__(str(exit_code))
         self.exit_code = exit_code
+
+
+def _remote_selector_args(state: ResolveCommandState) -> list[str]:
+    args = (
+        ["--base"] if state.use_base else ["--new"] if state.use_new else
+        ["--worktree-id", str(state.worktree_id)] if state.worktree_id else []
+    )
+    for name, flag in (("bare_resume", "--bare-resume"), ("restore", "--restore")):
+        if state.worktree_id and getattr(state.args, name, False):
+            args.append(flag)
+    if getattr(state.args, "target_no_mux", False) or getattr(state.args, "no_mux", False):
+        args.append("--no-mux")
+    return args
 
 
 def add_parsers(sub) -> None:
@@ -513,15 +529,18 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                         return 1
                     rc = _emit_remote_plan_for_env(
                         config, state.requested_machine, requested_environment,
-                        ["--new"] if state.use_new else ["--worktree-id", state.worktree_id]
-                        if state.worktree_id else None,
+                        _remote_selector_args(state),
                     )
                     if rc is not None:
                         return rc
                     output.err("Requested machine environment is unavailable.")
                     return 1
             if not target_is_local:
-                rc = _try_machine_handoff(config, state.requested_machine)
+                remote_args = _remote_selector_args(state)
+                rc = (
+                    _try_machine_handoff(config, state.requested_machine, remote_args)
+                    if remote_args else _try_machine_handoff(config, state.requested_machine)
+                )
                 if rc is not None:
                     return rc
                 output.err("Requested machine is unavailable.")
@@ -612,15 +631,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
     except (ValueError, ExecutionSpaceError) as exc:
         return output._json_error(str(exc))
-    requested_environment = getattr(state.args, "environment", None) or ""
+    requested_environment = (
+        split_machine_environment(
+            state.requested_machine, getattr(state.args, "environment", None),
+        ).environment if state.requested_machine else ""
+    )
     same_environment = True
     if requested_environment:
-        from . import resolve_machine_cli
-
-        want_platform = resolve_machine_cli._ENV_LABEL_TO_NAME.get(requested_environment.lower())
-        if want_platform is None:
-            return output._json_error(f"Unknown environment: {requested_environment}")
-        same_environment = want_platform == cfg.detect_platform()
+        same_environment = requested_environment == cfg.detect_platform()
     if state.requested_machine and not (same_machine and same_environment):
         remote_args: list[str] = []
         if state.use_base:
