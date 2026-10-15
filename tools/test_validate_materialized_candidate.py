@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 import yaml
@@ -60,6 +61,7 @@ def subject(tmp_path, monkeypatch):
     git(root, "add", ".")
     git(root, "commit", "-qm", "main")
     main = git(root, "rev-parse", "HEAD")
+    git(root, "clone", "-q", "--no-hardlinks", str(root), str(root.parent / "validated-dev"))
     state = {
         "schema": candidate.SCHEMA, "version": 1,
         "last_promotion": {"dev_head": main, "main_before": main},
@@ -87,7 +89,9 @@ def test_exact_candidate_and_real_consumer_preserve_tracked_inputs(subject):
     root, head, dev, main = subject
     identity = candidate.validate(root, head, dev, main)
     assert identity["tree"] == git(root, "rev-parse", "HEAD^{tree}")
-    result = candidate.run(root, head, dev, main, "plugin:agent-worktrees")
+    result = candidate.run(
+        root, head, dev, main, "plugin:agent-worktrees", dev_root=root.parent / "validated-dev",
+    )
     assert result["outcome"] == "success"
     assert [
         json.loads(line) for line in (root / "executions.jsonl").read_text().splitlines()
@@ -103,7 +107,7 @@ def test_wrong_immutable_input_refuses_before_any_consumer(subject, monkeypatch,
     arguments[position] = "f" * 40
     monkeypatch.setattr(candidate, "recipes", lambda *args: pytest.fail("consumer was reached"))
     with pytest.raises(candidate.CandidateValidationError):
-        candidate.run(*arguments, "plugin:agent-bridge")
+        candidate.run(*arguments, "plugin:agent-bridge", dev_root=subject[0].parent / "validated-dev")
 
 
 @pytest.mark.parametrize("key,value", [
@@ -138,13 +142,17 @@ def test_real_failed_and_mutating_consumers_cannot_authorize_merge(subject):
     runner.write_text("raise SystemExit(7)\n")
     head = commit(root)
     with pytest.raises(candidate.CandidateValidationError, match="exit 7"):
-        candidate.run(root, head, dev, main, "plugin:agent-bridge")
+        candidate.run(
+            root, head, dev, main, "plugin:agent-bridge", dev_root=root.parent / "validated-dev",
+        )
     runner.write_text(
         "from pathlib import Path\nPath('owned.txt').write_text('mutated')\n",
     )
     head = commit(root)
     with pytest.raises(candidate.CandidateValidationError, match="tracked inputs"):
-        candidate.run(root, head, dev, main, "plugin:agent-bridge")
+        candidate.run(
+            root, head, dev, main, "plugin:agent-bridge", dev_root=root.parent / "validated-dev",
+        )
 
 
 def test_timed_out_consumer_still_checks_tracked_immutability(subject, monkeypatch):
@@ -159,7 +167,9 @@ def test_timed_out_consumer_still_checks_tracked_immutability(subject, monkeypat
 
     monkeypatch.setattr(candidate.subprocess, "run", run)
     with pytest.raises(candidate.CandidateValidationError, match="tracked inputs"):
-        candidate.run(root, head, dev, main, "plugin:agent-bridge")
+        candidate.run(
+            root, head, dev, main, "plugin:agent-bridge", dev_root=root.parent / "validated-dev",
+        )
 
 
 @pytest.mark.parametrize("name", candidate.FORBIDDEN_AUTHORITY)
@@ -167,12 +177,12 @@ def test_release_or_api_authority_refuses_before_test_execution(subject, monkeyp
     monkeypatch.setenv(name, "fixture-not-an-actual-credential")
     monkeypatch.setattr(candidate, "recipes", lambda *args: pytest.fail("consumer was reached"))
     with pytest.raises(candidate.CandidateValidationError, match="authority"):
-        candidate.run(*subject, "plugin:agent-bridge")
+        candidate.run(*subject, "plugin:agent-bridge", dev_root=subject[0].parent / "validated-dev")
 
 
 def test_complete_matrix_and_exact_existing_recipes(subject):
-    root, _, _, _ = subject
-    rows = candidate.matrix(root)["include"]
+    root, _, dev, _ = subject
+    rows = candidate.matrix(root, root.parent / "validated-dev", dev)["include"]
     assert {(row["component"], row["os"]) for row in rows} == {
         ("plugin:agent-worktrees", "ubuntu-latest"),
         ("plugin:agent-bridge", "ubuntu-latest"),
@@ -187,7 +197,7 @@ def test_complete_matrix_and_exact_existing_recipes(subject):
     standalone, directory = candidate.recipes(root, "dispatch")[0]
     assert standalone[:2] == [sys.executable, str(root / "tools" / "run-standalone-tests.py")]
     assert standalone[2:] == [
-        str(Path("services") / "dispatch"), "--prepare", "--admission-wait", "60",
+        "services/dispatch", "--prepare", "--admission-wait", "60",
         "--timeout", "180",
     ]
     assert directory == root
@@ -197,30 +207,33 @@ def test_complete_matrix_and_exact_existing_recipes(subject):
 def test_missing_inventory_or_unknown_consumer_cannot_silently_skip(subject):
     root, head, dev, main = subject
     with pytest.raises(candidate.CandidateValidationError, match="absent"):
-        candidate.run(root, head, dev, main, "unrecognized")
+        candidate.run(
+            root, head, dev, main, "unrecognized", dev_root=root.parent / "validated-dev",
+        )
     (root / "plugins" / "agent-worktrees" / "plugin.json").unlink()
     with pytest.raises(candidate.CandidateValidationError, match="absent"):
-        candidate.matrix(root)
+        candidate.matrix(root, root.parent / "validated-dev", dev)
 
 
 def test_empty_required_recipe_is_not_a_success_receipt(subject, monkeypatch):
     monkeypatch.setattr(candidate, "recipes", lambda *args: [])
     with pytest.raises(candidate.CandidateValidationError, match="no executable recipe"):
-        candidate.run(*subject, "plugin:agent-bridge")
+        candidate.run(*subject, "plugin:agent-bridge", dev_root=subject[0].parent / "validated-dev")
 
 
 def test_matrix_does_not_invent_python_suites_for_other_test_languages(subject):
-    root, _, _, _ = subject
+    root, _, dev, _ = subject
     tests = root / "plugins" / "fixture-node" / "tests"
     tests.mkdir(parents=True)
     (tests / "test_contract.cjs").write_text("// fixture\n")
     assert not any(
-        row["component"] == "plugin:fixture-node" for row in candidate.matrix(root)["include"]
+        row["component"] == "plugin:fixture-node"
+        for row in candidate.matrix(root, root.parent / "validated-dev", dev)["include"]
     )
 
 
 def test_symlinked_consumer_is_refused(subject, tmp_path):
-    root, _, _, _ = subject
+    root, _, dev, _ = subject
     path = root / "plugins" / "agent-bridge" / "tests" / "foreign"
     try:
         path.symlink_to(tmp_path, target_is_directory=True)
@@ -228,7 +241,55 @@ def test_symlinked_consumer_is_refused(subject, tmp_path):
         pytest.skip("native symlink creation is unavailable")
     (root / "plugins" / "alias").symlink_to(root / "plugins" / "agent-bridge", target_is_directory=True)
     with pytest.raises(candidate.CandidateValidationError, match="symlink"):
-        candidate.matrix(root)
+        candidate.matrix(root, root.parent / "validated-dev", dev)
+
+
+@pytest.mark.parametrize("missing", ["directory", "empty"])
+def test_missing_non_worktrees_suite_cannot_escape_inventory(subject, missing):
+    root, _, dev, _ = subject
+    tests = root / "plugins" / "agent-bridge" / "tests"
+    if missing == "directory":
+        shutil.rmtree(tests)
+    else:
+        (tests / "test_owned.py").unlink()
+    with pytest.raises(candidate.CandidateValidationError, match="missing=.*agent-bridge"):
+        candidate.matrix(root, root.parent / "validated-dev", dev)
+
+
+@pytest.mark.parametrize("invalid", ["wrong-head", "dirty"])
+def test_development_inventory_must_be_the_validated_input(subject, invalid):
+    root, head, dev, _ = subject
+    source = root.parent / "validated-dev"
+    if invalid == "wrong-head":
+        git(source, "fetch", "-q", str(root), head)
+        git(source, "checkout", "-q", "--detach", head)
+    else:
+        (source / "owned.txt").write_text("changed")
+    with pytest.raises(candidate.CandidateValidationError, match="validated immutable input"):
+        candidate.matrix(root, source, dev)
+
+
+def test_windows_standalone_recipe_uses_canonical_component_id(subject, monkeypatch):
+    monkeypatch.setitem(candidate.STANDALONE, "index", PureWindowsPath("services", "index"))
+    argv, _ = candidate.recipes(subject[0], "index")[0]
+    assert argv[2] == "services/index"
+
+
+def test_isolated_trusted_cli_loads_inventory_and_executes_actual_consumer(subject):
+    root, head, dev, main = subject
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-B", str(ROOT / "tools" / "validate_materialized_candidate.py"),
+            "--root", str(root), "--candidate-sha", head,
+            "--dev-root", str(root.parent / "validated-dev"), "--dev-sha", dev,
+            "--main-before", main, "--component", "plugin:agent-worktrees",
+        ],
+        cwd=root, capture_output=True, text=True, timeout=120,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["outcome"] == "success"
+    assert len((root / "executions.jsonl").read_text().splitlines()) == 2
 
 
 def test_pipeline_requires_successful_exact_candidate_jobs_and_preserves_old_gates():
@@ -239,29 +300,38 @@ def test_pipeline_requires_successful_exact_candidate_jobs_and_preserves_old_gat
     merger = jobs["merge-promotion"]
     assert set(merger["needs"]) == {
         "promote", "materialized-candidate-plan", "materialized-candidate-consumers",
+        "materialized-candidate-windows",
     }
     assert "needs.materialized-candidate-plan.result == 'success'" in merger["if"]
     assert "needs.materialized-candidate-consumers.result == 'success'" in merger["if"]
     assert re.sub(r"\s+", " ", merger["if"]).strip() == (
         "needs.promote.outputs.pr_number != '' && "
         "needs.materialized-candidate-plan.result == 'success' && "
-        "needs.materialized-candidate-consumers.result == 'success'"
+        "needs.materialized-candidate-consumers.result == 'success' && "
+        "needs.materialized-candidate-windows.result == 'success'"
     )
     assert not any("checkout" in step.get("uses", "") for step in merger["steps"])
     assert "postmerge-workflows" in jobs and "python-artifacts" in jobs
-    for name in ("materialized-candidate-plan", "materialized-candidate-consumers"):
+    for name in (
+        "materialized-candidate-plan", "materialized-candidate-consumers",
+        "materialized-candidate-windows",
+    ):
         job = jobs[name]
         assert job["permissions"] == {"contents": "read"} and "environment" not in job
         assert name in jobs["report-failure"]["needs"]
         assert f"needs.{name}.result == 'failure'" in jobs["report-failure"]["if"]
         checkouts = [step for step in job["steps"] if step.get("uses") == "actions/checkout@v4"]
-        assert len(checkouts) == 2
+        assert len(checkouts) == 3
         assert all(step["with"]["persist-credentials"] is False for step in checkouts)
         assert checkouts[0]["with"]["ref"] == "${{ github.workflow_sha }}"
         assert checkouts[1]["with"]["ref"] == "${{ needs.promote.outputs.candidate_sha }}"
+        assert checkouts[2]["with"]["ref"] == "${{ needs.gate.outputs.sha }}"
         assert "APERTURE_RELEASE_TOKEN" not in json.dumps(job)
         assert "secrets." not in json.dumps(job)
     assert jobs["materialized-candidate-plan"]["runs-on"] == "ubuntu-latest"
+    assert jobs["materialized-candidate-consumers"]["runs-on"] == "ubuntu-latest"
+    assert jobs["materialized-candidate-windows"]["runs-on"] == "windows-latest"
+    assert "--component index" in jobs["materialized-candidate-windows"]["steps"][-1]["run"]
     assert jobs["materialized-candidate-consumers"]["strategy"]["fail-fast"] is False
     assert "needs.materialized-candidate-plan.result == 'success'" in (
         jobs["materialized-candidate-consumers"]["if"]
@@ -291,6 +361,7 @@ def test_cli_reports_failure_not_success_for_an_unbound_checkout(subject, capsys
     root, _, dev, main = subject
     assert candidate.main([
         "--root", str(root), "--candidate-sha", "f" * 40,
+        "--dev-root", str(root.parent / "validated-dev"),
         "--dev-sha", dev, "--main-before", main, "--matrix",
     ]) == 1
     captured = capsys.readouterr()

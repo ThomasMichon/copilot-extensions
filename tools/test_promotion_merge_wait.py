@@ -40,9 +40,11 @@ def waiter(monkeypatch, tmp_path):
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert set(merge_job["needs"]) == {
         "promote", "materialized-candidate-plan", "materialized-candidate-consumers",
+        "materialized-candidate-windows",
     }
     assert "needs.materialized-candidate-plan.result == 'success'" in merge_job["if"]
     assert "needs.materialized-candidate-consumers.result == 'success'" in merge_job["if"]
+    assert "needs.materialized-candidate-windows.result == 'success'" in merge_job["if"]
     assert merge_job["permissions"]["contents"] == "write"
     assert merge_job["permissions"]["pull-requests"] == "write"
     assert "secrets." not in json.dumps(merge_job)

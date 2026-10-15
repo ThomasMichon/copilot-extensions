@@ -67,9 +67,13 @@ mode when exercising the builder locally.
 Before the checkout-free merger can advance `main`, the exact pushed candidate
 has a separate consumer gate. `materialized-candidate-plan` validates its
 immutable candidate/dev/main identities and builds the consumer matrix from
-the actual generated tree. `materialized-candidate-consumers` executes the
+the actual generated tree, rejecting missing or empty suites against a third
+credential-free checkout of the pinned, validated development input.
+`materialized-candidate-consumers` executes the
 existing plugin recipes (collection plus guards for Worktrees), Manager and
-standalone Dispatch/Index, retaining Index's native Windows lane.
+standalone Dispatch/Index on a statically routed Linux host.
+`materialized-candidate-windows` retains Index's distinct statically routed
+native Windows lane; no matrix input can select a runner label.
 
 Each consumer gets a fresh public-hosted runner, `contents: read`, no release
 environment or API/release authority, and credential-free checkouts of both

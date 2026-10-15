@@ -10,19 +10,23 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from materialized_candidate_inventory import (  # noqa: E402
+    PLUGIN,
+    STANDALONE,
+    CandidateValidationError,
+    matrix as inventory_matrix,
+    python_suites,
+    regular as _regular,
+)
+
 STATE = Path(".github") / "release-pipeline-state.json"
 SCHEMA = "copilot-extensions.release-pipeline-state"
 SHA = re.compile(r"[0-9a-f]{40}")
-PLUGIN = re.compile(r"[a-z][a-z0-9-]{0,63}")
-STANDALONE = {"dispatch": Path("services") / "dispatch", "index": Path("services") / "index"}
 FORBIDDEN_AUTHORITY = (
     "GH_TOKEN", "GITHUB_TOKEN", "APERTURE_RELEASE_TOKEN", "PROMOTION_MERGE_TOKEN",
     "ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL",
 )
-
-
-class CandidateValidationError(RuntimeError):
-    pass
 
 
 def _environment() -> dict[str, str]:
@@ -51,18 +55,6 @@ def _git(root: Path, *arguments: str) -> str:
             f"candidate Git inspection failed ({arguments[0]}): {result.stderr.strip()}"
         )
     return result.stdout.strip()
-
-
-def _regular(root: Path, relative: Path) -> Path:
-    target = root / relative
-    cursor = root
-    for part in relative.parts:
-        cursor /= part
-        if cursor.is_symlink():
-            raise CandidateValidationError("candidate consumer path must not be a symlink")
-    if not target.is_file():
-        raise CandidateValidationError(f"required candidate consumer file is absent: {relative}")
-    return target
 
 
 def validate(root: Path, candidate: str, dev: str, main_before: str) -> dict[str, str]:
@@ -98,40 +90,18 @@ def validate(root: Path, candidate: str, dev: str, main_before: str) -> dict[str
     }
 
 
-def matrix(root: Path) -> dict[str, list[dict[str, str | int]]]:
-    rows: list[dict[str, str | int]] = []
-    plugins = root / "plugins"
-    if plugins.is_symlink() or not plugins.is_dir():
-        raise CandidateValidationError("candidate plugin directory is unavailable")
-    for plugin in sorted(plugins.iterdir()):
-        if plugin.is_symlink() or (plugin / "tests").is_symlink():
-            raise CandidateValidationError("candidate plugin test root must not be a symlink")
-        if not (plugin / "tests").exists():
-            continue
-        if not PLUGIN.fullmatch(plugin.name) or not (plugin / "tests").is_dir():
-            raise CandidateValidationError("invalid candidate plugin test root")
-        if not any((plugin / "tests").glob("test_*.py")):
-            continue
-        _regular(root, plugin.relative_to(root) / "plugin.json")
-        rows.append({
-            "os": "ubuntu-latest", "component": f"plugin:{plugin.name}",
-            "minutes": 12 if plugin.name in ("agent-dispatch", "agent-index", "agent-worktrees") else 8,
-        })
-    if not rows or len(rows) > 64 or not any(
-        row["component"] == "plugin:agent-worktrees" for row in rows
+def matrix(root: Path, dev_root: Path, dev: str) -> dict[str, list[dict[str, str | int]]]:
+    if dev_root.is_symlink() or not dev_root.is_dir():
+        raise CandidateValidationError("validated development checkout is unavailable")
+    dev_root = dev_root.resolve()
+    if (
+        not SHA.fullmatch(dev)
+        or Path(_git(dev_root, "rev-parse", "--show-toplevel")).resolve() != dev_root
+        or _git(dev_root, "rev-parse", "HEAD") != dev
+        or _git(dev_root, "status", "--porcelain", "--untracked-files=no")
     ):
-        raise CandidateValidationError("candidate plugin consumer inventory is incomplete")
-    for component, platforms in (
-        ("manager", ("ubuntu-latest",)),
-        ("dispatch", ("ubuntu-latest",)),
-        ("index", ("ubuntu-latest", "windows-latest")),
-    ):
-        relative = Path("worktree-manager") if component == "manager" else STANDALONE[component]
-        _regular(root, relative / "pyproject.toml")
-        rows.extend({
-            "os": platform, "component": component, "minutes": 5 if component == "index" else 6,
-        } for platform in platforms)
-    return {"include": rows}
+        raise CandidateValidationError("development inventory is not the validated immutable input")
+    return inventory_matrix(root, python_suites(dev_root))
 
 
 def recipes(root: Path, component: str) -> list[tuple[list[str], Path]]:
@@ -150,7 +120,7 @@ def recipes(root: Path, component: str) -> list[tuple[list[str], Path]]:
     if component in STANDALONE:
         runner = _regular(root, Path("tools") / "run-standalone-tests.py")
         argv = [
-            sys.executable, str(runner), str(STANDALONE[component]),
+            sys.executable, str(runner), STANDALONE[component].as_posix(),
             "--prepare", "--admission-wait", "60",
         ]
         if component == "dispatch":
@@ -164,12 +134,14 @@ def recipes(root: Path, component: str) -> list[tuple[list[str], Path]]:
     raise CandidateValidationError("unknown materialized consumer recipe")
 
 
-def run(root: Path, candidate: str, dev: str, main_before: str, component: str) -> dict[str, str]:
+def run(
+    root: Path, candidate: str, dev: str, main_before: str, component: str, *, dev_root: Path,
+) -> dict[str, str]:
     identity = validate(root, candidate, dev, main_before)
     if any(os.environ.get(name) for name in FORBIDDEN_AUTHORITY):
         raise CandidateValidationError("candidate tests must not receive release or API authority")
     root = root.resolve()
-    expected = matrix(root)["include"]
+    expected = matrix(root, dev_root, dev)["include"]
     if not any(row["component"] == component for row in expected):
         raise CandidateValidationError("requested consumer is absent from the candidate inventory")
     commands = recipes(root, component)
@@ -184,6 +156,7 @@ def run(root: Path, candidate: str, dev: str, main_before: str, component: str) 
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             validate(root, candidate, dev, main_before)
+            matrix(root, dev_root, dev)
             raise CandidateValidationError(f"candidate consumer could not complete: {component}") from error
         validate(root, candidate, dev, main_before)
         if result.returncode:
@@ -198,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--dev-sha", required=True)
+    parser.add_argument("--dev-root", type=Path, required=True)
     parser.add_argument("--main-before", required=True)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--matrix", action="store_true")
@@ -205,8 +179,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         validate(args.root, args.candidate_sha, args.dev_sha, args.main_before)
-        result = matrix(args.root) if args.matrix else run(
+        result = matrix(args.root, args.dev_root, args.dev_sha) if args.matrix else run(
             args.root, args.candidate_sha, args.dev_sha, args.main_before, args.component,
+            dev_root=args.dev_root,
         )
     except CandidateValidationError as error:
         print(f"materialized-candidate: {error}", file=sys.stderr)

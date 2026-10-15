@@ -573,7 +573,7 @@ jobs:
     # exists to react automatically to real validation runs), so the fix is
     # to just never offer that path, rather than trying to harden a job
     # whose own YAML could be attacker-controlled.
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, promote, materialized-candidate-plan, materialized-candidate-consumers, merge-promotion, publish-python-artifacts, postmerge-workflows]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, promote, materialized-candidate-plan, materialized-candidate-consumers, materialized-candidate-windows, merge-promotion, publish-python-artifacts, postmerge-workflows]
     if: >-
       always() &&
       github.event_name == 'repository_dispatch' &&
@@ -588,6 +588,7 @@ jobs:
        needs.promote.result == 'failure' ||
        needs.materialized-candidate-plan.result == 'failure' ||
        needs.materialized-candidate-consumers.result == 'failure' ||
+       needs.materialized-candidate-windows.result == 'failure' ||
        needs.merge-promotion.result == 'failure' ||
        needs.publish-python-artifacts.result == 'failure' ||
        needs.postmerge-workflows.result == 'failure')
@@ -1250,6 +1251,11 @@ jobs:
           path: candidate
           fetch-depth: 2
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: validated-dev
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -1261,7 +1267,8 @@ jobs:
         run: |
           matrix=$(python -I -B trusted/tools/validate_materialized_candidate.py \
             --root candidate --candidate-sha "$CANDIDATE_SHA" \
-            --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --matrix)
+            --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --matrix)
+          matrix=$(printf '%s' "$matrix" | jq -c '{include: [.include[] | select(.os == "ubuntu-latest")]}')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   materialized-candidate-consumers:
@@ -1270,7 +1277,7 @@ jobs:
     if: >-
       needs.promote.outputs.pr_number != '' &&
       needs.materialized-candidate-plan.result == 'success'
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.minutes }}
     permissions:
       contents: read
@@ -1289,6 +1296,11 @@ jobs:
           path: candidate
           fetch-depth: ${{ matrix.component == 'plugin:agent-bridge' && '0' || '2' }}
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: validated-dev
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -1303,15 +1315,58 @@ jobs:
         run: |
           python -I -B trusted/tools/validate_materialized_candidate.py \
             --root candidate --candidate-sha "$CANDIDATE_SHA" \
-            --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component "$COMPONENT"
+            --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component "$COMPONENT"
+
+  materialized-candidate-windows:
+    name: Materialized consumer (index, windows-latest)
+    needs: [gate, promote, materialized-candidate-plan]
+    if: >-
+      needs.promote.outputs.pr_number != '' &&
+      needs.materialized-candidate-plan.result == 'success'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.promote.outputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: validated-dev
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Execute native Windows Index consumer and recheck immutable inputs
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
+        run: |
+          python -I -B trusted/tools/validate_materialized_candidate.py \
+            --root candidate --candidate-sha "$CANDIDATE_SHA" \
+            --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component index
 
   merge-promotion:
     name: Merge the exact ready candidate without administrator authority
-    needs: [promote, materialized-candidate-plan, materialized-candidate-consumers]
+    needs: [promote, materialized-candidate-plan, materialized-candidate-consumers, materialized-candidate-windows]
     if: >-
       needs.promote.outputs.pr_number != '' &&
       needs.materialized-candidate-plan.result == 'success' &&
-      needs.materialized-candidate-consumers.result == 'success'
+      needs.materialized-candidate-consumers.result == 'success' &&
+      needs.materialized-candidate-windows.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 330
     permissions:
