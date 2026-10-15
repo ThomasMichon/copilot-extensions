@@ -96,17 +96,26 @@ class HumanOperation:
 
     def _write(
         self, text: str, *, completed: bool = False, elapsed: float | None = None,
+        state: str | None = None,
     ) -> None:
-        # Redact the complete logical line before either canonical recognition
-        # or the sink; truncating/chunk-redacting first can leak URL userinfo.
-        for original in str(text).splitlines() or [""]:
+        message = str(text)
+        safe = redact(message)
+        originals = message.splitlines() or [""]
+        lines = safe.splitlines() or [""]
+        # Reuse envelopes only when redaction retained line alignment. Unusual
+        # separators consumed by a redaction rule must never recover raw text.
+        if len(originals) != len(lines):
+            originals = lines
+        for original, line in zip(originals, lines, strict=True):
             framed = _FRAMED.fullmatch(original)
-            if framed is not None:
-                # Preserve the canonical envelope even when an authorization
-                # diagnostic's redactor consumes the rest of its body.
-                rendered = framed[1] + redact(framed[2]) + framed[3]
+            if framed is not None and line.startswith(framed[1]):
+                body = line[len(framed[1]):]
+                if body.endswith(framed[3]):
+                    body = body[:-len(framed[3])]
+                rendered = framed[1] + body + framed[3]
             else:
-                line = redact(original)
+                if state is not None:
+                    line = f"{state} {line}".rstrip()
                 now = self.wall().astimezone(timezone.utc)
                 stamp = now.strftime("%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
                 seconds = self.monotonic() - self.started if elapsed is None else elapsed
@@ -120,11 +129,7 @@ class HumanOperation:
     def progress(self, message: str, *, state: str | None = None) -> None:
         if state is not None and state not in _STATES:
             raise ValueError(f"unknown human output state: {state}")
-        if state is None:
-            self._write(message)
-        else:
-            for line in str(message).splitlines() or [""]:
-                self._write(line if _FRAMED.fullmatch(line) else f"{state} {line}".rstrip())
+        self._write(message, state=state)
 
     def complete(self, state: str = "done", message: str = "") -> None:
         if state not in _STATES - {"starting", "running"}:
@@ -165,15 +170,32 @@ def native_output():
     def relay():
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         pending = ""
+        logical = None
+
+        def emit(line: str):
+            nonlocal logical
+            message = line if logical is None else logical + "\n" + line
+            # Ask the existing redactor whether a following token would be
+            # sensitive; retain only prefixes requiring that continuation.
+            probe = "human_output_continuation_probe"
+            suffixes = ("\n" + probe, "\n: " + probe, "\n= " + probe)
+            if any(not redact(message + suffix).endswith(probe) for suffix in suffixes):
+                logical = message
+            else:
+                operation.progress(message)
+                logical = None
 
         def consume(data: bytes, *, final: bool = False):
-            nonlocal pending
+            nonlocal pending, logical
             pending += decoder.decode(data, final=final)
             while "\n" in pending:
                 line, pending = pending.split("\n", 1)
-                operation.progress(line.removesuffix("\r"))
+                emit(line.removesuffix("\r"))
             if final and pending:
-                operation.progress(pending)
+                emit(pending)
+            if final and logical is not None:
+                operation.progress(logical)
+                logical = None
 
         try:
             while not stopped.is_set():

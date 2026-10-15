@@ -10,6 +10,7 @@ legacy return code.
 from __future__ import annotations
 
 import contextlib
+import sys
 
 try:
     from update_telemetry.human import HumanOperation, current_operation
@@ -118,7 +119,7 @@ class UpdateRun:
             raise
         finally:
             if self._human is not None:
-                self._human.__exit__(None, None, None)
+                self._human.__exit__(*sys.exc_info())
 
     def abort(self, exc: BaseException) -> None:
         try:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import time
 
 try:
@@ -46,12 +47,15 @@ def enter(phase: str) -> None:
 def _close_human_phase(exc: BaseException | None = None) -> None:
     global _human_phase, _human_phase_failed
     phase, _human_phase = _human_phase, None
+    failed, _human_phase_failed = _human_phase_failed, False
     if phase is not None:
         try:
-            phase.complete("failed" if exc or _human_phase_failed else "done")
+            phase.complete("failed" if exc or failed else "done")
         finally:
-            phase.__exit__(type(exc) if exc else None, exc, None)
-    _human_phase_failed = False
+            error_info = sys.exc_info()
+            if error_info[0] is None and exc is not None:
+                error_info = (type(exc), exc, exc.__traceback__)
+            phase.__exit__(*error_info)
 
 
 def redact(text: str) -> str:

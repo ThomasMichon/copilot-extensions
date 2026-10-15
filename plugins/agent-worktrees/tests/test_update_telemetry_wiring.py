@@ -42,6 +42,34 @@ def declare_human_producer(tmp_path, monkeypatch):
     return declare
 
 
+def test_failed_phase_completion_write_cannot_report_done(monkeypatch):
+    import io
+
+    from update_telemetry.human import HumanOperation, current_operation
+
+    class Sink(io.StringIO):
+        failed = False
+
+        def write(self, text):
+            if "[duration " in text and not self.failed:
+                self.failed = True
+                raise OSError("completion sink unavailable")
+            return super().write(text)
+
+    monkeypatch.setattr(update_events, "_run", None)
+    monkeypatch.setattr(update_events, "_human_phase_failed", False)
+    sink = Sink()
+    with HumanOperation("update/engine", stream=sink) as operation:
+        update_events.enter("runtime_reconcile")
+        update_events.record("runtime_reconcile", "fixture", "installer exited 23")
+        with pytest.raises(OSError, match="completion sink unavailable"):
+            update_events.finish(1)
+        operation.complete("failed", "exit 1")
+    assert "runtime_reconcile done" not in sink.getvalue()
+    assert "runtime_reconcile failed" in sink.getvalue()
+    assert current_operation() is None
+
+
 def test_installer_process_extraction_preserves_runtime_seams():
     from agent_worktrees import update_installer_process
 

@@ -23,6 +23,30 @@ from worktree_manager import engine_client as ec
 from worktree_manager import self_install
 
 
+def test_update_double_completion_write_failure_cannot_report_done(monkeypatch):
+    from update_telemetry.human import current_operation
+    from worktree_manager import update_events
+
+    class Sink(io.StringIO):
+        failures = 0
+
+        def write(self, text):
+            if "[duration " in text and self.failures < 2:
+                self.failures += 1
+                raise OSError("completion sink unavailable")
+            return super().write(text)
+
+    monkeypatch.setattr(update_events, "_ut", None)
+    sink = Sink()
+    with redirect_stderr(sink):
+        owner = update_events.UpdateRun()
+        with pytest.raises(OSError, match="completion sink unavailable"):
+            owner.finish(1)
+    assert " done " not in sink.getvalue()
+    assert " failed " in sink.getvalue()
+    assert current_operation() is None
+
+
 def test_update_finish_failure_is_not_rendered_as_success(monkeypatch):
     from worktree_manager import update_events
 

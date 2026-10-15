@@ -104,6 +104,9 @@ empty and unterminated child lines are framed individually. Known credentials
 are redacted before the human sink; already canonical child records are not
 framed twice. Human output goes to stderr; JSON output helpers and unscoped
 legacy output retain their existing behavior.
+Redaction covers complete logical messages before line splitting or state
+prefixes. Native relays retain only incomplete credential prefixes recognized
+by the existing redactor until their following text can be masked safely.
 
 `native_output()` adapts only explicitly selected human installer streams.
 The existing Python operation reads a pipe live; no reporting interpreter,

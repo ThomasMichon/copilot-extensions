@@ -9,6 +9,8 @@ import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
+from agent_procutil import no_window_flags
+
 from . import output
 from .installer_capabilities import (
     HUMAN_UTF8_ENV,
@@ -93,7 +95,7 @@ def _run_human_installer(argv, *, label: str, **kwargs):
             if fd is not None:
                 kwargs.update(stdout=fd, stderr=fd)
                 if os.name == "nt":
-                    kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+                    kwargs.setdefault("creationflags", no_window_flags())
             result = subprocess.run(argv, **kwargs)
         if human is not None:
             human.complete("done" if result.returncode == 0 else "failed",

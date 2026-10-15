@@ -96,6 +96,90 @@ def test_human_completion_duration_excludes_multiline_sink_delay():
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("kind", ["plain", "state", "complete"])
+@pytest.mark.parametrize("separator", ["\n", "\r\n"])
+@pytest.mark.parametrize("scheme_parts", [("Bea", "rer"), ("Ba", "sic")])
+def test_human_multiline_credentials_are_redacted_before_splitting(kind, separator, scheme_parts):
+    import io
+
+    from update_telemetry.human import HumanOperation
+
+    scheme = "".join(scheme_parts)
+    credential = "-".join(("synthetic", "multiline", "credential"))
+    message = separator.join((scheme, credential))
+    assert credential not in ut.redact(message)
+    sink = io.StringIO()
+    with HumanOperation("update", stream=sink) as operation:
+        if kind == "complete":
+            operation.complete("failed", message)
+        else:
+            operation.progress(message, state="warning" if kind == "state" else None)
+    assert credential not in sink.getvalue()
+    assert all(line.startswith("[") for line in sink.getvalue().splitlines())
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("state", [None, "warning"])
+def test_human_multiline_redaction_keeps_canonical_envelopes(state):
+    import io
+
+    from update_telemetry.human import HumanOperation
+
+    scheme = "Bea" + "rer"
+    credential = "-".join(("synthetic", "framed", "credential"))
+    header = "Author" + "ization"
+    framed = f"[12:00:01.120Z] update/plugin {header}: {scheme} {credential} [elapsed 3.1s]"
+    sink = io.StringIO()
+    with HumanOperation("update", stream=sink) as operation:
+        operation.progress("before\n" + framed + "\nafter", state=state)
+    lines = sink.getvalue().splitlines()
+    nested = [line for line in lines if line.startswith("[12:00:01.120Z] update/plugin ")]
+    assert len(nested) == 1
+    assert nested[0].endswith("[elapsed 3.1s]")
+    assert credential not in sink.getvalue()
+
+
+@pytest.mark.guard
+def test_human_native_stream_redacts_multiline_credentials(tmp_path):
+    import io
+
+    from update_telemetry.human import HumanOperation, native_output
+
+    scheme = "Bea" + "rer"
+    credential = "-".join(("synthetic", "native", "credential"))
+
+    class Sink(io.StringIO):
+        def write(self, text):
+            if credential in text:
+                raise AssertionError("unredacted credential reached the sink")
+            return super().write(text)
+
+    sink = Sink()
+    messages = [
+        (scheme, credential),
+        ("Ba" + "sic", credential),
+        ("Author" + "ization", ": " + credential),
+        ("http.extraheader", "= " + credential),
+        (scheme + "\n", credential),
+    ]
+    for first, second in messages:
+        assert credential not in ut.redact(first + "\n" + second)
+    producer = "".join(
+        f"print({first!r}, flush=True)\nprint({second!r}, flush=True)\n"
+        for first, second in messages
+    ) + f"import sys; sys.stdout.write({scheme!r})"
+    with HumanOperation("update/installer", stream=sink):
+        with native_output() as fd:
+            result = subprocess.run(
+                [sys.executable, "-I", "-c", producer], stdout=fd, stderr=fd,
+                timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+    assert result.returncode == 0
+    assert credential not in sink.getvalue()
+    assert "human_output_continuation_probe" not in sink.getvalue()
+
+
+@pytest.mark.guard
 def test_human_operation_redacts_before_sink_and_preserves_canonical_records(monkeypatch):
     import io
 

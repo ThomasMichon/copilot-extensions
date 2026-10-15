@@ -213,6 +213,27 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-15 - Fix the review's privacy and completion fault class
+
+- Current-head review of #6869 identified multiline credential exposure
+  caused by splitting before redaction, and a failed phase's transient
+  completion-write error being retried as `done` during cleanup.
+  Reproduced both before editing production logic; the same false-success
+  cleanup also occurred in Manager after two transient writes.
+- Redact whole logical messages before splitting or adding state labels,
+  preserving canonical envelopes only through already-redacted text.
+  Native streaming now retains incomplete credential prefixes according
+  to the existing redactor so framing cannot separate a scheme from its
+  following credential. Cover plain/state/completion, LF/CRLF, canonical
+  records and real native pipe input.
+- Propagate active completion exceptions into both phase and Manager
+  cleanup, reset phase state before sink I/O, and retain explicit failure.
+  Adopt the existing `agent_procutil` windowless flag helper rather than
+  hand-rolling flags; no guard exemption is introduced.
+- Targeted regressions passed after the fix. Full current-candidate
+  acceptance and fresh review remain required; the prior approval is not
+  treated as approval of this new head.
+
 ### 2026-10-15 - Presentation review and bounded serving-source cooperation
 
 - Opened #6869 for the bounded presentation slice. Its first required
