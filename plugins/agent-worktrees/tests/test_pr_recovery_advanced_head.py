@@ -209,6 +209,22 @@ def test_proven_prior_publication_settles_without_push_or_forge_edit(
     assert audit["outcome"] == "succeeded"
 
 
+def test_mutable_checkpoint_target_is_unusable_settlement_evidence(
+    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, wt, remote, saved, branch, published = backed_publication(pr_repo, monkeypatch)
+    path = pr_recovery._path(str(wt))
+    data = json.loads(path.read_text())
+    data["checkpoints"][record(wid).pr.pr_id]["target_head"] = "refs/remotes/origin/master"
+    path.write_text(json.dumps(data))
+    first = preview(wid, config)
+    assert first["operation"]["action"] == "rewrite"
+    assert first["operation"]["evidence_status"] == "unusable"
+    assert first["operation"]["rebase_base_sha"] == ""
+    assert pr_publish._tip("origin", branch, str(wt)) == published
+    assert record(wid).pr.head_sha == saved
+
+
 def test_changed_backed_evidence_invalidates_settlement_confirmation(
     pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
