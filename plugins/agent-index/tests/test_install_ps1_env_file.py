@@ -85,6 +85,8 @@ def test_ensure_paths_run_their_python_inside_the_env_file():
     assert "AGENT_INDEX_ENGINE_HOME = $EngineHome" in engine
     assert engine.index("Invoke-WithEnvFile") < engine.index("Test-EnginePort")
     assert engine.index("Invoke-WithEnvFile") < engine.index("-m agent_index engine start")
+    # An installer must not accept an engine started inside its own Job.
+    assert "-m agent_index engine start --strict" in engine
     assert "Invoke-WithEnvFile -Path $EnvFile" in service
     assert service.index("Invoke-WithEnvFile") < service.index("-m agent_index deploy")
 

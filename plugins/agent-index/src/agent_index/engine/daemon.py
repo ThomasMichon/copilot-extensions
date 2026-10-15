@@ -176,13 +176,16 @@ def _with_log_level_bootstrap(cmd: list[str]) -> list[str]:
     return list(cmd)
 
 
-def _spawn(cmd: list[str], *, python: str, home: Path) -> subprocess.Popen:
+def _spawn(
+    cmd: list[str], *, python: str, home: Path, contained_fallback: bool = True
+) -> subprocess.Popen:
     """Launch the persistent engine through ``spawn_daemon``.
 
     Runs from its durable engine home, never the caller's cwd (a checkout that
     may be deleted, or the plugin payload), breaks away from a kill-on-close
-    Job around the caller where allowed (otherwise it starts inside it, as it
-    always did), and appends stdout/stderr to :func:`engine_log_path` at the
+    Job around the caller where allowed (otherwise, unless
+    ``contained_fallback`` is false, it starts inside it, as it always did),
+    and appends stdout/stderr to :func:`engine_log_path` at the
     :data:`ENGINE_LOG_LEVEL_ENV` level, whatever engine app version is installed.
     """
     root = Path(os.path.abspath(home))
@@ -196,7 +199,7 @@ def _spawn(cmd: list[str], *, python: str, home: Path) -> subprocess.Popen:
         log_path=engine_log_path(root),
         env=env,
         console_children=True,
-        contained_fallback=True,
+        contained_fallback=contained_fallback,
         display="agent_index_engine.app",
     )
 
@@ -224,12 +227,17 @@ def engine_command(home: Path | None = None) -> list[str]:
     ]
 
 
-def start(home: Path | None = None, *, wait_timeout: float | None = None) -> str:
+def start(
+    home: Path | None = None, *, wait_timeout: float | None = None, strict: bool = False
+) -> str:
     """Start the persistent engine daemon from the durable venv.
 
     Returns a short status string. Idempotent: a no-op when already healthy.
     Raises :class:`FileNotFoundError` if the durable engine venv is missing (the
     engine runtime hasn't been provisioned -- run the installer / provisioning).
+    With ``strict`` (installers), a caller's Job that forbids breakaway raises
+    :class:`agent_procutil.DaemonSpawnError` instead of starting an engine that
+    would die with that Job.
 
     ``wait_timeout`` defaults to a generous 300s: a cold process import of
     torch + the embedding model (before uvicorn even starts listening) has
@@ -254,7 +262,9 @@ def start(home: Path | None = None, *, wait_timeout: float | None = None) -> str
             f"first (installer, or 'agent-index engine install')"
         )
 
-    proc = _spawn(engine_command(home), python=str(py), home=home)
+    proc = _spawn(
+        engine_command(home), python=str(py), home=home, contained_fallback=not strict
+    )
     _write_pid(proc.pid, home)
 
     deadline = time.monotonic() + wait_timeout

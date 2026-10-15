@@ -145,7 +145,9 @@ class _Observer:
                 if hwnd not in self.surfaced and (name := self._name(hwnd)):
                     self.surfaced[hwnd] = name
             current = self._u.GetForegroundWindow()
-            if current and current != self.foreground and current not in self.baseline:
+            # Any foreground change counts, including to an already-visible
+            # terminal window that a console launch could reuse.
+            if current and current != self.foreground:
                 if current not in self.focus and (name := self._name(current)):
                     self.focus[current] = name
             time.sleep(0.02)

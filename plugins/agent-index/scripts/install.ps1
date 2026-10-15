@@ -2314,7 +2314,7 @@ function Ensure-EngineRunning {
     $code = Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{ AGENT_INDEX_ENGINE_HOME = $EngineHome } -Body {
         if (Test-EnginePort) { return 'serving' }
         $ErrorActionPreference = 'Continue'
-        & $EngineVenvPython -I -X utf8 -m agent_index engine start 2>&1 | Out-Host
+        & $EngineVenvPython -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         $LASTEXITCODE
     }
     if ($code -eq 'serving') { Write-Skip 'Engine already serving -- leaving the warm engine untouched' }

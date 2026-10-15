@@ -253,7 +253,7 @@ def test_start_default_wait_timeout_is_300_seconds(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_INDEX_ENGINE_START_TIMEOUT", raising=False)
     _prepare_venv(tmp_path)
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=True))
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, **_k: FakeProc(alive=True))
     monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
 
     clock = {"t": 0.0}
@@ -273,7 +273,7 @@ def test_start_wait_timeout_is_overridable_via_env(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_INDEX_ENGINE_START_TIMEOUT", "5")
     _prepare_venv(tmp_path)
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=True))
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, **_k: FakeProc(alive=True))
     monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
 
     clock = {"t": 0.0}
@@ -302,12 +302,61 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
         return calls["n"] >= 2  # unhealthy at the guard, healthy while waiting
 
     monkeypatch.setattr(daemon, "is_healthy", health)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc())
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, **_k: FakeProc())
     monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
 
     out = daemon.start(tmp_path)
     assert "started" in out and "5150" in out
     assert daemon._read_pid(tmp_path) == 5150
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_strict_start_never_falls_back_inside_the_callers_job(monkeypatch, tmp_path, strict):
+    py = daemon.engine_venv_python(tmp_path)
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("", encoding="ascii")
+    health = iter([False, True])
+    seen = {}
+    monkeypatch.setattr(daemon, "is_healthy", lambda *_a, **_k: next(health, True))
+    monkeypatch.setattr(
+        daemon, "_spawn",
+        lambda cmd, *, python, home, contained_fallback: seen.update(cf=contained_fallback)
+        or FakeProc(),
+    )
+    monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
+
+    daemon.start(tmp_path, strict=strict)
+
+    assert seen["cf"] is (not strict)
+
+
+def test_spawn_strict_reaches_spawn_daemon(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setattr(
+        daemon, "spawn_daemon",
+        lambda cmd, **kwargs: captured.update(kwargs=kwargs) or FakeProc(),
+    )
+    daemon._spawn(["py", "-m", "agent_index_engine.app"], python="py", home=tmp_path,
+                  contained_fallback=False)
+    assert captured["kwargs"]["contained_fallback"] is False
+
+
+def test_cli_engine_start_strict_reports_a_denied_breakaway(monkeypatch, capsys):
+    import agent_procutil
+
+    from agent_index import __main__ as cli
+
+    seen = {}
+
+    def start(*, strict=False):
+        seen["strict"] = strict
+        raise agent_procutil.DaemonSpawnError("the caller's Job object forbids breakaway")
+
+    monkeypatch.setattr(daemon, "start", start)
+
+    assert cli.main(["engine", "start", "--strict"]) == 1
+    assert seen == {"strict": True}
+    assert "forbids breakaway" in capsys.readouterr().err
 
 
 def test_spawn_launches_through_spawn_daemon(monkeypatch, tmp_path):
@@ -401,7 +450,7 @@ def test_start_raises_on_early_exit(monkeypatch, tmp_path):
     py.write_text("", encoding="ascii")
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
     monkeypatch.setattr(
-        daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=False, returncode=1)
+        daemon, "_spawn", lambda cmd, **_k: FakeProc(alive=False, returncode=1)
     )
     monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
     with pytest.raises(RuntimeError, match="exited early"):
