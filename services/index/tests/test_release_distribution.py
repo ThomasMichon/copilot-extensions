@@ -85,3 +85,26 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
     path = bundle / "release.json"
     path.write_text(json.dumps(descriptor), encoding="utf-8")
     assert verify_descriptor(path, expected_source_commit=commit) == descriptor
+
+    fleet_source = repo / "fleet-manager"
+    fleet_build = distribution_root / "fleet"
+    fleet_build.mkdir()
+    for filename in ("pyproject.toml", "README.md"):
+        shutil.copy2(fleet_source / filename, fleet_build / filename)
+    shutil.copytree(
+        fleet_source / "src", fleet_build / "src", ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    result = subprocess.run(
+        [sys.executable, "-c",
+         f"from setuptools.build_meta import build_wheel; build_wheel({str(bundle)!r})"],
+        cwd=fleet_build, capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    fleet = build_descriptor(bundle, source_commit=commit, profile="fleet")
+    assert {item["distribution"] for item in fleet["artifacts"]} == {
+        *(item["distribution"] for item in descriptor["artifacts"]), "fleet-manager",
+    }
+    path.write_text(json.dumps(fleet), encoding="utf-8")
+    assert verify_descriptor(path, expected_source_commit=commit, profile="fleet") == fleet
+    with pytest.raises(ReleaseError):
+        verify_descriptor(path, expected_source_commit=commit)

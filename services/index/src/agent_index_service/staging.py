@@ -640,6 +640,10 @@ from agent_index.config import SOURCE_MODE_ENV
 assert SOURCE_MODE_ENV == 'AGENT_INDEX_SOURCE_MODE'
 import agent_index_service
 assert Version(agent_index_service.__version__) == Version(pins['agent-index-service'])
+if 'fleet' in extra_pins.get('agent-index-service', []):
+    for module in ('agent_index.fleet_backend', 'agent_index.fleet_http',
+                   'agent_index.fleet_tls', 'fleet_manager.gateway_auth'):
+        importlib.import_module(module)
 print(json.dumps({'validated': True, 'versions': {n: installed[n].version for n in pins}}))
 """
 

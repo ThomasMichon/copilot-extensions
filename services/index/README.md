@@ -34,7 +34,7 @@ Only glibc Linux CPython images are admitted by this initial adapter.
 Library callers use `container.ContainerTarget(python_version, platform,
 glibc_version)` and `container.prepare_container_context(descriptor_path, *,
 expected_source_commit, third_party_lock, third_party_wheels, output, base_image,
-target, uid=10001, gid=10001)`. The returned schema-1
+target, uid=10001, gid=10001, profile="native")`. The returned schema-1
 `agent-index-service.container-context` result names the context, selected
 revision/service version, contract digest, build argv and `prepared` versus
 `already_prepared` status.
@@ -56,6 +56,26 @@ Kernel-dependent requirement markers need separate deployment admission and are
 rejected rather than evaluated against the preparation host or guessed values.
 The service image rejects the embedding-engine/torch/sentence-transformers
 packages; a real warm engine remains an independently provisioned companion.
+
+For an explicitly selected fleet image, use `--profile fleet` on **all three**
+`release describe`, `release verify` and `container prepare` commands (or
+`profile="fleet"` on their Python APIs). This uses a schema-2 release descriptor
+with `profile: fleet` and exactly six first-party distributions: the five above
+plus `fleet-manager`. The default remains the unchanged schema-1 native profile;
+a descriptor cannot opt a native caller into fleet installation. Native candidate
+staging does not accept fleet descriptors.
+
+The fleet image selects `agent-index-service[fleet,native]`,
+`agent-index[fleet,store,server]` and `fleet-manager[auth]`. Their declared extra
+relationships, versions and complete transitive third-party auth closure must
+verify before output is created. `fleet-manager` is never a third-party lock
+entry, including in native images. The generated schema-2 context records the
+fleet profile, binds its release descriptor/extras to the independently pinned
+context digest, and extends the native installed probe with actual fleet
+backend, HTTP, TLS and Gateway-auth module imports. No Gateway server is started
+inside the index image. Profile selection does not enroll a principal, select a
+provider, expose an API, provision a model, activate a release or grant deployment
+authority; all runtime policy, TLS and credential inputs remain runtime-only.
 
 The context is an immutable snapshot of selected wheels, normalized release/
 install contracts, a stdlib pre-install byte-verification adapter, a native
@@ -123,9 +143,11 @@ parent directory private while granting access only to the intentionally mounted
 input. Git connectors label indexed content by repository identity, including a
 separate commit-source suffix; query filters use those indexed identities, not an
 arbitrary configuration alias. Never mount the native host's live SQLite or
-LanceDB into another writer. The image has no `EXPOSE`, public port or wildcard
-listener; the API and external warm engine remain on loopback in the same
-private execution namespace. A real engine's durable model cache belongs on an
+LanceDB into another writer. The image has no `EXPOSE` or public port mapping.
+Native hosting keeps the API and external warm engine on loopback in the same
+private execution namespace; an explicitly mounted fleet policy separately
+selects the signed-grant TLS listener under the core backend contract.
+A real engine's durable model cache belongs on an
 independently managed volume. The image does not start/provision that engine.
 
 Validate real queued synthetic ingestion, a mock-engine query, durable state

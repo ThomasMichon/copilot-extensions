@@ -165,6 +165,18 @@ New invocations should use the canonical service paths. The native runner
 contract executes both aliases in canonical contained fixture environments
 from an isolated parent whose pytest dependencies reside outside its interpreter
 scheme, exercising the layered dependency layout without installing packages.
+Each alias has its own native fixture item and unchanged subprocess budgets.
+That pure pytest fixture disables unrelated third-party plugin autoload without
+changing the real contained runner or its ownership/environment assertions.
+Preparation's disposable override files stay under the repository so retaining
+their topology does not expand copied source paths back to a drive-root layout
+and exceed Windows' relative-path limit.
+
+The index-service smoke lane includes offline container-context and explicit
+fleet-image profile contracts; neither needs Docker, a model or enrollment.
+The real-wheel release test builds the sixth first-party `fleet-manager` wheel
+and verifies the actual declared fleet extras, without publishing or installing
+those fixture versions. Native schema-1 release behavior remains covered.
 
 Dependency preparation uses the canonical seven-day configured-resolver policy.
 Do not replace a failed admission with plain pip or an alternate index. After

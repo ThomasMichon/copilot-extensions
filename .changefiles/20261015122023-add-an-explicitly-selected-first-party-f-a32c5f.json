@@ -1,0 +1,9 @@
+{
+  "comment": "Add an explicitly selected first-party fleet image closure while preserving native release defaults.",
+  "changes": [
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    }
+  ]
+}

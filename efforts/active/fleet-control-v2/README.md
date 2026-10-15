@@ -281,6 +281,11 @@ All detailed slices are **agent-recommended** and remain subject to review.
   provider renewal and scoped enrollment, without changing management/SSH.
 - [ ] Supply the resident role-selected Gateway and fixed-service index route
   using the existing release, offer/request and operation/receipt contracts.
+  Source implementation and signed-grant index ingress landed in #6809.
+  Released image closure and actual provider/enrollment remain required before
+  treating this as a serving deployment.
+  The next image prerequisite adds an explicitly selected six-distribution
+  first-party fleet profile, without changing native defaults or activating roles.
 - [ ] Authenticate and authorize client/node/controller principals, service
   generations and corpus/source grants at admission and backend execution.
 - [ ] Route correlated source-credential requests to an authorized subscribed
@@ -288,6 +293,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   outcomes.
 - [ ] Wire explicit index CLI Gateway transport and detached-worker credential
   consumption without changing unselected native/SSH behavior.
+  The opt-in CLI/worker/source adapters landed in #6809 with installed-process
+  and real Git/HTTPS fixtures; released consumer adoption and real source refresh
+  remain part of the live proof below.
 - [ ] Prove the real CLI/Gateway/container/controller path, independently
   persistent index state and scoped negative cases before any native offload.
 
@@ -376,7 +384,46 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 
 ## Journal
 
+### 2026-10-15 - Explicit fleet index image closure prepared
+- Under #6383/#6443, added an opt-in fleet release/image profile with exactly six
+  first-party wheels, including `fleet-manager`, and explicit auth-extra closure.
+  Native schema-1 defaults and candidate staging remain independent; fleet
+  descriptors/contexts use schema 2 and cannot opt a native caller into fleet.
+- Context preparation still verifies bytes, RECORDs, target tags and the full
+  locked offline dependency closure. The installed probe checks actual fleet
+  imports before reporting validation. Engine/model provisioning, enrollment,
+  runtime secrets and public exposure are not image preparation.
+- Unit/controller smoke: 479 passed, 3 reported skips. This includes the image
+  contracts, CLI preparation, immutable tar capture and actual repository-built
+  native/fleet wheel metadata. Runner contracts: 69 passed, 1 reported skip;
+  lint, install contract and module ceilings passed.
+- Validation exposed a preparation failure where retained source/override
+  topology made a Windows relative path 261 characters despite its normalized
+  104-character target existing. Repository-local disposable override placement
+  fixes that real preparation path without changing dependency policy. Split the
+  native alias fixture by alias and disabled unrelated pytest plugin autoload;
+  real contained execution and the original deadlines/assertions remain.
+- Fresh context roots and real wheel builds exercise first-touch packaging,
+  not a clean Linux image or installed fleet import/query proof. Those live
+  tiers remain pending reviewed release availability and authorized image
+  assembly; retained release/auth/deployment owners are unchanged. No Gateway
+  was enrolled/deployed and no incumbent state was copied or retired.
+- This realizes the reviewed integrated-product packaging intent while preserving
+  standalone independence and source-trust boundaries. Documentation impact:
+  standalone service README, test guide and this effort. The full Plan and
+  Validation Plan remain open after this prerequisite.
+
 ### 2026-10-15 - Integrated Gateway prepared for review
+- #6809 merged into `dev` at `4af4857c64bdb01e8123b06c18a61183cb4f6bd0`
+  on `2026-10-15T14:49:33Z`, after required current-head CI run `38748829158`
+  and the actual `5a161765db` review's clean Comment with zero open findings.
+  Hosted Linux agent-index completed successfully, including the real raw/TLS
+  and renewable-source boundary cases. This closes the reviewed source slice,
+  not the Windows provider/enrollment, governed image/model closure, installed
+  responder, managed deployment or real-corpus validation gates.
+  Next integration slice: explicitly selected fleet-capable image artifact
+  closure, preserving the native five-distribution image and independent engine
+  boundary; coordinate its release/descriptor contract with #6383/#6240/#6030.
 - The current-head overview identified arbitrary synchronous source-provider
   exceptions bypassing the narrow sanitization tuple. Provider-only result
   capture now translates every ordinary callback failure into a static

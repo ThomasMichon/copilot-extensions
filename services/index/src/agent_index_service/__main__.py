@@ -32,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
         prepare.add_argument(f"--{flag}", required=True)
     prepare.add_argument("--uid", type=int, default=10001)
     prepare.add_argument("--gid", type=int, default=10001)
+    prepare.add_argument("--profile", choices=("native", "fleet"), default="native")
     build = container_commands.add_parser("build", help="verify and snapshot context before Docker")
     build.add_argument("--context", required=True, type=Path)
     build.add_argument("--expected-contract-sha256", required=True)
@@ -44,9 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
     describe = release_commands.add_parser("describe")
     describe.add_argument("--bundle", required=True, type=Path)
     describe.add_argument("--source-commit", required=True)
+    describe.add_argument("--profile", choices=("native", "fleet"), default="native")
     verify = release_commands.add_parser("verify")
     verify.add_argument("--descriptor", required=True, type=Path)
     verify.add_argument("--expected-source-commit", required=True)
+    verify.add_argument("--profile", choices=("native", "fleet"), default="native")
     stage = commands.add_parser("stage", help="build an immutable native candidate without activation")
     stage.add_argument("--config", required=True, type=Path)
     stage.add_argument("--install-root", required=True, type=Path)
@@ -93,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
                     third_party_wheels=args.third_party_wheels,
                     output=args.output, base_image=args.base_image,
                     target=ContainerTarget(args.python_version, args.platform, args.glibc_version),
-                    uid=args.uid, gid=args.gid,
+                    uid=args.uid, gid=args.gid, profile=args.profile,
                 )
             print(json.dumps(payload, sort_keys=True))
             return 0
@@ -101,12 +104,15 @@ def main(argv: list[str] | None = None) -> int:
             from .release import build_descriptor, verify_descriptor
 
             if args.release_command == "describe":
-                payload = build_descriptor(args.bundle, source_commit=args.source_commit)
+                payload = build_descriptor(
+                    args.bundle, source_commit=args.source_commit, profile=args.profile,
+                )
             else:
                 payload = {
                     "valid": True,
                     "release": verify_descriptor(
                         args.descriptor, expected_source_commit=args.expected_source_commit,
+                        profile=args.profile,
                     ),
                 }
             print(json.dumps(payload, sort_keys=True))

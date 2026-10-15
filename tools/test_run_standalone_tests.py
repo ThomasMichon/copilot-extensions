@@ -123,6 +123,7 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
         calls.append(command)
         if "--override" in command:
             override = Path(command[command.index("--override") + 1])
+            assert override.parent.parent == tmp_path
             core_extra = "" if smoke else "[store,server]"
             assert override.read_text() == (
                 f"agent-index{core_extra} @ {metadata.parent.as_uri()}\n"
@@ -372,45 +373,32 @@ def test_fixture_python_accepts_environment_beneath_symlinked_parent(tmp_path):
     assert len(list(actual.rglob("test-harness.pth"))) == 1
 
 
-def exercise_native_legacy_service_cli(tmp_path):
-    pairs = runner.COMPONENT_ALIASES
-    for canonical in pairs.values():
-        root = tmp_path / canonical
-        tests = root / "tests"
-        tests.mkdir(parents=True)
-        environment = tmp_path / ".test-venvs" / sys.platform / canonical
-        fixture_python(environment)
-        (tests / "test_contract.py").write_text(
-            "import os, sys, pytest\nfrom pathlib import Path\n"
-            "def test_contract():\n"
-            f"    assert Path.cwd() == Path({str(root)!r})\n"
-            f"    assert Path(sys.prefix).resolve() == Path({str(environment.resolve())!r})\n"
-            f"    assert Path(pytest.__file__).resolve() == Path({str(Path(pytest.__file__).resolve())!r})\n"
-            "    assert os.environ['COPILOT_EXTENSIONS_TEST_CONTAINED'] == '1'\n"
-            "    Path('executed.txt').write_text('canonical')\n",
-            encoding="utf-8",
-        )
-    script = (
-        "import importlib.util, sys\nfrom pathlib import Path\n"
-        f"sys.path.insert(0, {str(SCRIPT.parent)!r})\n"
-        f"spec = importlib.util.spec_from_file_location('standalone_runner', {str(SCRIPT)!r})\n"
-        "runner = importlib.util.module_from_spec(spec)\n"
-        "spec.loader.exec_module(runner)\n"
-        f"runner.REPO = Path({str(tmp_path)!r})\n"
-        f"for legacy in {tuple(pairs)!r}:\n"
-        "    assert runner.main([legacy, '--timeout', '10']) == 0\n"
+def exercise_native_legacy_service_cli(tmp_path, legacy, canonical):
+    root = tmp_path / canonical
+    tests = root / "tests"
+    tests.mkdir(parents=True)
+    environment = tmp_path / ".test-venvs" / sys.platform / canonical
+    fixture_python(environment)
+    (tests / "test_contract.py").write_text(
+        "import os, sys, pytest\nfrom pathlib import Path\n"
+        "def test_contract():\n"
+        f"    assert Path.cwd() == Path({str(root)!r})\n"
+        f"    assert Path(sys.prefix).resolve() == Path({str(environment.resolve())!r})\n"
+        f"    assert Path(pytest.__file__).resolve() == Path({str(Path(pytest.__file__).resolve())!r})\n"
+        "    assert os.environ['COPILOT_EXTENSIONS_TEST_CONTAINED'] == '1'\n"
+        "    Path('executed.txt').write_text('canonical')\n",
+        encoding="utf-8",
     )
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", script], capture_output=True, text=True, timeout=30,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    for legacy, canonical in pairs.items():
-        assert (tmp_path / canonical / "executed.txt").read_text() == "canonical"
-        assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
+    runner.REPO = tmp_path
+    assert runner.main([legacy, "--timeout", "10"]) == 0
+    assert (root / "executed.txt").read_text() == "canonical"
+    assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
 
 
-def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environments(tmp_path):
+@pytest.mark.parametrize("legacy,canonical", runner.COMPONENT_ALIASES.items())
+def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environments(
+    tmp_path, legacy, canonical,
+):
     python = fixture_python(tmp_path / "harness")
     script = (
         "import importlib.util, sys, sysconfig, pytest\nfrom pathlib import Path\n"
@@ -420,10 +408,12 @@ def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environ
         f"spec = importlib.util.spec_from_file_location('fixture_tests', {str(Path(__file__).resolve())!r})\n"
         "fixture = importlib.util.module_from_spec(spec)\n"
         "spec.loader.exec_module(fixture)\n"
-        f"fixture.exercise_native_legacy_service_cli(Path({str(tmp_path)!r}))\n"
+        f"fixture.exercise_native_legacy_service_cli(Path({str(tmp_path)!r}), "
+        f"{legacy!r}, {canonical!r})\n"
     )
     result = subprocess.run(
         [str(python), "-I", "-c", script], capture_output=True, text=True, timeout=30,
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -478,7 +468,7 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(
         captured.update(kwargs)
         assert command[1:4] == ["-I", "-m", "pytest"]
         if smoke:
-            assert command[5:16] == [
+            assert command[5:18] == [
                 str(root / "tests" / "test_cli.py"), str(root / "tests" / "test_config.py"),
                 str(root / "tests" / "test_release.py"),
                 str(root / "tests" / "test_release_cli.py"),
@@ -489,6 +479,8 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(
                 str(root / "tests" / "test_runtime_resource_distribution.py"),
                 str(root / "tests" / "test_distribution.py"),
                 str(root / "tests" / "test_release_distribution.py"),
+                str(root / "tests" / "test_container.py"),
+                str(root / "tests" / "test_fleet_image.py"),
             ]
         else:
             assert command[5] == str(root / "tests")

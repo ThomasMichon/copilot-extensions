@@ -195,7 +195,8 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         # not just an importable wheel; exercise its real source layout.
         sources.append("--editable")
     sources.append(str(REPO / component) + f"[{extra}]")
-    with tempfile.TemporaryDirectory(prefix="standalone-dependencies-") as temporary:
+    # Keep retained source/override topology below the Windows relative-path limit.
+    with tempfile.TemporaryDirectory(prefix="standalone-dependencies-", dir=REPO) as temporary:
         overrides: list[str] = []
         if component == "services/index":
             # dev freezes source versions; test the local compatibility seam,
@@ -338,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
                     root / "tests" / "test_runtime_resource_distribution.py",
                     root / "tests" / "test_distribution.py",
                     root / "tests" / "test_release_distribution.py",
+                    root / "tests" / "test_container.py",
+                    root / "tests" / "test_fleet_image.py",
                 ]
                 if args.smoke else [root / "tests"]
             )

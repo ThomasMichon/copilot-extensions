@@ -1,4 +1,4 @@
-"""Offline generic Linux image context, not fleet/Gateway deployment or migration.
+"""Offline Linux image context, not fleet/Gateway deployment or migration.
 
 The caller selects an approved digest-pinned Python base and independently
 trusted release revision. Hashes bind integrity, not source authenticity.
@@ -323,10 +323,14 @@ def verified_context_snapshot(context: Path, *, expected_contract_sha256: str):
         raise ContainerError("context contract JSON is malformed") from exc
     keys = {"schema", "schema_version", "source_commit", "service_version", "base_image",
             "target", "architecture", "uid", "gid", "pins", "extras", "files"}
+    fleet = isinstance(contract, dict) and contract.get("profile") == "fleet"
+    if fleet:
+        keys.add("profile")
     if (
         not isinstance(contract, dict) or set(contract) != keys
         or contract["schema"] != _SCHEMA
-        or type(contract["schema_version"]) is not int or contract["schema_version"] != 1
+        or type(contract["schema_version"]) is not int
+        or contract["schema_version"] != (2 if fleet else 1)
         or not isinstance(contract["files"], list)
         or not 6 <= len(contract["files"]) <= _CONTEXT_FILE_LIMIT
     ):
@@ -471,6 +475,7 @@ def prepare_container_context(
     descriptor_path: Path, *, expected_source_commit: str, third_party_lock: Path,
     third_party_wheels: Path, output: Path, base_image: str, target: ContainerTarget,
     uid: int = 10001, gid: int = 10001,
+    profile: str = "native",
 ) -> dict:
     """Prepare an exclusive immutable build snapshot; replay only identical content.
 
@@ -495,9 +500,11 @@ def prepare_container_context(
         ):
             raise ContainerError("output must be a dedicated directory disjoint from input artifacts")
         descriptor = verify_descriptor(
-            descriptor_path, expected_source_commit=expected_source_commit,
+            descriptor_path, expected_source_commit=expected_source_commit, profile=profile,
         )
         locked = hashed_requirements(_bytes(lock_path))
+        if "fleet-manager" in locked:
+            raise ContainerError("fleet-manager belongs in the explicit fleet first-party release")
         if set(locked) & {"agent-index-engine", "torch", "sentence-transformers"}:
             raise ContainerError("engine/model packages are outside the standalone service image")
         metadata, sources = {}, {}
@@ -523,6 +530,11 @@ def prepare_container_context(
             raise ContainerError("native third-party wheel closure is incomplete")
         extras = {name: item["extras"] for name, item in locked.items()}
         extras.update({"agent-index-service": ["native"], "agent-index": ["store", "server"]})
+        if profile == "fleet":
+            extras.update({
+                "agent-index-service": ["fleet", "native"],
+                "agent-index": ["fleet", "store", "server"], "fleet-manager": ["auth"],
+            })
         _closure(metadata, extras, environment, target)
         pins = {name: item["artifact"]["version"] for name, item in metadata.items()}
         install = "".join(
@@ -558,7 +570,8 @@ ENTRYPOINT ["/opt/agent-index/bin/python", "-I", "-m", "agent_index_service", "s
         hashes.update({f"wheels/{item['artifact']['file']}": item["artifact"]["sha256"]
                        for item in metadata.values()})
         contract = {
-            "schema": _SCHEMA, "schema_version": 1,
+            "schema": _SCHEMA, "schema_version": 1 if profile == "native" else 2,
+            **({"profile": profile} if profile == "fleet" else {}),
             "source_commit": descriptor["source_commit"], "service_version": pins["agent-index-service"],
             "base_image": base_image, "target": {
                 "python_version": environment["python_full_version"], "platform": target.platform,
