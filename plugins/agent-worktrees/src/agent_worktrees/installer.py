@@ -649,7 +649,7 @@ def _write_receipt(project: str, data: dict) -> None:
     path = _receipt_path(project)
     path.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(data, indent=2, sort_keys=True) + "\n"
-    if path.is_file() and path.read_text(encoding="utf-8") == content:
+    if path.is_file() and path.read_bytes() == content.encode("utf-8"):
         return
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:

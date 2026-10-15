@@ -533,6 +533,34 @@ def test_corrupt_transaction_is_preserved(command_home, monkeypatch):
     assert inst._read_receipt("demo") == receipt
 
 
+def test_explicit_transfer_repairs_non_utf8_receipt(command_home, monkeypatch):
+    inst._deploy_project_binstub("demo")
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    paths[0].write_bytes(b"unknown command\n")
+    before = {p: p.read_bytes() for p in paths}
+    receipt_path = inst._receipt_path("demo")
+    corrupt = b"\xff\xfeinvalid receipt"
+    receipt_path.write_bytes(corrupt)
+
+    result = inst.reconcile_binstubs()
+    assert result["blocked"] == result["preserved"] == ["demo"]
+    assert {p: p.read_bytes() for p in paths} == before
+    assert receipt_path.read_bytes() == corrupt
+    with pytest.raises(inst.BinstubOwnershipError, match="unreadable"):
+        inst._deploy_project_binstub("demo")
+
+    assert inst.transfer_project_binstub("demo") > 0
+    receipt = inst._read_receipt("demo")
+    assert receipt["owner"] == inst._binstub_owner()
+    for p, content in inst._project_binstub_specs("demo"):
+        assert p.read_bytes() == content.encode("utf-8")
+        assert inst._stub_hash(receipt, p) == inst._file_sha256(p)
+    timestamps = {p: p.stat().st_mtime_ns for p in paths + [receipt_path]}
+    assert inst.transfer_project_binstub("demo") == 0
+    assert inst.reconcile_binstubs()["blocked"] == []
+    assert timestamps == {p: p.stat().st_mtime_ns for p in paths + [receipt_path]}
+
+
 def test_unknown_unreceipted_bytes_are_preserved(command_home, monkeypatch, capsys):
     before = seed_old(monkeypatch, command_home, receipted=False)
     p = next(iter(before))
