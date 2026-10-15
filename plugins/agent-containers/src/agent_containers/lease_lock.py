@@ -78,7 +78,7 @@ def require_legacy_writers_quiesced(*, clear_expired_corruption: bool) -> None:
                 raise lease.ProviderAdmissionError("Provider record has an unknown lock protocol")
             try:
                 local = record.host == lease._this_host() and record.environment == lease._this_environment()
-                live = lease._pid_alive(record.pid) if local else lease._record_live(record, ttl)
+                live = lease._pid_alive(record.pid) if local else True
             except (AttributeError, TypeError, ValueError) as exc:
                 raise lease.ProviderAdmissionError("Legacy provider writer liveness is indeterminate") from exc
             if live:

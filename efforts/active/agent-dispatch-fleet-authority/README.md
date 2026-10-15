@@ -326,6 +326,19 @@ recorded against each open fork._
 
 ## Journal
 
+### 2026-10-15 -- Foreign legacy cutover cannot expire its own protection
+- Current-head review of #6745 found a real migration defect: replacing the
+  legacy lock pathname blocks old heartbeat writers, so elapsed heartbeat
+  time cannot establish foreign-owner quiescence. Foreign legacy admission
+  and lifecycle records now remain blocking regardless of expiry.
+  The owning environment may proceed only after verifying its PID is dead.
+- Both admission and hold regressions exercise initial refusal, expiry after
+  blocked refresh, refused stale cleanup, unchanged record bytes and
+  same-environment live/dead-PID verification. The coupled native lease and
+  cutover selection passes 56; touched Python lint passes. Existing real
+  mixed-version process proof remains in that selection. No service rollout,
+  manual promotion or merge-gate bypass occurred.
+
 ### 2026-10-14 -- Provider review: active locks and surviving guest workers
 - PR #6745's first review identified two real boundary gaps: the shared
   lease mutex could steal an aged live lock while projection was still

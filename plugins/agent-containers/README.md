@@ -62,6 +62,10 @@ enter or unlink the persistent lock after cutover. Live legacy admission and
 lifecycle writers must finish before new mutations are admitted. A crashed,
 unidentifiable legacy lock file requires verified operator quiescence rather
 than automatic age-based removal; no active wrapper is forcibly terminated.
+Legacy records from another environment remain blocking even after heartbeat
+expiry: cutover prevents their old writers from refreshing that heartbeat.
+Quiesce them in their owning environment, where dead-PID verification permits
+cleanup; expiry alone never proves foreign legacy quiescence.
 The provider's creation-time binding identity is pinned in both an
 immutable Docker label and owner-private state. Missing, corrupt or mismatched
 birth state is not an unused slot: preparation refuses it and requires

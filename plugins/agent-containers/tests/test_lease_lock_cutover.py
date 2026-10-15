@@ -105,6 +105,40 @@ def test_caller_failures_are_not_reclassified_as_admission_contention(state):
     assert type(failure.value) is RuntimeError
 
 
+@pytest.mark.parametrize("kind", ["admission", "hold"])
+def test_foreign_legacy_writer_remains_protected_after_blocked_heartbeat(state, monkeypatch, kind):
+    now = 1000.0
+    monkeypatch.setattr(lease.time, "time", lambda: now)
+    fields = {
+        "container": "pool-1", "token": "legacy", "pid": os.getpid(),
+        "host": lease._this_host(), "environment": "foreign-environment",
+        "acquired_at": now, "heartbeat_at": now,
+    }
+    if kind == "hold":
+        fields.update(operation="remove", expires_at=now + lease.DEPLOY_HOLD_TTL)
+        path, ttl = lease._DEPLOY_HOLDS_FILE, lease.DEPLOY_HOLD_TTL
+    else:
+        path, ttl = lease._SESSION_ADMISSIONS_FILE, lease.SESSION_ADMISSION_TTL
+    path.write_text(json.dumps({"legacy": fields}), encoding="utf-8")
+    original = path.read_bytes()
+    for elapsed in (0, ttl + 1):
+        now = 1000.0 + elapsed
+        with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
+            with lease._lease_lock(timeout=0.1):
+                pytest.fail("foreign legacy writer was admitted after blocking its heartbeat")
+        assert lease._LOCK_FILE.is_dir()
+        with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
+            lease.clear_stale_provider_records()
+        assert path.read_bytes() == original
+    monkeypatch.setattr(lease, "_this_environment", lambda: fields["environment"])
+    with pytest.raises(lease.ProviderAdmissionError, match="writers must quiesce"):
+        with lease._lease_lock(timeout=0.1):
+            pytest.fail("the owner environment ignored its live legacy PID")
+    monkeypatch.setattr(lease, "_pid_alive", lambda pid: False)
+    with lease._lease_lock(timeout=0.1):
+        assert lease._LOCK_FILE.is_dir()
+
+
 def test_mixed_version_process_cannot_enter_or_unlink_kernel_namespace(state):
     ready, attempt, result = (state / name for name in ("ready", "attempt", "result"))
     script = r"""
