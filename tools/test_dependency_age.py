@@ -374,6 +374,63 @@ def prepare(component, python):
     assert age.contract_source(Requirement("owned"), path, projects, tmp_path) is None
 
 
+@pytest.mark.parametrize("mode", [
+    "canonical", "embedded", "removed-core", "unregistered", "undeclared", "missing-mapping",
+    "wrong-identity", "escaped", "conditional", "duplicate", "changed-closure",
+])
+def test_standalone_source_contract_follows_only_selected_core_mapping(tmp_path, mode):
+    path = project(tmp_path, "services/demo", dependencies='"core", "owned"')
+    core = write(
+        tmp_path / "plugins" / "core" / "pyproject.toml",
+        '[project]\nname = "core"\ndependencies = ["owned"]\n',
+    )
+    canonical = write(
+        tmp_path / "libs" / "owned" / "pyproject.toml",
+        '[project]\nname = "owned"\ndependencies = ["external>=1"]\n',
+    )
+    embedded = tmp_path / "plugins" / "core" / "libs" / "owned" / "pyproject.toml"
+    write(embedded, canonical.read_text(encoding="utf-8"))
+    mapping = '{"path" = "../../libs/owned"}'
+    if mode in {"embedded", "changed-closure"}:
+        mapping = '{"path" = "libs/owned"}'
+    elif mode == "wrong-identity":
+        canonical.write_text('[project]\nname = "unrelated"\n', encoding="utf-8")
+    elif mode == "escaped":
+        mapping = '{"path" = "../../../outside"}'
+    elif mode == "conditional":
+        mapping = '[{path = "../../libs/owned", marker = "sys_platform == \'win32\'"}]'
+    if mode == "changed-closure":
+        embedded.write_text(
+            canonical.read_text(encoding="utf-8").replace("external>=1", "hidden>=1"),
+            encoding="utf-8",
+        )
+    if mode == "undeclared":
+        core.write_text('[project]\nname = "core"\n', encoding="utf-8")
+    if mode != "missing-mapping":
+        with core.open("a", encoding="utf-8") as stream:
+            stream.write(f"\n[tool.uv.sources]\nowned = {mapping}\n")
+            if mode == "duplicate":
+                stream.write('Owned = {path = "../../libs/owned"}\n')
+    consumers = "()" if mode == "unregistered" else '("services/demo",)'
+    write(tmp_path / "tools" / "standalone_consumers.py", f"STANDALONE_CONSUMERS = {consumers}\n")
+    sources = "[]" if mode == "removed-core" else '[str(REPO / "plugins" / "core")]'
+    write(tmp_path / "tools" / "run-standalone-tests.py", f"""
+def prepare(component, python):
+    if component == "services/demo":
+        sources = {sources}
+""")
+    _, projects = age.inventory(tmp_path)
+    req = Requirement("owned")
+    if mode in {"wrong-identity", "escaped", "conditional", "duplicate", "changed-closure"}:
+        with pytest.raises(age.DeclarationError):
+            age.contract_source(req, path, projects, tmp_path)
+    else:
+        expected = {
+            "canonical": canonical, "embedded": embedded,
+        }.get(mode)
+        assert age.contract_source(req, path, projects, tmp_path) == expected
+
+
 def test_engine_source_contract_requires_both_platforms_and_canonical_parent(tmp_path):
     parent = project(tmp_path, "plugins/demo")
     child = project(tmp_path, "plugins/demo/server", dependencies='"demo"')

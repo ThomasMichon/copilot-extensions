@@ -29,6 +29,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS, _default_fetch
+from standalone_consumers import local_dependency_source
 
 MIN_AGE_SECONDS = DEFAULT_MIN_AGE_DAYS * 86400
 
@@ -255,8 +256,10 @@ def contract_source(req: Requirement, path: Path, projects: dict[Path, dict], ro
     Test runners explicitly supply canonical path sources where published
     metadata intentionally has no UV pointer. Extract those literal
     paths from the exact consumer's prepare branch, never a package-name
-    whitelist. The nested engine's installers explicitly preinstall its parent
-    package on both platforms. Canonical inventory supplies each external
+    whitelist. Declared dependencies also follow that selected project's own
+    validated path mappings, not a replacement canonical source. The nested
+    engine's installers explicitly preinstall its parent package on both
+    platforms. Canonical inventory supplies each external
     closure; absence, replacement or drift of this evidence revokes exemption.
     """
     consumer = path.parent.relative_to(root).as_posix()
@@ -320,11 +323,24 @@ def contract_source(req: Requirement, path: Path, projects: dict[Path, dict], ro
         if not source.is_file():
             raise DeclarationError("source contract points to a missing project")
         source_data = projects.get(source) or _toml(source)
-        if canonicalize_name(source_data.get("project", {}).get("name", "")) != canonicalize_name(req.name):
-            continue
         if source not in projects:
             raise DeclarationError("source contract does not point to an inventoried canonical project")
-        return source
+        if canonicalize_name(source_data.get("project", {}).get("name", "")) == canonicalize_name(req.name):
+            return source
+        dependencies = source_data.get("project", {}).get("dependencies", [])
+        mappings = source_data.get("tool", {}).get("uv", {}).get("sources", {})
+        if (
+            not any(canonicalize_name(Requirement(value).name) == canonicalize_name(req.name)
+                    for value in dependencies)
+            or not any(canonicalize_name(name) == canonicalize_name(req.name) for name in mappings)
+        ):
+            continue
+        try:
+            selected = local_dependency_source(source.parent, req.name, source_root=root)
+        except ValueError as exc:
+            raise DeclarationError("source contract dependency mapping is invalid") from exc
+        attributed_project(req, selected, projects, root)
+        return contained_path(selected / "pyproject.toml", root)
     return None
 
 
