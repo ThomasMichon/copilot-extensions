@@ -731,6 +731,8 @@ def _service_start(direct: bool = False) -> None:
             "forward (active.json) that is not answering; not starting a local "
             "daemon over it",
         )
+        if direct:
+            sys.exit(1)
         return
     if core._reconcile_live_dynamic_daemon():
         print(f"[OK] agent-bridge recovered dynamic route (port {core._service_port()})")

@@ -110,6 +110,27 @@ def test_direct_start_leaves_a_healthy_daemon_alone(monkeypatch, direct_env):
     assert not direct_env.exists()
 
 
+def test_direct_start_fails_over_an_unanswering_forward_without_spawning(
+    monkeypatch, direct_env
+):
+    monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_active_endpoint_is_forward", lambda: True)
+    monkeypatch.setattr(
+        m, "_spawn_detached_daemon", lambda: pytest.fail("never spawn over a forward")
+    )
+
+    with pytest.raises(SystemExit) as info:
+        m._service_start(direct=True)
+
+    assert info.value.code == 1
+
+
+def test_plain_start_over_an_unanswering_forward_still_returns(monkeypatch, direct_env):
+    monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_active_endpoint_is_forward", lambda: True)
+    m._service_start()
+
+
 def test_cli_routes_direct_flag(monkeypatch):
     seen = []
     monkeypatch.setattr(m, "_service_start", lambda direct=False: seen.append(direct))

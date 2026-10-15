@@ -2731,7 +2731,16 @@ function Invoke-Start {
         $label = if ($attempt -gt 1) { " (attempt $attempt/$maxAttempts)" } else { '' }
         Write-Step "Starting agent-bridge$label..."
 
-        & $LinkPython -m agent_bridge service start --direct 2>&1 | ForEach-Object { Write-Host "  $_" }
+        # The command writes to stderr when the daemon does not come up; under
+        # $ErrorActionPreference='Stop' Windows PowerShell 5.1 would turn that
+        # into a terminating error and skip the drain and remaining retries.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $LinkPython -m agent_bridge service start --direct 2>&1 | ForEach-Object { Write-Host "  $_" }
+        } finally {
+            $ErrorActionPreference = $prevEAP
+        }
 
         # Success == the port actually answers /health (not merely "a process
         # exists"). Single-shot probe per second so the loop paces at ~1s.
