@@ -349,7 +349,9 @@ The Owner usually runs headless, so it logs to
 `~/.agent-codespaces/logs/owner.log` (rotated when an Owner starts; under
 `AGENT_CODESPACES_HOME` when set): its start and stop, every relay or forward
 re-establish, and every failed cycle. Read it first when a worker's credential
-relay or a forward drops. An on-demand start waits up to 30 seconds for a live,
+relay or a forward drops. Its raw stdout and stderr, including a traceback from
+a crash before that log is set up, are appended to `logs/owner-stdio.log` in the
+same directory, which a failed on-demand start names. An on-demand start waits up to 30 seconds for a live,
 process-identity-checked beacon, including cold imports and configuration
 loading; it stops waiting early if the launched child exits without a live
 Owner. A timeout is not proof the child died: it may still finish starting.

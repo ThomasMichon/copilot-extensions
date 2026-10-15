@@ -57,6 +57,27 @@ _START_TIMEOUT = 60.0
 _POLL_INTERVAL = 1.0
 _NORMAL_PRIORITY_CLASS = 0x00000020
 
+# Filesystem overrides the engine child re-reads. It runs from the data dir,
+# not the caller's cwd, so a relative value is anchored at the caller first.
+_ENGINE_PATH_ENV = (
+    "AGENT_INDEX_CONFIG", "AGENT_INDEX_CONFIG_ROOT", "AGENT_INDEX_HOME",
+    "AGENT_INDEX_DATA_DIR", "AGENT_INDEX_STATE_DIR", "AGENT_INDEX_RUN_DIR",
+    "AGENT_INDEX_LOG_DIR", "AGENT_INDEX_CACHE_DIR", "AGENT_INDEX_ROUTING_DIR",
+    "AGENT_INDEX_BACKUP_DIR", "AGENT_INDEX_BACKUP_MOUNT_ROOT", "AGENT_INDEX_ENGINE_HOME",
+)
+
+
+def _anchor_relative_path_env(env: dict[str, str]) -> None:
+    """Make relative path overrides absolute against the caller's cwd.
+
+    A value that is absolute once ``~`` is expanded (as the readers expand it)
+    is passed through unchanged, so its documented expansion still applies.
+    """
+    for name in _ENGINE_PATH_ENV:
+        value = env.get(name)
+        if value and not os.path.isabs(os.path.expanduser(value)):
+            env[name] = os.path.abspath(value)
+
 # Child engine processes this module spawned (subprocess mode), keyed by
 # model_id. ``ensure_engine`` and ``stop_engine`` run in the same process (the
 # indexer starts an engine then stops it in its ``finally``), so an in-memory
@@ -153,6 +174,7 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     env = os.environ.copy()
     env.update(windowless_python_env(python))
     env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
+    _anchor_relative_path_env(env)
     root = Path(os.path.abspath(data_dir()))
     root.mkdir(parents=True, exist_ok=True)
     model = re.sub(r"[^A-Za-z0-9._-]", "_", str(profile.model_id)) or "engine"

@@ -181,6 +181,45 @@ def test_spawn_engine_launches_through_spawn_daemon(monkeypatch, tmp_path):
     assert captured["env"]["AGENT_INDEX_ENGINE_LOG_LEVEL"] == "warning"
 
 
+@pytest.mark.parametrize("override", ["AGENT_INDEX_CONFIG", "AGENT_INDEX_CONFIG_ROOT"])
+def test_spawned_engine_reads_a_caller_relative_config(monkeypatch, tmp_path, override):
+    """The engine runs from the data dir, but a caller-relative config override
+    must still select the device its reader finds from the caller's cwd."""
+    import subprocess
+
+    caller = tmp_path / "caller"
+    (caller / "cfg").mkdir(parents=True)
+    (caller / "cfg" / "config.yaml").write_text("device: cpu\n", encoding="utf-8")
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("AGENT_INDEX_CONFIG", raising=False)
+    monkeypatch.delenv("AGENT_INDEX_CONFIG_ROOT", raising=False)
+    monkeypatch.setenv(override, "cfg/config.yaml" if override == "AGENT_INDEX_CONFIG" else "cfg")
+    captured: dict = {}
+    monkeypatch.setattr(
+        lifecycle, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or object()
+    )
+
+    lifecycle._spawn_engine(_profile())
+
+    assert captured["cwd"] == tmp_path / "data"
+    # Run the engine's own reader with the child's environment and cwd.
+    child = subprocess.run(
+        [sys.executable, "-c", "from agent_index.config import machine_device; print(machine_device())"],
+        cwd=captured["cwd"], env=captured["env"], capture_output=True, text=True, timeout=60,
+    )
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "cpu"
+
+
+def test_home_relative_path_overrides_keep_their_expansion(monkeypatch, tmp_path):
+    env = {"AGENT_INDEX_CONFIG": "~/cfg/config.yaml", "AGENT_INDEX_HOME": "state"}
+    monkeypatch.chdir(tmp_path)
+    lifecycle._anchor_relative_path_env(env)
+    assert env["AGENT_INDEX_CONFIG"] == "~/cfg/config.yaml"
+    assert env["AGENT_INDEX_HOME"] == str(tmp_path / "state")
+
+
 def test_systemd_without_unit_raises():
     with pytest.raises(EngineUnavailableError, match="systemd"):
         lifecycle.ensure_engine(_profile(engine_mode="systemd", systemd_unit=None),
