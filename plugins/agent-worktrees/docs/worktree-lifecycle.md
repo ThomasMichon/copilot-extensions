@@ -491,6 +491,12 @@ disposition), recover it via
 [`references/pr-workflow.md` § Recovering a PR after teardown](../skills/worktree/references/pr-workflow.md).
 When in doubt, just `create` a fresh worktree and continue there.
 
+Historical WSL claim-bundle actors may retain native-host labels. Local
+offer/accept routing requires each complete qualified reference to resolve under
+its receiving project's record, platform and namespace authority; host-label
+similarity alone never authorizes a transfer. Stored bundle/claim references and
+machine/platform fields are preserved while the accepted ownership changes.
+
 ## 5. What's cleanable, and what's never reaped
 
 "Can this worktree be removed?" is **not** the same question as its tracking

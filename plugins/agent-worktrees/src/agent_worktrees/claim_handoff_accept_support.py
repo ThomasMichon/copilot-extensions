@@ -6,15 +6,16 @@ import base64
 import shlex
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 import yaml
 
-from . import claimant, tracking
+from . import claimant, legacy_wsl_record_locality, tracking
 from . import config as cfg
 from .execution_spaces import (
     ExecutionSpaceError, registry_for_config, require_owner_identity,
-    require_project_record_mutation,
+    project_record_config, require_record_mutation,
 )
 from .lease_config import load_lease_settings
 from .lease_store import GitLeaseStore, LeaseConflict, LeaseLost, LeaseSnapshot
@@ -35,12 +36,82 @@ def same_machine(a: str, b: str, *, project: str | None = None) -> bool:
     return require_owner_identity(a, config) and require_owner_identity(b, config)
 
 
-def require_handoff_record(record, error_type: type[Exception]) -> None:
+def require_handoff_record(record: tracking.WorktreeRecord, error_type: type[Exception]) -> None:
     """Fence the freshly loaded source, consumer, or child before mutation."""
     try:
-        require_project_record_mutation(record)
+        config = project_record_config(record)
+        require_record_mutation(record, config)
+        expected_record = cfg.project_dir(record.repo) / "worktrees" / f"{record.worktree_id}.yaml"
+        if record.yaml_path != expected_record or record.yaml_path.is_symlink():
+            raise ExecutionSpaceError("handoff record does not match its receiving project's record path")
+        if cfg.detect_platform() == "wsl" and config.machine.casefold().endswith("-wsl"):
+            ref = tracking.parse_claim_ref(
+                tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+            )
+            if record.machine != config.machine:
+                if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config) is None:
+                    raise ExecutionSpaceError("handoff record has no verified local legacy WSL authority")
+            else:
+                checkout = Path(record.worktree_path)
+                namespace = Path(config.repos[record.repo].worktree_root).expanduser()
+                if (
+                    record.platform != "wsl" or not namespace.is_absolute()
+                    or not checkout.is_absolute() or checkout.is_symlink()
+                    or checkout != namespace / record.worktree_id
+                    or checkout.resolve() != namespace.resolve() / record.worktree_id
+                ):
+                    raise ExecutionSpaceError("handoff record has unproven WSL platform or namespace")
     except ExecutionSpaceError as exc:
         raise error_type(str(exc)) from exc
+
+
+def local_record_ref(ref: tracking.ClaimRef, *, machine: str) -> bool:
+    """Resolve a complete actor under its own receiving project's authority."""
+    if not ref.is_qualified:
+        return False
+    try:
+        config = cfg.load_project_config(ref.project, include_control_plane_related_pr=False)
+        if not require_owner_identity(machine, config):
+            return False
+        legacy = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config)
+        if legacy is None and not require_owner_identity(ref.machine, config):
+            return False
+        path = legacy or cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
+        if not path.is_file() or path.is_symlink():
+            return False
+        record = load_handoff_record(path, role="actor", error_type=ExecutionSpaceError)
+        if record.worktree_id != ref.worktree_id or record.repo != ref.project:
+            return False
+        return True
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+        raise ExecutionSpaceError(f"cannot establish handoff record authority: {exc}") from exc
+
+
+def same_local_records(
+    left: tracking.ClaimRef, right: tracking.ClaimRef, *, machine: str | None = None,
+) -> bool:
+    if machine is None:
+        machine = cfg.load_project_config(
+            right.project, include_control_plane_related_pr=False,
+        ).machine
+    return local_record_ref(right, machine=machine) and local_record_ref(left, machine=machine)
+
+
+def accept_child_path(
+    snapshot: dict[str, str], *, consumer: tracking.ClaimRef, error_type: type[Exception],
+) -> Path:
+    parsed = tracking.parse_claim_ref(snapshot["ref"])
+    if parsed is None or not parsed.is_qualified:
+        raise error_type(
+            "worktree claim ref must be qualified "
+            f"machine/project/worktree_id (got {snapshot['ref']!r})"
+        )
+    if not same_local_records(parsed, consumer):
+        raise error_type(
+            f"worktree claim {snapshot['ref']} targets machine {parsed.machine}, "
+            f"but bundle consumer lives on {consumer.machine}"
+        )
+    return cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml"
 
 
 def load_handoff_record(path, *, role: str, error_type: type[Exception]):
@@ -69,14 +140,14 @@ def require_handoff_consumer(bundle, machine: str, error_type: type[Exception]) 
         config = cfg.load_project_config(
             consumer.project, include_control_plane_related_pr=False,
         )
-        if not require_owner_identity(consumer.machine, config) or not require_owner_identity(machine, config):
-            raise error_type("claim bundle consumer is not the current registered execution space")
         if (
             any(entry.execution_platform for entry in registry_for_config(config).values())
-            and source.machine != consumer.machine
+            and not same_local_records(source, consumer, machine=machine)
             and any(claim["kind"] == "worktree" for claim in bundle.claims)
         ):
             raise error_type("cross-space owned worktree handoff remains unsupported; source claims are retained")
+        if not local_record_ref(consumer, machine=machine):
+            raise error_type("claim bundle consumer is not the current registered execution space")
     except (OSError, ValueError, ExecutionSpaceError) as exc:
         raise error_type(f"cannot establish claim-bundle consumer authority: {exc}") from exc
 

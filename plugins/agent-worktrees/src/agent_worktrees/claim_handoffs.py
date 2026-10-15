@@ -28,6 +28,9 @@ from .claim_handoff_accept_support import (
     remote_accept_source,
     require_handoff_record,
     require_handoff_consumer,
+    local_record_ref,
+    same_local_records,
+    accept_child_path,
     same_machine as _same_machine,
 )
 from .lease_config import load_lease_settings
@@ -211,7 +214,7 @@ def _record_path(ref: tracking.ClaimRef) -> Path:
 def _load_actor_record(
     ref: tracking.ClaimRef, *, role: str, machine: str
 ) -> tuple[Path, tracking.WorktreeRecord]:
-    if ref.machine != machine and not legacy_wsl_record_locality.legacy_wsl_owner_ref_is_local(ref):
+    if not local_record_ref(ref, machine=machine):
         raise ClaimHandoffError(
             f"{role} {ref.canonical()} is cross-machine; Phase 1 supports "
             "same-machine handoff only"
@@ -226,7 +229,7 @@ def _load_actor_record(
             f"cannot read {role} worktree record {path}: {exc}"
         ) from exc
     require_handoff_record(record, ClaimHandoffError)
-    if record.worktree_id != ref.worktree_id:
+    if record.worktree_id != ref.worktree_id or record.repo != ref.project:
         raise ClaimHandoffError(f"{role} worktree record identity mismatch: {path}")
     # ``finalized`` is deliberately not blocked: finalize is a non-terminal
     # safe-to-prune assertion, not a frozen end state -- a finalized worktree
@@ -295,18 +298,7 @@ def _claim_matches(
 def _accept_child_path(
     snapshot: dict[str, str], *, bundle_consumer: tracking.ClaimRef
 ) -> Path:
-    parsed = tracking.parse_claim_ref(snapshot["ref"])
-    if parsed is None or not parsed.is_qualified:
-        raise ClaimHandoffError(
-            "worktree claim ref must be qualified "
-            f"machine/project/worktree_id (got {snapshot['ref']!r})"
-        )
-    if parsed.machine != bundle_consumer.machine:
-        raise ClaimHandoffError(
-            f"worktree claim {snapshot['ref']} targets machine {parsed.machine}, "
-            f"but bundle consumer lives on {bundle_consumer.machine}"
-        )
-    return _record_path(parsed)
+    return accept_child_path(snapshot, consumer=bundle_consumer, error_type=ClaimHandoffError)
 
 
 def _validate_supported_claims(bundle: ClaimBundle) -> None:
@@ -405,7 +397,7 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
 
 def _finish_accept_consumer_side(bundle: ClaimBundle, *, machine: str) -> ClaimBundle:
     consumer_ref = _qualified_ref(bundle.consumer, "bundle consumer")
-    if consumer_ref.machine != machine and not legacy_wsl_record_locality.legacy_wsl_owner_ref_is_local(consumer_ref):
+    if not local_record_ref(consumer_ref, machine=machine):
         raise ClaimHandoffError(
             f"consumer worktree {bundle.consumer} is on {consumer_ref.machine}, "
             f"not local machine {machine}"
@@ -442,7 +434,10 @@ def _finish_accept_consumer_side(bundle: ClaimBundle, *, machine: str) -> ClaimB
                         _accept_child_path(snapshot, bundle_consumer=consumer_ref)
                     )
                     owner_ref = child_records[child_path].owner_ref or ""
-                    if owner_ref not in {bundle.source, bundle.consumer}:
+                    if not owner_ref or not any(
+                        _same_worktree(owner_ref, candidate)
+                        for candidate in (bundle.source, bundle.consumer)
+                    ):
                         raise ClaimHandoffError(
                             f"child worktree {snapshot['ref']} is owned by "
                             f"{owner_ref or 'nobody'}, "
@@ -713,7 +708,7 @@ def accept(
         if any("producer" in claim for claim in bundle.claims):
             from .producer_handoff import accept_producers
             return accept_producers(bundle_id, actor=actor)
-        if _same_machine(source_ref.machine, consumer_ref.machine, project=consumer_ref.project):
+        if same_local_records(source_ref, consumer_ref, machine=machine):
             if bundle.state != "accepted":
                 bundle = accept_source(bundle_id, actor=actor)
             return _finish_accept_consumer_side(bundle, machine=machine)
@@ -731,7 +726,7 @@ def accept(
                     error_type=ClaimHandoffError)
             source_ref = _qualified_ref(bundle.source, "bundle source")
             if bundle.state != "accepted":
-                if _same_machine(source_ref.machine, machine, project=consumer_ref.project):
+                if local_record_ref(source_ref, machine=machine):
                     bundle = accept_source(bundle_id, actor=actor)
                 else:
                     bundle = remote_accept_source(
