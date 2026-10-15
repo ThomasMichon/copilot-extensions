@@ -18,6 +18,7 @@ from materialized_candidate_inventory import (  # noqa: E402
     matrix as inventory_matrix,
     python_suites,
     regular as _regular,
+    standalone_roster,
 )
 
 STATE = Path(".github") / "release-pipeline-state.json"
@@ -101,7 +102,7 @@ def matrix(root: Path, dev_root: Path, dev: str) -> dict[str, list[dict[str, str
         or _git(dev_root, "status", "--porcelain", "--untracked-files=no")
     ):
         raise CandidateValidationError("development inventory is not the validated immutable input")
-    return inventory_matrix(root, python_suites(dev_root))
+    return inventory_matrix(root, python_suites(dev_root), standalone_roster(dev_root))
 
 
 def recipes(root: Path, component: str) -> list[tuple[list[str], Path]]:
@@ -125,8 +126,17 @@ def recipes(root: Path, component: str) -> list[tuple[list[str], Path]]:
         ]
         if component == "dispatch":
             argv += ["--timeout", "180"]
-        else:
+        elif component == "index":
             argv += ["--smoke"]
+        else:
+            argv += ["--timeout", "300" if os.name == "nt" else "120"]
+            return [
+                ([sys.executable, str(_regular(root, Path("tools/seasoned_uv.py"))),
+                  "--uv", "uv", "--", "--system", "pytest"], root),
+                ([sys.executable, "-m", "pytest", "-q",
+                  str(_regular(root, Path("tools/test_fleet_ci_scope.py")))], root),
+                (argv, root),
+            ]
         return [(argv, root)]
     if component == "manager":
         _regular(root, Path("worktree-manager") / "pyproject.toml")
@@ -145,13 +155,16 @@ def run(
     if not any(row["component"] == component for row in expected):
         raise CandidateValidationError("requested consumer is absent from the candidate inventory")
     commands = recipes(root, component)
+    env = _environment()
+    if component == "fleet-manager":
+        env["PYTEST_ADDOPTS"] = '-m "not client_distribution_full and not observation_retention_full"'
     if not commands:
         raise CandidateValidationError("required candidate consumer has no executable recipe")
     for argv, directory in commands:
         try:
             minutes = next(row["minutes"] for row in expected if row["component"] == component)
             result = subprocess.run(
-                argv, cwd=directory, check=False, timeout=int(minutes) * 60,
+                argv, cwd=directory, check=False, timeout=int(minutes) * 60, env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
         except (OSError, subprocess.TimeoutExpired) as error:

@@ -71,9 +71,12 @@ the actual generated tree, rejecting missing or empty suites against a third
 credential-free checkout of the pinned, validated development input.
 `materialized-candidate-consumers` executes the
 existing plugin recipes (collection plus guards for Worktrees), Manager and
-standalone Dispatch/Index on a statically routed Linux host.
-`materialized-candidate-windows` retains Index's distinct statically routed
-native Windows lane; no matrix input can select a runner label.
+standalone Dispatch/Index/Fleet on a statically routed Linux host.
+`materialized-candidate-windows` retains Index and Fleet's statically routed
+native Windows lanes; no matrix input can select a runner label. The supported
+recipes must cover the validated development input's canonical standalone
+roster. Fleet retains its existing bounded timeouts and exhaustive-test
+exclusions rather than silently expanding ordinary promotion coverage.
 
 Each consumer gets a fresh public-hosted runner, `contents: read`, no release
 environment or API/release authority, and credential-free checkouts of both

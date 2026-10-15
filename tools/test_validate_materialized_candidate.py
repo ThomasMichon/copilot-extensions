@@ -50,8 +50,23 @@ def subject(tmp_path, monkeypatch):
         ),
         "tools/fixture_sibling.py": 'LABEL = "supported recipe"\n',
         "tools/run-standalone-tests.py": "print('fixture standalone executed')\n",
+        "tools/standalone_consumers.py": (
+            "STANDALONE_CONSUMERS = "
+            "('worktree-manager', 'services/index', 'fleet-manager', 'services/dispatch')\n"
+        ),
+        "tools/seasoned_uv.py": "print('fixture preparation executed')\n",
+        "tools/test_fleet_ci_scope.py": (
+            "import os\nfrom pathlib import Path\n"
+            "def test_fleet_scope():\n"
+            " value = os.environ['PYTEST_ADDOPTS']\n"
+            " assert value == '-m \"not client_distribution_full and not observation_retention_full\"'\n"
+            " Path('fleet-exclusions.txt').write_text(value)\n"
+        ),
         "services/dispatch/pyproject.toml": '[project]\nname="fixture-dispatch"\n',
         "services/index/pyproject.toml": '[project]\nname="fixture-index"\n',
+        "fleet-manager/pyproject.toml": '[project]\nname="fixture-fleet"\n',
+        "fleet-manager/setup.py": "# fixture build entry\n",
+        "fleet-manager/README.md": "Fixture Fleet consumer\n",
         "worktree-manager/pyproject.toml": '[project]\nname="fixture-manager"\n',
     }
     for name, contents in files.items():
@@ -188,6 +203,7 @@ def test_complete_matrix_and_exact_existing_recipes(subject):
         ("plugin:agent-bridge", "ubuntu-latest"),
         ("manager", "ubuntu-latest"), ("dispatch", "ubuntu-latest"),
         ("index", "ubuntu-latest"), ("index", "windows-latest"),
+        ("fleet-manager", "ubuntu-latest"), ("fleet-manager", "windows-latest"),
     }
     commands = candidate.recipes(root, "plugin:agent-worktrees")
     assert [command[-1] for command, _ in commands] == ["--collect-only", "--guards"]
@@ -202,6 +218,13 @@ def test_complete_matrix_and_exact_existing_recipes(subject):
     ]
     assert directory == root
     assert candidate.recipes(root, "index")[0][0][-1] == "--smoke"
+    fleet = candidate.recipes(root, "fleet-manager")
+    assert fleet[0][0][2:] == ["--uv", "uv", "--", "--system", "pytest"]
+    assert fleet[1][0][1:4] == ["-m", "pytest", "-q"]
+    assert fleet[2][0][2:] == [
+        "fleet-manager", "--prepare", "--admission-wait", "60",
+        "--timeout", "300" if os.name == "nt" else "120",
+    ]
 
 
 def test_missing_inventory_or_unknown_consumer_cannot_silently_skip(subject):
@@ -275,6 +298,33 @@ def test_windows_standalone_recipe_uses_canonical_component_id(subject, monkeypa
     assert argv[2] == "services/index"
 
 
+def test_omitted_canonical_standalone_consumer_cannot_authorize_inventory(subject, monkeypatch):
+    monkeypatch.delitem(candidate.STANDALONE, "fleet-manager")
+    with pytest.raises(candidate.CandidateValidationError, match="canonical roster"):
+        candidate.matrix(subject[0], subject[0].parent / "validated-dev", subject[2])
+
+
+@pytest.mark.parametrize("relative", [
+    "fleet-manager/pyproject.toml", "fleet-manager/setup.py",
+    "fleet-manager/README.md", "tools/test_fleet_ci_scope.py",
+])
+def test_missing_required_fleet_consumer_files_refuse(subject, relative):
+    root, _, dev, _ = subject
+    root.joinpath(*relative.split("/")).unlink()
+    with pytest.raises(candidate.CandidateValidationError, match="absent"):
+        candidate.matrix(root, root.parent / "validated-dev", dev)
+
+
+def test_real_fleet_recipe_preserves_existing_bounded_exclusions(subject):
+    root, head, dev, main = subject
+    assert candidate.run(
+        root, head, dev, main, "fleet-manager", dev_root=root.parent / "validated-dev",
+    )["outcome"] == "success"
+    assert (root / "fleet-exclusions.txt").read_text() == (
+        '-m "not client_distribution_full and not observation_retention_full"'
+    )
+
+
 def test_isolated_trusted_cli_loads_inventory_and_executes_actual_consumer(subject):
     root, head, dev, main = subject
     result = subprocess.run(
@@ -331,7 +381,10 @@ def test_pipeline_requires_successful_exact_candidate_jobs_and_preserves_old_gat
     assert jobs["materialized-candidate-plan"]["runs-on"] == "ubuntu-latest"
     assert jobs["materialized-candidate-consumers"]["runs-on"] == "ubuntu-latest"
     assert jobs["materialized-candidate-windows"]["runs-on"] == "windows-latest"
-    assert "--component index" in jobs["materialized-candidate-windows"]["steps"][-1]["run"]
+    assert jobs["materialized-candidate-windows"]["strategy"]["matrix"]["component"] == [
+        "index", "fleet-manager",
+    ]
+    assert jobs["materialized-candidate-windows"]["strategy"]["fail-fast"] is False
     assert jobs["materialized-candidate-consumers"]["strategy"]["fail-fast"] is False
     assert "needs.materialized-candidate-plan.result == 'success'" in (
         jobs["materialized-candidate-consumers"]["if"]

@@ -1318,13 +1318,17 @@ jobs:
             --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component "$COMPONENT"
 
   materialized-candidate-windows:
-    name: Materialized consumer (index, windows-latest)
+    name: Materialized consumer (${{ matrix.component }}, windows-latest)
     needs: [gate, promote, materialized-candidate-plan]
     if: >-
       needs.promote.outputs.pr_number != '' &&
       needs.materialized-candidate-plan.result == 'success'
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [index, fleet-manager]
     permissions:
       contents: read
     steps:
@@ -1348,16 +1352,17 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Execute native Windows Index consumer and recheck immutable inputs
+      - name: Execute native Windows consumer and recheck immutable inputs
         shell: bash
         env:
           CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
+          COMPONENT: ${{ matrix.component }}
         run: |
           python -I -B trusted/tools/validate_materialized_candidate.py \
             --root candidate --candidate-sha "$CANDIDATE_SHA" \
-            --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component index
+            --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component "$COMPONENT"
 
   merge-promotion:
     name: Merge the exact ready candidate without administrator authority
