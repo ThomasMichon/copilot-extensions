@@ -138,7 +138,7 @@ than only to declared minima. The operator confirmed this effort's slug.
 - [x] Exercise the real resolver against a controlled index with old, new and
   missing-timestamp artifacts, including a transitive and isolated build
   dependency. Exercise npm's actual admission path with controlled metadata.
-- [ ] Run native contained Windows and POSIX installer failures after partial
+- [x] Run native contained Windows and POSIX installer failures after partial
   dependency writes; prove nonzero exit, no completed/reusable failed slot,
   unchanged prior runtime/selectors and no service cutover.
 - [x] Prove same-version retry succeeds from a clean candidate and that failure,
@@ -148,7 +148,7 @@ than only to declared minima. The operator confirmed this effort's slug.
   a live retained healthy runtime. Record clean-room evidence or an explicit
   unavailable-lane reason; do not substitute mocked helpers for real lifecycle
   boundaries.
-- [ ] Run targeted tests, touched-code lint, install-contract/fan-out guards and
+- [x] Run targeted tests, touched-code lint, install-contract/fan-out guards and
   required CI. Keep the required lane focused and put exhaustive matrices in
   the existing full portfolio.
 - [ ] Audit declared minima and prove actual installation through the configured
@@ -763,3 +763,23 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   dependency and lock cases passed with eight platform skips; installer
   contracts, touched Python lint and PowerShell parsing passed. Fresh-head
   publication gates remain required; no installed payload was patched.
+- #6598 merged as `09e7ad1f3fb0ad0162e10a3ab3c7936ccf06d641`
+  after genuine current-head Copilot review reported zero open findings and
+  every required current-head job succeeded. Native Linux, Windows and stock
+  macOS evidence includes selected dependency failure, retained/completed-slot
+  preservation, staging/bootstrap, source admission and bounded candidate
+  readiness. Post-merge CI run `38696190890` owns the next release gate.
+  Exact promotion verification and authorized configured-feed rollout remain
+  open; this implementation merge does not conclude the effort.
+- Release run `38698686535` passed all full plugin suites and artifact
+  attestation but correctly refused promotion without the SSH coverage baseline
+  (#6824). Its instrumented first-use cases exposed a real retained-settings
+  comparison error: package-specific reinstalls remained in the admitted
+  projection, while the mandatory full reinstall subsumed them in execution.
+  A native UV-only reproducer confirmed the mismatch without installing any
+  package. The comparison now treats that package refresh as subsumed by full
+  reinstall while preserving every resolver option, cutoff and retained-input
+  check. All 151 policy cases passed, including actual UV settings for single
+  and repeated package-refresh options and the mandatory full reinstall.
+  The fix is synchronized across all thirteen runtime payloads; it still owes
+  its own review/CI and a successful native instrumented release run.

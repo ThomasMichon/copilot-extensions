@@ -109,6 +109,14 @@ def resolver_configuration(projection, remapper=None, *, balanced, error_type):
                 opening = body[start]
                 _, end = balanced(body, start, opening, {"(": ")", "{": "}", "[": "]"}[opening])
                 body = body[:start] + remapper(body[start:end]) + body[end:]
+    # Execution always reinstalls the full closure, which also subsumes an
+    # admitted package-specific refresh. Neither changes dependency resolution.
+    reinstall = re.search(r"(?m)^\s*reinstall: Packages\(", body)
+    if reinstall:
+        _, end = balanced(body, reinstall.end() - 1, "(", ")")
+        if body[end:end + 1] == ",":
+            end += 1
+        body = body[:reinstall.start()] + body[end:]
     body = re.sub(r"(?m)^\s*reinstall: (?:None|All),", "", body)
     # Discovery provenance changes to explicit-file provenance; index identity,
     # order, authentication and every resolver option must remain identical.

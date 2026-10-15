@@ -634,6 +634,33 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
         assert imported.stdout.strip() == value
 
 
+@pytest.mark.parametrize("packages", [["pyyaml"], ["pyyaml", "packaging"]])
+def test_native_retained_configuration_preserves_package_specific_reinstall(tmp_path, monkeypatch, packages):
+    import subprocess
+
+    environment = offline_environment(tmp_path)
+    actual = subprocess.run
+    installs = []
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            return actual(command, **kwargs)
+        installs.append(command)
+        assert command.count("--reinstall") == 1
+        assert command[command.index("--exclude-newer") + 1] == "2026-10-06T00:00:00Z"
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    requested = [item for package in packages for item in ("--reinstall-package", package)]
+    result = policy.run_uv_install(
+        shutil.which("uv"), ["--python", sys.executable, *requested, "pyyaml"],
+        env=environment, cwd=tmp_path, now=NOW,
+    )
+    assert result.returncode == 0
+    assert len(installs) == 1
+    assert all(package in installs[0] for package in packages)
+
+
 def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_path, monkeypatch):
     import os
     import subprocess
