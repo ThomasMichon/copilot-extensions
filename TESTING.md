@@ -988,6 +988,11 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   **Picker** UX, golden, cache, pivot, streaming, steering, profile, SSH-source,
   selection, capture, mock, and PNG-validation corpus under
   `worktree-manager/tests/production_picker/`.
+  The real-child feed deadline regressions separate process/SSH startup from
+  admitted snapshot/update transactions, retain stale rows across transport
+  expiry, reconnect to a complete replacement generation, and verify child
+  cleanup on cancellation. Explicit terminal peer refusals retain their
+  existing no-respawn coverage.
   The configuration-action contracts exercise native forms, Cancel-default
   confirmation, safe argv substitution and visible command failures. For the
   real Workers-to-override acceptance lane, prepare agent-dispatch's test venv

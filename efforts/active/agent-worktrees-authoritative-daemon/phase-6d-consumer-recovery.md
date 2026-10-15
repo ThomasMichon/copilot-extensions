@@ -32,14 +32,14 @@ client fix repairs every resident failure or explains every platform.
 
 The following decomposition is agent-recommended.
 
-- [ ] Separate the existing bounded source-startup budget from snapshot/update
+- [x] Separate the existing bounded source-startup budget from snapshot/update
       transaction and heartbeat deadlines. Include process and SSH startup
       in the source budget; do not weaken atomic protocol admission.
-- [ ] Retry transient transport expiry through the existing cancellable
+- [x] Retry transient transport expiry through the existing cancellable
       reconnect/backoff owner, retaining visible failure or stale last-good
       state. Preserve terminal malformed, authentication and incompatible
       peer failures; do not introduce caller computation or polling fallback.
-- [ ] Add real child-process regressions for delayed initial publication,
+- [x] Add real child-process regressions for delayed initial publication,
       startup timeout followed by recovery, interrupted publication, missed
       heartbeat followed by recovery, and cancellation cleanup.
 - [ ] Update the consumer contract and add a Manager changefile, then drive
@@ -50,15 +50,15 @@ The following decomposition is agent-recommended.
 
 ## Validation plan
 
-- [ ] Demonstrate the delayed-start and transient-expiry regressions fail
+- [x] Demonstrate the delayed-start and transient-expiry regressions fail
       against the old loader and pass with the fix, with measured budget
       boundaries and unchanged atomic snapshot/update shapes.
-- [ ] Run the contained Manager feed/current-roster/SSH-loader selection,
+- [x] Run the contained Manager feed/current-roster/SSH-loader selection,
       touched Python lint, and applicable repository guards.
 - [ ] Exercise the real Windows Picker with the changed source against the
       selected installed engine, then repeat with the promoted installed
       Manager. Record source/runtime identity and actual rendered rows.
-- [ ] Confirm client cancellation reaps its own child and reconnect work.
+- [x] Confirm client cancellation reaps its own child and reconnect work.
       No test or probe may stop a shared resident or alter user settings.
 - [ ] Account explicitly for Linux/macOS native coverage and any unavailable
       live platform. This client repair does not certify untested resident

@@ -107,6 +107,15 @@ rows until the replacement generation completes. Unsupported authority is an
 actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
 selects current one-shot reads, not a direct computation fallback.
 
+Held-feed startup uses the source's existing bounded process/SSH budget
+(20 seconds by default). Once an initial snapshot or update starts, the
+two-second atomic-publication deadline applies; committed feeds retain the
+five-second heartbeat deadline. A transient transport watchdog expiry
+reconnects through the existing cancellable backoff, showing failure or stale
+last-good rows until a complete replacement arrives. Explicit peer timeout,
+authentication, malformed-protocol and incompatible-capability refusals remain
+terminal; none authorizes a polling fallback or a daemon restart.
+
 Sessionless workspaces retained by another controller appear separately under
 **Owned**, not as ordinary resumable conversations. Use **Go to controller**
 when its exact target is loaded, or **Refresh** / **View details** to diagnose

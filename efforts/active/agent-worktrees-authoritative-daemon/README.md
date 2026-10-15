@@ -949,8 +949,8 @@ than hypothetical:
 The [consumer recovery plan](phase-6d-consumer-recovery.md) addresses #6832
 within the already-requested Phase 6d.3 real-consumer acceptance.
 
-- [ ] Review the bounded client startup/reconnect plan before implementation.
-- [ ] Repair the client deadline/recovery policy and add real-process regressions.
+- [x] Review the bounded client startup/reconnect plan before implementation.
+- [x] Repair the client deadline/recovery policy and add real-process regressions.
 - [ ] Verify promoted, installed default streaming through the real Picker;
       remove the temporary opt-out only after that proof.
 - [ ] Journal the result and return the remaining parent acceptance to #3761;
@@ -1000,6 +1000,26 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-15 - Phase 6d.3a plan reviewed; client repair acceptance in progress
+
+Plan #6834 merged as `d959de8511ccba374af02e2e804d4b52cc113ecd` after
+current-head Copilot approval with zero findings and successful required CI.
+The bounded #6832 repair uses the existing source-startup budget, starts the
+unchanged transaction deadline only on admitted publication barriers, and
+retries transport watchdog expiry through the existing cancellable backoff.
+Explicit terminal peer errors remain terminal; no polling authority is added.
+
+Five real-child regressions failed against the old loader; the corrected
+consumer selection passes 162 tests with one platform skip, including a
+separate incomplete-initial-publication guard. Touched Python lint and the
+installation-contract guard pass. A native Windows production-Picker probe
+against the selected installed engine admitted current rows under a held
+feed with no local source error. The candidate Manager source was explicitly
+identified; this is source-consumer evidence, not promoted installed acceptance.
+Implementation review, normal promotion and authorized installed acceptance
+remain open in the [bounded recovery plan](phase-6d-consumer-recovery.md).
+The remaining parent phases, resident reports and other pivots are unchanged.
 
 ### 2026-10-14 - Phase 6d promoted; signed publication and consumer acceptance next
 
