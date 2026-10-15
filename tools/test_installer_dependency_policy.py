@@ -546,12 +546,14 @@ def test_native_install_never_reopens_admitted_mutable_inputs(tmp_path, monkeypa
     )
 
 
-@pytest.mark.parametrize("selection", ["explicit", "implicit", "env-relative", "project-env", "directory"])
+@pytest.mark.parametrize("selection", [
+    "explicit", "implicit", "env-relative", "project-env", "directory", "resource-parent",
+])
 def test_native_editable_retains_metadata_but_imports_live_source_after_cleanup(tmp_path, monkeypatch, selection):
     import os
     import subprocess
 
-    source = tmp_path / "source"
+    source = tmp_path / "resources" / "source" if selection == "resource-parent" else tmp_path / "source"
     backend = source / "backend" / "setuptools"
     backend.mkdir(parents=True)
     (backend / "__init__.py").write_text("", encoding="utf-8")
@@ -617,9 +619,18 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
         return actual(command, **kwargs)
 
     monkeypatch.setattr(policy.subprocess, "run", run)
+    copytree = policy.shutil.copytree
+
+    def copy_outside(source, destination, *args, **kwargs):
+        assert not Path(destination).resolve().is_relative_to(Path(source).resolve())
+        return copytree(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(policy.shutil, "copytree", copy_outside)
     installed = policy.run_uv_install(
         uv, arguments,
-        env=environment, cwd=cwd, trusted_source_roots=(source,),
+        env=environment, cwd=cwd,
+        trusted_source_roots=(source.parent,) if selection == "resource-parent" else (source,),
+        retained_resource_roots=(source.parent,) if selection == "resource-parent" else (),
         capture_output=True, text=True, timeout=30,
     )
     assert installed.returncode == 0, installed.stderr
@@ -759,6 +770,40 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
     )
     assert built.returncode == 0, built.stdout + built.stderr
     assert len(retained) == 1 and not retained[0].exists()
+
+
+def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypatch):
+    source = source_project(tmp_path / "source")
+    temporary_directory = policy.tempfile.TemporaryDirectory
+    monkeypatch.setattr(
+        policy.tempfile, "TemporaryDirectory",
+        lambda **kwargs: temporary_directory(prefix=kwargs["prefix"], dir=source),
+    )
+    monkeypatch.setattr(
+        policy.subprocess, "run", lambda command, **kwargs: CompletedProcess(command, 0, settings(), ""),
+    )
+    with pytest.raises(policy.DependencyPolicyError, match="outside copied inputs"):
+        policy.run_uv_install(
+            "uv", ["--no-config", str(source)], env=offline_environment(tmp_path),
+            cwd=tmp_path, trusted_source_roots=(source,),
+        )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows editable snapshot placement")
+def test_windows_volume_root_input_has_no_outside_retention_location(tmp_path, monkeypatch):
+    anchor = Path(tmp_path.anchor)
+    source = anchor / "fixture"
+    monkeypatch.setattr(
+        policy, "_source_inputs", lambda *args: (tmp_path, {anchor, source}, set(), {source}),
+    )
+
+    def prepare(*args, _projection, **kwargs):
+        _projection.append(settings())
+        return []
+
+    monkeypatch.setattr(policy, "prepare_uv_install", prepare)
+    with pytest.raises(policy.DependencyPolicyError, match="outside copied inputs"):
+        policy.run_uv_install("uv", [], env=offline_environment(tmp_path), cwd=tmp_path)
 
 
 @pytest.mark.parametrize("field,value", [
