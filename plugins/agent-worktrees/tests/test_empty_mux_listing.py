@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -123,6 +124,8 @@ def test_successful_session_data_is_still_parsed(monkeypatch: pytest.MonkeyPatch
 
 
 def test_real_missing_socket_probe_does_not_start_a_server(tmp_path: Path) -> None:
+    if sys.platform == "win32":
+        pytest.skip("Unix socket probe requires POSIX tmux, not a Windows compatibility shim")
     binary = shutil.which("tmux")
     if binary is None:
         pytest.skip("native tmux is unavailable")
