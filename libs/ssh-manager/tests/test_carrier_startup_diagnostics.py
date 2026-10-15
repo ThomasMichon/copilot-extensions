@@ -18,6 +18,7 @@ from ssh_manager.carrier import (
     hello_envelope,
 )
 from ssh_manager.process import terminate_ssh_process_tree
+from ssh_manager.carrier_lifecycle import _drain_startup_stderr
 
 
 class _Input:
@@ -265,6 +266,60 @@ async def test_native_close_drains_stderr_before_reaping():
         await carrier.close()
     assert processes[0].returncode == 0
     assert not carrier._stderr_tasks
+
+
+@pytest.mark.asyncio
+async def test_native_descendant_held_stderr_read_transport_is_closed(tmp_path):
+    _native_console()
+    ready = tmp_path / "descendant-ready"
+    release = tmp_path / "release-descendant"
+    finished = tmp_path / "descendant-finished"
+    child = (
+        "import pathlib,time\n"
+        f"ready=pathlib.Path({str(ready)!r});release=pathlib.Path({str(release)!r})\n"
+        f"finished=pathlib.Path({str(finished)!r})\n"
+        "ready.write_text('ready')\n"
+        "deadline=time.monotonic()+10\n"
+        "while not release.exists() and time.monotonic()<deadline:time.sleep(.01)\n"
+        "finished.write_text('finished')\n"
+    )
+    parent = (
+        "import os,subprocess,sys;"
+        f"subprocess.Popen([sys.executable,'-c',{child!r}],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=sys.stderr);"
+        "os._exit(0)"
+    )
+    carrier, processes = await _native_carrier([sys.executable, "-u", "-c", parent])
+    process = await carrier._opener()
+    stderr_task = asyncio.create_task(
+        _drain_startup_stderr(process.stderr, {"reason": None})
+    )
+    carrier._stderr_tasks[id(process)] = stderr_task
+
+    async def wait_until(predicate):
+        while not predicate():
+            await asyncio.sleep(0.01)
+
+    try:
+        await asyncio.wait_for(
+            wait_until(lambda: ready.exists() and process.returncode is not None),
+            timeout=10,
+        )
+        transport = process.stderr._transport
+        assert process.returncode == 0
+        assert not transport.is_closing()
+        assert not finished.exists()
+        await asyncio.wait_for(carrier._closer(process), timeout=2)
+        assert stderr_task.done()
+        assert not carrier._stderr_tasks
+        assert transport.is_closing()
+        assert not finished.exists()
+    finally:
+        release.write_text("release")
+        await carrier._closer(process)
+        await asyncio.wait_for(wait_until(finished.exists), timeout=10)
+        await carrier.close()
+    assert processes[0].returncode == 0
 
 
 @pytest.mark.asyncio

@@ -312,12 +312,17 @@ class _CarrierLifecycleMixin:
             await self._process_closer(process)
         finally:
             stderr_task = self._stderr_tasks.pop(id(process), None)
-            if stderr_task is not None:
-                try:
-                    await asyncio.wait({stderr_task}, timeout=0.05)
-                finally:
-                    stderr_task.cancel()
-                    await asyncio.gather(stderr_task, return_exceptions=True)
+            try:
+                if stderr_task is not None:
+                    try:
+                        await asyncio.wait({stderr_task}, timeout=0.05)
+                    finally:
+                        stderr_task.cancel()
+                        await asyncio.gather(stderr_task, return_exceptions=True)
+            finally:
+                transport = getattr(getattr(process, "stderr", None), "_transport", None)
+                if transport is not None:
+                    transport.close()
 
 
     def _record_connect_failure(self, exc: BaseException) -> None:

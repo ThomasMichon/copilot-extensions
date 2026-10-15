@@ -36,6 +36,9 @@ agent-codespaces) import this library instead of spawning SSH directly.
   payloads are never included in these diagnostics. A reason is a diagnostic
   hint, not proof of the remote failure's cause. `carrier.diagnostics()` adds
   `startup_failure` after failure and clears it on successful negotiation.
+  Cleanup bounds the final stderr drain and closes its owned read transport
+  even when a descendant keeps the remote pipe open; it does not change
+  process-tree ownership.
 
 ## Usage
 
