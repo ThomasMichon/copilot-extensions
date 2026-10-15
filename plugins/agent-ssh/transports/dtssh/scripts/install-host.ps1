@@ -638,16 +638,28 @@ function Start-DetachedHostLauncher {
       SSH session's, an updater's) nor the session that ran the installer takes the
       host down when it ends -- a Start-Process child stays in that Job. conhost
       --headless keeps it windowless; it runs from $InstallDir, never the payload.
-      The WMI child gets the user's default environment, not this process's, so
-      every input is passed as an argument. Returns the new pid, or $null.
+      A WMI child would otherwise get the provider's environment, so this process's
+      complete environment (PATH, LOCALAPPDATA and any override) is passed through
+      Win32_ProcessStartup, exactly as Start-Process would inherit it.
+      Returns the new pid, or $null.
     #>
     param([Parameter(Mandatory)][string[]]$LauncherArgs)
     $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
     $pwsh = (Get-Command pwsh).Source
     $commandLine = "`"$conhost`" --headless `"$pwsh`" " + ($LauncherArgs -join ' ')
     try {
+        $environment = [string[]]@(
+            [Environment]::GetEnvironmentVariables().GetEnumerator() |
+                ForEach-Object { "$($_.Key)=$($_.Value)" }
+        )
+        $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -ErrorAction Stop `
+            -Property @{ EnvironmentVariables = $environment }
         $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -ErrorAction Stop `
-            -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $InstallDir }
+            -Arguments @{
+                CommandLine = $commandLine
+                CurrentDirectory = $InstallDir
+                ProcessStartupInformation = $startup
+            }
         if ($r.ReturnValue -eq 0 -and $r.ProcessId) { return [int]$r.ProcessId }
         Write-Warning "Win32_Process.Create returned $($r.ReturnValue) for the dtssh host launcher"
     } catch {

@@ -704,6 +704,10 @@ def _installer_problems(problems: list[str]) -> list[str]:
     "Start-Process -FilePath 'conhost.exe' -ArgumentList $a -WindowStyle Hidden | Out-Null",
     "Start-Process conhost.exe -ArgumentList $a",
     'Start-Process -FilePath "C:\\Windows\\System32\\conhost.exe" `\n    -ArgumentList $a `\n    -PassThru',
+    # named parameters in any order, positional after a named one, a variable
+    "Start-Process -WindowStyle Hidden -FilePath 'conhost.exe' -ArgumentList $a",
+    "Start-Process -WindowStyle Hidden conhost -ArgumentList $a",
+    "$p = Start-Process -ArgumentList $a -FilePath $conhost -PassThru",
 ])
 def test_installer_conhost_start_process_is_reported(repo, rel, statement):
     _write_installer(repo, rel, "function Start-It {\n    " + statement + "\n}\n")
@@ -725,8 +729,12 @@ def test_installer_conhost_start_process_is_reported(repo, rel, statement):
     # a comment or generated here-string text is not a statement
     "# Start-Process -FilePath 'conhost.exe'\n",
     "$inner = @\"\nStart-Process -FilePath 'conhost.exe'\n\"@\n",
+    "<#\n  a Start-Process child of conhost stays in the Job\n#>\nfunction F { }\n",
+    "<# Start-Process conhost.exe #>\n",
     # another program
     "Start-Process -FilePath pwsh -ArgumentList $a\n",
+    "Start-Process -FilePath $conhostLike -ArgumentList $a\n",
+    "Start-ScheduledTask -TaskName conhost\n",
 ])
 def test_installer_rule_ignores_allowed_and_non_launch_lines(repo, text):
     _write_installer(repo, "plugins/agent-x/scripts/install.ps1", text)

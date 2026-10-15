@@ -444,9 +444,12 @@ _PS_INSTALLER_GLOBS = (
     "plugins/*/scripts/install*.ps1",
     "plugins/*/transports/*/scripts/install*.ps1",
 )
-_PS_START_PROCESS_RE = re.compile(
-    r"\bStart-Process\s+(?:-FilePath\s+)?['\"]?(?:[^\s'\"]*[\\/])?"
-    r"conhost(?:\.exe)?['\"]?(?=[\s`|)]|$)",
+_PS_START_PROCESS_RE = re.compile(r"(?<![\w-])Start-Process(?![\w-])", re.IGNORECASE)
+# conhost as any token of the statement (quoted, path-qualified or a variable
+# such as $conhost), wherever Start-Process's named or positional parameters
+# put it.
+_PS_CONHOST_TOKEN_RE = re.compile(
+    r"(?<![\w.-])['\"]?(?:[^\s'\"(),]*[\\/$])?conhost(?:\.exe)?['\"]?(?![\w.-])",
     re.IGNORECASE,
 )
 _PS_DAEMON_ALLOW_RE = re.compile(r"#\s*" + re.escape(_DAEMON_ALLOW) + r"[ :]+\S")
@@ -457,16 +460,25 @@ def _find_ps_conhost_launches(text: str) -> list[int]:
 
     A statement continues across trailing-backtick lines. It is allowed by a
     ``# daemon-spawn: allow <why>`` comment on one of its lines or on the
-    comment line directly above it. Lines inside a here-string are generated
-    text, not statements, and are skipped.
+    comment line directly above it. Comments (including ``<# ... #>`` blocks)
+    and here-string bodies are not statements and are skipped.
     """
     lines = text.splitlines()
     hits: list[int] = []
     in_here_string = False
+    in_block_comment = False
     i = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
+        if in_block_comment:
+            in_block_comment = "#>" not in line
+            i += 1
+            continue
+        if stripped.startswith("<#"):
+            in_block_comment = "#>" not in stripped[2:]
+            i += 1
+            continue
         if in_here_string:
             in_here_string = not stripped.startswith(('"@', "'@"))
             i += 1
@@ -480,7 +492,7 @@ def _find_ps_conhost_launches(text: str) -> list[int]:
             end += 1
         statement = " ".join(part.rstrip().rstrip("`") for part in lines[i:end + 1])
         code = statement.split("#", 1)[0] if not stripped.startswith("#") else ""
-        if code and _PS_START_PROCESS_RE.search(code):
+        if code and _PS_START_PROCESS_RE.search(code) and _PS_CONHOST_TOKEN_RE.search(code):
             marked = any(_PS_DAEMON_ALLOW_RE.search(part) for part in lines[i:end + 1])
             above = lines[i - 1].strip() if i else ""
             if not marked and not (above.startswith("#") and _PS_DAEMON_ALLOW_RE.search(above)):

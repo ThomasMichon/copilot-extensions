@@ -38,8 +38,9 @@ def _run(body: str, tmp_path: Path) -> list[str]:
     launcher.write_text("# launcher\n", encoding="utf-8")
     prelude = f"""
 $ErrorActionPreference = 'Stop'
-# The launcher is Windows-only; give a POSIX test host the Windows root it reads.
-if (-not $env:SystemRoot) {{ $env:SystemRoot = 'C:\Windows' }}
+# The launcher is Windows-only and process creation is recorded, not real: a
+# POSIX test host gets a synthetic root that its own path provider accepts.
+if (-not $env:SystemRoot) {{ $env:SystemRoot = '{tmp_path}' }}
 $InstallDir = '{tmp_path}'
 $LauncherDst = '{launcher}'
 $Alias = 'box'; $Port = 2222; $Tunnel = $null; $User = $null
@@ -49,6 +50,10 @@ function Get-HostProcess {{
 }}
 function Start-Sleep {{ param($Seconds) $script:hostUp = $true }}
 function Wait-DtsshHostIdentity {{ }}
+function New-CimInstance {{
+    param($ClassName, [switch]$ClientOnly, $Property, $ErrorAction)
+    return [pscustomobject]@{{ ClassName = $ClassName; Property = $Property }}
+}}
 function Start-Process {{
     param($FilePath, $ArgumentList, $WorkingDirectory, $WindowStyle, [switch]$PassThru)
     Write-Host "start-process:$FilePath|$WorkingDirectory"
@@ -86,6 +91,29 @@ Start-HostLauncher
     assert "-Alias box -Port 2222" in command
     assert not any(line.startswith("start-process:") for line in out)
     assert "dtssh host started for box on port 2222" in out
+
+
+def test_detached_start_passes_the_callers_environment(tmp_path):
+    """A WMI child gets the provider's environment unless one is supplied, and a
+    supplied block replaces it: the caller's complete environment goes through
+    Win32_ProcessStartup so the launcher resolves PATH/LOCALAPPDATA as the
+    installer did."""
+    out = _run("""
+$env:AIX_CALLER_ONLY = 'from the caller'
+function Invoke-CimMethod {
+    param($ClassName, $MethodName, $Arguments, $ErrorAction)
+    $startup = $Arguments.ProcessStartupInformation
+    Write-Host "startup:$($startup.ClassName)"
+    foreach ($entry in $startup.Property.EnvironmentVariables) { Write-Host "env:$entry" }
+    return [pscustomobject]@{ ReturnValue = 0; ProcessId = 4321 }
+}
+Start-HostLauncher
+""", tmp_path)
+
+    assert "startup:Win32_ProcessStartup" in out
+    env = [line.removeprefix("env:") for line in out if line.startswith("env:")]
+    assert "AIX_CALLER_ONLY=from the caller" in env
+    assert any(entry.upper().startswith("PATH=") for entry in env)
 
 
 @pytest.mark.parametrize("failure", ["return [pscustomobject]@{ ReturnValue = 9; ProcessId = 0 }",
