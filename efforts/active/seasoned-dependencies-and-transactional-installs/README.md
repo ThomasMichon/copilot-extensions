@@ -711,3 +711,12 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   dispatches. Runtime installer and canonical native-helper bytes are unchanged
   by this replay; previously exercised native proofs still apply. Fresh-head
   required CI and genuine review remain necessary before merge or rollout.
+- A final two-commit base advance added explicit test-wheel refresh and shared
+  daemon launch ownership. Replayed the implementation without changing the
+  already-validated promotion workflow or settled native installer bytes.
+  Retained explicit `--reinstall`, the leased environment directory and
+  junction-safe cleanup; the upstream argv regression now observes the
+  canonical policy boundary and verifies its fixed trusted root as well.
+  All 86 runner/ownership cases passed with two platform skips, and all 58
+  Index daemon/lifecycle cases passed against the new launch API. Fresh-head
+  CI and review remain the merge gate; this replay is not a release.

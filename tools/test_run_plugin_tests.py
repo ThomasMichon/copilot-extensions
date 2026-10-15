@@ -59,7 +59,14 @@ def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
             python.touch()
         return subprocess.CompletedProcess(command, 0)
 
+    def install(uv, arguments, **kwargs):
+        assert kwargs == {
+            "cwd": plugin, "trusted_source_roots": (runner.REPO,), "check": True,
+        }
+        return run([uv, "pip", "install", *arguments])
+
     monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "run_uv_install", install)
     assert runner._ensure_venv("example", "uv", reinstall=reinstall) == python
     installs = [command for command in calls if command[:3] == ["uv", "pip", "install"]]
     assert len(installs) == int(reinstall or not cached)
