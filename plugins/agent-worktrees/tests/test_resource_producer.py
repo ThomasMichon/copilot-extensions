@@ -18,6 +18,7 @@ from agent_worktrees.tracking_producer_write import apply_resource_producer
 
 @pytest.fixture
 def owner(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     project = tmp_path / "project"
     records = project / "worktrees"
     records.mkdir(parents=True)

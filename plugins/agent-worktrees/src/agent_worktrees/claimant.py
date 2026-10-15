@@ -169,12 +169,16 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
     if parsed is None:
         return None
     try:
-        this_machine = cfg.load_config().machine
-    except Exception:
-        this_machine = None
+        config = cfg.load_config()
+        this_machine = config.machine
+    except Exception as exc:
+        _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
+        return None
+    if not this_machine:
+        return None
     # Cross-machine -> unresolvable, unless a record-scoped legacy WSL ref.
     if parsed.machine and this_machine and parsed.machine != this_machine:
-        if not legacy_wsl_record_locality.legacy_wsl_owner_ref_is_local(parsed):
+        if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is None:
             return None
     project = parsed.project
     if not project:
@@ -255,11 +259,9 @@ def resolve_claimant_alive(
     else:
         try:
             config = cfg.load_config()
-        except Exception:
-            # Can't resolve local identity -- fail open to local, matching
-            # the prior behavior of treating an unresolvable this_machine
-            # as "same machine" rather than risking an SSH probe.
-            same_machine = True
+        except Exception as exc:
+            _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
+            return None
         else:
             same_machine = parsed.machine.casefold() == config.machine.casefold()
             if not same_machine:

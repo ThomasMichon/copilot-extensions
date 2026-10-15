@@ -707,7 +707,7 @@ def accept(
         require_handoff_consumer(bundle, machine, ClaimHandoffError)
         if any("producer" in claim for claim in bundle.claims):
             from .producer_handoff import accept_producers
-            return accept_producers(bundle_id, actor=actor)
+            return accept_producers(bundle_id, actor=actor, machine=machine)
         if same_local_records(source_ref, consumer_ref, machine=machine):
             if bundle.state != "accepted":
                 bundle = accept_source(bundle_id, actor=actor)

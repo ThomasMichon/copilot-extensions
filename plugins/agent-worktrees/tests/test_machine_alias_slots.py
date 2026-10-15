@@ -1,6 +1,7 @@
 """Alias grid through actual config, record, reference and handoff adapters."""
 
 from __future__ import annotations
+import base64
 from types import SimpleNamespace
 
 import pytest
@@ -261,4 +262,9 @@ def test_contextual_launch_alias_grid_uses_exact_foreign_profile(
     expected = "Example-Host-wsl" if target_platform == "wsl" else "Example-Host"
     assert plan["machine"] == expected
     assert plan["ssh_alias"] == ("guest-profile" if target_platform == "wsl" else "native-profile")
-    assert "--worktree-id target" in plan["remote_command"]
+    command = plan["remote_command"]
+    if "-EncodedCommand " in command:
+        script = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16le")
+        assert "'--worktree-id' 'target'" in script
+    else:
+        assert "--worktree-id target" in command

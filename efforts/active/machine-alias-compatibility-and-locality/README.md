@@ -158,6 +158,28 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-15 - Producer handoff and actual-caller locality corrections
+- Migrated the sole remaining caller of the removed machine-only handoff
+  helper to complete-record locality. Producer acceptance validates the actual
+  accepting execution identity, supports historical stored labels and preserves
+  accepted retries without reopening or requiring a removed source.
+- Claimant liveness retains the actual caller configuration while the record
+  resolver independently loads receiving-project authority. A reference cannot
+  substitute its project's machine for the caller, and unavailable caller
+  configuration remains unconfirmed rather than evidence of death.
+- Real producer reserve/bind/offer/accept/retry regressions preserve metadata
+  and historical labels; foreign machine/platform cases leave every ledger
+  unchanged. Actual claimant/prune regressions cover different caller/receiver
+  hosts on all three platforms and legitimate cross-project aliases.
+- The bounded producer, claimant, handoff and alias portfolio passed 644 tests;
+  the focused recovery/caller checks passed 32 overlapping tests. Ruff, install
+  contracts, module ceilings and whitespace checks passed. Existing WSL
+  claimant fixtures remain explicit, and producer fixtures explicitly select
+  their Linux context for native-host parity.
+- The alias-grid assertion now decodes the existing shell-safe PowerShell
+  command before inspecting its arguments, rather than expecting plaintext.
+  Native Windows validation and publication remain coordinator-owned.
+
 ### 2026-10-15 - Context safety and complete remote option policy
 - Normal supported publication succeeded for `28bdc336`, `7d878` and `26a1a2be`
   with intact replay proof after integration. No publication override is

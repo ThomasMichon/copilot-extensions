@@ -86,6 +86,26 @@ def _offer(graph: SimpleNamespace) -> claim_handoffs.ClaimBundle:
     )[0]
 
 
+def test_cross_project_claimant_keeps_actual_caller_and_receiving_alias_authority(graph, monkeypatch):
+    caller = cfg.load_project_config("consumer-project", include_control_plane_related_pr=False)
+    load_config = cfg.load_config
+
+    def caller_config(*args, **kwargs):
+        return load_config(*args, **kwargs) if args or kwargs.get("path") else caller
+
+    monkeypatch.setattr(cfg, "load_config", caller_config)
+    monkeypatch.setattr(claimant, "_owner_looks_dead", lambda _record: False)
+    ref = tracking.parse_claim_ref(graph.source)
+    before = {path: path.read_bytes() for path in graph.paths.values()}
+    assert legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, caller) == graph.paths["source"]
+    assert legacy_wsl_record_locality.legacy_wsl_owner_ref_is_local(ref)
+    assert claimant.local_claimant_alive(graph.source) is True
+    assert claimant.resolve_claimant_alive(graph.source, allow_remote=False) is True
+    assert before == {path: path.read_bytes() for path in graph.paths.values()}
+    caller = replace(caller, machine="foreign-host-wsl")
+    assert claimant.local_claimant_alive(graph.source) is None
+
+
 def _anchor_graph(graph: SimpleNamespace, *, qualified: bool) -> None:
     claims = tracking.load_record(graph.paths["source"]).resources
     original = tracking.load_record(graph.paths["source"])

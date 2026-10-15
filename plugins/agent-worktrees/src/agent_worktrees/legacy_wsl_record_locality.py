@@ -154,13 +154,13 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
     return path
 
 
-def legacy_wsl_owner_ref_is_local(ref: "ClaimRef") -> bool:
-    """Zero-config-arg convenience wrapper: loads the referenced project's config and
-    swallows any resolution failure (fail-closed to "not local legacy")."""
+def legacy_wsl_owner_ref_is_local(ref: "ClaimRef", config: cfg.Config | None = None) -> bool:
+    """Use the actual caller's config; the core separately loads receiving authority."""
     if ref is None or not ref.is_qualified:
         return False
     try:
-        config = cfg.load_project_config(ref.project, include_control_plane_related_pr=False)
+        if config is None:
+            config = cfg.load_config(include_control_plane_related_pr=False)
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot load legacy WSL ownership configuration: %s", exc)
         return False
