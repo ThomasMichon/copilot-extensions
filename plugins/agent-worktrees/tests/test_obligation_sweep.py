@@ -11,6 +11,8 @@ import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import obligations, sweep, tracking
 
+pytestmark = pytest.mark.guard
+
 # ── vocabulary ───────────────────────────────────────────────────────────────
 
 def test_abandoned_in_dispositions():
@@ -98,16 +100,18 @@ def _seed_project(tmp_path, monkeypatch, machine="m", project="p"):
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / f".{name}")
     monkeypatch.setattr(cfg, "tracking_dir",
                         lambda: tmp_path / f".{project}" / "worktrees")
-    monkeypatch.setattr(cfg, "load_config",
-                        lambda *a, **k: __import__("types").SimpleNamespace(machine=machine))
     d = tmp_path / f".{project}" / "worktrees"
     d.mkdir(parents=True, exist_ok=True)
+    repo = cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(d.parent))
+    conf, _ = _cfg_with_repo(project=project, machine=machine, repo=repo)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: conf)
     return d
 
 
-def _child(tdir, wt_id, status):
+def _child(tdir, wt_id, status, *, platform=None):
     rec = tracking.create_new_record(
-        wt_id, f"worktree/{wt_id}", str(tdir.parent / wt_id), "p", "m", "windows", tdir)
+        wt_id, f"worktree/{wt_id}", str(tdir.parent / wt_id), "p", "m",
+        platform or cfg.detect_platform(), tdir)
     rec.status = status
     tracking.save_record(rec, tdir / f"{wt_id}.yaml")
 
@@ -115,7 +119,7 @@ def _child(tdir, wt_id, status):
 def _owner_with_claim(tdir, owner_id, child_ref, kind="worktree"):
     rec = tracking.create_new_record(
         owner_id, f"worktree/{owner_id}", str(tdir.parent / owner_id), "p", "m",
-        "windows", tdir)
+        cfg.detect_platform(), tdir)
     tracking.add_resource_claim(
         rec, tracking.ResourceClaim(kind=kind, ref=child_ref,
                                     created_at=tracking._now_iso(), state="active"),
@@ -174,7 +178,7 @@ def test_cli_sweep_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, 
     tdir = _seed_project(tmp_path, monkeypatch, machine="config-machine")
     rec = tracking.create_new_record(
         "wt-owner", "worktree/wt-owner", str(tdir.parent / "wt-owner"), "p",
-        "record-machine", "windows", tdir,
+        "record-machine", cfg.detect_platform(), tdir,
     )
     tracking.add_resource_claim(
         rec, tracking.ResourceClaim(
@@ -217,6 +221,20 @@ def test_cli_sweep_non_worktree_kind_is_spared(tmp_path, monkeypatch, capfd):
     assert tracking.load_record(tdir / "wt-o.yaml").resources[0].state == "active"
 
 
+@pytest.mark.parametrize(
+    "foreign_platform", [p for p in ("windows", "wsl", "linux") if p != cfg.detect_platform()],
+)
+def test_cli_sweep_spares_foreign_platform_child(
+    tmp_path, monkeypatch, capfd, foreign_platform,
+):
+    tdir = _seed_project(tmp_path, monkeypatch)
+    _child(tdir, "wt-foreign", "finalized", platform=foreign_platform)
+    _owner_with_claim(tdir, "wt-owner", "m/p/wt-foreign")
+    assert m.cmd_claims(_sweep_args(apply=True)) == 0
+    assert json.loads(capfd.readouterr().out)["count"] == 0
+    assert tracking.load_record(tdir / "wt-owner.yaml").resources[0].state == "active"
+
+
 # ── branch-merged safe-check (dotfiles#1161: crashed-but-merged holder) ───────
 
 import types as _types  # noqa: E402
@@ -227,10 +245,12 @@ def _repo(anchor="/a", default_branch="master", remote="origin"):
                           default_branch=default_branch, remote=remote)
 
 
-def _cfg_with_repo(project="p", machine="m"):
-    r = _repo()
-    return _types.SimpleNamespace(machine=machine, repo_name=project,
-                                  repos={project: r}, default_repo=r), r
+def _cfg_with_repo(project="p", machine="m", *, repo=None):
+    r = repo if repo is not None else _repo()
+    return cfg.Config(
+        srcroot=r.anchor, machine=machine, platform=cfg.detect_platform(),
+        repo_name=project, repos={project: r},
+    ), r
 
 
 def test_repo_for_project_resolves_named_and_default():
@@ -305,9 +325,7 @@ def test_child_branch_merged_prefers_pr_branch(monkeypatch):
 
 def _seed_project_with_repo(tmp_path, monkeypatch, machine="m", project="p"):
     tdir = _seed_project(tmp_path, monkeypatch, machine, project)
-    conf, r = _cfg_with_repo(project=project, machine=machine)
-    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: conf)
-    return tdir, r
+    return tdir, cfg.load_config().default_repo
 
 
 def test_cli_sweep_abandons_crashed_but_merged_child(tmp_path, monkeypatch, capfd):
