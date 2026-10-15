@@ -3,6 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import sys
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--creation-key", help="opaque logical creation identity; exact local workspace/session retries retain the original result")
+    parser.add_argument("--provider-instance", action="store_true",
+                        help="keyed native creation on an exact provider-exec instance, without a worktree")
+
+
+def validate_arguments(args: argparse.Namespace) -> None:
+    if getattr(args, "provider_instance", False) and getattr(args, "creation_key", None) is None:
+        print("[FAIL] --provider-instance requires --creation-key.", file=sys.stderr)
+        sys.exit(2)
+    if getattr(args, "creation_key", None) is not None and getattr(args, "cli", False):
+        print("[FAIL] --creation-key is not supported by CLI-mode venue creation.", file=sys.stderr)
+        sys.exit(2)
 
 
 def create(args: argparse.Namespace, client, *, caller_id: str | None) -> None:
