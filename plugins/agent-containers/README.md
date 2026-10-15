@@ -55,6 +55,13 @@ terminating only the host wrapper does not admit a duplicate surviving worker.
 Destructive lifecycle probes that guest lock under its provider hold, both
 before rescue and immediately before stop/removal/recreation; an active or
 unreadable lock defers the action even without host admission or Copilot markers.
+Lock-protocol cutover waits for an existing legacy lock file to be released;
+it never steals or deletes that file. The new `leases.lock` is a private
+directory with its kernel lock inside, so old O_EXCL/unlink writers cannot
+enter or unlink the persistent lock after cutover. Live legacy admission and
+lifecycle writers must finish before new mutations are admitted. A crashed,
+unidentifiable legacy lock file requires verified operator quiescence rather
+than automatic age-based removal; no active wrapper is forcibly terminated.
 The provider's creation-time binding identity is pinned in both an
 immutable Docker label and owner-private state. Missing, corrupt or mismatched
 birth state is not an unused slot: preparation refuses it and requires
@@ -73,6 +80,10 @@ The host persists a monotonic attempted-expiry fence before delivery, separately
 from acknowledged expiry. An interrupted publication cannot permit an older
 grant to replace a potentially delivered newer one; equal-expiry retries remain
 admissible without claiming a failed delivery succeeded.
+Publication also holds a separate guest kernel lock and checks a root-owned
+monotonic expiry fence before replacing the token. A guest helper surviving its
+Docker client's timeout cannot overwrite a newer publication when it resumes;
+contention fails explicitly so the trusted supervisor can retry.
 
 The explicit launch projects only the pinned task/worker/endpoint and token-file
 path, using an immutable absolute Bash executable outside writable mounts and

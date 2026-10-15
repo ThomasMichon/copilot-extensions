@@ -31,7 +31,8 @@ from ssh_manager.locks import pid_alive
 
 from .config import LEASE_FILE, STATE_DIR, ContainersConfig, ensure_state_dir
 from .lifecycle import list_containers
-from .private_state import atomic_write_json, private_file_lock
+from .private_state import atomic_write_json
+from .lease_lock import PROTOCOL, LockCutoverError, provider_lock, require_legacy_writers_quiesced
 
 log = logging.getLogger("agent-containers")
 
@@ -92,6 +93,7 @@ class DeployHold:
     heartbeat_at: float
     expires_at: float
     uncertain: bool = False
+    lock_protocol: str = PROTOCOL
 
 
 @dataclass
@@ -105,6 +107,7 @@ class SessionAdmission:
     environment: str
     acquired_at: float
     heartbeat_at: float
+    lock_protocol: str = PROTOCOL
 
 
 class ProviderAdmissionError(RuntimeError):
@@ -129,11 +132,17 @@ def _this_environment() -> str:
 
 
 @contextmanager
-def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
+def _lease_lock(
+    timeout: float = 10.0, poll: float = 0.05, *, clear_expired_corruption: bool = False,
+) -> Iterator[None]:
     """Serialize admission, lifecycle and binding writers with kernel ownership."""
     ensure_state_dir()
-    with private_file_lock(_LOCK_FILE, timeout=timeout):
-        yield
+    try:
+        with provider_lock(_LOCK_FILE, timeout=timeout, poll=poll):
+            require_legacy_writers_quiesced(clear_expired_corruption=clear_expired_corruption)
+            yield
+    except LockCutoverError as exc:
+        raise ProviderAdmissionError(str(exc)) from exc
 
 
 def _read_leases() -> dict[str, Lease]:
@@ -256,7 +265,12 @@ def _read_records(path, record_type, *, fail_closed: bool = False):
     records = {}
     for key, rec in (raw or {}).items():
         try:
-            records[key] = record_type(**rec)
+            if not isinstance(rec, dict):
+                raise TypeError("provider record must be an object")
+            fields = dict(rec)
+            if record_type in (DeployHold, SessionAdmission):
+                fields.setdefault("lock_protocol", "legacy")
+            records[key] = record_type(**fields)
         except TypeError as exc:
             if fail_closed:
                 raise ProviderAdmissionError(
@@ -761,7 +775,7 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
     Windows and WSL cannot safely inspect each other's process IDs.
     """
     cleared = {"deploy_holds": 0, "session_admissions": 0}
-    with _lease_lock():
+    with _lease_lock(clear_expired_corruption=True):
         for path, record_type, ttl, counter in (
             (
                 _DEPLOY_HOLDS_FILE,

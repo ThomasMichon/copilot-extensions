@@ -178,6 +178,9 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
             assert check.returncode == 0, check.stderr
             assert token not in projection._path(physical_id).read_text(encoding="utf-8")
             assert token not in json.dumps(lifecycle.inspect_container(physical_id))
+        request = _assert_delayed_publication_is_guest_fenced(
+            monkeypatch, projection, name, physical_id, inspected, request, run,
+        )
         with pytest.raises(RuntimeError, match="another task incarnation"):
             projection.prepare(name, physical_id, {**facts, "generation": 2})
         with pytest.raises(RuntimeError, match="cannot be rebound"):
@@ -298,3 +301,98 @@ def test_dispatch_projection_uses_real_root_owned_rotating_file(monkeypatch, tmp
             holder.wait(timeout=10)
         holder_errors.close()
         run("rm", "-f", name)
+
+
+def _assert_delayed_publication_is_guest_fenced(
+    monkeypatch, projection, name, physical_id, inspected, request, run,
+):
+    old_token = uuid.uuid4().hex
+    old_request = {**request, "task_token": old_token, "expires_at": request["expires_at"] + 100}
+    original_run = subprocess.run
+    paused = "/run/agent-dispatch/publication-paused"
+    resume = "/run/agent-dispatch/publication-resume"
+    finished = "/run/agent-dispatch/publication-finished"
+
+    def timed_out_client(argv, **kwargs):
+        if kwargs.get("input") != old_token:
+            return original_run(argv, **kwargs)
+        # Retain the guest publisher's input across the client timeout, but
+        # delay its acquisition of the actual production publication lock.
+        delayed = (
+            "const fs=require('fs'),cp=require('child_process');let input='';"
+            "process.stdin.setEncoding('utf8');process.stdin.on('data',c=>input+=c);"
+            "process.stdin.on('end',()=>{"
+            f"fs.writeFileSync({json.dumps(paused)},String(process.pid));"
+            "const timer=setInterval(()=>{"
+            f"if(!fs.existsSync({json.dumps(resume)}))return;"
+            "clearInterval(timer);"
+            "const r=cp.spawnSync('/bin/bash',['--noprofile','--norc','-c',"
+            f"{json.dumps(argv[-1])}],{{input,encoding:'utf8'}});"
+            f"fs.writeFileSync({json.dumps(finished)},String(r.status));"
+            "process.exit(r.status===0?0:1);},50);});"
+        )
+        child = subprocess.Popen(
+            [*argv[:-5], "/usr/local/bin/node", "-e", delayed],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, creationflags=no_window_flags(),
+        )
+        try:
+            child.communicate(input=old_token, timeout=2)
+            pytest.fail("guest publisher unexpectedly completed before client timeout")
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate(timeout=10)
+            raise
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=10)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(projection.subprocess, "run", timed_out_client)
+        with pytest.raises(RuntimeError, match="delivery failed"):
+            projection.project(name, physical_id, old_request)
+    ready = run(
+        "exec", "-u", "0", physical_id, "/usr/local/bin/node", "-e",
+        f"process.stdout.write(require('fs').readFileSync({json.dumps(paused)},'utf8'))",
+    )
+    assert ready.returncode == 0, ready.stderr
+    guest_pid = int(ready.stdout)
+    assert run(
+        "exec", "-u", "0", physical_id, "/usr/local/bin/node", "-e",
+        f"process.kill({guest_pid},0)",
+    ).returncode == 0
+    newer = {
+        **request, "task_token": uuid.uuid4().hex,
+        "expires_at": old_request["expires_at"] + 100,
+    }
+    projection.project(name, physical_id, newer)
+    signalled = run(
+        "exec", "-u", "0", physical_id, "/usr/local/bin/node", "-e",
+        f"require('fs').writeFileSync({json.dumps(resume)},'resume')",
+    )
+    assert signalled.returncode == 0, signalled.stderr
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        complete = run(
+            "exec", "-u", "0", physical_id, "/usr/local/bin/node", "-e",
+            f"try{{process.stdout.write(require('fs').readFileSync({json.dumps(finished)},'utf8'))}}"
+            "catch(e){process.exit(1)}",
+        )
+        if complete.returncode == 0:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("surviving publisher did not reach its bounded guest fence")
+    assert complete.stdout == "1"
+    digest = hashlib.sha256(newer["task_token"].encode()).hexdigest()
+    verified = run(
+        "exec", "-u", "node", physical_id, "/usr/local/bin/node", "-e",
+        "const fs=require('fs'),c=require('crypto');"
+        f"if(c.createHash('sha256').update(fs.readFileSync({json.dumps(projection.TOKEN_FILE)}))"
+        f".digest('hex')!=={json.dumps(digest)})process.exit(1);",
+    )
+    assert verified.returncode == 0, verified.stderr
+    retained = projection._read(physical_id)
+    assert retained["expires_at"] == retained["attempted_expires_at"] == newer["expires_at"]
+    return newer

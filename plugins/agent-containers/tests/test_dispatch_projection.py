@@ -54,6 +54,7 @@ def target(monkeypatch, tmp_path):
         lambda *args, kind, **kwargs: (f"/usr/bin/{kind}", "/home/worker"),
     )
     monkeypatch.setattr(projection, "_initialize_worker_lock", lambda *args: None)
+    monkeypatch.setattr(projection, "_initialize_lock", lambda *args: None)
     return target
 
 
@@ -144,7 +145,9 @@ def test_rotation_delivers_only_stdin_secret_and_retains_nonsecret_fence(target,
         assert token not in json.dumps(argv)
         assert argv[:3] == ["docker", "exec", "-i"]
         assert "-u" in argv and argv[argv.index("-u") + 1] == "0"
-        assert "/usr/bin/node" in argv and PHYSICAL_ID in argv
+        assert "/usr/bin/node" in argv[-1] and PHYSICAL_ID in argv
+        assert projection.PUBLICATION_LOCK in argv[-1]
+        assert "--conflict-exit-code 75" in argv[-1]
     persisted = projection._path(PHYSICAL_ID).read_text(encoding="utf-8")
     assert "task-credential" not in persisted and "rotated-credential" not in persisted
     assert set(projection.environment(rotated)) == {

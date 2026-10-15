@@ -26,6 +26,7 @@ from .restricted_exec import resolve_executable, sanitized_exec_prefix
 
 TOKEN_FILE = "/run/agent-dispatch/task-token"
 WORKER_LOCK = "/run/agent-dispatch/worker.lock"
+PUBLICATION_LOCK = "/run/agent-dispatch/publication.lock"
 _STATE = STATE_DIR / "dispatch-bindings"
 _FACTS = {"task_id", "worker_id", "generation", "coordinator_epoch", "coordinator_url"}
 _ID = re.compile(r"[0-9a-f]{64}")
@@ -50,27 +51,50 @@ function rootDirectory() {
 # Runs only as root through an immutable Node executable; credentials use stdin.
 _WRITE_TOKEN = _ROOT_DIRECTORY + r"""
 let input = '';
+const inputTimer = setTimeout(() => {
+  process.stderr.write('Restricted task credential input timed out\n');
+  process.exit(1);
+}, 30000);
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => {
   input += chunk;
   if (Buffer.byteLength(input, 'utf8') > 8192) process.exit(1);
 });
 process.stdin.on('end', () => {
+  clearTimeout(inputTimer);
   let tmp;
   try {
     if (!/^[\x21-\x7e]{1,8192}$/.test(input)) throw Error();
     const dir = rootDirectory();
+    const expiry = Number(process.argv[1]);
+    if (!Number.isFinite(expiry) || expiry <= Date.now() / 1000) throw Error();
+    const fence = dir + '/publication-expiry';
+    function existing(dest) {
+      try {
+        const old = fs.lstatSync(dest);
+        if (!old.isFile() || old.uid !== 0 || (old.mode & 0o777) !== 0o444) throw Error();
+        return true;
+      } catch (err) { if (err.code !== 'ENOENT') throw err; }
+      return false;
+    }
+    if (existing(fence)) {
+      const previous = JSON.parse(fs.readFileSync(fence, 'utf8'));
+      if (typeof previous !== 'number' || !Number.isFinite(previous) ||
+          previous <= 0 || expiry < previous) throw Error();
+    }
+    function publish(dest, value) {
+      tmp = dir + '/.' + crypto.randomBytes(16).toString('hex');
+      const fd = fs.openSync(tmp, fs.constants.O_CREAT | fs.constants.O_EXCL |
+                            fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o444);
+      try { fs.writeFileSync(fd, value, 'utf8'); fs.fchmodSync(fd, 0o444); fs.fsyncSync(fd); }
+      finally { fs.closeSync(fd); }
+      fs.renameSync(tmp, dest);
+      tmp = undefined;
+    }
     const dest = dir + '/task-token';
-    try {
-      const old = fs.lstatSync(dest);
-      if (!old.isFile() || old.uid !== 0 || (old.mode & 0o777) !== 0o444) throw Error();
-    } catch (err) { if (err.code !== 'ENOENT') throw err; }
-    tmp = dir + '/.' + crypto.randomBytes(16).toString('hex');
-    const fd = fs.openSync(tmp, fs.constants.O_CREAT | fs.constants.O_EXCL |
-                          fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o444);
-    try { fs.writeFileSync(fd, input, 'utf8'); fs.fchmodSync(fd, 0o444); fs.fsyncSync(fd); }
-    finally { fs.closeSync(fd); }
-    fs.renameSync(tmp, dest);
+    existing(dest);
+    publish(fence, JSON.stringify(expiry));
+    publish(dest, input);
   } catch (_) {
     if (tmp) { try { fs.unlinkSync(tmp); } catch (_) {} }
     process.stderr.write('Restricted task credential publication failed\n');
@@ -81,7 +105,9 @@ process.stdin.on('end', () => {
 
 _INITIALIZE_LOCK = _ROOT_DIRECTORY + r"""
 try {
-  const dest = rootDirectory() + '/worker.lock';
+  const name = process.argv[1];
+  if (!['worker.lock', 'publication.lock'].includes(name)) throw Error();
+  const dest = rootDirectory() + '/' + name;
   try {
     const fd = fs.openSync(dest, fs.constants.O_CREAT | fs.constants.O_EXCL |
                           fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o444);
@@ -309,14 +335,10 @@ def project(name: str, expected_container_id: str, request: object) -> dict:
         inspected = lifecycle.inspect_container(expected_container_id)
         if inspected.get("Id") != expected_container_id:
             raise RuntimeError("Container physical identity changed before credential delivery")
-        node, home = resolve_executable(
-            expected_container_id, "0", inspected, kind="node",
-            deadline=time.monotonic() + 30,
-        )
-        prefix = sanitized_exec_prefix(expected_container_id, "0", home)
+        command = build_publication_command(expected_container_id, inspected, expiry)
         try:
             result = subprocess.run(
-                [*prefix[:2], "-i", *prefix[2:], node, "-e", _WRITE_TOKEN],
+                command,
                 input=token, text=True, capture_output=True, timeout=30,
                 creationflags=no_window_flags(),
             )
@@ -371,13 +393,17 @@ def build_spawn_command(target, binding: dict, acp_command: str) -> list[str]:
 
 
 def _initialize_worker_lock(target, inspected: dict) -> None:
+    _initialize_lock(target.container_id, inspected, "worker.lock")
+
+
+def _initialize_lock(container_id: str, inspected: dict, name: str) -> None:
     node, home = resolve_executable(
-        target.container_id, "0", inspected, kind="node",
+        container_id, "0", inspected, kind="node",
         deadline=time.monotonic() + 30,
     )
     try:
         result = subprocess.run(
-            [*sanitized_exec_prefix(target.container_id, "0", home), node, "-e", _INITIALIZE_LOCK],
+            [*sanitized_exec_prefix(container_id, "0", home), node, "-e", _INITIALIZE_LOCK, name],
             stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=30,
             creationflags=no_window_flags(),
         )
@@ -385,6 +411,24 @@ def _initialize_worker_lock(target, inspected: dict) -> None:
         raise RuntimeError("Restricted worker lock initialization failed") from None
     if result.returncode:
         raise RuntimeError("Restricted worker lock initialization failed")
+
+
+def build_publication_command(container_id: str, inspected: dict, expiry: float) -> list[str]:
+    """Guest ownership and expiry fencing outlive the host Docker client."""
+    _initialize_lock(container_id, inspected, "publication.lock")
+    deadline = time.monotonic() + 30
+    bash, home = resolve_executable(container_id, "0", inspected, kind="bash", deadline=deadline)
+    flock, _ = resolve_executable(container_id, "0", inspected, kind="flock", deadline=deadline)
+    node, _ = resolve_executable(container_id, "0", inspected, kind="node", deadline=deadline)
+    script = (
+        f"exec 9<{shlex.quote(PUBLICATION_LOCK)} || exit 1; "
+        f"{shlex.quote(flock)} --nonblock --conflict-exit-code 75 9 || exit $?; "
+        f"exec {shlex.quote(node)} -e {shlex.quote(_WRITE_TOKEN)} {shlex.quote(str(expiry))}"
+    )
+    prefix = sanitized_exec_prefix(container_id, "0", home)
+    return [
+        *prefix[:2], "-i", *prefix[2:], bash, "--noprofile", "--norc", "-c", script,
+    ]
 
 
 def probe_worker_liveness(container_id: str, inspected: dict) -> SessionLiveness:
