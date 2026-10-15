@@ -265,3 +265,13 @@ achieved by rearranging today's combined installer invocations.
   than changing production admission. Its focused guard partition passed nine
   cases with four native-POSIX skips; the remaining guard portfolio runs in
   a separate invocation under the unchanged per-run budget.
+- Further review found dangling configuration links, tolerant registry reloads
+  after validation, and malformed repository entries on the publishing path.
+  Strict parsing and entry validation now propagate through actual collection;
+  dangling links are blocked while genuinely absent optional inputs remain
+  supported. Regressions change or deny each registry between validation and
+  collection and assert preserved fragment/state/settings bytes and timestamps.
+- Manager coverage passed 175 cases, including native first/second refreshes at
+  2.079/1.609 seconds. A broad guard invocation exceeded its unchanged
+  300-second budget without another assertion failure; partitioning must retain
+  the complete collected guard portfolio rather than drop slow tests.

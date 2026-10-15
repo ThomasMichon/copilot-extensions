@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,7 +66,9 @@ def _read_yaml(p: Path, *, strict: bool = False) -> dict:
         if strict and data is not None and not isinstance(data, dict):
             raise ValueError(f"Configuration must be a mapping: {p}")
         return data if isinstance(data, dict) else {}
-    except FileNotFoundError:
+    except FileNotFoundError as error:
+        if strict and p.is_symlink():
+            raise ValueError(f"Cannot read configuration mapping: {p}") from error
         return {}
     except (OSError, yaml.YAMLError) as error:
         if strict:
@@ -181,12 +184,27 @@ class ProjectInfo:
     copilot-extensions#3390 Phase 3e Step 3b)."""
 
 
-def repos_registry(home_dir: Path | None = None) -> dict:
-    return _read_yaml((home_dir or home()) / ".agent-worktrees" / "repos.yaml")
+def _registry(home_dir: Path | None, kind: str, *, strict: bool) -> dict:
+    data = _read_yaml((home_dir or home()) / ".agent-worktrees" / f"{kind}.yaml", strict=strict)
+    if strict:
+        entries = data.get(kind, {})
+        if not isinstance(entries, dict) or any(
+            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name)
+            or name in {".", ".."} or (entry is not None and not isinstance(entry, dict))
+            for name, entry in entries.items()
+        ):
+            raise ValueError(f"{kind.title()} registry must contain a {kind} mapping with valid entries")
+        if kind == "repos" and not isinstance(data.get("account_map", {}), dict):
+            raise ValueError("Repos registry account_map must be a mapping")
+    return data
 
 
-def projects_registry(home_dir: Path | None = None) -> dict:
-    return _read_yaml((home_dir or home()) / ".agent-worktrees" / "projects.yaml")
+def repos_registry(home_dir: Path | None = None, *, strict: bool = False) -> dict:
+    return _registry(home_dir, "repos", strict=strict)
+
+
+def projects_registry(home_dir: Path | None = None, *, strict: bool = False) -> dict:
+    return _registry(home_dir, "projects", strict=strict)
 
 
 def project_config(name: str, home_dir: Path | None = None) -> dict:
@@ -330,9 +348,10 @@ def repo_enabled_plugins(repo_path: str | None) -> list[str]:
     ]
 
 
-def build_repos(home_dir: Path | None = None) -> list[RepoInfo]:
-    reg = repos_registry(home_dir)
-    projects = set((projects_registry(home_dir).get("projects") or {}).keys())
+def build_repos(home_dir: Path | None = None, *, strict: bool = False) -> list[RepoInfo]:
+    reg = repos_registry(home_dir, strict=True) if strict else repos_registry(home_dir)
+    project_reg = projects_registry(home_dir, strict=True) if strict else projects_registry(home_dir)
+    projects = set((project_reg.get("projects") or {}).keys())
     account_map = reg.get("account_map") or {}
     pkey = _platform_key()
     out: list[RepoInfo] = []
@@ -471,12 +490,15 @@ def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str, s
 
 
 def build_projects(home_dir: Path | None = None, *, strict_rosters: bool = False) -> list[ProjectInfo]:
-    reg = projects_registry(home_dir)
-    repos = {r.name: r for r in build_repos(home_dir)}
+    reg = projects_registry(home_dir, strict=True) if strict_rosters else projects_registry(home_dir)
+    repos = {r.name: r for r in (
+        build_repos(home_dir, strict=True) if strict_rosters else build_repos(home_dir)
+    )}
     out: list[ProjectInfo] = []
     for name, entry in (reg.get("projects") or {}).items():
         entry = entry or {}
-        cfg = project_config(name, home_dir)
+        cfg = (_read_yaml((home_dir or home()) / f".{name}" / "config.yaml", strict=True)
+               if strict_rosters else project_config(name, home_dir))
         repo = repos.get(name)
         wsl = entry.get("wsl") if isinstance(entry.get("wsl"), dict) else {}
         # Prefer the repos.yaml-resolved path; fall back to this project's

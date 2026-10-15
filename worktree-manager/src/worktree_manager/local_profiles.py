@@ -82,15 +82,13 @@ def _read_profile_input(path: Path) -> dict:
 def _validate_profile_inputs(project: str | None) -> None:
     """Writing must not turn an unreadable registry or selection into defaults."""
     home = harness_state.home()
-    registry = _read_profile_input(home / ".agent-worktrees" / "projects.yaml")
+    registry = harness_state.projects_registry(home, strict=True)
     entries = registry.get("projects", {})
     if not isinstance(entries, dict) or any(
         value is not None and not isinstance(value, dict) for value in entries.values()
     ):
         raise ValueError("Projects registry must contain a projects mapping")
-    repos = _read_profile_input(home / ".agent-worktrees" / "repos.yaml")
-    if not isinstance(repos.get("repos", {}), dict):
-        raise ValueError("Repos registry must contain a repos mapping")
+    harness_state.repos_registry(home, strict=True)
     names = set(entries) | ({project} if project is not None else set())
     for name in names:
         if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name)

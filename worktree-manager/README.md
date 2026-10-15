@@ -333,9 +333,12 @@ Unchanged fragment content and shortcut properties are not rewritten. It does
 not stage a plugin payload, build a venv, or probe a remote host. A missing
 destination, invalid selection or failed shortcut operation returns a blocked
 result and nonzero exit rather than claiming synchronized profiles.
-Publishing also refuses present malformed or unreadable resolved machine
-rosters before touching fragment/state/settings outputs. Read-only state views
-and previews retain their tolerant roster behavior.
+Publishing also refuses malformed or unreadable registries and resolved machine
+rosters, invalid registry entries and dangling configuration links before
+touching fragment/state/settings outputs. Actual publishing collection uses
+strict registry reads too; preliminary validation never authorizes a later
+tolerant reload. Genuinely absent optional files remain supported. Read-only
+state views and previews retain their tolerant behavior.
 Publishing rejects blank/non-string selection identifiers and unknown kinds,
 including when inputs change during collection; it never silently converts a
 shell typo into an agent launch.

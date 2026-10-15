@@ -160,6 +160,7 @@ def test_invalid_project_name_never_reaches_config(monkeypatch, project):
     (".agent-worktrees/projects.yaml", "projects: []"),
     (".agent-worktrees/projects.yaml", "projects:\n  demo: invalid"),
     (".agent-worktrees/repos.yaml", "repos: []"),
+    (".agent-worktrees/repos.yaml", "repos:\n  demo: invalid"),
     (".demo/config.yaml", "terminal_profiles: invalid"),
     (".demo/config.yaml", "terminal_profiles:\n- machine: host\n"),
 ])
@@ -222,6 +223,81 @@ def test_collection_revalidates_selection_without_tolerant_coercion(monkeypatch,
     monkeypatch.setattr(tf, "collect_local_projects", changed)
     with pytest.raises(ValueError, match="kind must be"):
         profiles.refresh("demo")
+
+
+@pytest.mark.parametrize(("relative", "damage"), [
+    (".agent-worktrees/projects.yaml", "symlink"),
+    (".agent-worktrees/repos.yaml", "symlink"),
+    (".demo/config.yaml", "symlink"),
+    *[(f".agent-worktrees/{kind}.yaml", damage)
+      for kind in ("projects", "repos")
+      for damage in ("yaml", "denied", "entry")],
+])
+def test_strict_collection_failures_preserve_published_outputs(
+    monkeypatch, tmp_path, capsys, relative, damage,
+):
+    home = tmp_path / "home"
+    registry_dir = home / ".agent-worktrees"
+    registry_dir.mkdir(parents=True)
+    (registry_dir / "projects.yaml").write_text("projects:\n  demo: {}\n  peer: {}\n", encoding="utf-8")
+    (registry_dir / "repos.yaml").write_text("repos: {}\n", encoding="utf-8")
+    (home / ".demo").mkdir()
+    (home / ".demo" / "config.yaml").write_text("machine: host\n", encoding="utf-8")
+    monkeypatch.setattr(profiles.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(profiles.harness_state, "home", lambda: home)
+    fragments, state = tmp_path / "fragments", tmp_path / "state"
+    (fragments / "AgentWorktrees").mkdir(parents=True)
+    state.mkdir()
+    guid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    outputs = {
+        fragments / "AgentWorktrees" / "agent-worktrees.json":
+            {"profiles": [{"guid": guid, "name": "Peer", "commandline": "ssh example"}]},
+        state / "state.json": {"generatedProfiles": [guid]},
+        state / "settings.json": {"profiles": {"list": [{"guid": guid, "source": "AgentWorktrees"}]}},
+    }
+    for path, data in outputs.items():
+        path.write_text(json.dumps(data), encoding="utf-8")
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in outputs}
+    monkeypatch.setattr(tf, "_wt_fragments_dir", lambda: fragments)
+    monkeypatch.setattr(tf, "_wt_local_state_dir", lambda: state)
+    monkeypatch.setattr(profiles, "refresh_shortcuts", lambda *_: pytest.fail("reached shortcuts"))
+    target = home / relative
+    if damage == "symlink":
+        target.unlink()
+        try:
+            target.symlink_to(tmp_path / "missing.yaml")
+        except OSError as error:
+            pytest.skip(f"Symlink creation unavailable: {error}")
+    else:
+        collect, read_text = tf.collect_local_projects, Path.read_text
+
+        def changed(**kwargs):
+            if damage == "denied":
+                def denied(path, *args, **kw):
+                    if path == target:
+                        raise PermissionError("fixture registry denied after validation")
+                    return read_text(path, *args, **kw)
+                monkeypatch.setattr(Path, "read_text", denied)
+            else:
+                text = "[" if damage == "yaml" else f"{target.stem}:\n  demo: invalid\n"
+                target.write_text(text, encoding="utf-8")
+            return collect(**kwargs)
+
+        monkeypatch.setattr(tf, "collect_local_projects", changed)
+    assert profiles.main(["demo"]) == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["status"] == "blocked"
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in outputs} == before
+
+
+def test_invalid_repo_entry_returns_blocked_json(monkeypatch, tmp_path, capsys):
+    registry = tmp_path / ".agent-worktrees" / "repos.yaml"
+    registry.parent.mkdir()
+    registry.write_text("repos:\n  demo: invalid\n", encoding="utf-8")
+    monkeypatch.setattr(profiles.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(profiles.harness_state, "home", lambda: tmp_path)
+    assert profiles.main(["demo", "--machine", "host"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "blocked"
 
 
 @pytest.mark.parametrize("relative", [".agent-worktrees/machines.yaml", "machines.yaml"])
