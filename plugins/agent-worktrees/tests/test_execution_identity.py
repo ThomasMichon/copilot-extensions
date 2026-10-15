@@ -70,6 +70,40 @@ def test_config_precedence_and_topology_mapping(topology, tmp_path, monkeypatch,
     assert (local_path.read_bytes(), global_path.read_bytes()) == before
 
 
+@pytest.mark.parametrize("scoped", [False, True])
+def test_auto_config_preserves_hostname_provenance_until_project_topology(
+    tmp_path, monkeypatch, scoped,
+):
+    from agent_worktrees.execution_spaces import ExecutionSpaceError, require_current_execution_space
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    machine = (
+        {"execution_platform": "wsl", "hostname": "generated-host"}
+        if scoped else {"hostname": "generated-host", "ssh": {"environments": [
+            {"name": "windows", "alias": "native-ssh"}, {"name": "wsl", "alias": "guest-ssh"},
+        ]}}
+    )
+    key = "generated-host-wsl" if scoped else "example-host"
+    (anchor / "machines.yaml").write_text(
+        yaml.safe_dump({"machines": {key: machine}}), encoding="utf-8",
+    )
+    local = tmp_path / "config.yaml"
+    local.write_text(yaml.safe_dump({
+        "repo_name": "example", "repos": {"example": {"anchor": str(anchor)}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "generated-host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    if scoped:
+        with pytest.raises(ExecutionSpaceError, match="explicit machine configuration"):
+            cfg.load_config(local, include_control_plane_related_pr=False)
+    else:
+        config = cfg.load_config(local, include_control_plane_related_pr=False)
+        assert config.machine == "example-host-wsl"
+        require_current_execution_space(config)
+
+
 def test_knowledge_topology_uses_loaded_config_without_recursion(
     topology, tmp_path, monkeypatch,
 ):
@@ -331,13 +365,18 @@ def test_registered_container_identity_survives_shared_wsl_kernel(tmp_path, monk
     before = local.read_bytes()
     monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
     monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"))
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"), raising=False)
+    real_read_text = Path.read_text
+    monkeypatch.setattr(
+        Path, "read_text", lambda path, *args, **kwargs: "0::/user.slice"
+        if path == Path("/proc/1/cgroup") else real_read_text(path, *args, **kwargs),
+    )
     monkeypatch.setenv("WSL_DISTRO_NAME", "inherited-example-value")
     real_is_file = Path.is_file
     monkeypatch.setattr(
         Path, "is_file",
-        lambda path: str(path) == marker
-        if str(path) in ("/.dockerenv", "/run/.containerenv") else real_is_file(path),
+        lambda path: (path == Path(marker) if marker else False)
+        if path in (Path("/.dockerenv"), Path("/run/.containerenv")) else real_is_file(path),
     )
     config = cfg.load_config(local, include_control_plane_related_pr=False)
     assert config.platform == "linux"

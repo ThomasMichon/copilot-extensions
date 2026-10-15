@@ -173,11 +173,14 @@ def test_legacy_wsl_parent_claim_settled_using_legacy_child_ref(_project_root, m
         machine="machine-x", platform="wsl",
     )
 
-    child = SimpleNamespace(owner_claim_ref=tracking.parse_claim_ref(parent_ref))
-    config = SimpleNamespace(
-        machine="machine-x-wsl", repo_name="childproj",
-        default_repo=SimpleNamespace(anchor=str(_project_root)),
+    child_dir = _project_root / ".childproj" / "worktrees"
+    child_dir.mkdir(parents=True)
+    (_project_root / child_id).mkdir()
+    child = tracking.create_new_record(
+        child_id, f"worktree/{child_id}", str(_project_root / child_id),
+        "childproj", "machine-x", "wsl", child_dir, owner_ref=parent_ref,
     )
+    config = cfg.load_project_config("childproj")
 
     _settle_parent_obligation(child, config, child_id)
 

@@ -1784,6 +1784,9 @@ deploy_package() {
     # remote_login_shell, copilot-extensions#5207). Same materialized-release
     # guard as zdd above.
     local remote_login_shell_dir="$PLUGIN_DIR/libs/remote-login-shell"
+    if [[ ! -f "$remote_login_shell_dir/pyproject.toml" ]]; then
+        remote_login_shell_dir="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/remote-login-shell"
+    fi
     if [[ -f "$remote_login_shell_dir/pyproject.toml" ]]; then
         if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-remote-login-shell \
                 "$remote_login_shell_dir" --quiet; then

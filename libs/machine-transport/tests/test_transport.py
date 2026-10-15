@@ -58,7 +58,7 @@ def test_explicit_logical_transport_refuses_multiple_profiles():
 ])
 def test_local_platform_detection_is_owner_only(monkeypatch, system, release, distro, expected):
     monkeypatch.setattr("sys.platform", "win32" if system == "Windows" else "linux")
-    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release))
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release), raising=False)
     monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
     monkeypatch.setattr("pathlib.Path.read_text", lambda *_args, **_kwargs: "0::/user.slice")
     import io

@@ -119,6 +119,9 @@ only for unscoped legacy entries; a WSL key qualifies its hostname for guest
 lookup. Display labels are a unique-lookup compatibility fallback, never a
 collision with a key or an alias. Logical-machine
 physical metadata is for grouping, not an alternate canonical source/target.
+Passing `entries=registry` includes a unique, unshadowed display label for an
+unscoped legacy entry's package gates; scoped entries never acquire display-name
+gate authority.
 Duplicate logical keys, profile aliases crossing entries, repeated same-platform
 profiles, and legacy WSL mixed with a non-Windows native platform fail closed.
 Collisions with an explicitly declared generated key require repository-owned

@@ -111,6 +111,27 @@ def test_explicit_discovery_target_is_not_guest_qualified(execution_packages):
     )
 
 
+def test_automatic_discovery_preserves_unique_legacy_display_gates(tmp_path, monkeypatch):
+    from agent_machines import identity
+
+    repo = tmp_path / "acme"
+    display = "Example workstation"
+    write_package(repo, "gated.yaml", base_package(name="acme/gated", gate=[display]))
+    write_package(
+        repo, "overlay.yaml", base_package(name="acme/overlay", gate=[display]), machine=display,
+    )
+    (repo / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "example-host": {"hostname": "generated-host", "display_name": display},
+    }}), encoding="utf-8")
+    registry, projects = _registry(tmp_path, acme={"class": "worktree"}), _projects("acme")
+    monkeypatch.setattr(discover.platform, "node", lambda: "generated-host")
+    monkeypatch.setattr(identity, "detect_platform", lambda: "linux")
+    found = discover.discover(registry=registry, projects=projects)
+    assert [package.name for item in found for package in item.packages] == [
+        "acme/gated", "acme/overlay",
+    ]
+
+
 def test_direct_discovery_output_reports_execution_not_hardware(execution_packages, capsys):
     assert discover._main() == 0
     output = capsys.readouterr().out

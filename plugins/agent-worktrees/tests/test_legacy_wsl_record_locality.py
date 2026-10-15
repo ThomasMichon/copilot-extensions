@@ -95,6 +95,30 @@ def test_legacy_wsl_owner_ref_has_local_claimant_liveness(legacy_records):
     assert claimant.local_claimant_alive(legacy_records.owner_ref) is True
 
 
+@pytest.mark.parametrize("checkout_state", ["missing", "file", "foreign-symlink"])
+def test_post_cleanup_legacy_locality_keeps_exact_namespace_and_redirect_fences(
+    legacy_records, tmp_path, checkout_state,
+):
+    checkout = Path(tracking.load_record(legacy_records.paths["wsl"]).worktree_path)
+    checkout.rmdir()
+    if checkout_state == "file":
+        checkout.write_text("not a checkout", encoding="utf-8")
+    elif checkout_state == "foreign-symlink":
+        foreign = tmp_path / "foreign"
+        foreign.mkdir()
+        try:
+            checkout.symlink_to(foreign, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"host cannot create the contained symlink fixture: {exc}")
+    resolved, _, _ = claims_cli._resolve_owner_ref_record_path(
+        legacy_records.owner_ref, legacy_records.config,
+    )
+    assert (resolved == legacy_records.paths["wsl"]) is (checkout_state == "missing")
+    assert claimant.local_claimant_alive(legacy_records.owner_ref) is (
+        False if checkout_state == "missing" else None
+    )
+
+
 def test_legacy_wsl_owner_ref_never_uses_native_remote_death_probe(legacy_records, monkeypatch):
     probes = []
 

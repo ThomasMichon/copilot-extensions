@@ -150,7 +150,9 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         if not machine_label_is_legacy_local(record.machine or "", receiving_config):
             return None
         checkout = Path(record.worktree_path)
-        if not checkout.is_absolute() or not checkout.is_dir():
+        if not checkout.is_absolute() or checkout.is_symlink():
+            return None
+        if checkout.exists() and not checkout.is_dir():
             return None
         repo_config = receiving_config.repos.get(ref.project)
         if repo_config is None:
@@ -159,7 +161,7 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         if not namespace.is_absolute():
             return None
         expected = namespace / ref.worktree_id
-        if checkout.resolve() != expected.resolve():
+        if checkout != expected or checkout.resolve() != namespace.resolve() / ref.worktree_id:
             return None
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot establish legacy WSL record locality: %s", exc)
@@ -186,7 +188,9 @@ def legacy_wsl_owner_ref_is_local(ref: "ClaimRef") -> bool:
     return resolve_legacy_wsl_owner_ref(ref, config) is not None
 
 
-def claim_refs_equivalent(left: "ClaimRef", right: "ClaimRef") -> bool:
+def claim_refs_equivalent(
+    left: "ClaimRef", right: "ClaimRef", *, config: cfg.Config | None = None,
+) -> bool:
     """True when two qualified owner-refs name the SAME local worktree
     record, directly (identical machine/project/worktree_id) or via one
     side's record-scoped legacy WSL spelling for the other's live identity.
@@ -205,7 +209,8 @@ def claim_refs_equivalent(left: "ClaimRef", right: "ClaimRef") -> bool:
     if left.project != right.project or left.worktree_id != right.worktree_id:
         return False
     try:
-        config = cfg.load_config()
+        if config is None:
+            config = cfg.load_config()
     except _RESOLUTION_ERRORS as exc:
         _LOG.warning("Cannot establish legacy WSL claim equivalence: %s", exc)
         return False

@@ -952,11 +952,8 @@ def _load_config_uncached(
         or global_raw.get("platform")
         or detect_platform()
     )
-    machine = (
-        machine_raw.get("machine")
-        or global_raw.get("machine")
-        or detect_machine()
-    )
+    configured_machine = machine_raw.get("machine") or global_raw.get("machine")
+    machine = configured_machine or detect_machine()
     srcroot = machine_raw.get("srcroot") or global_raw.get("srcroot") or ""
 
     # Active project / default repo name.
@@ -1141,6 +1138,8 @@ def _load_config_uncached(
     except FileNotFoundError:
         entries = {}
     if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
+        if not configured_machine:
+            detect_machine(config.default_repo.anchor)
         return config
     # Resolve after the config-source binding is available, without calling
     # load_machines_yaml's overlay fallback (which loads this config recursively).
@@ -1158,7 +1157,9 @@ def _load_config_uncached(
         if any((root / rel).is_file() for rel in (
             Path(INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
         )):
-            return replace(config, machine=detect_machine(anchor, value=config.machine))
+            return replace(config, machine=detect_machine(
+                anchor, value=config.machine if configured_machine else None,
+            ))
     else:
         if machine_raw.get("machine") or global_raw.get("machine"):
             return replace(config, machine=detect_machine(value=config.machine))

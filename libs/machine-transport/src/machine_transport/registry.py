@@ -258,7 +258,9 @@ def parse_machines_yaml(
     return entries
 
 
-def machine_identity_names(entry: MachineIdentity) -> tuple[str, ...]:
+def machine_identity_names(
+    entry: MachineIdentity, *, entries: Mapping[str, MachineIdentity] | None = None,
+) -> tuple[str, ...]:
     """Explicit selection identities, excluding physical metadata for logical entries."""
     values = (entry.key,)
     if not getattr(entry, "execution_platform", ""):
@@ -271,6 +273,15 @@ def machine_identity_names(entry: MachineIdentity) -> tuple[str, ...]:
         *getattr(entry, "compatibility_aliases", ()),
         *(env.alias for env in getattr(entry, "ssh_environments", ())),
     )
+    display = entry.display_name
+    if entries is not None and display and not getattr(entry, "execution_platform", ""):
+        others = [other for other in entries.values() if other is not entry]
+        if not any(
+            other.display_name.casefold() == display.casefold()
+            or display.casefold() in {name.casefold() for name in machine_identity_names(other)}
+            for other in others
+        ):
+            values += (display,)
     return tuple(dict.fromkeys(value for value in values if isinstance(value, str) and value))
 
 
@@ -407,6 +418,17 @@ def find_machine_entry(
         )
         if selected and getattr(selected, "execution_platform", "") == execution_platform:
             return selected
+        if (
+            selected is not None and execution_platform == "wsl"
+            and not any(getattr(entry, "execution_platform", "") for entry in entries.values())
+            and not selected.key.casefold().endswith("-wsl")
+        ):
+            guest = find_machine_entry(
+                entries, split_machine_environment(selected.key, "wsl").logical_machine,
+                reject_ambiguous=reject_ambiguous,
+            )
+            if guest is not None and guest.key.casefold().endswith("-wsl"):
+                return guest
         def physical_host(entry: MachineIdentity) -> str:
             return getattr(entry, "physical_host", "") or split_machine_environment(entry.key).machine
 

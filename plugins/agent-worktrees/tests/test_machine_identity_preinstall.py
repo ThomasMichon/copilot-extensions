@@ -28,11 +28,14 @@ def test_machine_transport_preinstall(tmp_path, suffix, layout):
     dependency.mkdir(parents=True)
     plugin.mkdir(parents=True, exist_ok=True)
     (dependency / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    remote = dependency.parent / "remote-login-shell"
+    remote.mkdir()
+    (remote / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
     source = (PLUGIN / "scripts" / f"install.{suffix}").read_text(encoding="utf-8")
-    start = source.index("    # Vendored machine-transport lib")
+    start = source.index("    # Vendored remote-login-shell lib")
     end = source.index(
         "    # Vendored update-telemetry lib" if suffix == "sh" else "    $installRes =",
-        source.index("\n\n", start) + 2,
+        source.index("    # Vendored machine-transport lib", start),
     )
     block = source[start:end]
     if suffix == "sh":
@@ -58,6 +61,8 @@ def test_machine_transport_preinstall(tmp_path, suffix, layout):
     )
     assert result.returncode == 0, result.stderr
     assert "ERROR" not in result.stdout
-    line, = result.stdout.strip().splitlines()
-    assert line.startswith("INSTALL:")
-    assert Path(line.removeprefix("INSTALL:")).resolve() == dependency.resolve()
+    lines = result.stdout.strip().splitlines()
+    assert all(line.startswith("INSTALL:") for line in lines)
+    assert [Path(line.removeprefix("INSTALL:")).resolve() for line in lines] == [
+        remote.resolve(), dependency.resolve(),
+    ]

@@ -18,7 +18,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 def _powershell_path(path: Path, shell: str) -> str:
     raw = str(path)
-    if Path(shell).name.lower() != "powershell.exe":
+    if os.name == "nt" or Path(shell).name.lower() != "powershell.exe":
         return raw
     converted = subprocess.run(
         ["wslpath", "-w", raw],
@@ -27,6 +27,15 @@ def _powershell_path(path: Path, shell: str) -> str:
         check=False,
     )
     return converted.stdout.strip() or raw
+
+
+def test_native_windows_powershell_path_does_not_require_wslpath(tmp_path, monkeypatch):
+    with monkeypatch.context() as native:
+        native.setattr(os, "name", "nt")
+        native.setattr(
+            subprocess, "run", lambda *_args, **_kwargs: pytest.fail("native paths need no wslpath"),
+        )
+        assert _powershell_path(tmp_path, "powershell.exe") == str(tmp_path)
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh", "bash"])

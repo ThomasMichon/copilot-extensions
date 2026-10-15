@@ -14,6 +14,7 @@ from machine_transport import split_machine_environment
 from . import activity, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
 from . import codename_tracking, config as cfg, machine_identity
 from .launch_trace import append_launch_event
+from .execution_spaces import ExecutionSpaceError
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
@@ -33,17 +34,25 @@ def _target_is_local(
     if not name:
         return False
     target = split_machine_environment(name, environment)
+    from .execution_spaces import registry_for_config
+    from .resolve_machine_cli import _entry_for_environment
+
+    entries = registry_for_config(config)
+    if entries:
+        entry = _entry_for_environment(entries, name, environment)
+        if entry is not None:
+            if target.environment and target.environment != cfg.detect_platform():
+                return False
+            return machine_identity.is_local_machine(entry.key, config)
+    if target.environment and target.environment != cfg.detect_platform():
+        return False
     if target.environment and config.machine:
         current = split_machine_environment(config.machine, cfg.detect_platform())
         if target.machine.casefold() == current.machine.casefold():
             return target.environment == current.environment
     if not target.environment and config.machine and name.casefold() == config.machine.casefold():
         return True
-    from .resolve_machine_cli import _machine_key_for_display
-
-    return machine_identity.is_local_machine(
-        _machine_key_for_display(config, name, environment), config,
-    )
+    return False
 
 
 def _apply_assignment_env(*args, **kwargs):
@@ -480,6 +489,42 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             output.err("Run 'agent-worktrees list' to see available worktrees.")
             return 1
 
+        if state.requested_machine:
+            config = state.load_config()
+            try:
+                target_is_local = _target_is_local(
+                    config, state.requested_machine, getattr(args, "environment", None),
+                )
+            except (ValueError, ExecutionSpaceError) as exc:
+                output.err(str(exc))
+                return 1
+            requested_environment = split_machine_environment(
+                state.requested_machine, getattr(args, "environment", None),
+            ).environment
+            if requested_environment:
+                want_platform = requested_environment
+                if not target_is_local or want_platform != cfg.detect_platform():
+                    from .resolve_machine_cli import _in_ssh_session
+
+                    if _in_ssh_session():
+                        output.err("Cannot dispatch another machine environment from an SSH session.")
+                        return 1
+                    rc = _emit_remote_plan_for_env(
+                        config, state.requested_machine, requested_environment,
+                        ["--new"] if state.use_new else ["--worktree-id", state.worktree_id]
+                        if state.worktree_id else None,
+                    )
+                    if rc is not None:
+                        return rc
+                    output.err("Requested machine environment is unavailable.")
+                    return 1
+            if not target_is_local:
+                rc = _try_machine_handoff(config, state.requested_machine)
+                if rc is not None:
+                    return rc
+                output.err("Requested machine is unavailable.")
+                return 1
+
         if state.worktree_id:
             return _resolve_noninteractive_worktree(state)
 
@@ -491,41 +536,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             except codename_tracking.CodenameAttributionPolicyError as exc:
                 output.err(str(exc))
                 return 1
-
-        if state.requested_machine:
-            config = state.load_config()
-            try:
-                target_is_local = _target_is_local(
-                    config, state.requested_machine, getattr(args, "environment", None),
-                )
-            except ValueError as exc:
-                output.err(str(exc))
-                return 1
-            requested_environment = getattr(args, "environment", None) or ""
-            if requested_environment:
-                from .resolve_machine_cli import _ENV_LABEL_TO_NAME
-
-                want_platform = _ENV_LABEL_TO_NAME.get(requested_environment.lower())
-                if want_platform is None:
-                    output.err(f"Unknown environment: {requested_environment}")
-                    return 1
-                if not target_is_local or want_platform != cfg.detect_platform():
-                    from .resolve_machine_cli import _in_ssh_session
-
-                    if _in_ssh_session():
-                        output.err("Cannot dispatch another machine environment from an SSH session.")
-                        return 1
-                    rc = _emit_remote_plan_for_env(
-                        config, state.requested_machine, requested_environment
-                    )
-                    if rc is not None:
-                        return rc
-                    output.err("Requested machine environment is unavailable.")
-                    return 1
-            if not target_is_local:
-                rc = _try_machine_handoff(config, state.requested_machine)
-                if rc is not None:
-                    return rc
 
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
@@ -598,7 +608,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         same_machine = _target_is_local(
             config, state.requested_machine, getattr(state.args, "environment", None),
         )
-    except ValueError as exc:
+    except (ValueError, ExecutionSpaceError) as exc:
         return output._json_error(str(exc))
     requested_environment = getattr(state.args, "environment", None) or ""
     same_environment = True
@@ -708,7 +718,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
-    from .execution_spaces import ExecutionSpaceError, require_record_mutation
+    from .execution_spaces import require_record_mutation
     try:
         require_record_mutation(record, config)
     except ExecutionSpaceError as exc:

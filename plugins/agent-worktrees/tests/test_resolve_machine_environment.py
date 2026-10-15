@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,22 @@ import pytest
 from agent_worktrees import config as cfg, resolve_cli, resolve_machine_cli
 
 pytestmark = pytest.mark.guard
+
+
+def test_json_route_reports_execution_authority_error_without_starting_a_launch(monkeypatch, capfd):
+    from agent_worktrees.execution_spaces import ExecutionSpaceError
+
+    state = resolve_cli.ResolveCommandState.from_args(SimpleNamespace(
+        json=True, new_worktree=True, machine="example-host", environment="WSL", worktree_id=None,
+    ))
+    state.config = SimpleNamespace(machine="example-host-wsl")
+
+    def invalid(*_args, **_kwargs):
+        raise ExecutionSpaceError("fixture registered authority is invalid")
+
+    monkeypatch.setattr(resolve_cli, "_target_is_local", invalid)
+    assert resolve_cli._resolve_json_mode(state) == 1
+    assert json.loads(capfd.readouterr().out)["error"] == "fixture registered authority is invalid"
 
 
 def _entries() -> dict[str, cfg.MachineEntry]:
@@ -83,7 +100,7 @@ def test_native_side_dispatches_tuple_to_guest_transport(monkeypatch) -> None:
         machine="example-host", default_repo=SimpleNamespace(anchor="example-repo"),
     )
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args: _entries())
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args, **_kwargs: _entries())
     monkeypatch.setattr(cfg, "project_name", lambda: "example-project")
     monkeypatch.setattr(
         resolve_cli.machine_identity, "is_local_machine",
@@ -98,6 +115,106 @@ def test_native_side_dispatches_tuple_to_guest_transport(monkeypatch) -> None:
     assert plans[0]["machine"] == "example-host-wsl"
     assert plans[0]["ssh_alias"] == "guest-ssh"
     assert "--worktree-id example-worktree" in plans[0]["remote_command"]
+
+
+def test_explicit_association_precedes_lexical_locality_and_allocator(monkeypatch):
+    entries = _entries()
+    entries["example-host-wsl"] = replace(
+        entries["example-host-wsl"], physical_host="another-host",
+    )
+    entries["custom-guest"] = cfg.MachineEntry(
+        key="custom-guest", display_name="Custom guest", execution_platform="wsl",
+        physical_host="example-host", ssh_environments=[cfg.SSHEnvironment("wsl", "custom-ssh")],
+    )
+    config = cfg.Config(
+        srcroot="", machine="example-host-wsl", platform="wsl", repo_name="example",
+        repos={"example": cfg.RepoConfig(anchor="example-repo", worktree_root="")},
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args, **_kwargs: entries)
+    monkeypatch.setattr(cfg, "project_name", lambda: "example")
+    assert not resolve_cli._target_is_local(config, "example-host", "WSL")
+    monkeypatch.setattr(
+        resolve_cli, "_create_worktree_core",
+        lambda *_args, **_kwargs: pytest.fail("a registered foreign guest cannot use the local allocator"),
+    )
+    state = resolve_cli.ResolveCommandState.from_args(SimpleNamespace(
+        json=True, new_worktree=True, machine="example-host", environment="WSL", worktree_id=None,
+    ))
+    state.config = config
+    plans = []
+    monkeypatch.setattr(resolve_machine_cli, "_emit_plan", plans.append)
+    assert resolve_cli._resolve_json_mode(state) == 0
+    assert plans[0]["machine"] == "custom-guest"
+    assert plans[0]["ssh_alias"] == "custom-ssh"
+
+
+@pytest.mark.parametrize(("name", "environment"), [
+    ("generated-host", "WSL"), ("generated-host-wsl", None),
+])
+def test_legacy_hostname_guest_launch_uses_independent_profile(monkeypatch, name, environment):
+    entries = {
+        "example-host": cfg.MachineEntry(
+            key="example-host", display_name="Host", hostname="generated-host",
+            ssh_environments=[cfg.SSHEnvironment("windows", "native-ssh")],
+        ),
+        "example-host-wsl": cfg.MachineEntry(
+            key="example-host-wsl", display_name="Guest", hostname="generated-host",
+            ssh_environments=[cfg.SSHEnvironment("wsl", "guest-ssh")],
+        ),
+    }
+    config = SimpleNamespace(default_repo=SimpleNamespace(anchor="example-repo"))
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args: entries)
+    monkeypatch.setattr(cfg, "project_name", lambda: "example")
+    plans = []
+    monkeypatch.setattr(resolve_machine_cli, "_emit_plan", plans.append)
+    assert resolve_machine_cli._emit_remote_plan_for_env(config, name, environment) == 0
+    assert plans[0]["machine"] == "example-host-wsl"
+    assert plans[0]["ssh_alias"] == "guest-ssh"
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive", "interactive-new", "interactive-resume"])
+def test_suffix_only_guest_never_launches_locally_on_native_host(monkeypatch, surface):
+    config = cfg.Config(
+        srcroot="", machine="generated-host", platform="windows", repo_name="example",
+        repos={"example": cfg.RepoConfig(anchor="example-repo", worktree_root="")},
+    )
+    native = cfg.MachineEntry(
+        key="example-host", display_name="Host", hostname="generated-host", environment="Windows",
+        ssh_environments=[
+            cfg.SSHEnvironment("windows", "native-ssh"), cfg.SSHEnvironment("wsl", "guest-ssh"),
+        ],
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *_args, **_kwargs: {native.key: native})
+    monkeypatch.setattr(cfg, "load_config", lambda *_args, **_kwargs: config)
+    monkeypatch.setattr(cfg, "project_name", lambda: "example")
+    monkeypatch.setattr(
+        resolve_cli, "_create_worktree_core",
+        lambda *_args, **_kwargs: pytest.fail("a native process cannot allocate a guest checkout"),
+    )
+    monkeypatch.setattr(
+        resolve_cli, "_try_machine_handoff",
+        lambda *_args, **_kwargs: pytest.fail("suffix-only selectors need environment-aware routing"),
+    )
+    monkeypatch.setattr(
+        resolve_cli, "_resolve_new",
+        lambda *_args, **_kwargs: pytest.fail("a foreign guest cannot use local creation"),
+    )
+    monkeypatch.setattr(
+        resolve_cli, "_resolve_noninteractive_worktree",
+        lambda *_args, **_kwargs: pytest.fail("a foreign guest cannot use local resume"),
+    )
+    monkeypatch.setattr(resolve_cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(resolve_machine_cli, "_in_ssh_session", lambda: False)
+    args = SimpleNamespace(
+        json=surface == "json", new_worktree=surface == "interactive-new", machine="example-host-wsl",
+        environment=None, worktree_id="wt-guest" if surface in ("json", "interactive-resume") else None,
+    )
+    plans = []
+    monkeypatch.setattr(resolve_machine_cli, "_emit_plan", plans.append)
+    assert resolve_cli.cmd_resolve(args) == 0
+    assert plans[0]["ssh_alias"] == "guest-ssh"
 
 
 @pytest.mark.parametrize(("name", "environment"), [

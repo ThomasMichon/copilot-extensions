@@ -36,9 +36,14 @@ def _entry_for_environment(
     target = split_machine_environment(name, environment)
     if not target.environment:
         return find_machine_entry(entries, name, reject_ambiguous=True)
-    return find_machine_entry(
+    entry = find_machine_entry(
         entries, name, reject_ambiguous=True, execution_platform=target.environment,
     )
+    if entry is None and target.machine != name:
+        entry = find_machine_entry(
+            entries, target.machine, reject_ambiguous=True, execution_platform=target.environment,
+        )
+    return entry
 
 
 def _load_remote_machines(
@@ -177,11 +182,8 @@ def _emit_remote_plan_for_env(
     except (FileNotFoundError, ValueError):
         return None
 
-    requested_environment = bool((env_label or "").strip())
-    want = _ENV_LABEL_TO_NAME.get((env_label or "").lower())
-    if requested_environment and not want:
-        return None
     try:
+        want = split_machine_environment(machine_display, env_label).environment
         entry = _entry_for_environment(entries, machine_display, env_label)
     except ValueError as exc:
         return output._json_error(str(exc))

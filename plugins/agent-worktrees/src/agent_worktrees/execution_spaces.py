@@ -126,13 +126,16 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
             settled = tracking.settle_resource_claim(
                 parent, child_ref, obligations.AT_REST, save=False,
             )
-            if settled is None and legacy_parent:
-                legacy_child_ref = tracking.format_claim_ref(
-                    owner.machine, config.repo_name, worktree_id,
-                )
-                settled = tracking.settle_resource_claim(
-                    parent, legacy_child_ref, obligations.AT_REST, save=False,
-                )
+            if settled is None:
+                current_child = tracking.parse_claim_ref(child_ref)
+                for claim in parent.resources:
+                    if claim.kind == "worktree" and legacy_wsl_record_locality.claim_refs_equivalent(
+                        tracking.parse_claim_ref(claim.ref), current_child, config=config,
+                    ):
+                        settled = tracking.settle_resource_claim(
+                            parent, claim.ref, obligations.AT_REST, save=False,
+                        )
+                        break
             if settled is not None:
                 tracking.save_record(parent, parent_path)
         if settled is not None:

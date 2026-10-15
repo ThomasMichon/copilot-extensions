@@ -147,7 +147,7 @@ def resolve_machine(
             accepted=(name,),
             warnings=tuple(warnings),
         )
-    accepted = machine_identity_names(entry)
+    accepted = machine_identity_names(entry, entries=entries)
     if not entry.execution_platform and context != "wsl":
         accepted = (*accepted, raw)
     return MachineIdentity(

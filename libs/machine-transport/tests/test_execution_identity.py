@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import ast
+from pathlib import Path
 
 from types import SimpleNamespace
 
@@ -97,7 +99,7 @@ def test_detect_platform_ignores_inherited_environment(
     monkeypatch, system, release, expected,
 ):
     monkeypatch.setattr("sys.platform", "win32" if system == "Windows" else "linux")
-    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release))
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release), raising=False)
     monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
     monkeypatch.setattr("pathlib.Path.read_text", lambda *_args, **_kwargs: "0::/user.slice")
     monkeypatch.setattr("builtins.open", lambda *_args, **_kwargs: io.StringIO("Linux generic"))
@@ -111,7 +113,33 @@ def test_detect_platform_ignores_inherited_environment(
 ])
 def test_markerless_containers_do_not_inherit_wsl_identity(monkeypatch, cgroup):
     monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"))
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"), raising=False)
     monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
     monkeypatch.setattr("pathlib.Path.read_text", lambda *_args, **_kwargs: cgroup)
     assert detect_platform() == "linux"
+
+
+def test_platform_fixture_uname_patches_support_native_windows_absence():
+    root = Path(__file__).resolve().parents[3]
+    fixtures = [
+        Path(__file__).relative_to(root),
+        Path("libs/machine-transport/tests/test_transport.py"),
+        Path("plugins/agent-machines/tests/test_identity.py"),
+        Path("plugins/agent-worktrees/tests/test_execution_identity.py"),
+        Path("plugins/agent-worktrees/tests/test_config.py"),
+    ]
+    count = 0
+    for fixture in fixtures:
+        tree = ast.parse((root / fixture).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "setattr" and node.args
+                and isinstance(node.args[0], ast.Constant) and node.args[0].value == "os.uname"
+            ):
+                assert any(
+                    keyword.arg == "raising" and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is False for keyword in node.keywords
+                ), fixture
+                count += 1
+    assert count == 8

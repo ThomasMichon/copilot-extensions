@@ -78,6 +78,29 @@ def test_unknown_machine_preserves_raw_fallback(tmp_path):
     assert identity.topology_path is None
 
 
+@pytest.mark.parametrize("other", [
+    {"key": "other", "display_name": "Legacy label"},
+    {"key": "other", "alias": "Legacy label"},
+    {"key": "Legacy label"},
+])
+def test_automatic_legacy_display_gate_never_shadows_another_identity(tmp_path, monkeypatch, other):
+    key = other["key"]
+    _topology(tmp_path, {
+        "example-host": {"hostname": "generated-host", "display_name": "Legacy label"},
+        key: {name: value for name, value in other.items() if name != "key"},
+    })
+    monkeypatch.setattr("agent_machines.identity.platform.node", lambda: "generated-host")
+    monkeypatch.setattr("agent_machines.identity.detect_platform", lambda: "linux")
+    assert "Legacy label" not in resolve_machine(topology_repos=[tmp_path]).accepted
+
+
+def test_explicit_space_display_metadata_never_becomes_a_package_gate(tmp_path):
+    _topology(tmp_path, {"guest": {
+        "execution_platform": "wsl", "physical_host": "example-host", "display_name": "Legacy label",
+    }})
+    assert resolve_machine("guest", topology_repos=[tmp_path]).accepted == ("guest",)
+
+
 def test_legacy_windows_wsl_identity_and_gate_aliases_are_independent(tmp_path):
     repo = tmp_path / "repo"
     _topology(repo, {"desktop": {
@@ -291,11 +314,12 @@ def test_execution_platform_ignores_inherited_environment(monkeypatch, system, r
     from machine_transport import detect_platform
 
     monkeypatch.setattr("sys.platform", "win32" if system == "Windows" else "linux")
-    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release))
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release), raising=False)
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: "0::/user.slice")
     real_is_file = Path.is_file
     monkeypatch.setattr(
         Path, "is_file",
-        lambda path: False if str(path) in ("/.dockerenv", "/run/.containerenv")
+        lambda path: False if path in (Path("/.dockerenv"), Path("/run/.containerenv"))
         else real_is_file(path),
     )
     monkeypatch.setattr("builtins.open", lambda *_args, **_kwargs: io.StringIO("Linux generic"))
@@ -310,12 +334,13 @@ def test_container_marker_distinguishes_shared_wsl_kernel(monkeypatch, marker, i
     from machine_transport import detect_platform
 
     monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"))
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="6.6-microsoft-standard-WSL2"), raising=False)
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: "0::/user.slice")
     real_is_file = Path.is_file
     monkeypatch.setattr(
         Path, "is_file",
-        lambda path: str(path) == marker
-        if str(path) in ("/.dockerenv", "/run/.containerenv") else real_is_file(path),
+        lambda path: (path == Path(marker) if marker else False)
+        if path in (Path("/.dockerenv"), Path("/run/.containerenv")) else real_is_file(path),
     )
     monkeypatch.setattr(
         "builtins.open", lambda *_args, **_kwargs: io.StringIO("Linux microsoft-standard-WSL2"),
@@ -344,11 +369,12 @@ def test_headless_wsl_proc_fallback_without_container_marker(monkeypatch):
     from machine_transport import detect_platform
 
     monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="generic-kernel"))
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="generic-kernel"), raising=False)
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: "0::/user.slice")
     real_is_file = Path.is_file
     monkeypatch.setattr(
         Path, "is_file",
-        lambda path: False if str(path) in ("/.dockerenv", "/run/.containerenv")
+        lambda path: False if path in (Path("/.dockerenv"), Path("/run/.containerenv"))
         else real_is_file(path),
     )
     monkeypatch.setattr(
