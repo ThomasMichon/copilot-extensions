@@ -318,11 +318,11 @@ def _anchor_roots() -> tuple[Path, ...]:
                 if _identity(project["project"]["name"]) != _identity(entry["name"]):
                     raise DependencyPolicyError("canonical project identity is inconsistent")
                 roots.add(path)
-                pending.append(path)
+                pending.append((path, path / "libs"))
         if owner_payload is not None and owner_payload not in roots:
             raise DependencyPolicyError("installer helper owner is not a roster-attributed project")
         while pending:
-            source = pending.pop()
+            source, library_root = pending.pop()
             mappings = _toml(_contained(source / "pyproject.toml", (repository,))).get("tool", {}).get("uv", {}).get("sources", {})
             for name, entries in mappings.items():
                 for entry in entries if isinstance(entries, list) else [entries]:
@@ -330,13 +330,14 @@ def _anchor_roots() -> tuple[Path, ...]:
                         continue
                     child = _contained(source / entry["path"], (repository,))
                     if not (child.is_relative_to(repository / "libs")
-                            or child.is_relative_to(source / "libs")):
+                            or child.is_relative_to(library_root)):
                         raise DependencyPolicyError("canonical local graph lacks library attribution")
                     if _identity(_toml(_contained(child / "pyproject.toml", (repository,)))["project"]["name"]) != _identity(name):
                         raise DependencyPolicyError("canonical library identity is inconsistent")
                     if child not in roots:
                         roots.add(child)
-                        pending.append(child)
+                        child_root = repository / "libs" if child.is_relative_to(repository / "libs") else library_root
+                        pending.append((child, child_root))
         return tuple(sorted(roots))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise DependencyPolicyError("canonical source ownership could not be established") from exc
