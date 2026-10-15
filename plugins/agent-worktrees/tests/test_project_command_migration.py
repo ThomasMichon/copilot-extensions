@@ -978,6 +978,134 @@ def test_publication_without_admission_fails_before_capture(command_home, monkey
     assert not inst._receipt_path("demo").exists()
 
 
+def _seed_foreign_transfer(command_home, monkeypatch, receipt_kind):
+    current, _old = command_home
+    foreign = current.parent.parent / "foreign" / "agent-worktrees"
+    foreign.mkdir(parents=True)
+    (foreign / "plugin.json").write_bytes((current / "plugin.json").read_bytes())
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(foreign))
+    inst._deploy_project_binstub("demo")
+    receipt_path = inst._receipt_path("demo")
+    if receipt_kind == "foreign-project":
+        receipt = inst._read_receipt("demo")
+        receipt["project"] = {"name": "prior-project", "path": "/prior/project", "remote": ""}
+        inst._write_receipt("demo", receipt)
+    elif receipt_kind == "cell":
+        receipt = inst._read_receipt("demo")
+        receipt["owner"]["marketplace_id"] = "prior-cell"
+        receipt["owner"]["install_receipt"] = "prior-installation-receipt"
+        receipt["runtime"]["root"] = "/prior/runtime"
+        inst._write_receipt("demo", receipt)
+    elif receipt_kind == "corrupt":
+        receipt_path.write_bytes(b"\xffinvalid prior receipt")
+    elif receipt_kind == "unreceipted":
+        receipt_path.unlink()
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
+    return foreign
+
+
+@pytest.mark.parametrize("receipt_kind", ["foreign", "foreign-project", "cell", "corrupt", "unreceipted"])
+def test_interrupted_explicit_transfer_recovers_without_retransfer(
+    command_home, monkeypatch, receipt_kind
+):
+    from agent_worktrees import project_command_transaction as tx
+
+    _seed_foreign_transfer(command_home, monkeypatch, receipt_kind)
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    before = {p: p.read_bytes() for p in paths}
+    destination = inst._binstub_owner()
+    original = tx._replace
+    interrupted = False
+
+    def interrupt_after_first_sibling(path, data, mode, **kwargs):
+        nonlocal interrupted
+        original(path, data, mode, **kwargs)
+        if not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("interrupted authorized transfer")
+
+    monkeypatch.setattr(tx, "_replace", interrupt_after_first_sibling)
+    with pytest.raises(KeyboardInterrupt):
+        inst.transfer_project_binstub("demo")
+    monkeypatch.setattr(tx, "_replace", original)
+    pending = inst._read_receipt("demo")
+    assert pending["owner"] == destination
+    assert pending["project"] == inst._project_identity("demo")
+    assert pending["runtime"] == pending["transaction"]["receipt"]["runtime"]
+    if len(paths) == 2:
+        assert paths[0].read_bytes() != before[paths[0]]
+        assert paths[1].read_bytes() == before[paths[1]]
+    result = inst.reconcile_binstubs()
+    assert result["blocked"] == result["preserved"] == []
+    receipt = inst._read_receipt("demo")
+    assert receipt["owner"] == destination
+    assert receipt["project"] == inst._project_identity("demo")
+    assert "transaction" not in receipt
+    assert all(p.read_bytes() == content.encode("utf-8")
+               for p, content in inst._project_binstub_specs("demo"))
+    mtimes = {p: p.stat().st_mtime_ns for p in paths + [inst._receipt_path("demo")]}
+    assert inst.reconcile_binstubs()["added"] == 0
+    assert mtimes == {p: p.stat().st_mtime_ns for p in mtimes}
+
+
+@pytest.mark.parametrize("interference", ["edit", "foreign-caller"])
+def test_interrupted_transfer_still_protects_edited_and_foreign_state(
+    command_home, monkeypatch, interference
+):
+    from agent_worktrees import project_command_transaction as tx
+
+    foreign = _seed_foreign_transfer(command_home, monkeypatch, "foreign")
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    original = tx._replace
+
+    def interrupt(path, data, mode, **kwargs):
+        original(path, data, mode, **kwargs)
+        raise KeyboardInterrupt("interrupted authorized transfer")
+
+    monkeypatch.setattr(tx, "_replace", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        inst.transfer_project_binstub("demo")
+    monkeypatch.setattr(tx, "_replace", original)
+    if interference == "edit":
+        paths[-1].write_bytes(b"operator edit after interrupted transfer\n")
+    else:
+        monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(foreign))
+    before = {p: p.read_bytes() for p in paths}
+    receipt_before = inst._receipt_path("demo").read_bytes()
+    result = inst.reconcile_binstubs()
+    assert result["blocked"] == result["preserved"] == ["demo"]
+    assert {p: p.read_bytes() for p in paths} == before
+    assert inst._receipt_path("demo").read_bytes() == receipt_before
+
+
+@pytest.mark.parametrize("receipt_kind", ["foreign", "foreign-project", "cell", "corrupt", "unreceipted"])
+def test_failed_explicit_transfer_restores_exact_prior_owner_and_bytes(
+    command_home, monkeypatch, receipt_kind
+):
+    from agent_worktrees import project_command_transaction as tx
+
+    _seed_foreign_transfer(command_home, monkeypatch, receipt_kind)
+    paths = [p for p, _ in inst._project_binstub_specs("demo")]
+    before = {p: p.read_bytes() for p in paths}
+    receipt_path = inst._receipt_path("demo")
+    previous_bytes = receipt_path.read_bytes() if receipt_path.exists() else None
+    original = tx._replace
+    failed = False
+
+    def fail_after_first(path, data, mode, **kwargs):
+        nonlocal failed
+        original(path, data, mode, **kwargs)
+        if not failed:
+            failed = True
+            raise PermissionError("transfer publication denied")
+
+    monkeypatch.setattr(tx, "_replace", fail_after_first)
+    with pytest.raises(PermissionError, match="denied"):
+        inst.transfer_project_binstub("demo")
+    assert {p: p.read_bytes() for p in paths} == before
+    assert (receipt_path.read_bytes() if receipt_path.exists() else None) == previous_bytes
+
+
 def test_unknown_unreceipted_bytes_are_preserved(command_home, monkeypatch, capsys):
     before = seed_old(monkeypatch, command_home, receipted=False)
     p = next(iter(before))

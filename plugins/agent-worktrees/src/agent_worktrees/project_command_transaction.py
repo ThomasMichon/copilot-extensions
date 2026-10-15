@@ -239,7 +239,7 @@ def publish(
     changed = sum(before[key]["bytes"] != after[key]["bytes"] for key in before)
     if not changed and final == previous and all(before[key]["mode"] == after[key]["mode"] for key in before):
         return 0
-    journal = dict(previous or final or {
+    journal = dict((None if transfer else previous) or final or {
         "schema": inst._BINSTUB_RECEIPT_SCHEMA, "version": inst._BINSTUB_RECEIPT_VERSION,
         "owner": owner, "project": identity, "stubs": {},
         "runtime": {"root": str(inst.install_dir()), "resolver": "payload-local"},

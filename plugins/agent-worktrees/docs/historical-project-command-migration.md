@@ -65,6 +65,12 @@ working snapshot against the evidence before writing a journal: changed or
 newly appeared bytes are preserved and rejected, not adopted as a new prior
 state. Missing admission evidence fails closed rather than triggering an
 implicit fresh validation.
+An explicitly authorized transfer journals the destination owner, project and
+runtime identity, so ordinary recovery can finish an interrupted cross-owner
+replacement without repeating `--transfer`. The exact prior receipt bytes stay
+available for ordinary-failure rollback; they do not remain the journal's
+recovery owner. Edited intermediate commands and callers from another owner
+remain blocked.
 Nested intended-receipt sections are structurally validated before use; a
 corrupt journal is preserved and reported without aborting unrelated projects.
 
