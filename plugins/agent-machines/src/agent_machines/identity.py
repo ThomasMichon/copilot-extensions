@@ -104,7 +104,6 @@ def resolve_machine(
                     if (
                         prior.execution_platform != entry.execution_platform
                         or prior.physical_host != entry.physical_host
-                        or prior.ssh_environments != entry.ssh_environments
                     ):
                         raise ValueError(f"conflicting topology declarations for machine {key!r}")
                     entries[prior_key] = replace(

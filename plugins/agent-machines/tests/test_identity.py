@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+
 import pytest
 import yaml
 
@@ -116,6 +121,104 @@ def test_explicit_logical_identity_preserves_physical_relationship(tmp_path):
     assert guest.canonical == "guest"
     assert guest.physical_host == "desktop"
     assert guest.accepted == ("guest",)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("platform_name", ["windows", "wsl"])
+def test_mixed_topologies_ignore_transport_details_in_identity_and_native_cli(
+    tmp_path, reverse, platform_name,
+):
+    legacy, explicit = tmp_path / "legacy", tmp_path / "explicit"
+    _topology(legacy, {"desktop": {"ssh": {"environments": [
+        {"name": "windows", "alias": "native-profile"},
+        {"name": "wsl", "alias": "guest-profile", "user": "guest"},
+    ]}}})
+    _topology(explicit, {
+        key: {
+            "execution_platform": execution_platform,
+            "physical_host": "desktop",
+            "ssh": {"environments": [{
+                "name": execution_platform, "alias": alias,
+                "port": port, "user": "operator", "shell": shell,
+            }]},
+        }
+        for key, execution_platform, alias, port, shell in (
+            ("desktop", "windows", "native-profile", 2222, "pwsh"),
+            ("desktop-wsl", "wsl", "guest-profile", 2200, "bash"),
+        )
+    })
+    repos = [explicit, legacy] if reverse else [legacy, explicit]
+    requested = "native-profile" if platform_name == "windows" else "guest-profile"
+
+    identity = resolve_machine(requested, topology_repos=repos)
+
+    assert identity.canonical == ("desktop" if platform_name == "windows" else "desktop-wsl")
+    assert identity.execution_platform == platform_name
+    assert identity.physical_host == "desktop"
+    assert identity.accepted == (identity.canonical, requested)
+    assert identity.warnings == ()
+
+    home = tmp_path / "home"
+    registry = home / ".agent-worktrees"
+    registry.mkdir(parents=True)
+    (registry / "repos.yaml").write_text(yaml.safe_dump({
+        "schema_version": 1,
+        "repos": {
+            repo.name: {"class": "worktree", **{
+                platform: str(repo) for platform in ("windows", "linux", "wsl")
+            }}
+            for repo in repos
+        },
+    }), encoding="utf-8")
+    (registry / "projects.yaml").write_text(yaml.safe_dump({
+        "schema_version": 2,
+        "projects": {repo.name: {"config_dir": str(home / repo.name)} for repo in repos},
+    }), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-m", "agent_machines", "discover", "--machine", requested, "--json"],
+        cwd=tmp_path, env={**os.environ, "HOME": str(home), "USERPROFILE": str(home)},
+        capture_output=True, text=True, timeout=20,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["machine"] == identity.canonical
+    assert payload["machine_aliases"] == list(identity.accepted)
+    assert payload["machine_identity_warnings"] == []
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("conflict", [
+    {"execution_platform": "linux"},
+    {"physical_host": "other-host"},
+])
+def test_duplicate_logical_machine_conflicts_still_fail_closed(tmp_path, reverse, conflict):
+    first, second = tmp_path / "first", tmp_path / "second"
+    entry = {"execution_platform": "windows", "physical_host": "desktop"}
+    _topology(first, {"native": entry})
+    _topology(second, {"native": {**entry, **conflict}})
+    repos = [second, first] if reverse else [first, second]
+
+    with pytest.raises(ManifestError, match="conflicting topology declarations"):
+        resolve_machine("native", topology_repos=repos)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_merged_profile_aliases_still_reject_cross_machine_ambiguity(tmp_path, reverse):
+    first, second = tmp_path / "first", tmp_path / "second"
+    entry = {"execution_platform": "windows", "physical_host": "desktop"}
+    _topology(first, {
+        "native": {**entry, "alias": "original-profile"},
+        "other": {"execution_platform": "linux", "alias": "shared-profile"},
+    })
+    _topology(second, {"native": {
+        **entry, "ssh": {"environments": [
+            {"name": "windows", "alias": "shared-profile", "port": 2222},
+        ]},
+    }})
+    repos = [second, first] if reverse else [first, second]
+
+    with pytest.raises(ManifestError, match="ambiguous.*native, other"):
+        resolve_machine("native", topology_repos=repos)
 
 
 def test_known_platform_does_not_choose_among_same_platform_entries(tmp_path):

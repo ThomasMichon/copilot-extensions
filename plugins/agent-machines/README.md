@@ -544,6 +544,12 @@ not the native key or shared physical hostname. No package, persisted registrati
 or repository topology is rewritten; move any WSL-specific package gates to the
 logical WSL key through normal repository maintenance.
 
+Across adopted repositories, duplicate logical keys must agree on execution
+platform and physical host. SSH connection details such as port, user and shell
+do not define machine identity; profile aliases are combined and still checked
+for cross-machine ambiguity. Legacy and explicit logical declarations can
+therefore coexist without requiring identical transport configuration.
+
 The canonical root is `.copilot-extensions/agent-machines/`. Legacy
 `.agent-machines/` and `.github/machine-state/` remain bounded fallbacks only
 when the canonical root is absent. An explicit marketplace-specific overlay may
