@@ -34,7 +34,7 @@ def _json(raw: str) -> Any:
 
     try:
         return json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
-    except (ValueError, TypeError) as error:
+    except (ValueError, TypeError, RecursionError) as error:
         raise VerificationError("Malformed Docker JSON response") from error
 
 

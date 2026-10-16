@@ -77,6 +77,8 @@ trailer terminator. Chunk extensions are unsupported and refuse explicitly.
 A single buffered reader preserves all unread bytes between requests; padding
 or unsolicited bytes cannot be discarded to reveal a later apparent response.
 The absolute deadline is rechecked after decoding and before an operation returns.
+Excessive JSON nesting is a verification error; failed admission and later
+decoding failures close both the connection and response reader without reconnecting.
 This adapter spawns no child processes and requires no background daemon.
 
 `LocalDaemonAdmission` is a provider-trusted **configuration capability**, never

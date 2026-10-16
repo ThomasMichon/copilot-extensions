@@ -1,6 +1,7 @@
 """Real local stream fixtures: one operation cannot reconnect onto daemon B."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import socket
@@ -80,6 +81,10 @@ class FixtureDaemon:
                         else:
                             result = self.resources[IDENTIFIER]
                         payload = json.dumps(result).encode()
+                        if (self.behavior == "nested-info" and route == "/info") or (
+                            self.behavior == "nested-inventory" and route == "/containers/json"
+                        ):
+                            payload = b"[" * 10000 + b"0" + b"]" * 10000
                         if self.behavior == "padding" and route == "/info":
                             first = f"HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\n\r\n".encode() + payload
                             connection.sendall(first + b"X" * (8192 - len(first))
@@ -197,6 +202,36 @@ def test_read_ahead_padding_cannot_be_discarded_to_expose_fake_absence(daemon: F
     with pytest.raises(VerificationError):
         verifier(daemon).probe(identity())
     assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
+
+
+@pytest.mark.parametrize("behavior", ["nested-info", "nested-inventory"])
+def test_nested_json_closes_all_session_resources_without_reconnect(
+    daemon: FixtureDaemon, monkeypatch: pytest.MonkeyPatch, behavior: str,
+) -> None:
+    from docker_resource_producer import local_session
+
+    daemon.behavior = behavior
+    host = "unix://" + str(daemon.path)
+    session = LocalDaemonSession(Endpoint(host, "daemon-a"), LocalDaemonAdmission(host))
+    decode = local_session._json
+    resources: list[tuple[socket.socket | None, io.BufferedReader | None, io.RawIOBase | None]] = []
+
+    def capture_decode(raw: str) -> object:
+        resources.append((session.connection, session.reader, session.raw_reader))
+        return decode(raw)
+
+    monkeypatch.setattr(local_session, "_json", capture_decode)
+    with pytest.raises(VerificationError):
+        with session:
+            session.request("GET", "/containers/json?all=1")
+    assert session.connection is None and session.reader is None and session.raw_reader is None
+    assert resources
+    for connection, reader, raw_reader in resources:
+        assert connection is not None and connection.fileno() == -1
+        assert reader is not None and reader.closed
+        assert raw_reader is not None and raw_reader.closed
+    assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
+    assert all(method != "DELETE" for method, _target in daemon.calls)
 
 
 def test_expiry_during_json_decode_closes_before_return(daemon: FixtureDaemon, monkeypatch) -> None:

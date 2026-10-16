@@ -56,6 +56,13 @@ def logs(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.with_suffix(".log").read_text().splitlines()]
 
 
+def test_nested_json_is_a_verification_error() -> None:
+    from docker_resource_producer.client import _json
+
+    with pytest.raises(VerificationError, match="Malformed Docker JSON"):
+        _json("[" * 10000 + "0" + "]" * 10000)
+
+
 def test_diagnostic_snapshot_cannot_authorize_proof_or_removal(fixture: tuple) -> None:
     client, path, _state = fixture
     kind = "container"
