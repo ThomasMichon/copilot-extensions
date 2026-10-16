@@ -55,7 +55,7 @@ def validate_inventory(raw: str, *, fresh: bool = False) -> float | None:
         data = json.loads(raw)
     except json.JSONDecodeError:
         raise DiscoveryReadError("source-malformed") from None
-    observed = None
+    observed = time.monotonic()
     if isinstance(data, dict):
         version = data.get("version", 1)
         if type(version) is not int:
@@ -70,12 +70,14 @@ def validate_inventory(raw: str, *, fresh: bool = False) -> float | None:
             raise DiscoveryReadError("source-incomplete")
         if data.get("availability") is not None:
             raise DiscoveryReadError("source-degraded")
-        if "projection" in data:
-            projection = data["projection"]
+        if "projection" in data or "contract_version" in data:
+            if type(data.get("contract_version")) is not int:
+                raise DiscoveryReadError("source-malformed")
+            if data["contract_version"] != 1:
+                raise DiscoveryReadError("source-incompatible")
+            projection = data.get("projection")
             if (
-                type(data.get("contract_version")) is not int
-                or data["contract_version"] != 1
-                or not isinstance(projection, dict)
+                not isinstance(projection, dict)
                 or projection.get("quality") != "current"
             ):
                 raise DiscoveryReadError("source-incomplete")

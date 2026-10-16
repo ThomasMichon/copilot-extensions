@@ -118,3 +118,45 @@ async def test_python310_async_timeout_preserves_pending_holder(
     finally:
         release.set()
         await task
+
+
+@pytest.mark.parametrize("version", [None, True, "1", 2, 1])
+@pytest.mark.parametrize("fresh", [False, True])
+async def test_declared_roster_contract_requires_valid_version_and_projection(
+    version: object, fresh: bool,
+) -> None:
+    raw = json.dumps({"ok": True, "contract_version": version, "worktrees": []})
+    with pytest.raises(refresh.DiscoveryReadError):
+        refresh.validate_inventory(raw, fresh=fresh)
+
+
+async def test_fast_legacy_source_ages_while_a_peer_remains_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr(refresh, "time", SimpleNamespace(
+        monotonic=lambda: clock.now, time=time.time,
+    ))
+    cache = wt.WorktreeDiscoveryCache()
+    cache._resolver = SimpleNamespace(agents={
+        name: AgentConfig(name=name, project=name) for name in ("fast", "slow")
+    })
+    fast_read = asyncio.Event()
+
+    async def source(project: str, *args, **kwargs) -> tuple[str, str]:
+        if project == "fast":
+            fast_read.set()
+        else:
+            await fast_read.wait()
+            clock.now += 45
+        return json.dumps({"worktrees": [{"id": project}]}), ""
+
+    monkeypatch.setattr(wt, "_run_local_ex", source)
+    await cache.crawl(cache._resolver)
+    evidence = cache._refresh.metadata()["sources"]
+    assert evidence["fast"]["age_seconds"] == 45
+    assert evidence["fast"]["freshness"] == "stale"
+    assert evidence["slow"]["age_seconds"] == 0
+    assert evidence["slow"]["freshness"] == "fresh"
+    assert cache.get_all()["fast"][0].id == "fast"
+    await cache.stop()
