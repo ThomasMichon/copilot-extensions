@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+    "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 36,
-    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-    "source_git_blob": "9356238d6e96a829081e636bf4fb13bae2e63d4f",
-    "source_sha256": "5d2bb75b2d5c10f58bd0a1fba5d6ea2eee15b4ecbb1e16b0e8c1fbf00050edda"
+    "protocol_generation": 39,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+    "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+    "source_sha256": "6fd92672388d225e31b307235b383465c3f4608cf475a6272331b57cc3f3dfb1"
   },
   "request": {
     "method": "POST",
@@ -34,7 +34,7 @@
     }
   },
   "health": {
-    "protocol_version": 36,
+    "protocol_version": 39,
     "min_protocol_version": 1
   },
   "capability": {

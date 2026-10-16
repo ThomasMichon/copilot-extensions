@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 38,
+        "current": 39,
         "minimum": 1,
-        "previous_generation": 37,
+        "previous_generation": 38,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -44,7 +44,8 @@
           35,
           36,
           37,
-          38
+          38,
+          39
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -101,25 +102,19 @@
         "provider_creation": 36,
         "worktree_render_cache": 37,
         "remote_acp": 38,
-        "live_message_receipt": 36
+        "live_message_receipt": 39
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "72719d714e157e2c6b956ce375b4d5ef5bbdf93913ba0dcde2bf54c8ec6ff2dd",
+          "sha256": "9232ecccd116704648768e33e053606f86af3ccb1bae5faae1b7845259ca25a0",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "1a26085ec890a59a2457d36e584ea3e371668f130eb379718732cc825a5ee169",
-          "semantic": true,
-          "non_semantic_reason": null
-        },
-        {
-          "path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
-          "sha256": "03bbc897a991d68c0e862e7d87b802d9b2d5a058647ce7117385cb5f1de60509",
+          "sha256": "3f8bbcd2f4fa48ee73432c34b59ae44870594f886f3444c66cf7be38eb6e6d41",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -256,6 +251,12 @@
           "non_semantic_reason": null
         },
         {
+          "path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "sha256": "03bbc897a991d68c0e862e7d87b802d9b2d5a058647ce7117385cb5f1de60509",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
           "path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
           "sha256": "c685f0755107582cad5b274621d32c2dfc66654f67b5d0148da8a92fbc323884",
           "semantic": true,
@@ -276,12 +277,6 @@
           "generation": 34
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-35.json",
-          "sha256": "6a32ef224ce3ffb120b944a862c6fff24245c9819ffd6e7963a99ccaa0c28c00",
-          "role": "unchanged roster response re-attested at current receipt generation",
-          "generation": 35
-        },
-        {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-32.json",
           "sha256": "82459757b85aafdf6085c184e02d57923e18fa4759781c611dd34f48d403a52d",
           "role": "unchanged agent-roster response re-attested at current retirement-recovery HTTP generation",
@@ -295,21 +290,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol.json",
-          "sha256": "94a272cc078dafd76bd87b528404a437f59f78cc46430393fa66d40d6b5d5349",
-          "role": "Committed generation-36 receipt evidence; prior capability floors retained",
-          "generation": 36
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt.json",
-          "sha256": "9b5e172c99cb015d95aa6d2300defb70a0fdeea00b175046078203880777d2a1",
-          "role": "Committed generation-36 receipt evidence; prior capability floors retained",
-          "generation": 36
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-32/acquisition-protocol.json",
-          "sha256": "18026e314eb8961eef4cd443f28277518b13d81b3d1a5dd718539f7771f0ece3",
-          "role": "retained immutable retirement-recovery evidence across receipt rollout",
-          "generation": 32
+          "sha256": "5d9bcda1bf06b453eb2f4e4c13a2e0bfd526da9cb386b7cb654d200007e27ae6",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
@@ -475,15 +458,15 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-30/acquisition-protocol.json",
-          "sha256": "e73e6de23803c793529ef873921122bb81b877d3fa4c7a746c258bda93cf8d98",
-          "role": "previous acquisition generation retained across recovery rollout",
-          "generation": 30
+          "sha256": "af491a4bcbbbd1264102093ad48452e8aaa02c693e4b5423b5e00fcdd43d756d",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-31/acquisition-protocol.json",
-          "sha256": "e7f75c2f93e3ac9516c709df7eaf5f75ce3789851117b229202c0ae8f6559541",
-          "role": "previous acquisition generation retained across retirement-recovery rollout",
-          "generation": 31
+          "sha256": "9ec62f552926d3d24b5a1e70e3fb47865d48545a15149179bdd039092b1d3dc6",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-31.json",
@@ -567,6 +550,12 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-35.json",
           "sha256": "5fb3f4c56a7316d6386a2f7c2db60494836b6dc75d7f0bbaf24e1fd3fa9934a1",
           "role": "Generation-35 remote-peer evidence; prior capability floors retained",
+          "generation": 35
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-35.json",
+          "sha256": "6a32ef224ce3ffb120b944a862c6fff24245c9819ffd6e7963a99ccaa0c28c00",
+          "role": "Generation-35 agents-list evidence; prior capability floors retained",
           "generation": 35
         },
         {
@@ -960,119 +949,187 @@
           "generation": 38
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-36.json",
-          "sha256": "17e6679fbeed2a56684d93e9409671c1412916d90afc56bf9ceb4b8ad9331009",
-          "role": "Committed generation-36 receipt evidence; prior capability floors retained",
-          "generation": 36
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt.json",
+          "sha256": "59ed02679a7aadcb742c9c0547b29d23aba967350957d735d3c7212a61f302a0",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-36.json",
-          "sha256": "f31a46ae6468426e08167834fe94210dcf142232b5df5d565de34f697800d0b9",
-          "role": "Committed generation-36 receipt evidence; prior capability floors retained",
-          "generation": 36
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-32/acquisition-protocol.json",
+          "sha256": "a517ae411c186285dad2b87851e368148bd61cbf580a4d6c0f60907860e58463",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-36.json",
-          "sha256": "f358c0403ea4cee994786e990c613e31a8d6dbaf219f45665e42bf05d13e58a7",
-          "generation": 36,
-          "role": "Bridge-owned receipt-backed remote wait fields; external carrier envelope unchanged"
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-39.json",
+          "sha256": "92df12939c9646d669ff11e3dfcc06717bdc0b75e72a0ae21835995e1d3a234e",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-36.json",
-          "sha256": "a6adb0411237066595f76c0f5e2e33a6bf313c3ba7d7cb79027f6bc69ed07b80",
-          "generation": 36,
-          "role": "Zero-second remote reply wait returns durable admission without requiring a response"
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-39.json",
+          "sha256": "018fcb592a0ecaaa257d2c03d494b68c255489fdcdf5bcfd42bf31d65f7ee914",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-39.json",
+          "sha256": "94139bd4d728671945ec9270c941a25f67b3813ecad4d8ca2ad444f90108f8bb",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-39.json",
+          "sha256": "5c42ee5772d39a529cd43bc1183ce8579546067d05a337e449870c8e601387ea",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-39.json",
+          "sha256": "e2eb7ec6cf907152621b0a8fdada3705070dca6ccf3dc3d5168ca54f6aaf3ba7",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-39.json",
+          "sha256": "8cef00644982af547776d7c4320d97100685efe3f7797c5dbbe1fc4975778bcd",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-39.json",
+          "sha256": "45dda0fe1439d711032257317b4ed0dd10b7090c289759880e668f482fb4a933",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-39.json",
+          "sha256": "5b99de066fef7fbb95d4a59a1bec2491c497a3a9d9714c539dfc7043cfb06aff",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-39.json",
+          "sha256": "569f740cfb379345426a17a996933b45561cf6c9ea409a8e7249ea5f2bd87697",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-39.json",
+          "sha256": "ceb8dce6d779dfa1c65f91674bd259cbe0ce0b52cf42f5675ad1b23e88729be6",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-39.json",
+          "sha256": "8a6d06db94c7b04358d8bdf6513ad15ff9f92b459a684ed636a0e6b82089e5ac",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-39.json",
+          "sha256": "4a8d7d6f966dfadbe34e57a800273b7d89e5f0bb20d7b171fbeec593b72d83ff",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-39.json",
+          "sha256": "7d6f2b758b5c79b9f012aec44699dc4a14f8273bbe6c452e1839ae9ddb04ead9",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-39.json",
+          "sha256": "86c467cbca0855980284e016016334c631eb46d4bb439436b48210125bb5fa8d",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-39.json",
+          "sha256": "57fd13eec7f88601e38a2058d8b70a008b571f17d960f7d64fe490d9cffcaa06",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-39.json",
+          "sha256": "5ca67ff2dc083e38fe1a5eb26750ef6fc01f6680a3415969c67eae65a4ffd4dc",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-39.json",
+          "sha256": "a58d0b5f6b57e8b9c15bd6e773ae101dd4c5ac82b59003ddb5fa4dec0ff78cfb",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-39.json",
+          "sha256": "62ca2863ac5f7745bca2ed4213fc691ad147345bfc58b5606062002a9595dc83",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-39.json",
+          "sha256": "6aaf466d5a11fdf1b769b3c2885255a1ef24d61a9e203979691d0aa53b0a1f31",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-39.json",
+          "sha256": "4beadda60046e1ba6faf33479043c27680c8451c128f3aafd5d246f8e1adee9e",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-39.json",
+          "sha256": "81d9e2416aceb5c893e28a8da45a0e079b2808c4ee416ac4f33db7755b95c99a",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-39.json",
+          "sha256": "e132525b6fb3a7f36fb6dbcbc5c1e4c597e552e3c303dc51af84b728b5e28c43",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-39.json",
+          "sha256": "671466b977fc12a6243bb5dcebedb0ebf609ceaf10821d90f0b17609e38e409e",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-39.json",
+          "sha256": "67e0a3f752ce786307538d24316ff89828d2083fe6e76ea7a854ebbedee75955",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-39.json",
+          "sha256": "ddcb733046c5f6b7632d5028758d6eb71d5244595ba0302d51e76fafabeea50c",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-39.json",
+          "sha256": "7841ea796eede1c1945058f7e290a1dc019e79ac4ac87e340b8a78a9cc1b4242",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-39.json",
+          "sha256": "24ce754ec6197d198a3b4209f7f4b28bc049d95a326fdaf95683e2f94042b77b",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-39.json",
+          "sha256": "cf3545221721bd2541abaa4dcbe59dcbe5b2ab4f0dbf4979618a3a1f4c17a305",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         }
       ],
       "provenance": [
-        {
-          "commit": "567bd805b23397346bda927274cbb96a92e697dd",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
-          "capture_method": "Capture committed finite 0..600 remote reply-wait model; real CLI-to-two-bridge/carrier regressions compare zero-wait admission and preserve zero through every deadline layer."
-        },
-        {
-          "commit": "c6f00b2348a172bba3b7bc7cac1d7b1ad64c91a1",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
-          "source_git_blob": "7ee9ecda25dfbd806565c2935cc497b159675d09",
-          "capture_method": "Freeze committed operation-version selection; actual two-bridge tests compare the emitted waited packet and prove older hosting bridges/carriers refuse before admission."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
-          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
-          "source_git_blob": "90f2a01f70488a96e6f5160bfbf12cbfe66d65b6",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
-          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
-          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "source_git_blob": "9356238d6e96a829081e636bf4fb13bae2e63d4f",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
-          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
-        {
-          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 36,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
-          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
-          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
-        },
         {
           "commit": "9aa7aa03f5ba2762eba4c92d02bf7b6c6b425934",
           "plugin_version": "0.4.1-dev3",
@@ -1080,38 +1137,6 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
           "capture_method": "Freeze the opt-in registration payload from the actual owning model; independent serialization/default assertions and HTTP clearing, retention and recovery assertions exercise it with matching incarnation identity."
-        },
-        {
-          "commit": "b97c27a3bf7b9594c22beefe5a3f40eedeac2123",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 33,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
-          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
-          "capture_method": "Re-attest unchanged typed admission request/response serialization after sharing finite reply-wait limits with pre-transport client and CLI validation; bounded regression tests cover invalid inputs, exact limits and transport margins."
-        },
-        {
-          "commit": "945debc080e13f388d598d2230a18c7536fbf41b",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 34,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
-          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
-          "capture_method": "Re-attest unchanged agent-roster source and its representative response at additive receipt generation 34."
-        },
-        {
-          "commit": "945debc080e13f388d598d2230a18c7536fbf41b",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 34,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "source_git_blob": "7f989f1354afd029f65c53d380a16760e1e9827e",
-          "capture_method": "Read committed protocol-34 receipt capability constants; retain the exact protocol-32 acquisition fixture as previous-generation evidence."
-        },
-        {
-          "commit": "945debc080e13f388d598d2230a18c7536fbf41b",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 34,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
-          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
-          "capture_method": "Compare typed request and admission-response serialization against a deterministic synthetic receipt fixture; separate TestClient regressions exercise admission, SDK acknowledgement, consumption, timeout, alias and retained-evidence behavior."
         },
         {
           "commit": "eab727b8afc4de461934a3e801f75d61ddfb516e",
@@ -2840,9 +2865,193 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
           "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
           "capture_method": "Independently expected progress and freshness projection, verified through actual manager rehydration with live failure followed by historical success."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "3b751ac95114ed2aaaf32f2b41856c9676993b96",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "73a077eaaf14ae64365268b0a857b2b912594998",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "00fad21adb39873dd52f44123a0e11daf75e5a74",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "942bb51fe709a761b4c763ff38578920b20a5966",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "fd5fe3e722ef027a6e96e169a66a4b5dfb3d0912",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "ff9b0f6b3dc5a7e6e9b939d916d9564487943eb8",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "e1c95c1065f20e29cf40e933701222b3ba2ea6ce",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "7ee9ecda25dfbd806565c2935cc497b159675d09",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 38 supported; retained evidence exercises generations 9 through 38, with generations 16 through 18 represented by their historical health fixtures rather than the current producer. Generation 38 adds opt-in remote ACP client controls; all prior generations and capability floors remain supported.",
+      "support_window": "HTTP generations 1 through 39 remain supported. Immutable native33, workspace34, qualified-peer35, provider-creation36, render-cache37 and remote-ACP38 evidence is retained independently from receipt generation 39.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",

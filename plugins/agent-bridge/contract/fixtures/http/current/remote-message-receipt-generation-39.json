@@ -1,14 +1,14 @@
 {
   "captured_from": {
-    "commit": "c6f00b2348a172bba3b7bc7cac1d7b1ad64c91a1",
+    "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 36,
+    "protocol_generation": 39,
     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
     "source_git_blob": "7ee9ecda25dfbd806565c2935cc497b159675d09",
     "source_sha256": "c685f0755107582cad5b274621d32c2dfc66654f67b5d0148da8a92fbc323884"
   },
   "capability": {
-    "required_protocol_version": 36,
+    "required_protocol_version": 39,
     "required_operation_version": 5,
     "qualified_no_wait_operation_version": 4,
     "unsupported_operation_status": 426,
