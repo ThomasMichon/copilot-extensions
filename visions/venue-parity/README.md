@@ -190,6 +190,17 @@ loopback, or one resolving to genuine remote SSH:
   share the plain SSH session's filesystem view — but the observable effect
   (a working `--plugin-dir` on the elevated launch) is the same guarantee.
 
+### repository-local-plugin-registration
+Eligible plugins selected for a target repository are available to both a
+headed CLI and a headless ACP agent executing there. Remote venues receive the
+payloads before launch; local venues may reference already-local payloads.
+The target checkout's `.github/copilot/settings.local.json` declares the local
+marketplace paths and enabled identities without replacing unrelated settings
+or requiring user-global registration. ACP additionally receives the resolved
+`--plugin-dir` arguments its launch contract requires. A copy or registration
+failure is not a successful, plugin-equipped launch. Restricted venues retain
+their explicit no-automatic-projection boundary.
+
 ## Behaviors
 
 ### quality-parity-across-venues
