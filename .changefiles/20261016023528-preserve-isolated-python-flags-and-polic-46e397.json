@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve isolated Python flags and policy separators across PowerShell native process forwarding",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

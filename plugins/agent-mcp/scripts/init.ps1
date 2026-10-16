@@ -763,9 +763,9 @@ foreach ($lib in @(
     }
     if (Test-Path (Join-Path $libDir 'pyproject.toml')) {
         if (Get-Command uv -ErrorAction SilentlyContinue) {
-            Invoke-Hidden $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet | Out-Null
+            Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $VenvPython, '--reinstall-package', $lib.Pkg, $libDir, '--quiet') | Out-Null
         } else {
-            Invoke-Hidden $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" | Out-Null
+            Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $VenvPython, '--quiet', $libDir) | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "$($lib.Dir) library install failed"
@@ -775,9 +775,9 @@ foreach ($lib in @(
 }
 
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    Invoke-Hidden $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet | Out-Null
+    Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $VenvPython, $PluginDir, '--quiet') | Out-Null
 } else {
-    Invoke-Hidden $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" | Out-Null
+    Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $VenvPython, '--quiet', $PluginDir) | Out-Null
 }
 $pkgResult = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP
