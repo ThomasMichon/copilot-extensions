@@ -993,7 +993,7 @@ def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path,
 
 
 @pytest.mark.parametrize("resource_parent", [False, True])
-def test_compact_absolute_sources_preserve_dependency_and_resource_layout(tmp_path, monkeypatch, resource_parent):
+def test_absolute_sources_preserve_dependency_and_resource_layout(tmp_path, monkeypatch, resource_parent):
     stage = tmp_path / "deep" / "staging" / "plugin"
     source = source_project(stage / "libs" / "root", sources='fixture-child={path="../child"}')
     child = source_project(stage / "libs" / "child", "fixture-child")
@@ -1020,6 +1020,47 @@ def test_compact_absolute_sources_preserve_dependency_and_resource_layout(tmp_pa
         trusted_source_roots=(stage,), retained_resource_roots=(stage,) if resource_parent else (),
     )
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("reference", ["configured-override", "source-excursion"])
+def test_absolute_operands_preserve_relative_metadata_sources(tmp_path, monkeypatch, reference):
+    if reference == "configured-override":
+        source = source_project(tmp_path / "nested" / "source")
+        (tmp_path / "uv.toml").write_text(
+            'override-dependencies=["fixture-source @ file:./nested/source"]\n',
+            encoding="utf-8",
+        )
+    else:
+        source = source_project(
+            tmp_path / "source", sources='fixture-child={path="../source/child"}',
+        )
+        source_project(source / "child", "fixture-child")
+    if reference == "configured-override":
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            if "--show-settings" not in command:
+                retained_base = Path(kwargs["cwd"])
+                assert (retained_base / "nested" / "source" / "pyproject.toml").is_file()
+            return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
+
+        # Native UV on Windows does not accept relative file URLs. Exercise the
+        # policy's retained configuration/source audit without bypassing it.
+        monkeypatch.setattr(policy.subprocess, "run", run)
+        policy.run_uv_install(
+            "uv", [str(source)], cwd=tmp_path, env=offline_environment(tmp_path),
+            trusted_source_roots=(tmp_path,),
+        )
+        assert len(calls) == 3
+        return
+    installed = native_policy(
+        tmp_path, ["--no-index", "--python", sys.executable,
+                   "--target", str(tmp_path / "installed"), str(source)],
+        roots=(tmp_path,),
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert (tmp_path / "installed" / "fixture_source-1.0.dist-info" / "METADATA").is_file()
 
 
 @pytest.mark.parametrize("selection", [

@@ -2476,7 +2476,9 @@ layout without reproducing unrelated caller-directory or staging ancestry.
 An unrelated caller uses a separate private working directory; its effective
 configuration and target interpreter are still captured before relocation.
 Relative operands, requirement files, dependency groups, explicit project
-contexts and editable installations retain their existing relative layout.
+contexts, source-bearing configuration/metadata and editable installations
+retain their existing relative layout. This includes relative source traversals
+that leave and re-enter a project, rather than rewriting those declarations.
 This reduces backend build-path depth without relocating the checkout or
 weakening source attribution, seasoning or resolver-equivalence checks.
 

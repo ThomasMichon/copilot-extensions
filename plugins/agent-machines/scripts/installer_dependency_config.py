@@ -12,6 +12,24 @@ _STRUCTURED_CUTOFF = re.compile(
 )
 
 
+def metadata_needs_caller_layout(value):
+    if isinstance(value, dict):
+        # Source-bearing metadata can contain relative references or traversals
+        # outside and back into a source root. Keep its established layout.
+        if any(value.get(key) for key in (
+            "sources", "dependency-groups", "dev-dependencies", "constraint-dependencies",
+            "override-dependencies", "build-constraint-dependencies",
+            "dependency-metadata", "extra-build-dependencies",
+        )):
+            return True
+        return any(metadata_needs_caller_layout(item) for item in value.values())
+    if isinstance(value, list):
+        return any(metadata_needs_caller_layout(item) for item in value)
+    return isinstance(value, str) and (
+        "file:" in value.lower() or re.search(r"(?:^|[\s/\\])\.\.(?:[/\\]|$)", value) is not None
+    )
+
+
 def cutoff_value(value: str, now: datetime, *, error_type) -> datetime:
     value = value.strip().removesuffix(",").strip()
     structured = _STRUCTURED_CUTOFF.fullmatch(value)
