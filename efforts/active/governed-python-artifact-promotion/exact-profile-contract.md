@@ -5,7 +5,7 @@
 engine application remains
 [#6737](https://github.com/ThomasMichon/copilot-extensions/issues/6737).
 
-**Status: Design approved in #6795; inert record implementation in progress.**
+**Status: Design approved in #6795; inert record implemented in #7044.**
 This closes the design portion of the artifact effort's exact-profile
 prerequisite, not approval-adapter integration, publication, consumer admission,
 deployed engine selection or any production rollout.
@@ -42,6 +42,17 @@ An arbitrary JSON file, its self-declared authority or a matching digest does
 not establish approval. The selector obtains the approved profile from that
 trusted channel/configuration; it does not accept an untrusted caller's
 `approved: true` flag.
+
+An adopting harness may supply a complete reviewed baseline through its trusted
+configuration, so ordinary users need no personal approval file or hand-built
+approval map. The existing installation authority applies that policy:
+prefer authentic release-approved profiles, and automatically select permitted
+source mode for allowed availability/admission failures. This is explicit
+authority-owned mode selection, not an admission-layer retry or a new signing
+authority. Optional overlays may narrow permissions or deliberately select
+capability; they cannot weaken existing acquisition restrictions. The bounded
+[zero-configuration plan](../lean-runtime-dependencies/zero-configuration-defaults.md)
+owns the adapter/consumer amendment before enabling it.
 
 Public profiles contain only dependency identities/hashes and portable target
 constraints, never private feed identities, credentials or third-party bytes.
@@ -135,12 +146,15 @@ and cutover ownership. It does not regenerate or edit its historical lock.
 - [x] Review this design under #4876 before writing the selector or engine
   consumer (#6795).
 - [ ] Integrate the existing authority/approval-source adapters before enabling
-  any consumer; no new globally trusted profile directory is presumed.
-- [ ] Add the inert versioned record, canonical identity and pure selection
+  any consumer. Support a complete adopting-policy baseline without a personal
+  approval file or hand-built approvals map; no new globally trusted profile
+  directory is presumed.
+- [x] Add the inert versioned record, canonical identity and pure selection
   contract using existing source/manifest validators. Unit fixtures cover
   wrong release, unknown schema, incomplete/duplicate closure, extras/markers,
   wrong ABI/device, unapproved source, ambiguous selection and capability
-  retention. Fixtures use synthetic hashes, not released dependency claims.
+  retention. Fixtures use synthetic hashes, not released dependency claims
+  (#7044); source authentication and inspected-byte validation remain separate.
 - [ ] Prove real permitted resolution freezes a complete exact CPU closure
   before assembly, plus a declared accelerator closure where its allowed feed
   is available. Measure compressed downloads separately from installed

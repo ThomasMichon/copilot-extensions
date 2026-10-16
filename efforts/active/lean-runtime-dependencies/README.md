@@ -80,6 +80,26 @@ The operator confirmed the slug `lean-runtime-dependencies`.
 The additional package/profile priorities below originate in the audit and are
 marked agent-recommended; exploratory backend replacements are not commitments.
 
+### 2026-10-16 - Operator-approved zero-configuration default
+
+Follow-up direction, with only the private adopter name abstracted:
+
+> We need to make an executive decision on [the adopting harness], on the
+> assumption that most users will never adjust local config for themselves.
+>
+> Great. Update and drive the vision and effort for this
+
+**Approved decision summary:** the adopting harness owns a complete baseline,
+not a requirement for personal approval configuration. Prefer verified
+release-approved exact profiles; automatically select a distinct governed
+source lock when artifact availability/admission prevents that mode. CPU is
+the fresh engine default; retain explicit accelerator intent and explicit
+unprofiled migration. Reuse admitted unchanged inputs. Existing feed,
+seasoning, integrity and provenance restrictions remain authoritative.
+Optional local/knowledge overlays are not prerequisites. This authorizes
+driving source implementation, not production rollout, model/corpus mutation or
+new package feeds.
+
 ## Plan
 
 ### Phase 1 - Reviewed intent and dependency baseline
@@ -108,7 +128,12 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 ### Phase 4 - Largest optional installation costs
 - [ ] Govern explicit compatible CPU/GPU engine wheel profiles; eliminate
   accidental accelerator downloads and unsafe install-then-swap assumptions.
-  _(agent-recommended; coordinate artifact ownership with #4876)_
+  _(operator-approved default; coordinate artifact ownership with #4876)_
+- [ ] Implement the reviewed [zero-configuration default](zero-configuration-defaults.md)
+  through the existing installation authority: authentic release profiles first,
+  automatically authorized governed source fallback, optional overrides only.
+  Do not require users to assemble an approval map or wait for artifact
+  publication before source installation.
 - [x] Make restricted-SSH Paramiko provisioning genuinely opt-in.
   _(agent-recommended)_
 - [x] Replace full-table pandas statistics materialization with projected
@@ -149,6 +174,10 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   two installers and two independent marketplace installations.
 - [ ] Index integration preserves authenticated routing, HTTP/SSE/MCP contracts,
   background jobs, retrieval semantics and durable state across upgrades.
+- [ ] Fresh adoption with no runtime-profile overrides proves the shared
+  baseline, CPU closure and automatic governed fallback; unchanged warm reuse
+  makes no resolver/feed call. Exercise stricter policy, supplied revocation,
+  retained accelerators, unprofiled migration and all-modes-blocked retention.
 - [x] Every slice records applicable unit, integration, clean-room and available
   live-venue evidence, or a specific reason a tier is unavailable.
 - [x] Measurement separates compressed downloads, unpacked logical files,
@@ -177,13 +206,19 @@ The existing owners have the concrete acceptance requests; no reply or accepted
 transfer is assumed. To drive rather than merely wait on that prerequisite,
 this campaign contributes the bounded
 [exact-profile contract](../governed-python-artifact-promotion/exact-profile-contract.md)
-to #4876's existing authority design. The reviewed next slice is an inert exact
-record and pure selection API, not approval-source integration, a loader,
-publication or acquisition. #6941 retains the separate contributor-owned
+to #4876's existing authority design. The inert exact record and pure selection
+API merged in #7044, not approval-source integration, a loader, publication or
+acquisition. #6941 retains the separate contributor-owned
 candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
 Darwin acceptance remain with #5768. Apply the reviewed profile contract under
 #6737, composing #6598 construction and #6707 admission rather than overlapping
 their open implementations. The effort and retained runtime/state stay open.
+
+The next stretch follows the operator-approved
+[zero-configuration default](zero-configuration-defaults.md). A harness-supplied
+policy reaches the same authority seam for release and source modes; hand-built
+adopter approval files are not the default integration. Review the amended
+intent and plan before enabling that authority adapter or a native consumer.
 
 ## Journal
 
@@ -581,3 +616,30 @@ their open implementations. The effort and retained runtime/state stay open.
 - Review corrected optional Requires-Python handling: an absent wheel header
   has an empty specifier, not an invented minimum. Empty values now remain
   representable while malformed or untrimmed metadata still refuses.
+
+### 2026-10-16 - Inert exact-profile record merged
+- #7044 merged to `dev` as `8f144844d` after current-head approval
+  `5554395793`, successful CI `38974962162` and all 45 actual check contexts
+  completed. Linux/Windows service and native Windows/macOS construction
+  contexts passed; these regression checks do not prove a profile integration
+  that this inert slice does not enable.
+- The post-push review wait timed out after the full 600-second window.
+  Explicit re-request produced the approving review without a dummy commit or
+  merge bypass. The optional Requires-Python finding is fixed and resolved.
+- Re-read the canonical completion gates and reconciled the retained worktree.
+  Closed only the inert record/selection item. Authority-source adapters,
+  real permitted exact CPU/accelerator closures, inspected-byte admission,
+  engine constructors and this campaign's remaining native/service acceptance
+  are still open; the effort remains Active. No production rollout occurred.
+
+### 2026-10-16 - Complete baseline rather than per-user approval setup
+- The operator approved a complete harness-owned default on the assumption
+  that most users never edit runtime configuration, then directed updating and
+  driving the vision and effort. Captured the literal direction above and the
+  approved decision separately; no new rollout or package-feed permission is
+  inferred.
+- Amended Runtime Assembly and engine intent plus the linked authority,
+  resolution, integration and fresh-adopter validation plan. Keep one canonical
+  campaign and the existing construction/admission/input-generator owners.
+  The inert API's caller-provided approval map is not an implemented default;
+  ordinary users must not have to construct that map themselves.

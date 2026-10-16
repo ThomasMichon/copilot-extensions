@@ -57,6 +57,24 @@ source.
 
 ## Features
 
+### adopter-supplied-complete-defaults
+
+An adopting harness can supply a complete, reviewed selection policy that
+works for operators who never customize local runtime settings. Its existing
+installation authority applies that policy automatically: prefer compatible
+verified release profiles, and select the separately governed source mode
+when availability or admission prevents artifact mode. Routine fallback does
+not require a human to approve individual dependencies or write an approval
+file. Optional overlays may select deliberate capabilities or stronger
+restrictions; they never weaken existing acquisition policy.
+
+The baseline selects behavior, not a new trust root. A release profile still
+requires authentic release approval and actual feed admission. Source mode
+still binds independently verified source and freezes a complete exact closure
+within declared constraints before assembly. Neither the presence of a
+candidate nor its self-declared approval authorizes it. Adopting a default
+never grants service activation, model download or unattended execution.
+
 ### one-verified-acquisition-path
 
 All entry points share one lookup, verification, and assembly path:
