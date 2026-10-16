@@ -168,6 +168,91 @@ def test_installation_repair_native_apply_freshly_probes_dependencies(repair_fix
     assert not any(row["attempted"] for row in again["outcomes"])
 
 
+@pytest.mark.parametrize("initial_ready,prerequisite_makes_ready", [
+    (True, False), (False, True), (True, True),
+])
+def test_installation_repair_refreshes_dependent_after_native_prerequisite(
+    repair_fixture, initial_ready, prerequisite_makes_ready,
+):
+    home, _, payload, _, _ = repair_fixture
+    child_state = home / "agent-example-child.ready"
+    if initial_ready:
+        child_state.write_text("ready", encoding="utf-8")
+    script = payload / "scripts" / "action.ps1"
+    child_action = (
+        "[IO.File]::WriteAllText($child, 'ready')"
+        if prerequisite_makes_ready else
+        "if (Test-Path -LiteralPath $child) { Remove-Item -LiteralPath $child }"
+    )
+    script.write_text(script.read_text(encoding="utf-8").replace(
+        "  [IO.File]::WriteAllText($state, 'ready'); exit 0",
+        "  if ($Module -eq 'agent-example/base') {\n"
+        "    $child = Join-Path $env:HOME 'agent-example-child.ready'\n"
+        f"    {child_action}\n"
+        "  }\n"
+        "  [IO.File]::WriteAllText($state, 'ready'); exit 0",
+    ), encoding="utf-8")
+    script = payload / "scripts" / "action.sh"
+    child_action = (
+        'printf ready > "$HOME/agent-example-child.ready"'
+        if prerequisite_makes_ready else 'rm -f "$HOME/agent-example-child.ready"'
+    )
+    script.write_text(script.read_text(encoding="utf-8").replace(
+        '  printf ready > "$state"; exit 0',
+        '  if [ "$2" = agent-example/base ]; then\n'
+        f"    {child_action}\n"
+        "  fi\n"
+        '  printf ready > "$state"; exit 0',
+    ), encoding="utf-8")
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    base, child = result["outcomes"]
+    assert result["status"] == "ready" and result["requiredSatisfied"]
+    assert base["attempted"]
+    assert child["observedBefore"]["state"] == ("ready" if initial_ready else "not-ready")
+    assert child["attempted"] is not prerequisite_makes_ready
+    assert child["observedAfter"]["state"] == "ready"
+    assert child_state.read_text(encoding="utf-8") == "ready"
+
+
+@pytest.mark.parametrize("stage", ["admission", "closure", "hashing", "readiness"])
+def test_installation_repair_revalidation_cancellation_retains_completed_outcomes(
+    repair_fixture, monkeypatch, stage,
+):
+    home, _, _, _, _ = repair_fixture
+    target = {
+        "admission": "admit_host", "closure": "_closure",
+        "hashing": "_binding_inputs", "readiness": "_invoke",
+    }[stage]
+    original = getattr(repair_api, target)
+
+    def interrupted(*args, **kwargs):
+        if (home / "agent-example-base.ready").exists() and (
+            stage != "readiness" or (
+                kwargs["readonly"] and args[0].module_id == "agent-example/child"
+            )
+        ):
+            raise KeyboardInterrupt
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(repair_api, target, interrupted)
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    base, child = result["outcomes"]
+    assert result["interrupted"] and result["status"] == "incomplete"
+    assert not result["requiredSatisfied"]
+    assert base["attempted"] and base["installer"] == {"status": "exited", "exitCode": 0}
+    assert base["observedAfter"]["state"] == "ready"
+    assert not child["attempted"] and child["installer"] is None
+    assert child["observedBefore"]["state"] == "not-ready"
+    assert child["observedAfter"] == {
+        "state": "unknown",
+        "reason": "readiness-interrupted" if stage == "readiness"
+        else "owner-revalidation-interrupted",
+    }
+    assert not (home / "agent-example-child.ready").exists()
+
+
 def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixture):
     _, _, payload, _, _ = repair_fixture
     declaration = payload / "contracts" / "readiness.json"

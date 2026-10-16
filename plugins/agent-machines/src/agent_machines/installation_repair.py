@@ -324,25 +324,41 @@ def repair(
             ):
                 blockers.append(dependency)
         outcome.blocked_by = tuple(blockers)
-        if not apply or interrupted or blockers or _satisfies(module, observation):
+        if not apply or interrupted or blockers:
             continue
         owner = host.bindings.get(module.owner.owner_id)
         if not owner or owner.refusal or platform not in module.platforms:
             continue
-        if owner.mode == "core-active":
-            # An ordinary init action is not permission to synthesize a cell lifecycle operation.
-            outcome.installer = {"status": "refused", "reason": "active-core-action-not-declared"}
+        refresh_readiness = any(item.attempted for item in outcomes.values())
+        if not refresh_readiness and _satisfies(module, observation):
             continue
         try:
             fresh = admit_host(project_root, home=home)
             fresh_selected = _closure(fresh, modules, platform)
+            binding_matches = digest(_binding_inputs(fresh, fresh_selected, platform)) == plan_digest
+        except KeyboardInterrupt:
+            outcome.after = Observation("unknown", "owner-revalidation-interrupted")
+            interrupted = True
+            break
         except RepairAdmissionError:
             outcome.installer = {"status": "refused", "reason": "owner-binding-changed"}
             break
-        if digest(_binding_inputs(fresh, fresh_selected, platform)) != plan_digest:
+        if not binding_matches:
             outcome.installer = {"status": "refused", "reason": "owner-binding-changed"}
             break
         fresh_owner = fresh.bindings[module.owner.owner_id]
+        if refresh_readiness:
+            observation = _observe(module, fresh_owner, platform, readiness_timeout)
+            outcome.after = observation
+            if observation.reason == "readiness-interrupted":
+                interrupted = True
+                break
+            if _satisfies(module, observation):
+                continue
+        if fresh_owner.mode == "core-active":
+            # An ordinary init action is not permission to synthesize a cell lifecycle operation.
+            outcome.installer = {"status": "refused", "reason": "active-core-action-not-declared"}
+            continue
         outcome.attempted = True
         try:
             result = _invoke(
@@ -361,13 +377,13 @@ def repair(
         outcome.restart_required = (
             result.status == "exited" and result.exit_code == 0 and module.restart is not Restart.NONE
         )
-    required_satisfied = all(
+    required_satisfied = not interrupted and all(
         _satisfies(outcome.module, outcome.observed) and not outcome.restart_required
         and not outcome.blocked_by
         and outcome.installer_succeeded
         for outcome in outcomes.values() if outcome.module.classification is Requirement.REQUIRED
     )
-    satisfied = all(
+    satisfied = not interrupted and all(
         _satisfies(outcome.module, outcome.observed) and not outcome.restart_required
         and not outcome.blocked_by
         and outcome.installer_succeeded

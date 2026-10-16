@@ -97,14 +97,17 @@ installer-owned durable services keep their own supervision contract.
 `--readiness-timeout` and `--installer-timeout` are seconds (positive, at most
 3600); defaults are 15 and 300.
 
-Each attempted installer gets an independent readiness probe. Zero exit alone
-is not readiness. Failed/unknown/unsupported, unsatisfied configuration-empty
+After an earlier installer runs, apply refreshes each unblocked module's
+readiness before deciding whether to skip or repair it, preserving its initial
+observation. Each attempted installer also gets an independent readiness probe.
+Zero exit alone is not readiness. Failed/unknown/unsupported, unsatisfied configuration-empty
 and restart-required prerequisites block dependents; independent branches may
 continue. JSON includes before/after states, installer outcome, blockers and
 restart boundaries, never raw subprocess output. Exit 0 means discovery,
 observation, or a ready selected apply; exit 2 means incomplete apply (including
 optional failure), and exit 1 means invalid/refused admission or stale inputs.
-Interrupted execution retains partial outcomes, exits 130 and does not replay.
+Interrupted execution, including owner revalidation and hashing, retains
+completed partial outcomes, exits 130 and does not replay.
 
 Ordinary downstream owners need declared no-self-provision and legacy-root
 protocols; inherited core-cell control variables are cleared. Linked/reparse
