@@ -170,7 +170,15 @@ def recover(
             ):
                 raise ValueError("invalid intended receipt")
             if not inst._same_identity(final["owner"], owner, inst._OWNER_IDENTITY_FIELDS):
-                raise ValueError("intended owner changed; refuse stale publication")
+                recorded_owner = (
+                    final["runtime"]["resolver"] == "payload-local"
+                    and inst._same_identity(
+                        final["owner"], receipt["owner"],
+                        inst._OWNER_IDENTITY_FIELDS + ("plugin_version",),
+                    )
+                )
+                if not recorded_owner:
+                    raise ValueError("intended owner changed; refuse stale publication")
             content = dict(inst._project_binstub_specs(project))
             if final["runtime"]["resolver"] == "payload-local":
                 historical = templates.render(

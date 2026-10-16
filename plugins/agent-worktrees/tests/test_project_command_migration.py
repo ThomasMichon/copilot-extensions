@@ -173,9 +173,22 @@ def test_receipt_free_user_shortcut_does_not_identify_an_owner(
     assert not inst._receipt_path("demo").exists()
 
 
-def test_pre_upgrade_pending_payload_journal_recovers_then_migrates(command_home, monkeypatch):
-    current, _ = command_home
-    before = seed_old(monkeypatch, (current, current))
+@pytest.mark.parametrize("relocation", ["none", "snapshot", "checkout"])
+@pytest.mark.parametrize("final_owner", ["recorded", "unrelated"])
+def test_pre_upgrade_pending_payload_journal_recovers_then_migrates(
+    command_home, monkeypatch, tmp_path, relocation, final_owner,
+):
+    current, snapshot = command_home
+    old = current if relocation == "none" else snapshot
+    if relocation == "checkout":
+        old = tmp_path / "checkout" / "plugins" / "agent-worktrees"
+        old.mkdir(parents=True)
+        (old / "plugin.json").write_bytes((snapshot / "plugin.json").read_bytes())
+        (inst.install_dir() / "deploy-manifest.json").write_text(json.dumps({
+            "source": {"kind": "marketplace", "plugin": "agent-worktrees",
+                       "path": current.as_posix(), "version": "1.1.0"},
+        }), encoding="utf-8")
+    before = seed_old(monkeypatch, (current, old))
     receipt = inst._read_receipt("demo")
     assert receipt["runtime"]["resolver"] == "payload-local"
     receipt["transaction"] = {
@@ -187,8 +200,15 @@ def test_pre_upgrade_pending_payload_journal_recovers_then_migrates(command_home
         },
         "receipt": json.loads(json.dumps(receipt)),
     }
+    if final_owner == "unrelated":
+        receipt["transaction"]["receipt"]["owner"]["payload_root"] = str(tmp_path / "unrelated")
     inst._write_receipt("demo", receipt)
     result = inst.reconcile_binstubs()
+    if final_owner == "unrelated":
+        assert result["blocked"] == ["demo"]
+        assert inst._read_receipt("demo") == receipt
+        assert {p: p.read_bytes() for p in before} == before
+        return
     assert result["blocked"] == []
     assert result["migrated"] == ["demo"]
     final = inst._read_receipt("demo")
