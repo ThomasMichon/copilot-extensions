@@ -1076,6 +1076,29 @@ a scheduled or manually dispatched workflow.
 
 - Gate specialized suites by changed paths so unrelated pull requests do not
   pay their cost.
+- The existing artifact/toolchain, Python 3.10 compatibility, Windows composed
+  artifact and Windows candidate-readiness lanes also cover their source inputs:
+  root/nested `.gitattributes`, plugin and shared-library trees (including
+  metadata and copied files), declared standalone consumers, changefiles,
+  marketplace versions, materializers and their helpers, and canonical copied
+  documentation. Both inline artifact selectors in `ci.yml` must agree;
+  `tools/test_public_toolchain_source.py` checks positive and unrelated-path
+  cases. `tools/test_promotion_python_artifacts.py` exercises the real producer
+  hash/materializer/verifier roundtrip with offline wheel-encoding fixtures,
+  including LF/CRLF policy and altered source, dependency, bundle and wheel
+  bytes. These contracts do not normalize downloaded bytes or replace raw
+  archive/wheel digest checks, and do not require an exhaustive portfolio for
+  unrelated documentation changes.
+- `tools/test_promotion_source_alias.py` uses real Git candidates, squash
+  landings and real source-bound archives to prove that an unchanged version
+  alias survives both a prior squash merge and a failed Main merge. Signed
+  prior-index proof never waives current plugin-source or raw-byte checks.
+- Before a workflow-only control activation, run the prepared file explicitly:
+  `python tools/test_release_publication_boundary.py --workflow <prepared-workflow> --base-branch-workflow <prepared-admission-workflow>`.
+  It executes the literal merge, pause and control-generation admission code
+  with bounded provider/Git fixtures. A legacy default controller is explicitly
+  skipped, not credited as implementing the new boundary; fixture proof does
+  not replace exact-candidate live CI and artifact qualification.
 - Keep one canonical implementation broad; sample external adapters at genuine
   divergence seams such as parsing, interoperability, security boundaries,
   atomicity, concurrency, and wrapper wiring.

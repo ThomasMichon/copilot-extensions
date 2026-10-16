@@ -284,6 +284,25 @@ def test_api_transport_sends_exact_json_without_a_secret_on_argv(monkeypatch):
     assert kwargs["check"] is True and kwargs["timeout"] == 60
 
 
+def test_provider_reads_use_consumer_authority_without_mutating_publication_or_dispatch_scope(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "synthetic-publisher")
+    monkeypatch.setenv("ARTIFACT_VERIFY_TOKEN", "synthetic-consumer")
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "{}")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    verification._api("repos/example/project/actions/runs/1")
+    verification._api("repos/example/project/dispatches", body={"ref": "main"})
+    assert calls[0][1]["env"]["GH_TOKEN"] == "synthetic-consumer"
+    assert calls[1][1]["env"]["GH_TOKEN"] == "synthetic-publisher"
+    assert all("ARTIFACT_VERIFY_TOKEN" not in kwargs["env"] for _, kwargs in calls)
+    assert os.environ["GH_TOKEN"] == "synthetic-publisher"
+    assert all("synthetic-" not in " ".join(argv) for argv, _ in calls)
+
+
 def workflows():
     return {
         name: yaml.safe_load((ROOT / ".github/workflows" / name).read_text(encoding="utf-8"))
@@ -347,6 +366,7 @@ def test_native_snapshot_guard_checks_the_executed_workflow_not_only_its_checkou
     job = workflow["jobs"]["checks" if filename == "ci.yml" else "refresh-source-attribution"]
     environment = {
         **os.environ, "EXPECTED_SHA": SHA, "PROMOTION_RUN": RUN,
+        "PROMOTION_PHASE": "release",
         "RUN_SHA": SHA, "WORKFLOW_SHA": SHA,
         "RUN_REF": "refs/heads/main" if filename != "ci.yml" else f"refs/tags/{TAG}",
         "DEFAULT_REF": "refs/heads/main", "GITHUB_REPOSITORY": "example/project",
@@ -363,7 +383,7 @@ def test_native_snapshot_guard_checks_the_executed_workflow_not_only_its_checkou
     assert result.returncode == (1 if changed else 0), result.stdout + result.stderr
     if changed:
         message = (
-            "does not execute the exact merged snapshot" if filename == "ci.yml"
+            "does not execute the exact qualification snapshot" if filename == "ci.yml"
             else "requires a trusted main control snapshot"
         )
         assert message in result.stdout
@@ -412,11 +432,52 @@ def test_real_promotion_coverage_aggregate_refuses_missing_coverage(monkeypatch,
     script = job["steps"][0]["run"]
     code = re.search(r"python3 - <<'PY'\n(.*?)^PY$", script, re.M | re.S).group(1)
     monkeypatch.setenv("NEEDS_JSON", json.dumps({name: {"result": result} for name in job["needs"]}))
+    monkeypatch.setenv("PROMOTION_PHASE", "candidate")
     if result == "success":
         exec(compile(code, "promotion-coverage-aggregate", "exec"), {})
     else:
         with pytest.raises(SystemExit, match="coverage did not succeed"):
             exec(compile(code, "promotion-coverage-aggregate", "exec"), {})
+
+
+def test_legacy_release_aggregate_permits_only_the_explicitly_omitted_full_tier(monkeypatch):
+    job = workflows()["ci.yml"]["jobs"]["promotion-gate"]
+    code = re.search(r"python3 - <<'PY'\n(.*?)^PY$", job["steps"][0]["run"], re.M | re.S).group(1)
+    results = {name: {"result": "success"} for name in job["needs"]}
+    results["full"]["result"] = "skipped"
+    monkeypatch.setenv("PROMOTION_PHASE", "release")
+    monkeypatch.setenv("NEEDS_JSON", json.dumps(results))
+    exec(compile(code, "promotion-coverage-aggregate", "exec"), {})
+    results["checks"]["result"] = "skipped"
+    monkeypatch.setenv("NEEDS_JSON", json.dumps(results))
+    with pytest.raises(SystemExit, match="coverage did not succeed"):
+        exec(compile(code, "promotion-coverage-aggregate", "exec"), {})
+
+
+@pytest.mark.parametrize("changed", [None, "RUN_SHA", "WORKFLOW_SHA", "RUN_REF", "PROMOTION_RUN", "PROMOTION_PHASE"])
+def test_native_candidate_guard_binds_the_owner_run_ref_and_exact_workflow(changed):
+    bash = shutil.which("bash")
+    git = shutil.which("git")
+    if os.name == "nt" and git:
+        native = Path(git).resolve().parent.parent / "bin" / "bash.exe"
+        bash = str(native) if native.is_file() else None
+    if not bash:
+        pytest.skip("native workflow guard validation requires Bash")
+    step = workflows()["ci.yml"]["jobs"]["checks"]["steps"][0]
+    environment = {
+        **os.environ, "EXPECTED_SHA": SHA, "PROMOTION_RUN": RUN, "PROMOTION_PHASE": "candidate",
+        "RUN_SHA": SHA, "WORKFLOW_SHA": SHA, "RUN_REF": "refs/heads/release/promote-123",
+    }
+    if changed:
+        environment[changed] = "moved"
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e"], input=step["run"],
+        text=True, capture_output=True, env=environment, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == (1 if changed else 0), result.stdout + result.stderr
+    if changed:
+        assert "::error::" in result.stdout
 
 
 def test_postmerge_verifier_and_failure_reporter_are_bound_to_actual_merge_and_tag():

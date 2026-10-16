@@ -248,13 +248,20 @@ relaxing artifact evidence.
 A no-content-change or paused run builds and
 publishes nothing.
 
-Before creating or merging the candidate PR, promotion publishes
-the attested transfer index and every bundle to the candidate-scoped prerelease
-`python-artifacts-<candidate-commit>`. It validates that commit's actual
+The source-owned helper interface uses an immutable
+`python-artifacts-<dev-commit>` prerelease for schema-version-2 indexes. Its
+signed composition and exact toolchain lock are reused across equivalent Git
+containers, not rebuilt under a new Main identity. Historical version-1 indexes
+retain the original `python-artifacts-<candidate-commit>` lookup and parent
+binding. See [source-owned release qualification](pipelines/source-owned-release-identity.md)
+for the helper interfaces and their independently reviewed control activation.
+
+Before creating or merging the candidate PR, readiness publishes
+the attested transfer index and every bundle. It validates the candidate's actual
 parent/content tree, complete project set and archive contents first. The
 prerelease is never marked latest and is not a source-release or dependency-policy
 approval. A failed candidate may leave immutable inputs there, but never claims
-a stable plugin version tag. Clients still have to independently verify their
+an installed source release. Clients still have to independently verify their
 selected source and the pinned artifact attestation; the prerelease's existence
 is not installation authority.
 

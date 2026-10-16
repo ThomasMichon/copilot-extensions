@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
-"""Tag a landed promotion commit from the release-pipeline state it carries.
+"""Record a landed release under its development source's immutable tag.
 
-``promote_release.py`` records only the tag *stem* (``promote-<UTC ts>``) in
-``.github/release-pipeline-state.json``, because the landed commit's sha is
-not known until it exists -- on the pull-request path the squash-merge
-produces it. This tool runs after the merge and names the tag
-``<stem>-<merge sha8>`` from the state file the merged commit itself carries,
-so the pushed tag and the state it releases always agree.
-
-Refuses (exit 1) when the merged commit is not on the main branch, its state
-does not name the promoted dev commit, its stem is missing, or the tag
-already points somewhere else. Re-running on the same commit is a no-op.
+New state names ``promote-dev-<full development SHA>``. The tag points at the
+first qualified Main landing; an equivalent later Git container reuses it
+without moving it. Different source/composition under that identity refuses.
+Historical timestamp/Main-SHA tags retain their original validation rules.
 """
 
 from __future__ import annotations
@@ -23,13 +17,35 @@ import sys
 from pathlib import Path
 
 from coverage_guided_selection.ancestor_resolution import scrubbed_git_env
-from promote_release import PIPELINE_STATE_PATH, PROMOTION_TAG_PREFIX
+from promote_release import COVERAGE_BASELINES_DIR, PIPELINE_STATE_PATH, PROMOTION_TAG_PREFIX
 
 TAG_PREFIX = f"{PROMOTION_TAG_PREFIX}-"
 
 
 class TagError(Exception):
     pass
+
+
+def _same_source_release(previous: str, landed: str, dev_sha: str, *, repo: Path) -> bool:
+    shown = _git(["show", f"{previous}:{PIPELINE_STATE_PATH}"], cwd=repo)
+    try:
+        state = json.loads(shown.stdout)
+        promotion = state.get("last_promotion") if isinstance(state, dict) else None
+    except json.JSONDecodeError as error:
+        raise TagError("existing source release has unreadable provenance") from error
+    if (
+        not isinstance(promotion, dict) or promotion.get("release_id") != dev_sha
+        or promotion.get("dev_head") != dev_sha
+    ):
+        return False
+    compared = _git(
+        ["diff", "--quiet", previous, landed, "--", ".",
+         f":(exclude){PIPELINE_STATE_PATH}", f":(exclude){COVERAGE_BASELINES_DIR}"],
+        cwd=repo, check=False,
+    )
+    if compared.returncode not in (0, 1):
+        raise TagError(f"cannot compare the existing source release: {compared.stderr.strip()}")
+    return compared.returncode == 0
 
 
 def _git(args: list[str], *, cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
@@ -53,8 +69,7 @@ def tag_promotion(
     remote: str = "origin",
     main_branch: str = "main",
 ) -> tuple[str, bool]:
-    """Create and push the promotion tag. Returns ``(tag_name, created)``;
-    ``created`` is False when the tag already pointed at ``merge_sha``."""
+    """Return the immutable source tag and whether it was newly published."""
     _git(["fetch", "-q", remote, main_branch], cwd=repo)
     known = _git(["rev-parse", "-q", "--verify", f"{merge_sha}^{{commit}}"], cwd=repo, check=False)
     if known.returncode != 0:
@@ -86,10 +101,18 @@ def tag_promotion(
             f"expected the promoted {dev_sha}"
         )
     stem = promotion.get("tag")
-    if not isinstance(stem, str) or not re.fullmatch(rf"{re.escape(TAG_PREFIX)}[0-9]{{14}}", stem):
+    source_owned = "release_id" in promotion
+    if source_owned:
+        if (
+            promotion["release_id"] != dev_sha or not re.fullmatch(r"[0-9a-f]{40}", dev_sha)
+            or stem != f"{TAG_PREFIX}dev-{dev_sha}"
+        ):
+            raise TagError("source release tag does not match the recorded development identity")
+        tag_name = stem
+    elif not isinstance(stem, str) or not re.fullmatch(rf"{re.escape(TAG_PREFIX)}[0-9]{{14}}", stem):
         raise TagError(f"{PIPELINE_STATE_PATH} at {merge_sha} has no {TAG_PREFIX}* tag stem ({stem!r})")
-
-    tag_name = f"{stem}-{merge_sha[:8]}"
+    else:
+        tag_name = f"{stem}-{merge_sha[:8]}"
     # Ask for both the ref and its peeled form: an annotated tag reports the
     # commit on `^{}`, a lightweight tag only on the plain ref.
     listed: dict[str, str] = {}
@@ -102,6 +125,10 @@ def tag_promotion(
     if existing:
         if existing == merge_sha:
             return tag_name, False
+        if source_owned:
+            _git(["fetch", "-q", remote, f"refs/tags/{tag_name}"], cwd=repo)
+            if _same_source_release(existing, merge_sha, dev_sha, repo=repo):
+                return tag_name, False
         raise TagError(f"{tag_name} already exists on {existing}, not {merge_sha}")
 
     # A previous run may have created the tag locally and then failed to push.

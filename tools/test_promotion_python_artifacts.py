@@ -786,6 +786,142 @@ def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo,
     assert promoted["tag"] in _git(["tag", "--points-at", promoted["commit"]], repo).splitlines()
 
 
+@pytest.mark.parametrize("attributes,eol,mutation", [
+    (".gitattributes", "lf", "none"),
+    (".gitattributes", "crlf", "none"),
+    ("plugins/demo-plugin/.gitattributes", "lf", "none"),
+    ("plugins/demo-plugin/.gitattributes", "crlf", "none"),
+    (".gitattributes", "crlf", "plugin-source"),
+    (".gitattributes", "crlf", "vendored-source"),
+    (".gitattributes", "crlf", "bundle-bytes"),
+    (".gitattributes", "crlf", "wheel-bytes"),
+])
+def test_materialized_producer_verifier_roundtrip(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    attributes: str, eol: str, mutation: str,
+) -> None:
+    _git(["checkout", "-q", "dev"], repo)
+    _git(["config", "core.autocrlf", "false"], repo)
+    plugin = repo / "plugins" / "demo-plugin"
+    (plugin / "pyproject.toml").write_text(
+        _STATIC_BUILD
+        + '[project]\nname = "demo"\nversion = "0.1.0-dev1"\n'
+        + '[tool.uv.sources]\nlibrary = { path = "../../libs/library", editable = true }\n',
+        encoding="utf-8",
+    )
+    for source, name, version in (
+        (plugin, "demo", "0.1.0-dev1"),
+        (repo / "libs" / "library", "library", "1.0"),
+    ):
+        package = source / "src" / name
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
+        if name == "library":
+            (source / "pyproject.toml").write_text(
+                _STATIC_BUILD + f'[project]\nname = "{name}"\nversion = "{version}"\n',
+                encoding="utf-8",
+            )
+    (repo / attributes).write_text(f"*.ps1 text eol={eol}\n", encoding="utf-8")
+    (plugin / "generated.ps1").write_bytes(b"first line\nsecond line\n")
+    dev = _commit(repo, "declared source closure and checkout policy")
+    main = _git(["rev-parse", "main"], repo)
+    scratch = promotion.add_scratch_worktree(dev, repo=repo)
+    try:
+        summary = promotion.consume_pending_changes(
+            scratch, main_head=main, repo=repo,
+            trusted_source=Path(promotion.__file__).resolve().parent.parent,
+        )
+        tree = promotion.build_promotion_tree(scratch, control=summary.get("control_preserved"))
+        commit = _git(["commit-tree", tree, "-p", main, "-m", "materialized candidate"], repo)
+    finally:
+        promotion.remove_scratch_worktree(scratch, repo=repo)
+    candidate = promotion.add_scratch_worktree(commit, repo=repo)
+    try:
+        assert not builder.uer.find_uv_editable_refs(candidate / "plugins" / "demo-plugin")
+        assert (candidate / "plugins/demo-plugin/generated.ps1").read_bytes() == (
+            b"first line\r\nsecond line\r\n" if eol == "crlf" else b"first line\nsecond line\n"
+        )
+        producer = promotion._load_module(Path(builder.__file__), "roundtrip_artifact_producer")
+        producer.REPO = candidate
+        producer.PLUGINS_DIR = candidate / "plugins"
+        producer.LIBS_DIR = candidate / "libs"
+
+        def encode_wheel(
+            source_dir: Path, out_dir: Path, *, toolchain: builder.ToolchainLock,
+            reserved_names: set[str],
+        ) -> Path:
+            # Only the external build backend is replaced: closure discovery,
+            # pre-build source hashing, identity generation and verification are real.
+            project = artifacts.tomllib.loads(
+                (source_dir / "pyproject.toml").read_text(encoding="utf-8"),
+            )["project"]
+            name = project["name"]
+            version = project["version"].replace("-", ".")
+            wheel = out_dir / f"{name}-{version}-py3-none-any.whl"
+            assert toolchain.generator == "setuptools (80.9.0)"
+            assert wheel.name not in reserved_names
+            reserved_names.add(wheel.name)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            wheel.write_bytes(_wheel_bytes(
+                name, version, payload=(source_dir / "src" / name / "__init__.py").read_bytes(),
+            ))
+            return wheel
+
+        monkeypatch.setattr(producer, "build_wheel", encode_wheel)
+        toolchain = builder.ToolchainLock(Path("."), {
+            "setuptools": "80.9.0", "wheel": "0.45.1", "packaging": "25.0",
+        }, provenance={
+            "source_policy": "governed", "python": "/python",
+            "validated_index_identity": "sha256:" + "f" * 64,
+        })
+        wheels = tmp_path / "produced-wheels"
+        manifest = producer.build_plugin_artifacts("demo-plugin", out_dir=wheels, toolchain=toolchain)
+        assert {wheel["source"] for wheel in manifest["wheels"]} == {
+            "plugins/demo-plugin", "plugins/demo-plugin/libs/library",
+        }
+        directory = tmp_path / "produced-bundles"
+        directory.mkdir()
+        entry = artifacts.bundle_wheels(manifest, wheels, directory)
+        index = {
+            "schema": artifacts.SCHEMA, "schema_version": 1,
+            "dev_head": dev, "main_before": main, "content_tree": tree, "artifacts": [entry],
+        }
+        _write_index(directory, index)
+        assert artifacts.validate_candidate_artifacts(
+            directory, repo=repo, dev_head=dev, main_before=main,
+        ) == index
+        if mutation == "none":
+            return
+        archive = directory / entry["filename"]
+        if mutation in ("plugin-source", "vendored-source"):
+            relative = "src/demo/__init__.py" if mutation == "plugin-source" else (
+                "libs/library/src/library/__init__.py"
+            )
+            (candidate / "plugins" / "demo-plugin" / relative).write_bytes(b"changed shipped source\n")
+            diagnostic = "manifest payload hash differs"
+        elif mutation == "bundle-bytes":
+            archive.write_bytes(archive.read_bytes() + b"\n")
+            diagnostic = "artifact digest mismatch"
+        else:
+            with zipfile.ZipFile(archive) as bundle:
+                members = {name: bundle.read(name) for name in bundle.namelist()}
+            wheel_name = next(wheel["filename"] for wheel in manifest["wheels"] if wheel["role"] == "plugin")
+            members[wheel_name] += b"\n"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                for name, payload in members.items():
+                    bundle.writestr(name, payload)
+            entry["sha256"] = artifacts._digest(archive)
+            _write_index(directory, index)
+            diagnostic = "wheel digest mismatch"
+        with pytest.raises(artifacts.PromotionArtifactError, match=diagnostic):
+            artifacts.validate_artifacts(
+                directory, content_tree=tree, dev_head=dev, main_before=main,
+                projects=artifacts.candidate_projects(candidate), candidate_root=candidate,
+            )
+    finally:
+        promotion.remove_scratch_worktree(candidate, repo=repo)
+
+
 @pytest.mark.parametrize("suffix", ["ps1", "cmd"])
 @pytest.mark.parametrize("eol", ["crlf", "lf"])
 @pytest.mark.parametrize("entrypoint", ["cli", "workflow", "promote"])

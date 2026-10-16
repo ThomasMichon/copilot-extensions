@@ -64,8 +64,7 @@ sys.dont_write_bytecode = True
 #: dev to know or carry it.
 PIPELINE_STATE_PATH = ".github/release-pipeline-state.json"
 PIPELINE_STATE_SCHEMA = "copilot-extensions.release-pipeline-state"
-# Every promotion tag is `<PROMOTION_TAG_PREFIX>-<UTC ts>-<sha8>`; rollback and
-# CI find promotions by this prefix.
+# New release tags name Dev; historical timestamp/Main-SHA tags share this prefix.
 PROMOTION_TAG_PREFIX = "promote"
 
 
@@ -649,6 +648,8 @@ def promote(
     toolchain_source: str = "governed",
     toolchain_min_age_days: int | None = None,
     promotion_time: str | None = None,
+    qualification_only: bool = False,
+    reuse_artifacts_repository: str | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
     "nothing to promote" (reported via ``report["promoted"] is False``).
@@ -684,6 +685,8 @@ def promote(
     -- with no real `dev` content change -- never forces a vacuous
     promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
+    if qualification_only and push and not candidate_branch:
+        raise PromotionError("qualification-only publication requires the normal candidate PR path")
     if build_python_artifacts_dir is not None and (
         push or python_artifacts_dir is not None
     ):
@@ -696,7 +699,7 @@ def promote(
     main_tree = _git(["rev-parse", f"{main_head}^{{tree}}"], cwd=repo)
 
     state = _read_pipeline_state(main_head, repo=repo)
-    if state.get("paused"):
+    if state.get("paused") and not qualification_only:
         raise PromotionPaused(
             "promotion is paused: "
             f"{state.get('pause_reason') or '(no reason recorded)'} -- "
@@ -759,7 +762,7 @@ def promote(
         content_tree = build_promotion_tree(scratch, control=summary.get("control_preserved"))
         main_content_tree = _tree_excluding_state(main_tree, repo=repo)
 
-        if content_tree == main_content_tree:
+        if content_tree == main_content_tree and last_dev_head in (None, dev_head):
             return {"promoted": False, "reason": "no content change vs. main", **summary}
 
         from promotion_python_artifacts import (
@@ -777,19 +780,16 @@ def promote(
 
         base = _git(["merge-base", main_head, dev_head], cwd=repo, check=False) or main_head
         message = format_promotion_message(dev_range=(base, dev_head), summary=summary)
-        # The state file records only the tag *stem*: the landed commit's sha
-        # is not known until it exists (and, on the PR path, until the
-        # squash-merge produces it). Every pushed tag is `<stem>-<sha8>` of
-        # the commit it points at, so the tag and the state it releases
-        # always agree.
         prepared_at, stamp = candidate_clock(promotion_time)
         tag_stem = f"{tag_prefix}-{stamp}"
+        source_tag = f"{tag_prefix}-dev-{dev_head}"
 
         new_state = dict(state)
         new_state["last_promotion"] = {
             "dev_head": dev_head,
             "main_before": main_head,
-            "tag": tag_stem,
+            "tag": source_tag,
+            "release_id": dev_head,
             "promoted_at": prepared_at,
         }
         if "control_preserved" in summary:
@@ -816,21 +816,28 @@ def promote(
                     dev_head=dev_head, main_before=main_head,
                     out_dir=build_python_artifacts_dir, source_policy=toolchain_source,
                     min_age_days=toolchain_min_age_days,
+                    reuse_repository=reuse_artifacts_repository,
                 )
             except PromotionArtifactError as exc:
                 raise PromotionError(str(exc)) from exc
-        tag_name: str | None = f"{tag_stem}-{commit[:8]}"
+        tag_name: str | None = source_tag
 
         if push and candidate_branch:
-            # Land via a real PR, not a direct push (see promote()'s
-            # docstring) -- the caller tags the actual post-merge commit as
-            # `<tag_stem>-<merge sha8>`; this pre-merge candidate's sha is
-            # replaced by the squash-merge, so no tag name is reported for it.
+            # The landed Git container is a receipt, not another release key.
             tag_name = None
             push_candidate(commit, candidate_branch, cwd=scratch, git=_git)
         else:
-            if build_python_artifacts_dir is None:
-                _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+            if build_python_artifacts_dir is None and not qualification_only:
+                from tag_promotion import _same_source_release
+
+                existing = _git(
+                    ["rev-parse", "-q", "--verify", f"refs/tags/{tag_name}^{{commit}}"],
+                    cwd=scratch, check=False,
+                )
+                if existing and not _same_source_release(existing, commit, dev_head, repo=repo):
+                    raise PromotionError("existing source release tag binds a different source/composition")
+                if not existing:
+                    _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
             else:
                 # Artifact preparation never tags (and never pushes; see the
                 # guard at the top), so there is no tag name to report.
@@ -844,6 +851,7 @@ def promote(
             "commit": commit,
             "tag": tag_name,
             "tag_stem": tag_stem,
+            "source_tag": source_tag,
             "main_before": main_head,
             "dev_head": dev_head,
             "pushed": push,
@@ -872,6 +880,10 @@ def main(argv: list[str] | None = None) -> int:
         help="override the non-incremental-promotion guard after a rollback",
     )
     ap.add_argument(
+        "--qualification-only", action="store_true",
+        help="qualify a replacement while preserving the pause; never push Main directly",
+    )
+    ap.add_argument(
         "--candidate-branch", default=None,
         help="push the candidate commit here instead of main directly, for a "
              "caller (validate-and-promote.yml) to land via a real PR + merge",
@@ -888,6 +900,7 @@ def main(argv: list[str] | None = None) -> int:
     artifacts = ap.add_mutually_exclusive_group()
     artifacts.add_argument("--build-python-artifacts-dir", type=Path)
     artifacts.add_argument("--python-artifacts-dir", type=Path)
+    ap.add_argument("--reuse-artifacts-repository", help="reuse the admitted immutable development artifact set")
     ap.add_argument(
         "--toolchain-source", choices=("governed", "seasoned-public"), default="governed"
     )
@@ -904,6 +917,8 @@ def main(argv: list[str] | None = None) -> int:
         report = promote(
             repo=args.repo, dev_ref=args.dev_ref, main_ref=args.main_ref,
             push=args.push, force=args.force, candidate_branch=args.candidate_branch,
+            qualification_only=args.qualification_only,
+            reuse_artifacts_repository=args.reuse_artifacts_repository,
             coverage_baselines_dir=args.coverage_baselines_dir,
             build_python_artifacts_dir=args.build_python_artifacts_dir,
             python_artifacts_dir=args.python_artifacts_dir,
@@ -939,13 +954,12 @@ def main(argv: list[str] | None = None) -> int:
     elif report.get("python_artifacts_exported"):
         print(
             f"promote-release: prepared commit {report['commit']} for artifact export "
-            f"(not tagged; tag stem {report['tag_stem']})"
+            f"(not tagged; source release {report['source_tag']})"
         )
     else:
         print(
             f"promote-release: generated commit {report['commit']} "
-            f"(tag stem {report['tag_stem']}; the merged commit is tagged "
-            f"{report['tag_stem']}-<merge sha8>)"
+            f"(the qualified landing is recorded as {report['source_tag']})"
         )
     print(f"  main before: {report['main_before']}")
     print(f"  dev head:    {report['dev_head']}")

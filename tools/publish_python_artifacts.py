@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -14,6 +15,7 @@ from promotion_python_artifacts import (
     INDEX_NAME, PromotionArtifactError, candidate_projects, validate_artifacts,
     validate_source_binding,
 )
+from verify_promotion_workflows import VerificationError
 
 
 def _gh(
@@ -45,11 +47,11 @@ def _is_not_found(result: subprocess.CompletedProcess) -> bool:
     ) is not None
 
 
-def verify_attestations(
-    directory: Path, *, repository: str, signer_digest: str, source_digest: str,
+def verify_attestation_subject(
+    path: Path, *, repository: str, signer_digest: str, source_digest: str,
     source_ref: str,
 ) -> None:
-    """Require the pinned hosted promotion workflow, never repo-write authority."""
+    """Authenticate one immutable subject against the pinned hosted Main producer."""
     if (
         not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
         or not re.fullmatch(r"[0-9a-f]{40}", signer_digest)
@@ -57,21 +59,27 @@ def verify_attestations(
         or not re.fullmatch(r"refs/heads/[A-Za-z0-9_./-]+", source_ref)
     ):
         raise PromotionArtifactError("invalid expected attestation identity")
-    index = directory / INDEX_NAME
-    if not index.is_file() or index.is_symlink():
-        raise PromotionArtifactError("missing or unsafe promotion artifact index")
-    # Verify the index before using any publisher-controlled identity fields.
-    def verify(path: Path) -> None:
-        if path.is_symlink() or not path.is_file():
-            raise PromotionArtifactError(f"{path.name}: unsafe attestation subject")
-        _check(_gh([
-            "attestation", "verify", str(path), "--repo", repository,
-            "--signer-workflow", f"{repository}/.github/workflows/validate-and-promote.yml",
-            "--signer-digest", signer_digest, "--source-digest", source_digest,
-            "--source-ref", source_ref, "--deny-self-hosted-runners",
-        ], verification=True))
+    if path.is_symlink() or not path.is_file():
+        raise PromotionArtifactError(f"{path.name}: unsafe attestation subject")
+    _check(_gh([
+        "attestation", "verify", str(path), "--repo", repository,
+        "--signer-workflow", f"{repository}/.github/workflows/validate-and-promote.yml",
+        "--signer-digest", signer_digest, "--source-digest", source_digest,
+        "--source-ref", source_ref, "--deny-self-hosted-runners",
+    ], verification=True))
 
-    verify(index)
+
+def verify_attestations(
+    directory: Path, *, repository: str, signer_digest: str, source_digest: str,
+    source_ref: str, repo: Path | None = None,
+) -> None:
+    """Require the pinned hosted promotion workflow, never repo-write authority."""
+    identity = dict(
+        repository=repository, signer_digest=signer_digest,
+        source_digest=source_digest, source_ref=source_ref,
+    )
+    index = directory / INDEX_NAME
+    verify_attestation_subject(index, **identity)
     try:
         signed_index = json.loads(index.read_text(encoding="utf-8"))
         if not isinstance(signed_index, dict):
@@ -80,10 +88,33 @@ def verify_attestations(
             directory, content_tree=signed_index.get("content_tree"),
             dev_head=signed_index.get("dev_head"), main_before=signed_index.get("main_before"),
         )
+        if validated["schema_version"] == 2:
+            admission = validated.get("admission")
+            if (
+                source_ref != "refs/heads/main" or signer_digest != source_digest
+                or not isinstance(admission, dict)
+                or not isinstance(admission.get("signer_digest"), str)
+                or not re.fullmatch(r"[0-9a-f]{40}", admission["signer_digest"])
+                or admission.get("source_digest") != admission["signer_digest"]
+                or admission.get("source_ref") != "refs/heads/main"
+            ):
+                raise PromotionArtifactError("source-owned publication requires original trusted Main admission")
+            if admission["signer_digest"] != signer_digest:
+                import promote_release as promotion
+
+                if not promotion._is_ancestor(
+                    admission["signer_digest"], signer_digest,
+                    cwd=repo or Path(__file__).resolve().parent.parent,
+                ):
+                    raise PromotionArtifactError("original source admission is not trusted Main history")
+                verify_attestation_subject(
+                    index, repository=repository, signer_digest=admission["signer_digest"],
+                    source_digest=admission["source_digest"], source_ref=admission["source_ref"],
+                )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PromotionArtifactError(f"cannot read signed promotion artifact index: {exc}") from exc
     for entry in validated["artifacts"]:
-        verify(directory / entry["filename"])
+        verify_attestation_subject(directory / entry["filename"], **identity)
 
 
 def _tag_commit(repository: str, tag: str) -> str | None:
@@ -112,14 +143,42 @@ def _tag_commit(repository: str, tag: str) -> str | None:
 
 def _validate_tag_binding(
     directory: Path, entry: dict, *, tag_commit: str, merged_commit: str, repo: Path,
+    repository: str, admission_cache: dict[tuple[str, str], dict] | None = None,
 ) -> None:
     """A stable version tag may precede unrelated promotions, but not its payload."""
     import promote_release as promotion
 
     if tag_commit == merged_commit:
         return
+    index = json.loads((directory / INDEX_NAME).read_text(encoding="utf-8"))
+    if index["schema_version"] == 2:
+        tag_tree = promotion._tree_excluding_state(
+            promotion._git(["rev-parse", f"{tag_commit}^{{tree}}"], cwd=repo), repo=repo,
+        )
+        current_tree = promotion._tree_excluding_state(
+            promotion._git(["rev-parse", f"{merged_commit}^{{tree}}"], cwd=repo), repo=repo,
+        )
+        if tag_tree == current_tree and promotion._git(
+            ["ls-tree", tag_commit, promotion.PIPELINE_STATE_PATH], cwd=repo,
+        ):
+            state = json.loads(promotion._git(
+                ["show", f"{tag_commit}:{promotion.PIPELINE_STATE_PATH}"], cwd=repo,
+            ))
+            if (
+                isinstance(state, dict) and isinstance(state.get("last_promotion"), dict)
+                and state["last_promotion"].get("dev_head") == index["dev_head"]
+            ):
+                return
     if not promotion._is_ancestor(tag_commit, merged_commit, cwd=repo):
-        raise PromotionArtifactError("release tag is not a shipped ancestor of the merged candidate")
+        if index["schema_version"] != 2:
+            raise PromotionArtifactError("release tag is not a shipped ancestor of the merged candidate")
+        from promotion_source_alias import validate_prior_source_alias
+
+        validate_prior_source_alias(
+            repository=repository, tag_commit=tag_commit, current_commit=merged_commit,
+            current_index=index, repo=repo,
+            cache={} if admission_cache is None else admission_cache,
+        )
     scratch = promotion.add_scratch_worktree(tag_commit, repo=repo)
     try:
         with zipfile.ZipFile(directory / entry["filename"]) as bundle:
@@ -165,6 +224,7 @@ def validate_commit_artifacts(
 def publish_artifacts(
     directory: Path, *, repository: str, merged_commit: str, dev_head: str, repo: Path,
     candidate_commit: str | None = None,
+    admission_cache: dict[tuple[str, str], dict] | None = None,
 ) -> None:
     """Publish only after verifying the actual merged candidate's exact composition."""
     if candidate_commit is not None:
@@ -179,6 +239,8 @@ def publish_artifacts(
     index = validate_commit_artifacts(
         directory, commit=merged_commit, dev_head=dev_head, repo=repo,
     )
+    if admission_cache is None:
+        admission_cache = {}
     for entry in index["artifacts"]:
         tag = f"{entry['plugin']}-v{entry['version']}"
         asset = str(directory / entry["filename"])
@@ -193,6 +255,7 @@ def publish_artifacts(
         if tag_commit is not None:
             _validate_tag_binding(
                 directory, entry, tag_commit=tag_commit, merged_commit=merged_commit, repo=repo,
+                repository=repository, admission_cache=admission_cache,
             )
         elif not absent:
             raise PromotionArtifactError(f"{tag}: published release has no tag")
@@ -220,9 +283,65 @@ def publish_artifacts(
         _check(_gh(["release", "upload", tag, "--repo", repository, asset]))
 
 
+def verify_published_artifacts(
+    directory: Path, *, repository: str, candidate_commit: str, dev_head: str, repo: Path,
+    admission_cache: dict[tuple[str, str], dict] | None = None,
+) -> dict:
+    """Read every required final asset with consumer authority before Main moves."""
+    index = validate_commit_artifacts(directory, commit=candidate_commit, dev_head=dev_head, repo=repo)
+    if admission_cache is None:
+        admission_cache = {}
+    for entry in index["artifacts"]:
+        tag = f"{entry['plugin']}-v{entry['version']}"
+        release = _release(
+            _gh(["api", f"repos/{repository}/releases/tags/{tag}"], verification=True), tag,
+        )
+        if type(release.get("id")) is not int or release["id"] <= 0:
+            raise PromotionArtifactError(f"{tag}: invalid published release identity")
+        tag_commit = _tag_commit(repository, tag)
+        if tag_commit is None:
+            raise PromotionArtifactError(f"{tag}: published release has no immutable tag")
+        _validate_tag_binding(
+            directory, entry, tag_commit=tag_commit, merged_commit=candidate_commit, repo=repo,
+            repository=repository, admission_cache=admission_cache,
+        )
+        pages = json.loads(_check(_gh(
+            ["api", "--paginate", "--slurp",
+             f"repos/{repository}/releases/{release['id']}/assets?per_page=100"],
+            verification=True,
+        )))
+        if not isinstance(pages, list) or any(
+            not isinstance(page, list) or any(not isinstance(asset, dict) for asset in page)
+            for page in pages
+        ):
+            raise PromotionArtifactError(f"{tag}: invalid published asset pages")
+        matches = [
+            asset for page in pages for asset in page
+            if isinstance(asset, dict) and asset.get("name") == entry["filename"]
+        ]
+        if (
+            len(matches) != 1 or matches[0].get("digest") != f"sha256:{entry['sha256']}"
+            or matches[0].get("state") != "uploaded"
+            or type(matches[0].get("id")) is not int or matches[0]["id"] <= 0
+        ):
+            raise PromotionArtifactError(f"{tag}: required published asset is missing or conflicting")
+        downloaded = _gh(
+            ["api", f"repos/{repository}/releases/assets/{matches[0]['id']}",
+             "-H", "Accept: application/octet-stream"],
+            verification=True, binary=True,
+        )
+        _check(downloaded)
+        if (
+            not isinstance(downloaded.stdout, bytes)
+            or hashlib.sha256(downloaded.stdout).hexdigest() != entry["sha256"]
+        ):
+            raise PromotionArtifactError(f"{tag}: downloaded published asset digest mismatch")
+    return index
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("verify", "prepare", "publish"))
+    parser.add_argument("operation", choices=("verify", "prepare", "publish", "publish-candidate"))
     parser.add_argument("--directory", required=True, type=Path)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--signer-digest", required=True)
@@ -231,6 +350,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--merged-commit")
     parser.add_argument("--candidate-commit")
     parser.add_argument("--dev-head")
+    parser.add_argument("--main-before")
+    parser.add_argument("--promotion-run")
+    parser.add_argument("--candidate-root", type=Path)
+    parser.add_argument("--qualification-receipt", type=Path)
+    parser.add_argument("--github-output", type=Path)
+    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args(argv)
     if args.operation == "publish" and (
         not args.merged_commit or not args.candidate_commit or not args.dev_head
@@ -238,14 +363,32 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("publish requires --merged-commit, --candidate-commit and --dev-head")
     if args.operation == "prepare" and (not args.candidate_commit or not args.dev_head):
         parser.error("prepare requires --candidate-commit and --dev-head")
+    if args.operation == "publish-candidate" and not all((
+        args.candidate_commit, args.dev_head, args.main_before, args.promotion_run,
+        args.candidate_root, args.qualification_receipt,
+    )):
+        parser.error("publish-candidate requires candidate, source, base and qualification identities")
     try:
+        qualification_digest = None
+        if args.operation == "publish-candidate":
+            if not os.environ.get("ARTIFACT_VERIFY_TOKEN"):
+                raise PromotionArtifactError("candidate publication requires independent consumer read authority")
+            from qualify_promotion_candidate import verify_receipt
+
+            receipt = json.loads(args.qualification_receipt.read_text(encoding="utf-8"))
+            qualification_digest = verify_receipt(
+                receipt, repository=args.repository, candidate_sha=args.candidate_commit,
+                dev_sha=args.dev_head, main_before=args.main_before,
+                control_sha=args.signer_digest, promotion_run=args.promotion_run,
+                candidate_root=args.candidate_root,
+            )
         verify_attestations(
             args.directory, repository=args.repository, signer_digest=args.signer_digest,
-            source_digest=args.source_digest, source_ref=args.source_ref,
+            source_digest=args.source_digest, source_ref=args.source_ref, repo=args.repo,
         )
-        repo = Path(__file__).resolve().parent.parent
+        repo = args.repo
         if args.operation == "prepare" or (
-            args.operation == "publish" and args.candidate_commit
+            args.operation in ("publish", "publish-candidate") and args.candidate_commit
         ):
             from promotion_artifact_readiness import prepare_artifacts, verify_ready_artifacts
 
@@ -260,7 +403,30 @@ def main(argv: list[str] | None = None) -> int:
                 args.directory, repository=args.repository, merged_commit=args.merged_commit,
                 dev_head=args.dev_head, repo=repo, candidate_commit=args.candidate_commit,
             )
-    except PromotionArtifactError as exc:
+        if args.operation == "publish-candidate":
+            admission_cache: dict[tuple[str, str], dict] = {}
+            publish_artifacts(
+                args.directory, repository=args.repository, merged_commit=args.candidate_commit,
+                dev_head=args.dev_head, repo=repo, candidate_commit=args.candidate_commit,
+                admission_cache=admission_cache,
+            )
+            index = verify_published_artifacts(
+                args.directory, repository=args.repository, candidate_commit=args.candidate_commit,
+                dev_head=args.dev_head, repo=repo,
+                admission_cache=admission_cache,
+            )
+            publication = {
+                "dev_head": args.dev_head, "candidate": args.candidate_commit,
+                "qualification": qualification_digest,
+                "index_digest": hashlib.sha256((args.directory / INDEX_NAME).read_bytes()).hexdigest(),
+                "artifacts": index["artifacts"],
+            }
+            digest = hashlib.sha256(json.dumps(publication, sort_keys=True).encode()).hexdigest()
+            if args.github_output is not None:
+                with args.github_output.open("a", encoding="utf-8") as output:
+                    output.write(f"source_release={tag}\npublication_digest={digest}\n")
+            print(f"artifact-published: {digest}")
+    except (PromotionArtifactError, VerificationError, OSError, ValueError) as exc:
         print(f"promotion-python-artifacts: FAILED: {exc}", file=sys.stderr)
         return 1
     return 0

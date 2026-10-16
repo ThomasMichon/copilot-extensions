@@ -77,33 +77,34 @@ def _verify_downloads(
 
 def _validated_set(
     directory: Path, *, candidate_commit: str, dev_head: str, repo: Path,
-) -> tuple[str, dict[str, str]]:
+) -> tuple[str, str, dict[str, str]]:
     index = publisher.validate_commit_artifacts(
         directory, commit=candidate_commit, dev_head=dev_head, repo=repo,
     )
-    return f"python-artifacts-{candidate_commit}", _expected(directory, index)
+    target = dev_head if index["schema_version"] == 2 else candidate_commit
+    return f"python-artifacts-{target}", target, _expected(directory, index)
 
 
 def prepare_artifacts(
     directory: Path, *, repository: str, candidate_commit: str, dev_head: str, repo: Path,
 ) -> str:
     """Only a complete set readable with consumer authority authorizes merge."""
-    tag, expected = _validated_set(
+    tag, source, expected = _validated_set(
         directory, candidate_commit=candidate_commit, dev_head=dev_head, repo=repo,
     )
     release = _read_release(repository, tag)
     target = publisher._tag_commit(repository, tag)
-    if target is not None and target != candidate_commit:
+    if target is not None and target != source:
         raise PromotionArtifactError(f"{tag}: candidate tag points to a different commit")
     if release is None:
         publisher._check(publisher._gh([
-            "release", "create", tag, "--repo", repository, "--target", candidate_commit,
+            "release", "create", tag, "--repo", repository, "--target", source,
             "--prerelease", "--latest=false", "--title", tag, "--notes",
             "Attested candidate inputs, not a promoted source release or dependency-policy approval. "
             "Consume only after independently verifying the selected source and artifact provenance.",
         ], timeout=120))
         release = _read_release(repository, tag)
-    if release is None or publisher._tag_commit(repository, tag) != candidate_commit:
+    if release is None or publisher._tag_commit(repository, tag) != source:
         raise PromotionArtifactError(f"{tag}: candidate release/tag creation was not verified")
     assets = _assets(repository, release, expected)
     for name in expected:
@@ -122,11 +123,11 @@ def verify_ready_artifacts(
     directory: Path, *, repository: str, candidate_commit: str, dev_head: str, repo: Path,
 ) -> str:
     """Read-only verification; never repair a readiness failure after source merge."""
-    tag, expected = _validated_set(
+    tag, source, expected = _validated_set(
         directory, candidate_commit=candidate_commit, dev_head=dev_head, repo=repo,
     )
     release = _read_release(repository, tag)
-    if release is None or publisher._tag_commit(repository, tag) != candidate_commit:
+    if release is None or publisher._tag_commit(repository, tag) != source:
         raise PromotionArtifactError(f"{tag}: candidate release is unavailable or misbound")
     _verify_downloads(repository, tag, _assets(repository, release, expected), expected)
     return tag

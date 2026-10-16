@@ -109,6 +109,12 @@ rewrite)._
 
 > The has refusals are also a problem, because they get easily broken and nothing is catching the breaks before PRs go in. This is the kind of thing which needs to be caught at PR time; by the time a release goes out, we may need be more forgiving, or at least perform some normalization before hash-comparison
 
+**Main publication boundary clarification (verbatim):**
+
+> How can it land *AND* fail? If this merges:
+> https://github.com/ThomasMichon/copilot-extensions/pull/6938
+> I expect that to mean "release succeeded". If we have a failure, don't allow this merge through.
+
 Phase 9 is the agent-recommended decomposition of this clarification. It does
 not grant a new main-path exception, relax byte integrity or silently change
 the separately owned main-control preservation policy. The original pipeline
@@ -717,7 +723,7 @@ Historical proposal and supersession evidence:
 _(Agent-recommended implementation and validation decomposition of the
 2026-10-15 operator clarification; not a replacement release writer.)_
 
-- [ ] Land the reviewed source-identity and cadence contract before changing
+- [x] Land the reviewed source-identity and cadence contract before changing
       the mechanism.
 - [ ] Exercise actual producer, materializer and verifier agreement in bounded
       ordinary PR checks before development merge, reusing existing CI lanes.
@@ -931,6 +937,50 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-16 - Source-owned helper implementation; activation remains open
+
+The source-identity/PR-time contract merged as #6939. Source helpers now bind
+version-2 artifact indexes and immutable availability lookup to the verified
+Dev commit, preserve version-1 validation, reuse the signed admitted
+composition/lock without rebuilding for another Git container, and record new
+landings with Dev-named tags. Source, composition, archive/wheel bytes,
+governance, immutable collisions and original hosted-signature checks remain
+hard failures.
+
+The independently reviewed Bridge release-label repair merged as #6992
+(`1d5bf16e408025f85315b035abc916faee35c5fb`). It normalizes the actual fallback
+release label, exercises already-stamped/materialized inputs, and re-attests
+only the current authority corpus with confined, deterministic capture.
+Current-head approval and CI succeeded; this is a source repair, not proof of
+a qualified containing Main release or installed acceptance.
+
+The new qualifier derives the required executed portfolio from canonical CI,
+including full suites, native platforms and matrix rows. Final publication
+requires its exact successful attempt and consumer-authority raw readback
+before a Main merge. Ordinary PR input selection now includes real source,
+attribute and materializer inputs; eight actual producer/materializer/verifier
+roundtrips cover canonical checkout representation and source/archive/wheel
+tamper refusal.
+
+Independent implementation review caught two additional authority/completion
+gaps, both repaired without weakening evidence. The prepared required Main
+source gate authenticates the owning run's executing control generation by
+workflow blob equality, so obsolete in-flight graphs cannot publish after
+resume. Immutable version aliases from prior squash-landed or never-landed
+candidates are authenticated through the prior signed Dev index and actual
+per-plugin source closure, not a nonexistent Main ancestry relationship.
+Real two-release regressions cover both cases and preserve current raw-byte,
+signature, provenance and no-clobber refusals.
+
+These source changes do not activate Main control. #6237 retains one
+coordinated, explicitly authorized workflow/control repair; the pipeline is
+paused after #6949, and the exposed product snapshot is not declared healthy.
+The paused `qualification_only` path preserves the pause and every other gate
+while preparing a normal candidate PR replacement. Its trusted control,
+first-transition qualification, actual known-good Main replacement, installed
+consumer acceptance and hourly-or-faster cadence proof remain open. A source
+merge, helper receipt or documentation change is not effort completion.
 
 ### 2026-10-13 - Phase 8 superseded by the canonical campaign
 

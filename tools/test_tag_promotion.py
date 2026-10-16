@@ -149,6 +149,43 @@ def test_control_head_can_advance_beyond_the_published_release(repo):
     assert _remote_tag(origin, f"{STEM}-{sha[:8]}") == sha
 
 
+def test_source_owned_tag_names_development_and_reuses_the_original_immutable_landing(repo):
+    work, origin = repo
+    tag = f"promote-dev-{DEV_SHA}"
+    state = {"tag": tag, "dev_head": DEV_SHA, "release_id": DEV_SHA}
+    first = _commit_state(work, state)
+    assert _tag(work, first) == (tag, True)
+    another_container = _commit_state(work, state)
+    assert another_container != first
+    assert _tag(work, another_container) == (tag, False)
+    assert _remote_tag(origin, tag) == first
+
+
+def test_source_owned_tag_refuses_changed_payload_under_the_same_development_identity(repo):
+    work, origin = repo
+    tag = f"promote-dev-{DEV_SHA}"
+    state = {"tag": tag, "dev_head": DEV_SHA, "release_id": DEV_SHA}
+    first = _commit_state(work, state)
+    _tag(work, first)
+    (work / "shipped.py").write_text("changed executable payload\n", encoding="utf-8")
+    changed = _commit_state(work, state)
+    with pytest.raises(tp.TagError, match="already exists"):
+        _tag(work, changed)
+    assert _remote_tag(origin, tag) == first
+
+
+@pytest.mark.parametrize("field,value", [
+    ("release_id", "f" * 40), ("tag", STEM), ("tag", f"promote-dev-{'f' * 40}"),
+])
+def test_source_owned_tag_rejects_conflicting_state_without_a_legacy_fallback(repo, field, value):
+    work, _origin = repo
+    state = {"tag": f"promote-dev-{DEV_SHA}", "dev_head": DEV_SHA, "release_id": DEV_SHA}
+    state[field] = value
+    sha = _commit_state(work, state)
+    with pytest.raises(tp.TagError, match="source release tag"):
+        _tag(work, sha)
+
+
 def test_native_workflow_tag_step_configures_fresh_git_identity_and_authentication(repo, tmp_path):
     import yaml
 

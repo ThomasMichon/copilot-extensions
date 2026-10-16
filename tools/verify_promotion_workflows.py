@@ -25,9 +25,17 @@ def _api(path: str, *, body: dict | None = None, timeout: float = 60):
     argv = ["gh", "api", path]
     if body is not None:
         argv += ["--method", "POST", "--input", "-"]
+    env = os.environ.copy()
+    read_token = env.pop("ARTIFACT_VERIFY_TOKEN", None)
+    if read_token is not None:
+        if not read_token:
+            raise VerificationError("explicit verification authority is unavailable")
+        if body is None:
+            env["GH_TOKEN"] = read_token
     result = subprocess.run(
         argv, input=None if body is None else json.dumps(body),
         check=True, capture_output=True, text=True, timeout=timeout,
+        env=env,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     return json.loads(result.stdout) if result.stdout.strip() else None

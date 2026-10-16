@@ -126,6 +126,7 @@ def test_cli_emits_the_trusted_commit_directly_not_via_human_log_parsing(tmp_pat
     report = {
         "promoted": True, "commit": commit, "tag": None, "tag_stem": "promote-fixture",
         "main_before": "a" * 40, "dev_head": "b" * 40, "pushed": True,
+        "source_tag": "promote-dev-" + "b" * 40,
         "candidate_branch": "release/promote-fixture",
         "bumps": {"untrusted\ncandidate_sha=" + "d" * 40: ("1", "2")},
     }

@@ -460,7 +460,8 @@ def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
 @pytest.mark.parametrize("job_id", ["checks", "windows-python-artifact-builder"])
 @pytest.mark.parametrize("promotion_run,changed,expected", [
     ("123-1", "tools/promotion_artifact_readiness.py", "run=true"),
-    ("123-1", "plugins/demo-plugin/README.md", "run=false"),
+    ("123-1", "plugins/demo-plugin/README.md", "run=true"),
+    ("123-1", "docs/unrelated.md", "run=false"),
     ("", "tools/promotion_artifact_readiness.py", "run=false"),
     ("123-1", "tools/promotion_artifact_readiness.py", None),
 ])
