@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from functools import partial
 from pathlib import Path
 from time import monotonic, sleep
 
@@ -88,8 +89,13 @@ def acquire(
         }
         try:
             result = (
-                activation_preservation.run_install_preserving_activation(argv, ref, **kwargs)
-                if verb == "install" else subprocess.run(argv, **kwargs)
+                activation_preservation.run_install_preserving_activation(
+                    argv, ref, runner=partial(_auth.run_acquisition, subprocess.run, context=cwd),
+                    **kwargs,
+                )
+                if verb == "install" else _auth.run_acquisition(
+                    subprocess.run, argv, context=cwd, **kwargs,
+                )
             )
         except activation_preservation.PluginStateError as error:
             status = f"plugin state error: {update_events.bounded(str(error), 200)}"

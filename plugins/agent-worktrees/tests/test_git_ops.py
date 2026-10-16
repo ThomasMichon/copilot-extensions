@@ -1240,10 +1240,11 @@ class TestFetchTimeout:
         captured = {}
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     no_hooks=False, isolated_repository=False):
+                     no_hooks=False, isolated_repository=False, auth_acquisition=False):
             captured["timeout"] = timeout
             captured["args"] = args
             captured["isolated_repository"] = isolated_repository
+            captured["auth_acquisition"] = auth_acquisition
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
@@ -1251,6 +1252,7 @@ class TestFetchTimeout:
         assert captured["timeout"] == go.DEFAULT_FETCH_TIMEOUT
         assert captured["args"] == ("fetch", "origin", "--quiet")
         assert captured["isolated_repository"] is False
+        assert captured["auth_acquisition"] is True
         go.fetch("origin", cwd=".", isolated_repository=True)
         assert captured["isolated_repository"] is True
 
@@ -1258,7 +1260,8 @@ class TestFetchTimeout:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
         monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
-                            capture=True, timeout=None, isolated_repository=False: (
+                            capture=True, timeout=None, isolated_repository=False,
+                            auth_acquisition=False: (
             captured.__setitem__("timeout", timeout),
             types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
         go.fetch("origin", cwd=".", timeout=5)
@@ -1271,7 +1274,7 @@ class TestFetchTimeout:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
-                     isolated_repository=False):
+                     isolated_repository=False, auth_acquisition=False):
             raise subprocess.TimeoutExpired(cmd=["git", *args], timeout=timeout)
 
         monkeypatch.setattr(go, "git", fake_git)
@@ -1284,7 +1287,8 @@ class TestFetchTimeout:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         captured = {}
         monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
-                            capture=True, timeout="sentinel", isolated_repository=False: (
+                            capture=True, timeout="sentinel", isolated_repository=False,
+                            auth_acquisition=False: (
             captured.__setitem__("timeout", timeout),
             types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
         go.fetch("origin", cwd=".", timeout=None)

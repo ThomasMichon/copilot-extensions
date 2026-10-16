@@ -8,6 +8,7 @@ import contextvars
 import json
 import os
 import re
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -22,8 +23,8 @@ _repository: contextvars.ContextVar[auth.RunOverlay | None] = contextvars.Contex
 _managed: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "update_auth_managed", default=False
 )
-_repository_scoped: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "update_repository_scoped", default=False
+_repository_context: contextvars.ContextVar[Path | None] = contextvars.ContextVar(
+    "update_repository_context", default=None
 )
 
 
@@ -50,6 +51,7 @@ class Session:
         self.reports: dict[Path | None, auth.AuthReport] = {}
         self.overlays: dict[Path | None, auth.RunOverlay | None] = {}
         self.context_required: dict[Path | None, bool] = {}
+        self.used: set[tuple[str, str, Path | None]] = set()
         self.anchor_reports: dict[Path, auth.AuthReport] = {}
         self.anchor_overlays: dict[Path, auth.RunOverlay | None] = {}
         self.anchors_prepared = False
@@ -91,11 +93,20 @@ class Session:
         self.unresolved |= required and bool(overlay and overlay.denies)
         describe(report)
         for item in report.results:
-            applied = overlay is not None and item.source.id in overlay.applies_to
+            available = overlay is not None and item.source.id in overlay.applies_to
             summary = item.summary()
             summary["required"] = summary["required"] and required
-            update_events.auth_result(summary, applied=applied)
+            update_events.auth_result(summary, applied=False, available=available)
         return report, overlay
+
+    def record_use(self, report: auth.AuthReport, overlay: auth.RunOverlay, *, required: bool):
+        for item in report.results:
+            key = (item.source.id, item.source.url, item.source.cwd)
+            if item.source.id in overlay.applies_to and key not in self.used:
+                self.used.add(key)
+                summary = item.summary()
+                summary["required"] = summary["required"] and required
+                update_events.auth_used(summary)
 
     def environment(self, context: Path | None) -> dict[str, str] | None:
         self.prepare(context)
@@ -122,6 +133,34 @@ def child_environment(context: Path | None) -> dict[str, dict[str, str]]:
     value = _current.get()
     env = value.environment(context) if value is not None else None
     return {"env": env} if env is not None else {}
+
+
+def run_acquisition(runner, *args, context: Path | None = None, repository: bool = False, **kwargs):
+    """Observe a launched child, not environment preparation or a failed spawn."""
+    value = _current.get()
+    if value is not None and repository:
+        anchor = _repository_context.get()
+        report = value.anchor_reports.get(anchor) if anchor is not None else None
+        overlay = _repository.get()
+        required = True
+    elif value is not None:
+        report = value.reports.get(context)
+        overlay = value.overlays.get(context)
+        required = value.context_required.get(context, True)
+    else:
+        report, overlay, required = None, None, False
+
+    def used():
+        if value is not None and report is not None and overlay is not None:
+            value.record_use(report, overlay, required=required)
+
+    try:
+        result = runner(*args, **kwargs)
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        used()
+        raise
+    used()
+    return result
 
 
 def blocked(context: Path | None, marketplace: str) -> bool:
@@ -191,13 +230,13 @@ def repository_scope(anchor: Path):
         managed = anchor in value.anchor_reports
     token = _repository.set(overlay)
     managed_token = _managed.set(managed)
-    scope_token = _repository_scoped.set(True)
+    scope_token = _repository_context.set(anchor)
     try:
         yield
     finally:
         _repository.reset(token)
         _managed.reset(managed_token)
-        _repository_scoped.reset(scope_token)
+        _repository_context.reset(scope_token)
 
 
 def managed_repository() -> bool:
@@ -208,7 +247,7 @@ def repository_environment(env: Mapping[str, str]) -> dict[str, str]:
     from . import git_ops
 
     overlay = _repository.get()
-    if _repository_scoped.get() or managed_repository():
+    if _repository_context.get() is not None or managed_repository():
         env = git_ops.repository_identity_env(dict(env))
         # An inherited snapshot is untrusted command configuration too; restoring
         # it would undo the isolation that just removed its counted entries.

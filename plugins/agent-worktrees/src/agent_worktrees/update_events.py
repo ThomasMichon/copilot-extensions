@@ -208,10 +208,16 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
         return rc
 
 
-def auth_result(summary: dict, *, applied: bool) -> None:
-    ok = summary["status"] in ("ok", "anonymous") or applied
+def auth_result(summary: dict, *, applied: bool, available: bool = False) -> None:
+    ok = summary["status"] in ("ok", "anonymous") or applied or available
     record("auth_fallback" if applied else "auth_report", summary["id"],
            "OK" if ok else "auth_required", required=summary["required"], changed=False)
     if _run is not None:
         _run.emit("auth_report", summary["id"], "info",
-                  details={"auth": summary, "fallback_applied": applied})
+                  details={"auth": summary, "fallback_applied": applied,
+                           "fallback_available": available or applied})
+
+
+def auth_used(summary: dict) -> None:
+    if _run is not None:
+        _run.emit("auth_fallback", summary["id"], "info", details={"auth": summary})

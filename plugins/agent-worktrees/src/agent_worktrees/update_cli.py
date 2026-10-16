@@ -434,12 +434,14 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
     if _auth.blocked(cwd, marketplace):
         return False
     try:
-        r = subprocess.run(
+        r = _auth.run_acquisition(
+            subprocess.run,
             [_resolve_copilot() or "copilot", "plugin", "marketplace", "update", marketplace],
             capture_output=True,
             text=True,
             timeout=120,
             cwd=cwd,
+            context=cwd,
             **_auth.child_environment(cwd),
         )
         if r.returncode != 0:
@@ -461,7 +463,8 @@ def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) ->
     if _auth.blocked(cwd, marketplace):
         return None
     try:
-        r = subprocess.run(
+        r = _auth.run_acquisition(
+            subprocess.run,
             [
                 _resolve_copilot() or "copilot",
                 "plugin",
@@ -473,6 +476,7 @@ def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) ->
             text=True,
             timeout=120,
             cwd=cwd,
+            context=cwd,
             **_auth.child_environment(cwd),
         )
     except OSError as exc:

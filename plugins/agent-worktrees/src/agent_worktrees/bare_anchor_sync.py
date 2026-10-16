@@ -135,6 +135,7 @@ def sync_bare_anchor(
             "fetch", "--quiet", "--no-tags", remote,
             f"+refs/heads/{target}:{scratch_ref}",
             cwd=path, check=False, timeout=180, isolated_repository=True,
+            auth_acquisition=True,
         )
     finally:
         for refspec in saved_refspecs:

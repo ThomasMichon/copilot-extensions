@@ -1630,7 +1630,12 @@ Manager result retains that precedence with or without telemetry; a recorded
 Manager authentication failure cannot hide an independent engine command failure.
 The shared
 status includes `auth.report` and `auth.fallback_used`; helper command values
-are not included. `CE_UPDATE_AUTH=report-only` applies no credential fix, so
+are not included. Preflight reports fallback availability separately from use.
+A source enters `fallback_used` only after its acquisition child receives the
+overlay, including a child that later times out. Failed spawns, activation
+preconditions, ordinary anchor inspection, and unattempted anchors do not count;
+activation restoration failures after launch do not erase the usage evidence.
+`CE_UPDATE_AUTH=report-only` applies no credential fix, so
 fixable sources remain unresolved. `CE_UPDATE_AUTH=off` skips this preflight.
 There is no persistent configuration cleanup or cleanup-consent flag.
 
