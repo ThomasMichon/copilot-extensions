@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import IO, BinaryIO
 
 from agent_logger.sync.archive_directory import ArchiveDirectory, archive_directory
+from agent_logger.sync.log_archive_readback import LogArchiveRevision
 from agent_logger.sync.targets.claim_file import create_claim_file
 
 log = logging.getLogger("agent-logger.log-archives")
@@ -167,8 +168,7 @@ def _archive_opened(
     if _fingerprint(before) != _fingerprint(selected):
         raise ValueError("process-log archive candidate changed while opening")
     digest = _hash_stream(raw, before.st_size)
-    key = hashlib.sha256(name.encode("utf-8") + b"\0" + digest.encode("ascii")).hexdigest()
-    destination = f"process-log-{key}.zip"
+    destination = LogArchiveRevision(name, digest, before.st_size).archive_name
 
     def validate_source() -> None:
         if (

@@ -257,6 +257,39 @@ retention age, scheduler integration and native acceptance gates remain in the
 [reclamation contract](../../../efforts/active/session-intelligence-and-accounting/process-log-reclamation.md).
 No local or target ZIP is removed by this primitive.
 
+### Readback and policy preparation
+
+`Target.process_log_readback(machine)` resolves an internal, pass-local
+destination. Filesystem targets (`local` and `onedrive`) support full
+single-member ZIP hash/length verification against a `LogArchiveRevision`.
+SSH, SSH-tunnel and ingest explicitly return unsupported, never successful
+verification. An all-target result requires a nonempty set and every result
+to be supported and verified. It never uses transfer success, file count,
+size/mtime equality or a prior verification receipt as evidence.
+
+Readback pins the lexical destination ancestry without creating directories
+or issuing durability writes. A missing/offline root, redirected ancestor,
+changed ZIP entry, unsupported codec or corrupt member is a failed result.
+The result names the content-addressed archive and failure class without
+exposing configured paths. OneDrive readback proves local stored bytes only,
+not cloud upload acknowledgement. These observations alone do not authorize
+retirement or promise continued retention at the destination.
+
+The reserved machine-local `sync.process_logs.reclamation` block is strictly
+parsed: boolean `enabled`, positive integer `min_age_seconds` with no default,
+and explicit `required_targets` transport names including the active target.
+Enabling also requires process-log collection, ZIP snapshots and the local
+producer attestation. Inactive target option defaults are not required targets.
+The internal target-set resolver reuses existing options, resolves them once,
+and rejects unknown/unsupported, duplicate and source-overlapping destinations.
+It does not turn ordinary session-state sync into a multi-target transfer.
+
+**Enabled runtime reclamation is still explicitly refused at configuration
+construction**, before any sync writes. Post-publication orchestration, scope
+gates, revision revalidation and the retirement policy are not wired yet.
+Disabled defaults and existing additive snapshot/manual behavior are unchanged.
+Do not enable this reserved setting as an operational feature.
+
 ### Combined transfer health
 
 Filesystem `sync-meta.json` retains independently recoverable `sync_legs`

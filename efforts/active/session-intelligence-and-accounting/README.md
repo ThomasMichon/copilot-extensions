@@ -238,6 +238,47 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-16 - Explicit target-set and ZIP readback preparation
+- Added strict internal policy parsing with no implicit retention age or target
+  inference. Complete target resolution reuses existing options and rejects
+  unsupported, duplicate and source-overlapping destinations. The active
+  transport must be explicitly included; ordinary session-state sync remains
+  single-target.
+- Filesystem targets now expose typed, pass-local full ZIP readback. Missing,
+  corrupt, redirected or changed evidence cannot satisfy the all-target result,
+  even after a successful transfer or with identical size/mtime. OneDrive
+  readback acknowledges local bytes, not cloud upload. The read-only pinned
+  boundary creates no directories and issues no durability writes.
+- Enabled runtime reclamation is explicitly refused before sync writes until
+  post-publication orchestration exists. No deletion path or default changed.
+  This is a preparation slice, not completed reclamation or live adoption.
+- Bounded isolated Linux validation passed 1,383 tests with 85 skips across the
+  complete plugin suite; native readback assertions remain for the existing
+  Windows `source_roots` CI lane. Required review, complete same-head CI,
+  scheduler integration and parent effort completion remain open.
+
+### 2026-10-16 - Native retirement file boundary reviewed and merged
+- #7023 actually merged as `7dab91a9600bb845f9a0a4bf0853b7866ad21639`
+  at `2026-10-16T20:12:47Z`, from final head
+  `ffbb5a9443dc91377975901f6e20f4092f76ceab`. Fresh Copilot approval
+  `5553165043` accepted the corrected writer-exclusion proof. The prior
+  finding's thread was resolved after that acceptance.
+- The review identified a real test confound: CRT writable handles do not share
+  DELETE access, so their own sharing mask could make a permissive retirement
+  handle appear exclusive. Native probes now share READ, WRITE and DELETE,
+  require error 32 at the exclusion boundary, and successfully open/write
+  outside it.
+- Complete same-head CI `38958305525` passed before merge. Its native archive
+  job `117167238664` executed the `source_roots` selection on a merge candidate
+  containing the final head: 463 passed, 15 skipped. Bounded full Linux
+  validation before the test-only correction passed 1,323 tests with 83 skips;
+  the corrected focused rerun passed four with 11 native skips.
+- The internal primitive is not called by scheduled sync or manual commands.
+  POSIX retirement remains explicitly unsupported; all-target verification,
+  required-target configuration and orchestration are next. Both this effort
+  and its parent validation obligations remain open. No live retirement,
+  configuration change or rollout occurred.
+
 ### 2026-10-16 - All-target reclamation policy reviewed
 - #7016 merged as `2d7640c56fa0f344bdd0b1d068c83e133105110b` after
   exact-head approval `5552430865` with no open findings and complete

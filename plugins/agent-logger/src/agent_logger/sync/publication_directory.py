@@ -77,12 +77,15 @@ class PublicationDirectory(ArchiveDirectory):
 
 
 @contextmanager
-def publication_directory(path: Path) -> Iterator[PublicationDirectory]:
+def publication_directory(
+    path: Path, *, create: bool = True,
+) -> Iterator[PublicationDirectory]:
     """Create and pin a lexical directory chain without following redirects.
 
     POSIX child creation and all later I/O are descriptor-relative. Windows
     keeps each parent unrenamable before creating/opening the next child.
-    No unchecked pathname mkdir precedes this boundary.
+    No unchecked pathname mkdir precedes this boundary. Readback uses
+    ``create=False``: missing children fail without mkdir or durability writes.
     """
     absolute = path.expanduser().absolute()
     if ".." in absolute.parts:
@@ -94,21 +97,23 @@ def publication_directory(path: Path) -> Iterator[PublicationDirectory]:
             stack.enter_context(_windows_directory(current))
             for component in absolute.parts[1:]:
                 current /= component
-                try:
-                    os.mkdir(windows_extended_path(current))
-                except FileExistsError:
-                    pass
+                if create:
+                    try:
+                        os.mkdir(windows_extended_path(current))
+                    except FileExistsError:
+                        pass
                 stack.enter_context(_windows_directory(current))
         else:
             flags = _posix_flags("O_DIRECTORY", "O_NOFOLLOW")
             fd = os.open(current, flags)
             stack.callback(os.close, fd)
             for component in absolute.parts[1:]:
-                try:
-                    os.mkdir(component, dir_fd=fd)
-                except FileExistsError:
-                    pass
-                os.fsync(fd)
+                if create:
+                    try:
+                        os.mkdir(component, dir_fd=fd)
+                    except FileExistsError:
+                        pass
+                    os.fsync(fd)
                 fd = os.open(component, flags, dir_fd=fd)
                 stack.callback(os.close, fd)
         yield PublicationDirectory(absolute, fd)

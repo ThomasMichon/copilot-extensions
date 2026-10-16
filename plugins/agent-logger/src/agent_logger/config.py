@@ -650,6 +650,11 @@ class Config(ProcessLogArchiveConfig):
         self.home = home
         self.repo_config_path = repo_config_path
         self.repo_root = repo_root
+        if self.process_log_reclamation.enabled:
+            raise ValueError(
+                "process-log reclamation is not available: post-publication "
+                "all-target verification and retirement orchestration are not implemented"
+            )
 
     # -- resolved convenience accessors ---------------------------------
 
