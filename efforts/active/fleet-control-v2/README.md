@@ -284,8 +284,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   Source implementation and signed-grant index ingress landed in #6809.
   Released image closure and actual provider/enrollment remain required before
   treating this as a serving deployment.
-  The next image prerequisite adds an explicitly selected six-distribution
-  first-party fleet profile, without changing native defaults or activating roles.
+  The explicit six-distribution first-party fleet image profile landed in #6871,
+  without changing native defaults or activating roles. Containing release and
+  actual image/model assembly remain open.
 - [ ] Authenticate and authorize client/node/controller principals, service
   generations and corpus/source grants at admission and backend execution.
 - [ ] Route correlated source-credential requests to an authorized subscribed
@@ -384,7 +385,15 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 
 ## Journal
 
-### 2026-10-15 - Explicit fleet index image closure prepared
+### 2026-10-15 - Explicit fleet index image closure landed
+- #6871 merged at `9e0b58c9153fbf7c21d2c45fac243ef65635a5f0`,
+  `2026-10-15T20:04:18Z`, after exact-head Copilot APPROVED with zero findings
+  and green required CI, including hosted Linux/Windows service and runner lanes.
+  Managed post-merge sync advanced cleanly to the verified merge.
+- Corrected this slice's still-pending changefile consumer to `services/index`.
+  The promotion planner ignores the legacy `agent-index-service` CLI alias;
+  read-only planning reproduced the skipped entry before the correction and
+  recognizes the canonical standalone consumer afterward. No version was edited.
 - Under #6383/#6443, added an opt-in fleet release/image profile with exactly six
   first-party wheels, including `fleet-manager`, and explicit auth-extra closure.
   Native schema-1 defaults and candidate staging remain independent; fleet
