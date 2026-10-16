@@ -206,7 +206,12 @@ try {
     Assert 'WATCHDOG killed the GRANDCHILD (whole tree)' (-not $grandAlive) "grand=$grandPid"
     Assert 'WATCHDOG payload still free after kill' (Test-Renamable $payload)
 
+    Remove-Item -LiteralPath (Join-Path (Join-Path $sandbox ".$Plugin") 'smoke.json') -ErrorAction SilentlyContinue
     $phaseChild = Start-Install -sleep 7 -deadline 4 -phase cutover
+    $phaseSmoke = Wait-Smoke $TimeoutSec
+    Assert 'CUTOVER smoke reached its phase boundary' ($null -ne $phaseSmoke)
+    Assert 'CUTOVER remains running beyond its four-second build budget' `
+        (-not $phaseChild.WaitForExit(5000))
     $phaseChild.WaitForExit(30000) | Out-Null
     Assert 'CUTOVER finishes beyond build deadline within its phase budget' `
         ($phaseChild.HasExited -and $phaseChild.ExitCode -eq 0)
