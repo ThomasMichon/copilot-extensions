@@ -227,6 +227,10 @@ def _cmd_deploy(
                 print(f"[FAIL] Conditional cutover refused or failed: {result.error}")
         sys.exit(0 if result.ok else 1)
     if core._active_endpoint_is_forward() and not getattr(args, "recover", False):
+        if serving is not None:
+            from .serving_reconcile import ServingReconcileError
+
+            raise ServingReconcileError("serving ownership changed to a forwarded route")
         # The routed "old daemon" is the host's bridge, through the forward:
         # a cutover would take the route over, then drain and shut it down.
         # Skip before any recovery or reap, the same way in both output modes
@@ -239,6 +243,7 @@ def _cmd_deploy(
             print(f"[SKIP] agent-bridge deploy: {forwarded_skip}")
         return
     cfg = load_config()
+    predecessor = routing.Endpoint.from_dict(serving.route) if serving is not None else None
     if serving is not None:
         from .serving_reconcile import existing_auth_token
 
@@ -271,6 +276,11 @@ def _cmd_deploy(
                 if serving is not None:
                     from .serving_reconcile import compare_serving_version
 
+                    if predecessor is not None and (h, port) == (
+                        predecessor.client_host, predecessor.port,
+                    ):
+                        serving.verify_health(body)
+                        return True
                     return (
                         isinstance(body, dict)
                         and body.get("status") == "ok"
@@ -380,7 +390,7 @@ def _cmd_deploy(
             old_confirmed_gone = False  # confirmed below, or left False
         if old is not None and old.pid and (active is None or old.pid != active.pid):
             if serving is not None:
-                exited, forced = serving.process.wait(15.0), False
+                exited, forced = serving.process.wait(0), False
             else:
                 exited, forced = core._ensure_retired_daemon_exited(old.pid)
             if exited:

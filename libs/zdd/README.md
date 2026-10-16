@@ -167,6 +167,14 @@ selection or passive spawn: listener fallback to another endpoint (or to no
 endpoint) is a refusal, never an implicit cold start. The refusal callback
 still fences publication; the expectation alone does not grant ownership,
 provide effective-config capture or authorize retirement.
+This opt-in also guards rollback publication against the exact captured
+predecessor or published successor and confirms successor exit before restoring
+the predecessor. The health callback must recognize each endpoint's own identity
+and version, including an older predecessor. Its client must confirm predecessor
+retirement before `shutdown()` returns, raising if native exit is unconfirmed.
+Post-commit failures retain full predecessor identity and a writer-reconciliation
+breadcrumb; keeping a healthy successor serving does not make retirement
+successful. Callers without `expected_old` retain the existing behavior.
 
 #### Conditional owner operation (partial lifecycle support)
 

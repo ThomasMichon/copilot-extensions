@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from packaging.version import InvalidVersion, Version
@@ -68,38 +68,56 @@ class ServingRuntime:
             return "serving predecessor process identity changed"
         return None
 
-    def verify_control(self) -> None:
+    def verify_health(self, health: dict | None) -> None:
+        slot = health.get("slot") if isinstance(health, dict) else None
+        if (
+            self.refuse(self.route)
+            or not isinstance(health, dict)
+            or health.get("status") != "ok"
+            or health.get("service") != "agent-bridge"
+            or health.get("ready") is not True
+            or not isinstance(slot, dict)
+            or type(slot.get("pid")) is not int
+            or slot.get("pid") != self.process.pid
+            or compare_serving_version(health.get("version"), self.version) != "current"
+        ):
+            raise ServingReconcileError("serving predecessor no longer owns its observed endpoint")
+
+    def verify_control(self, *, undrain: bool = False) -> None:
         """Recheck the captured process at its old port before authenticated control."""
-        refusal = self.refuse(self.route)
         table = routing.read_table(self.root, strict=True) or {}
         active = table.get("active")
         previous = table.get("previous")
         expected = routing.Endpoint.from_dict(self.route)
         current = routing.Endpoint.from_dict(active) if isinstance(active, dict) else None
         predecessor = routing.Endpoint.from_dict(previous) if isinstance(previous, dict) else None
+        restored = (
+            undrain and current is not None and expected is not None
+            and current.generation >= expected.generation
+            and replace(current, generation=expected.generation) == expected
+        )
         if active_route_is_forward(active) or (
-            current != expected and (current is None or predecessor != expected)
+            not restored and current != expected and (current is None or predecessor != expected)
         ):
             raise ServingReconcileError("serving ownership changed before predecessor control")
         health = _core()._service_health_on_port(self.route["port"])
-        slot = health.get("slot") if isinstance(health, dict) else None
-        if (
-            refusal
-            or not isinstance(health, dict)
-            or not isinstance(slot, dict)
-            or type(slot.get("pid")) is not int
-            or slot.get("pid") != self.process.pid
-            or compare_serving_version(health.get("version"), self.version) != "current"
+        self.verify_health(health)
+        if restored and (
+            health["slot"].get("role") != "active" or health["slot"].get("active") != active
         ):
-            raise ServingReconcileError(
-                refusal or "serving predecessor no longer owns its observed endpoint"
-            )
+            raise ServingReconcileError("restored predecessor route is unverified")
 
 
 @contextmanager
 def observe_serving(root: Path) -> Iterator[ServingRuntime | None]:
     """Capture a native reference only after the routed daemon identifies itself."""
     try:
+        from zdd import breadcrumb
+
+        if breadcrumb.breadcrumb_path(root).exists():
+            raise ServingReconcileError(
+                "retained cutover evidence requires owner-led reconciliation"
+            )
         table = routing.read_table(root, strict=True)
         if table is None:
             if (root / "agent-bridge.pid").exists() or any(root.glob("agent-bridge*.lock")):
@@ -167,10 +185,14 @@ def guarded_client(serving: ServingRuntime, base_url: str, token: str, timeout: 
             if method == "POST" and path in (
                 "/api/v1/drain", "/api/v1/undrain", "/api/v1/shutdown",
             ):
-                serving.verify_control()
-            return super()._request(
+                serving.verify_control(undrain=path == "/api/v1/undrain")
+            response = super()._request(
                 method, path, body, params=params, request_timeout=request_timeout,
             )
+            if method == "POST" and path == "/api/v1/shutdown":
+                if not serving.process.wait(15.0):
+                    raise ServingReconcileError("serving predecessor native exit is unconfirmed")
+            return response
 
     endpoint = routing.Endpoint.from_dict(serving.route)
     client_type = ServingClient if endpoint is not None and base_url == endpoint.base_url else BridgeClient

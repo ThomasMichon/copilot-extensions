@@ -27,6 +27,13 @@ forwarded route is not started locally. This mode neither repairs stale
 cutovers nor substitutes for the effective-config conditional-repair contract.
 A reconcile failure does not publish a success manifest or fall back to
 stop/rebuild.
+Rollback validates the captured older predecessor rather than requiring the
+target version and permits undrain only after that same native process is
+verified at its restored route. A local-to-forwarded ownership change is a
+refusal, not the initial forwarded-installation no-op. Native predecessor exit
+is confirmed before the cutover lock and durable breadcrumb are released;
+unresolved retirement or retained cutover evidence also blocks a later
+healthy/current shortcut without attempting automatic recovery.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`

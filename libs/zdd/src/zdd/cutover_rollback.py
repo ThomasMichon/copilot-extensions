@@ -25,7 +25,7 @@ def _undrain(self: CutoverOrchestrator, old: Endpoint, result: CutoverResult) ->
 
     try:
         response = self.make_client(old.base_url).undrain()
-        if self.drain_before_publish and (
+        if (self.drain_before_publish or self.expected_old is not None) and (
             not isinstance(response, dict) or response.get("draining") is not False
         ):
             raise CutoverError("old daemon did not confirm undrain")
@@ -52,9 +52,10 @@ def _rollback(
     from .cutover import CutoverError
 
     log.warning("Rolling back cutover: %s", result.error)
+    guarded = self.drain_before_publish or self.expected_old is not None
     successor_stopped = False
     old_live: bool | None = None
-    if self.drain_before_publish:
+    if guarded:
         try:
             old_live = bool(
                 drain_started and old and self.health_check(old.client_host, old.port)
@@ -81,14 +82,14 @@ def _rollback(
 
     # 1. Try to restore the old endpoint as active (only if it is still alive).
     old_restored = False
-    if old is not None and (not self.drain_before_publish or drain_started):
+    if old is not None and (not guarded or drain_started):
         try:
             predecessor_live = (
                 old_live if old_live is not None
                 else self.health_check(old.client_host, old.port)
             )
             if predecessor_live:
-                if self.drain_before_publish:
+                if guarded:
                     current_raw = self._raw_active()
                     current = Endpoint.from_dict(current_raw) if current_raw else None
                     if (
@@ -115,7 +116,7 @@ def _rollback(
                 # failure -- release it so the survivor does not stay closed
                 # to new work (#1756). Recorded either way for traceability.
                 undrained = self._undrain(old, result)
-                if self.drain_before_publish:
+                if guarded:
                     old_restored = undrained
         except routing_persistence.PublicationCommitUncertain:
             result.publication_uncertain = True
@@ -128,7 +129,7 @@ def _rollback(
             result.steps.append(f"rollback: predecessor restoration failed: {exc}")
 
     if (
-        self.drain_before_publish and successor_stopped
+        guarded and successor_stopped
         and old is not None and not old_restored
     ):
         result.steps.append("rollback: successor stopped; predecessor reconciliation pending")
@@ -145,7 +146,7 @@ def _rollback(
             # Re-assert the new daemon as active (it already is, but make the
             # intent explicit and bump the generation) and keep it alive.
             try:
-                if self.drain_before_publish:
+                if guarded:
                     if expected_new is None:
                         raise CutoverError("successor publication identity is unconfirmed")
                     self.routing.publish_active_with_previous_guarded(
@@ -162,7 +163,7 @@ def _rollback(
                     )
             except Exception as exc:  # noqa: BLE001
                 log.error("Commit-forward could not re-assert route: %s", exc)
-                if self.drain_before_publish:
+                if guarded:
                     result.steps.append(f"rollback: successor reconciliation pending: {exc}")
                     return
             result.steps.append(
@@ -171,7 +172,7 @@ def _rollback(
             )
             self._adopt_relay(new_port, result)
             result.committed = True
-            result.ok = True
+            result.ok = self.expected_old is None
             result.rolled_back = False
             return
         # Both old and new are unreachable: a double failure. Leave the route
@@ -180,7 +181,7 @@ def _rollback(
         result.steps.append(
             "rollback: both old and new unhealthy -- left route untouched"
         )
-        result.rolled_back = not self.drain_before_publish
+        result.rolled_back = not guarded
         return
 
     # 3. Safe to terminate the freshly spawned passive daemon: either the old

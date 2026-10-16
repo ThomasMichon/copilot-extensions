@@ -409,7 +409,7 @@ class CutoverOrchestrator:
                 kwargs["state"] = "conditional-" + kwargs["state"]
             kwargs["publication_witness"] = publication_witness
             kwargs["new_process_start_time"] = new_process_start_time
-            kwargs["requires_writer_reconciliation"] = self.drain_before_publish
+            kwargs["requires_writer_reconciliation"] = self.drain_before_publish or self.expected_old is not None
             return breadcrumb.write_breadcrumb(self.config_dir, **kwargs)
 
         spawn_passive = conditional.spawn if conditional else self.spawn_passive
@@ -492,7 +492,7 @@ class CutoverOrchestrator:
         # undrain the stranded old daemon). started_at is threaded through every
         # later update so the record keeps its original timestamp.
         old_dict = (
-            old.to_dict() if conditional and old is not None else
+            old.to_dict() if (conditional or self.expected_old is not None) and old is not None else
             {"bind": old.bind, "port": old.port} if old is not None else None
         )
         started_at = write_breadcrumb(
@@ -628,7 +628,7 @@ class CutoverOrchestrator:
                         published, _ = publication
                         conditional.new = published
                         result.serving_endpoint = published
-                    if self.drain_before_publish:
+                    if self.drain_before_publish or self.expected_old is not None:
                         new_for_cas = (
                             publication[0]
                             if isinstance(publication, tuple) and len(publication) == 2
@@ -821,7 +821,7 @@ class CutoverOrchestrator:
                     f"post-commit conditional error ({type(exc).__name__})" if conditional
                     else f"post-commit error (new daemon is live): {exc}"
                 )
-                result.ok = conditional is None
+                result.ok = conditional is None and self.expected_old is None
                 if conditional:
                     result.serving_endpoint = None
                 log.error("Cutover post-commit error: %s", result.error)
@@ -831,7 +831,7 @@ class CutoverOrchestrator:
                         new_port=new_port, new_pid=new_pid, started_at=started_at,
                         error=result.error,
                     )
-                elif self.drain_before_publish:
+                elif self.drain_before_publish or self.expected_old is not None:
                     write_breadcrumb(
                         state="committed", old=old_dict,
                         new_port=new_port, new_pid=new_pid, started_at=started_at,
