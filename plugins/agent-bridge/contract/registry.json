@@ -272,7 +272,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
-          "sha256": "12d372747dd29a468db88efec36f6e8882b7b821ab06642d9970f24c37589783",
+          "sha256": "fb3baabb8bf28585dcb3597e69ed9fa65fda4909925900af163f4a8b34502660",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -290,7 +290,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
-          "sha256": "3d359864f9c08c85d7c1f288eb98264f0ddc8ca3c1c242cda22147175da66ebe",
+          "sha256": "824535a7d5c3bfaf1726bcbd8c1a56e4cca627f1544081b5161b7fbcc56219b0",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -1320,6 +1320,18 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-39.json",
           "sha256": "7eb3b7139efb201d63d129adb77cd97d4f50f826cd5962853c2ac2020711e57b",
           "role": "Generation-39 cache-blind exact-record owner lookup without roster publication",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-39.json",
+          "sha256": "ffa74852a610fd49df436adea2814847d239c64e38a1314f1fce40fade614b8e",
+          "role": "Generation-39 retained execution reconciliation and exact reservation release",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-39.json",
+          "sha256": "57a95e62f9adcdf7e12e659079e0d6ae94cced288e945a640094ab3636ac5333",
+          "role": "Generation-39 authoritative singleton host liveness before client readiness",
           "generation": 39
         }
       ],
@@ -3491,6 +3503,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
           "source_git_blob": "149d82a7f33756bbe30edd94796a483a09f23866",
           "capture_method": "Freeze the committed exact-record lookup request and validation contract; cache-blind HTTP and independent owner subprocess tests exercise lookup without resident inventory."
+        },
+        {
+          "commit": "bff44efdc82f9e758e02ec69ec35ff6c2e8a9fe5",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "72bc966647f1b5a9714e63dd031dfaa0f58f4154",
+          "capture_method": "Freeze reviewed native recovery reconciliation, exact reservation cleanup and finalizing refusal behavior; real SQLite, local host-liveness reducer and HTTP regressions exercise each branch."
+        },
+        {
+          "commit": "fd0c82376f725ec7367c526478e930b8b796e4b8",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "70ea2045fbe8ac3b945ccfaa837ec1dbd3ccc752",
+          "capture_method": "Freeze authoritative retained-host reconciliation before singleton client readiness; actual reducer and persistent-status regressions cover connected, disconnected and absent retained clients."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",
