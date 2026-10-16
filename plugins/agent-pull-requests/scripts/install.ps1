@@ -552,7 +552,7 @@ function Invoke-Stamp {
     Write-Ok 'Stamped: agent-pull-requests binstub on PATH; runtime provisions on first use.'
 }
 
-$needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision')
+$needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
     Write-Fail "Timed out waiting for the install transaction lock: $(Join-Path $InstallDir '.install.lock')"
     exit 1
@@ -574,8 +574,8 @@ try {
     if ($Action -eq 'uninstall') {
         Remove-Item (Join-Path $LocalBin 'agent-pull-requests.ps1') -Force -ErrorAction SilentlyContinue
         Remove-Item (Join-Path $LocalBin 'agent-pull-requests.cmd') -Force -ErrorAction SilentlyContinue
-        Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Ok 'agent-pull-requests runtime removed'
+        Remove-InstallRuntimeContent -InstallRoot $InstallDir
+        Write-Ok 'agent-pull-requests runtime removed (transaction/staging coordination retained)'
         exit 0
     }
 

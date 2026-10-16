@@ -513,7 +513,7 @@ _install_hook_files() {
     _ok "Session-start hook: $bin_hook_dir/bootstrap-check.sh"
 }
 
-if [[ "$ACTION" == "install" || "$ACTION" == "update" || "$ACTION" == "stamp" || "$ACTION" == "provision" ]]; then
+if [[ "$ACTION" == "install" || "$ACTION" == "update" || "$ACTION" == "stamp" || "$ACTION" == "provision" || "$ACTION" == "uninstall" ]]; then
     if ! _enter_install_lock; then
         _fail "Timed out waiting for the install transaction lock: $INSTALL_DIR/.install.lock"
         exit 1
@@ -554,8 +554,8 @@ fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
     rm -f "$LOCAL_BIN/agent-pull-requests"
-    rm -rf "$INSTALL_DIR"
-    _ok 'agent-pull-requests runtime removed'
+    remove_install_runtime_content "$INSTALL_DIR" || exit 1
+    _ok 'agent-pull-requests runtime removed (transaction/staging coordination retained)'
     exit 0
 fi
 

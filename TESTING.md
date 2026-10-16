@@ -95,6 +95,21 @@ break each planner and the shared policy/barrier; the production guard-wiring
 test prevents these probes from becoming an unwired helper. This source-level
 contract does not substitute for native installer or installed-update proof.
 
+Runtime purge contracts retain the original install-lock identity and active
+staged sources while removing runtime/config contents. The existing tool guard
+suite collects native POSIX flock, live PID-fallback, link-target and failure
+cases. Vault's transaction suite runs the real shared helper under both Windows
+PowerShell 5.1 and PowerShell 7, with a held lock, open staged source and outside
+junction target. Native consumer cases exercise supported uninstall entrypoints
+and read-only previews in fresh roots; service APIs are isolated, never live.
+Pull Requests retains its existing 300-second production wait: its immediate
+native lock probe and source-wiring test cover contention without stretching a
+test deadline to wait out that default.
+Its fresh-payload fixture invokes the real engine materializer, then runs the
+actual marketplace-path self-stage/uninstall twice under native PowerShell and
+POSIX Bash. The next invocation reaps the prior dead stage while an independently
+live stage survives. Immediate self-stage cleanup is not the v4 protocol.
+
 The Worktrees standalone instruction-preflight fixture copies runtime files
 with at most 16 workers, waits for every copy and propagates copy errors.
 Byte-preservation and cache-exclusion guards cover that fixture separately.

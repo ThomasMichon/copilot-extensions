@@ -17,6 +17,60 @@
 # Packaged human-output initialization: installer-human-output.ps1
 $script:InstallerDependencyPolicy = Join-Path $PSScriptRoot 'installer_dependency_policy.py'
 
+function Remove-InstallRuntimeEntry {
+    param([Parameter(Mandatory)][System.IO.FileSystemInfo]$Entry)
+
+    if ($Entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        if ($Entry.Attributes -band [System.IO.FileAttributes]::Directory) {
+            [System.IO.Directory]::Delete($Entry.FullName)
+        } else {
+            [System.IO.File]::Delete($Entry.FullName)
+        }
+        return
+    }
+    if ($Entry.Attributes -band [System.IO.FileAttributes]::Directory) {
+        foreach ($child in @(Get-ChildItem -LiteralPath $Entry.FullName -Force -ErrorAction Stop)) {
+            Remove-InstallRuntimeEntry -Entry $child
+        }
+    }
+    if ($Entry.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+        $Entry.Attributes = $Entry.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+    }
+    if ($Entry.Attributes -band [System.IO.FileAttributes]::Directory) {
+        [System.IO.Directory]::Delete($Entry.FullName)
+    } else {
+        [System.IO.File]::Delete($Entry.FullName)
+    }
+}
+
+function Remove-InstallRuntimeContent {
+    <# The caller holds the install transaction lock. Never unlink that lock or
+       another invocation's staged source while removing runtime/config data. #>
+    param([Parameter(Mandatory)][string]$InstallRoot)
+
+    $full = [System.IO.Path]::GetFullPath($InstallRoot)
+    $root = $full.TrimEnd([char[]]@('\', '/'))
+    if ($root -eq ([System.IO.Path]::GetPathRoot($full)).TrimEnd([char[]]@('\', '/'))) {
+        throw 'Refusing to purge a filesystem root'
+    }
+    foreach ($homePath in @($HOME, $env:USERPROFILE, $env:HOME)) {
+        if ($homePath -and $root -eq ([System.IO.Path]::GetFullPath($homePath)).TrimEnd([char[]]@('\', '/'))) {
+            throw 'Refusing to purge a user home'
+        }
+    }
+    $directory = Get-Item -LiteralPath $full -Force -ErrorAction Stop
+    if (-not $directory.PSIsContainer -or
+        ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        throw 'Runtime purge requires a real install directory, not a link'
+    }
+    foreach ($entry in @(Get-ChildItem -LiteralPath $full -Force -ErrorAction Stop)) {
+        if ($entry.Name -in @('.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')) {
+            continue
+        }
+        Remove-InstallRuntimeEntry -Entry $entry
+    }
+}
+
 function Invoke-NativeCapture {
     param([Parameter(Mandatory)][scriptblock]$Command)
 

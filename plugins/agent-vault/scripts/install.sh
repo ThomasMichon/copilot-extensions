@@ -840,9 +840,10 @@ do_uninstall() {
     fi
     if [[ "$PURGE" -eq 1 ]]; then
         if [[ "$DRY_RUN" -eq 1 ]]; then
-            echo "[dry-run] would PURGE: $INSTALL_DIR"
+            echo "[dry-run] would purge runtime/config contents (coordination retained): $INSTALL_DIR"
         else
-            rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR"
+            remove_install_runtime_content "$INSTALL_DIR" || return 1
+            _ok "Runtime purged (transaction/staging coordination retained): $INSTALL_DIR"
         fi
     else
         # Remove the runtime venv. Versioned: the `.venv` link + the versions/
@@ -967,8 +968,9 @@ _enter_install_lock() {
 }
 # === end install-transaction lock ===
 
-case "$ACTION" in
-    install|update|stamp|provision)
+case "$ACTION:${DRY_RUN:-0}" in
+    uninstall:1) ;;
+    install:*|update:*|stamp:*|provision:*|uninstall:*)
         if ! _enter_install_lock; then
             _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
             exit 1

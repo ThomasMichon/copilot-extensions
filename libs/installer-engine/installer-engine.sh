@@ -13,6 +13,39 @@
 
 INSTALLER_ENGINE_DEPENDENCY_POLICY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/installer_dependency_policy.py"
 
+remove_install_runtime_content() {
+    # The caller holds the transaction lock; retain its inode and staged owners.
+    local root="${1:-}" entry name home
+    while [[ "$root" == */ && "$root" != "/" ]]; do root="${root%/}"; done
+    if [[ -z "$root" || ! -d "$root" || -L "$root" ]]; then
+        printf '%s\n' 'Runtime purge requires a real install directory, not a link' >&2
+        return 1
+    fi
+    root="$(cd -- "$root" && pwd -P)" || return 1
+    if [[ "$root" == "/" ]]; then
+        printf '%s\n' 'Refusing to purge a filesystem root' >&2
+        return 1
+    fi
+    if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
+        home="$(cd -- "$HOME" && pwd -P)" || return 1
+        if [[ "$root" == "$home" ]]; then
+            printf '%s\n' 'Refusing to purge a user home' >&2
+            return 1
+        fi
+    fi
+    for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
+        [[ -e "$entry" || -L "$entry" ]] || continue
+        name="${entry##*/}"
+        case "$name" in
+            .install.lock|.install.lock.pid|.install.lock.pid.reap|.install-stage) continue ;;
+        esac
+        if ! rm -rf -- "$entry"; then
+            printf 'Runtime purge failed while removing: %s\n' "$entry" >&2
+            return 1
+        fi
+    done
+}
+
 invoke_native_capture() {
     local output rc
     output="$("$@" 2>&1)"; rc=$?

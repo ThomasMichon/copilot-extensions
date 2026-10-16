@@ -908,7 +908,8 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
-$needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision')
+$needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision')) -or
+    ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
     exit 1
@@ -934,14 +935,14 @@ if ($Action -eq 'uninstall') {
         $cmd = Join-Path $LocalBin 'agent-ssh.cmd'
         if (Test-Path $ps1) { Write-Host "[dry-run] would remove binstub: $ps1" }
         if (Test-Path $cmd) { Write-Host "[dry-run] would remove binstub: $cmd" }
-        if (Test-Path $InstallDir) { Write-Host "[dry-run] would remove (config + DB + venv): $InstallDir" }
+        if (Test-Path $InstallDir) { Write-Host "[dry-run] would remove runtime/config contents (coordination retained): $InstallDir" }
         Write-Host 'agent-ssh uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
         exit 0
     }
     Remove-Item (Join-Path $LocalBin 'agent-ssh.ps1') -Force -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $LocalBin 'agent-ssh.cmd') -Force -ErrorAction SilentlyContinue
-    Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Ok 'agent-ssh runtime removed'
+    Remove-InstallRuntimeContent -InstallRoot $InstallDir
+    Write-Ok 'agent-ssh runtime removed (transaction/staging coordination retained)'
     exit 0
 }
 

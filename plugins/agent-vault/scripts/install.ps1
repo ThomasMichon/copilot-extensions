@@ -1224,8 +1224,11 @@ function Invoke-Uninstall {
     }
     if ($Purge) {
         if (Test-Path $InstallDir) {
-            if ($DryRun) { Write-Host "[dry-run] would PURGE: $InstallDir" }
-            else { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue; Write-Ok "Runtime purged: $InstallDir" }
+            if ($DryRun) { Write-Host "[dry-run] would purge runtime/config contents (coordination retained): $InstallDir" }
+            else {
+                Remove-InstallRuntimeContent -InstallRoot $InstallDir
+                Write-Ok "Runtime purged (transaction/staging coordination retained): $InstallDir"
+            }
         }
     } else {
         # Remove the runtime venv. In the versioned layout this is the `.venv`
@@ -1318,7 +1321,8 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
-$needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision')
+$needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision')) -or
+    ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
     exit 1

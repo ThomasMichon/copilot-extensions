@@ -64,7 +64,10 @@ def _isolated_env(home: Path) -> dict[str, str]:
         if not key.startswith("COPILOT_PLUGIN_")
         and key not in {"COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXT_NO_FLOCK"}
     }
-    env.update({"HOME": str(home), "USERPROFILE": str(home)})
+    env.update({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+    })
     env["COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC"] = "1"
     return env
 
@@ -129,6 +132,7 @@ def _ps_holder(pwsh: str, lock: Path) -> subprocess.Popen[str]:
     holder = subprocess.Popen(
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert holder.stdout is not None
     assert holder.stdout.readline().strip() == "held"
@@ -144,6 +148,7 @@ def _run_ps_block(pwsh: str, install_dir: Path, body: str) -> subprocess.Complet
     return subprocess.run(
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=60,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
 
 
@@ -208,7 +213,8 @@ def test_powershell_lock_times_out_while_held(tmp_path: Path) -> None:
         holder.wait()
 
 
-def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path) -> None:
+@pytest.mark.parametrize("action", ["stamp", "uninstall"])
+def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path, action: str) -> None:
     pwsh = _pwsh()
     if pwsh is None:
         pytest.skip("pwsh not available")
@@ -220,9 +226,10 @@ def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path) -> N
     try:
         result = subprocess.run(
             [pwsh, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-             "-File", str(PS_SCRIPT), "-Action", "stamp", "-InstallDir", str(install_dir)],
+             "-File", str(PS_SCRIPT), "-Action", action, "-InstallDir", str(install_dir)],
             capture_output=True, text=True, timeout=120, env=_isolated_env(home),
             cwd=tmp_path,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
     finally:
         holder.kill()
@@ -313,28 +320,40 @@ def test_posix_pid_fallback_waits_for_live_owner_and_reaps_dead_one(tmp_path: Pa
     assert reaped.stdout.strip() == "acquired", reaped.stderr
 
 
-def test_posix_installer_fails_closed_without_mutating(tmp_path: Path) -> None:
+@pytest.mark.parametrize("action", ["stamp", "uninstall"])
+@pytest.mark.parametrize("lock_kind", ["flock", "pid"])
+def test_posix_installer_fails_closed_without_mutating(
+    tmp_path: Path, action: str, lock_kind: str,
+) -> None:
     bash = _posix_bash()
-    if bash is None or shutil.which("flock") is None:
-        pytest.skip("POSIX bash with flock not available")
+    if bash is None or (lock_kind == "flock" and shutil.which("flock") is None):
+        pytest.skip(f"native POSIX bash with {lock_kind} unavailable")
     home = tmp_path / "home"
     home.mkdir()
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
-    holder = _flock_holder(bash, install_dir / ".install.lock")
+    env = _isolated_env(home)
+    holder = None
+    lock_name = ".install.lock" if lock_kind == "flock" else ".install.lock.pid"
+    if lock_kind == "flock":
+        holder = _flock_holder(bash, install_dir / lock_name)
+    else:
+        os.symlink(str(os.getpid()), install_dir / lock_name)
+        env["COPILOT_EXT_NO_FLOCK"] = "1"
     try:
         result = subprocess.run(
-            [bash, str(SH_SCRIPT), "stamp", "--install-dir", str(install_dir)],
-            capture_output=True, text=True, timeout=120, env=_isolated_env(home),
+            [bash, str(SH_SCRIPT), action, "--install-dir", str(install_dir)],
+            capture_output=True, text=True, timeout=120, env=env,
             cwd=tmp_path,
         )
     finally:
-        holder.kill()
-        holder.wait()
+        if holder is not None:
+            holder.kill()
+            holder.wait()
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert LOCK_FAILURE in output
-    assert sorted(p.name for p in install_dir.iterdir()) == [".install.lock"]
+    assert sorted(p.name for p in install_dir.iterdir()) == [lock_name]
     assert not (home / ".local").exists()
 
 

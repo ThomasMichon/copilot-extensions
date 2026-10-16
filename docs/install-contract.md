@@ -1965,7 +1965,7 @@ reconcile, `update`, a session-start bootstrap, and a binstub's first-use
 `provision`. An adopting installer (`agent-pull-requests`, `agent-logger`,
 `agent-vault`, `agent-mcp`, `agent-containers`, `agent-ssh`) therefore holds one exclusive
 lock on `<install-dir>/.install.lock` for every mutating action
-(`stamp`/`install`/`update`/`provision`) across its whole
+(`stamp`/`install`/`update`/`provision`, plus `uninstall` where provided) across its whole
 build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
 fd 8 (fd 7 for `agent-ssh`), or an atomic pid symlink
 `<install-dir>/.install.lock.pid` where `flock` is unavailable, whose dead owner is
@@ -1987,9 +1987,27 @@ The lock is **fail-closed**: a run that cannot acquire it within its timeout
 (300s; overridable for `agent-vault`, `agent-mcp`, `agent-containers`, and `agent-ssh` via
 `COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC`) reports that it could not acquire the
 install transaction lock and exits non-zero — it never proceeds unlocked.
-Read-only actions (`status`), service controls, and `uninstall` do not take it.
-`agent-logger` differs only in also locking `uninstall` (everything except
-`status`).
+Read-only actions (`status`) and service controls do not take it.
+`agent-vault`, `agent-ssh`, and `agent-pull-requests` also serialize uninstall
+against the same install/update lock. Vault and SSH uninstall previews do not
+acquire or create the transaction lock or remove runtime/config contents.
+The normal transient payload self-staging protocol still applies.
+`agent-logger` already locks uninstall and keeps its state directory.
+
+For those three uninstallers, removing runtime/config contents must **not**
+remove the lock inode or in-flight staged sources. The canonical
+`Remove-InstallRuntimeContent` / `remove_install_runtime_content` helper keeps
+`.install.lock`, `.install.lock.pid`, `.install.lock.pid.reap`, and
+`.install-stage` in place; the install root may therefore remain after purge.
+Dead-owner staging reap remains with the self-staging protocol on subsequent
+invocations, not with purge. Moving the lock to a new
+path would not exclude an older installer holding the original lock, so purge
+preserves the existing identity instead. Removal errors stop that purge rather
+than reporting success. Nested links are unlinked, never traversed; filesystem
+roots, user homes, and linked install roots are refused. This changes no
+uninstaller's config-retention default and introduces no uninstall action for
+init-only plugins.
+
 `agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
 `flock` on fd 8; without a `flock` binary, the same `flock(2)` lock taken through
 Python, so it still excludes PowerShell and `flock` holders of `.install.lock`;

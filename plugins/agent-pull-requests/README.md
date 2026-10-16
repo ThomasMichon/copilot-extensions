@@ -23,6 +23,12 @@ The installer builds an immutable versioned venv under
 `~/.local/bin/agent-pull-requests` binstub, and self-reconciles that runtime on
 session start the same way the other Python runtime plugins do.
 
+The installer's `uninstall` action holds the same transaction lock as
+install/update. It removes runtime/config contents but retains the lock files
+and `.install-stage` coordination, so the install directory may remain.
+Normal self-staging reap removes dead-owner stages on later invocations; purge
+never replaces a held lock.
+
 ## Verbs
 
 ```text

@@ -65,7 +65,10 @@ def _isolated_env(home: Path) -> dict[str, str]:
         if not key.startswith("COPILOT_PLUGIN_")
         and key not in {"COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXT_NO_FLOCK"}
     }
-    env.update({"HOME": str(home), "USERPROFILE": str(home)})
+    env.update({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+    })
     env["COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC"] = "1"
     return env
 
@@ -128,6 +131,7 @@ def _ps_holder(pwsh: str, lock: Path) -> subprocess.Popen[str]:
     holder = subprocess.Popen(
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert holder.stdout is not None
     assert holder.stdout.readline().strip() == "held"
@@ -143,6 +147,7 @@ def _run_ps_block(pwsh: str, install_dir: Path, body: str) -> subprocess.Complet
     return subprocess.run(
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=60,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
 
 
@@ -158,6 +163,38 @@ def test_powershell_lock_acquires_releases_and_reacquires(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().splitlines()[-1] == "True/True"
     assert (tmp_path / "rt" / ".install.lock").is_file()
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_powershell_purge_keeps_live_lock_stage_and_link_target(tmp_path: Path, host: str) -> None:
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip(f"native {host} unavailable")
+    root = tmp_path / "rt"
+    stage = root / ".install-stage" / "owner"
+    stage.mkdir(parents=True)
+    (stage / "active").write_text("active", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "sentinel").write_text("outside", encoding="utf-8")
+    (root / "state").write_text("remove", encoding="utf-8")
+    engine = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
+    result = _run_ps_block(executable, root, f"""
+. '{str(engine).replace("'", "''")}'
+New-Item -ItemType Junction -Path (Join-Path $InstallDir 'linked-state') -Target '{str(outside).replace("'", "''")}' | Out-Null
+if (-not (Enter-InstallLock -TimeoutSec 0)) {{ throw 'initial lock failed' }}
+$active = [IO.File]::Open((Join-Path $InstallDir '.install-stage\\owner\\active'), 'Open', 'Read', 'None')
+try {{
+    Remove-InstallRuntimeContent -InstallRoot $InstallDir
+    if (Enter-InstallLock -TimeoutSec 0) {{ throw 'purge replaced the live lock' }}
+}} finally {{ $active.Dispose(); Exit-InstallLock }}
+if (-not (Enter-InstallLock -TimeoutSec 0)) {{ throw 'released lock did not reacquire' }}
+Exit-InstallLock
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(path.name for path in root.iterdir()) == [".install-stage", ".install.lock"]
+    assert (stage / "active").read_text(encoding="utf-8") == "active"
+    assert (outside / "sentinel").read_text(encoding="utf-8") == "outside"
 
 
 def test_powershell_lock_releases_when_construction_cleanup_throws(tmp_path: Path) -> None:
@@ -207,7 +244,8 @@ def test_powershell_lock_times_out_while_held(tmp_path: Path) -> None:
         holder.wait()
 
 
-def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path) -> None:
+@pytest.mark.parametrize("action", ["stamp", "uninstall", "purge"])
+def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path, action: str) -> None:
     pwsh = _pwsh()
     if pwsh is None:
         pytest.skip("pwsh not available")
@@ -215,13 +253,28 @@ def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path) -> N
     home.mkdir()
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
+    sentinel = install_dir / "sentinel"
+    sentinel.write_text("must survive contention", encoding="utf-8")
+    runner = tmp_path / "invoke.ps1"
+    runner.write_text(
+        "param($Installer, $Action, $InstallRoot)\n"
+        "function Get-ScheduledTask {}\n"
+        "function Stop-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Unregister-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "if ($Action -eq 'purge') {\n"
+        "    & $Installer -Action uninstall -InstallDir $InstallRoot -Purge\n"
+        "} else { & $Installer -Action $Action -InstallDir $InstallRoot }\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
     holder = _ps_holder(pwsh, install_dir / ".install.lock")
     try:
         result = subprocess.run(
             [pwsh, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-             "-File", str(PS_SCRIPT), "-Action", "stamp", "-InstallDir", str(install_dir)],
+             "-File", str(runner), str(PS_SCRIPT), action, str(install_dir)],
             capture_output=True, text=True, timeout=120, env=_isolated_env(home),
             cwd=tmp_path,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
     finally:
         holder.kill()
@@ -229,7 +282,8 @@ def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path) -> N
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert LOCK_FAILURE in output
-    assert sorted(p.name for p in install_dir.iterdir()) == [".install.lock"]
+    assert sorted(p.name for p in install_dir.iterdir()) == [".install.lock", "sentinel"]
+    assert sentinel.read_text(encoding="utf-8") == "must survive contention"
     assert not (home / ".local").exists()
 
 
@@ -312,28 +366,48 @@ def test_posix_pid_fallback_waits_for_live_owner_and_reaps_dead_one(tmp_path: Pa
     assert reaped.stdout.strip() == "acquired", reaped.stderr
 
 
-def test_posix_installer_fails_closed_without_mutating(tmp_path: Path) -> None:
+@pytest.mark.parametrize("action", ["stamp", "uninstall", "purge"])
+@pytest.mark.parametrize("lock_kind", ["flock", "pid"])
+def test_posix_installer_fails_closed_without_mutating(
+    tmp_path: Path, action: str, lock_kind: str,
+) -> None:
     bash = _posix_bash()
-    if bash is None or shutil.which("flock") is None:
-        pytest.skip("POSIX bash with flock not available")
+    if bash is None or (lock_kind == "flock" and shutil.which("flock") is None):
+        pytest.skip(f"native POSIX bash with {lock_kind} unavailable")
     home = tmp_path / "home"
     home.mkdir()
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
-    holder = _flock_holder(bash, install_dir / ".install.lock")
+    fake_bin = home / "fake-bin"
+    fake_bin.mkdir()
+    systemctl = fake_bin / "systemctl"
+    systemctl.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    systemctl.chmod(0o755)
+    env = _isolated_env(home)
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + str(home / "no-session-bus")
+    holder = None
+    lock_name = ".install.lock" if lock_kind == "flock" else ".install.lock.pid"
+    if lock_kind == "flock":
+        holder = _flock_holder(bash, install_dir / lock_name)
+    else:
+        os.symlink(str(os.getpid()), install_dir / lock_name)
+        env["COPILOT_EXT_NO_FLOCK"] = "1"
     try:
+        actions = ["uninstall", "--purge"] if action == "purge" else [action]
         result = subprocess.run(
-            [bash, str(SH_SCRIPT), "stamp", "--install-dir", str(install_dir)],
-            capture_output=True, text=True, timeout=120, env=_isolated_env(home),
+            [bash, str(SH_SCRIPT), *actions, "--install-dir", str(install_dir)],
+            capture_output=True, text=True, timeout=120, env=env,
             cwd=tmp_path,
         )
     finally:
-        holder.kill()
-        holder.wait()
+        if holder is not None:
+            holder.kill()
+            holder.wait()
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert LOCK_FAILURE in output
-    assert sorted(p.name for p in install_dir.iterdir()) == [".install.lock"]
+    assert sorted(p.name for p in install_dir.iterdir()) == [lock_name]
     assert not (home / ".local").exists()
 
 

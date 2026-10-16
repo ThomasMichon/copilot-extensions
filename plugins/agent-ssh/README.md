@@ -5,6 +5,12 @@ The **SSH connectivity layer** for the agent fabric. It provides a standalone
 and defines the transport-provider contract used by direct and tunnel
 transports.
 
+The installer's `uninstall` action serializes with install/update. It removes
+runtime/config contents but keeps transaction-lock files and `.install-stage`
+coordination, so the install directory may remain. Normal self-staging reap
+removes dead-owner stages on later invocations. Its preview takes no transaction lock and removes no contents;
+normal transient payload self-staging still applies.
+
 ## What you can do with only this plugin
 
 `agent-ssh` does not require a harness, daemon, or sibling plugin. From a

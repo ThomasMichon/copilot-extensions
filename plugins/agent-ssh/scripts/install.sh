@@ -827,8 +827,9 @@ _enter_install_lock() {
 }
 # === end install-transaction lock ===
 
-case "$ACTION" in
-    install|update|stamp|provision)
+case "$ACTION:${DRY_RUN:-0}" in
+    uninstall:1) ;;
+    install:*|update:*|stamp:*|provision:*|uninstall:*)
         if ! _enter_install_lock; then
             _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
             exit 1
@@ -915,13 +916,13 @@ if [[ "$ACTION" == "uninstall" ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo '(dry run -- nothing will be changed)'
         [[ -e "$STUB" ]] && echo "[dry-run] would remove binstub: $STUB"
-        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove (config + DB + venv): $INSTALL_DIR"
+        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove runtime/config contents (coordination retained): $INSTALL_DIR"
         echo "agent-ssh uninstall dry run complete -- nothing was changed"
         exit 0
     fi
     rm -f "$STUB"
-    rm -rf "$INSTALL_DIR"
-    _ok 'agent-ssh runtime removed'
+    remove_install_runtime_content "$INSTALL_DIR" || exit 1
+    _ok 'agent-ssh runtime removed (transaction/staging coordination retained)'
     exit 0
 fi
 
