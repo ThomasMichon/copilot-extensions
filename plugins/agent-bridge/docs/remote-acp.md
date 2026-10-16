@@ -166,6 +166,9 @@ authority. Reissued decisions require a new callback and fresh explicit answer.
 Every approval wait has its own `rpc_timeout_seconds` deadline, including an
 idle-session callback with no outstanding outbound RPC. Expiry closes the
 connection and refuses later answers.
+When an originating RPC completes, an unanswered request-scoped form is
+withdrawn with terminal cancellation; its live token disappears while the
+callback response retains the original wire routing.
 
 ## Authentication owner and limits
 
@@ -207,6 +210,8 @@ Asynchronous SDK notification diagnostics are also redacted inside the remote
 connection's context, using Python's public log-record factory API. Local SDK
 connections and application logging retain their existing behavior; SDK code
 and private handlers are not patched.
+SDK source paths are canonicalized on both sides of the diagnostic boundary,
+including packages imported through a directory symlink.
 
 Defaults: 1 MiB JSON/SSE/WS frames, 64 queued messages/callbacks/sessions,
 30-second connect/send/close deadlines, a 900-second RPC result/approval deadline,

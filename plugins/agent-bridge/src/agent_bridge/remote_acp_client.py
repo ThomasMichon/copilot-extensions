@@ -74,6 +74,7 @@ class RemoteAcpClientMixin:
         )
         remote = self._remote_transport
         remote.on_lost = self._remote_lost
+        remote.on_request_completed = self._remote_rpc_completed
         if auth is not None:
             remote.auth = auth
         if auth is None and remote.auth is None and target.auth.source == "git-credential":
@@ -268,6 +269,22 @@ class RemoteAcpClientMixin:
             and entry["kind"] == "form" and not entry["future"].done()
         )
 
+    def _remote_rpc_completed(self, request_id: object) -> None:
+        for token, entry in list(getattr(self, "_remote_answers", {}).items()):
+            native = entry["data"].get("native_request_id")
+            if (
+                entry["kind"] != "form" or type(native) is not type(request_id)
+                or native != request_id or entry["future"].done()
+            ):
+                continue
+            entry["future"].set_result(CancelElicitationResponse(
+                action="cancel", field_meta=entry["meta"],
+            ))
+            self._emit("ask_user_withdrawn", {
+                "request_id": token, "tool_call_id": entry["tool_call_id"],
+                "decision_id": entry["decision_id"], "native_request_id": native,
+            })
+
     def _remote_withdraw(self, elicitation_id, kwargs):
         # Native elicitation IDs, tool-call IDs and application decision IDs
         # are different domains. Never guess equality or cancel the sole form.
@@ -285,7 +302,9 @@ class RemoteAcpClientMixin:
         if len(matches) != 1:
             return
         token, entry = matches[0]
-        entry["future"].cancel()
+        entry["future"].set_result(CancelElicitationResponse(
+            action="cancel", field_meta=entry["meta"],
+        ))
         self._emit("ask_user_withdrawn", {
             "request_id": token, "tool_call_id": entry["tool_call_id"],
             "decision_id": decision_id, "native_elicitation_id": elicitation_id,

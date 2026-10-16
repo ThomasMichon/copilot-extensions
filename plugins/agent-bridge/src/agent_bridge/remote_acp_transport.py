@@ -7,6 +7,7 @@ import contextlib
 import json
 import uuid
 from typing import Any
+from collections.abc import Callable
 
 from credential_relay.http_auth import HttpAuthContext, HttpAuthInjector
 
@@ -36,6 +37,7 @@ class RemoteTransport:
         )
         self.auth = auth
         self.on_lost = on_lost
+        self.on_request_completed: Callable[[object], None] | None = None
         self.closed = False
         self._failure: RemoteTransportError | None = None
         self._inbox: asyncio.Queue[dict] = asyncio.Queue(target.max_queue_messages)
@@ -176,6 +178,8 @@ class RemoteTransport:
                 self._adopting[sid] = asyncio.Event()
             elif stream_session is not None and requested_sid != stream_session:
                 raise RemoteTransportError("Remote response session mismatch")
+            if self.on_request_completed is not None:
+                self.on_request_completed(message["id"])
         elif sid is not None and sid not in self.sessions:
             # Load replay is historical and may precede the load response.
             if not any(m == "session/load" and s == sid for m, s in self._pending.values()):

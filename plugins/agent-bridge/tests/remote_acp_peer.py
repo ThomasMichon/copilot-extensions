@@ -138,7 +138,7 @@ class Connection:
             assert self.ws_send or header_sid == sid
             evidence["prompts"] += 1
             text = params["prompt"][0]["text"]
-            if text in {"permission", "form", "form-request"}:
+            if text in {"permission", "form", "form-request", "form-request-finish"}:
                 self.pending["rpc/opaque"] = (message, sid)
                 metadata = {NS: {"applicationApproval": {
                     "version": 1, "decisionId": "decision/opaque",
@@ -165,7 +165,7 @@ class Connection:
                         }, "_meta": metadata,
                     }
                     name = "elicitation/create"
-                    if text == "form-request":
+                    if text in {"form-request", "form-request-finish"}:
                         callback.pop("sessionId")
                         callback.pop("toolCallId")
                         callback["requestId"] = message["id"]
@@ -280,6 +280,24 @@ async def app(scope, receive, send):
                 await send({"type": "lifespan.shutdown.complete"})
                 return
     headers = dict(scope["headers"])
+    if scope["type"] == "http" and scope["path"] == "/complete-request":
+        body = b""
+        while True:
+            event = await receive()
+            body += event.get("body", b"")
+            if not event.get("more_body"):
+                break
+        requested_sid = json.loads(body)["session_id"]
+        for conn in connections.values():
+            pending = conn.pending.get("rpc/opaque")
+            if pending is not None and pending[1] == requested_sid:
+                original, sid = conn.pending.pop("rpc/opaque")
+                conn.retired_callbacks["rpc/opaque"] = sid
+                await conn.emit(rpc(original, {"stopReason": "end_turn"}), sid)
+                await respond(send, 200)
+                return
+        await respond(send, 404)
+        return
     if scope["path"] == "/forbidden":
         evidence["redirect_followed"] += 1
     scheme = "Bear" + "er "
@@ -320,6 +338,7 @@ async def app(scope, receive, send):
             affinity=affinity_cookie(headers),
             immediate=scope["path"] == "/immediate",
         )
+        connections[conn.id] = conn
         if affinity_cookie(headers):
             evidence["ws_cookies"] += 1
         await send({

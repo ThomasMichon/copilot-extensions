@@ -309,8 +309,7 @@ async def test_native_decision_id_withdrawal_and_cross_client_answers():
     client._remote_withdraw("separate-elicitation-id", {NAMESPACE: {
         "applicationApproval": {"version": 1, "decisionId": "native-durable-id"},
     }})
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    assert (await task).action == "cancel"
     assert not client.resolve_elicitation("native-durable-id", {}, request_id=token)
     assert events[-1][1]["native_elicitation_id"] == "separate-elicitation-id"
 
@@ -555,3 +554,37 @@ async def test_permission_event_retains_native_action_details_available_only_in_
     assert client.resolve_permission(event["request_id"], "explicit")
     await pending
     await client._remote_transport.close()
+
+
+@pytest.mark.asyncio
+async def test_completed_native_request_retires_form_without_losing_callback_route():
+    client, events = live_client()
+    wire = client._remote_transport
+    wire.sessions.add("session-one")
+    wire.on_request_completed = client._remote_rpc_completed
+    wire.outgoing_session({
+        "jsonrpc": "2.0", "id": 7, "method": "session/prompt",
+        "params": {"sessionId": "session-one"},
+    })
+    await wire.incoming({
+        "jsonrpc": "2.0", "id": "server-rpc", "method": "elicitation/create",
+        "params": {"requestId": 7},
+    }, "session-one")
+    await wire.receive()
+    pending = asyncio.create_task(client._remote_elicitation(
+        "Choose", SimpleNamespace(request_id=7, requested_schema={}), {},
+    ))
+    await asyncio.sleep(0)
+    token = events[-1][1]["request_id"]
+    await wire.incoming({
+        "jsonrpc": "2.0", "id": 7, "result": {"stopReason": "end_turn"},
+    }, "session-one")
+    assert (await pending).action == "cancel"
+    assert client.pending_ask_user() == [] and not client.has_pending_elicitation_request(token)
+    assert not client.resolve_elicitation("", {}, request_id=token)
+    assert events[-1][0] == "ask_user_withdrawn" and events[-1][1]["request_id"] == token
+    assert wire.outgoing_session({
+        "jsonrpc": "2.0", "id": "server-rpc", "result": {"action": "cancel"},
+    }) == "session-one"
+    assert wire._failure is None and client.is_running
+    await wire.close()

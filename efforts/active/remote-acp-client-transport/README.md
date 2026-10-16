@@ -177,6 +177,21 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Canonical diagnostic paths and completed-request forms
+
+- Review identified symlink aliases bypassing the SDK diagnostic boundary and
+  unanswered request-scoped forms remaining live after their originating RPC
+  completed. SDK/log paths now resolve consistently; non-SDK/local behavior
+  remains unchanged.
+- A public bridge transport completion notification retires only the exact
+  typed native request scope, emits correlated withdrawal and sends terminal
+  cancellation without prematurely deleting callback response routing.
+  Explicit form withdrawal uses the same terminal outcome.
+- Native symlink/privacy and actual HTTP2/WSS completed-RPC regressions verify
+  the marker stays redacted, late answers refuse, live attention clears and a
+  subsequent prompt still succeeds. Remote/logging/attention selection:
+  149 passed.
+
 ### 2026-10-16 — End fences remote replacement attachment
 
 - Review identified end completing while resume waited on old-client

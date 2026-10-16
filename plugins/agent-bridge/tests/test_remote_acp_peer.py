@@ -705,3 +705,38 @@ async def test_auth_retry_retains_affinity_cookie_from_401(peer, mode):
         evidence = (await probe.get(url + "/evidence")).json()
     assert evidence["auth_refused"] == 1 and evidence["created_sessions"] == 1
     assert proc.poll() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+async def test_completed_rpc_withdraws_unanswered_form_and_keeps_connection_usable(peer, mode):
+    url, context, proc = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/acp", transport=mode, allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"},
+    )
+    events = []
+    client = AcpClient(on_event=lambda kind, data: events.append((kind, data)))
+    wire = authenticated_wire(spec, context)
+    try:
+        await client.start_remote(spec, transport=wire)
+        await client.new_session(cwd="/workspace")
+        prompt = asyncio.create_task(client.send_prompt("form-request-finish"))
+        request = await wait_event(events, "ask_user_request")
+        assert client.has_pending_elicitation_request(request["request_id"])
+        async with httpx.AsyncClient(verify=context, trust_env=False) as control:
+            response = await control.post(
+                url + "/complete-request", json={"session_id": client.acp_session_id},
+            )
+            assert response.status_code == 200
+        await asyncio.wait_for(prompt, 5)
+        withdrawn = await wait_event(events, "ask_user_withdrawn")
+        assert withdrawn["request_id"] == request["request_id"]
+        assert client.pending_ask_user() == []
+        assert not client.has_pending_elicitation_request(request["request_id"])
+        assert not client.resolve_elicitation("", {}, request_id=request["request_id"])
+        assert await asyncio.wait_for(client.send_prompt("fresh"), 5)
+        assert client.is_running and wire._failure is None
+    finally:
+        await client.shutdown()
+    assert proc.poll() is None
