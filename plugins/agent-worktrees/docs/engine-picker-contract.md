@@ -371,6 +371,8 @@ The Manager requests `resolve --stage-launch-seed --require-native-seed` for
 prompted requests. The latter is a capability handshake: engines without the
 native execution-leg fence reject it before allocation or staging. The fence
 itself is unconditional in current engines, including direct stage callers.
+Direct engine requests requiring this fence refuse remote/cross-environment
+dispatch before SSH admission; the capability requirement is never silently dropped.
 Launch-seed stage/take mutation protocol version 5 and structured
 `launch_request_stage` version 4 exclude older resident handlers that lack that
 fence, using the existing same-code fallback. Both retain launch-admission guards.

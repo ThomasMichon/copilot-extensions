@@ -266,6 +266,8 @@ class _ResolveEarlyExit(RuntimeError):
 
 
 def _remote_selector_args(state: ResolveCommandState) -> list[str]:
+    if getattr(state.args, "require_native_seed", False):
+        raise ValueError("Remote --require-native-seed is unsupported; launch on the target.")
     if getattr(state.args, "owner_ref", None):
         raise ValueError("Remote --owner-ref is unsupported; create owned worktrees on the target.")
     if getattr(state.args, "copilot_args", None):

@@ -83,6 +83,28 @@ def test_remote_plan_preserves_supported_options_and_quotes_values(
     assert forwarded.no_mux
 
 
+@pytest.mark.parametrize("target", ["remote-host", "local-host"])
+@pytest.mark.parametrize("selector", [["--new"], ["--worktree-id", "wt-a"]])
+def test_native_seed_requirement_refuses_remote_dispatch_before_target_mutation(
+    remote, monkeypatch: pytest.MonkeyPatch, capfd, target: str, selector: list[str],
+) -> None:
+    _, entry, plans = remote
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *args, **kwargs: {
+        entry.key: entry, "local-host": replace(entry, key="local-host"),
+    })
+    monkeypatch.setattr(
+        remote_seed_launch, "prepare",
+        lambda *args, **kwargs: pytest.fail("pre-fence target received prompt admission"),
+    )
+    args = _parse([
+        "--json", "--machine", target, "--environment", "WSL", *selector,
+        "--seed", "retained intent", "--stage-launch-seed", "--require-native-seed",
+    ])
+    assert resolve_cli.cmd_resolve(args) == 2
+    assert "native-seed" in json.loads(capfd.readouterr().out)["error"]
+    assert not plans
+
+
 @pytest.mark.parametrize("json_mode", [False, True])
 @pytest.mark.parametrize("environment", [None, "WSL"])
 @pytest.mark.parametrize("unsupported", [
@@ -182,6 +204,7 @@ def test_remote_option_inventory_covers_all_resolve_parser_destinations() -> Non
         "dry_run", "recovery", "defer_projections", "no_resume", "bare_resume", "restore",
         "no_mux", "no_fast_forward", "json", "worktree_id", "codename", "base", "auto",
         "new_worktree", "bridge", "profile", "defer_new_seed", "stage_launch_seed",
+        "require_native_seed",
         "seed_id", "launch_request_b64", "launch_request_status", "machine", "environment",
         "target_no_mux", "parent_session", "caller_worktree", "owner_ref", "seed", "copilot_args",
     }
