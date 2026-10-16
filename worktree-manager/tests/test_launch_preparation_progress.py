@@ -189,7 +189,8 @@ def test_streamed_error_retains_version_skew_detail(monkeypatch, capsys):
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("current", [False, True])
-def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, current):
+@pytest.mark.parametrize("boundary", ["reconcile", "bootstrap"])
+def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, current, boundary):
     if shell != "bash" and os.name != "nt":
         pytest.skip("Windows launcher contract")
     if shell != "bash" and not shutil.which(shell):
@@ -199,16 +200,21 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
     root = Path(__file__).resolve().parents[1]
     # The fixture planner/actions need only stdlib, not the runner's site packages.
     fixture_python = getattr(sys, "_base_executable", sys.executable)
+    canonical = "[12:00:01.120Z] update/nested running preserved detail [elapsed 3.1s]"
+    literal = "space ' ; $ ` &"
     child = tmp_path / "action.py"
     child.write_text(
         "import os,sys,time\nfrom pathlib import Path\n"
         "assert os.environ['MAINTENANCE_FIXTURE'] == 'child'\n"
         "assert 'MAINTENANCE_UNSET' not in os.environ\n"
+        f"assert sys.argv[3] == {literal!r}\n"
         "print('progress-before-completion', flush=True)\n"
         "gate=Path(sys.argv[1]); deadline=time.monotonic()+10\n"
         "while not gate.exists() and time.monotonic()<deadline: time.sleep(.02)\n"
         "assert gate.exists(), 'progress was buffered'\n"
         "print('action-diagnostic', file=sys.stderr, flush=True)\n"
+        f"print({canonical!r}, flush=True)\n"
+        "print('native-last-line', end='', flush=True)\n"
         "sys.exit(int(sys.argv[2]))\n"
     )
     gate = tmp_path / "progress-seen"
@@ -226,9 +232,10 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         f"argv=[sys.executable,{str(child)!r},{str(gate)!r}]\n"
         "updates=[dict(service=label,argv=args,environment={'MAINTENANCE_FIXTURE':'child'},"
         "unset_environment=['MAINTENANCE_UNSET']) for label,args in "
-        "[('failed',argv+['7']),"
-        f"('spawn-error',[{str(tmp_path / 'missing-executable')!r}]),('success',argv+['0'])]]\n"
-        f"print(json.dumps(dict(action='reconcile' if n==1 and not {current!r} else 'continue',updates=updates)))\n"
+        f"[('failed',argv+['7',{literal!r}]),"
+        f"('spawn-error',[{str(tmp_path / 'missing-executable')!r}]),('success',argv+['0',{literal!r}])]]\n"
+        f"print(json.dumps(dict(action={('self-update' if boundary == 'bootstrap' else 'reconcile')!r} "
+        f"if n==1 and not {current!r} else 'continue',updates=updates)))\n"
     )
     env = dict(
         os.environ, PYTHONPATH=str(tmp_path), MAINTENANCE_FIXTURE="parent",
@@ -242,12 +249,20 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         text = (root / "bin/launch-session.ps1").read_text()
         formatter_start = text.index("function Format-SetupLine {")
         formatter = text[formatter_start:text.index("\n}\n", formatter_start) + 3]
-        block = text[text.index("    # (3) Plugin reconciliation"):text.index(
-            "\n}\n", text.index("    # (3) Plugin reconciliation"))]
+        helpers = text[text.index("function Push-UpdateEnvironment {"):text.index(
+            "\nfunction Invoke-UpdateApply {")]
+        if boundary == "bootstrap":
+            start = text.index("        # (2) Pre-launch self-update")
+            block = text[start:text.index(
+                "\n    } else {\n        Write-SetupStatus 'Skipping plugin update", start)]
+        else:
+            start = text.index("    # (3) Plugin reconciliation")
+            block = text[start:text.index("\n}\n", start)]
         script = "\n".join([
             "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true; $WithReconcile=$true",
             "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
             formatter,
+            helpers,
             f"$VenvPython='{fixture_python}'",
             f"function Resolve-RuntimePython {{ '{fixture_python}' }}",
             "function Write-PlanDiagnostics { param($Plan,$Prefix) }",
@@ -263,8 +278,14 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         command = [shell, "-NoProfile", "-File", str(fixture)]
     else:
         text = (root / "bin/launch-session.sh").read_text()
-        start = text.index('    if [[ "$with_reconcile" == "1"')
-        block = text[start:text.index("\n}\n", start)]
+        if boundary == "bootstrap":
+            start = text.index("        # (2) Pre-launch self-update")
+            block = text[start:text.index(
+                '\n    else\n        setup_status INFO \'Skipping plugin update', start)]
+            block += "\n_stop_setup_progress"
+        else:
+            start = text.index('    if [[ "$with_reconcile" == "1"')
+            block = text[start:text.index("\n}\n", start)]
         functions = text[text.index("setup_log() {"):text.index("\n# Write header")]
         library = root.parent / "libs/update-telemetry/src"
         env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(library)])
@@ -321,16 +342,129 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
     if current:
         assert state.read_text() == "1"
         assert not gate.exists()
-        assert "no executable actions" in report
-        assert "reconcile/pass-" not in report
+        assert ("Checking bootstrap services" if boundary == "bootstrap" else "no executable actions") in report
+        assert ("launch/bootstrap/" if boundary == "bootstrap" else "reconcile/pass-") not in report
         return
     assert state.read_text() == "2", "success/failure must not replace fresh replanning"
     assert gate.exists(), "child progress was not streamed"
     assert "action-diagnostic" in report
+    assert report.splitlines().count(canonical) == 2
+    assert report.count("native-last-line [elapsed ") == 2
     assert re.search(r"failed.*exit 7.*continuing.*duration [0-9.]+s", report)
     assert re.search(r"success.*exit 0.*duration [0-9.]+s", report)
     assert re.search(r"spawn-error.*(exit 127|spawn failed).*continuing.*duration [0-9.]+s", report)
     assert "starting" in result.stderr
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, shell, exit_code):
+    if shell == "bash" and os.name != "posix":
+        pytest.skip("POSIX shell contract")
+    if shell != "bash" and (os.name != "nt" or not shutil.which(shell)):
+        pytest.skip("Windows launcher contract")
+    root = Path(__file__).resolve().parents[1]
+    python = getattr(sys, "_base_executable", sys.executable)
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "__main__.py").write_text("print('{\"action\":\"continue\"}')\n")
+    plugin = tmp_path / "installed plugin"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    runtime_root = tmp_path / "runtime root"
+    canonical = "[12:00:01.120Z] update/nested running preserved detail [elapsed 3.1s]"
+    stage = tmp_path / "home" / ".agent-worktrees" / "updater-status.json"
+    stage.parent.mkdir(parents=True)
+    stage.write_text(json.dumps(dict(
+        stage_done=True, plugin_changed=True, plugin_dir=str(plugin),
+        runtime_root=str(runtime_root), environment={"MAINTENANCE_FIXTURE": "child"},
+        unset_environment=["MAINTENANCE_UNSET"],
+    )))
+    env = dict(
+        os.environ, HOME=str(stage.parent.parent), USERPROFILE=str(stage.parent.parent),
+        PYTHONPATH=str(tmp_path), WORKTREE_BLOCKING_INSTALL="1",
+        MAINTENANCE_FIXTURE="parent", MAINTENANCE_UNSET="parent",
+    )
+    log = tmp_path / "setup.log"
+    if shell != "bash":
+        source = (root / "bin/launch-session.ps1").read_text(encoding="utf-8")
+
+        def function(name):
+            start = source.index(f"function {name} {{")
+            return source[start:source.index("\n}\n", start) + 3]
+
+        (scripts / "install.ps1").write_text(
+            "param($Action,$InstallDir,$ProjectName)\n"
+            f"if($Action -ne 'update' -or $InstallDir -ne '{runtime_root}'){{throw 'arguments changed'}}\n"
+            "if($env:MAINTENANCE_FIXTURE -ne 'child' -or $env:MAINTENANCE_UNSET){throw 'environment changed'}\n"
+            "Write-Host 'installer-detail'\n"
+            "[Console]::Error.WriteLine('installer-diagnostic')\n"
+            f"Write-Output '{canonical}'\n"
+            "[Console]::Write('installer-last-line')\n"
+            f"exit {exit_code}\n",
+        )
+        script = "\n".join([
+            "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true",
+            "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
+            f"$script:SetupLog='{log}'; $script:ShowLaunchStatus=$false",
+            "$script:UpdateApplied=$false; $script:LaunchProject=''; $noUpdate=$false",
+            f"$VenvPython='{python}'",
+            function("Format-SetupLine"), function("Write-SetupLog"),
+            function("Write-SetupStatus"), function("Write-PlanDiagnostics"),
+            function("Push-UpdateEnvironment"), function("Pop-UpdateEnvironment"),
+            function("Invoke-SetupAction"), function("Invoke-UpdateApply"),
+            "Invoke-UpdateApply",
+            "if($env:MAINTENANCE_FIXTURE -ne 'parent' -or $env:MAINTENANCE_UNSET -ne 'parent'){throw 'environment leaked'}",
+            "if($ErrorActionPreference -ne 'Stop' -or -not $PSNativeCommandUseErrorActionPreference){throw 'preference leaked'}",
+        ])
+        fixture = tmp_path / "blocking.ps1"
+        fixture.write_text(script, encoding="utf-8-sig")
+        command = [shell, "-NoProfile", "-File", str(fixture)]
+    else:
+        source = (root / "bin/launch-session.sh").read_text()
+        start = source.index("invoke_update_apply() {")
+        apply = source[start:source.index("\n}\n", start) + 3]
+        functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+        (scripts / "install.sh").write_text(
+            "#!/bin/bash\nset -euo pipefail\n"
+            f"[[ \"$1\" == update && \"$2\" == --install-dir && \"$3\" == {shlex.quote(str(runtime_root))} ]]\n"
+            "[[ \"$MAINTENANCE_FIXTURE\" == child && -z \"${MAINTENANCE_UNSET+x}\" ]]\n"
+            "printf '%s\\n' installer-detail\n"
+            "printf '%s\\n' installer-diagnostic >&2\n"
+            f"printf '%s\\n' {shlex.quote(canonical)}\n"
+            "printf '%s' installer-last-line\n"
+            f"exit {exit_code}\n",
+        )
+        env["PYTHONPATH"] = os.pathsep.join([
+            str(tmp_path), str(root.parent / "libs/update-telemetry/src"),
+        ])
+        script = "\n".join([
+            "set -euo pipefail; _NO_UPDATE=0; _UPDATE_APPLIED=''; _STAGE_PID=''; LAUNCH_PROJECT=''",
+            f"PYTHON={shlex.quote(python)}",
+            functions, apply,
+            f"_SETUP_LOG_DIR={shlex.quote(str(tmp_path))}; SETUP_LOG={shlex.quote(str(log))}",
+            "invoke_update_apply 0",
+            '[[ "$MAINTENANCE_FIXTURE" == parent && "$MAINTENANCE_UNSET" == parent ]]',
+        ])
+        fixture = tmp_path / "blocking.sh"
+        fixture.write_text(script)
+        command = ["/bin/bash", str(fixture)]
+    result = subprocess.run(
+        command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    report = log.read_text()
+    assert "installer-detail [elapsed " in report
+    assert "installer-diagnostic [elapsed " in report
+    assert "installer-last-line [elapsed " in report
+    assert report.splitlines().count(canonical) == 1
+    state = "failed" if exit_code else "done"
+    assert re.search(rf"launch/installer {state} Installer update {state} \(exit {exit_code}\).*\[duration [0-9.]+s\]", report)
+    assert "installer: [" not in report
+    assert "Checking bootstrap services" in report
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])

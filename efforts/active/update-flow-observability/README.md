@@ -113,9 +113,12 @@ matrix below are _(agent-recommended)_ implementation details.
   formatting (#6827); preserve diagnostic stderr and identity-scoped retirement.
 - [x] Land the Python-owned aggregate and nested-output formatter, declared
   native encoding boundary and release-materialization contract (#6869).
-- [ ] Implement the smallest shared extension of the existing formatter
-  ownership, covering aggregate progress, plugin installers, nested child
-  output and persistent diagnostics.
+- [x] Implement the shared formatter extension for aggregate update,
+  captured plugin installers, nested output and native maintenance's
+  persistent/status sinks (#6869 and #6904).
+- [ ] Finish the remaining detached/standalone installer and early/late Bash
+  output boundaries through their actual output owners; synchronous bootstrap
+  and blocking marketplace adapters are implemented in the next reviewed slice.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -151,9 +154,9 @@ matrix below are _(agent-recommended)_ implementation details.
 
 ## Validation Plan
 
-- [ ] Use deterministic clocks to cover start, progress, completion, no-op,
+- [x] Use deterministic clocks to cover start, progress, completion, no-op,
   failure, nesting, multiline output, empty output and clock movement.
-- [ ] Prove clean JSON/stdout and diagnostic stderr at real subprocess
+- [x] Prove clean JSON/stdout and diagnostic stderr at real subprocess
   boundaries, including a failed installer and preserved exit status.
 - [ ] Cover Windows and POSIX installer entrypoints and synchronized vendored
   formatter copies; run the relevant install-contract and formatting guards.
@@ -214,6 +217,62 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-15 - Synchronous bootstrap and marketplace boundary
+
+- Traced the actual pre-launch producer to direct native installer argv.
+  Its admission subprocess inherits streams and is not a Python human-output
+  owner, so the launcher is the smallest missing presentation boundary.
+- Reused native reconciliation's PowerShell runner for bootstrap updates and
+  the blocking marketplace installer: exact argv, scoped environment,
+  Stopwatch duration, streamed diagnostics, explicit spawn/exit outcomes and
+  restored native-error preferences. No per-line subprocess was introduced.
+- Bash uses its existing maintenance renderer for the same actions, preserves
+  final unterminated output and canonical nested frames, and records the
+  installer's own pipeline exit status instead of the logger's.
+- A fresh complete blocking fixture exposed empty optional stage fields
+  shifting Bash's tab-delimited metadata. Replaced that handoff with NUL-delimited
+  fields in the same existing producer call; the fixture validates the real
+  decoded installer path and runtime-root arguments.
+- Before the fix, both Windows bootstrap hosts leaked raw child output and
+  failed the streaming gate; native-error policy could abort the launcher.
+  Updated fixtures cover failed, missing, successful and unchanged actions,
+  metacharacter argv, both streams, nested frames, final lines, environment
+  restoration and fresh second-pass planning.
+- Targeted Windows native bootstrap/reconcile: eight passed, four POSIX skips.
+  Blocking marketplace: four passed, two POSIX skips. Native Linux changed
+  boundaries: six passed, twelve Windows skips. Existing 30-second item,
+  20-second child and 300-second contained-suite bounds are unchanged.
+- This source slice is not yet published. Detached/standalone output, early/
+  late Bash diagnostics, speed reductions and promoted installed proof remain
+  open; this is not effort completion or production rollout evidence.
+
+### 2026-10-15 - Native maintenance slice merged; continue remaining streams
+
+- #6904 actually merged as `aaace382f7b9b45ee0a9c47ee2da9f72b7348b30`
+  after fresh approval of exact head
+  `20c6573798425bdcb5f1cd0fe956f78af1c0948d`, no unresolved review
+  threads and all observed CI successful. The source review's lifecycle
+  and timing findings were reproduced and repaired, not bypassed.
+- This closes the native maintenance formatter/sink extension. It does not
+  close inherited bootstrap output, detached/standalone installer output,
+  early/late Bash diagnostics, banner consolidation, Bridge serving drift
+  or any promoted installed proof. The next slice traces those streams at
+  their existing output owners rather than adding per-line interpreters
+  or another executor.
+- Native worktree status reconciliation encountered a busy publication
+  lock after the confirmed merge. No lock or tracking record was forced.
+  Preserve source history and journal, then retry the supported status/sync
+  path after publication finishes; this active effort must not be finalized.
+  The later status retry confirmed merged state. Whole-branch sync safely
+  aborted on the already-squashed history; after retaining backups and
+  verifying the native payload was byte-identical upstream, replayed only
+  the unpublished journal. The supported sync then completed successfully.
+- Separately attributed the normal release's three Agent Worktrees
+  failures to existing #6907, #6208 and #6209. Their existing owner already
+  landed #6910 (`f9093a58fffe088f232746c9f028c41ce5c2976a`), independently
+  confirmed merged. Do not duplicate that fix or treat its dev merge as a
+  containing full release. No updater or new production activation ran.
 
 ### 2026-10-15 - Native maintenance acceptance and isolated Windows blocker
 

@@ -498,21 +498,29 @@ invoke_update_apply() {
 
     _parse_stage_status() {
         [[ -f "$status_file" ]] || return 0
-        IFS=$'\t' read -r stage_done plugin_changed skipped plugin_dir runtime_root runtime_apply_blocked < <(
+        local _stage_key
+        for _stage_key in stage_done plugin_changed skipped plugin_dir runtime_root runtime_apply_blocked; do
+            if ! IFS= read -r -d '' "$_stage_key"; then
+                stage_done=""
+                setup_log WARN 'Plugin-update stage metadata could not be decoded'
+                return 0
+            fi
+        done < <(
             "$PYTHON" -c "
 import sys, json
 try:
     d = json.load(open(sys.argv[1], encoding='utf-8'))
 except Exception:
     d = {}
-print('\t'.join([
+for value in [
     str(d.get('stage_done', False)),
     str(d.get('plugin_changed', False)),
     str(d.get('skipped', '')),
     str(d.get('plugin_dir', '')),
     str(d.get('runtime_root', '')),
     str(d.get('runtime_apply_blocked', '')),
-]))
+]:
+    sys.stdout.write(value + '\0')
 " "$status_file" 2>/dev/null
         )
     }
@@ -584,13 +592,21 @@ for key, value in environment.items():
                     if [[ -n "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
                         # Escape hatch (recovery/debug): apply synchronously.
                         setup_status INFO 'A new plugin version was downloaded; installing the updated runtime...'
+                        _setup_progress_begin installer
+                        local _installer_status=() _installer_exit
                         if env ${_stage_env[@]+"${_stage_env[@]}"} \
-                            bash "$_installer" "${_inst_args[@]}" 2>&1 | while IFS= read -r _line; do
-                            setup_log INFO "installer: $_line"
+                            bash "$_installer" "${_inst_args[@]}" 2>&1 | while IFS= read -r _line || [[ -n "$_line" ]]; do
+                            setup_log INFO "$_line"
                         done; then
-                            setup_log INFO 'Installer update succeeded (launcher change, if any, applies next launch)'
+                            _installer_status=("${PIPESTATUS[@]}")
                         else
-                            setup_log WARN "Installer update failed -- continuing with existing version"
+                            _installer_status=("${PIPESTATUS[@]}")
+                        fi
+                        _installer_exit=${_installer_status[0]}
+                        if [[ "$_installer_exit" == 0 ]]; then
+                            _setup_progress_end done 'Installer update done (exit 0); launcher changes apply on the next launch'
+                        else
+                            _setup_progress_end failed "Installer update failed (exit $_installer_exit); continuing with existing version"
                         fi
                     else
                         # Default: DETACH the install so the launch never blocks on the
@@ -674,11 +690,20 @@ for key, value in environment.items():
                     while IFS= read -r _update_env; do
                         [[ -n "$_update_env" ]] && _UPDATE_ENV+=("$_update_env")
                     done <<< "$_UPDATE_ENV_TEXT"
-                    setup_status INFO "Updating $SVC_NAME..."
                     setup_log INFO "  command: ${UPDATE_ARGV[*]}"
-                    env ${_UPDATE_ENV[@]+"${_UPDATE_ENV[@]}"} \
-                        "${UPDATE_ARGV[@]}" \
-                        || setup_log WARN "Update failed for $SVC_NAME (exit $?)"
+                    _setup_progress_begin "bootstrap/$SVC_NAME"
+                    if env ${_UPDATE_ENV[@]+"${_UPDATE_ENV[@]}"} \
+                        "${UPDATE_ARGV[@]}" 2>&1 | while IFS= read -r _ul || [[ -n "$_ul" ]]; do setup_log INFO "$_ul"; done; then
+                        _update_status=("${PIPESTATUS[@]}")
+                    else
+                        _update_status=("${PIPESTATUS[@]}")
+                    fi
+                    _update_exit=${_update_status[0]}
+                    if [[ "$_update_exit" == 0 ]]; then
+                        _setup_progress_end done "Bootstrap update: $SVC_NAME done (exit 0)"
+                    else
+                        _setup_progress_end failed "Bootstrap update: $SVC_NAME failed (exit $_update_exit); continuing"
+                    fi
                 fi
             done
             # Re-resolve before the re-check: one of the updates just applied

@@ -1,0 +1,13 @@
+{
+  "comment": "Frame synchronous bootstrap and marketplace installer output with native action outcomes and preserve empty staged metadata fields",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
