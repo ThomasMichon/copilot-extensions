@@ -482,7 +482,13 @@ class _ReadLiveClient:
 
 def test_cmd_read_resolves_worktree_handle_to_live_session(monkeypatch, capsys):
     client = _ReadLiveClient()
-    monkeypatch.setattr(m, "_get_client", lambda: client)
+    startup: list[bool] = []
+
+    def get_client(*, ensure: bool = True) -> _ReadLiveClient:
+        startup.append(ensure)
+        return client
+
+    monkeypatch.setattr(m, "_get_client", get_client)
     monkeypatch.setattr(m, "_caller_id_for", lambda _args: None)
     monkeypatch.setattr(m, "_make_renderer", lambda _args: _ReadRenderer())
     args = argparse.Namespace(
@@ -497,6 +503,7 @@ def test_cmd_read_resolves_worktree_handle_to_live_session(monkeypatch, capsys):
 
     m._cmd_read(args)
 
+    assert startup == [False, True]
     assert client.list_calls >= 1
     assert client.cursor_calls == ["live-sess-1"]
     assert client.range_calls == [("live-sess-1", 1, None)]

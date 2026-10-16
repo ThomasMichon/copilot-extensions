@@ -674,8 +674,8 @@ def test_live_read_uses_bounded_result_not_acp_cursor(monkeypatch, capsys, tail)
             return {"message_id": mid, "stage": "sdk_accepted"}
 
     client = Client()
-    def read_client(**kwargs):
-        assert kwargs == {"ensure": False}
+    def read_client(*, ensure: bool = True) -> Client:
+        assert ensure is False
         return client
 
     monkeypatch.setattr(cli, "_get_client", read_client)
