@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 from . import output, update_events
@@ -94,7 +94,8 @@ def eligible_runtimes(args: argparse.Namespace, targets: Mapping[str, object],
 
 
 def check_forced_runtimes(args: argparse.Namespace, targets: Mapping[str, object],
-                          plugin_dir: Path) -> bool:
+                          plugin_dir: Path, *, eligible: Collection[str] | None = None,
+                          phase: str = "engine_runtime") -> bool:
     """Refuse ``--force-runtime`` names this update would never deploy.
 
     Records a configuration failure (exit 3) naming them, so a typo or an
@@ -105,10 +106,11 @@ def check_forced_runtimes(args: argparse.Namespace, targets: Mapping[str, object
     if not forced:
         return True
     try:
-        eligible = eligible_runtimes(args, targets, plugin_dir)
+        if eligible is None:
+            eligible = eligible_runtimes(args, targets, plugin_dir)
     except OSError as error:
         output.err(f"--force-runtime: cannot read modules.json: {error}")
-        update_events.record("engine_runtime", "force-runtime",
+        update_events.record(phase, "force-runtime",
                              f"modules.json unreadable: {error}")
         return False
     unknown = sorted(forced - eligible)
@@ -116,6 +118,6 @@ def check_forced_runtimes(args: argparse.Namespace, targets: Mapping[str, object
         return True
     names = ", ".join(unknown)
     output.err(f"--force-runtime: no eligible runtime named {names}")
-    update_events.record("engine_runtime", "force-runtime",
+    update_events.record(phase, "force-runtime",
                          f"--force-runtime target not found: {names}")
     return False

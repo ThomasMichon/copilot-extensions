@@ -6,7 +6,6 @@ import argparse
 import json
 import os
 import platform
-import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -15,10 +14,12 @@ from pathlib import Path
 from . import config as cfg
 from . import output, services as svc
 from . import picker_profiles_cli, services_cli
-from . import update_events as _events, update_options
+from . import update_events as _events, update_options, update_runtime_plan
 from . import worktree_identity
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
-from .update_runtime import _installer_timeout, _run_engine_installer, installer_deadline_status
+from .update_runtime import (  # noqa: F401 - compatibility seams used by the plan collector
+    _installer_timeout, _run_engine_installer, installer_deadline_status,
+)
 
 
 def _core():
@@ -314,95 +315,69 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         return 1
 
     output.info(f"Plugin source: {plugin_dir}")
-    _events.enter("engine_runtime")
-    if not update_options.check_forced_runtimes(args, registered_targets, plugin_dir):
-        return 1
-
-    from . import reconcile as _reconcile
+    _events.enter("runtime_preflight")
 
     plat = cfg.detect_platform()
     force = getattr(args, "force", False)
     forced = update_options.forced_runtimes(args)
-    try:
-        aw_runtime_env, aw_runtime_root = _reconcile.runtime_installer_environment(
-            "agent-worktrees",
-            plugin_dir,
-        )
-    except ValueError as error:
-        output.err(f"Installation context invalid: {error}")
-        _events.record("engine_runtime", plugin_ref, f"installation context invalid: {error}")
-        return 1
-    aw_payload_ver = _reconcile.payload_version(plugin_dir)
-    aw_context_selected = "COPILOT_EXTENSIONS_CONTEXT" in aw_runtime_env
-    aw_deployed_ver = _reconcile.runtime_deployed_version("agent-worktrees", root=aw_runtime_root)
-    versions_equal = bool(aw_payload_ver and aw_payload_ver == aw_deployed_ver)
-    version_match = not (force or "agent-worktrees" in forced) and versions_equal
-    hooks_drifted = (
-        bool(version_match)
-        and not aw_context_selected
-        and _reconcile.hook_shims_drifted(plugin_dir)
+    skip_modules = getattr(args, "skip_modules", None)
+    engine_step = update_runtime_plan.plan_engine(
+        plugin_dir, plat, force=force or "agent-worktrees" in forced,
     )
-    if version_match and not hooks_drifted:
+    module_plan = update_runtime_plan.plan_modules(
+        plugin_dir, plat, skip_modules, force=force,
+        targets=registered_targets, force_runtimes=forced,
+    )
+    excluded = {step.name for step in module_plan} | {"agent-worktrees"}
+    if skip_modules:
+        excluded.update(skip_modules)
+    registered_plan = tuple(
+        update_runtime_plan.plan_registered(
+            name, plat, force=force or name in forced,
+            gate_context=target.context,
+        )
+        for name, target in sorted(registered_targets.items())
+        if target.required and name not in excluded
+        and not (skip_modules is not None and not skip_modules)
+    )
+    portfolio = (engine_step, *module_plan, *registered_plan)
+    if not update_options.check_forced_runtimes(
+        args, registered_targets, plugin_dir,
+        eligible={step.name for step in portfolio if step.eligible},
+        phase="runtime_preflight",
+    ):
+        return 1
+    blockers = [
+        step for step in portfolio
+        if step.required and step.blocked
+    ]
+    if blockers:
+        for step in blockers:
+            output.err(f"Runtime preflight: {step.name}: {step.status}")
+            _events.record("runtime_preflight", f"{step.name}@copilot-extensions", step.status)
+        output.err(
+            "Required runtime preflight failed; no runtime installers or local "
+            "integration will run. Resolve the reported blockers and retry update."
+        )
+        return 1
+
+    _events.enter("engine_runtime")
+    if engine_step.status:
         output.ok(
-            f"Runtime already at {aw_deployed_ver} -- skipping installer "
+            f"Runtime already at {engine_step.target_version} -- skipping installer "
             "(use --force to re-deploy)"
         )
         _events.record("engine_runtime", plugin_ref, "SKIPPED (current)", changed=False)
     else:
-        if hooks_drifted:
-            output.warn(
-                f"Runtime already at {aw_deployed_ver}, but deployed hook shims "
-                "have drifted from the payload -- re-deploying (bin/ hook shims "
-                "deploy independently of the runtime version; dotfiles #1171)"
-            )
-        if plat == "windows":
-            installer = plugin_dir / "scripts" / "install.ps1"
-            shell = shutil.which("pwsh") or shutil.which("powershell")
-            if not shell:
-                output.err("PowerShell not found")
-                _events.record("engine_runtime", plugin_ref, "powershell not found")
-                return 1
-            argv = [
-                shell,
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(installer),
-                "update",
-                "-InstallDir",
-                str(aw_runtime_root),
-            ]
-        else:
-            installer = plugin_dir / "scripts" / "install.sh"
-            argv = [
-                "bash",
-                str(installer),
-                "update",
-                "--install-dir",
-                str(aw_runtime_root),
-            ]
-
-        if not installer.exists():
-            output.err(f"Installer not found: {installer}")
-            _events.record("engine_runtime", plugin_ref, "installer not found")
-            return 1
-
-        try:
-            installer_timeout = max(600, _installer_timeout("agent-worktrees", aw_runtime_env, plugin_dir))
-        except (OSError, ValueError) as error:
-            output.err(str(error))
-            _events.record("engine_runtime", plugin_ref, installer_deadline_status(error))
-            return 1
-        aw_runtime_env["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] = "1"
         rc = _run_engine_installer(
-            argv, plugin_dir, installer_timeout, aw_runtime_env, runtime_root=aw_runtime_root
+            list(engine_step.argv), plugin_dir, engine_step.deadline_s,
+            engine_step.environment, runtime_root=engine_step.runtime_root,
+            target_version=engine_step.target_version,
         )
         if rc != 0:
             return rc
 
     _events.enter("module_update")
-    skip_modules = getattr(args, "skip_modules", None)
     runtimes_ok = True
     if (
         _core_helper("_update_modules", _update_modules)(
@@ -412,6 +387,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             force=force,
             targets=registered_targets,
             force_runtimes=forced,
+            plan=module_plan,
         )
         is False
     ):
@@ -426,6 +402,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             force=force,
             targets=registered_targets,
             force_runtimes=forced,
+            plan=registered_plan,
         )
         is False
     ):
@@ -441,7 +418,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
 
     from .update_integration import finish
 
-    integration_ok = finish(plugin_dir, plat, aw_runtime_env)
+    integration_ok = finish(plugin_dir, plat, dict(engine_step.environment))
     return 0 if payloads_ok and runtimes_ok and integration_ok else 1
 
 

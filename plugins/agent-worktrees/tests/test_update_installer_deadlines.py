@@ -107,7 +107,7 @@ def test_registered_runtime_and_module_fallback_use_selected_deadline(payloads, 
     )}
     assert runtime._update_modules(plugin, "linux", None, force=True, targets=targets)
     assert len(calls) == 3
-    assert all(call["timeout"] == 930 and call["env"] is environment for call in calls)
+    assert all(call["timeout"] == 930 and call["env"] == environment for call in calls)
 
 
 def test_declared_default_reaches_registered_and_module_installers(payloads, monkeypatch):

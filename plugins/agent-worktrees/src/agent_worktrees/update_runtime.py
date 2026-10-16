@@ -7,7 +7,6 @@ import enum
 import functools
 import json
 import os
-import shutil
 import socket
 import subprocess
 import time
@@ -15,17 +14,18 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 
 from . import bare_anchor_files, bare_anchor_sync, git_ops, output, update_events
+from . import update_runtime_plan
 from . import config as cfg
-from .installer_capabilities import posix_zero_downtime_flag_supported
+from .installer_capabilities import posix_zero_downtime_flag_supported  # noqa: F401 - planning seam
 from .update_gate import (  # noqa: F401 - re-exported for callers and tests
     MACHINE_GATED_SKIP,
     MachineDetectionError,
     _machine_gate_blocks,
 )
 from .update_installer_process import (
-    _installer_timeout,
+    _installer_timeout,  # noqa: F401 - planning seam
     _run_human_installer,
-    installer_deadline_status,
+    installer_deadline_status,  # noqa: F401 - planning seam
 )
 
 
@@ -430,10 +430,31 @@ def _reconcile_registered_runtimes(
     force: bool = False,
     targets: dict[str, _RegisteredPluginTarget] | None = None,
     force_runtimes: Collection[str] = (),
+    plan: tuple[update_runtime_plan.RuntimeUpdateStep, ...] | None = None,
 ) -> bool:
     """Rebuild the runtime venv of every enabled plugin the other steps skip."""
     if skip_modules is not None and len(skip_modules) == 0:
         return True
+
+    if plan is not None:
+        planned_results: list[str] = []
+        for step in plan:
+            started = time.monotonic()
+            status = _execute_runtime_step(step)
+            update_events.record(
+                step.phase, f"{step.name}@copilot-extensions", status,
+                changed=status.startswith("OK"), started=started,
+            )
+            planned_results.append(status)
+            if status not in ("SKIPPED (current)", "payload-only"):
+                report = output.ok if status.startswith("OK") else (
+                    output.info if status.startswith("SKIPPED") else output.warn
+                )
+                report(f"{step.name}: {status}")
+        return all(
+            status.startswith(("OK", "SKIPPED")) or status == "payload-only"
+            for status in planned_results
+        )
 
     targets = (
         _core_helper("_registered_plugin_targets", _registered_plugin_targets)()
@@ -511,94 +532,39 @@ def _reconcile_one_runtime_status(
     force: bool,
     gate_context: Path | None = None,
 ) -> str:
+    return _execute_runtime_step(update_runtime_plan.plan_registered(
+        name, platform_name, force=force, gate_context=gate_context,
+    ))
+
+
+def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
     from . import reconcile
 
-    pdir = reconcile.core_installed_payload_dir(name)
-    if pdir is None:
-        return "payload not installed"
-    scope = reconcile.manifest_runtime_scope(pdir) or "none"
-    if scope == "none":
-        return "payload-only"
-    try:
-        if _machine_gate_blocks(name, scope, gate_context):
-            return MACHINE_GATED_SKIP
-    except MachineDetectionError as error:
-        return f"machine detection failed: {error}"
-
-    pver = reconcile.payload_version(pdir)
-    try:
-        child_environment, runtime_root = reconcile.runtime_installer_environment(name, pdir)
-    except ValueError as error:
-        return f"installation context invalid: {error}"
-    dver = reconcile.runtime_deployed_version(name, root=runtime_root)
-    if not force and pver and dver and reconcile._versions_equal(dver, pver):
-        return "SKIPPED (current)"
-
-    context = (
-        Path(child_environment["COPILOT_EXTENSIONS_CONTEXT"])
-        if "COPILOT_EXTENSIONS_CONTEXT" in child_environment
-        else None
+    if step.status:
+        return step.status
+    output.header(f"Updating Runtime: {step.name}")
+    run = functools.partial(
+        _run_human_installer, label=step.name, receipt_owned=True,
+        cwd=step.payload, env=step.environment, deadline_s=step.deadline_s,
+        target_version=step.target_version,
+        receipt=functools.partial(
+            reconcile.runtime_deployed_version, step.name, root=step.runtime_root,
+        ),
     )
-    if context is not None:
-        if force:
-            return "forced namespaced runtime reconciliation is unsupported"
-        try:
-            built = reconcile.runtime_installer_argv(
-                pdir,
-                context=context,
-            )
-        except ValueError as error:
-            return str(error)
-        if built is None:
-            return "installer not found"
-        _display, argv = built
-        installer = None
-    elif platform_name == "windows":
-        shell = shutil.which("pwsh") or shutil.which("powershell")
-        if not shell:
-            return "powershell not found"
-        installer = pdir / "scripts" / "install.ps1"
-        if installer.exists():
-            argv = [
-                shell,
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(installer),
-                "update",
-            ]
-        else:
-            installer = pdir / "scripts" / "init.ps1"
-            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer)] + (
-                ["-Force"] if force else []
-            )
-    else:
-        installer = pdir / "scripts" / "install.sh"
-        if installer.exists():
-            argv = ["bash", installer.as_posix(), "update"]
-        else:
-            installer = pdir / "scripts" / "init.sh"
-            argv = ["bash", installer.as_posix()] + (["--force"] if force else [])
-
-    if context is None and installer is not None and not installer.exists():
-        return "installer not found"
-
-    try:
-        installer_timeout = _installer_timeout(name, child_environment, pdir)
-    except (OSError, ValueError) as error:
-        return installer_deadline_status(error)
-    output.header(f"Reconciling Runtime: {name}" + (" (forced)" if force else ""))
-    return _run_human_installer(
-        argv, label=name, receipt_owned=True,
-        cwd=pdir, env=child_environment, deadline_s=installer_timeout, target_version=pver,
-        receipt=lambda: reconcile.runtime_deployed_version(name, root=runtime_root),
-    ).status
+    status = run(list(step.argv)).status
+    if step.fallback_argv and status.startswith("installer exited"):
+        output.info(f"Module '{step.name}' update failed (not installed?), trying install...")
+        status = run(list(step.fallback_argv)).status
+        return "OK (installed)" if status == "OK" else status.replace(
+            "installer exited", "install exited", 1,
+        )
+    return status
 
 
 def _run_engine_installer(
     argv: list[str], plugin_dir: Path, timeout: int, env: Mapping[str, str],
     runtime_root: Path | None = None,
+    target_version: str | None = None,
 ) -> int:
     """Run agent-worktrees' own runtime installer and record its result.
 
@@ -611,7 +577,7 @@ def _run_engine_installer(
     run = _run_human_installer(
         argv, label="agent-worktrees", receipt_owned=True,
         cwd=plugin_dir, env=env, deadline_s=timeout,
-        target_version=reconcile.payload_version(plugin_dir) if runtime_root else None,
+        target_version=(target_version or reconcile.payload_version(plugin_dir)) if runtime_root else None,
         receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
     )
     rc, status = (0 if run.status == "OK" else (run.rc or 1)), run.status
@@ -728,196 +694,32 @@ def _update_modules(
     *,
     targets: dict[str, _RegisteredPluginTarget] | None = None,
     force_runtimes: Collection[str] = (),
+    plan: tuple[update_runtime_plan.RuntimeUpdateStep, ...] | None = None,
 ) -> bool:
     """Update sibling modules registered in modules.json."""
-    manifest = plugin_dir / "modules.json"
-    if not manifest.exists():
-        return True
-
-    try:
-        data = json.loads(manifest.read_text())
-    except Exception as exc:
-        output.warn(f"Failed to parse modules.json: {exc}")
-        update_events.record("module_update", "modules.json", f"unreadable: {exc}")
-        return False
-
-    modules = data.get("modules", [])
-    if not modules:
-        return True
-
-    if skip_modules is not None and len(skip_modules) == 0:
-        output.info("Skipping all module updates (--skip-modules)")
-        return True
-
-    extensions_root = plugin_dir.parent
-    results: list[tuple[str, str]] = []
-
-    for mod in modules:
-        name = mod.get("name", "unknown")
-
-        if skip_modules and name in skip_modules:
-            output.info(f"Skipping module: {name}")
-            results.append((name, "SKIPPED"))
-            continue
-
-        target = targets.get(name) if targets is not None else None
-        if targets is not None and (target is None or not target.required):
-            output.info(
-                f"Skipping inactive module runtime: {name} (payload inventory remains advisory)"
-            )
-            results.append((name, "SKIPPED (inactive inventory)"))
-            continue
-
-        source = mod.get("source", name)
-        module_dir = extensions_root / source
-
+    if plan is None:
         if targets is None:
-            plugin_ref = f"{name}@copilot-extensions"
-            try:
-                r = subprocess.run(
-                    [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if r.returncode == 0:
-                    for line in r.stdout.strip().splitlines():
-                        output.ok(line)
-                else:
-                    output.warn(
-                        f"Plugin update for {name} returned non-zero "
-                        f"(continuing with installed version)"
-                    )
-            except OSError as exc:
-                output.warn(
-                    f"{describe_copilot_spawn_error(exc)} -- skipping plugin refresh"
-                )
-            except subprocess.TimeoutExpired:
-                output.warn(
-                    f"Plugin update for {name} timed out -- continuing with installed version"
-                )
-
-        if not module_dir.is_dir():
-            output.warn(f"Module '{name}' source not found: {module_dir}")
-            results.append((name, "source dir not found"))
-            continue
-
-        from . import reconcile as _reconcile
-
-        module_scope = _reconcile.manifest_runtime_scope(module_dir)
-        if module_scope is None:
-            # A module always ships a runtime installer; a missing or malformed
-            # scope must not bypass the machine gate on its way to it.
-            output.warn(f"{name}: module manifest has no valid runtimeScope -- not installing")
-            results.append((name, "invalid runtimeScope"))
-            continue
-        if module_scope == "none":
-            results.append((name, "SKIPPED (payload-only)"))
-            continue
-        try:
-            gate_blocks = _machine_gate_blocks(
-                name, module_scope, target.context if target is not None else None
-            )
-        except MachineDetectionError as error:
-            output.warn(f"{name}: machine detection failed: {error}")
-            results.append((name, f"machine detection failed: {error}"))
-            continue
-        if gate_blocks:
-            output.info(f"Skipping module runtime not allowed on this machine: {name}")
-            results.append((name, MACHINE_GATED_SKIP))
-            continue
-
-        try:
-            runtime_env, runtime_root = _reconcile.runtime_installer_environment(name, module_dir)
-        except ValueError as error:
-            output.warn(f"{name}: installation context invalid: {error}")
-            results.append((name, f"installation context invalid: {error}"))
-            continue
-        mod_payload_ver = _reconcile.payload_version(module_dir)
-        mod_deployed_ver = _reconcile.runtime_deployed_version(name, root=runtime_root)
-        if (
-            not (force or name in force_runtimes)
-            and mod_payload_ver
-            and mod_deployed_ver
-            and mod_payload_ver == mod_deployed_ver
-        ):
-            output.ok(f"{name} already at {mod_deployed_ver} -- skipping installer")
-            results.append((name, "SKIPPED (current)"))
-            continue
-        try:
-            installer_timeout = _installer_timeout(name, runtime_env, module_dir)
-        except (OSError, ValueError) as error:
-            output.warn(str(error))
-            results.append((name, installer_deadline_status(error)))
-            continue
-
-        if platform_name == "windows":
-            installer = module_dir / "scripts" / "install.ps1"
-        else:
-            installer = module_dir / "scripts" / "install.sh"
-
-        if not installer.exists():
-            output.warn(f"Module '{name}' installer not found: {installer}")
-            results.append((name, "installer not found"))
-            continue
-
-        if platform_name == "windows":
-            shell = shutil.which("pwsh") or shutil.which("powershell")
-            if not shell:
-                output.warn(f"Module '{name}': PowerShell not found")
-                results.append((name, "powershell not found"))
-                continue
-            shell_prefix = [
-                shell,
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(installer),
-            ]
-        else:
-            shell_prefix = ["bash", str(installer)]
-
-        update_args = ["update"]
-        from . import reconcile as _reconcile
-
-        if _reconcile._zero_downtime_update(module_dir):
-            if platform_name == "windows":
-                update_args.append("-ZeroDowntime")
-            elif posix_zero_downtime_flag_supported(module_dir):
-                update_args.append("--zero-downtime")
-        output.header(f"Updating Module: {name}")
-        run = functools.partial(
-            _run_human_installer, label=name, receipt_owned=True,
-            cwd=module_dir, env=runtime_env,
-            deadline_s=installer_timeout, target_version=mod_payload_ver,
-            receipt=functools.partial(_reconcile.runtime_deployed_version, name, root=runtime_root),
+            # Standalone callers still own payload acquisition. The unified
+            # updater supplies its already-acquired target selection and plan.
+            for name in sorted(_module_names(plugin_dir)):
+                if skip_modules is not None and (not skip_modules or name in skip_modules):
+                    continue
+                _refresh_module_payload(name)
+        plan = update_runtime_plan.plan_modules(
+            plugin_dir, platform_name, skip_modules, force=force,
+            targets=targets, force_runtimes=force_runtimes,
         )
-        status = run([*shell_prefix, *update_args]).status
-        if status == "OK" or not status.startswith("installer exited"):
-            if status != "OK":
-                output.warn(f"Module '{name}' update: {status}")
-            results.append((name, status))
-            continue
+    results = [(step.name, _execute_runtime_step(step)) for step in plan]
 
-        output.info(f"Module '{name}' update failed (not installed?), trying install...")
-        status = run([*shell_prefix, "install"]).status
-        if status == "OK":
-            results.append((name, "OK (installed)"))
-        else:
-            output.warn(f"Module '{name}' install: {status}")
-            results.append((name, status.replace("installer exited", "install exited", 1)))
-
-    for name, status in results:
-        target = targets.get(name) if targets is not None else None
+    for step, (name, status) in zip(plan, results, strict=True):
         update_events.record("module_update", f"{name}@copilot-extensions", status,
                              changed=status.startswith("OK"),
-                             required=targets is None or (target is not None and target.required))
+                             required=step.required)
     if results:
         output.header("Module Update Summary")
         for name, status in results:
-            if status == "OK":
-                output.ok(f"{name}")
+            if status.startswith("OK"):
+                output.ok(f"{name} ({status})")
             elif status == "SKIPPED":
                 output.info(f"{name} (skipped)")
             elif status.startswith("SKIPPED"):
@@ -925,6 +727,27 @@ def _update_modules(
             else:
                 output.warn(f"{name}: {status}")
     return all(status.startswith("OK") or status.startswith("SKIPPED") for _, status in results)
+
+
+def _refresh_module_payload(name: str) -> None:
+    """Preserve the best-effort refresh contract of standalone module callers."""
+    try:
+        result = subprocess.run(
+            [_resolve_copilot() or "copilot", "plugin", "update", f"{name}@copilot-extensions"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().splitlines():
+                output.ok(line)
+        else:
+            output.warn(
+                f"Plugin update for {name} returned non-zero "
+                "(continuing with installed version)"
+            )
+    except OSError as error:
+        output.warn(f"{describe_copilot_spawn_error(error)} -- skipping plugin refresh")
+    except subprocess.TimeoutExpired:
+        output.warn(f"Plugin update for {name} timed out -- continuing with installed version")
 
 
 def _find_installed_plugin_dir() -> Path | None:

@@ -502,7 +502,8 @@ def test_phase_events_emitted(wired, _update_home):
     assert status["run"]["exit_code"] == 0
     phases = [p["phase"] for p in status["run"]["phases"]]
     assert phases == [
-        "payload_refresh", "engine_runtime", "module_update", "runtime_reconcile", "binstubs"]
+        "payload_refresh", "runtime_preflight", "engine_runtime", "module_update",
+        "runtime_reconcile", "binstubs"]
     events = _events(_update_home)
     assert {e["proc"] for e in events} == {"engine"}
     starts = [e["phase"] for e in events if e["component"] == "run" and e["event"] == "start"]
@@ -608,6 +609,8 @@ def test_target_selection_precedes_acquisition_and_self_refresh_is_not_repeated(
         return True
 
     monkeypatch.setattr(m, "_registered_plugin_targets", collect)
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: Path("/payload") / name)
+    monkeypatch.setattr(reconcile, "manifest_runtime_scope", lambda directory: "none")
     monkeypatch.setattr(subprocess, "run", acquire)
     monkeypatch.setattr(m, "_update_registered_plugins", registered)
     monkeypatch.setattr(m, "_update_modules", runtimes)
@@ -859,13 +862,13 @@ def _phase_outcomes(home: Path) -> dict[str, str]:
 def test_missing_engine_installer_is_configuration_exit_3(wired, tmp_path, _update_home):
     (tmp_path / "agent-worktrees" / "scripts" / "install.sh").unlink()
     assert m.cmd_update(_args()) == 3
-    assert _phase_outcomes(_update_home)["engine_runtime"] == ut.CONFIGURATION_LIMITATION
+    assert _phase_outcomes(_update_home)["runtime_preflight"] == ut.CONFIGURATION_LIMITATION
 
 
 def test_invalid_engine_deadline_is_configuration_exit_3(wired, monkeypatch, _update_home):
     monkeypatch.setenv("AGENT_WORKTREES_INSTALL_DEADLINE_SEC", "not-a-number")
     assert m.cmd_update(_args()) == 3
-    assert _phase_outcomes(_update_home)["engine_runtime"] == ut.CONFIGURATION_LIMITATION
+    assert _phase_outcomes(_update_home)["runtime_preflight"] == ut.CONFIGURATION_LIMITATION
 
 
 def test_missing_installed_payload_fails_its_phase(wired, monkeypatch, _update_home):
@@ -874,14 +877,15 @@ def test_missing_installed_payload_fails_its_phase(wired, monkeypatch, _update_h
     assert _phase_outcomes(_update_home)["payload_refresh"] == ut.COMMAND_FAILED
 
 
-def test_unreadable_modules_manifest_fails_module_update(wired, monkeypatch, tmp_path,
-                                                         _update_home):
+def test_unreadable_modules_manifest_fails_preflight(wired, monkeypatch, tmp_path,
+                                                    _update_home):
     (tmp_path / "agent-worktrees" / "modules.json").write_text("{not json")
     monkeypatch.setattr(m, "_update_modules", runtime._update_modules)
     assert m.cmd_update(_args()) == 1
     phases = _phase_outcomes(_update_home)
-    assert phases["module_update"] == ut.COMMAND_FAILED
-    assert phases["engine_runtime"] == ut.VERIFIED_CURRENT
+    assert phases["runtime_preflight"] == ut.COMMAND_FAILED
+    assert "engine_runtime" not in phases
+    assert "module_update" not in phases
     assert _status(_update_home)["last_failure"]["summary"].startswith("modules.json")
 
 

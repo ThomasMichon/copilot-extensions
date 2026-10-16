@@ -1184,6 +1184,23 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 > (`check-changefile-presence.py`) makes the same-version-drift case rare in
 > the first place, so `--force` stays a last resort.
 
+The explicit updater collects the engine, selected modules and other required
+registered runtime commands once after payload acquisition. Before launching
+any runtime installer, its `runtime_preflight` checks the whole selected set's
+installation ownership/root, machine gate, version/force decision, installer
+and interpreter availability, and effective deadline. Execution uses those
+collected arguments, environment snapshots and roots rather than repeating
+discovery after the engine has already changed. Required preflight failures
+name their targets and stop all runtime installation and local integration.
+Intentional exclusions and already-current runtimes do not require unused
+installers; existing module update/install fallback and cell-specific invocation
+contracts remain intact.
+
+This is a cheap configuration preflight, not dependency admission, a retained
+prepared candidate, or a readiness/activation transaction. The installers still
+own their combined construction and activation, live revalidation and recovery.
+The pull-free, cache-aware session-launch reconciler remains a separate path.
+
 ### What the marketplace vendors (copied vs loaded)
 
 `copilot plugin update` copies the **entire git-tracked plugin folder** — the

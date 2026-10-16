@@ -560,3 +560,54 @@ achieved by rearranging today's combined installer invocations.
 - This is another bounded acquisition improvement, not the complete immutable
   runtime-input plan, preparation/readiness protocol, checkpointed retry or
   installed acceptance. Those parent gates remain open.
+
+### 2026-10-15 - Fail-fast source merge and next planning boundary
+- #6890 squash-merged into `dev` at
+  `421056fc861d92278e49f06ebe3f59600d67432b`. Exact-head Copilot review
+  5541108074 Approved with zero open findings. Hosted lint and all required
+  checks pass on the reviewed head.
+- Required Windows launch CI initially reproduced the retained #6266/#6274
+  seven-conhost signature. After its parent run completed, one recorded
+  same-head failed-job diagnostic actually executed both native cases:
+  2 passed, 11,569 deselected. Attempt 2 of 38822519125 and its required
+  aggregate passed. No monitor source, safety assertion, deadline or gate
+  changed. This is not a root-cause fix or blanket flake acceptance; #6274
+  retains that investigation.
+- Re-read the parent Plan and Validation Plan after merge. Phase 3 remains
+  open. Next slice: factor one attributable runtime execution plan and
+  whole-set cheap preflight from the existing engine/module/registered
+  planning paths, preserving their actual invocation and ownership semantics.
+  Do not double all expensive discovery by adding a second dry-run traversal.
+- The constructor owner's concrete preparation/retention handoff request on
+  #6707 (comment 6204311620) has no accepted contract yet. A frozen execution
+  plan must not be called a preparation/readiness barrier. The coordinator
+  retains the parent release-consumption and installed-state gates regardless
+  of the separate #6867 bootstrap stewardship handover.
+
+### 2026-10-15 - Collected runtime commands and whole-set preflight
+- Extracted the existing engine/module/registered command planning into one
+  collected execution portfolio. Entries retain the selected root, immutable
+  environment snapshot, version/force decision, exact argv, deadline and
+  module-only update/install fallback. Named-force admission uses the same
+  selection instead of rediscovering installations.
+- Cheap required ownership/context, scope/gate, installer/interpreter and
+  deadline failures now stop before any combined runtime installer or local
+  finishing. The explicit `runtime_preflight` phase reports those failures
+  without claiming that an unexecuted engine/module phase completed.
+- Regression-first reproduced all six late-blocker cases after engine
+  invocation. The corrected ten-file native portfolio passed 309 cases with
+  six platform skips, including a real fresh synthetic update subprocess
+  proving a later missing module installer prevents engine activation.
+  Existing cell roots, fallback, watchdog/receipt, force, skip, acquisition and
+  finishing contracts remain covered. All thirteen install contracts pass.
+- Documentation impact: updated `docs/install-contract.md`'s unified-update
+  boundary and its limits. This closes part of the reviewed installer vision
+  and design; it adds no constructor, dependency resolver or scheduler.
+  Hosted POSIX coverage, lint and current-head review/CI remain publication
+  gates. The synthetic first-touch process is not a full clean-room installer
+  build; constructor code is unchanged. Actual local update/health/timing
+  remains blocked on promotion and belongs to Phase 4, not this fixture.
+- This is an execution snapshot and configuration preflight, not a frozen
+  prepared-candidate identity, dependency admission, readiness barrier or
+  resumable retry. The existing constructor owner still owes an accepted
+  prepare/retention interface; Phase 3 and the parent effort remain open.
