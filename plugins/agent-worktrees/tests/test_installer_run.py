@@ -304,6 +304,66 @@ def test_windows_spawn_requires_the_job(monkeypatch, tmp_path):
     assert run.rc is None and "Job assignment failed" in run.status
 
 
+@pytest.mark.skipif(os.name != "nt", reason="confirmed Windows Job exit")
+@pytest.mark.parametrize("exit_mode", ["success", "deadline", "watchdog"])
+def test_strict_job_exit_kills_and_reaps_every_descendant(tmp_path, stub, exit_mode):
+    run = installer_run.run_installer(
+        stub(delay=4, sleep=60 if exit_mode == "deadline" else 0,
+             code=124 if exit_mode == "watchdog" else 0),
+        cwd=tmp_path, env=os.environ, deadline_s=2, require_tree_exit=True,
+    )
+    assert run.status == "OK" if exit_mode == "success" else run.status.startswith("timed out")
+    assert _wait_dead(int((tmp_path / "slot.pid").read_text()))
+    time.sleep(4)
+    assert not (tmp_path / "slot").exists(), "confirmed cleanup precedes all late writes"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="verified Windows payload timeout recovery")
+@pytest.mark.parametrize("refusal", ["", "HTTP 403 authentication required"])
+def test_real_payload_replay_follows_empty_job_confirmation(tmp_path, monkeypatch, refusal):
+    from agent_worktrees import update_acquisition
+
+    script = tmp_path / "payload.py"
+    script.write_text(textwrap.dedent("""
+        import pathlib, subprocess, sys, time
+        root, attempt = pathlib.Path(sys.argv[1]), int(sys.argv[2])
+        if attempt == 1:
+            child = subprocess.Popen(
+                [sys.executable, "-c",
+                 "import pathlib,sys,time; time.sleep(4); pathlib.Path(sys.argv[1]).touch()",
+                 str(root / "late-write")],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            (root / "child.pid").write_text(str(child.pid))
+            print(sys.argv[3], flush=True)
+            time.sleep(60)
+        print("acquired", flush=True)
+    """), encoding="utf-8")
+    original_spawn, calls = installer_run._spawn, []
+
+    def spawn(argv, cwd, env, capture, **kwargs):
+        calls.append(argv)
+        if len(calls) == 2:
+            assert _wait_dead(int((tmp_path / "child.pid").read_text()))
+            assert not (tmp_path / "late-write").exists()
+        return original_spawn(
+            [sys.executable, str(script), str(tmp_path), str(len(calls)), refusal],
+            cwd, env, capture, **kwargs,
+        )
+
+    monkeypatch.setattr(installer_run, "_spawn", spawn)
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: tmp_path)
+    monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
+    monkeypatch.setattr(update_acquisition, "_ATTEMPT_TIMEOUT_S", 2)
+    status = update_acquisition.acquire("agent-example", "m", "fixture", engine=True)
+    assert status.startswith("OK") is (not refusal)
+    assert len(calls) == (1 if refusal else 2)
+    assert _wait_dead(int((tmp_path / "child.pid").read_text()))
+    time.sleep(4)
+    assert not (tmp_path / "late-write").exists()
+
+
 def test_a_containment_failure_becomes_the_status(monkeypatch, tmp_path):
     def refuse(*_a, **_k):
         raise RuntimeError("failed to resume suspended process 1")

@@ -48,9 +48,13 @@ class InstallerRun:
     duration_s: float
 
 
+class InstallerCleanupError(RuntimeError):
+    """The owned process tree could not be confirmed empty."""
+
+
 def _spawn(
     argv: Sequence[str], cwd: Path | None, env: Mapping[str, str], capture: bool,
-    output_fd: int | None = None,
+    output_fd: int | None = None, *, require_tree_exit: bool = False,
 ):
     # Captured output is merged into one text stream; otherwise stdio stays
     # inherited (the installer reports to the updater's console).
@@ -60,8 +64,12 @@ def _spawn(
         stdio = {"stdout": output_fd, "stderr": output_fd}
     if os.name == "nt":
         # Without a Job the deadline could not own the tree, so refuse to run.
+        strict = (
+            {"allow_breakaway": False, "creationflags": subprocess.CREATE_NO_WINDOW}
+            if require_tree_exit else {}
+        )
         return spawn_sync_in_kill_on_close_job(
-            list(argv), cwd=cwd, env=dict(env), require_job=True, **stdio)
+            list(argv), cwd=cwd, env=dict(env), require_job=True, **strict, **stdio)
     # Contained test mode keeps the child in the harness's own group.
     session = {} if contained_test_mode() else {"start_new_session": True}
     return subprocess.Popen(list(argv), cwd=cwd, env=dict(env), **session, **stdio), None
@@ -240,6 +248,7 @@ def run_installer(
     receipt: Callable[[], str | None] | None = None,
     log: Callable[[str], None] | None = None,
     output_fd: int | None = None,
+    require_tree_exit: bool = False,
 ) -> InstallerRun:
     """Run ``argv`` until it exits or ``deadline_s`` passes; never raises for a
     spawn failure (it becomes the status).
@@ -251,16 +260,26 @@ def run_installer(
     deadline kill); otherwise they stay inherited. ``output_fd`` streams both
     channels to an owning human-output adapter without bypassing containment
     or receipt judgment. It cannot be combined with ``log``.
+
+    ``require_tree_exit`` is Windows-only: prohibit breakaway and confirm an
+    empty Job before returning any launched command's outcome. Cleanup failure
+    raises ``InstallerCleanupError``, never a retry-licensing timeout outcome.
+    Spawn OS errors propagate in this mode so the caller retains native codes.
     """
     started = time.monotonic()
     if log is not None and output_fd is not None:
         raise ValueError("installer output_fd and log are mutually exclusive")
+    if require_tree_exit and os.name != "nt":
+        raise ValueError("confirmed process-tree exit requires a Windows Job")
     try:
+        strict = {"require_tree_exit": True} if require_tree_exit else {}
         if output_fd is None:
-            proc, job = _spawn(argv, cwd, env, log is not None)
+            proc, job = _spawn(argv, cwd, env, log is not None, **strict)
         else:
-            proc, job = _spawn(argv, cwd, env, False, output_fd=output_fd)
+            proc, job = _spawn(argv, cwd, env, False, output_fd=output_fd, **strict)
     except (OSError, RuntimeError) as exc:
+        if require_tree_exit and isinstance(exc, OSError):
+            raise
         return InstallerRun(str(exc)[:120], None, None, False, time.monotonic() - started)
     expired, out = False, ""
     try:
@@ -269,10 +288,25 @@ def run_installer(
             rc: int | None = proc.returncode
         except subprocess.TimeoutExpired:
             expired, rc = True, None
-            out = _kill_tree(proc, job)
-            job = None
+            if not require_tree_exit:
+                out = _kill_tree(proc, job)
+                job = None
+        if require_tree_exit:
+            try:
+                if job is None:
+                    raise RuntimeError("owned Windows Job is unavailable")
+                cleanup_deadline = time.monotonic() + _REAP_GRACE_S
+                job.terminate_and_wait(_REAP_GRACE_S)
+                job = None
+                out = proc.communicate(timeout=max(0, cleanup_deadline - time.monotonic()))[0] or ""
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                raise InstallerCleanupError(f"process-tree cleanup unverified: {exc}") from exc
     except BaseException:
-        _kill_tree(proc, job)
+        if require_tree_exit:
+            if job is not None:
+                job.close()
+        else:
+            _kill_tree(proc, job)
         job = None
         raise
     finally:

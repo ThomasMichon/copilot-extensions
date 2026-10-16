@@ -12,7 +12,7 @@ from agent_worktrees import (
     __main__ as core, activation_preservation, reconcile, update_acquisition, update_events,
 )
 
-pytestmark = pytest.mark.guard
+pytestmark = [pytest.mark.guard, pytest.mark.usefixtures("payload_subprocess_double")]
 
 
 @pytest.fixture

@@ -37,6 +37,23 @@ arbitrary peers before readiness. Existing adapters that combine construction
 and activation cannot silently enter the prepare-only lane; add the split with
 their canonical engine owners and retain an honest supported legacy lane.
 
+### Timeout recovery admission
+
+The first supported timeout-replay lane is Windows payload update, explicitly
+selected before portable recovery. Use the existing process owner's required
+non-breakaway Job and positive zero-active-process termination check. Reserve
+its bounded cleanup grace inside the acquisition budget, reap/drain the root,
+and retain refusal precedence before starting another writer. Cleanup failure
+is terminal, not a confirmed timeout. A CLI exit code alone is not evidence of
+an owner deadline.
+
+POSIX session cleanup deliberately preserves detached daemons, so it cannot
+license full-tree timeout replay. Install timeout replay also remains blocked
+until interrupted restoration retains the original activation snapshot
+durably. Those are explicit unsupported lanes, not completed convergence.
+Ordinary runtime installers retain their existing daemon/breakaway behavior;
+the strict process contract is opt-in for payload updates.
+
 ## First slice: historical project commands
 
 Keep the current command owner until #1238's separate ownership transition.

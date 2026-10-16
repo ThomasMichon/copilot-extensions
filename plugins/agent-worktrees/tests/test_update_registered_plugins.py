@@ -19,6 +19,9 @@ from agent_worktrees import config as cfg
 from agent_worktrees import activation_preservation, reconcile
 
 
+pytestmark = pytest.mark.usefixtures("payload_subprocess_double")
+
+
 _READ_USER_ENABLED_PLUGINS = reconcile.read_user_enabled_plugins
 
 

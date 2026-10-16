@@ -123,8 +123,12 @@ fulfilling that direction, not additional operator requirements.
   history, and stop authority/policy/integrity refusals.
 - [ ] Preserve verified prepared-candidate progress across retries and resume
   incomplete runtime/local-finishing work through canonical contracts.
-- [ ] Establish payload process-tree and activation-restoration recovery
-  custody before automatically retrying timeouts or restoration failures.
+- [x] Recover explicit transient activation-restoration contention against the
+  original snapshot without replaying installation.
+- [ ] Recover Windows payload-update timeouts only after positive non-breakaway
+  Job cleanup, preserving refusal precedence and the existing attempt budget.
+- [ ] Establish portable payload process-tree cleanup and durable interrupted
+  activation-restoration custody before automatically retrying timeouts.
 - [ ] Adopt reuse and bounded independent preparation only where measured
   benefit and existing isolation/resource contracts justify them.
 
@@ -747,3 +751,60 @@ achieved by rearranging today's combined installer invocations.
   timeout cleanup, so timeout replay remains blocked. Durable interrupted
   restoration, preparation/readiness, release and actual running-state
   acceptance remain open; the broad custody Plan item is not complete.
+
+### 2026-10-15 - Original-snapshot recovery source merge
+- #6916 squash-merged into `dev` at
+  `c7dd55a69d2cb0437d47d519809717cd838837c2`. Exact-head Copilot review
+  5542276395 Approved `25ebe2e9a69b7176089228f53f7e8cb81e96f27b` with no
+  open findings. CI 38839564402 succeeded, including hosted lint, POSIX and
+  native Windows lanes. No retry or gate bypass was needed.
+- Re-read the Plan and Validation Plan. Marked only original-snapshot
+  restoration-contention recovery complete. Timeout cleanup proof and durable
+  interrupted restoration remain separately open rather than being implied by
+  this bounded recovery. Preparation/readiness still has no accepted handoff
+  from #6707; that draft and the handed-over #6867 remain at their prior heads.
+- Next independent slice: make the existing process owner positively confirm
+  cleanup before payload state restoration or command replay. Reuse the
+  existing Windows Job termination-and-wait primitive and POSIX session owner,
+  preserve test containment, and retain an explicit failure on unproven cleanup.
+  Source merge is not release promotion or installed-state acceptance.
+
+### 2026-10-15 - Windows-first timeout recovery boundary
+- The operator explicitly selected verified Windows payload-update recovery
+  first, retaining POSIX and install timeout blockers until their independent
+  recovery custody is established. A POSIX session census cannot be presented
+  as full descendant proof because the existing owner preserves detached daemons.
+- Added an opt-in strict Windows lane to the existing process owner, not a
+  second runner: require a Job, prohibit breakaway, confirm zero active
+  processes through the existing termination-and-wait API, then drain/reap the
+  root within one shared cleanup grace. Default runtime installer behavior is
+  unchanged. Failed cleanup raises an explicit error rather than a timeout
+  result that could authorize another writer.
+- Windows payload updates consume that lane and reserve cleanup time inside
+  the existing total budget. Only confirmed owner timeouts may retry; captured
+  refusals retain precedence, and CLI exit 124 alone is not proof. Native spawn
+  errors retain their numeric codes. Install and POSIX timeout behavior remains
+  explicitly blocked.
+- Regression-first reproduced all three missing strict-owner cases. Real
+  native children cover normal exit, owner deadline and watchdog exit, plus
+  end-to-end timeout replay after the first grandchild is dead and refusal
+  after timeout with no replay. No late synthetic writes may appear.
+- Documentation impact: updated the unified-update install contract and design
+  admission boundary. This closes another bounded piece of the reviewed
+  installer convergence vision, not preparation/readiness, durable interruption
+  recovery, release or running-state acceptance.
+- The complete eight-file native process/retry/runtime portfolio passes 307
+  cases with seven platform skips. Failure-injection covers Job termination
+  and output-drain refusal, native spawn-code retention, finite attempts and
+  reservation of cleanup time inside the total budget. Existing acquisition,
+  telemetry, whole-set preflight, runtime deadline and anchor behavior remain
+  covered. All thirteen install contracts pass.
+- Existing subprocess-double fixtures needed explicit routing for classification
+  and planning tests; real Job-owner tests bypass those doubles. The final
+  combined portfolio verifies that boundary rather than faking an empty Job
+  for a subprocess double. No production containment guard was disabled.
+- Fresh synthetic Jobs and native child processes exercise the changed
+  first-touch process boundary; no dependency or installer-construction code
+  changes require a full clean-room build. Hosted POSIX/lint, exact-head review
+  and CI remain publication gates. Live rollout is not authorized by this
+  source slice and remains a separate running-state obligation.

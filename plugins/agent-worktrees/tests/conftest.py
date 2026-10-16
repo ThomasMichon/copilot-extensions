@@ -10,6 +10,14 @@ import pytest
 from agent_worktrees import tracking
 
 
+@pytest.fixture
+def payload_subprocess_double(monkeypatch):
+    """Classification tests retain their subprocess double; native Job tests opt out."""
+    from agent_worktrees import update_acquisition
+
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+
+
 @pytest.fixture(scope="session")
 def native_bash():
     from native_shell_support import ShellUnavailable, resolve_native_bash

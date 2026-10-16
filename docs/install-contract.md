@@ -1221,12 +1221,25 @@ a wrapped state-read error. It reuses the original activation snapshot, not the
 post-install state, and never replays the command. Partial settings restoration
 is retained while inventory restoration is retried. Permission errors, malformed
 state and exhausted restoration still propagate as failures.
-A command timeout also stops: the
-payload subprocess path does not prove descendant cleanup, so starting another
-writer would be unsafe. Retried failures remain advisory attempt history;
-the final required outcome decides the run. This is in-run recovery, not a
-persistent acquisition checkpoint, a payload process-tree cleanup guarantee
-or permission to retry combined runtime activation.
+Windows payload **updates** run in a required, non-breakaway Job through the
+existing process owner. On every exit, including an owner deadline, that owner
+terminates the Job and positively queries zero active processes, then drains
+and reaps the root within one thirty-second cleanup grace. That grace is
+reserved inside the remaining acquisition budget. Only a confirmed owner
+timeout may retry, within the same two-attempt limit; captured authority or
+integrity refusals still stop. A CLI exit code 124 alone is not proof of an
+owner deadline. Failed termination, accounting or output drain is an explicit
+cleanup failure and cannot license replay. Native spawn errors retain their
+codes and existing diagnostic/retry handling.
+
+Install timeouts still stop because original-snapshot recovery custody is not
+durable across interruption. POSIX timeouts also stop: the current session
+owner intentionally permits detached daemons to survive and cannot attest the
+entire payload writer tree. Existing runtime-installer daemon/breakaway behavior
+is unchanged; the strict contract is opt-in for Windows payload updates.
+Retried failures remain advisory attempt history; the final required outcome
+decides the run. This is in-run recovery, not a persistent acquisition
+checkpoint or permission to retry combined runtime activation.
 
 ### What the marketplace vendors (copied vs loaded)
 

@@ -14,6 +14,9 @@ from agent_worktrees import __main__ as core
 from agent_worktrees import config, reconcile, update_cli, update_runtime
 
 
+pytestmark = pytest.mark.usefixtures("payload_subprocess_double")
+
+
 @pytest.fixture
 def portfolio(monkeypatch, tmp_path):
     engine = tmp_path / "agent-worktrees"

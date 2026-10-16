@@ -21,7 +21,7 @@ from agent_worktrees import installer
 from agent_worktrees import reconcile, update_cli, update_events, update_gate, update_options
 from agent_worktrees import update_runtime as runtime
 
-pytestmark = pytest.mark.guard
+pytestmark = [pytest.mark.guard, pytest.mark.usefixtures("payload_subprocess_double")]
 
 
 @pytest.fixture

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 from time import monotonic, sleep
@@ -25,6 +27,41 @@ _TRANSIENT = re.compile(
 _TOTAL_BUDGET_S = 240.0
 _ATTEMPT_TIMEOUT_S = 120.0
 _BACKOFF_S = 1.0
+_WINDOWS = os.name == "nt"
+
+
+class _QuiescentPayloadTimeout(subprocess.TimeoutExpired):
+    """A payload update timed out after its Windows Job was confirmed empty."""
+
+
+def _run_update(
+    argv: list[str], *, cwd: Path | None, timeout: float,
+    env: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    if not _WINDOWS:
+        environment = {"env": env} if env is not None else {}
+        return subprocess.run(
+            argv, cwd=cwd, timeout=timeout, capture_output=True, text=True, **environment,
+        )
+    from . import installer_run
+
+    lines: list[str] = []
+    result = installer_run.run_installer(
+        argv, cwd=cwd, env=os.environ if env is None else env, deadline_s=timeout,
+        log=lines.append, require_tree_exit=True,
+    )
+    text = "\n".join(lines)
+    if result.rc is None and result.status.startswith("timed out"):
+        raise _QuiescentPayloadTimeout(argv, timeout, output=text)
+    return subprocess.CompletedProcess(
+        argv, result.rc if result.rc is not None else 1, text,
+        result.status if result.rc is None else "",
+    )
+
+
+def _refusal_reason(detail: str) -> str | None:
+    refusal = _REFUSAL.search(detail)
+    return refusal.group(0) if refusal else _numeric_refusal(detail)
 
 
 def _numeric_refusal(detail: str) -> str | None:
@@ -59,9 +96,10 @@ def acquire(
     A completed command's explicit transport/contention failure may retry after
     backoff. Missing Copilot ledger entries may use activation-preserving
     install. Unknown failures and authority/integrity refusals stop. A timeout
-    cannot retry: subprocess.run does not prove descendants have been reaped.
+    may retry only after a Windows update's owned Job is confirmed empty.
+    Install and POSIX timeouts cannot license another writer.
     """
-    from . import activation_preservation, reconcile
+    from . import activation_preservation, installer_run, reconcile
     from .update_runtime import describe_copilot_spawn_error
 
     if _auth.blocked(cwd, marketplace):
@@ -81,11 +119,16 @@ def acquire(
             return status
         installed = reconcile.core_installed_payload_dir(name) is not None
         verb = "update" if engine or (installed and not repair_ledger) else "install"
+        if verb == "update" and _WINDOWS:
+            remaining -= installer_run._REAP_GRACE_S
+            if remaining <= 0:
+                return status
         argv = [copilot, "plugin", verb, ref]
+        timeout = min(_ATTEMPT_TIMEOUT_S, remaining)
+        environment = _auth.child_environment(cwd)
         kwargs = {
             "capture_output": True, "text": True,
-            "timeout": min(_ATTEMPT_TIMEOUT_S, remaining), "cwd": cwd,
-            **_auth.child_environment(cwd),
+            "timeout": timeout, "cwd": cwd, **environment,
         }
         try:
             result = (
@@ -94,19 +137,30 @@ def acquire(
                     **kwargs,
                 )
                 if verb == "install" else _auth.run_acquisition(
-                    subprocess.run, argv, context=cwd, **kwargs,
+                    _run_update, argv, context=cwd, cwd=cwd, timeout=timeout, **environment,
                 )
             )
         except activation_preservation.PluginStateError as error:
             status = f"plugin state error: {update_events.bounded(str(error), 200)}"
             output.warn(f"{name}: {status}")
             return status
-        except subprocess.TimeoutExpired:
-            output.warn(
-                f"Plugin {verb} for {name} timed out; automatic retry is blocked "
-                "because payload subprocess descendant cleanup is not proven"
-            )
-            return "timed out"
+        except installer_run.InstallerCleanupError as error:
+            status = f"payload cleanup failed: {update_events.bounded(str(error), 200)}"
+            output.warn(f"{name}: {status}")
+            return status
+        except subprocess.TimeoutExpired as error:
+            if verb != "update" or not isinstance(error, _QuiescentPayloadTimeout):
+                output.warn(
+                    f"Plugin {verb} for {name} timed out; automatic retry is blocked "
+                    "because payload subprocess descendant cleanup is not proven"
+                )
+                return "timed out"
+            refusal = _refusal_reason(error.output or "")
+            if refusal:
+                status = f"plugin update timed out after refusal ({refusal})"
+                output.warn(f"{name}: {status}")
+                return status
+            status, retryable, missing_ledger = "timed out", True, False
         except OSError as error:
             if verb == "install":
                 status = (
@@ -127,8 +181,7 @@ def acquire(
             detail = "\n".join(
                 value for value in (result.stdout.strip(), result.stderr.strip()) if value
             )
-            refusal = _REFUSAL.search(detail)
-            refusal_reason = refusal.group(0) if refusal else _numeric_refusal(detail)
+            refusal_reason = _refusal_reason(detail)
             refused = refusal_reason is not None
             reason = f"refused ({refusal_reason}, exit {result.returncode})" if refused else (
                 f"failed (exit {result.returncode})"
