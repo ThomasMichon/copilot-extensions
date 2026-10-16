@@ -60,7 +60,8 @@ def environment(source: str, *, cwd: Path | None = None) -> dict[str, str] | Non
                 "--auth-source",
             )
         )
-        if not error.install_hint and not unsupported:
+        legacy_project_guard = "Could not resolve a project for 'update'" in detail
+        if not error.install_hint and not unsupported and not legacy_project_guard:
             raise
         print(
             "Manager auth report unavailable; retaining existing Git authentication.",

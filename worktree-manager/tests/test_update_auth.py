@@ -238,16 +238,18 @@ def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkey
     assert (root / "staging" / "worktree-manager" / "pyproject.toml").is_file()
 
 
-@pytest.mark.parametrize("missing", [True, False])
+@pytest.mark.parametrize("reason", ["missing", "unsupported", "legacy-project-guard"])
 def test_optional_auth_report_does_not_prevent_independent_manager_updates(
-    monkeypatch, capsys, missing
+    monkeypatch, capsys, reason
 ):
     def unavailable(*args, **kwargs):
         raise ec.EngineError(
-            "engine absent"
-            if missing
-            else "unrecognized arguments: --auth-report --auth-environment",
-            install_hint=missing,
+            {
+                "missing": "engine absent",
+                "unsupported": "unrecognized arguments: --auth-report --auth-environment",
+                "legacy-project-guard": "Could not resolve a project for 'update'",
+            }[reason],
+            install_hint=reason == "missing",
         )
 
     monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
