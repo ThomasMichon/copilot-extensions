@@ -170,12 +170,18 @@ class HttpAcpTransport(RemoteTransport):
             buffer = b""
             lines: list[bytes] = []
             size = 0
+            previous_cr = False
             while True:
                 chunk = await asyncio.wait_for(iterator.__anext__(), self.target.idle_seconds)
+                if not chunk:
+                    continue
+                if previous_cr and chunk.startswith(b"\n"):
+                    chunk = chunk[1:]
+                previous_cr = chunk.endswith(b"\r")
+                chunk = chunk.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
                 buffer += chunk
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
-                    line = line.removesuffix(b"\r")
                     size += len(line) + 1
                     if size > self.target.max_frame_bytes:
                         raise RemoteTransportError("Remote SSE frame limit exceeded")

@@ -202,11 +202,15 @@ and a 120-second stream idle deadline.
 bounded validated adjustments. Overflow or stream loss invalidates the live
 connection, not a quiet fallback. Server SSE keepalives must arrive within the
 idle deadline. Compressed HTTP responses are refused to bound frame decoding.
+SSE accepts LF, CR and CRLF delimiters, including CRLF split across reads.
 
 Affinity cookies stay in memory per target/identity and survive explicit resume
 within the same daemon; they are not persisted across daemon restart. `source:
 none` and cleartext are available only with `allow_loopback_test: true` for
 explicit loopback synthetic fixtures; neither enables arbitrary cleartext.
+Remote ACP connections are excluded from the process idle reaper and automatic
+process handoff. In particular, a healthy agent without `session/load` support
+is not automatically disconnected merely because its conversation is idle.
 
 No runtime deployment or server-side business semantics are configured by this
 feature. See [the canonical test guide](../../../TESTING.md) for contained

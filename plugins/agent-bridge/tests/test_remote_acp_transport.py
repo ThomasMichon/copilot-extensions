@@ -383,3 +383,39 @@ async def test_stalled_sse_stream_has_an_independent_idle_deadline():
             await asyncio.wait_for(wire.receive(), 3)
     finally:
         await wire.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", [b"\n", b"\r", b"\r\n"])
+@pytest.mark.parametrize("split_bytes", [False, True])
+async def test_sse_line_endings_and_chunk_boundaries(ending, split_bytes):
+    message = {"jsonrpc": "2.0", "method": "synthetic/notice", "params": {"value": 7}}
+    frame = ending.join([
+        b": heartbeat", b'data: {"jsonrpc":"2.0",', b'data: "method":"synthetic/notice",',
+        b'data: "params":{"value":7}}', b"", b"",
+    ])
+
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for chunk in ([bytes([byte]) for byte in frame] if split_bytes else [frame]):
+                yield chunk
+            await asyncio.Event().wait()
+
+    async def respond(request):
+        return httpx.Response(
+            202 if request.method == "DELETE" else 200,
+            headers={"content-type": "text/event-stream"}, stream=Stream(),
+            extensions={"http_version": b"HTTP/2"},
+        )
+
+    spec = RemoteAcpTarget(
+        endpoint="https://localhost/acp", transport="streamable-http",
+        auth={"source": "none", "identity": "synthetic"}, allow_loopback_test=True,
+    )
+    wire = HttpAcpTransport(spec, client=httpx.AsyncClient(transport=httpx.MockTransport(respond)))
+    wire._connection_id = "synthetic"
+    try:
+        await wire._open_stream(None)
+        assert await asyncio.wait_for(wire.receive(), 3) == message
+    finally:
+        await wire.close()

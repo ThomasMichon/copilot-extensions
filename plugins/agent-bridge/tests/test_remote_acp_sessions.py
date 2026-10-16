@@ -262,6 +262,21 @@ async def test_remote_usage_reports_pressure_without_process_handoff(remote_mana
     await manager.stop_session(session.session_id)
 
 
+@pytest.mark.asyncio
+async def test_process_idle_reaper_preserves_non_loadable_remote_conversation(remote_manager):
+    manager, _ = remote_manager
+    session = await connect_remote_session(manager, "example")
+    session.client._remote_can_load = False
+    session.turn_count = 1
+    manager._idle_reap_ttl_seconds = 1
+    session.updated_at = 1
+    manager.stop_session = AsyncMock(wraps=manager.stop_session)
+    assert await manager.sweep_idle_sessions(now=1000) == 0
+    manager.stop_session.assert_not_awaited()
+    assert session.client.is_running and session.status == SessionStatus.IDLE
+    await manager.stop_session(session.session_id)
+
+
 def test_cli_status_request_scoped_form_has_token_without_empty_tool_flag(monkeypatch, capsys):
     from agent_bridge import service_start_cli
 

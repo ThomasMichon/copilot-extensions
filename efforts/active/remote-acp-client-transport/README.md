@@ -177,6 +177,18 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Additional protocol and non-resumable-session corrections
+
+- A subsequent review identified CR-only SSE framing and healthy non-loadable
+  remote sessions entering the process idle reaper. Incremental parsing now
+  accepts LF, CR and CRLF, including CR/LF boundaries split between reads.
+- Remote ACP connections are excluded from process idle reaping as well as
+  automatic process handoff; an idle conversation is not expendable merely
+  because a remote agent cannot load it after disconnect.
+- Focused remote transport/session and existing idle-reaper selection:
+  50 passed. Current required CI is green; fresh review of these corrections
+  remains required before merge. No deployment or transport-profile change.
+
 ### 2026-10-16 — Fresh review and full CI corrections
 
 - Fresh review of #6997 found two additional issues: mixed-case HTTPS schemes
