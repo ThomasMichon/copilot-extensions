@@ -171,6 +171,21 @@ def test_no_roster_requires_observed_hostname(local_record, monkeypatch):
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("target", ["canonical-host-wsl", "canonical-host (WSL)"])
+def test_no_roster_guest_target_cannot_relabel_native_record(
+    local_record, capsys, monkeypatch, target,
+):
+    config, path, _ = local_record
+    monkeypatch.setattr(repair.execution_spaces, "registry_for_config", lambda _: {})
+    monkeypatch.setattr(cfg, "load_config", lambda: replace(config, machine=target))
+    before = path.read_bytes()
+    assert repair.targeted_doctor(arguments(fix=True)) == 1
+    assert "environment" in json.loads(capsys.readouterr().out)["error"]
+    assert path.read_bytes() == before
+    assert not list(path.parent.glob("*.bak"))
+
+
+@pytest.mark.guard
 def test_ambiguous_roster_refuses(local_record, capsys, monkeypatch):
     _, path, _ = local_record
     entries = {name: cfg.MachineEntry(

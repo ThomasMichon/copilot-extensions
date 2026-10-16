@@ -21,11 +21,12 @@ def _prove_local_alias(config, previous: str) -> None:
         raise ValueError("machine-label repair requires the current native execution platform")
     execution_spaces.require_current_execution_space(config)
     entries = execution_spaces.registry_for_config(config)
+    selected = resolve_machine_selection(entries, config.machine, platform)
     if not entries:
         if previous.casefold() != socket.gethostname().casefold():
             raise ValueError("previous label is not the observed local hostname")
         return
-    current = resolve_machine_selection(entries, config.machine, platform).entry
+    current = selected.entry
     old = resolve_machine_selection(entries, previous, platform).entry
     observed = resolve_machine_selection(entries, socket.gethostname(), platform).entry
     if current is None or old is None or observed is None or not (
