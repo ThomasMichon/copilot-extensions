@@ -336,6 +336,74 @@ async def test_remote_start_telemetry_uses_learned_server_session_identity(remot
     await manager.stop_session(session.session_id)
 
 
+@pytest.mark.asyncio
+async def test_remote_resume_attachment_blocks_clean_drain_before_old_client_shutdown(remote_manager):
+    manager, calls = remote_manager
+    session = await connect_remote_session(manager, "example")
+    client = session.client
+    client._remote_lost()
+    session.status = SessionStatus.STOPPED
+    shutdown = client.shutdown
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def paused():
+        entered.set()
+        await release.wait()
+        await shutdown()
+
+    client.shutdown = paused
+    pending = asyncio.create_task(manager.resume_session(session.session_id, drain=False))
+    await entered.wait()
+    try:
+        assert manager._active_acquisitions == 1
+        result = await manager.drain(timeout=0)
+        assert not result["clean"]
+        release.set()
+        with pytest.raises(ValueError, match="draining"):
+            await pending
+        assert manager._active_acquisitions == 0
+        assert calls.count("connect") == 1
+    finally:
+        release.set()
+        manager.set_draining(False)
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["failure", "cancellation"])
+async def test_remote_attachment_accounting_releases_on_failed_old_client_shutdown(remote_manager, outcome):
+    manager, _ = remote_manager
+    session = await connect_remote_session(manager, "example")
+    client = session.client
+    client._remote_lost()
+    session.status = SessionStatus.STOPPED
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def paused():
+        entered.set()
+        await release.wait()
+        raise RuntimeError("Synthetic old-client shutdown failed")
+
+    shutdown = client.shutdown
+    client.shutdown = paused
+    pending = asyncio.create_task(manager.resume_session(session.session_id, drain=False))
+    await entered.wait()
+    if outcome == "cancellation":
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+    else:
+        release.set()
+        with pytest.raises(RuntimeError, match="Synthetic"):
+            await pending
+    assert manager._active_acquisitions == 0
+    client.shutdown = shutdown
+    await manager.stop_session(session.session_id)
+
+
 def test_cli_status_request_scoped_form_has_token_without_empty_tool_flag(monkeypatch, capsys):
     from agent_bridge import service_start_cli
 

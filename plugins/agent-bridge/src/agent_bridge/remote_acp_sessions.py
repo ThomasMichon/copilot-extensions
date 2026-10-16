@@ -22,6 +22,24 @@ async def connect_remote_session(
     caller_session_id: str | None = None, remote_session_id: str | None = None,
     session: Session | None = None,
 ) -> Session:
+    if manager.is_draining:
+        raise ValueError("Bridge is draining")
+    manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
+    try:
+        return await _attach_remote_session(
+            manager, name, cwd=cwd, caller_id=caller_id,
+            caller_session_id=caller_session_id, remote_session_id=remote_session_id,
+            session=session,
+        )
+    finally:
+        manager._active_acquisitions -= 1
+
+
+async def _attach_remote_session(
+    manager: SessionManager, name: str, *, cwd: str = "/", caller_id: str | None = None,
+    caller_session_id: str | None = None, remote_session_id: str | None = None,
+    session: Session | None = None,
+) -> Session:
     from .session_manager import Session
 
     if manager.is_draining:
@@ -60,6 +78,8 @@ async def connect_remote_session(
         cookies = getattr(transport, "cookies", None)
     if previous is not None:
         await previous.shutdown()
+    if manager.is_draining:
+        raise ValueError("Bridge is draining")
     def on_event(kind: str, data: dict) -> None:
         if session.client is not client:
             return
@@ -80,6 +100,8 @@ async def connect_remote_session(
     session.status = SessionStatus.STARTING
 
     def require_current() -> None:
+        if manager.is_draining:
+            raise ValueError("Bridge is draining")
         if session.client is not client or not client.is_running:
             raise RemoteTransportError("Remote session startup was closed or superseded")
 
