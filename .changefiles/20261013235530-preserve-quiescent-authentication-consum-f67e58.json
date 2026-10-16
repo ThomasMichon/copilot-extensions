@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve quiescent authentication consumers and one-time UI login-code continuity during private runtime preparation",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

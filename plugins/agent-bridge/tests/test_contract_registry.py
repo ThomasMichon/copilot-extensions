@@ -516,6 +516,8 @@ def _historical_protocol(commit: str):
         capture_output=True,
         text=True,
         env=environment,
+        timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if result.returncode:
         if not any(marker in result.stderr for marker in ("invalid object name", "bad object")):

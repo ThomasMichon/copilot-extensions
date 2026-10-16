@@ -32,6 +32,7 @@ from fastapi import APIRouter, WebSocket
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from ..acp_agent import BridgeAgent
+from ..auth_custody import owned_auth_operation
 
 log = logging.getLogger("agent-bridge")
 
@@ -122,6 +123,7 @@ def _provided_token(ws: WebSocket, subprotocols: list[str]) -> str | None:
     return None
 
 
+@owned_auth_operation
 async def _run_bridge_ws(
     ws: WebSocket,
     *,

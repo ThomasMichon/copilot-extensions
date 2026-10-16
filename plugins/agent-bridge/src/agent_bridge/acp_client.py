@@ -18,7 +18,7 @@ import signal
 import sys
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from acp import PROTOCOL_VERSION, text_block
 from acp.client.connection import ClientSideConnection
@@ -65,6 +65,11 @@ from .acp_preferences import (
     AcpPreferencesMixin, _ACP_MODEL_CONFIG_ID, _ACP_EFFORT_CONFIG_ID,
     _ACP_MODEL_ENV, _ACP_EFFORT_ENV, _ACP_PROPAGATE_OFF_ENV, _first_env,
 )
+from .acp_continuation import IdleAcpTransport, idle_operation
+from .acp_host_streams import AcpHostStreamsMixin
+
+if TYPE_CHECKING:
+    from .events import EventLog
 
 log = logging.getLogger("agent-bridge")
 
@@ -259,7 +264,7 @@ def resolve_acp_model_config() -> dict[str, str]:
 
 
 
-class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
+class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin):
     """Wraps a single Copilot CLI subprocess running in ACP mode.
 
     Handles the ACP protocol (initialize, session/new, session/prompt)
@@ -417,6 +422,9 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
         # can be woken instead of hanging forever awaiting a reply from a dead
         # reader -- the wedged-``running`` root cause (issue #22).
         self._transport_lost_event = asyncio.Event()
+        self._idle_operations = 0
+        self._idle_transport: IdleAcpTransport | None = None
+        self._idle_event_log: EventLog | None = None
 
     @property
     def pid(self) -> int | None:
@@ -494,6 +502,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
 
     # -- Lifecycle -----------------------------------------------------------
 
+    @idle_operation
     async def start(self, process: asyncio.subprocess.Process) -> None:
         """Initialize ACP protocol on an already-spawned subprocess."""
         self._process = process
@@ -507,33 +516,6 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
 
         await self._init_connection(process.stdin, process.stdout)
 
-    async def start_streams(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-        *,
-        child_pid: int | None = None,
-        closer: Any = None,
-    ) -> None:
-        """Initialize ACP over a Session Host's relayed stream pair (host mode).
-
-        The child lives in a Session Host that outlives this frontend, so there
-        is no local process to own here: ``pid`` is informational, and
-        :meth:`shutdown` DETACHES (closes the streams via ``closer``) rather than
-        killing the child. Reaping the child is a separate, explicit act
-        (goal 1's intentional-only reaping). ``reader`` carries agent->client
-        ACP; ``writer`` carries client->agent ACP.
-        """
-        child_already_exited = self._host_child_exit_code is not None
-        self._host_mode = True
-        self._host_child_pid = child_pid
-        self._host_closer = closer
-        if not child_already_exited:
-            self._host_transport_alive = True
-            self._connection_loss_error = None
-            self._transport_lost_event.clear()
-        await self._init_connection(writer, reader)
-
     async def _init_connection(
         self, input_stream: asyncio.StreamWriter, output_stream: asyncio.StreamReader,
     ) -> None:
@@ -543,11 +525,10 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
         ``output_stream`` is where it *reads* (agent->client).
         """
         client_impl = _BridgeClientImpl(self)
-        self._connection = ClientSideConnection(
-            client_impl,
-            input_stream,
-            output_stream,
-        )
+        if self._idle_transport is None:
+            self._connection = ClientSideConnection(client_impl, input_stream, output_stream)
+        else:
+            self._connection = ClientSideConnection(client_impl, self._idle_transport)
         self._subagent_attr.install_route(self._connection)
         await self._subagent_attr.call_with_meta(
             self._connection.initialize,
@@ -560,6 +541,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
             retry_overrides={"client_capabilities": client_capabilities({})},
         )
 
+    @idle_operation
     async def new_session(
         self,
         cwd: str,
@@ -614,6 +596,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
         self._acp_session_id = acp_session_id
         self._preferences_ready = True
 
+    @idle_operation
     async def load_session(
         self,
         cwd: str,
@@ -676,6 +659,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
 
 
 
+    @idle_operation
     async def send_prompt(self, text: str) -> dict[str, Any]:
         """Send a prompt and block until the turn completes.
 
@@ -684,6 +668,8 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
         """
         if not self._connection or not self._acp_session_id:
             raise RuntimeError("No active ACP session")
+        if self._idle_transport is not None and not self.is_running:
+            raise RuntimeError("Private idle ACP continuation is not activated")
 
         async with self._prompt_lock:
             self._reset_buffers()
@@ -741,6 +727,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
                     with contextlib.suppress(asyncio.CancelledError, Exception):
                         await fut
 
+    @idle_operation
     async def cancel_prompt(self) -> None:
         """Cancel the current prompt via ACP session/cancel."""
         if self._remote_transport is not None:
@@ -748,6 +735,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
         if self._connection and self._acp_session_id and not self._prompt_complete:
             await self._connection.cancel(session_id=self._acp_session_id)
 
+    @idle_operation
     async def shutdown(self) -> None:
         """Shut down the ACP connection.
 

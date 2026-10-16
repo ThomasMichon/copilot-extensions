@@ -96,7 +96,10 @@ def _bind_listen_socket(host: str, port: int) -> socket.socket:
     return sock
 
 
-def _cmd_start(args: argparse.Namespace) -> None:
+def _cmd_start(
+    args: argparse.Namespace, *,
+    required_runtime_environment: tuple[str, ...] | None = None,
+) -> None:
     from .app import create_app
     from .config import (
         config_dir,
@@ -137,6 +140,13 @@ def _cmd_start(args: argparse.Namespace) -> None:
     cfg = migrate_config(cfg)
     if source_root is not None:
         cfg._source_worktree = source_root
+    runtime_origins = None
+    if required_runtime_environment is not None:
+        from .launch_runtime import record_launch_origins
+
+        runtime_origins = record_launch_origins(
+            cfg, required_environment=required_runtime_environment,
+        )
     write_default_config(cfg)
     if launch_id:
         from .serving_reconcile import existing_auth_token
@@ -189,6 +199,8 @@ def _cmd_start(args: argparse.Namespace) -> None:
         return
 
     app = create_app(config=cfg, token=token)
+    if runtime_origins is not None:
+        app.state.runtime_origins = runtime_origins
     app.state.single_instance = singleton
     app.state.background_readiness = True
     app.state.publish_on_ready = not passive

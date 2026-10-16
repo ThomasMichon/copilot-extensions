@@ -40,7 +40,7 @@ from ..models import SessionStatus
 from ..singleton_anchor import find_singleton_repo, repo_name_from_anchor_key
 
 if TYPE_CHECKING:
-    from .worktrees import _WorktreeEntry
+    from .worktrees import WorktreeDiscoveryCache, _WorktreeEntry
 
 log = logging.getLogger("agent-bridge")
 
@@ -169,7 +169,7 @@ async def owning_agent(
 
     from . import worktrees as wt
 
-    cache = wt.get_cache()
+    cache = wt.cache_for_app(request.app)
     for agent_name, entries in cache.get_all().items():
         if any(entry.id == worktree_id for entry in entries):
             config = resolver.agents.get(agent_name)
@@ -305,7 +305,8 @@ async def probe_live_worktree(
 
 
 async def find_worktree_entry(
-    worktree_id: str, resolver: AgentResolver,
+    worktree_id: str, resolver: AgentResolver, *,
+    cache: WorktreeDiscoveryCache | None = None,
 ) -> tuple[str, "_WorktreeEntry"] | tuple[None, None]:
     """Resolve a worktree or singleton-anchor key to owner + entry."""
     singleton = await _singleton_owner(worktree_id, resolver)
@@ -314,7 +315,8 @@ async def find_worktree_entry(
 
     from . import worktrees as wt
 
-    cache = wt.get_cache()
+    if cache is None:
+        cache = wt.get_cache()
     for agent_name, worktrees in cache.get_all().items():
         match = next((entry for entry in worktrees if entry.id == worktree_id), None)
         if match is not None:

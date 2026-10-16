@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 from .session_preferences import PreferenceApplicationError, SOURCES, clean
+from .acp_continuation import idle_operation
 
 log = logging.getLogger("agent-bridge")
 
@@ -73,10 +74,12 @@ class AcpPreferencesMixin:
         self.provider_intent = provider_intent
         self._verified_options = None
         self._preferences_ready = source == "caller-settings"
+        self._idle_operations = 0
 
     def _resolve_caller_preferences(self) -> dict[str, str]:
         raise NotImplementedError
 
+    @idle_operation
     async def _apply_model_config(self, config_options: Any, *, resuming: bool = False) -> None:
         """Set the session's ``model`` / ``reasoning_effort`` via ACP.
 
@@ -323,5 +326,6 @@ class AcpPreferencesMixin:
     def _remember_preferences(
         self, config_options: Any,
     ) -> None:
+        self._verified_options = config_options
         self.confirmed_preferences = self._selected_preferences(config_options)
         self._emit("preference_selected", dict(self.confirmed_preferences))

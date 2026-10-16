@@ -41,6 +41,7 @@ import re
 import time
 from bisect import bisect_right
 from collections import deque
+from functools import wraps
 from threading import Event, Lock
 from typing import Any
 
@@ -484,6 +485,19 @@ class MergePendingError(RuntimeError):
     the caller should retry rather than validate references against it."""
 
 
+def _store_operation(method):
+    @wraps(method)
+    def owned(self, *args, **kwargs):
+        with self._operation_lock:
+            self._operations += 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            with self._operation_lock:
+                self._operations -= 1
+    return owned
+
+
 class LiveEventStore:
     """In-memory registry of represented ``EventLog``s, keyed by session id.
 
@@ -507,6 +521,9 @@ class LiveEventStore:
         # until each is done, that log's merge map is incomplete (``snapshot``).
         self._merging: dict[int, list[Event]] = {}
         self._lock = Lock()
+        # Covers the gaps between deduplication, append and merge-map publication.
+        self._operation_lock = Lock()
+        self._operations = 0
 
     def get(self, session_id: str) -> EventLog | None:
         """Return the represented log for ``session_id``, or None if none yet."""
@@ -538,6 +555,7 @@ class LiveEventStore:
             for done in pending:
                 done.wait(max(0.0, deadline - time.monotonic()))
 
+    @_store_operation
     def get_or_create(
         self, session_id: str, *, worktree_id: str | None = None
     ) -> EventLog:
@@ -555,6 +573,7 @@ class LiveEventStore:
                 log.set_telemetry_identity(worktree_id=worktree_id)
             return log
 
+    @_store_operation
     def alias(self, old_id: str, new_id: str) -> None:
         """Serve ``old_id`` and ``new_id`` from one log after a session-id
         change: the predecessor's log (its history, waited sends and readers)
@@ -657,6 +676,7 @@ class LiveEventStore:
             log = self._logs.get(session_id)
             return [k for k, v in self._logs.items() if log is not None and v is log]
 
+    @_store_operation
     def drop(self, session_id: str) -> None:
         """Forget a session's represented log (on deregister) to free memory;
         once no alias still serves that log, its merge mappings go too."""
@@ -703,6 +723,7 @@ class LiveEventStore:
             if sdk_id in self._seen_ids.get(session_id, ()):
                 self._sdk_events.setdefault(session_id, {}).setdefault(sdk_id, []).append(log_event_id)
 
+    @_store_operation
     def ingest(
         self,
         session_id: str,

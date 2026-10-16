@@ -12,10 +12,11 @@ import json
 import logging
 import os
 import signal
+import threading
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 
 from ..agent_registry import AgentConfig, AgentResolver
 from ..loop_governance import LoopGovernance
@@ -68,6 +69,8 @@ class WorktreeDiscoveryCache:
         self._resolver: AgentResolver | None = None
         self._refresh = WorktreeRefreshOwner()
         self._governance: LoopGovernance | None = None
+        self._owner_thread: threading.Thread | None = None
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
         # worktree-finality-and-obligations (Phase 5): the classify-backfill
         # tasks crawl_if_empty() spawns must obey the same daemon lifecycle as
         # the periodic loop -- retained here so stop() can cancel/await them
@@ -114,6 +117,8 @@ class WorktreeDiscoveryCache:
         self._sync_sources(resolver)
         self._resolver = resolver
         self._governance = governance
+        self._owner_thread = threading.current_thread()
+        self._owner_loop = asyncio.get_running_loop()
         if self._interval > 0:
             self._task = asyncio.create_task(
                 self._loop(resolver), name="worktree-discovery",
@@ -659,6 +664,16 @@ def get_cache() -> WorktreeDiscoveryCache:
     return _discovery_cache
 
 
+def cache_for_app(app: FastAPI) -> WorktreeDiscoveryCache:
+    """Use the lifespan's retained cache, with legacy lookup for detached apps."""
+    if hasattr(app.state, "worktree_discovery_cache"):
+        cache = app.state.worktree_discovery_cache
+        if not isinstance(cache, WorktreeDiscoveryCache):
+            raise RuntimeError("Application worktree cache ownership is invalid")
+        return cache
+    return get_cache()
+
+
 # -- Route handlers -----------------------------------------------------------
 
 
@@ -706,7 +721,7 @@ async def list_worktrees(
     ``refresh=true`` joins one owned refresh for at most ten wall seconds;
     expiry never releases or cancels that holder.
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     refresh_result = None
     if refresh:
         refresh_result = await cache.refresh_live()
@@ -942,7 +957,7 @@ async def list_worktree_sessions(
     For the worktree's full head-succession/fork-lineage graph, see
     ``GET /api/v1/worktrees/{id}/lineage`` instead.
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     await cache.crawl_if_empty()
 
     owner = await _owning_agent(worktree_id, request)
@@ -996,7 +1011,7 @@ async def get_worktree_lineage(
     to ``<project> worktree-lineage --worktree <id> --json`` on the
     machine that owns the worktree.
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     await cache.crawl_if_empty()
 
     owner = await _owning_agent(worktree_id, request)
@@ -1047,7 +1062,7 @@ async def get_worktree_session_transcript(
     nothing for this session (mirrors ``get_session``'s bare-lookup
     fallback).
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     await cache.crawl_if_empty()
 
     owner = await _owning_agent(worktree_id, request)
@@ -1125,7 +1140,7 @@ async def restart_worktree_copilot(
     ``{worktree_id, had_session, method, ok}`` (``method``: none | graceful |
     hard | failed).
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     await cache.crawl_if_empty()
 
     owner = await _owning_agent(worktree_id, request)

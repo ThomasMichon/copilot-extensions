@@ -37,6 +37,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
         topology_errors: list[str] | None = None,
         topology_warnings: list[str] | None = None,
         local_execution_space: str | None = None,
+        resolved_local_identity: tuple[str | None, str] | None = None,
     ) -> None:
         from . import agent_registry as compat
 
@@ -110,10 +111,24 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 else:
                     self._agent_alias_index[key] = canonical
 
-        self._local_machine, self._local_platform = (
-            compat._detect_local_machine(machines, local_execution_space)
-            if local_execution_space is not None else compat._detect_local_machine(machines)
-        )
+        if resolved_local_identity is not None:
+            key, platform = resolved_local_identity
+            if (
+                local_execution_space is not None
+                or platform != compat._detect_platform()
+                or (key is None and any(machine.execution_platform for machine in machines.values()))
+                or (key is not None and key not in machines)
+                or (key is not None and machines[key].execution_platform
+                    and machines[key].execution_platform != platform)
+            ):
+                raise ValueError("resolved local identity does not match this execution space")
+            self._local_machine = machines[key] if key is not None else None
+            self._local_platform = platform
+        else:
+            self._local_machine, self._local_platform = (
+                compat._detect_local_machine(machines, local_execution_space)
+                if local_execution_space is not None else compat._detect_local_machine(machines)
+            )
 
     @property
     def agents(self) -> dict[str, AgentConfig]:

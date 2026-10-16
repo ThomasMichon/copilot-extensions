@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in authenticated private runtime channels with native peer, retained original-peer exit and owned-child custody, bounded I/O, strict publication types and separately attenuated passive preparation, resource/foreground activation and singleton reservation/admission grants; no automatic activation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

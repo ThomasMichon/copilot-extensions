@@ -601,11 +601,7 @@ class _SessionHostConnectionMixin:
         from .session_host.endpoints import CredentialRelayReadinessError
 
         def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
-            if session.event_log:
-                session.event_log.append(event_type, data)
-            self._capture_progress(session, event_type, data)
-            if event_type == "usage_update":
-                self._handle_usage_update(session, data)
+            self._route_acp_event(session, event_type, data)
 
         # Release any stale (dead-transport) client first so its socketpair +
         # relay tasks are freed; host-mode shutdown DETACHES (child survives).

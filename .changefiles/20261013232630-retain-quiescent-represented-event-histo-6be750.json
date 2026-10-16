@@ -1,0 +1,9 @@
+{
+  "comment": "Retain quiescent represented-event histories and exact alias/dedup/reconnect state during private runtime preparation",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

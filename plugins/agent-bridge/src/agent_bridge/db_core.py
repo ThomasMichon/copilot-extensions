@@ -286,16 +286,41 @@ CREATE INDEX IF NOT EXISTS idx_pending_prompts_session
 class _CoreMixin:
     """Connection, schema-bootstrap, and low-level query helpers."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, read_only: bool = False) -> None:
         self._db_path = Path(db_path).expanduser()
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._read_only = read_only
+        if not read_only:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._write_lock = threading.Lock()
         self._local = threading.local()
         self._event_write_q: queue.Queue[_EventWriteItem | object] = queue.Queue()
         self._writer_state_lock = threading.Lock()
         self._writer_thread: threading.Thread | None = None
         self._writer_error: BaseException | None = None
-        self._init_schema()
+        self._read_only_file_id: tuple[int, int] | None = None
+        if read_only:
+            try:
+                try:
+                    before = self._db_path.stat()
+                except FileNotFoundError as exc:
+                    raise sqlite3.OperationalError("unable to open database file") from exc
+                rows = self.execute_read("SELECT version FROM schema_version")
+                if len(rows) != 1 or rows[0]["version"] != SCHEMA_VERSION:
+                    raise ValueError("Read-only database requires the current schema")
+                after = self._db_path.stat()
+                if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                    raise ValueError("Read-only database changed during preparation")
+                self._read_only_file_id = (after.st_dev, after.st_ino)
+            except BaseException:
+                self.close()
+                raise
+        else:
+            self._init_schema()
+
+    @property
+    def read_only(self) -> bool:
+        """Whether this connection owner is barred from writes and migration."""
+        return self._read_only
 
     @property
     def db_path(self) -> Path:
@@ -305,8 +330,20 @@ class _CoreMixin:
     def _get_conn(self) -> sqlite3.Connection:
         """Get a thread-local connection."""
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            target = (
+                self._db_path.absolute().as_uri() + "?mode=ro"
+                if self._read_only else str(self._db_path)
+            )
+            conn = sqlite3.connect(
+                target, uri=self._read_only, check_same_thread=False,
+                timeout=0 if self._read_only else 5.0,
+            )
             conn.row_factory = sqlite3.Row
+            if self._read_only:
+                conn.execute("PRAGMA query_only=ON")
+                conn.execute("PRAGMA foreign_keys=ON")
+                self._local.conn = conn
+                return conn
             conn.execute("PRAGMA journal_mode=WAL")
             # NORMAL (vs the default FULL) skips the per-commit fsync of the WAL,
             # syncing only at checkpoints. Safe under WAL -- a power loss can lose
@@ -319,6 +356,8 @@ class _CoreMixin:
 
     def start_writer(self) -> None:
         """Start the background event writer thread if it is not already running."""
+        if self._read_only:
+            raise PermissionError("Read-only database cannot start an event writer")
         with self._writer_state_lock:
             if self._writer_thread is not None and self._writer_thread.is_alive():
                 return
@@ -348,6 +387,10 @@ class _CoreMixin:
 
     def flush(self) -> None:
         """Block until every previously queued event has been committed."""
+        if self._read_only:
+            if self._event_write_q.unfinished_tasks:
+                raise PermissionError("Read-only database has unexpected queued writes")
+            return
         if threading.current_thread() is self._writer_thread:
             return
         self.start_writer()
@@ -505,6 +548,8 @@ class _CoreMixin:
 
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
+        if self._read_only:
+            raise PermissionError("Read-only database cannot execute writes")
         conn = self._get_conn()
         with self._write_lock:
             cursor = conn.execute(sql, params)

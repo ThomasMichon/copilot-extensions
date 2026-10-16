@@ -1,0 +1,9 @@
+{
+  "comment": "Keep historical protocol probes bounded and scoped to the isolated checkout",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}
