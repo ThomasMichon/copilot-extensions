@@ -226,6 +226,25 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-16 - Bounded process-log payload destination containment
+- Continued the claimed #5727 process-log destination slice after the source-read
+  receipt merged. Directory creation begins inside the held ancestor boundary:
+  POSIX payload operations use directory/file descriptors; Windows keeps each
+  parent unrenamable before creating the next child and through publication.
+- Incremental destination inspection and byte accounting use that same boundary.
+  Source identity/size and pre-publication entry checks remain shared with the
+  existing transfer. Failed moves no longer pre-delete an older good payload.
+  Destination failures are not swallowed as benign source disappearance.
+- Deterministic Linux tests exercise redirects before/after ancestor opening,
+  before child creation and at each payload operation, plus explicit I/O errors
+  and previous-good-copy retention. A real Windows regression attempts ancestor
+  rename during creation/copy and verifies handle release afterward; native
+  execution and fresh-head CI/review remain required before merge.
+- Session-state writes, health metadata, identity-admission containment and
+  readers remain separate #5727 obligations. Reclamation is next and unassigned;
+  accounting, daily products, consumer parity, release and authorized adoption
+  remain active. No original evidence, runtime or live configuration changed.
+
 ### 2026-10-13 - Process-log source containment reviewed and merged
 - #6156 merged at `2026-10-14T06:35:39Z` as
   `f79c873ee4c03022216d5d1a0ff3d8a79f9e4fc1`, from final head

@@ -91,9 +91,10 @@ are propagated unchanged.
 The configured final root must be a real directory, not an alias. Pinning lasts
 for the operation, not across separate enumeration and read calls: references
 are observations, not immutable snapshots. Concurrent content writes remain
-possible. Sync destination writes and session-state readers retain their
-separate ancestor-containment limitations; this source-read change does not
-close the complete containment tracker.
+possible. Process-log payload destinations have their own pinned boundary
+described below. Session-state readers/writers and transfer-health metadata
+retain separate ancestor-containment limitations; the complete containment
+tracker remains open.
 
 ## See Also
 
@@ -125,6 +126,39 @@ Two scope limits, both deliberate rather than overlooked:
 
 Source reclamation after settled-log ZIP verification, SSH/ingest target support, and
 admission fencing for repo-scoped syncs remain outstanding.
+
+### Filesystem payload destination boundary
+
+Process-log transfers pin every lexical destination ancestor, beginning at the
+filesystem anchor, before creating the next child. Configured destination
+symlinks and name-surrogate reparse points are rejected rather than resolved.
+No pathname-based directory creation precedes that boundary.
+
+POSIX directory creation, incremental inspection, temporary creation, metadata,
+atomic replacement, byte-count inspection and temporary cleanup use the held
+directory descriptors or the newly created file descriptor. If an ancestor is
+renamed after opening, publication stays in that original directory; a replacement
+symlink cannot redirect later operations. Windows holds native handles denying
+ancestor rename through creation and payload I/O, then releases every handle at
+operation exit. Its final payload move retains the existing write-through move
+barrier; POSIX additionally fsyncs new parent entries and the replacement directory.
+Missing primitives or unsupported durability barriers fail explicitly.
+
+Source identity/size and entry revalidation still run before publication.
+Replacement no longer unlinks a previous good process-log payload first: a
+rejected source or a failed atomic move leaves that copy intact. Native Windows
+restrictions such as a read-only destination can therefore report a failed move
+rather than delete the old file to force replacement. Ordinary destination
+inspection, metadata and publication errors are visible failures, not missing
+source candidates. Existing source-churn and sharing-violation deferral remains.
+An error after a successful move (for example, its durability acknowledgement or
+byte-count inspection) reports failure without deleting the landed evidence.
+
+This boundary covers process-log payloads only, not `sync-meta.json`,
+session-state publication, identity admission or session readers. It does not
+serialize independent writers, make mutable source bytes immutable, or implement
+kernel-owned ZIP snapshot claims. Those contracts and the remaining #5727 work
+are separate; no source retirement or rollout is enabled.
 
 ### Additive settled-log ZIP snapshots
 
@@ -187,9 +221,9 @@ Windows ancestor handles denying directory rename. Intentionally relocated
 ancestors resolve once before pinning; later redirects cannot redirect archive
 I/O. ZIP file contents are flushed on both platforms; POSIX also flushes the
 containing directory. Windows directory-entry power-loss durability is not
-claimed. Process-log source reads also reuse this boundary; older destination
-writes and session-state readers remain outside it, and their containment
-tracker stays open.
+claimed. Process-log source reads also reuse this boundary. Process-log payload
+transfers use the separate destination boundary above; the containment tracker
+stays open for session-state and health-metadata paths.
 Windows snapshot/verification read handles additionally deny writes and rename.
 Fingerprints use birth time there because native `lstat` and `fstat` can expose
 different `ctime` meanings; POSIX retains change time. Published ZIP verification
