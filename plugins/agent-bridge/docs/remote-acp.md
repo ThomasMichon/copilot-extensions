@@ -238,6 +238,8 @@ Remote connect/resume also participates in existing manager acquisition/drain
 accounting before awaiting an old client. Drain cannot report clean while
 attachment is pending; a drain that starts during attachment refuses further
 connection adoption instead of allowing a later prompt through.
+Attachment checks registry ownership and terminal state after teardown and
+before adoption; a completed end cannot resurrect an untracked connection.
 
 Affinity cookies stay in memory per target/identity and survive explicit resume
 within the same daemon; they are not persisted across daemon restart. `source:

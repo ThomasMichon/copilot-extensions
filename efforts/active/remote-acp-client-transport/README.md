@@ -177,6 +177,16 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — End fences remote replacement attachment
+
+- Review identified end completing while resume waited on old-client
+  shutdown. Registry identity and terminal state are now checked before client
+  replacement and at adoption; stale callbacks/finalizers cannot mutate a
+  deleted or superseding session.
+- The regression pauses resume, completes end (removing registry/database
+  state), then releases shutdown and proves no replacement connection/load
+  occurs. Remote-manager selection: 19 passed.
+
 ### 2026-10-16 — Replay-safe progress after daemon rehydration
 
 - Review followed the marked-history path through manager restart and found
