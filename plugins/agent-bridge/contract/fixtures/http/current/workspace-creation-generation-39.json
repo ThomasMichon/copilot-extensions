@@ -43,6 +43,6 @@
     "native_bound_prompt": 33,
     "older_route_status": 404,
     "client_floor_refusal_status": 426,
-    "required_protocol_version": 39
+    "required_protocol_version": 34
   }
 }

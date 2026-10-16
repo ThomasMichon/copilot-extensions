@@ -401,41 +401,47 @@ def _cmd_attention_wait(client, args: argparse.Namespace, caller_id: str | None,
 
 
 def _cmd_read(args: argparse.Namespace) -> None:
-    from .client import BridgeClientError
+    from .client import BridgeClientError, BridgeConnectionError
 
     core = _core()
-    client = core._get_client()
+    client = core._get_client(ensure=False)
     caller_id = core._caller_id_for(args)
     target = args.session_id
     from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
 
-    if getattr(client, "resolve_live_result_target", None) is not None and (
-        client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)
-        or client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION, refresh=True)
-    ):
-        represented = client.resolve_live_result_target(target)
-        if represented:
-            if getattr(args, "range", None) or getattr(args, "event", None) is not None or getattr(args, "since", None) is not None:
-                print("[FAIL] Represented reads use bounded result positions, not ACP event ranges; use result --position.", file=sys.stderr)
-                sys.exit(2)
-            tail = getattr(args, "tail", None)
-            payload = client.get_live_result_snapshot(
-                target, max_items=tail if tail is not None else getattr(args, "max_items", None),
-                max_text_chars=getattr(args, "max_text_chars", None),
+    represented = None
+    try:
+        if getattr(client, "resolve_live_result_target", None) is not None and (
+            client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)
+            or client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION, refresh=True)
+        ):
+            represented = client.resolve_live_result_target(target)
+    except BridgeConnectionError as exc:
+        print(f"[FAIL] Read evidence unavailable; the daemon was not started: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if represented:
+        if getattr(args, "range", None) or getattr(args, "event", None) is not None or getattr(args, "since", None) is not None:
+            print("[FAIL] Represented reads use bounded result positions, not ACP event ranges; use result --position.", file=sys.stderr)
+            sys.exit(2)
+        tail = getattr(args, "tail", None)
+        payload = client.get_live_result_snapshot(
+            target, max_items=tail if tail is not None else getattr(args, "max_items", None),
+            max_text_chars=getattr(args, "max_text_chars", None),
+        )
+        message_id = getattr(args, "message_id", None)
+        if message_id is not None:
+            payload["message_receipt"] = client.get_live_message_receipt(
+                represented["session_id"], message_id
             )
-            message_id = getattr(args, "message_id", None)
-            if message_id is not None:
-                payload["message_receipt"] = client.get_live_message_receipt(
-                    represented["session_id"], message_id
-                )
-            if args.json:
-                core._json_out(payload)
-            else:
-                _render_result_snapshot(payload, target)
-            return
+        if args.json:
+            core._json_out(payload)
+        else:
+            _render_result_snapshot(payload, target)
+        return
     if getattr(args, "message_id", None) is not None:
         print("[FAIL] --message-id requires a represented live session with receipt support.", file=sys.stderr)
         sys.exit(2)
+    client = core._get_client()
     renderer = core._make_renderer(args)
     session_id, follow_handle = core._resolve_read_target(client, target)
     if follow_handle and session_id is None:

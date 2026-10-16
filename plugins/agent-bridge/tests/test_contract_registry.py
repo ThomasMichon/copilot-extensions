@@ -224,6 +224,19 @@ def test_retirement_recovery_capability_matches_current_fixture() -> None:
     )
 
 
+@pytest.mark.parametrize("generation", [30, 31, 32])
+def test_historical_acquisition_fixture_retains_its_generation_and_floor(generation: int) -> None:
+    fixture = _fixture(f"fixtures/http/previous-generation-{generation}/acquisition-protocol.json")
+    assert fixture["captured_from"]["protocol_generation"] == generation
+    assert fixture["response"]["protocol_version"] == generation
+    assert fixture["capability"]["required_protocol_version"] == generation
+
+
+def test_current_workspace_fixture_preserves_original_creation_floor() -> None:
+    fixture = _fixture("fixtures/http/current/workspace-creation-generation-39.json")
+    assert fixture["capability"]["required_protocol_version"] == bridge_protocol.WORKSPACE_CREATION_PROTOCOL_VERSION
+
+
 def test_live_message_receipt_generation_and_typed_fixture() -> None:
     from agent_bridge.models import SendMessageRequest, SendMessageResult
 

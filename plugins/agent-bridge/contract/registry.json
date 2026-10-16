@@ -464,14 +464,14 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-30/acquisition-protocol.json",
-          "sha256": "af491a4bcbbbd1264102093ad48452e8aaa02c693e4b5423b5e00fcdd43d756d",
-          "generation": 39,
+          "sha256": "e73e6de23803c793529ef873921122bb81b877d3fa4c7a746c258bda93cf8d98",
+          "generation": 30,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-31/acquisition-protocol.json",
-          "sha256": "9ec62f552926d3d24b5a1e70e3fb47865d48545a15149179bdd039092b1d3dc6",
-          "generation": 39,
+          "sha256": "e7f75c2f93e3ac9516c709df7eaf5f75ce3789851117b229202c0ae8f6559541",
+          "generation": 31,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
@@ -962,8 +962,8 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-32/acquisition-protocol.json",
-          "sha256": "a517ae411c186285dad2b87851e368148bd61cbf580a4d6c0f60907860e58463",
-          "generation": 39,
+          "sha256": "18026e314eb8961eef4cd443f28277518b13d81b3d1a5dd718539f7771f0ece3",
+          "generation": 32,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
@@ -974,7 +974,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-39.json",
-          "sha256": "018fcb592a0ecaaa257d2c03d494b68c255489fdcdf5bcfd42bf31d65f7ee914",
+          "sha256": "40aa42619ce0f609c16aaa9be0aa6e74b8ed8abba706c6361b90c84c341743fd",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
@@ -3358,7 +3358,7 @@
       "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1448",
       "reason": "The delegation effort owns lifecycle vocabulary and product semantics; the compatibility registry must not redefine them.",
       "reference_path": "plugins/agent-bridge/docs/delegation-contract.md",
-      "reference_sha256": "028cbfbfa8ada1acb354fd00f4b6e6d329b1b4181e8c88bcad0ab6741073ed7c"
+      "reference_sha256": "a28a0e2b0b0c5290ac50fdfd414b1196448d23dfe51b85fdfc933adc3ac02fb2"
     },
     {
       "id": "agent-bridge.event-history-identity",

@@ -674,7 +674,11 @@ def test_live_read_uses_bounded_result_not_acp_cursor(monkeypatch, capsys, tail)
             return {"message_id": mid, "stage": "sdk_accepted"}
 
     client = Client()
-    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
+    def read_client(**kwargs):
+        assert kwargs == {"ensure": False}
+        return client
+
+    monkeypatch.setattr(cli, "_get_client", read_client)
     args = argparse.Namespace(session_id="wt-1", caller=None, json=True, tail=tail,
                               message_id=7, max_text_chars=256)
     cli._cmd_read(args)
@@ -682,6 +686,50 @@ def test_live_read_uses_bounded_result_not_acp_cursor(monkeypatch, capsys, tail)
     assert result["state"]["liveness"] == "active"
     assert result["message_receipt"]["stage"] == "sdk_accepted"
     assert client.bounds == {"max_items": tail, "max_text_chars": 256}
+
+
+@pytest.mark.parametrize("message_id", [None, 7])
+def test_stopped_daemon_read_reports_unavailable_without_starting(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], message_id: int | None,
+) -> None:
+    import socket
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    client = BridgeClient(f"http://127.0.0.1:{port}", "test", connect_grace=0)
+    starts = []
+    monkeypatch.setattr(BridgeClient, "from_config", classmethod(lambda _cls: client))
+    monkeypatch.setattr(cli, "_ensure_daemon", lambda: starts.append("started"))
+    args = argparse.Namespace(session_id="live-1", caller=None, json=True, message_id=message_id)
+    with pytest.raises(SystemExit) as refused:
+        cli._cmd_read(args)
+    assert refused.value.code == 1
+    assert starts == []
+    assert "Read evidence unavailable; the daemon was not started" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("receipt_current", [False, True])
+def test_remote_observation_hint_names_hosting_machine(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], receipt_current: bool,
+) -> None:
+    from agent_bridge import live_peer_address
+
+    result = {
+        "session_id": "hosting-native-id", "message_id": 7,
+        "receipt": {"stage": "admitted"}, "receipt_current": receipt_current,
+    }
+    monkeypatch.setattr(live_peer_address, "send_remote_peer", lambda *_a, **_k: result)
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
+    _deliver_to_live_session(
+        object(), argparse.Namespace(json=False), "live:host-b:project-a:wt-b", "update",
+        remote_address=live_peer_address.LivePeerAddress("host-b", "project-a", "wt-b"),
+    )
+    output = capsys.readouterr().out
+    assert "observe on hosting machine host-b: agent-bridge read hosting-native-id" in output
+    assert "observe: agent-bridge read hosting-native-id" not in output
+    assert ("--message-id 7" in output) is receipt_current
 
 
 @pytest.mark.parametrize("name,value", [("max_items", 0), ("max_items", 101), ("max_text_chars", 255), ("max_text_chars", 20001)])

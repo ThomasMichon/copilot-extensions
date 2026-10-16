@@ -306,10 +306,14 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     print(f"    receipt: {receipt.get('stage') or 'unavailable (delivery evidence unavailable)'}")
     if result.get("receipt_error"):
         print(f"    receipt evidence unavailable: {result['receipt_error']}", file=sys.stderr)
+    observe = (
+        f"observe on hosting machine {remote_address.machine}"
+        if remote_address is not None else "observe"
+    )
     if receipt.get("stage") and result.get("receipt_current") is True:
-        print(f"    observe: agent-bridge read {session_id} --message-id {mid} --json")
+        print(f"    {observe}: agent-bridge read {session_id} --message-id {mid} --json")
     else:
-        print(f"    observe: agent-bridge read {session_id} --json")
+        print(f"    {observe}: agent-bridge read {session_id} --json")
         if receipt.get("stage"):
             print("    (message receipt observation is unavailable; inspect session state instead)")
         else:

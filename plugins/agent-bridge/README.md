@@ -120,7 +120,7 @@ and the new protocol; qualified CLI forwarding supplies it. Prefix text alone
 never upgrades a legacy exact-ID request to a newer carrier operation.
 Qualified peer sends return their admission receipt without waiting by default.
 `--wait-reply` opts into receipt-backed post-consumption reply evidence, requiring
-HTTP protocol 36 at both bridges and remote operation version 5. Qualified
+HTTP protocol 39 at both bridges and remote operation version 5. Qualified
 addressing without a reply wait retains protocol-35/version-4 compatibility.
 
 [Session preference authority](docs/session-preferences.md) documents optional

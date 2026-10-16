@@ -76,7 +76,7 @@ recent output separately:
 - `--no-wait` is still available, including for bridge-owned ACP sends.
 - On an old daemon, missing receipt support is explicit: `delivered: null`,
   and `read --message-id` refuses with an unsupported-protocol error.
-  Current receipt inspection requires HTTP protocol 36. If retention disappears
+  Current receipt inspection requires HTTP protocol 39. If retention disappears
   after admission, the response preserves the known admission evidence with
   `receipt_current: false` and `receipt_error`; an unavailable duplicate's
   historical receipt is explicitly `null`, never fabricated.
@@ -107,7 +107,7 @@ returns the admission receipt without waiting for a reply, just like a local sen
 Client, HTTP and carrier operation deadlines cover the requested reply wait
 plus transport margin, including when their defaults are used without the CLI.
 Qualified addressing requires HTTP protocol 35 and remote carrier operation
-version 4. Receipt-backed remote reply waits require HTTP protocol 36 and
+version 4. Receipt-backed remote reply waits require HTTP protocol 39 and
 carrier operation version 5; they are opt-in with `--wait-reply`, just like
 local represented sends. An older hosting bridge/carrier refuses explicitly rather than
 silently dropping the reply fields. An unavailable qualified peer is never
