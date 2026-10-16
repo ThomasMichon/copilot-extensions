@@ -82,12 +82,19 @@ class FixtureDaemon:
                             elif self.behavior == "warning":
                                 result["Warnings"] = ["incomplete"]
                         elif method == "DELETE":
-                            if self.behavior != "retain":
-                                self.resources.pop(IDENTIFIER, None)
+                            identifier = route.split("/")[2]
+                            resource = self.resources.get(identifier) or next((
+                                value for value in self.resources.values()
+                                if value.get("Name") == "/" + identifier
+                            ), None)
+                            if resource is not None:
+                                self.resources.pop(resource["Id"])
                             connection.sendall(b"HTTP/1.1 204 No Content\r\n\r\n")
                             continue
                         else:
                             result = self.resources[IDENTIFIER]
+                            if self.behavior == "name-collision":
+                                self.resources.pop(IDENTIFIER)
                         payload = json.dumps(result).encode()
                         if self.behavior == "unsolicited" and route == "/info":
                             first = f"HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\n\r\n".encode() + payload
@@ -189,15 +196,31 @@ def test_fixture_admits_canonical_socket_under_symlinked_temp_root(
     assert daemon.accepts == 1
 
 
-def test_exact_removal_and_absence_share_one_connection(daemon: FixtureDaemon) -> None:
-    assert verifier(daemon).remove(identity(), authorized=True) is True
-    assert daemon.resources == {}
+def test_inventory_and_birth_inspection_share_one_connection(daemon: FixtureDaemon) -> None:
+    assert verifier(daemon).probe(identity()) is True
+    assert IDENTIFIER in daemon.resources
     assert daemon.accepts == 1
     assert daemon.calls == [
         ("GET", "/info"), ("GET", "/containers/json?all=1"),
-        ("GET", f"/containers/{IDENTIFIER}/json"), ("DELETE", f"/containers/{IDENTIFIER}?force=1"),
-        ("GET", "/containers/json?all=1"),
+        ("GET", f"/containers/{IDENTIFIER}/json"),
     ]
+
+
+def test_complete_empty_inventory_proves_absence_without_inspection(daemon: FixtureDaemon) -> None:
+    daemon.resources.clear()
+    assert verifier(daemon).probe(identity()) is False
+    assert daemon.accepts == 1
+    assert daemon.calls == [("GET", "/info"), ("GET", "/containers/json?all=1")]
+
+
+def test_id_name_fallback_race_refuses_without_any_mutation(daemon: FixtureDaemon) -> None:
+    daemon.behavior = "name-collision"
+    collision = "b" * 64
+    daemon.resources[collision] = {"Id": collision, "Name": "/" + IDENTIFIER}
+    with pytest.raises(VerificationError, match="ID-only"):
+        verifier(daemon).remove(identity(), authorized=True)
+    assert daemon.accepts == 0 and daemon.calls == []
+    assert set(daemon.resources) == {IDENTIFIER, collision}
 
 
 @pytest.mark.parametrize("chunked", [False, True])
@@ -214,7 +237,7 @@ def test_probe_keeps_daemon_a_despite_new_connections_routing_b(daemon: FixtureD
 def test_unknown_stream_never_reconnects_or_mutates(daemon: FixtureDaemon, behavior: str) -> None:
     daemon.behavior = behavior
     with pytest.raises(VerificationError):
-        verifier(daemon).remove(identity(), authorized=True)
+        verifier(daemon).probe(identity())
     assert daemon.accepts == 1
     assert IDENTIFIER in daemon.resources
     assert all(method != "DELETE" for method, _target in daemon.calls)
@@ -336,21 +359,14 @@ def test_expiry_during_json_decode_closes_before_return(daemon: FixtureDaemon, m
     assert daemon.accepts == 1
 
 
-def test_expiry_after_delete_response_refuses_success(daemon: FixtureDaemon, monkeypatch) -> None:
-    from docker_resource_producer import local_session
-    read = local_session.read_response
+@pytest.mark.parametrize("method", ["DELETE", "POST", "PUT", "PATCH"])
+def test_session_refuses_mutating_requests_before_transport(daemon: FixtureDaemon, method: str) -> None:
     host = "unix://" + str(daemon.path)
     with LocalDaemonSession(Endpoint(host, "daemon-a"), LocalDaemonAdmission(host)) as session:
-        def expire_delete(source):
-            result = read(source)
-            if result[0] == 204:
-                session.deadline = time.monotonic() - 1
-            return result
-        monkeypatch.setattr(local_session, "read_response", expire_delete)
-        with pytest.raises(VerificationError):
-            session.request("DELETE", f"/containers/{IDENTIFIER}?force=1")
-        assert session.connection is None
-    assert daemon.accepts == 1
+        with pytest.raises(VerificationError, match="Invalid daemon request"):
+            session.request(method, f"/containers/{IDENTIFIER}?force=1")
+    assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
+    assert daemon.calls == [("GET", "/info")]
 
 
 def test_expiry_during_inventory_projection_cannot_return_absence(daemon: FixtureDaemon, monkeypatch) -> None:
@@ -393,16 +409,15 @@ def test_only_null_or_empty_volume_warnings_allow_complete_inventory(
     assert daemon.accepts == 1
 
 
-def test_retained_container_refuses_cleanup_success(daemon: FixtureDaemon) -> None:
-    daemon.behavior = "retain"
-    with pytest.raises(VerificationError, match="did not establish"):
+def test_retained_container_refuses_cleanup_before_connecting(daemon: FixtureDaemon) -> None:
+    with pytest.raises(VerificationError, match="ID-only"):
         verifier(daemon).remove(identity(), authorized=True)
-    assert daemon.accepts == 1
+    assert daemon.accepts == 0 and IDENTIFIER in daemon.resources
 
 
 def test_changed_birth_identity_never_deletes(daemon: FixtureDaemon) -> None:
     with pytest.raises(VerificationError, match="birth identity"):
-        verifier(daemon).remove(replace(identity(), created="2026-10-14T00:00:00Z"), authorized=True)
+        verifier(daemon).probe(replace(identity(), created="2026-10-14T00:00:00Z"))
     assert all(method != "DELETE" for method, _target in daemon.calls)
 
 

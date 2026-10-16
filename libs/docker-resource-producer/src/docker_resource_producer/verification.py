@@ -91,17 +91,9 @@ class LocalDockerVerifier:
             return identities
 
     def remove(self, identity: Identity, *, authorized: bool = False) -> bool:
-        """Remove an authorized exact container ID, then prove absence in-session."""
+        """Refuse until the daemon supports atomic birth-conditional deletion."""
         if authorized is not True:
             raise VerificationError("Exact resource cleanup is not authorized")
         if identity.resource_type == "volume":
             raise VerificationError("Docker has no birth-conditional volume deletion; automatic cleanup remains blocked")
-        with LocalDaemonSession(self.endpoint, self.admission, timeout=self.timeout) as session:
-            if not self._probe(session, identity):
-                session._check_response_boundary()
-                return False
-            session.request("DELETE", f"/containers/{identity.resource_id}?force=1")
-            if self._probe(session, identity):
-                raise VerificationError("Container removal did not establish absence")
-            session._check_response_boundary()
-            return True
+        raise VerificationError("Docker container deletion is not ID-only; automatic cleanup remains blocked")

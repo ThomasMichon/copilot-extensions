@@ -178,8 +178,11 @@ to bypass its invariants or the live cleanup confirmation gate.
   active reservation/claim. Settle a failed launch only after an authoritative
   probe of the pinned daemon confirms that the reservation created no resource.
 - Cleanup validates exact identity and ownership immediately before removal,
-  respects explicit cleanup authority, and records a verified absence receipt
-  in the authoritative ledger afterward. Nonzero cleanup or verification exits
+  requires an atomic identity-conditional mutation as well as explicit cleanup
+  authority, and records a verified absence receipt in the authoritative ledger
+  afterward. The current Docker container and volume APIs do not satisfy that
+  mutation gate; retain ownership and refuse automatic deletion until a
+  separately reviewed mechanism does. Nonzero cleanup or verification exits
   fail visibly and leave the claim active. Never infer absence from an arbitrary
   inspect error, process exit, Docker name reuse or daemon mismatch.
 - Named-volume retention is an explicit outcome, not successful full cleanup.
@@ -229,16 +232,23 @@ implementation, not the generic ledger ABI, fleet borrowing or cleanup authority
   cleanup failure is visible. Session exit is not allocation quiescence and
   must never synthesize `allocation_finished`. No new background daemon, Docker
   SDK in agent-worktrees, registry or finalize-time Docker census is introduced.
-- Automatic named-volume deletion remains refused. A current owner may close an
-  already-absent volume only through the same authoritative exact-subject proof,
-  or transfer a bound obligation through explicit acceptance.
+- Automatic deletion remains refused for both containers and named volumes.
+  Moby's removal path uses `GetContainer()`, which falls back from an absent
+  full ID to an exact name. A disappearing container can therefore redirect
+  deletion to an unrelated container named with that ID. A bound connection
+  and another inspection do not make that operation identity-conditional.
+  A current owner may close an already-absent resource only through the same
+  authoritative exact-subject proof and allocation-quiescence gate, or transfer
+  a bound obligation through explicit acceptance. Safe physical cleanup
+  requires a separately reviewed atomic identity-conditional mechanism.
 
 The separate-process A/B/A fixture reproduces false absence in the original
 CLI implementation. The source foundation now labels CLI results diagnostic-only
 and refuses authoritative proof and automatic removal before invocation.
-It does not implement the binding session or close-out contract yet.
-Required source validation covers same-session identity,
-absence and deletion; connection loss/reconnect refusal; nonbinding-route
+The source adapter implements direct-local read sessions, not provider
+integration or safe deletion. Required source validation covers same-session
+identity and absence; refusal of name-fallback deletion races and mutating
+requests; connection loss/reconnect refusal; nonbinding-route
 admission; malformed/truncated/oversized responses; bounded child-tree cleanup;
 and original-creator/current-owner visibility through retained resources and
 accepted transfers. Native fixture proofs remain distinct from live Docker
@@ -261,7 +271,10 @@ acceptance. Producer enablement stays gated by the validation plan below.
       active parent worktree. Docker producer integration remains pending below.
 - [ ] Prove running and stopped-but-existing containers block; exact verified
       removal settles; cleanup failure, outage, daemon mismatch, malformed
-      response and interrupted allocation remain active.
+      response and interrupted allocation remain active. Until an atomic
+      identity-conditional cleanup mechanism is reviewed, prove automatic
+      container deletion refuses before connecting, including ID/name
+      collisions after inspection; this refusal does not satisfy removal proof.
 - [ ] Prove failed launch settles only after confirmed no allocation; bind
       failure never starts/mutates the resource; repair can bind an allocation
       born with the reservation labels after the caller was interrupted.
@@ -297,7 +310,7 @@ acceptance. Producer enablement stays gated by the validation plan below.
       changefiles and do not hand-edit versions.
 - [ ] After separate explicit cleanup authorization, perform a harmless live
       sleep-container proof with no host mounts, privilege, networking or auth.
-      Verify the actual ledger/finalize gate, exact-ID cleanup and absence
+      Verify the actual ledger/finalize gate, identity-conditional cleanup and absence
       receipt. Mocked tests do not satisfy this live item.
 - [ ] Report native PowerShell/Windows-container/macOS evidence separately;
       parser checks or simulated platform tests are not native lifecycle proof.

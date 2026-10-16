@@ -145,7 +145,7 @@ class LocalDaemonSession:
 
     def request(self, method: str, target: str) -> Any:
         """Read one bounded response; every transport/protocol error closes."""
-        if method not in {"GET", "DELETE"} or not target.startswith("/") or any(
+        if method != "GET" or not target.startswith("/") or any(
             ord(character) <= 32 or ord(character) >= 127 for character in target
         ):
             raise VerificationError("Invalid daemon request")
@@ -158,11 +158,8 @@ class LocalDaemonSession:
                 raise VerificationError("Daemon response stream is unavailable")
             self.raw_reader.remaining = _MAX_WIRE
             status, body = read_response(self.reader)
-            if status not in {200, 204}:
+            if status != 200:
                 raise VerificationError(f"Daemon request refused (HTTP {status})")
-            if status == 204:
-                self._check_response_boundary()
-                return None
             decoded = _json(body.decode("utf-8", errors="strict"))
             self._check_response_boundary()
             return decoded
