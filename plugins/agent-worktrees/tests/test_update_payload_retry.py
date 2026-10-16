@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import __main__ as core, activation_preservation, reconcile, update_acquisition
+from agent_worktrees import (
+    __main__ as core, activation_preservation, reconcile, update_acquisition, update_events,
+)
 
 pytestmark = pytest.mark.guard
 
@@ -149,6 +151,86 @@ def test_only_explicit_spawn_contention_can_retry(acquisition, code, attempts):
     status = core._update_one_plugin_payload("agent-example", "copilot-extensions")
     assert status.startswith("OK") is (attempts == 2)
     assert len(calls) == attempts
+
+
+@pytest.mark.parametrize("detail,windows", [
+    ("[WinError 5] localized refusal", False),
+    ("[WinError 5] localized refusal", True),
+    ("[Errno 1] localized refusal", False),
+    ("[Errno 13] localized refusal", True),
+    ("(os error 5) localized refusal", True),
+    ("(os error 1) localized refusal", False),
+    ("(os error 13) localized refusal", False),
+    ("(os error 5) localized I/O failure", False),
+])
+@pytest.mark.parametrize("recovery", ["ECONNRESET", "Plugin agent-example is not installed"])
+def test_numeric_refusals_stop_both_recovery_paths(
+    acquisition, monkeypatch, detail, windows, recovery,
+):
+    calls, responses = acquisition
+    monkeypatch.setattr(update_events, "_WINDOWS", windows)
+    responses.extend([(1, f"{detail}\n{recovery}"), (0, "")])
+    status = core._update_one_plugin_payload("agent-example", "copilot-extensions")
+    assert not status.startswith("OK")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("code", [32, 33])
+def test_native_os_error_sharing_is_host_aware(acquisition, monkeypatch, windows, code):
+    calls, responses = acquisition
+    monkeypatch.setattr(update_events, "_WINDOWS", windows)
+    responses.extend([(1, f"localized failure (os error {code})"), (0, "")])
+    status = core._update_one_plugin_payload("agent-example", "copilot-extensions")
+    assert status.startswith("OK") is windows
+    assert len(calls) == (2 if windows else 1)
+
+
+@pytest.mark.parametrize("command_timeout", [False, True])
+def test_real_install_restoration_failure_is_never_retried(
+    tmp_path, monkeypatch, command_timeout,
+):
+    from plugin_activation import state
+
+    home, payload = tmp_path / "copilot", tmp_path / "payload"
+    home.mkdir()
+    identity = "agent-example@copilot-extensions"
+    settings = home / "settings.json"
+    settings.write_text(json.dumps({"enabledPlugins": {identity: False}}))
+    monkeypatch.setattr(state, "copilot_home", lambda: home)
+    monkeypatch.setattr(
+        activation_preservation, "run_install_preserving_activation",
+        state.run_install_preserving_activation,
+    )
+    monkeypatch.setattr(core, "_resolve_copilot", lambda: "copilot")
+    monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        reconcile, "core_installed_payload_dir",
+        lambda name: payload if payload.is_dir() else None,
+    )
+    calls = []
+    def install(argv, **kwargs):
+        calls.append(list(argv))
+        if argv[2] == "install":
+            payload.mkdir()
+            settings.write_text(json.dumps({"enabledPlugins": {identity: True}}))
+            if command_timeout:
+                raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", install)
+    replace = state.os.replace
+    def fail_restore(source, destination):
+        if Path(destination) == settings:
+            error = OSError("activation restoration write blocked")
+            error.winerror = 32
+            raise error
+        return replace(source, destination)
+    monkeypatch.setattr(state.os, "replace", fail_restore)
+    status = core._update_one_plugin_payload("agent-example", "copilot-extensions")
+    assert not status.startswith("OK")
+    assert "restor" in status
+    assert len(calls) == 1
+    assert json.loads(settings.read_text())["enabledPlugins"][identity] is True
 
 
 def test_retry_timeout_uses_remaining_total_budget(acquisition, monkeypatch):

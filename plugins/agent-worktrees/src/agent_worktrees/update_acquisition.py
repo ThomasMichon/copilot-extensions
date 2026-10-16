@@ -18,12 +18,35 @@ _REFUSAL = re.compile(
 )
 _TRANSIENT = re.compile(
     r"\b(?:ECONNRESET|ECONNREFUSED|EAI_AGAIN|ETIMEDOUT)\b|"
-    r"\[WinError (?:32|33)\]|\bHTTP(?:/\d(?:\.\d)?)?\s+(?:502|503|504)\b",
+    r"\bHTTP(?:/\d(?:\.\d)?)?\s+(?:502|503|504)\b",
     re.IGNORECASE,
 )
 _TOTAL_BUDGET_S = 240.0
 _ATTEMPT_TIMEOUT_S = 120.0
 _BACKOFF_S = 1.0
+
+
+def _numeric_refusal(detail: str) -> str | None:
+    low = detail.lower()
+    if update_events._marker(low, update_events._ERRNO, 5) or update_events._os_error(
+        low, posix=(5,),
+    ):
+        return "I/O failure"
+    if (
+        update_events._marker(low, update_events._WINERROR, 5)
+        or any(update_events._marker(low, update_events._ERRNO, code) for code in (1, 13))
+        or update_events._os_error(low, windows=(5,), posix=(1, 13))
+    ):
+        return "permission denied"
+    return None
+
+
+def _numeric_contention(detail: str) -> bool:
+    low = detail.lower()
+    return (
+        any(update_events._marker(low, update_events._WINERROR, code) for code in (32, 33))
+        or update_events._os_error(low, windows=(32, 33))
+    )
 
 
 def acquire(
@@ -76,6 +99,13 @@ def acquire(
             )
             return "timed out"
         except OSError as error:
+            if verb == "install":
+                status = (
+                    "plugin install or activation restoration failed: "
+                    f"{update_events.bounded(str(error), 200)}"
+                )
+                output.warn(f"{name}: {status}")
+                return status
             detail = describe_copilot_spawn_error(error, cwd=cwd)
             status = update_events.bounded(detail, 200)
             retryable = getattr(error, "winerror", None) in (32, 33)
@@ -89,8 +119,9 @@ def acquire(
                 value for value in (result.stdout.strip(), result.stderr.strip()) if value
             )
             refusal = _REFUSAL.search(detail)
-            refused = refusal is not None
-            reason = f"refused ({refusal.group(0)}, exit {result.returncode})" if refusal else (
+            refusal_reason = refusal.group(0) if refusal else _numeric_refusal(detail)
+            refused = refusal_reason is not None
+            reason = f"refused ({refusal_reason}, exit {result.returncode})" if refused else (
                 f"failed (exit {result.returncode})"
             )
             status = f"plugin {verb} {reason}: {update_events.bounded(detail, 200, tail=True)}"
@@ -98,7 +129,9 @@ def acquire(
                 not engine and verb == "update" and not refused
                 and bool(missing_ledger_pattern.search(detail))
             )
-            retryable = not refused and bool(_TRANSIENT.search(detail))
+            retryable = not refused and (
+                bool(_TRANSIENT.search(detail)) or _numeric_contention(detail)
+            )
 
         if attempt == 1 or not (retryable or missing_ledger):
             output.warn(f"{name}: {status}")

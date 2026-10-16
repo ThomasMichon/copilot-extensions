@@ -667,3 +667,21 @@ achieved by rearranging today's combined installer invocations.
   consumer boundary rather than repeating a full clean-room build.
   Hosted POSIX/lint, current-head review and CI still gate publication;
   release consumption and actual installed-state proof remain open.
+
+### 2026-10-15 - Retry error custody and native numeric diagnostics
+- #6906's first current-head review identified three medium issues: numeric
+  permission refusals could lose precedence to a transient/missing-ledger
+  marker, native Windows `(os error 32/33)` contention was not recognized, and
+  install-wrapper OS errors could originate in activation restoration rather
+  than spawning the child.
+- Added twenty-two focused regressions; twenty failed and two host controls
+  passed before correction. Recovery now reuses the existing host-aware
+  numeric matchers, including terminal I/O/permission errors, and only direct
+  update-path sharing/lock spawn failures may retry.
+- A real preservation-wrapper fixture captures a disabled plugin, simulates
+  install enabling it and denies the restoration replacement. Both successful
+  and timed-out command cases remain explicit failures with no second command;
+  the updater cannot claim success while activation restoration is unproven.
+  This does not claim that an inaccessible restoration destination was repaired.
+- The complete five-file native portfolio passes 245 cases with one platform
+  skip. Fresh current-head review and hosted CI remain required before merge.

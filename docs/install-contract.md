@@ -1211,7 +1211,11 @@ activation-preserving install path; arbitrary failed updates no longer
 authorize an install fallback. The engine's own acquisition stays update-only.
 
 Authority, permissions, source-policy, integrity, certificate and unknown
-failures stop without automatic retry. A command timeout also stops: the
+failures stop without automatic retry. Numeric OS errors use the same
+host-aware matchers as update outcome classification, including localized
+permission refusals. An install wrapper's OS error is terminal because it may
+be activation restoration failing, not a retryable spawn failure.
+A command timeout also stops: the
 payload subprocess path does not prove descendant cleanup, so starting another
 writer would be unsafe. Retried failures remain advisory attempt history;
 the final required outcome decides the run. This is in-run recovery, not a
