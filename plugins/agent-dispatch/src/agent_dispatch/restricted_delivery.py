@@ -89,7 +89,7 @@ def record(queue, key: str, info: dict) -> SpawnReservation:
             "UPDATE spawn_reservations SET agent_info=?,session_handle=?,updated_at=?,"
             "state=CASE WHEN ? THEN ? ELSE state END WHERE key=?",
             (json.dumps(info, sort_keys=True), handle, queue._now(None),
-             terminal_ack, SpawnState.SPAWNED, key),
+             info.get("delivered") is True, SpawnState.SPAWNED, key),
         )
         result = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
         conn.commit()

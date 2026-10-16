@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_dispatch import restricted_spawn as delivery
-from agent_dispatch.client import DispatchClient, DispatchError
+from agent_dispatch.client import DispatchClient, DispatchError, ResolvingDispatchClient
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.registrations import RegistrationError, validate_registration
 from agent_dispatch.restricted_delivery import DRIVER
@@ -48,10 +48,13 @@ def rig(tmp_path, monkeypatch):
             )
             return httpx.Response(response.status_code, content=response.content)
 
-        with DispatchClient(
-            "http://coordinator.test", token="fleet-fixture", control_token="control-fixture",
-            transport=httpx.MockTransport(send),
-        ) as client:
+        def client_factory():
+            return DispatchClient(
+                "http://coordinator.test", token="fleet-fixture", control_token="control-fixture",
+                transport=httpx.MockTransport(send),
+            )
+
+        with client_factory() as client:
             calls, grants = [], []
             prepared = {}
             agent = f"container:dispatch/{spec['instance_id']}/{'b' * 32}/worker"
@@ -100,7 +103,7 @@ def rig(tmp_path, monkeypatch):
             yield SimpleNamespace(
                 queue=queue, task=task, spec=spec, client=client, api=api, control=control,
                 supervisor=supervisor, spawn=spawn, calls=calls, grants=grants,
-                command=command, app=app,
+                command=command, app=app, client_factory=client_factory,
             )
 
 
@@ -339,6 +342,30 @@ def test_terminal_ack_cannot_adopt_a_reclaimed_generation(rig, monkeypatch):
     assert "delivered" not in reservation(rig)["agent_info"]
 
 
+def test_later_completion_after_lost_spawn_publication_can_reconcile(rig, monkeypatch):
+    monkeypatch.setattr(
+        rig.client, "record_spawn",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(DispatchError(503, "lost publication")),
+    )
+    assert rig.supervisor.poll_once() == []
+    receipt = reservation(rig)
+    assert receipt["agent_info"]["delivered"] is True and receipt["state"] == "spawned"
+    assert rig.queue.get(rig.task.id).status == "claimed"
+    headers = {TASK_SCOPE_HEADER: rig.grants[-1]}
+    assert rig.api.post(
+        f"/tasks/{rig.task.id}/start", headers=headers, json={"worker_id": "ignored"},
+    ).status_code == 200
+    assert rig.api.post(
+        f"/tasks/{rig.task.id}/complete", headers=headers, json={"worker_id": "ignored"},
+    ).status_code == 200
+    rig.supervisor.local_body_verdict_fn = lambda _sid: "gone"
+    rig.supervisor.local_body_target_dir_fn = lambda _sid: None
+    rig.supervisor.reconcile()
+    assert reservation(rig)["state"] == "settled"
+    assert rig.supervisor._active_reservations() == []
+    assert sum("send" in argv for argv, _ in rig.calls) == 1
+
+
 @pytest.mark.parametrize("replaced", [False, True])
 def test_restart_before_projection_strictly_resumes_original_native(rig, monkeypatch, replaced):
     project = delivery._project
@@ -446,6 +473,26 @@ def test_restricted_lease_heartbeat_is_scoped_and_native_fenced(rig, monkeypatch
     assert current.lease_expires_at > before.lease_expires_at
     assert current.generation == before.generation and current.owner_session_id == before.owner_session_id
     assert rig.supervisor.hold_live_leases() == 0
+
+
+def test_production_resolving_client_renews_with_scoped_heartbeat(rig, monkeypatch):
+    rig.supervisor.client = ResolvingDispatchClient(rig.client_factory)
+    rig.supervisor.heartbeat = True
+    assert rig.supervisor.poll_once() == [rig.task.id]
+    before = rig.queue.get(rig.task.id)
+    for credential in ("", rig.grants[-1] + "tampered"):
+        with pytest.raises(DispatchError) as invalid:
+            rig.supervisor.client.scoped_heartbeat(before.id, before.owner, credential)
+        assert invalid.value.status_code == 401
+        assert rig.queue.get(before.id) == before
+    now = time.time()
+    monkeypatch.setattr("agent_dispatch.task_authority.time.time", lambda: now + 60)
+    assert rig.supervisor.poll_once() == []
+    current = rig.queue.get(before.id)
+    assert current.lease_expires_at > before.lease_expires_at
+    assert current.owner_session_id == before.owner_session_id == "native-worker"
+    assert current.generation == before.generation
+    assert len(rig.grants) == 2
 
 
 def test_restricted_heartbeat_race_does_not_extend_reclaimed_task(rig, monkeypatch):

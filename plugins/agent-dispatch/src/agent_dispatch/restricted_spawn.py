@@ -17,7 +17,6 @@ from .client_transport import validate_task_url
 from .ordinary_bridge import _json_result
 from .procutil import agent_bridge_launch_prefix, no_window_kwargs
 from .restricted_delivery import DRIVER
-from .task_scope import TASK_SCOPE_HEADER
 
 log = logging.getLogger(__name__)
 
@@ -302,10 +301,7 @@ def make_spawn(value: object, *, charter: str | None = None):
             raise BridgeUnavailable("restricted renewal incarnation or native identity changed")
         grant = _project(spec, client, task["id"], info)
         if heartbeat:
-            client._unwrap(client._http.post(
-                f"/tasks/{task['id']}/heartbeat", json={"worker_id": info["worker_id"]},
-                headers={TASK_SCOPE_HEADER: grant["task_token"]},
-            ))
+            client.scoped_heartbeat(task["id"], info["worker_id"], grant["task_token"])
 
     spawn.restricted_bridge_for = lambda _task: True
     spawn.renew_restricted = renew

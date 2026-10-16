@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from agent_dispatch import restricted_spawn
-from agent_dispatch.client import DispatchClient
+from agent_dispatch.client import DispatchClient, ResolvingDispatchClient
 from agent_dispatch.supervisor import Supervisor
 from agent_procutil import no_window_flags
 
@@ -208,7 +208,9 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                     return response.json()
 
                 supervisor = Supervisor(
-                    client, spawn_fn=restricted_spawn.make_spawn({
+                    ResolvingDispatchClient(lambda: DispatchClient(
+                        central_url, token=fleet_token, control_token=control_token,
+                    )), spawn_fn=restricted_spawn.make_spawn({
                         "command": [provider_python, "-m", "agent_containers"],
                         "name": worker, "instance_id": physical,
                         "coordinator_url": "http://coordinator:8787",

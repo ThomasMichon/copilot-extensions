@@ -96,16 +96,18 @@ it is not permission to send another first prompt or create another agent.
 Acquiring that intent is a one-shot queue transaction, including when two
 supervisors overlap. A lost creation acknowledgement can recover the stopped
 original conversation through its keyed identity and strict, unprompted resume.
-An acknowledged send for the same concluded task incarnation retains its
-delivery receipt and advances spawn bookkeeping atomically, so completion
-during delivery cannot strand a reserving lane slot.
+Every acknowledged send retains its delivery receipt and advances spawn
+bookkeeping atomically, so completion during or after delivery cannot strand
+a reserving lane slot after interrupted generic publication.
 
 On the existing supervision cadence, a positively live, exact native worker
 receives a fresh task grant through the same provider operation. Unknown
 liveness, a changed native conversation, configuration, generation or epoch
 refuses renewal. With heartbeat enabled, the supervisor also uses that grant
 for a transactionally fenced lease heartbeat; issuing a grant alone does not
-extend a lease. Commands are always taken from the current trusted lane
+extend a lease. The public scoped-heartbeat client operation also supports
+the production client's per-operation coordinator re-resolution.
+Commands are always taken from the current trusted lane
 configuration, never executed from a stored queue receipt.
 
 This is not completed fleet federation. Directory epoch observation is not
