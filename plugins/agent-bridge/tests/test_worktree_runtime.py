@@ -247,3 +247,34 @@ async def test_refresh_evidence_keeps_absolute_age_without_granting_refresh(capt
     frozen._refresh.sources["actual"].updated += 1
     with pytest.raises(PrivateIPCError):
         frozen.private_payload()
+
+
+@pytest.mark.asyncio
+async def test_capture_after_real_warm_and_backfill_completion(captured, monkeypatch):
+    app, _origins, _capture = captured
+    cache, resolver, governance = cache_graph(app)
+    release, entered = asyncio.Event(), asyncio.Event()
+
+    async def crawl(_resolver, *, classify, epoch):
+        cache._refresh.published(epoch, {"actual": None}, observed={"actual": 123.0})
+
+    async def backfill(_resolver):
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(cache, "_do_crawl", crawl)
+    monkeypatch.setattr(cache, "_backfill_classify", backfill)
+    holder = cache._ensure_warm()
+    with pytest.raises(PrivateIPCError):
+        capture_worktrees(cache, resolver, governance)
+    await holder
+    await entered.wait()
+    assert holder.done() and not cache._refresh._warm_callbacks
+    with pytest.raises(PrivateIPCError):
+        capture_worktrees(cache, resolver, governance)
+    release.set()
+    await asyncio.gather(*cache._backfill_tasks)
+    await asyncio.sleep(0)
+    snapshot = capture_worktrees(cache, resolver, governance)
+    assert snapshot["refresh"]["sources"]["actual"]["updated"] == 123.0
+    assert restore_worktrees(snapshot, resolver).private_payload() == snapshot

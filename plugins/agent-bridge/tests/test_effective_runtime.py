@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -130,6 +131,16 @@ def test_uncovered_remote_acp_policy_refuses_instead_of_silently_dropping_it(ser
     app.state.session_manager._remote_acp_targets["synthetic"] = object()
     with pytest.raises(PrivateIPCError, match=Refusal.AUTHORITY.value):
         capture.capture()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter image")
+def test_executing_interpreter_uses_native_image_not_venv_redirector():
+    from agent_bridge.launch_runtime import executing_executable
+    from zdd.private_windows_native import Native
+
+    native = Native()
+    image = Path(native.process_image(native.k.GetCurrentProcess())).resolve(strict=True)
+    assert executing_executable() == image
 
 
 def test_invalid_secret_settings_are_only_fixed_refusals(serving):
