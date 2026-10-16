@@ -200,13 +200,13 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "20be2788ebbbb1d378017a54a74c698c206b73b768b0cd4a34636d09e30d1614",
+          "sha256": "2102d4ea8fcc4568cff920ca8220f22729e454777f08bc152758c2dc2f9879ed",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
-          "sha256": "365af61078ebc305e01540b8f546386c5d8d957e42f346d8035fc014869b0b6d",
+          "sha256": "d47d925011c895a3c6cbfd047d6ca8b409551fa92ed2aece639ffe07dcc99c3e",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -742,13 +742,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-37.json",
-          "sha256": "ea9e9eb531dfb2e14ee25fbbded5179fc95215955b4d336d555bb468a203cd62",
+          "sha256": "7c4f821a410a0583f9a0b85d4807779b473d388b173a70cb62e198450125df1c",
           "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
           "generation": 37
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-37.json",
-          "sha256": "269222bf13012dd17e3cab9e542ebc070e190b8e979645312587a91e4636cd4e",
+          "sha256": "eacd8addadc27ab70af750d05a2df099b5a20415a4442a3422e9741470677aa6",
           "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
           "generation": 37
         },
@@ -2293,6 +2293,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
           "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
           "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "40ef5b2c2a58c02041ef4667f02aede6f1c66da2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "942bb51fe709a761b4c763ff38578920b20a5966",
+          "capture_method": "Capture committed current-roster source-evidence corrections; deterministic regressions preserve observation age and last-good rows, and real source CLI dispatch cannot acknowledge a live refresh."
+        },
+        {
+          "commit": "40ef5b2c2a58c02041ef4667f02aede6f1c66da2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "d43bb04d1ba5fa05191bd84eeba57a953b8cb1bb",
+          "capture_method": "Capture committed current-roster source-evidence corrections; deterministic regressions preserve observation age and last-good rows, and real source CLI dispatch cannot acknowledge a live refresh."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",

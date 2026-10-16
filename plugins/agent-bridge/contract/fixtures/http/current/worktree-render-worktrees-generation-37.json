@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+    "commit": "40ef5b2c2a58c02041ef4667f02aede6f1c66da2",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 37,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-    "source_git_blob": "6e29f6d7366650d17f63a69ffea384275784ca33",
-    "source_sha256": "20be2788ebbbb1d378017a54a74c698c206b73b768b0cd4a34636d09e30d1614"
+    "source_git_blob": "942bb51fe709a761b4c763ff38578920b20a5966",
+    "source_sha256": "2102d4ea8fcc4568cff920ca8220f22729e454777f08bc152758c2dc2f9879ed"
   },
   "response": {
     "protocol_version": 37,
@@ -19,7 +19,10 @@
     "legacy_cold_request_blocks": true,
     "caller_expiry_releases_holder": false,
     "source_live_option": "--fresh",
-    "queued_live_native_overlap": false
+    "queued_live_native_overlap": false,
+    "source_observation_age_retained": true,
+    "degraded_source_replaces_good_rows": false,
+    "current_roster_read_acknowledges_live_refresh": false
   },
   "requests": {
     "render": {
