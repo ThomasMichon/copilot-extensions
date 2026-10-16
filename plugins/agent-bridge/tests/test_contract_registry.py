@@ -55,7 +55,7 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/remote-acp-models-generation-38.json")
+    fixture = _fixture("fixtures/http/current/acquisition-protocol.json")
     body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
@@ -121,7 +121,7 @@ def test_live_registration_fixture_preserves_opt_in_wire_shape_and_default() -> 
     assert fixture["compatibility"]["ordinary_null_heartbeat_retains_metadata"] is True
 
 
-@pytest.mark.parametrize("generation", [35, 36, 37, 38])
+@pytest.mark.parametrize("generation", [35, 36, 37, 38, 39])
 @pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
 def test_native_bound_wire_is_preserved_at_later_generations(owner, generation) -> None:
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse

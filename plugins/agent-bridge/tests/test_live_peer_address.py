@@ -335,7 +335,7 @@ def test_remote_cli_zero_and_fractional_waits_return_admission(
         assert packets[0]["version"] == 5
         if reply_timeout == 0:
             fixture_path = (Path(__file__).parents[1] / "contract" / "fixtures" / "http"
-                            / "current" / "remote-zero-reply-generation-36.json")
+                            / "current" / "remote-zero-reply-generation-39.json")
             expected = json.loads(fixture_path.read_text(encoding="utf-8"))["response"]
             assert {key: result[key] for key in expected} == expected
     finally:
@@ -406,7 +406,7 @@ async def test_remote_receipt_wait_selects_its_carrier_version(wait, version):
     assert requests[0]["version"] == version
     if wait:
         fixture_path = (Path(__file__).parents[1] / "contract" / "fixtures" / "http"
-                        / "current" / "remote-message-receipt-generation-36.json")
+                        / "current" / "remote-message-receipt-generation-39.json")
         expected = json.loads(fixture_path.read_text(encoding="utf-8"))["request"]
         assert {key: requests[0][key] for key in expected} == expected
 
