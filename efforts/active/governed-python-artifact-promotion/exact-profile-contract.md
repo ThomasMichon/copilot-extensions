@@ -1,13 +1,14 @@
 # Exact Runtime Profile Selection Contract
 
-[Artifact effort and completion gate](README.md). Proposed contribution from
+[Artifact effort and completion gate](README.md). Reviewed contribution from
 [#6234](https://github.com/ThomasMichon/copilot-extensions/issues/6234);
 engine application remains
 [#6737](https://github.com/ThomasMichon/copilot-extensions/issues/6737).
 
-**Status: Proposed; review before implementation.** This closes the design
-portion of the artifact effort's exact-profile prerequisite, not publication,
-consumer admission, deployed engine selection or any production rollout.
+**Status: Design approved in #6795; inert record implementation in progress.**
+This closes the design portion of the artifact effort's exact-profile
+prerequisite, not approval-adapter integration, publication, consumer admission,
+deployed engine selection or any production rollout.
 
 ## Reconciliation and existing boundaries
 
@@ -49,8 +50,8 @@ cannot certify that a private mirror carries a wheel or permits its acquisition.
 
 ## Closed input and selected result
 
-Implementation will version a single inert profile record, validated before
-construction. No runtime loader or new CLI is introduced by this proposal.
+The inert implementation versions a single profile record, validated before
+construction. No runtime loader or new CLI is introduced by this slice.
 
 | Record component | Required meaning |
 |------------------|------------------|
@@ -78,7 +79,7 @@ dependent on discovery order.
 
 For the engine, a new standalone installation requests CPU unless the operator
 or its existing controller explicitly selects an accelerator profile
-_(agent-recommended default, subject to this proposal's review)_. An update
+_(agent-recommended default reviewed in #6795)_. An update
 retains the persisted capability selection; an existing unprofiled engine needs
 an explicit migration selection rather than guessing from installed Torch.
 Device eligibility is checked before download/construction. A missing requested
@@ -131,9 +132,10 @@ and cutover ownership. It does not regenerate or edit its historical lock.
 
 ## Ordered implementation and acceptance
 
-- [ ] Review this design under #4876 before writing the selector or engine
-  consumer. Confirm the existing authority/approval-source adapters; no new
-  globally trusted profile directory is presumed.
+- [x] Review this design under #4876 before writing the selector or engine
+  consumer (#6795).
+- [ ] Integrate the existing authority/approval-source adapters before enabling
+  any consumer; no new globally trusted profile directory is presumed.
 - [ ] Add the inert versioned record, canonical identity and pure selection
   contract using existing source/manifest validators. Unit fixtures cover
   wrong release, unknown schema, incomplete/duplicate closure, extras/markers,
@@ -160,3 +162,42 @@ and cutover ownership. It does not regenerate or edit its historical lock.
   reuse. Preserve existing standalone/warm-engine ownership under #5768.
   Publication and explicitly authorized rollout remain the artifact effort's
   existing gates; design approval is not their completion.
+
+## Inert record and pure API
+
+`tools/runtime_profile.py` implements schema
+`copilot-extensions.exact-runtime-profile`, version 1. `validate_profile(record)`
+returns immutable canonical ASCII JSON bytes and their `sha256:` identity.
+Mapping keys are sorted with compact separators; array order remains part of
+the approved record. `record()` returns a detached copy, never mutable lock
+state. Unknown fields, including self-declared approval flags, refuse.
+
+Each wheel record carries name, exact version, basename, SHA-256,
+`requires_python`, `provides_extras`, `selected_extras` and `requires_dist`.
+The graph starts at explicit `roots`, propagates extras through cycles and
+evaluates markers against the full recorded target environment. It rejects
+missing/incompatible edges, unknown or dropped extras, duplicate normalized
+distributions, unreachable packages, direct URL/VCS/path requirements and wrong
+wheel/Python tags. These are assertions in an approved record, **not proof of
+the actual wheel metadata**; acquisition/admission must inspect the bytes and
+compare all those fields before construction.
+
+`select_profile` accepts candidate records and an independent
+`approvals` mapping from whole-record digest to trusted approval-source
+reference. The calling authority adapter authenticates that mapping using the
+existing release/configuration channel; neither this tool nor a record creates
+such authority. It requires exact independently supplied release, target,
+component, roots and mode. Backend intent is explicit, retained on update, or
+CPU for a fresh install. Existing unprofiled installations require an explicit
+migration choice. Multiple matching locks need a digest preference order; a
+missing requested choice refuses instead of taking an unlisted match.
+
+Target facts include actual interpreter compatibility tags, a complete marker
+environment and an opaque device constraint. References identify existing
+approval/acquisition policy without embedding URLs, paths or credentials.
+Artifact mode additionally binds artifact/manifest digests; independently
+selected source mode requires no artifact identity. There is no automatic
+fallback, resolver, download, signature verifier, profile directory, installer
+adapter, activation or runtime payload fan-out. The record API does not itself
+prove device detection, feed compatibility, approval origin or source
+provenance. Those remain prerequisite owner integrations, not success claims.

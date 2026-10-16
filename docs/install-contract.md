@@ -2542,6 +2542,24 @@ change refuses publication rather than installing an unaudited closure.
 Inputs are rechecked after the candidate tree's rename, before retiring the
 previous tree; a mismatch at that linearization point rolls publication back.
 
+### Inert exact-profile preparation
+
+`tools/runtime_profile.py` provides a repository-only versioned exact-record
+validator and pure selector. It is not shipped in runtime payloads or invoked
+by an installer. Its [reviewed contract](../efforts/active/governed-python-artifact-promotion/exact-profile-contract.md)
+defines the schema and explicit boundary: canonical whole-record identities,
+release/target/mode compatibility, complete asserted wheel metadata graphs
+with extras/markers, and externally supplied whole-record approval references.
+It does not authenticate approvals, verify a source release, inspect/download
+wheels, detect hardware, resolve dependencies or activate a generation.
+
+Actual consumers still need adapters from the existing installation authority
+and verified release/configuration channels, followed by admitted byte/metadata
+checks and immutable construction. Candidate release-input generation is a
+separate concern (#6941); neither constraints nor this inert record prove an
+approved, available CPU/accelerator closure. The current constructors and their
+retained slots remain unchanged by this preparation seam.
+
 ### Shared engine delivery
 
 A canonical pair of files, `libs/installer-engine/installer-engine.ps1` and

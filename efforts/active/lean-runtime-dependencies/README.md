@@ -167,18 +167,20 @@ shared mutable venv is presumed acceptable.
 The delivered dependency reductions, helper investigation and compatibility
 boundary have cleared review. This is not approval to enable a production
 artifact fast path. The remaining engine-profile application (#6737) depends on
-#4876's still-open Phase 2 item to design and publish authority-approved exact
-profiles and their selection/feed-compatibility contract. Its Phase 3 consumer
-admission is also unimplemented; do not invent a substitute resolver here.
-The overlapping held-construction change (#6598) remains open.
+#4876's still-open Phase 2 item to publish authority-approved exact profiles.
+The selection contract's design merged in #6795; actual approval adapters,
+feed-compatible closures and Phase 3 consumer admission remain open. Do not
+invent a substitute resolver here. Held construction merged in #6598; that is
+not profile admission or proof of this campaign's remaining native acceptance.
 
 The existing owners have the concrete acceptance requests; no reply or accepted
 transfer is assumed. To drive rather than merely wait on that prerequisite,
 this campaign contributes the bounded
-[exact-profile contract proposal](../governed-python-artifact-promotion/exact-profile-contract.md)
-to #4876's existing authority design. Review precedes any selector or engine
-consumer implementation; the contribution does not take over its publication
-or acquisition work. Native/standalone queue, schema, canary, warm-engine and
+[exact-profile contract](../governed-python-artifact-promotion/exact-profile-contract.md)
+to #4876's existing authority design. The reviewed next slice is an inert exact
+record and pure selection API, not approval-source integration, a loader,
+publication or acquisition. #6941 retains the separate contributor-owned
+candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
 Darwin acceptance remain with #5768. Apply the reviewed profile contract under
 #6737, composing #6598 construction and #6707 admission rather than overlapping
 their open implementations. The effort and retained runtime/state stay open.
@@ -553,3 +555,26 @@ their open implementations. The effort and retained runtime/state stay open.
 - Native context management preserves this session's responsibility. No manual
   handoff, profile implementation, engine/model download or rollout is part of
   this proposal.
+
+### 2026-10-16 - Reviewed exact-profile prerequisite and bounded implementation
+- #6795 merged to `dev` as `40084a99c` after current-head Copilot approval
+  `5527977396` and successful required CI `38680105914`. The review corrected
+  the blocked-artifact case: authority-selected source fallback may use a
+  distinct admissible closure, never bypass a blocked dependency or an
+  integrity/provenance failure.
+- Re-read both owning efforts and advanced this retained worktree through
+  managed post-merge reconciliation. #6598 has since merged; #6707 and #6551
+  retain their open scopes. #6941's candidate-input contribution is separate
+  and is neither modified nor superseded here.
+- Implemented the reviewed inert record/selection slice under #4876. Full wheel
+  graph, extras, markers, targets and whole-record approval references are
+  validated without downloading or installing dependencies. Actual authority
+  adapters, inspected-wheel admission and native engine application remain
+  open. No production rollout, model or corpus mutation occurred.
+- The existing wired installation-contract suite passed 171 cases with 14
+  unavailable native-POSIX skips on Windows. The final 47 exact-profile cases include
+  an actual fresh Python process using the API without creating a runtime.
+  The focused cases also run under optimized Python with explicit production
+  refusal checks, not removable production assertions.
+  This is not a released lock, fresh installer or acquisition/admission proof.
+  Hosted current-head checks and normal review remain required.

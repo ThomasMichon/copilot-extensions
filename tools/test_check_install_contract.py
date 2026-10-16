@@ -10,6 +10,9 @@ import subprocess
 from pathlib import Path
 import pytest
 
+pytest.register_assert_rewrite("runtime_profile_cases")
+from runtime_profile_cases import TestExactRuntimeProfile as TestExactRuntimeProfile
+
 from test_installer_finalizers import (
     test_posix_purge_ignores_cdpath_for_relative_roots as test_posix_purge_ignores_cdpath_for_relative_roots,
     test_posix_purge_keeps_the_locked_inode_and_link_target as test_posix_purge_keeps_the_locked_inode_and_link_target,
