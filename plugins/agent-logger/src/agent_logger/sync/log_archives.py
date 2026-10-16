@@ -278,7 +278,7 @@ def _archive_directory(
                 result.archived += 1
             else:
                 result.unchanged += 1
-        except (OSError, ValueError, zipfile.BadZipFile, RuntimeError, zlib.error) as error:
+        except (OSError, ValueError, EOFError, zipfile.BadZipFile, RuntimeError, zlib.error) as error:
             message = f"{name}: {error}"
             result.failed.append(message)
             log.warning("process-log ZIP snapshot failed: %s", message)

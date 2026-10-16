@@ -64,7 +64,7 @@ class ProcessLogReadback:
                     root, revision.archive_name, revision.logical_name,
                     revision.sha256, revision.size,
                 )
-        except (OSError, ValueError, zipfile.BadZipFile, zlib.error, RuntimeError) as exc:
+        except (OSError, ValueError, EOFError, zipfile.BadZipFile, zlib.error, RuntimeError) as exc:
             # Do not expose configured paths or arbitrary exception text in reports.
             return LogArchiveReadbackResult(
                 self.target_name, revision, True, False,

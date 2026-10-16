@@ -24,9 +24,12 @@ CONTENT = b"preserved process evidence\n"
 REVISION = LogArchiveRevision(NAME, hashlib.sha256(CONTENT).hexdigest(), len(CONTENT))
 
 
-def _zip(root: Path, content: bytes = CONTENT, *, name: str = NAME) -> Path:
+def _zip(
+    root: Path, content: bytes = CONTENT, *, name: str = NAME,
+    revision: LogArchiveRevision = REVISION,
+) -> Path:
     root.mkdir(parents=True, exist_ok=True)
-    path = root / REVISION.archive_name
+    path = root / revision.archive_name
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(name, content)
     return path
@@ -140,6 +143,51 @@ def test_source_roots_readback_rejects_corrupt_or_inexact_archives(
             archive.writestr(info, CONTENT)
     assert not ProcessLogReadback("local", tmp_path).verify(REVISION).verified
     assert path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permits truncating an opened readback file")
+@pytest.mark.parametrize("operation", ["readback", "snapshot"])
+def test_source_roots_readback_member_truncation_is_a_per_revision_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    content = b"x" * (3 * 1024 * 1024)
+    revision = LogArchiveRevision(NAME, hashlib.sha256(content).hexdigest(), len(content))
+    first, second = tmp_path / "first", tmp_path / "second"
+    path = _zip(first, content, revision=revision)
+    _zip(second, content, revision=revision)
+    opened: list[str] = []
+    original = zipfile.ZipFile.open
+
+    def truncate_opened(
+        self: zipfile.ZipFile, name: str | zipfile.ZipInfo, mode: str = "r",
+        pwd: bytes | None = None, *, force_zip64: bool = False,
+    ) -> BinaryIO:
+        member = original(self, name, mode, pwd, force_zip64=force_zip64)
+        if not opened:
+            # Large stored data prevents header buffering from hiding this EOF.
+            with path.open("r+b") as writable:
+                writable.truncate(0)
+        opened.append(mode)
+        return member
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", truncate_opened)
+    if operation == "readback":
+        result = verify_required_log_archives((
+            ProcessLogReadback("local", first), ProcessLogReadback("onedrive", second),
+        ), revision)
+        assert not result.verified
+        assert [item.verified for item in result.results] == [False, True]
+        assert "EOFError" in result.results[0].detail
+        assert len(opened) == 2
+    else:
+        source = first / NAME
+        source.write_bytes(content)
+        os.utime(source, (1, 1))
+        monkeypatch.setattr(log_archives, "producer_exited", lambda pid: True)
+        snapshot = log_archives.archive_settled_process_logs(first, min_quiet_seconds=1)
+        assert len(snapshot.failed) == 1 and snapshot.scanned == 1
+        assert source.read_bytes() == content
+    assert path.exists() and path.stat().st_size == 0
 
 
 def test_source_roots_readback_reuses_snapshot_archive_naming(
