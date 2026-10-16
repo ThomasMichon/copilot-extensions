@@ -143,16 +143,15 @@ def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
     if (
         reservation.get("reserved_by") != supervisor.supervisor_id
         or reservation.get("release_requested")
-        or reservation.get("conversation_retired")
         or reservation.get("conclusion_state") == "pending"
     ):
         return 0
     info = reservation.get("agent_info")
     if not info and not (
-        reservation.get("creation_key") and reservation.get("allocation_project")
+        reservation.get("creation_key")
         and (
-            not reservation.get("worktree") and not reservation.get("session_handle")
-            or reservation.get("worktree") and reservation.get("worktree_path")
+            reservation.get("worktree")
+            or reservation.get("allocation_project") and not reservation.get("session_handle")
         )
     ):
         log.error("ordinary reservation %s has unrecorded creation; explicit repair required", reservation["key"])
@@ -162,6 +161,8 @@ def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
     if time.time() - reservation["updated_at"] < supervisor.reserving_timeout:
         return 0
     if info:
+        if reservation.get("conversation_retired") is not False:
+            return 0
         session_id = info["session_id"]
         verdict = supervisor.local_body_verdict_fn(session_id)
         if verdict == "unknown":
@@ -290,7 +291,9 @@ def start(
         except (TaskError, DispatchError, OSError, subprocess.TimeoutExpired) as exc:
             raise BridgeCarriedSessionBusy(f"retained ordinary agent resume failed: {exc}") from exc
     else:
-        if reservation.get("conversation_retired") is not False:
+        if reservation.get("conversation_retired") is not False and not (
+            assigned and reservation.get("inherited_retirement_reconcilable") is True
+        ):
             raise BridgeCarriedSessionBusy("ordinary allocation has retired or unknown native history")
         if assigned:
             record = assignment_record()

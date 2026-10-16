@@ -1,0 +1,9 @@
+{
+  "comment": "Expose canonical dispatch attribution on exact worktree record reads for retained assignment ownership checks",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

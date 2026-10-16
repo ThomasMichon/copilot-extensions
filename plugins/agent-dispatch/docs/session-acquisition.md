@@ -31,6 +31,14 @@ retirement, foreign holders and exact native identity are checked again before
 the first prompt. Releasing an exclusive slot is not conversation retirement.
 Explicitly retired IDs remain forbidden, but do not veto a different current,
 unretired native head; unknown unretired historical identities still conflict.
+Bare historical CLI handles are native IDs under their original producing
+driver, even after an ordinary-bridge retry; unclassifiable bare handles refuse.
+A handleless inherited retirement marker permits only current-head inspection
+when all known retired identities are attributable. Exact resumed-agent storage
+can atomically clear that current derived marker for a different unretired
+head; historical retirement evidence is unchanged. It never permits creation.
+Assigned keyed reservations missing project/path metadata defer through normal
+supervisor retry without probing or launching a native session.
 Reconciliation preserves explicit prior workspace ownership;
 a fresh ordinary Bridge allocation remains Bridge-owned and `targeted` from
 Dispatch's perspective. Deploy compatible exact-record, strict-resume and

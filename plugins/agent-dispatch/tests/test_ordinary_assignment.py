@@ -39,7 +39,13 @@ def assigned(tmp_path, monkeypatch):
         "creation_nonce": "original-incarnation", "sessions_indexed": True,
         "execution_leg": None, "execution_leg_opaque": False,
         "session_backend": None, "session_backend_opaque": False,
-        "dispatch_attempt": {"task_id": task.id},
+        "dispatch_attempt": {
+            "task_id": task.id, "reservation_key": reservation.key,
+            "attempt": reservation.attempt, "driver": "ordinary-bridge",
+            "supervisor": "supervisor", "creator_machine": "example-owner",
+            "ownership": "created",
+        },
+        "dispatch_attempt_opaque": False,
     }
     response = {
         "session_id": "bridge-a", "acp_session_id": "native-a",
@@ -224,7 +230,7 @@ def test_ordinary_assignment_distinguishes_released_exclusivity_from_native_reti
     if retirement_requested:
         with pytest.raises(bridge.BridgeCarriedSessionBusy):
             _start(assigned)
-        assert not calls
+        assert calls == ["record"]
     else:
         _start(assigned)
         assert calls.count("resume") == calls.count("send") == 1
@@ -248,16 +254,19 @@ def test_ordinary_assignment_current_head_respects_unretired_not_retired_old_nat
     task["spawn_reservation_key"] = current.key
     record.update(last_session_id="native-b", session_count=2)
     response.update(acp_session_id="native-b", durable_session_id="native-b")
-    with queue._connect() as conn:
-        conn.execute(
-            "UPDATE spawn_reservations SET conversation_retired=0,session_handle=NULL WHERE key=?",
-            (current.key,),
-        )
+    assert current.conversation_retired is old_retired
+    assert current.session_handle == (None if old_retired else "local-body:legacy-bridge")
     if old_retired:
         _start(assigned)
         assert calls.count("resume") == calls.count("send") == 1
         assert "create" not in calls
         assert queue.get_reservation(current.key).agent_info["acp_session_id"] == "native-b"
+        assert queue.get_reservation(current.key).conversation_retired is False
+        assert queue.get_reservation(current.key).creation_key == current.creation_key
+        with queue._connect() as conn:
+            validate_start(conn, queue.get(task["id"]), "native-b", None)
+            with pytest.raises(TaskError):
+                validate_start(conn, queue.get(task["id"]), "native-a", None)
     else:
         with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
             _start(assigned)

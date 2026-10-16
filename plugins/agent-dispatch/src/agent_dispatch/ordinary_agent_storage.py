@@ -8,41 +8,8 @@ from typing import Any
 from .ordinary_agent_facts import (
     identity, native_conflict, owner_record, validate_created, validate_resumed,
 )
+from .ordinary_native_bindings import inherited_retirement, native_bindings
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
-
-
-def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str]]:
-    """Read native bindings only for this retained allocation and exact workspace."""
-    known: set[str] = set()
-    retired: set[str] = set()
-    if task.owner_session_id:
-        known.add(task.owner_session_id)
-    if row["session_handle"] and not row["session_handle"].startswith("local-body:"):
-        if row["driver"] == "cli":
-            known.add(row["session_handle"])
-    if row["agent_info"]:
-        known.add(identity(json.loads(row["agent_info"])).native)
-    if row["worktree"]:
-        histories = conn.execute(
-            "SELECT s.agent_info,s.conversation_retired,s.release_requested,s.state,"
-            "s.session_handle,a.native_session_id "
-            "FROM spawn_reservations s LEFT JOIN acquisition_receipts a "
-            "ON a.reservation_key=s.key WHERE s.worktree=? "
-            "AND (s.task_id=? OR s.creation_key=?)",
-            (row["worktree"], task.id, row["creation_key"]),
-        ).fetchall()
-        for history in histories:
-            native = history["native_session_id"]
-            if not native and history["agent_info"]:
-                native = identity(json.loads(history["agent_info"])).native
-            if native:
-                known.add(native)
-                if history["conversation_retired"] or (
-                    history["session_handle"] and history["release_requested"]
-                    and history["state"] in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED}
-                ):
-                    retired.add(native)
-    return sorted(known), sorted(retired)
 
 
 def reservation_native_facts(queue: Any, key: str) -> dict:
@@ -51,18 +18,24 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         task = queue._fetch(conn, row["task_id"]) if row else None
         if row is None or task is None:
             raise TaskError("ordinary assignment has no current task/reservation")
-        known, retired = native_bindings(conn, row, task)
-        error = _admission_error(conn, row, task)
+        try:
+            known, retired = native_bindings(conn, row, task)
+            reconcile_retirement = inherited_retirement(conn, row, task)
+            error = _admission_error(conn, row, task)
+        except TaskError as exc:
+            known, retired, reconcile_retirement, error = [], [], False, str(exc)
     return {
         "known_native_session_ids": known, "retired_native_session_ids": retired,
         "ordinary_assignment_error": error,
+        "inherited_retirement_reconcilable": reconcile_retirement,
     }
 
 
 def _admission_error(conn: Any, row: Any, task: Any) -> str | None:
     if (
         row["state"] != SpawnState.RESERVING or row["release_requested"]
-        or row["conversation_retired"] or row["conclusion_state"] == "pending"
+        or row["conversation_retired"] and not inherited_retirement(conn, row, task)
+        or row["conclusion_state"] == "pending"
         or row["exclusive_key"] and row["exclusive_released"]
         or task.hold_reason is not None or task.status != Status.QUEUED or task.owner is not None
         or task.source == "ci-repair" or row["exclusive_key"] != task.exclusive_key
@@ -111,6 +84,11 @@ def _record_agent(
             raise TaskError("ordinary agent does not match retained allocation provenance")
         if worktree_record is not None:
             record = owner_record(worktree_record, dict(row), task.id)
+            if (
+                record["id"] != actual.worktree or record["repo"] != actual.project
+                or record["path"] != actual.path
+            ):
+                raise TaskError("ordinary agent does not match the exact ground workspace")
             if record.get("last_session_id") != actual.native:
                 # A real keyed create can complete the positively sessionless allocation.
                 from .ordinary_agent_facts import sessionless
@@ -118,6 +96,8 @@ def _record_agent(
                     raise TaskError("ordinary agent does not match the ground native head")
         elif resumed:
             raise TaskError("resumed agent requires the exact ground owner record")
+        if row["conversation_retired"] and not resumed:
+            raise TaskError("retired history requires a proven current native head")
         known, retired = native_bindings(conn, row, task)
         if native_conflict(actual.native, known, retired):
             raise TaskError("ordinary agent conflicts with known or retired native identity")
@@ -156,7 +136,7 @@ def _record_agent(
         conn.execute(
             "UPDATE spawn_reservations SET worktree=?,session_handle=?,agent_info=?,"
             "worktree_ownership=?,driver='ordinary-bridge',allocation_project=?,"
-            "worktree_path=?,updated_at=? WHERE key=?",
+            "worktree_path=?,conversation_retired=0,updated_at=? WHERE key=?",
             (
                 actual.worktree, handle, encoded,
                 row["worktree_ownership"] or "targeted",

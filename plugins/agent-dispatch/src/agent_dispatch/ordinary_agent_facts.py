@@ -94,6 +94,8 @@ def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
         )
     ):
         raise TaskError("ground owner returned no exact worktree record")
+    if not {"dispatch_attempt", "dispatch_attempt_opaque"} <= record.keys():
+        raise TaskError("exact owner record lacks dispatch-attribution capability")
     path = record["path"]
     posix, windows = PurePosixPath(path), PureWindowsPath(path)
     if (
@@ -101,6 +103,7 @@ def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
         or ".." in posix.parts or ".." in windows.parts
         or any(type(record[field]) is not bool for field in (
             "sessions_indexed", "execution_leg_opaque", "session_backend_opaque",
+            "dispatch_attempt_opaque",
         ))
         or record["session_count"] is not None
         and (type(record["session_count"]) is not int or record["session_count"] < 0)
@@ -108,6 +111,13 @@ def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
         and not isinstance(record["creation_nonce"], str)
     ):
         raise TaskError("ground owner returned invalid workspace or history metadata")
+    attribution = record["dispatch_attempt"]
+    if record["dispatch_attempt_opaque"] or attribution is not None and (
+        not isinstance(attribution, dict)
+        or not isinstance(attribution.get("task_id"), str)
+        or not attribution["task_id"]
+    ):
+        raise TaskError("ground worktree dispatch attribution is opaque or invalid")
     if record["status"] == "finalizing":
         raise TaskError("ground workspace finalization is in progress; retry the assignment")
     if (

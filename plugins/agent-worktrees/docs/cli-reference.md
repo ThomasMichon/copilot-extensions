@@ -94,6 +94,7 @@ Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
 The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
 `session_count`, `last_session_id`, `sessions_indexed`, `execution_leg`,
 `execution_leg_opaque`, `session_backend`, `session_backend_opaque`,
+`dispatch_attempt`, `dispatch_attempt_opaque`,
 and raw historical `machine`, `platform`, `owner`,
 `owner_ref`, `caller_worktree`, `parent_session`, `checkout_managed` fields
 (absent raw fields are null). `session_count` is null when sessions have not
@@ -107,6 +108,11 @@ the existing asserted-head fallback; an explicit null head transition clears it.
 preserving an unrecognized explicit leg as opaque data.
 An unrecognized legacy backend likewise remains visible as raw data with its
 opaque flag; a null derived leg does not prove absence of a provider binding.
+`dispatch_attempt` uses the canonical seven-field dispatch provenance parser.
+An absent attribution returns null with `dispatch_attempt_opaque: false`;
+an explicit null, incomplete or unrecognized attribution remains raw with
+`dispatch_attempt_opaque: true`. Consumers must check that capability and
+opacity before treating a record as unassigned.
 YAML timestamp scalars, including those nested in opaque bindings or provider
 blobs, are represented as ISO-8601 strings in JSON without rewriting the record.
 Other values must be JSON-compatible: mapping keys must be strings, and

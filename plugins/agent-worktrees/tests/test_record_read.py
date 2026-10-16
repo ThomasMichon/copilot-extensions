@@ -127,6 +127,8 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "sessions_indexed": True,
         "session_backend": None,
         "session_backend_opaque": False,
+        "dispatch_attempt": None,
+        "dispatch_attempt_opaque": False,
         "machine": "historical-owner",
         "platform": "windows",
         "owner": data["owner"],
@@ -136,6 +138,52 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "checkout_managed": None,
     }
     assert reads == [path]
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("task_id", ["assigned-task", "foreign-task"])
+def test_record_read_preserves_canonical_dispatch_attribution(record_fixture, task_id, monkeypatch):
+    data, path = record_fixture
+    attribution = {
+        "task_id": task_id,
+        "reservation_key": "dispatch-task:example:1",
+        "attempt": 1,
+        "driver": "ordinary-bridge",
+        "supervisor": "example-supervisor",
+        "creator_machine": "example-owner",
+        "ownership": "created",
+    }
+    data["dispatch_attempt"] = attribution
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["dispatch_attempt"] == attribution
+    assert result["worktree"]["dispatch_attempt_opaque"] is False
+    assert path.read_bytes() == before
+    # Exercise the actual consumer against the producer's serialized contract.
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "agent-dispatch" / "src"))
+    from agent_dispatch.ordinary_agent_facts import owner_record
+    from agent_dispatch.queue_records import TaskError
+    reservation = {"worktree": data["worktree_id"], "allocation_project": data["repo"],
+                   "worktree_path": data["worktree_path"]}
+    if task_id == "foreign-task":
+        with pytest.raises(TaskError, match="identity, holder"):
+            owner_record(result["worktree"], reservation, "assigned-task")
+    else:
+        assert owner_record(result["worktree"], reservation, "assigned-task") == result["worktree"]
+
+
+@pytest.mark.parametrize("attribution", [None, {}, {"task_id": "future-task"}, {"version": 99}])
+def test_record_read_preserves_opaque_dispatch_attribution(record_fixture, attribution):
+    data, path = record_fixture
+    data["dispatch_attempt"] = attribution
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["dispatch_attempt"] == attribution
+    assert result["worktree"]["dispatch_attempt_opaque"] is True
     assert path.read_bytes() == before
 
 
