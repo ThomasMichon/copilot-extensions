@@ -1,0 +1,9 @@
+{
+  "comment": "Carried-worktree resolution falls back to the exact durable record when list --fresh has not yet published a just-created worktree or fails outright; archived worktrees and opaque dispatch attempts stay refused",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

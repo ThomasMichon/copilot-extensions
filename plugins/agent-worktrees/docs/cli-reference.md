@@ -127,8 +127,8 @@ directory itself before considering a non-bare checkout's parent.
 Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
 The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
 `session_count`, `last_session_id`, `sessions_indexed`, `execution_leg`,
-`execution_leg_opaque`, `session_backend`, `session_backend_opaque`,
-`dispatch_attempt`, `dispatch_attempt_opaque`,
+`execution_leg_opaque`, `execution_leg_live`, `session_backend`,
+`session_backend_opaque`, `dispatch_attempt`, `dispatch_attempt_opaque`,
 and raw historical `machine`, `platform`, `owner`,
 `owner_ref`, `caller_worktree`, `parent_session`, `checkout_managed` fields
 (absent raw fields are null). `session_count` is null when sessions have not
@@ -140,6 +140,9 @@ than silently deriving a legacy head. An absent or empty legacy ledger retains
 the existing asserted-head fallback; an explicit null head transition clears it.
 `execution_leg` uses the existing read-only legacy-backend compatibility view,
 preserving an unrecognized explicit leg as opaque data.
+`execution_leg_live` follows the roster row's rule (opaque bindings, or an
+active/unknown derived leg, are live), so callers can judge a just-created
+worktree before the resident republishes the roster.
 An unrecognized legacy backend likewise remains visible as raw data with its
 opaque flag; a null derived leg does not prove absence of a provider binding.
 `dispatch_attempt` uses the canonical seven-field dispatch provenance parser.

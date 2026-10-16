@@ -199,6 +199,13 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
             "last_session_id": record.resolved_head_session,
             "execution_leg": leg.to_dict() if leg is not None else record.execution_leg_raw,
             "execution_leg_opaque": record.execution_leg_opaque,
+            # Same liveness rule as the roster row, so exact-record readers can
+            # judge a just-created worktree before the roster republishes.
+            "execution_leg_live": bool(
+                record.execution_leg_opaque
+                or record.session_backend_opaque
+                or (leg is not None and leg.state in {"active", "unknown"})
+            ),
             "session_backend": (
                 record.session_backend.to_dict()
                 if record.session_backend is not None

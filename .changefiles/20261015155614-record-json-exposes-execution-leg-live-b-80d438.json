@@ -1,0 +1,9 @@
+{
+  "comment": "record --json also exposes execution_leg_live so exact-record readers can judge a just-created worktree before the resident roster republishes",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
