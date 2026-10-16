@@ -540,8 +540,9 @@ async def test_quiet_ws_keeps_ping_pong_liveness_beyond_application_idle(peer):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+@pytest.mark.parametrize("malformed", ["malformed-result", "malformed-notification"])
 async def test_malformed_sdk_results_never_reach_logs_events_or_failure_records(
-    peer, tmp_db, monkeypatch, caplog, mode,
+    peer, tmp_db, monkeypatch, caplog, mode, malformed,
 ):
     url, context, _ = peer
     spec = RemoteAcpTarget(
@@ -557,14 +558,17 @@ async def test_malformed_sdk_results_never_reach_logs_events_or_failure_records(
     manager = session_manager_from_config(tmp_db, ServiceConfig(remote_acp={"peer": spec}))
     session = await connect_remote_session(manager, "peer")
     try:
-        await manager.submit_prompt(session.session_id, "malformed-result")
+        await manager.submit_prompt(session.session_id, malformed)
         await asyncio.wait_for(session._prompt_task, 5)
         rows = manager.db.execute_read(
             "SELECT stop_reason FROM turns WHERE session_id=?", (session.session_id,),
         )
         evidence = str([dict(row) for row in rows]) + str(session.event_log.get_events()) + caplog.text
         assert "SYNTHETIC-SENSITIVE-MARKER" not in evidence
-        assert "Remote ACP SDK request failed" in evidence
+        if malformed == "malformed-result":
+            assert "Remote ACP SDK request failed" in evidence
+        else:
+            assert "Remote ACP SDK diagnostic (details redacted)" in caplog.text
     finally:
         await manager.stop_session(session.session_id)
 

@@ -177,6 +177,19 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Asynchronous SDK diagnostic privacy
+
+- Fresh review confirmed synchronous malformed-result fixes and identified the
+  separate asynchronous notification-validation logger path. Added a
+  remote-connection context propagated into SDK tasks and a public Python
+  log-record-factory redactor for SDK diagnostics only; no SDK private method,
+  protocol handler or local connection behavior is patched.
+- Actual HTTP2/WSS malformed-notification and malformed-result marker tests,
+  plus a local/non-SDK logging preservation regression, pass: 5 tests.
+- The open candidate now conflicts with newer `dev` work and must be
+  reconciled before a fresh complete CI/review pass. Cancelled CI is not a pass
+  or a waiver. Implementation merge, effort closure and finalization stay open.
+
 ### 2026-10-16 — Sanitized SDK results and adopted session streams
 
 - Current review identified malformed successful SDK results leaking through

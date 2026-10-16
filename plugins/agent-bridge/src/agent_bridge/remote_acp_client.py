@@ -21,6 +21,7 @@ from .remote_acp_config import (
     NAMESPACE, REMOTE_ACP_VERSION, RemoteAcpTarget, capability_metadata, validate_capabilities,
 )
 from .remote_acp_transport import RemoteTransport, RemoteTransportError
+from .remote_acp_logging import remote_sdk_log_scope
 
 
 class RemoteAcpClientMixin:
@@ -37,7 +38,8 @@ class RemoteAcpClientMixin:
         self, method: Callable[..., Awaitable[Any]], **kwargs: Any,
     ) -> Any:
         try:
-            return await method(**kwargs)
+            with remote_sdk_log_scope():
+                return await method(**kwargs)
         except Exception as exc:
             reason = f"Remote ACP SDK request failed ({type(exc).__name__}); outcome unknown"
             self._remote_transport.fail(reason)
@@ -85,9 +87,10 @@ class RemoteAcpClientMixin:
         try:
             if target.transport == "websocket":
                 await remote.open()
-            self._connection = connect_to_agent(
-                _BridgeClientImpl(self), remote, use_unstable_protocol=True,
-            )
+            with remote_sdk_log_scope():
+                self._connection = connect_to_agent(
+                    _BridgeClientImpl(self), remote, use_unstable_protocol=True,
+                )
             result = await asyncio.wait_for(
                 self._remote_sdk_rpc(self._connection.initialize,
                     protocol_version=REMOTE_ACP_VERSION,

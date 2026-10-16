@@ -195,6 +195,10 @@ before credentials can reach a different destination. Remote RPC error text is
 sanitized, not incorporated into bridge errors/logs.
 Malformed successful SDK results are likewise replaced by a sanitized typed
 failure before caller errors, event logs or turn-failure persistence.
+Asynchronous SDK notification diagnostics are also redacted inside the remote
+connection's context, using Python's public log-record factory API. Local SDK
+connections and application logging retain their existing behavior; SDK code
+and private handlers are not patched.
 
 Defaults: 1 MiB JSON/SSE/WS frames, 64 queued messages/callbacks/sessions,
 30-second connect/send/close deadlines, a 900-second RPC result/approval deadline,

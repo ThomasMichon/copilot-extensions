@@ -175,6 +175,14 @@ class Connection:
                 }, sid)
             elif text == "malformed-result":
                 await self.emit(rpc(message, {"stopReason": "SYNTHETIC-SENSITIVE-MARKER"}), sid)
+            elif text == "malformed-notification":
+                await self.emit({
+                    "jsonrpc": "2.0", "method": "session/update",
+                    "params": {"sessionId": sid, "update": {
+                        "sessionUpdate": "SYNTHETIC-SENSITIVE-MARKER",
+                    }},
+                }, sid)
+                await self.finish(message, sid)
             elif text == "wait":
                 self.pending["cancel"] = message, sid
             elif text == "drop-session-only":
