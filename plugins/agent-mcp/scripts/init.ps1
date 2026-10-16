@@ -320,7 +320,7 @@ function Get-BootstrapPython {
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (Invoke-Hidden py -3 -c 'import sys; print(sys.executable)' | Out-String).Trim()
+        $exe = (Invoke-Hidden -FilePath py -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
@@ -593,6 +593,7 @@ if (-not (Enter-InstallLock)) {
     exit 1
 }
 
+$script:McpInstallFailure = $null
 try {
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
@@ -604,27 +605,41 @@ if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 # on screen once per spawn during provisioning. Route provisioning spawns
 # through this helper (native CreateNoWindow=true) instead, so the child
 # never gets a window regardless of this script's own console state.
-# Preserves stdout capture + $LASTEXITCODE so call sites need only replace
-# `& $exe @args` with `Invoke-Hidden $exe @args`.
+# Bind native argv explicitly so PowerShell cannot consume flags or separators.
 function Invoke-Hidden {
     param(
         [Parameter(Mandatory)][string]$FilePath,
-        [Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgList
+        [string[]]$ArgList = @()
     )
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
-    foreach ($a in $ArgList) { [void]$psi.ArgumentList.Add($a) }
+    if ($psi.PSObject.Properties['ArgumentList']) {
+        foreach ($a in $ArgList) { [void]$psi.ArgumentList.Add($a) }
+    } else {
+        # Windows PowerShell 5.1 uses .NET Framework's quoted command line.
+        $psi.Arguments = ($ArgList | ForEach-Object {
+            '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+        }) -join ' '
+    }
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $proc = [System.Diagnostics.Process]::Start($psi)
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $stderr = $proc.StandardError.ReadToEnd()
-    $proc.WaitForExit()
-    $global:LASTEXITCODE = $proc.ExitCode
-    if ($stderr) { $stderr -split "`r?`n" | Where-Object { $_ } | ForEach-Object { Write-Verbose $_ } }
-    return $stdout
+    try {
+        $stdout = $proc.StandardOutput.ReadToEndAsync()
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        $proc.WaitForExit()
+        [Threading.Tasks.Task]::WaitAll($stdout, $stderr)
+        $global:LASTEXITCODE = $proc.ExitCode
+        if ($stderr.Result) {
+            if ($proc.ExitCode -ne 0) { [Console]::Error.Write($stderr.Result) }
+            else { Write-Verbose $stderr.Result }
+        }
+        return $stdout.Result
+    } finally {
+        $proc.Dispose()
+    }
 }
 
 # -- Preflight checks --------------------------------------------------
@@ -636,7 +651,7 @@ Write-Host ''
 if (-not (Test-Path $PkgSrcDir)) {
     Write-Fail "Package source not found at $PkgSrcDir"
     Write-Host "  Are you running this from the correct plugin directory?"
-    exit 1
+    throw "Package source not found at $PkgSrcDir"
 }
 
 $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
@@ -662,7 +677,7 @@ if (-not $pythonCmd) {
     Write-Fail 'Python not found on PATH (need 3.10+)'
     Write-Host '  Install Python from https://python.org or via winget:' -ForegroundColor DarkGray
     Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
-    exit 1
+    throw 'Python not found on PATH (need 3.10+)'
 }
 Write-Ok "Python: $pythonCmd"
 
@@ -701,7 +716,7 @@ if ($Force -or -not (Test-Path $VenvPython)) {
     $signedBase = $null
     if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
         foreach ($v in '3.13', '3.12', '3.11') {
-            $cand = (Invoke-Hidden py "-$v" -c "import sys;print(sys.executable)" | Out-String).Trim()
+            $cand = (Invoke-Hidden -FilePath py -ArgList @("-$v", '-c', 'import sys;print(sys.executable)') | Out-String).Trim()
             if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
                 try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
             }
@@ -711,26 +726,26 @@ if ($Force -or -not (Test-Path $VenvPython)) {
         try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
     }
     if ($signedBase -and -not (Test-Path $VenvPython)) {
-        Invoke-Hidden $signedBase -m venv --copies $VenvDir | Out-Null
+        Invoke-Hidden -FilePath $signedBase -ArgList @('-m', 'venv', '--copies', $VenvDir) | Out-Null
     }
     if (-not (Test-Path $VenvPython)) {
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             Write-Step 'Creating venv via uv...'
             Invoke-VersionedSlotClean
-            Invoke-Hidden uv venv $VenvDir --allow-existing | Out-Null
+            Invoke-Hidden -FilePath uv -ArgList @('venv', $VenvDir, '--allow-existing') | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Write-Step 'uv venv failed -- falling back to python -m venv'
-                Invoke-Hidden $pythonCmd -m venv $VenvDir | Out-Null
+                Invoke-Hidden -FilePath $pythonCmd -ArgList @('-m', 'venv', $VenvDir) | Out-Null
             }
         } else {
             Write-Step 'Creating venv via python -m venv...'
-            Invoke-Hidden $pythonCmd -m venv $VenvDir | Out-Null
+            Invoke-Hidden -FilePath $pythonCmd -ArgList @('-m', 'venv', $VenvDir) | Out-Null
         }
     }
     $ErrorActionPreference = $prevEAP
     if (-not (Test-Path $VenvPython)) {
         Write-Fail "Venv creation failed -- $VenvPython not found"
-        exit 1
+        throw "Venv creation failed -- $VenvPython not found"
     }
     Write-Ok 'Venv created'
 } else {
@@ -769,7 +784,7 @@ foreach ($lib in @(
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "$($lib.Dir) library install failed"
-            exit 1
+            throw "$($lib.Dir) library install failed (exit $LASTEXITCODE)"
         }
     }
 }
@@ -783,7 +798,7 @@ $pkgResult = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP
 if ($pkgResult -ne 0) {
     Write-Fail 'Failed to install agent-mcp package into venv'
-    exit 1
+    throw "Failed to install agent-mcp package into venv (exit $pkgResult)"
 }
 
 # Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused).
@@ -802,16 +817,16 @@ if ($VersionedRuntime) {
     # Health-gate (#935): never swap the stable .venv link onto a slot whose
     # package does not import -- a broken build must not become the live runtime.
     # The marker is written only after this gate passes (so "marked" == healthy).
-    Invoke-Hidden $VenvPython -c 'import agent_mcp' | Out-Null
+    Invoke-Hidden -FilePath $VenvPython -ArgList @('-c', 'import agent_mcp') | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
-        exit 1
+        throw "Fresh runtime slot failed its health gate (versions/$SrcVersion)"
     }
-    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
-    Invoke-Hidden $VenvPython $VrScript --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link | Out-Null
+    if (-not (Invoke-VersionedMarkComplete)) { throw 'Runtime construction completion failed' }
+    Invoke-Hidden -FilePath $VenvPython -ArgList @($VrScript, '--root', $InstallDir, '--link-name', '.venv', 'activate', $SrcVersion, '--no-link') | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
-        exit 1
+        throw "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
     }
     Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
 }
@@ -839,15 +854,6 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
     $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
     $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
     try {
-        # `-ArgList` is passed explicitly (as an array) rather than as bare
-        # positional tokens: `Invoke-Hidden`'s `param()` block uses
-        # `[Parameter(...)]` attributes, which implicitly makes it an
-        # advanced function and enables PowerShell's common parameters
-        # (`-InformationAction`/`-InformationVariable`/etc.). A bare `-I`
-        # token (Python's isolated-mode flag) is ambiguous against those two
-        # common-parameter names and PowerShell throws instead of treating
-        # it as a remaining argument. Binding the whole array to `-ArgList`
-        # by name sidesteps that re-parsing entirely.
         $cutoverArgs = @(
             '-I', '-X', 'utf8', '-m', 'agent_mcp', 'cutover', '--require-live', '--force', '--json',
             '--health-timeout', $cutoverHealthTimeout, '--drain-timeout', $cutoverDrainTimeout
@@ -879,7 +885,7 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
         # Use the plain (one 'version:pid' per line) output, not --json: under this
         # script's Set-StrictMode 2.0, an empty ConvertFrom-Json array collapses so
         # a later .Count throws. @(...) of the lines is always a countable array.
-        $reapLines = (Invoke-Hidden $VenvPython $ReapScript --root $InstallDir --link-name '.venv') -split "`r?`n"
+        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @($ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
         $reaped = @($reapLines | Where-Object { $_ -and $_.ToString().Trim() })
         if ($reaped.Count -gt 0) {
             $stale = ($reaped | ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique) -join ', '
@@ -954,7 +960,7 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false
 for ($i = 0; $i -lt 3; $i++) {
-    & $VenvPython -c 'import agent_mcp' 2>$null
+    Invoke-Hidden -FilePath $VenvPython -ArgList @('-c', 'import agent_mcp') | Out-Null
     if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
     Start-Sleep -Seconds 1
 }
@@ -963,7 +969,7 @@ if ($importOk) {
     Write-Ok 'Verification: module imports successfully'
 } else {
     Write-Fail 'Verification: module import failed'
-    exit 1
+    throw 'Verification: module import failed'
 }
 
 # Ensure ~/.local/bin is on PATH
@@ -983,10 +989,19 @@ Write-Host ''
 Write-Host '=== agent-mcp init complete ===' -ForegroundColor Cyan
 Write-Host '  Try: agent-mcp version' -ForegroundColor DarkGray
 exit 0
+} catch {
+    $script:McpInstallFailure = $_
+    throw
 } finally {
     try {
         if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
-            Stop-RuntimeConstruction
+            try {
+                Stop-RuntimeConstruction
+            } catch {
+                if ($script:McpInstallFailure) {
+                    Write-Warning "Runtime construction cleanup also failed: $($_.Exception.Message)" -WarningAction Continue
+                } else { throw }
+            }
         }
     } finally {
         Exit-InstallLock

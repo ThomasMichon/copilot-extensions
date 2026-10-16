@@ -136,6 +136,7 @@ def _ps_holder(pwsh: str, lock: Path) -> subprocess.Popen[str]:
 def _run_ps_block(pwsh: str, install_dir: Path, body: str) -> subprocess.CompletedProcess[str]:
     script = (
         "Set-StrictMode -Version 2.0\n$ErrorActionPreference = 'Stop'\n"
+        "$script:McpInstallFailure = $null\n"
         "function Write-Fail { param([string]$Msg) Write-Output \"FAIL:$Msg\" }\n"
         f"$InstallDir = '{install_dir}'\n" + _block(PS_SCRIPT) + "\n" + body
     )
@@ -159,7 +160,10 @@ def test_powershell_lock_acquires_releases_and_reacquires(tmp_path: Path) -> Non
     assert (tmp_path / "rt" / ".install.lock").is_file()
 
 
-def test_powershell_lock_releases_when_construction_cleanup_throws(tmp_path: Path) -> None:
+@pytest.mark.parametrize("primary_failure", [True, False])
+def test_powershell_lock_releases_when_construction_cleanup_throws(
+    tmp_path: Path, primary_failure: bool,
+) -> None:
     pwsh = _pwsh()
     if pwsh is None:
         pytest.skip("pwsh not available")
@@ -171,7 +175,10 @@ function Stop-RuntimeConstruction {{
 }}
 if (-not (Enter-InstallLock -TimeoutSec 1)) {{ throw 'lock-not-acquired' }}
 try {{
-    try {{ throw 'install-body-failure' }} finally {{
+    try {{ if (${str(primary_failure).lower()}) {{ throw 'install-body-failure' }} }} catch {{
+        $script:McpInstallFailure = $_
+        throw
+    }} finally {{
 {_ps_cleanup()}
     }}
 }} catch {{ Write-Output "caught=$($_.Exception.Message)" }}
@@ -181,8 +188,12 @@ Exit-InstallLock
 Write-Output "reacquired=$reacquired"
 """)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip().splitlines() == [
-        "cleanup-held=True", "caught=construction-cleanup-failure",
+    lines = result.stdout.strip().splitlines()
+    warnings = [line for line in lines if "Runtime construction cleanup also failed:" in line]
+    assert bool(warnings) is primary_failure
+    expected = "install-body-failure" if primary_failure else "construction-cleanup-failure"
+    assert [line for line in lines if line not in warnings] == [
+        "cleanup-held=True", f"caught={expected}",
         "released=True", "reacquired=True",
     ]
 

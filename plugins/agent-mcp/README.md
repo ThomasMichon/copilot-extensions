@@ -1404,6 +1404,13 @@ from a checkout, run the installer directly; for a cheap first-use setup, pass
 No daemon is required for a Copilot agent. `agent-mcp serve` is only an optional
 warmth tier for repeated shell `call`/materialized-stub use.
 
+The Windows installer supports Windows PowerShell 5.1 and PowerShell 7. Native
+arguments, including Python's isolated-mode flag and paths containing spaces,
+are forwarded literally without opening console windows. Failed native commands
+retain their stderr diagnostics. Failed construction reclaims only its owned
+incomplete candidate, leaves the active runtime unchanged, and preserves the
+original error if cleanup also reports a failure.
+
 ## Architecture
 
 ```
