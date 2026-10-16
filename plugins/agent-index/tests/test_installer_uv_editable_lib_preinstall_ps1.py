@@ -9,8 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from test_install_engine_adoption import environment, fake_uv
-from test_installer_publication_provisioning import stage_index_policy_sources
+from test_install_engine_adoption import environment, fake_uv, stage_procutil_layout
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -171,7 +170,7 @@ def test_procutil_preinstall_resolves_plugin_local_copy(
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
 
-    plugin_dir = stage_index_policy_sources(tmp_path, materialized=True)
+    plugin_dir = stage_procutil_layout(tmp_path, materialized=True)
     lib_dir = plugin_dir / "libs" / "agent-procutil"
 
     proc, marker = _run(pwsh, block_name, plugin_dir, have_uv, isolated_home=tmp_path / "home")
@@ -191,8 +190,9 @@ def test_procutil_preinstall_falls_back_to_repo_root_canonical_when_absent(
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
 
-    plugin_dir = stage_index_policy_sources(tmp_path, materialized=False)
+    plugin_dir = stage_procutil_layout(tmp_path, materialized=False)
     canonical = tmp_path / "libs" / "agent-procutil"
+    assert not (plugin_dir / "libs" / "agent-procutil").exists()
 
     proc, marker = _run(pwsh, block_name, plugin_dir, have_uv, isolated_home=tmp_path / "home")
     assert proc.returncode == 0, proc.stderr

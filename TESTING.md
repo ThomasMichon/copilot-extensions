@@ -1105,6 +1105,17 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   declaration and interpreter-only launch, unsupported/missing-supervisor
   inertness, and ordered direct-SSH routing parity. Agent-dispatch also consumes
   the shipped declaration/provider in its materialization and launch tests.
+  Installer fixture contracts in `test_install_engine_adoption.py`,
+  `test_installer_staging.py`, and the two
+  `test_installer_uv_editable_lib_preinstall_{sh,ps1}.py` files build explicit
+  canonical Dev and self-contained materialized layouts independently of the
+  checkout running the tests. The real materializer supplies payload-local
+  engine assets and regenerates native human-output declarations after wrapper
+  changes. Cell coordinator cases retain the live payload-replacement/no-reentry
+  proof in both layouts and shells. Procutil fallback cases remove only their
+  copied local procutil directory, assert its absence, and retain canonical
+  dependency-policy/private-copy checks; an existing local copy is not evidence
+  that fallback ran. Run all four files in source and generated-consumer views.
 - **agent-codespaces:** config, lifecycle, resolver, and the credential relay.
   The focused `-k worktrees_peer` lane covers every same-cell worktrees adapter,
   refusal propagation (including claim and auth fallbacks), and cross-context

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -52,6 +53,89 @@ def construction_bundle(scripts: Path) -> None:
     for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
                  "versioned_runtime_construction.py"):
         shutil.copy2(REPO / "libs/versioned-runtime" / name, scripts / name)
+
+
+def _materializer() -> dict:
+    previous = sys.path[:]
+    try:
+        return runpy.run_path(str(REPO / "tools/materialize_main.py"))
+    finally:
+        sys.path[:] = previous
+
+
+def stage_index_installer(payload: Path, *, materialized: bool) -> Path:
+    """Build either wrapper layout from canonical assets, regardless of the test checkout."""
+    release = _materializer()
+    refs = release["mie"].ier
+    canonical_root = payload.parents[1]
+    canonical_engine = canonical_root / "libs" / "installer-engine"
+    shutil.copytree(
+        ENGINE, canonical_engine,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+    )
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for extension in ("sh", "ps1"):
+        source = PLUGIN / "scripts" / f"install.{extension}"
+        ref = refs.find_engine_ref(source, extension)
+        assert ref is not None
+        assert refs.is_canonical_ref(ref, PLUGIN, repo_root=REPO) or refs.is_local_ref(ref, PLUGIN)
+        lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+        matches = 0
+        for index, line in enumerate(lines):
+            if line.strip() in (refs.canonical_line(extension), refs.local_line(extension)):
+                lines[index] = refs.canonical_line(extension) + "\n"
+                matches += 1
+        assert matches == 1
+        (scripts / source.name).write_text("".join(lines), encoding="utf-8")
+    script = scripts / "install.ps1"
+    if refs.HUMAN_SOURCE_LINE in script.read_text(encoding="utf-8"):
+        shutil.copy2(canonical_engine / refs.HUMAN_HELPER, scripts / refs.HUMAN_HELPER)
+        script.with_suffix(".human-output.json").write_text(
+            refs.human_output_json(script), encoding="utf-8",
+        )
+    if materialized:
+        report = release["materialize_installer_engine_ref_into"](
+            source_consumer_dir=payload, dest_consumer_dir=payload,
+            canonical_root=canonical_root, dest_root=canonical_root,
+        )
+        assert not any(message.startswith("SKIP ") for message in report), report
+    for extension in ("sh", "ps1"):
+        ref = refs.find_engine_ref(scripts / f"install.{extension}", extension)
+        assert ref is not None
+        if materialized:
+            assert refs.is_local_ref(ref, payload)
+            assert (scripts / ref.file_name).read_bytes() == (canonical_engine / ref.file_name).read_bytes()
+        else:
+            assert refs.is_canonical_ref(ref, payload, repo_root=canonical_root)
+            assert not (scripts / ref.file_name).exists()
+    if script.with_suffix(".human-output.json").exists():
+        assert script.with_suffix(".human-output.json").read_text(encoding="utf-8") == (
+            refs.human_output_json(script)
+        )
+    return payload
+
+
+def stage_procutil_layout(repository: Path, *, materialized: bool) -> Path:
+    """Select an explicit procutil layout instead of inheriting the checkout's layout."""
+    from test_installer_publication_provisioning import stage_index_policy_sources
+
+    payload = stage_index_policy_sources(repository, materialized=True)
+    local = payload / "libs" / "agent-procutil"
+    assert (local / "pyproject.toml").is_file()
+    if not materialized:
+        canonical = repository / "libs" / "agent-procutil"
+        shutil.copytree(local, canonical, dirs_exist_ok=True)
+        sources = _materializer()["uer"]
+        project = payload / "pyproject.toml"
+        assert sources.can_rewrite_uv_source_to_editable(project, "agent-procutil")
+        sources.rewrite_uv_source_to_editable(
+            project, "agent-procutil", "../../libs/agent-procutil",
+        )
+        shutil.rmtree(local)
+        assert not local.exists()
+        assert (canonical / "pyproject.toml").is_file()
+    return payload
 
 
 def posix_venv_uv(tmp_path: Path, *, failure: bool = False, transient: bool = False) -> Path:
@@ -148,13 +232,13 @@ def run_ps(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_canonical_references_and_both_runtime_builds():
-    sh = (PLUGIN / "scripts/install.sh").read_text(encoding="utf-8")
-    ps = (PLUGIN / "scripts/install.ps1").read_text(encoding="utf-8")
-    assert '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' in sh
-    assert r". (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')" in ps
-    assert not (PLUGIN / "scripts/installer-engine.sh").exists()
-    assert not (PLUGIN / "scripts/installer-engine.ps1").exists()
+@pytest.mark.parametrize("materialized", [False, True], ids=["dev", "materialized"])
+def test_canonical_references_and_both_runtime_builds(tmp_path: Path, materialized: bool) -> None:
+    payload = stage_index_installer(
+        tmp_path / "repo" / "plugins" / "agent-index", materialized=materialized,
+    )
+    sh = (payload / "scripts/install.sh").read_text(encoding="utf-8")
+    ps = (payload / "scripts/install.ps1").read_text(encoding="utf-8")
     for directory in ("$VENV_DIR", "$ENGINE_VENV", "$server_venv_dir"):
         assert f'_new_index_venv "{directory}"' in sh
     assert 'invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$dir" --allow-existing' in sh
