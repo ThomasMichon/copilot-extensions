@@ -211,9 +211,14 @@ unrelated service changes or a second machine registry.
   does not create enrollment; `--fix` enrolls only a matching named direct
   guest entry and never repairs unrelated records or changes the OS default.
 - Native Windows core/PowerShell boundaries pass 24 cases with one POSIX-only
-  skip; targeted doctor passes 13, including real primitive enrollment and
-  repeated SSH-style no-write checks. Existing context and vendoring coverage
-  passes 45 with five platform skips. These counts are separate rosters.
+  skip; targeted doctor passes 14, including real primitive enrollment,
+  repeated SSH-style no-write checks and the actual native CLI front door.
+  Existing context and vendoring coverage passes 45 with five platform skips;
+  governance/diagnostic smoke passes 127 with seven platform skips. Counts
+  describe rosters, not a cumulative test total.
+- A separate native PowerShell long-path failure was reproduced and tracked
+  in #7010. No unrelated final-path implementation was added to this slice;
+  the unchanged governance roster passes at ordinary temporary-path depth.
 - Local remote POSIX test invocation was denied before execution. That is a
   validation-surface blocker, not a product verdict. All three POSIX writers
   and readers remain in the existing hosted smoke selection; the candidate

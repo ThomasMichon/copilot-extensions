@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import doctor_cli_parser, guest_environment_cli, maintenance_cli
 
@@ -130,3 +134,40 @@ def test_doctor_registers_via_real_primitive_then_ssh_is_read_only(
     assert maintenance_cli.cmd_doctor(_args("--fix")) == 1
     assert "guest-identity-foreign" in json.loads(capsys.readouterr().out)["detail"]
     assert snapshot() == before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native host default diagnostic")
+def test_native_doctor_front_door_is_read_only(
+    tmp_path: Path,
+) -> None:
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    sentinel = profile / "unrelated.json"
+    sentinel.write_text('{"preserved": true}\n', encoding="utf-8")
+    environment = {
+        **os.environ, "HOME": str(profile), "USERPROFILE": str(profile),
+        "AGENT_HOME": str(profile), "WSL_DISTRO_NAME": "Inherited guest",
+    }
+
+    def snapshot() -> dict[str, tuple[int, bytes | None]]:
+        return {
+            str(path.relative_to(profile)): (
+                path.stat().st_mtime_ns, path.read_bytes() if path.is_file() else None,
+            )
+            for path in [profile, *profile.rglob("*")]
+        }
+
+    before = snapshot()
+    for flags in ([], ["--fix"], [], ["--fix"]):
+        result = subprocess.run(
+            [sys.executable, "-B", "-m", "agent_worktrees", "doctor",
+             "--guest-distribution", "Nonexistent diagnostic test guest", "--json", *flags],
+            env=environment, cwd=tmp_path, capture_output=True, text=True,
+            timeout=20, **no_window_kwargs(),
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        assert report["scope"] == "guest-environment"
+        assert report["status"] == "blocked"
+        assert report["guest_environment"]["environment"]["wslDistro"] is None
+        assert snapshot() == before
