@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-15
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -230,6 +230,30 @@ and installer. It shows what is selected, ready, and serving, and it can
 request an update. It does not keep its own record of which release the host
 runs, and it is never a second updater. See
 [plugin-services *one-authority-per-lifecycle-decision*](../plugin-services/README.md#one-authority-per-lifecycle-decision).
+
+### independent-runtime-source-selection
+The installation flow can maintain its own source checkout independently of
+Copilot's installed plugin payloads, developer checkouts, and the app's own
+self-update source. A local opt-in selects current main, an explicitly stable
+or exact older release, or a clean merged development snapshot. A run resolves
+that choice once and realizes the same immutable source throughout.
+
+Source acquisition and materialization leave the source checkout unchanged.
+The selected runtime continues working when that checkout is unavailable.
+Source failures preserve the current healthy installation and name the
+blocked selection; they never substitute an ambient checkout or newer payload.
+Ordinary marketplace delivery of skills, instructions, hooks and extensions
+continues independently, including their non-deployment behavior.
+
+### exclusive-plugin-content-source
+An adopter can separately choose approved local-checkout delivery of Copilot
+plugin content instead of marketplace delivery. This is an explicit
+replacement of the effective source, never parallel activation of both copies
+of the same logical plugin. Competing registrations are detected even when
+their display names differ. Source transitions preserve enablement intent,
+are reversible, and verify effective pickup at the supported session boundary
+without duplicate hooks, extensions, skills or instructions stalling loading.
+Selecting a runtime source alone never changes the plugin-content source.
 
 ### resilient-update-convergence
 An update pursues a verified good, current state rather than treating one

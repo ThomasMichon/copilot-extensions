@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -116,6 +116,22 @@ contract. It never bypasses a blocked package, seasoning requirement or
 governed feed, and an artifact-integrity or source-provenance failure is not
 an ordinary availability fallback. If no permitted dependency closure can
 be assembled, the outcome is explicit and the current generation survives.
+
+### selected-development-source-assembly
+An authority-selected, clean merged development snapshot can be assembled
+directly, without waiting for a generated release-branch payload or installing
+Copilot plugin content from that checkout. This explicit source mode is not
+an artifact-availability fallback and does not claim promotion attestation.
+It retains the same source integrity, exact dependency admission, immutable
+completion, health, activation and rollback guarantees.
+
+Assembly materializes the complete declared first-party dependency closure
+from the selected snapshot, including development-only source indirections.
+Materialization and version composition use the canonical source
+representation rather than a second approximation of promotion. The
+assembled runtime contains no live dependency on the source checkout.
+Source identity, package version, optional capability profile and exact
+assembly/dependency identity remain separately observable.
 
 ### optional-client-artifacts-complete-promotion
 

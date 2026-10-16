@@ -3,7 +3,7 @@
 - **Subject:** clean-room validation of the copilot-extensions plugins and the harnesses assembled from them
 - **Scope:** leaf (concrete cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-08-13
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`tools/clean-room/README.md`](../../tools/clean-room/README.md) (operator guide), [`tools/clean-room/ARCHITECTURE.md`](../../tools/clean-room/ARCHITECTURE.md) (rig architecture)
 
 ## Purpose & Intent
@@ -83,6 +83,17 @@ Validation is a matrix, not a single flow: **solo** plugins → **reasonable
 combinations** → the **full assembled harness**, each runnable **with and without
 the worktree base** (does an enhanced feature degrade safely to ambient behavior
 when its base is absent?). The set is meant to **cover the suite** and grow with it.
+
+### independent-source-installation
+The matrix also proves runtime installation from clean, merged source
+snapshots independently of marketplace plugin delivery. It exercises the
+actual installer, source materialization, installed command redirects and
+serving runtime rather than crediting a source import or editable environment
+as a deployment. Exact reuse, distinct same-package-version commits, source
+checkout removal and failed-candidate preservation have observable outcomes.
+Managed-deployment checks prove that ordinary plugin hook behavior continues
+without replacing the selected runtime or its command redirects, including
+supported plugin/runtime version skew.
 
 ### classified diagnostics & unjam
 Failures are emitted as **classified jams** with evidence and an unjam hint; safe,

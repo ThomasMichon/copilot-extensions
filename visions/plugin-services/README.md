@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -255,6 +255,13 @@ working development generation and the original release rollback target.
 Development claims gate construction, publication and release; editable source
 is intentionally live, but completed dependency environments remain immutable.
 
+An explicitly selected, merged development snapshot can also be deployed as a
+non-editable runtime. This is source deployment, not an editable development
+claim: its immutable generation distinguishes the exact source and assembly
+inputs even when package versions have not changed. Repeating an identical
+assembly reuses the completed generation; different admitted content never
+rewrites it. Installed code remains usable without its source checkout.
+
 A failed selected-dependency installation never publishes a completed runtime,
 active selection or service cutover. Construction cleans up only its owned,
 incomplete candidate and preserves the previous healthy runtime, completed
@@ -340,6 +347,21 @@ and *one-authority-per-lifecycle-decision*): they request convergence to the
 selected release lock rather than reconciling to their own payload version,
 and they never install, activate, or supervise a runtime themselves. Either
 way there is exactly one installer and one supervisor per runtime on a host.
+
+### managed-runtime-deployment
+An adopter can explicitly reserve runtime deployment to a managed installation
+flow while retaining ordinary Copilot marketplace delivery of plugin content.
+This local choice controls copying runtime payloads into immutable generations
+and publishing their installed command redirects; it does not disable hooks,
+extensions, session guidance, registration, or ordinary interaction with the
+installed services. Indirect bootstrap and first-use paths honor the same
+choice, so a newer plugin cannot silently replace a pinned runtime.
+
+The standalone self-provisioning behavior remains the default. Managed
+deployment preserves existing installation provenance and supervision
+ownership, and does not by itself adopt the integrated coordination profile.
+A missing or incompatible managed runtime yields an explicit readiness
+outcome rather than falling back to another deployment owner.
 
 **Narrow, operator-invoked exception (bootstrap-killswitch):** an explicit,
 resettable, host-local switch lets an operator or agent pause this automatic
@@ -492,6 +514,13 @@ authority applies the channel. Each update run resolves one named release
 when it starts and converges to that release. A newer release published
 during the run is picked up by a later run, never partway through this one.
 
+Runtime source selection is independent of Copilot plugin-content delivery.
+An adopter can follow current main, retain an explicitly qualified stable or
+exact older release, or opt in to a clean, merged development snapshot before
+promotion. The selected source has an immutable, attributable identity;
+working edits and development worktrees are never deployment inputs.
+Development-source validation does not assert release qualification.
+
 ### adoptive-migration-to-integrated-profile
 Moving an existing installation onto the integrated profile adopts its
 durable state, configuration, and registrations one service at a time. It
@@ -516,6 +545,16 @@ Installed services, CLIs, and daemons work on a native host and in an OCI
 container with no Copilot installation, marketplace, or plugin registry
 present. They are configured through installation-owned configuration and
 state, not through plugin directories.
+
+### thin-plugin-runtime-adapters
+Hooks and extensions remain small across independent plugin and runtime
+updates. They preferentially redirect promptly to durable, installation-owned
+command surfaces rather than carrying a version-locked service implementation.
+Self-contained plugin behavior may execute entirely within its payload;
+behavior that communicates directly with a service uses a drift-compatible
+contract. Both newer-plugin/older-runtime and older-plugin/newer-runtime
+combinations are normal supported states within declared capability bounds.
+Adapter compatibility never grants permission to redeploy a managed runtime.
 
 ### compatibility-enforced-at-the-consumer
 A plugin declares the runtime capabilities and compatible range it needs. The
