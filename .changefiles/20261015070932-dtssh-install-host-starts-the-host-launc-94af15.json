@@ -1,9 +1,0 @@
-{
-  "comment": "dtssh install-host starts the host launcher through WMI Win32_Process.Create so an SSH session or updater running the installer no longer takes the host down when it ends; a contained Start-Process remains only as a warned last resort.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

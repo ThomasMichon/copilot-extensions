@@ -1,9 +1,0 @@
-{
-  "comment": "Retarget workspace continuity documentation to its completed effort archive",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "dev"
-    }
-  ]
-}

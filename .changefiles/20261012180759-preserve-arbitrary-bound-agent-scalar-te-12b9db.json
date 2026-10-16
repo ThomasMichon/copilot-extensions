@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve nonblank bound-agent text through creation, tracking loads and JSON projection.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

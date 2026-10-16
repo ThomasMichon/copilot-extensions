@@ -1,9 +1,0 @@
-{
-  "comment": "Expand real read-only installation inspection coverage across legacy policy and refused transitions.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

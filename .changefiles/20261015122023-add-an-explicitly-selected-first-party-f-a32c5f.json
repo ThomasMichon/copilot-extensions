@@ -1,9 +1,0 @@
-{
-  "comment": "Add an explicitly selected first-party fleet image closure while preserving native release defaults.",
-  "changes": [
-    {
-      "plugin": "services/index",
-      "type": "patch"
-    }
-  ]
-}

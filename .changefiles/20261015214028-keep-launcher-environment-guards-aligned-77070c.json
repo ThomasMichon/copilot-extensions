@@ -1,9 +1,0 @@
-{
-  "comment": "Keep launcher environment guards aligned with the shared setup-action boundary",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

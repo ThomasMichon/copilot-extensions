@@ -1,9 +1,0 @@
-{
-  "comment": "Restore read-only installation diagnostics; retain legacy evidence without implicit runtime-root publication.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit fenced current-observation storage with bounded scoped replay and queries",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

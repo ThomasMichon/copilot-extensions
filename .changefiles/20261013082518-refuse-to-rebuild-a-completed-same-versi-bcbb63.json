@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse to rebuild a completed same-version runtime slot in place and fail the install when completion-marker publication is refused.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

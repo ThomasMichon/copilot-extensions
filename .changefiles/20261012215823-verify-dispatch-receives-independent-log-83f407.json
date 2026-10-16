@@ -1,9 +1,0 @@
-{
-  "comment": "Verify dispatch receives independent logical Windows and WSL machine identities from the worktrees owner probe",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

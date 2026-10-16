@@ -1,9 +1,0 @@
-{
-  "comment": "Allow compatible logical machine declarations to differ in SSH connection metadata while preserving identity conflict checks",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

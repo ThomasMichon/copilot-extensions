@@ -1,9 +1,0 @@
-{
-  "comment": "Add inactive watch-state adoption and bounded lossless worker quiescence groundwork",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

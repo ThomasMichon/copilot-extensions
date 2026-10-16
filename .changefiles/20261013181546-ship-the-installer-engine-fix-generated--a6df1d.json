@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the installer-engine fix: generated binstubs never unlink an absent provision lock",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

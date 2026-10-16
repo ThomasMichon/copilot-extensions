@@ -1,9 +1,0 @@
-{
-  "comment": "Pin canonical process-log source ancestors during enumeration, reads and sync transfers; reuse pinned directories for POSIX copies and ZIP enumeration, retain configured reference paths with safe Windows reader roots, check transfer root churn before opening and publishing each candidate, normalize entry-opening errors without masking consumers, and release native enumeration handles before yielding.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}
