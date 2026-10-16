@@ -8,6 +8,7 @@ import socket
 import tempfile
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -141,7 +142,7 @@ def daemon():
     if os.name != "posix" or not hasattr(socket, "AF_UNIX"):
         pytest.skip("Authoritative direct Unix adapter is POSIX-only; other routes fail closed")
     with tempfile.TemporaryDirectory(prefix="ce-d-") as directory:
-        fixture = FixtureDaemon(Path(directory) / "d.sock")
+        fixture = FixtureDaemon(Path(directory).resolve() / "d.sock")
         try:
             yield fixture
         finally:
@@ -155,6 +156,29 @@ def verifier(daemon: FixtureDaemon, *, timeout: float = 2) -> LocalDockerVerifie
 
 def identity() -> Identity:
     return Identity("container", IDENTIFIER, CREATED, "daemon-a", TOKEN, CREATOR, 1)
+
+
+@pytest.fixture
+def symlinked_temp_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    if os.name != "posix":
+        pytest.skip("POSIX fixture path canonicalization")
+    with tempfile.TemporaryDirectory(prefix="ce-l-") as directory:
+        root = Path(directory).resolve()
+        target = root / "real"
+        target.mkdir(mode=0o700)
+        alias = root / "alias"
+        alias.symlink_to(target, target_is_directory=True)
+        monkeypatch.setattr(tempfile, "tempdir", str(alias))
+        yield
+
+
+def test_fixture_admits_canonical_socket_under_symlinked_temp_root(
+    symlinked_temp_root: None, request: pytest.FixtureRequest,
+) -> None:
+    daemon = request.getfixturevalue("daemon")
+    assert daemon.path == daemon.path.resolve()
+    assert verifier(daemon).probe(identity()) is True
+    assert daemon.accepts == 1
 
 
 def test_exact_removal_and_absence_share_one_connection(daemon: FixtureDaemon) -> None:
