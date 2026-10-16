@@ -100,6 +100,10 @@ def stage_index_installer(payload: Path, *, materialized: bool) -> Path:
             canonical_root=canonical_root, dest_root=canonical_root,
         )
         assert not any(message.startswith("SKIP ") for message in report), report
+    # Fixture text writers, including the materializer, translate newlines on
+    # Windows. Git Bash needs LF after the final rewrite, not just the first one.
+    bash_entry = scripts / "install.sh"
+    bash_entry.write_bytes(bash_entry.read_bytes().replace(b"\r\n", b"\n"))
     for extension in ("sh", "ps1"):
         ref = refs.find_engine_ref(scripts / f"install.{extension}", extension)
         assert ref is not None
