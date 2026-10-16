@@ -134,6 +134,49 @@ def test_live_nonchild_reference_refuses_even_with_correct_numeric_pid() -> None
             process.pid = original
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux high-numbered pidfds")
+def test_high_numbered_pidfds_preserve_acquisition_and_exact_exit(monkeypatch) -> None:
+    import fcntl
+    import resource
+    from zdd import singleton_linux
+    from zdd.private_peer import PeerProcess
+
+    if resource.getrlimit(resource.RLIMIT_NOFILE)[0] <= 1200:
+        pytest.skip("test needs an existing descriptor limit above 1200")
+    original_open = singleton_linux._open_pidfd
+
+    def open_high(pid):
+        original = original_open(pid)
+        try:
+            return fcntl.fcntl(original, fcntl.F_DUPFD_CLOEXEC, 1100)
+        finally:
+            os.close(original)
+
+    monkeypatch.setattr(singleton_linux, "_open_pidfd", open_high)
+    with child() as process:
+        custody = OwnedChild(process, Path(sys.executable).resolve(), Deadline(2))
+        peer = None
+        try:
+            assert custody._reference >= 1100
+            custody.check(Deadline(1))
+            descriptor = fcntl.fcntl(custody._reference, fcntl.F_DUPFD_CLOEXEC, 1200)
+            peer = PeerProcess(descriptor, custody.peer)
+            assert peer.exited(Deadline(1)) is False
+            with pytest.raises(PrivateIPCError) as caught:
+                peer.wait_exit(Deadline(0.01))
+            assert caught.value.reason is Refusal.DEADLINE
+            process.communicate(b"x", timeout=5)
+            assert peer.exited(Deadline(1)) is True
+            peer.wait_exit(Deadline(1))
+            with pytest.raises(PrivateIPCError) as caught:
+                custody.check(Deadline(1))
+            assert caught.value.reason is Refusal.IDENTITY
+        finally:
+            if peer is not None:
+                peer.close()
+            custody.close()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows creation-handle proof")
 def test_windows_never_reopens_numeric_pid(monkeypatch: pytest.MonkeyPatch) -> None:
     with child() as process:

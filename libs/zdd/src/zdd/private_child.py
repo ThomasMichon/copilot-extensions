@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import select
 import subprocess
 import sys
 import threading
@@ -11,6 +10,7 @@ from pathlib import Path
 
 from .diagnostics import process_start_time
 from .private_protocol import Deadline, PeerIdentity, PrivateIPCError, Refusal
+from .private_peer import _pidfd_exited
 from .private_windows_native import Native
 
 # Linux 5.4 waitid idtype; some Python builds expose pidfd_open but omit it.
@@ -74,7 +74,7 @@ class OwnedChild:
 
     def _linux_alive(self, deadline: Deadline) -> None:
         deadline.remaining()
-        if select.select([self._reference], [], [], 0)[0]:
+        if _pidfd_exited(self._reference, 0):
             raise PrivateIPCError(Refusal.IDENTITY)
         # ECHILD refuses a PID that no longer belongs to this process. WNOWAIT
         # preserves Popen's exclusive ownership of eventual exit/reaping.

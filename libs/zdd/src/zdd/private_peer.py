@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import os
+import math
 import select
 import threading
 
 from .private_protocol import Deadline, PeerIdentity, PrivateIPCError, Refusal
 from .private_windows_native import WAIT_TIMEOUT, Native
+
+
+def _pidfd_exited(reference: int, timeout: float) -> bool:
+    poller = select.poll()
+    poller.register(reference, select.POLLIN)
+    events = poller.poll(0 if timeout == 0 else max(1, math.ceil(timeout * 1000)))
+    for descriptor, flags in events:
+        if descriptor != reference or flags & (select.POLLERR | select.POLLNVAL):
+            raise PrivateIPCError(Refusal.IDENTITY)
+        if not flags & select.POLLIN:
+            raise PrivateIPCError(Refusal.IDENTITY)
+    return bool(events)
 
 
 class PeerProcess:
@@ -43,12 +56,7 @@ class PeerProcess:
     def _observe(self, timeout: float) -> bool:
         try:
             if self._api is None:
-                ready, _w, exceptional = select.select(
-                    [self._reference], [], [self._reference], timeout,
-                )
-                if exceptional:
-                    raise PrivateIPCError(Refusal.IDENTITY)
-                return bool(ready)
+                return _pidfd_exited(self._reference, timeout)
             result = self._api.k.WaitForSingleObject(
                 self._reference, 0 if timeout == 0 else max(1, int(timeout * 1000)),
             )
