@@ -460,19 +460,15 @@ def _historical_protocol(commit: str):
     }
     environment["GIT_NO_LAZY_FETCH"] = "1"
     environment["GIT_NO_REPLACE_OBJECTS"] = "1"
-    result = subprocess.run(
-        ["git", "-c", f"safe.directory={REPO}", "-C", str(REPO),
-         "show", f"{commit}:{SESSION_HOST_PROTOCOL_PATH}"],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=10,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    command = ["git", "-c", f"safe.directory={REPO}", "-C", str(REPO)]
+    options = {
+        "check": False, "capture_output": True, "text": True, "env": environment,
+        "timeout": 10, "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    }
+    available = subprocess.run(
+        [*command, "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}"], **options,
     )
-    if result.returncode:
-        if not any(marker in result.stderr for marker in ("invalid object name", "bad object")):
-            result.check_returncode()
+    if available.returncode == 1:
         frozen = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
         captured = frozen["captured_from"]
         assert captured["commit"] == commit
@@ -482,6 +478,11 @@ def _historical_protocol(commit: str):
         assert hashlib.sha256(raw).hexdigest() == captured["source_sha256"]
         assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == captured["source_git_blob"]
     else:
+        available.check_returncode()
+        result = subprocess.run(
+            [*command, "show", f"{commit}:{SESSION_HOST_PROTOCOL_PATH}"], **options,
+        )
+        result.check_returncode()
         historical_source = result.stdout
     module_name = f"_agent_bridge_protocol_{commit[:12]}"
     module = types.ModuleType(module_name)
@@ -492,7 +493,7 @@ def _historical_protocol(commit: str):
 
 def test_historical_protocol_without_commit_uses_hash_verified_source(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
-        a[0], 128, "", "fatal: invalid object name",
+        a[0], 1, "", "",
     ))
     captured = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
     protocol = _historical_protocol(captured["captured_from"]["commit"])
@@ -501,7 +502,7 @@ def test_historical_protocol_without_commit_uses_hash_verified_source(monkeypatc
 
 def test_historical_protocol_rejects_corrupted_frozen_source(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
-        a[0], 128, "", "fatal: invalid object name",
+        a[0], 1, "", "",
     ))
     captured = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
     captured["source_text"] += "\n"
@@ -514,6 +515,18 @@ def test_historical_protocol_preserves_unrelated_git_failures(monkeypatch) -> No
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
         a[0], 128, "", "fatal: failed to read repository",
     ))
+    with pytest.raises(subprocess.CalledProcessError):
+        _historical_protocol("4ed08dcdd0e72377b95a67d6bd22aec819bf7fec")
+
+
+def test_available_historical_commit_with_missing_source_never_uses_frozen_fallback(monkeypatch):
+    def git(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command, 0 if "rev-parse" in command else 128, "",
+            "" if "rev-parse" in command else "fatal: path missing from existing commit",
+        )
+
+    monkeypatch.setattr(subprocess, "run", git)
     with pytest.raises(subprocess.CalledProcessError):
         _historical_protocol("4ed08dcdd0e72377b95a67d6bd22aec819bf7fec")
 
@@ -544,6 +557,10 @@ def _message_frames(protocol) -> dict[str, dict[str, str]]:
         ),
         "unknown": (None, b"future"),
     }
+    if hasattr(protocol.MsgType, "ATTACH_PRIVATE"):
+        messages["attach_private"] = (
+            protocol.MsgType.ATTACH_PRIVATE, b"synthetic-native-ticket",
+        )
     result = {}
     for name, (message_type, payload) in messages.items():
         type_bytes = message_type.value if message_type is not None else b"Z"
