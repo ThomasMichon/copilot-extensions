@@ -7,7 +7,7 @@
   "runtimeScope": "machine-gated",
   "installerReadiness": "installer-readiness.json",
   "installerDeadlineSeconds": 1050,
-  "cutoverDeadlineSeconds": 900,
+  "cutoverDeadlineSeconds": 1500,
   "zeroDowntimeUpdate": true,
   "author": {
     "name": "Thomas Michon"
