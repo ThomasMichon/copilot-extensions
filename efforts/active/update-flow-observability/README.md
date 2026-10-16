@@ -116,9 +116,10 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Implement the shared formatter extension for aggregate update,
   captured plugin installers, nested output and native maintenance's
   persistent/status sinks (#6869 and #6904).
+- [x] Route synchronous bootstrap and blocking marketplace installer output
+  through the native timing, outcome and persistent-log adapters (#6920).
 - [ ] Finish the remaining detached/standalone installer and early/late Bash
-  output boundaries through their actual output owners; synchronous bootstrap
-  and blocking marketplace adapters are implemented in the next reviewed slice.
+  output boundaries through their actual output owners.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -217,6 +218,87 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-15 - Verify independent final-integration work counts
+
+- While shared standalone-presentation files remain reserved, verified #6836's
+  existing reduction without editing its implementation or running an updater.
+  The native Windows fixture observes two command-reconciliation callbacks
+  without deferral and zero with it; aggregate update retains exactly one
+  final command pass and one final profile pass.
+- Extended that aggregate count contract to first touch with no deployed
+  version. Current, changed and missing runtimes retain the same late
+  finishing order; only changed/missing runtimes invoke the engine installer.
+- Both complete orchestration/integration modules passed 42 cases on each
+  of Windows and native Linux; six native PowerShell deferral/verified-result
+  cases and two native Bash count cases passed. The audit
+  separates these measured invocation counts from test-run durations:
+  neither is installed end-to-end speed evidence.
+- The Linux run exposed a Windows-simulating test that still discovered a
+  real PowerShell executable despite mocking all child execution. Bound that
+  discovery to a synthetic fixture command; both native suites now pass
+  without requiring PowerShell on Linux.
+- Standalone presentation overlap, real runtime construction/cutover
+  measurements and promoted rollout proof remain open.
+
+### 2026-10-15 - Standalone presentation-owner decision
+
+- The operator selected the existing Python admission parent for remaining
+  standalone human presentation, rather than adding a reporting interpreter.
+  Reuse `HumanOperation` and the existing live native relay with an explicit
+  install/update opt-in and source-owned packaged support.
+- Default lifecycle stdout/stderr identity, parsed protocols, execution policy,
+  exact native argv, admission and child-lifetime behavior remain binding.
+  A runtime package that has not been built yet cannot supply bootstrap
+  presentation support.
+- Structured-context native installers bypass legacy command admission.
+  Their actual output owner must be addressed separately; a legacy-parent
+  change alone cannot establish every-line standalone coverage.
+- Requested the exact reserved-file overlap from the existing source owner
+  before changing shared lifecycle, generation or native installer support.
+  No such implementation change is included in this journal entry.
+
+### 2026-10-15 - Attribute the next normal-release blocker without a waiver
+
+- The latest inspected normal promotion, run `38841372088`, validated
+  `aaace382f7b9b45ee0a9c47ee2da9f72b7348b30`. Only
+  `full - agent-worktrees` failed, job `116782077335`.
+  Fourteen test groups passed before the plugin's existing aggregate budget
+  expired in group 15, which had only `17.9934s` remaining. This is not one
+  of the earlier assertion failures repaired by #6910.
+- The deterministic suite contains 402 files in 17 groups. The inspected run
+  spent approximately 122s, 162s and 120s in groups 6, 7 and 10 respectively.
+  Those are whole-group observations, not proof of which individual tests
+  caused the excess. Public coordination is recorded on #6812.
+- Local runtime profiling is not yet evidence: the existing interpreter
+  lacked `machine_transport`; canonical dependency preparation on the
+  mounted checkout exceeded a bounded wait. No surviving owned preparation
+  child was found afterward.
+- A fresh exact-source Linux filesystem fixture exercised the preferred
+  hardened devcontainer wrapper with already-provisioned tooling. Its normal
+  dependency-preparation pass failed fetching package metadata with TLS
+  `HandshakeFailure`; the network-disconnected test pass never started.
+  No verification, seasoning, network or resource control was disabled.
+- No test was removed, timeout raised, pipeline retried/cancelled or updater
+  started. Promotion and the installed proof remain blocked; source-group
+  runtime attribution remains open rather than being called a known flake.
+
+### 2026-10-15 - Synchronous output slice merged; retain the parent gates
+
+- #6920 actually merged as `bf3d5a03792ccfb4fe4e92b98d7e894de4b83119`
+  at `2026-10-16T03:38:42Z`, after Copilot approval of exact head
+  `a21d89aa1e1d074c3042c157089d82c6579e0e86`, zero findings and
+  successful observed checks including the required aggregate gate.
+- Native PR state now reports merged, and supported worktree synchronization
+  advanced to that merged commit without conflicts. Recovery refs remain.
+- Re-read the Plan and Validation Plan after merge. Only the synchronous
+  bootstrap/blocking marketplace output item closes here. This is not a
+  standalone-installer guarantee, runtime speed proof, promoted release
+  receipt, installed verification or effort completion.
+- Continue at the remaining output owner's native entrypoint/admission
+  boundary. Preserve independent installer lifetime, execution policy, exact
+  command and ownership behavior; do not invent a second updater to obtain
+  timing. The effort remains Active and the source worktree remains retained.
 
 ### 2026-10-15 - Synchronous bootstrap and marketplace boundary
 
