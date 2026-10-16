@@ -109,6 +109,30 @@ optional failure), and exit 1 means invalid/refused admission or stale inputs.
 Interrupted execution, including owner revalidation and hashing, retains
 completed partial outcomes, exits 130 and does not replay.
 
+Restart obligations accumulate across independent selected steps and subsequent
+invocations in the machine home's `.agent-machines/installation-repair` journal.
+They are recorded **before** a restart-declaring action starts, so cancellation,
+failure or a process crash cannot silently discard a possibly required restart.
+Pending modules are not reinstalled and their dependents remain blocked, even
+if readiness reports ready. Read-only discovery/observation creates no journal;
+apply and confirmation are serialized, and corrupt state refuses execution.
+
+Use `restarts.pending` to present one combined restart opportunity to the
+operator rather than restarting between independent steps. No restart is
+automatic. After the operator has completed **every** listed shell, session or
+machine restart, explicitly confirm the exact batch:
+
+```text
+agent-machines installation-repair --confirm-restart <restarts.pendingDigest>
+```
+
+This is an operator attestation, not automatically observed restart evidence.
+A changed batch refuses confirmation; confirmation neither runs installers nor
+declares readiness. Then observe/replan and explicitly apply again. A new CLI
+process, changed payload, successful readiness probe or repeated apply is not
+restart confirmation. Inspect interrupted/failed actions before attesting;
+their conservatively retained obligations must not be dismissed as a retry.
+
 Ordinary downstream owners need declared no-self-provision and legacy-root
 protocols; inherited core-cell control variables are cleared. Linked/reparse
 targets, ambiguous owners and migration/deactivation/maintenance states refuse

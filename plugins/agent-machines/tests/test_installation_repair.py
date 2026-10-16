@@ -269,6 +269,40 @@ def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixt
     assert all(row["attempted"] for row in result["outcomes"])
 
 
+@pytest.mark.parametrize("probe_ready", [False, True])
+def test_installation_repair_refuses_binding_changed_during_refreshed_readiness(
+    repair_fixture, monkeypatch, probe_ready,
+):
+    home, _, payload, _, _ = repair_fixture
+    original = repair_api._invoke
+
+    def changing(module, owner, platform, *, readonly, timeout):
+        refreshed = (
+            readonly and module.module_id == "agent-example/child"
+            and (home / "agent-example-base.ready").exists()
+        )
+        if refreshed and probe_ready:
+            (home / "agent-example-child.ready").write_text("ready", encoding="utf-8")
+        result = original(module, owner, platform, readonly=readonly, timeout=timeout)
+        if refreshed:
+            manifest = payload / "plugin.json"
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            value["version"] = "1.0.1"
+            write_json(manifest, value)
+        return result
+
+    monkeypatch.setattr(repair_api, "_invoke", changing)
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    base, child = result["outcomes"]
+    assert result["status"] == "incomplete" and not result["requiredSatisfied"]
+    assert base["attempted"] and base["observedAfter"]["state"] == "ready"
+    assert not child["attempted"]
+    assert child["installer"] == {"status": "refused", "reason": "owner-binding-changed"}
+    assert child["observedAfter"]["state"] == ("ready" if probe_ready else "not-ready")
+    assert (home / "agent-example-child.ready").exists() is probe_ready
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows execution-policy contract")
 def test_installation_repair_powershell_fallback_has_process_scoped_policy(
     repair_fixture, monkeypatch,
@@ -360,6 +394,104 @@ def test_installation_repair_restart_blocks_actual_dependents(repair_fixture):
     assert base["restartRequired"]
     assert not child["attempted"]
     assert child["blockedBy"] == [base["module"]]
+
+
+@pytest.mark.parametrize("restart", ["shell", "session", "machine"])
+def test_installation_repair_restart_survives_repeated_apply_until_exact_confirmation(
+    repair_fixture, restart,
+):
+    home, project, _, configure, _ = repair_fixture
+    configure(restart=restart, dependencies=("agent-example/base",))
+    plan = invoke(repair_fixture)
+    first = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    again = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    base, child = again["outcomes"]
+    assert again["status"] == "incomplete" and not again["requiredSatisfied"]
+    assert first["restarts"] == again["restarts"]
+    assert first["outcomes"][0]["attempted"] and base["restartRequired"]
+    assert not base["attempted"] and not child["attempted"]
+    assert child["blockedBy"] == [base["module"]]
+    assert not (home / "agent-example-child.ready").exists()
+    with pytest.raises(RepairAdmissionError, match="batch changed"):
+        repair_api.repair(project, home=home, confirm_restart="0" * 64)
+    observed = invoke(repair_fixture)
+    assert observed["restarts"] == first["restarts"]
+    confirmed = repair_api.repair(
+        project, home=home, confirm_restart=first["restarts"]["pendingDigest"],
+    )
+    assert confirmed["status"] == "restart-confirmed"
+    assert confirmed["confirmation"] == "operator-attestation"
+    assert confirmed["restarts"]["pending"] == []
+    final = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert final["status"] == "ready" and final["requiredSatisfied"]
+    assert not final["outcomes"][0]["attempted"]
+    assert final["outcomes"][1]["attempted"]
+
+
+def test_installation_repair_accumulates_independent_restart_steps(repair_fixture):
+    _, _, payload, configure, identity = repair_fixture
+    configure(restart="session", dependencies=())
+    declaration = payload / "installer-readiness.json"
+    value = json.loads(declaration.read_text(encoding="utf-8"))
+    value["modules"][1]["restart"] = "machine"
+    write_json(declaration, value)
+    plan = invoke(repair_fixture, selection=("base", "child"))
+    result = invoke(
+        repair_fixture, selection=("base", "child"), apply=True, digest=plan["planDigest"],
+    )
+    assert result["status"] == "incomplete"
+    assert all(row["attempted"] and row["restartRequired"] for row in result["outcomes"])
+    pending = result["restarts"]["pending"]
+    assert [(row["module"], row["restart"]) for row in pending] == [
+        (identity + "::agent-example/base", "session"),
+        (identity + "::agent-example/child", "machine"),
+    ]
+    again = invoke(
+        repair_fixture, selection=("base", "child"), apply=True, digest=plan["planDigest"],
+    )
+    assert not any(row["attempted"] for row in again["outcomes"])
+    assert again["restarts"] == result["restarts"]
+
+
+def test_installation_repair_restart_is_recorded_before_interrupted_action(
+    repair_fixture, monkeypatch,
+):
+    home, _, _, configure, _ = repair_fixture
+    configure(restart="session", dependencies=("agent-example/base",))
+    original = repair_api._invoke
+
+    def interrupted(module, owner, platform, *, readonly, timeout):
+        if not readonly:
+            journal = repair_api.RestartJournal(home)
+            journal.load()
+            assert module.qualified_id in journal.pending
+            raise KeyboardInterrupt
+        return original(module, owner, platform, readonly=readonly, timeout=timeout)
+
+    monkeypatch.setattr(repair_api, "_invoke", interrupted)
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["interrupted"] and result["outcomes"][0]["restartRequired"]
+    assert len(result["restarts"]["pending"]) == 1
+    again = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert not any(row["attempted"] for row in again["outcomes"])
+    assert again["restarts"] == result["restarts"]
+
+
+def test_installation_repair_restart_publication_failure_prevents_installer(
+    repair_fixture, monkeypatch,
+):
+    home, _, _, configure, _ = repair_fixture
+    configure(restart="session", dependencies=("agent-example/base",))
+    plan = invoke(repair_fixture)
+
+    def fail_save(self):
+        raise OSError("synthetic publication failure")
+
+    monkeypatch.setattr(repair_api.RestartJournal, "_save", fail_save)
+    with pytest.raises(RepairAdmissionError, match="cannot be accessed or persisted"):
+        invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert not list(home.glob("*.ready"))
 
 
 def test_installation_repair_failed_installer_cannot_count_ready(repair_fixture, monkeypatch):

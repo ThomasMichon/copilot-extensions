@@ -23,6 +23,7 @@ from .installation_repair_admission import (
     HostAdmission, OwnerBinding, RepairAdmissionError, admit_host, digest, ordinary,
 )
 from .installation_repair_process import ActionResult, run_action
+from .installation_repair_restarts import RestartJournal
 
 
 def current_platform() -> Platform:
@@ -268,10 +269,61 @@ def _binding_inputs(
     }
 
 
+def _readmit_owner(
+    project_root: Path, modules: Sequence[str], platform: Platform, plan_digest: str,
+    owner_id: str, home: Path | None,
+) -> OwnerBinding:
+    fresh = admit_host(project_root, home=home)
+    fresh_selected = _closure(fresh, modules, platform)
+    if digest(_binding_inputs(fresh, fresh_selected, platform)) != plan_digest:
+        raise RepairAdmissionError("repair owner binding changed")
+    return fresh.bindings[owner_id]
+
+
 def repair(
     project_root: Path, *, modules: Sequence[str] = (), apply: bool = False,
     expected_plan_digest: str | None = None, home: Path | None = None,
     readiness_timeout: float = 15, installer_timeout: float = 300,
+    confirm_restart: str | None = None,
+) -> dict[str, object]:
+    """Serialize apply and explicit restart confirmation against durable obligations."""
+    journal = RestartJournal(home if home is not None else Path.home())
+    try:
+        if confirm_restart is not None:
+            if apply or modules or expected_plan_digest or not isinstance(confirm_restart, str):
+                raise RepairAdmissionError("restart confirmation cannot also plan or apply repair")
+            with journal.locked():
+                confirmed = journal.evidence()
+                journal.confirm(confirm_restart)
+            return {
+                "schema": "copilot-extensions.installation-repair", "version": 1,
+                "status": "restart-confirmed", "interrupted": False,
+                "confirmation": "operator-attestation", "confirmedRestarts": confirmed,
+                "restarts": journal.evidence(),
+            }
+        if apply:
+            with journal.locked():
+                return _repair(
+                    project_root, modules=modules, apply=apply,
+                    expected_plan_digest=expected_plan_digest, home=home,
+                    readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
+                    journal=journal,
+                )
+        journal.load()
+        return _repair(
+            project_root, modules=modules, apply=apply,
+            expected_plan_digest=expected_plan_digest, home=home,
+            readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
+            journal=journal,
+        )
+    except OSError as error:
+        raise RepairAdmissionError("installation repair state cannot be accessed or persisted") from error
+
+
+def _repair(
+    project_root: Path, *, modules: Sequence[str], apply: bool,
+    expected_plan_digest: str | None, home: Path | None,
+    readiness_timeout: float, installer_timeout: float, journal: RestartJournal,
 ) -> dict[str, object]:
     """Reconstruct host admission and invoke only the explicit selected closure."""
     if (
@@ -293,6 +345,7 @@ def repair(
     outcomes = {
         module.qualified_id: Outcome(
             module=module, before=Observation("unknown", "readiness-not-observed"),
+            restart_required=module.qualified_id in journal.pending,
         )
         for module in selected
     }
@@ -324,7 +377,7 @@ def repair(
             ):
                 blockers.append(dependency)
         outcome.blocked_by = tuple(blockers)
-        if not apply or interrupted or blockers:
+        if not apply or interrupted or blockers or outcome.restart_required:
             continue
         owner = host.bindings.get(module.owner.owner_id)
         if not owner or owner.refusal or platform not in module.platforms:
@@ -333,9 +386,20 @@ def repair(
         if not refresh_readiness and _satisfies(module, observation):
             continue
         try:
-            fresh = admit_host(project_root, home=home)
-            fresh_selected = _closure(fresh, modules, platform)
-            binding_matches = digest(_binding_inputs(fresh, fresh_selected, platform)) == plan_digest
+            fresh_owner = _readmit_owner(
+                project_root, modules, platform, plan_digest, module.owner.owner_id, home,
+            )
+            if refresh_readiness:
+                observation = _observe(module, fresh_owner, platform, readiness_timeout)
+                outcome.after = observation
+                if observation.reason == "readiness-interrupted":
+                    interrupted = True
+                    break
+                fresh_owner = _readmit_owner(
+                    project_root, modules, platform, plan_digest, module.owner.owner_id, home,
+                )
+                if _satisfies(module, observation):
+                    continue
         except KeyboardInterrupt:
             outcome.after = Observation("unknown", "owner-revalidation-interrupted")
             interrupted = True
@@ -343,24 +407,15 @@ def repair(
         except RepairAdmissionError:
             outcome.installer = {"status": "refused", "reason": "owner-binding-changed"}
             break
-        if not binding_matches:
-            outcome.installer = {"status": "refused", "reason": "owner-binding-changed"}
-            break
-        fresh_owner = fresh.bindings[module.owner.owner_id]
-        if refresh_readiness:
-            observation = _observe(module, fresh_owner, platform, readiness_timeout)
-            outcome.after = observation
-            if observation.reason == "readiness-interrupted":
-                interrupted = True
-                break
-            if _satisfies(module, observation):
-                continue
         if fresh_owner.mode == "core-active":
             # An ordinary init action is not permission to synthesize a cell lifecycle operation.
             outcome.installer = {"status": "refused", "reason": "active-core-action-not-declared"}
             continue
-        outcome.attempted = True
         try:
+            if module.restart is not Restart.NONE:
+                journal.require(module.qualified_id, module.restart.value, plan_digest)
+                outcome.restart_required = True
+            outcome.attempted = True
             result = _invoke(
                 module, fresh_owner, platform, readonly=False, timeout=installer_timeout,
             )
@@ -374,9 +429,6 @@ def repair(
         if after.reason == "readiness-interrupted":
             interrupted = True
             break
-        outcome.restart_required = (
-            result.status == "exited" and result.exit_code == 0 and module.restart is not Restart.NONE
-        )
     required_satisfied = not interrupted and all(
         _satisfies(outcome.module, outcome.observed) and not outcome.restart_required
         and not outcome.blocked_by
@@ -393,6 +445,7 @@ def repair(
         "schema": "copilot-extensions.installation-repair", "version": 1,
         "platform": platform.value, "apply": apply, "planDigest": plan_digest,
         "interrupted": interrupted,
+        "restarts": journal.evidence(),
         "status": ("discovered" if not selected else "observed") if not apply else (
             "ready" if satisfied else "incomplete" if not required_satisfied else "optional-incomplete"
         ),

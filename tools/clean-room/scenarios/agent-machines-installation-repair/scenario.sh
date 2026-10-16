@@ -142,7 +142,8 @@ else
     cr_finalize
 fi
 if capture "repair-tests" -- timeout 180 "$TEST_ENV/bin/python" -m pytest -q --timeout=30 \
-    "$TEST_SOURCE/plugins/agent-machines/tests/test_installation_repair.py"; then
+    "$TEST_SOURCE/plugins/agent-machines/tests/test_installation_repair.py" \
+    "$TEST_SOURCE/plugins/agent-machines/tests/test_installation_repair_restarts.py"; then
     pass "native Linux repair, active-cell observation/refusal and descendant cleanup pass"
 else
     jam "machines-config" "native repair regression tests failed" "inspect repair-tests.log"

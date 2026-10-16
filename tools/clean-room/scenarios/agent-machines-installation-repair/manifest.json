@@ -11,7 +11,8 @@
     "first-use binstub provisions the candidate after its original source copy is removed",
     "installed CLI observes without installing, then repairs only digest-bound selected closure",
     "fresh prerequisite readiness unlocks dependent repair, retry preserves unrelated configuration",
-    "payload changes refuse stale apply before invoking an installer"
+    "payload changes refuse stale apply before invoking an installer",
+    "restart obligations survive separate apply processes until exact operator-confirmed continuation"
   ],
   "config": {
     "CR_HARNESS_MOUNT": "candidate checkout, or a directory containing candidate.tar from the canonical test-isolation writer or an exact staged Git tree archive"

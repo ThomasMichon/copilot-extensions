@@ -104,7 +104,34 @@ def main(command: str) -> None:
         assert config.read_text(encoding="utf-8") == '{"preserve":true}'
         action.write_text(action.read_text(encoding="utf-8") + "\n# changed payload\n", encoding="utf-8")
         call(apply, expected=1)
-        print("installed ordinary repair: no-write plan, fresh dependency readiness, repeat, preservation, stale refusal")
+        modules[0]["restart"] = "session"
+        write(payload / "installer-readiness.json", {
+            "schema": "copilot-extensions.installer-readiness", "version": 1,
+            "owner": {"plugin": "agent-example"}, "state": "supported", "modules": modules,
+        })
+        for name in ("base", "child"):
+            (Path.home() / ".agent-example" / f"agent-example-{name}.ready").unlink()
+        plan = call(selection)
+        apply = [*selection, "--apply", "--expected-plan-digest", plan["planDigest"]]
+        first = call(apply, expected=2)
+        assert first["outcomes"][0]["attempted"]
+        assert first["outcomes"][0]["restartRequired"]
+        assert not first["outcomes"][1]["attempted"]
+        repeated = call(apply, expected=2)
+        assert repeated["restarts"] == first["restarts"]
+        assert not any(row["attempted"] for row in repeated["outcomes"])
+        call(["--confirm-restart", "0" * 64], expected=1)
+        confirmed = call(["--confirm-restart", first["restarts"]["pendingDigest"]])
+        assert confirmed["status"] == "restart-confirmed"
+        assert confirmed["confirmation"] == "operator-attestation"
+        assert not confirmed["restarts"]["pending"]
+        repaired = call(apply)
+        assert repaired["status"] == "ready"
+        assert not repaired["outcomes"][0]["attempted"]
+        assert repaired["outcomes"][1]["attempted"]
+        assert config.read_text(encoding="utf-8") == '{"preserve":true}'
+        print("installed ordinary repair: fresh readiness, retry, preservation, stale refusal, "
+              "durable restart blocking and exact operator-confirmed continuation")
 
 
 if __name__ == "__main__":

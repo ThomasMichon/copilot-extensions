@@ -346,6 +346,7 @@ def _cmd_installation_repair(args: argparse.Namespace) -> int:
             args.project_root, modules=args.module, apply=args.apply,
             expected_plan_digest=args.expected_plan_digest,
             readiness_timeout=args.readiness_timeout, installer_timeout=args.installer_timeout,
+            confirm_restart=args.confirm_restart,
         )
     except RepairAdmissionError as error:
         print(f"agent-machines: {error}", file=sys.stderr)
@@ -353,7 +354,7 @@ def _cmd_installation_repair(args: argparse.Namespace) -> int:
     print(json.dumps(result, sort_keys=True))
     if result["interrupted"]:
         return 130
-    return 0 if result["status"] in {"discovered", "observed", "ready"} else 2
+    return 0 if result["status"] in {"discovered", "observed", "ready", "restart-confirmed"} else 2
 
 
 def _fmt_val(v: object) -> str:
@@ -809,6 +810,10 @@ def _build_parser() -> argparse.ArgumentParser:
     installation_repair.add_argument("--module", action="append", default=[])
     installation_repair.add_argument("--apply", action="store_true")
     installation_repair.add_argument("--expected-plan-digest")
+    installation_repair.add_argument(
+        "--confirm-restart", metavar="PENDING_DIGEST",
+        help="operator attestation that every restart in the exact pending batch completed",
+    )
     installation_repair.add_argument("--readiness-timeout", type=float, default=15)
     installation_repair.add_argument("--installer-timeout", type=float, default=300)
     restore = add("restore", _cmd_restore)
