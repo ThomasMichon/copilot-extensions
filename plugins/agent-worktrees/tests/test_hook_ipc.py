@@ -933,7 +933,7 @@ def test_active_update_preserves_non_reconcile_legacy_hooks(monkeypatch):
         {"pid": 1, "started": 10 ** 1000},
         {"pid": 1, "started": -(10 ** 1000)},
         {"pid": 1, "started": 1001},
-        {"pid": 1, "started": 880},
+        {"pid": 1, "started": -1},
     ],
 )
 def test_update_driver_rejects_absent_or_invalid_ownership(
@@ -990,6 +990,80 @@ def test_update_driver_tracks_real_stage_lock_lifetime(tmp_path):
     finally:
         update_stage.release_lock(lock)
     assert not hook_client._external_update_driver_active(tmp_path, python)
+
+
+@pytest.mark.parametrize("protocol", [None, "kernel-lease-v1"])
+def test_update_driver_does_not_expire_a_live_stage(monkeypatch, tmp_path, protocol):
+    from agent_worktrees import update_stage
+
+    runtime = tmp_path / ".agent-worktrees"
+    lock = runtime / "updater.lock"
+    helper = hook_client._load_sibling("versioned_runtime.py")
+    image = helper._pid_image_path(os.getpid())
+    assert image
+    assert update_stage.acquire_lock(lock)
+    try:
+        record = json.loads(lock.read_text(encoding="utf-8"))
+        if protocol is None:
+            record.pop("protocol")
+            record.pop("start_time")
+        # Keep the actual owner record intact for release.
+        monkeypatch.setattr(hook_client.time, "time", lambda: record["started"] + 3600)
+        original = hook_client._read_json
+        monkeypatch.setattr(
+            hook_client, "_read_json",
+            lambda path: record if path == lock else original(path),
+        )
+        assert hook_client._external_update_driver_active(tmp_path, Path(image))
+    finally:
+        update_stage.release_lock(lock)
+
+
+def test_update_driver_rejects_reused_pid_with_matching_python(tmp_path):
+    from agent_worktrees import update_stage
+
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    helper = hook_client._load_sibling("versioned_runtime.py")
+    image = helper._pid_image_path(os.getpid())
+    assert image
+    (runtime / "updater.lock").write_text(
+        json.dumps({
+            "protocol": "kernel-lease-v1",
+            "pid": os.getpid(),
+            "started": time.time(),
+            "start_time": "not-this-process-birth",
+        }), encoding="utf-8",
+    )
+    assert update_stage.locks.process_start_time(os.getpid()) is not None
+    assert not hook_client._external_update_driver_active(tmp_path, Path(image))
+
+
+def test_update_driver_identity_probe_needs_no_installed_runtime(tmp_path):
+    from agent_worktrees import update_stage
+
+    runtime = tmp_path / ".agent-worktrees"
+    lock = runtime / "updater.lock"
+    helper = hook_client._load_sibling("versioned_runtime.py")
+    image = helper._pid_image_path(os.getpid())
+    assert image
+    script = (
+        "import importlib.util,pathlib,sys;"
+        "spec=importlib.util.spec_from_file_location('hook',sys.argv[1]);"
+        "hook=importlib.util.module_from_spec(spec);spec.loader.exec_module(hook);"
+        "assert hook._external_update_driver_active("
+        "pathlib.Path(sys.argv[2]),pathlib.Path(sys.argv[3]))"
+    )
+    assert update_stage.acquire_lock(lock)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", script, str(_SCRIPT), str(tmp_path), image],
+            capture_output=True, text=True, timeout=10,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    finally:
+        update_stage.release_lock(lock)
 
 
 @pytest.mark.parametrize("failure", ["unavailable", "probe-error"])
