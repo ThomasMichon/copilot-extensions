@@ -19,6 +19,7 @@ import yaml
 from agent_dispatch import restricted_spawn
 from agent_dispatch.client import DispatchClient, ResolvingDispatchClient
 from agent_dispatch.supervisor import Supervisor
+from agent_dispatch.tracking import session_activity
 from agent_procutil import no_window_flags
 
 pytestmark = [
@@ -253,11 +254,16 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                         "coordinator_url": "http://coordinator:8787",
                     }), repo=_REPO, labels=["restricted"], supervisor_id="docker-acceptance",
                     machine="fixture-host", recover=False, nudge=False, heartbeat=True,
-                    consistency_sweep=False,
+                    consistency_sweep=False, publish_activity=True,
                     local_body_verdict_fn=lambda sid: (
                         "live" if bridge_state(sid)["status"] in {"running", "idle"} else "unknown"
                     ),
                     local_acp_session_fn=lambda sid: bridge_state(sid)["acp_session_id"],
+                    local_body_activity_fn=lambda sid: session_activity(bridge_state(sid)),
+                )
+                monkeypatch.setattr(
+                    supervisor.client, "heartbeat",
+                    lambda *_args, **_kwargs: pytest.fail("restricted worker used generic heartbeat"),
                 )
                 polled = supervisor.poll_once()
                 assert polled == [task["id"]], json.dumps({
@@ -283,6 +289,13 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                     )
 
                 _wait(awaiting_renewal)
+                before_activity = client.get(task["id"])
+                assert supervisor.hold_live_leases() == 0
+                active = client.get(task["id"])
+                assert active["activity"] == "ACTIVE"
+                assert active["lease_expires_at"] == before_activity["lease_expires_at"]
+                assert active["generation"] == info["task_generation"]
+                assert active["owner_session_id"] == info["native_session_id"]
                 assert supervisor.renew_restricted_grants() == 1
                 _run(
                     "docker", "exec", "-u", "node", physical, "/usr/local/bin/node", "-e",

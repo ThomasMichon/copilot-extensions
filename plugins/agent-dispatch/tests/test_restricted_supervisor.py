@@ -608,6 +608,58 @@ def test_restricted_lease_heartbeat_is_scoped_and_native_fenced(rig, monkeypatch
     assert rig.supervisor.hold_live_leases() == 0
 
 
+@pytest.mark.parametrize("started", [False, True])
+def test_restricted_activity_refreshes_without_generic_heartbeat(rig, monkeypatch, started):
+    rig.supervisor.poll_once()
+    if started:
+        response = rig.api.post(
+            f"/tasks/{rig.task.id}/start", headers={TASK_SCOPE_HEADER: rig.grants[-1]},
+            json={"worker_id": "ignored"},
+        )
+        assert response.status_code == 200, response.text
+    before = rig.queue.get(rig.task.id)
+    rig.supervisor.publish_activity = rig.supervisor.heartbeat = True
+    monkeypatch.setattr(
+        rig.client, "heartbeat",
+        lambda *_args, **_kwargs: pytest.fail("restricted activity used generic heartbeat"),
+    )
+    for offset, activity in enumerate(("ACTIVE", "STALLED"), start=1):
+        monkeypatch.setattr("agent_dispatch.supervisor_identity.time.time", lambda: before.updated_at + offset)
+        rig.supervisor.local_body_activity_fn = lambda _sid: activity
+        assert rig.supervisor.hold_live_leases() == 0
+        current = rig.queue.get(before.id)
+        assert asdict(current) == {
+            **asdict(before), "activity": activity,
+            "activity_updated_at": before.updated_at + offset,
+        }
+
+
+@pytest.mark.parametrize("change", ["native-before", "native-during", "generation"])
+def test_restricted_activity_refuses_replaced_incarnation(rig, change):
+    rig.supervisor.poll_once()
+    before = rig.queue.get(rig.task.id)
+    rig.supervisor.publish_activity = True
+    if change == "native-before":
+        rig.supervisor.local_acp_session_fn = lambda _sid: "replacement-native"
+
+    def activity(_sid):
+        if change == "native-during":
+            rig.supervisor.local_acp_session_fn = lambda _sid: "replacement-native"
+        elif change == "generation":
+            rig.queue.yield_task(before.id, before.owner, release_spawn=False)
+            rig.queue.claim_one(before.owner, task_id=before.id, repo=TEST_REPO)
+        return "ACTIVE"
+
+    rig.supervisor.local_body_activity_fn = activity
+    assert rig.supervisor.hold_live_leases() == 0
+    current = rig.queue.get(before.id)
+    assert current.activity is None
+    if change == "generation":
+        assert current.generation > before.generation
+    else:
+        assert current == before
+
+
 def test_production_resolving_client_renews_with_scoped_heartbeat(rig, monkeypatch):
     rig.supervisor.client = ResolvingDispatchClient(rig.client_factory)
     rig.supervisor.heartbeat = True

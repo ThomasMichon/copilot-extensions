@@ -2854,6 +2854,9 @@ class Supervisor(RestrictedStartupMixin):
         snapshots = capture(self.client, self._pool_reservations(state=SpawnState.SPAWNED))
         for res, task in snapshots:
             if res.get("driver") == "restricted-bridge":
+                from .supervisor_identity import publish_restricted_activity
+
+                publish_restricted_activity(self, res, task)
                 continue  # Its renewal hook heartbeats with the exact scoped incarnation.
             if task.get("status") == Status.SUSPENDED:
                 continue

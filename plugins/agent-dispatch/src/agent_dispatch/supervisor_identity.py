@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 
@@ -110,3 +111,34 @@ def renew_restricted_grants(supervisor) -> int:
             continue
         renewed += 1
     return renewed
+
+
+def publish_restricted_activity(supervisor, reservation: dict, task: dict) -> None:
+    if not supervisor.publish_activity or task.get("status") not in {Status.CLAIMED, Status.STARTED}:
+        return
+    info = reservation.get("agent_info") or {}
+    session_id, native = info.get("session_id"), info.get("native_session_id")
+    if (
+        not session_id or not native
+        or task.get("owner") != info.get("worker_id")
+        or task.get("generation") != info.get("task_generation")
+        or task.get("owner_session_id") != native
+        or _parse_local_body_handle(reservation.get("session_handle")) != session_id
+    ):
+        return
+    try:
+        if supervisor.local_acp_session_fn(session_id) != native:
+            return
+        observed_at = time.time()
+        activity = supervisor.local_body_activity_fn(session_id)
+        if supervisor.local_acp_session_fn(session_id) != native:
+            return
+        supervisor.client.set_activity(
+            task["id"], activity, reservation_key=reservation["key"], observed_at=observed_at,
+            admission_fence={
+                key: task.get(key)
+                for key in ("generation", "status", "started_at", "owner_session_id")
+            },
+        )
+    except (DispatchError, BridgeUnavailable, OSError, httpx.HTTPError) as exc:
+        log.error("restricted activity publication %s refused: %s", reservation["key"], exc)

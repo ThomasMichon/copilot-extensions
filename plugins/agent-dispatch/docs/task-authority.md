@@ -123,6 +123,11 @@ refuses renewal. With heartbeat enabled, the supervisor also uses that grant
 for a transactionally fenced lease heartbeat; issuing a grant alone does not
 extend a lease. The public scoped-heartbeat client operation also supports
 the production client's per-operation coordinator re-resolution.
+Activity publication remains independent of that lease heartbeat: the trusted
+supervisor observes the retained Bridge handle only while its native identity
+matches, then publishes through the existing reservation and task-incarnation
+fence. A replaced native session or a concurrent generation/start transition
+cannot supply activity for the old observation.
 Commands are always taken from the current trusted lane
 configuration, never executed from a stored queue receipt.
 
