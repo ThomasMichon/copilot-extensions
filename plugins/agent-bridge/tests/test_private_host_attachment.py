@@ -48,6 +48,31 @@ async def staged_connection(owner, host, channel, endpoint, *, snapshot=None, de
     return reader, writer
 
 
+def test_ticket_timeout_catches_distinct_pre_311_asyncio_exception(tmp_path, monkeypatch):
+    class LegacyTimeout(Exception):
+        pass
+
+    async def expire(operation, *, timeout):
+        operation.close()
+        raise LegacyTimeout()
+
+    async def scenario():
+        host, owner, old, _new, endpoint, _new_ep = setup(tmp_path, monkeypatch)
+        await host.serve()
+        try:
+            control(owner, old, endpoint, AttachmentOperation.RESERVE)
+            with monkeypatch.context() as patch:
+                patch.setattr(asyncio, "TimeoutError", LegacyTimeout)
+                patch.setattr(asyncio, "wait_for", expire)
+                with pytest.raises(PrivateIPCError, match="private-ipc-protocol-refused"):
+                    await owner.read_ticket(asyncio.StreamReader())
+            assert host.child_alive and host._front is None and owner._owner is None
+        finally:
+            await host.close()
+
+    asyncio.run(scenario())
+
+
 def setup(tmp_path, monkeypatch, *, acp_wire_boundary=False):
     monkeypatch.setattr(module, "_native_channel_type", lambda: NativeChannel)
     host = SessionHost(_FakeChild(), unexpected_reap_seconds=0)

@@ -406,7 +406,7 @@ class PrivateAttachment:
             return await asyncio.wait_for(
                 protocol.read_private_attach(reader), timeout=remaining,
             )
-        except (TimeoutError, asyncio.IncompleteReadError, protocol.ProtocolError):
+        except (asyncio.TimeoutError, TimeoutError, asyncio.IncompleteReadError, protocol.ProtocolError):
             raise PrivateIPCError(Refusal.PROTOCOL) from None
 
     async def prepare_stream(
