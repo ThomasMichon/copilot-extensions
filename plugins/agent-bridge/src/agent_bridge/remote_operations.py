@@ -29,6 +29,13 @@ from .client import (
 )
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
 from .remote_errors import RemoteBridgeError
+from .remote_operation_versions import (
+    REMOTE_OPERATION_VERSION as REMOTE_OPERATION_VERSION,
+    REMOTE_COPILOT_ARGS_MIN_VERSION as REMOTE_COPILOT_ARGS_MIN_VERSION,
+    REMOTE_PEER_REPLY_MIN_VERSION as REMOTE_PEER_REPLY_MIN_VERSION,
+    REMOTE_RECEIPT_REPLY_MIN_VERSION as REMOTE_RECEIPT_REPLY_MIN_VERSION,
+    request_operation_version,
+)
 from .live_peer_address import (
     deliver_remote_peer,
     peer_reply_requested as _peer_reply_requested,
@@ -38,12 +45,6 @@ from .live_peer_address import (
     validate_live_handle as _validate_live_handle,
 )
 
-REMOTE_OPERATION_VERSION = 5
-#: Versions below this reject a request naming ``copilot_args`` (a charter
-#: overlay) rather than silently dropping it on an older carrier.
-REMOTE_COPILOT_ARGS_MIN_VERSION = 3
-REMOTE_PEER_REPLY_MIN_VERSION = 4
-REMOTE_RECEIPT_REPLY_MIN_VERSION = 5
 _REMOTE_OPERATION_VERSIONS = {1, 2, 3, 4, REMOTE_OPERATION_VERSION}
 MAX_CALLER_ID_LENGTH = 128
 MAX_HOST_LENGTH = 128
@@ -901,29 +902,9 @@ class RemoteOperationService:
         try:
             while True:
                 try:
-                    operation = payload.get("operation")
-                    # Version 3 is only required when this request actually carries
-                    # copilot_args (a charter overlay) -- send the lowest version
-                    # that still satisfies the request so a not-yet-upgraded remote
-                    # carrier keeps working for every call that doesn't need it.
-                    if operation == "live_session.send" and payload.get("wait") is True:
-                        version = REMOTE_RECEIPT_REPLY_MIN_VERSION
-                    elif _peer_reply_requested(payload):
-                        version = REMOTE_PEER_REPLY_MIN_VERSION
-                    elif payload.get("copilot_args") is not None:
-                        version = REMOTE_COPILOT_ARGS_MIN_VERSION
-                    elif operation in {
-                        "live_session.send",
-                        "session.create",
-                        "session.end",
-                        "session.stop",
-                    }:
-                        version = 2
-                    else:
-                        version = 1
                     response = await lease.carrier.request(
                         {
-                            "version": version,
+                            "version": request_operation_version(payload),
                             **payload,
                         },
                         timeout=max(0.1, deadline - time.monotonic()),
