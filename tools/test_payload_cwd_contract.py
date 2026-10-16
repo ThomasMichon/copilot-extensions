@@ -579,6 +579,48 @@ def test_native_watchdog_budget(
 
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("name,minimum", [
+    ("agent-dispatch", 420 + 60 + 300),
+    ("agent-index", 420 + 60 + 300),
+    ("agent-mcp", 420 + 60 + 300),
+    ("agent-worktrees", 300 + 420 + 60 + 300),
+    ("agent-bridge", 540 + 180 + 300),
+])
+def test_native_watchdog_declared_cutover_covers_lifecycle_near_build_deadline(
+    tmp_path: Path, extension: str, name: str, minimum: int,
+) -> None:
+    payload = ROOT / "plugins" / name
+    manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
+    build = manifest.get("installerDeadlineSeconds", 480)
+    cutover = manifest.get("cutoverDeadlineSeconds", 300)
+    env = _env(tmp_path)
+    env.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC", None)
+    phase = tmp_path / "phase.json"
+    entered = 100 + build - 1
+    phase.write_text(json.dumps({
+        "phase": "cutover", "extend_until": entered + cutover,
+    }), encoding="utf-8")
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": (
+            "$b = Get-InstallWatchdogBudget -Payload $args[0] -Name $args[1]\n"
+            "$s = Get-InstallWatchdogDeadline -BuildSec $b.BuildSec "
+            "-CutoverSec $b.CutoverSec -StartedAt 100 -PhaseFile $args[2]\n"
+            '"$($b.BuildSec) $($b.CutoverSec) $($s.Deadline) $($s.Phase)"'
+        ),
+        "sh": (
+            'read -r build cutover < <(get_install_watchdog_budget "$1" "$2")\n'
+            'printf "%s %s " "$build" "$cutover"\n'
+            'get_install_watchdog_deadline "$build" "$cutover" 100 "$3"'
+        ),
+    }, [payload.as_posix(), name, phase.as_posix()], env)
+    assert result.returncode == 0, result.stderr
+    actual_build, actual_cutover, deadline, state = result.stdout.split()
+    assert (int(actual_build), int(actual_cutover), state) == (build, cutover, "cutover")
+    assert int(deadline) - entered >= minimum
+    assert int(deadline) <= 100 + build + cutover
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
 @pytest.mark.parametrize("raw", ["2147483648", "-2147483649", "18446744073709551616"])
 def test_native_watchdog_rejects_deadline_overflow(tmp_path: Path, extension: str, raw: str) -> None:
     (tmp_path / "plugin.json").write_text("{}", encoding="utf-8")

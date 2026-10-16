@@ -1,5 +1,5 @@
 {
-  "comment": "Use a shared phase-aware native installer watchdog with bounded cutover extension and matching outer updater grace.",
+  "comment": "Use a shared phase-aware native installer watchdog with bounded cutover extension, declared daemon lifecycle budgets and matching outer updater grace.",
   "changes": [
     {
       "plugin": "agent-bridge",

@@ -19,12 +19,12 @@ pytestmark = pytest.mark.guard
 @pytest.mark.parametrize(
     ("environment", "expected"),
     [
-        ({}, 1380),
-        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 1230),
+        ({}, 1980),
+        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 1830),
         ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "600",
-          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 930),
-        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "0"}, 810),
-        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "-1"}, 810),
+          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 1530),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "0"}, 1410),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "-1"}, 1410),
     ],
 )
 def test_dispatch_effective_default_and_overrides(environment, expected):
@@ -38,6 +38,28 @@ def test_dispatch_effective_default_and_overrides(environment, expected):
         match = re.search(pattern, (payload / "scripts" / script).read_text())
         assert match and int(match[1]) == default
     assert runtime._installer_timeout("agent-dispatch", environment, payload) == expected
+
+
+@pytest.mark.parametrize("name,minimum", [
+    ("agent-dispatch", 420 + 60 + 300),
+    ("agent-index", 420 + 60 + 300),
+    ("agent-mcp", 420 + 60 + 300),
+    ("agent-worktrees", 300 + 420 + 60 + 300),
+    ("agent-bridge", 540 + 180 + 300),
+])
+def test_declared_daemon_cutover_and_outer_budget_cover_lifecycle(name, minimum):
+    payload = Path(__file__).resolve().parents[2] / name
+    manifest = json.loads((payload / "plugin.json").read_text())
+    build = manifest.get("installerDeadlineSeconds", 480)
+    cutover = manifest.get("cutoverDeadlineSeconds", 300)
+    assert cutover >= minimum
+    assert runtime._installer_timeout(name, {}, payload) == build + cutover + 30
+    assert runtime._installer_timeout(
+        name, {"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "1"}, payload,
+    ) == 1 + cutover + 30
+    assert runtime._installer_timeout(
+        name, {"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0"}, payload,
+    ) == 480 + cutover + 30
 
 
 @pytest.mark.parametrize(

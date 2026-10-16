@@ -2224,10 +2224,22 @@ Plugins with a watchdog default other than 480 seconds declare that positive
 integer as `installerDeadlineSeconds` in `plugin.json`; unified update reads it
 only when neither deadline environment override is set. The declaration must
 match the plugin's own cross-platform installer defaults. Agent-dispatch declares
-1050 seconds for its longer activation lifecycle, so its default outer caller
-budget is 1380 seconds including the default cutover budget and cleanup grace.
-An explicit disabled-watchdog override still uses the finite 810-second default
-outer fallback. Invalid declarations fail before installer launch.
+1050 seconds for its longer activation lifecycle.
+
+The daemon adopters declare longer cutover budgets rather than inheriting the
+generic 300 seconds: Dispatch, Index and MCP use 900 seconds; Bridge and
+Worktrees use 1200 seconds. The former cover a 420-second cutover-lease wait
+followed by 60-second health and 300-second drain windows, with 120 seconds
+for surrounding lifecycle work. Bridge covers its Windows 180-second health
+window, 300-second drain and resulting 540-second lease wait. Worktrees also
+covers its separate 300-second installer-cutover lock before the standard
+lease/health/drain sequence. The generic default remains unchanged.
+
+Dispatch's actual default outer budget is therefore 1980 seconds
+(1050 build + 900 cutover + 30 cleanup). Disabling its inner watchdog leaves
+1410 seconds (480 + 900 + 30), not the generic 810-second fallback.
+Invalid declarations fail before installer launch. Operator-increased service
+windows beyond these declared bounds are not an unbounded watchdog extension.
 
 Bridge, CodeSpaces, Logger, Pull Requests, SSH and Vault bootstrap hooks submit
 through the [installation driver](../libs/update-driver/README.md), retaining
