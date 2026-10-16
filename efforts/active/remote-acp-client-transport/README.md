@@ -186,8 +186,11 @@ ID already serves that role. Neither identity is an official ACP registration.
   protocol handler or local connection behavior is patched.
 - Actual HTTP2/WSS malformed-notification and malformed-result marker tests,
   plus a local/non-SDK logging preservation regression, pass: 5 tests.
-- The open candidate now conflicts with newer `dev` work and must be
-  reconciled before a fresh complete CI/review pass. Cancelled CI is not a pass
+- Reconciled the candidate onto newer `dev`, preserving both independent
+  testing-guide contributions. The rebased remote/logging/ledger/independent
+  peer/legacy ACP selection passes 124 tests. Contract evidence (122 fixtures),
+  shrink-only module caps, changefile presence and install contract pass.
+- A fresh complete CI/review pass is still required. Cancelled CI is not a pass
   or a waiver. Implementation merge, effort closure and finalization stay open.
 
 ### 2026-10-16 — Sanitized SDK results and adopted session streams
