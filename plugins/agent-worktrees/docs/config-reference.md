@@ -92,6 +92,12 @@ refused; review their provenance before any separate migration. Cross-space
 owned creation is still unsupported before allocation. This feature does not
 add reservation/receipt authority.
 
+An explicit [local owner-label migration](local-owner-migration.md) is available
+through `doctor --migrate-owner <exact-id> --from-machine <old> --to-machine <key>`.
+It reports first, requires `--fix` to apply, proves the receiving project,
+execution platform and checkout namespace, and refuses dependent relationships.
+This dedicated recovery does not change automatic alias-resolution behavior.
+
 Claim and handoff transactions recheck each freshly loaded source, consumer,
 and child record while holding its sidecar lock. Authority comes from the
 receiving execution user's registered project configuration, never a caller's

@@ -4,6 +4,14 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Explicit local owner-label repair
+
+`doctor --migrate-owner <exact-id> --from-machine <old> --to-machine <key>
+[--fix] [--json]`, scoped with `-p <receiving-project>`, reports one record first.
+Only `--fix` applies a proven local migration; ordinary doctor fixes never do.
+Linked records, foreign/ambiguous identity and mismatched provenance refuse.
+See [admission, backups, JSON outcomes and relationship fences](local-owner-migration.md).
+
 ## Disposable producer ownership
 
 `resource-producer <capabilities|reserve|begin|complete|bind|inspect|close> --json

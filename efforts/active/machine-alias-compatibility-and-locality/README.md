@@ -181,23 +181,26 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
 
 ### Phase 3c - Explicit provenance-checked local owner migration
 _(Agent-recommended integration details for the requested #7057 capability.)_
-- [ ] Review and merge this plan before implementation.
-- [ ] Add a dedicated public report-first CLI with exact old/new labels and
+- [x] Review and merge this plan before implementation; #7059 merged with
+  exact-head approval and passing required CI.
+- [x] Add a dedicated public report-first CLI with exact old/new labels and
   explicit apply, separate from ordinary `doctor --fix`. Require the new label
   to be the receiving configured canonical execution-space key and platform;
   reject alias/key ambiguity and arbitrary foreign takeovers.
-- [ ] Prove each selected record belongs to its registered receiving project,
+- [x] Prove each selected record belongs to its registered receiving project,
   platform and checkout namespace. Historical absent checkouts are eligible
   only with sufficient independent provenance; never rename IDs or paths.
-- [ ] Scan canonical local project/repository relationships, including paired
+- [x] Scan canonical local project/repository relationships, including paired
   knowledge repositories. Deliberately fence cross-project dependent references,
   misplaced/duplicate records, claims, controller and resource references:
   migrate coherently through the owning authority or refuse explicitly.
-- [ ] Reuse authoritative mutation/publication and tracking locks, validate
+- [x] Reuse authoritative mutation/publication and tracking locks, validate
   unchanged input under lock, retain original-byte backups and an audit report;
   report partial/error outcomes honestly and make repeated apply idempotent.
-- [ ] Pass focused regressions, lint, install-contract and metadata/documentation
-  gates; add the agent-worktrees changefile and land through reviewed dev PR.
+- [x] Pass focused regressions, lint, install-contract and metadata/documentation
+  gates; add the agent-worktrees changefile. The final source candidate passes
+  176 affected tests, including native synthetic public-CLI report proof.
+- [ ] Land the source candidate through final-head review and required dev CI.
 - [ ] Transfer explicit one-time local application to the coordinator with the
   retained clean source and public CLI commands. No runtime deployment, service
   change, real-record repair or release promotion by this participant.
@@ -233,10 +236,10 @@ _(Agent-recommended integration details for the requested #7057 capability.)_
   queued prompts, live sessions, historical strings and unrelated records.
 - [ ] Satisfy the [guest-identity validation matrix](guest-execution-identity.md#validation-plan)
   before declaring the #6945 containing rollout gap closed.
-- [ ] For Phase 3c, prove read-only dry-run, exact selection and JSON, local
+- [x] For Phase 3c, prove read-only dry-run, exact selection and JSON, local
   existing/missing checkouts, unchanged non-owner fields, repeated apply,
   changed-record/lock failures and original-byte backup/audit recovery.
-- [ ] For Phase 3c, reject foreign project/platform/namespace, alias/key
+- [x] For Phase 3c, reject foreign project/platform/namespace, alias/key
   ambiguity, ambiguous provenance and unsupported dependent references; verify
   paired repository discovery and no incoherent cross-project edge or
   success-shaped partial result. Ordinary doctor fix never migrates ownership.
@@ -266,6 +269,17 @@ unrelated service changes or a second machine registry.
 - Plan captures the requested report-first migration and preserves surrounding
   authorization constraints. All algorithm/CLI integration details above are
   visibly agent-recommended and require the implementation's own review/tests.
+
+### 2026-10-16 - Owner-migration plan reviewed; bounded implementation
+- #7059 merged as `71104231fa60aa316728978f77377e9d2a4ca948` after
+  exact-head Copilot approval and passing required CI; execution synced onto
+  that reviewed intent through the supported Git flow.
+- The agent-recommended first integration is one exact record in its receiving
+  project, with a canonical cross-project/knowledge inventory for dependency
+  checks. Linked/provider-owned records are explicitly refused rather than
+  partially migrated. This does not claim multi-record graph transfer.
+- Real-record recovery and rollout remain coordinator-owned and unexecuted by
+  the source participant. The existing wider effort remains Active.
 
 ### 2026-10-16 - Guest source repair merged; release containment remains
 - #7009 merged as `6fe63b78740cc0adbf49fad4cd8970dca656ce83`, from exact head
