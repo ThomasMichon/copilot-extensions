@@ -248,6 +248,7 @@ class SpawnReservationMixin:
                 raise TaskError("explicit target conflicts with a replacement allocation revision")
             worktree_ownership = "targeted" if carried_worktree else None
             carried_session = None
+            prior = None
             carried_project = carried_path = carried_host = carried_driver = None
             if latest_allocation is not None and not new_allocation:
                 carried_project = latest_allocation["allocation_project"]
@@ -386,6 +387,8 @@ class SpawnReservationMixin:
                 carried_worktree, carried_session, worktree_ownership, agent_info = carry_agent(
                     conn, task, carried_worktree, carried_session, worktree_ownership,
                     conversation_retired, creation_key=creation_key)
+                if prior is not None and carried_worktree == prior["worktree"]:
+                    allocation_reservation_key = prior["allocation_reservation_key"] or prior["key"]
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "

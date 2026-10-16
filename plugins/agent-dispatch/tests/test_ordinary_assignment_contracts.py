@@ -266,6 +266,93 @@ def test_ordinary_assignment_handleless_release_without_native_stays_unknown(ass
 
 
 @pytest.mark.parametrize("head", ["native-a", "native-b"])
+@pytest.mark.parametrize("tagged_owner", [False, True])
+@pytest.mark.parametrize("transfers", [1, 2])
+def test_ordinary_assignment_cross_task_handleless_retirement_keeps_exact_origin(
+    assigned, head, tagged_owner, transfers,
+):
+    queue, task, _, record, response, calls = assigned
+    _legacy(queue, task)
+    original = queue.get_reservation(task["spawn_reservation_key"])
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET session_handle=NULL WHERE key=?", (original.key,))
+    queue.fail_spawn(original.key, detail="receipt before handle write", release_requested=True)
+    for transfer in range(transfers):
+        next_task = queue.create("different logical task", repo="queue-lane", exclusive_key="review-slot")
+        current, admitted = queue.reserve_spawn(next_task.id, driver="ordinary-bridge")
+        assert admitted and current.allocation_reservation_key == original.key
+        if transfer + 1 < transfers:
+            queue.defer_spawn(current.key, detail="next exclusive-lane task")
+    assert admitted and current.worktree == original.worktree and current.session_handle is None
+    assert current.creation_key != original.creation_key
+    assert current.allocation_reservation_key == original.key
+    task.clear()
+    task.update(asdict(next_task), spawn_reservation_key=current.key)
+    record.update(last_session_id=head, session_count=2)
+    if not tagged_owner:
+        record["dispatch_attempt"] = None
+    response.update(acp_session_id=head, durable_session_id=head)
+    unrelated = queue.create("unrelated workspace history", repo="queue-lane", exclusive_key="other-slot")
+    unrelated_reservation, _ = queue.reserve_spawn(unrelated.id, driver="ordinary-bridge")
+    queue.record_spawn_worktree(unrelated_reservation.key, "worktree-a", ownership="targeted")
+    _legacy(queue, {**asdict(unrelated), "spawn_reservation_key": unrelated_reservation.key},
+            native="unrelated-native", handle="unrelated-bridge")
+    queue.fail_spawn(unrelated_reservation.key, detail="unrelated history", release_requested=True)
+    facts = reservation_native_facts(queue, current.key)
+    assert facts["known_native_session_ids"] == facts["retired_native_session_ids"] == ["native-a"]
+    if head == "native-b":
+        _start(assigned)
+        assert calls.count("resume") == calls.count("send") == 1
+        assert queue.get_reservation(current.key).agent_info["acp_session_id"] == head
+    else:
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
+            _start(assigned)
+        assert "resume" not in calls and "send" not in calls
+    assert "create" not in calls
+
+
+@pytest.mark.parametrize("origin", [None, "self", "missing-predecessor"])
+def test_ordinary_assignment_legacy_handleless_inheritance_without_origin_refuses(assigned, origin):
+    queue, task, _, record, _, calls = assigned
+    original = queue.get_reservation(task["spawn_reservation_key"])
+    queue.defer_spawn(original.key, detail="handleless inherited workspace")
+    next_task = queue.create("different work", repo="queue-lane", exclusive_key="review-slot")
+    current, admitted = queue.reserve_spawn(next_task.id, driver="ordinary-bridge")
+    assert admitted and current.session_handle is None
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET allocation_reservation_key=? WHERE key=?",
+                     (current.key if origin == "self" else origin, current.key))
+    task.clear()
+    task.update(asdict(next_task), spawn_reservation_key=current.key)
+    record.update(last_session_id="native-a", dispatch_attempt=None)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="native origin is unproven"):
+        _start(assigned)
+    assert not calls
+
+
+def test_ordinary_assignment_unproven_intermediate_legacy_origin_refuses(assigned):
+    queue, task, _, record, _, calls = assigned
+    _legacy(queue, task)
+    original = queue.get_reservation(task["spawn_reservation_key"])
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET session_handle=NULL WHERE key=?", (original.key,))
+    queue.fail_spawn(original.key, detail="receipt before handle", release_requested=True)
+    intermediate = queue.create("legacy task", repo="queue-lane", exclusive_key="review-slot")
+    legacy, _ = queue.reserve_spawn(intermediate.id, driver="cli")
+    assert legacy.worktree == original.worktree and legacy.allocation_reservation_key == legacy.key
+    queue.defer_spawn(legacy.key, detail="legacy carry has no root provenance")
+    next_task = queue.create("ordinary task", repo="queue-lane", exclusive_key="review-slot")
+    current, admitted = queue.reserve_spawn(next_task.id, driver="ordinary-bridge")
+    assert admitted and current.allocation_reservation_key == legacy.key
+    task.clear()
+    task.update(asdict(next_task), spawn_reservation_key=current.key)
+    record.update(last_session_id="native-a", dispatch_attempt=None)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="native origin is unproven"):
+        _start(assigned)
+    assert not calls
+
+
+@pytest.mark.parametrize("head", ["native-a", "native-b"])
 def test_ordinary_assignment_exclusive_carry_keeps_original_handle_native(assigned, head):
     queue, task, _, record, _, calls = assigned
     _legacy(queue, task)

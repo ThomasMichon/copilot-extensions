@@ -116,7 +116,10 @@ confirmed-gone body instead of ever reaching a fresh spawn. See
 For ordinary same-worktree recovery, a receipt proving the retired native
 conversation is binding even when the handle write never completed. A terminal
 release without any native identity evidence remains unknown and refuses
-automatic resume or creation.
+automatic resume or creation. Ordinary inheritance across different tasks
+retains the exact original allocation reservation, not merely a directory or
+handle; an unproven legacy handleless origin refuses instead of searching
+unrelated lane history.
 
 Retired reservations keep session and allocation cleanup as separate
 `conclusion_state`/`conclusion_detail` metadata. Positive body absence first

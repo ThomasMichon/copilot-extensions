@@ -140,7 +140,8 @@ def _legacy(queue, task, *, native="native-a", handle="legacy-bridge"):
         conn.execute("INSERT INTO acquisition_markers VALUES (?)", (key,))
         conn.execute(
             "INSERT INTO acquisition_receipts VALUES (?,?,?,?,?,?,?,?)",
-            (key, task["id"], task["generation"], "worktree-a", handle, native, "acp", "old-delivery"),
+            (key, task["id"], task["generation"], "worktree-a", handle, native, "acp",
+             f"old-delivery:{key}"),
         )
 
 

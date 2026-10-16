@@ -2437,7 +2437,11 @@ the compact resume acknowledgement is not identity or readiness evidence.
 Receipt-proven terminal retirement remains binding even if interruption occurred
 before the session handle was stored. A different proven, unretired current head
 can be resumed, but an explicitly released conversation with unknown identity
-cannot authorize a replacement. Both paths recheck the authenticated
+cannot authorize a replacement. Ordinary exclusive-lane inheritance retains the
+original allocation reservation across distinct task/creation keys, so handleless
+predecessor receipts remain in scope without importing unrelated lane history.
+Legacy handleless inheritance with an unproven origin refuses before resume.
+Both paths recheck the authenticated
 reservation/task admission fence immediately before delivery. That coordinator
 transaction is a pre-send admission point, not a cross-service transaction:
 later holds still gate claim/start. The ordinary send itself requires Bridge
