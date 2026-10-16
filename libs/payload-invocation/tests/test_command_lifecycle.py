@@ -586,6 +586,10 @@ def _real_installer(fixture: dict, shell: str, location: str) -> tuple[Path, dic
     suffix = "sh" if shell == "bash" else "ps1"
     installer = payload / f"scripts/install.{suffix}"
     shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/install.{suffix}", installer)
+    shutil.copyfile(
+        ROOT / f"plugins/agent-worktrees/scripts/installer-watchdog.{suffix}",
+        installer.parent / f"installer-watchdog.{suffix}",
+    )
     if shell == "powershell":
         for name in ("installer-human-output.ps1", "install.human-output.json"):
             shutil.copyfile(ROOT / "plugins/agent-worktrees/scripts" / name, installer.parent / name)
@@ -860,7 +864,10 @@ def test_command_binding_bootstrap_preserves_off_path_spaced_interpreter_through
     _prepare_catalog(binding_fixture)
     payload = binding_fixture["payload"]
     scripts = payload / "scripts"
-    for name in ("install.ps1", "bootstrap-check.ps1", "bootstrap-killswitch-guard.ps1"):
+    for name in (
+        "install.ps1", "installer-watchdog.ps1",
+        "bootstrap-check.ps1", "bootstrap-killswitch-guard.ps1",
+    ):
         shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/{name}", scripts / name)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     python_root = binding_fixture["home"] / "Python with spaces"

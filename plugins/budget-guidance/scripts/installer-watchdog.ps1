@@ -62,6 +62,15 @@ function Enter-InstallPhase {
     else { [IO.File]::Move($temporary, $path) }
 }
 
+function Open-InstallPhaseReceipt {
+    param([string]$Path)
+
+    return [IO.File]::Open(
+        $Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    )
+}
+
 function Get-InstallWatchdogDeadline {
     param(
         [long]$BuildSec, [long]$CutoverSec, [long]$StartedAt, [string]$PhaseFile
@@ -71,7 +80,9 @@ function Get-InstallWatchdogDeadline {
     $phase = 'build'
     if ([IO.File]::Exists($PhaseFile)) {
         try {
-            $receipt = [IO.File]::ReadAllText($PhaseFile) | ConvertFrom-Json
+            $reader = [IO.StreamReader]::new((Open-InstallPhaseReceipt -Path $PhaseFile))
+            try { $receipt = $reader.ReadToEnd() | ConvertFrom-Json }
+            finally { $reader.Dispose() }
             if ($receipt.phase -cne 'cutover' -or
                 ($receipt.extend_until -isnot [long] -and $receipt.extend_until -isnot [int]) -or
                 $receipt.extend_until -le 0) {
