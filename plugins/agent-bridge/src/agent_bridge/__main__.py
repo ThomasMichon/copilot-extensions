@@ -322,7 +322,6 @@ from .inventory_cli import (  # noqa: F401
     register_inventory_commands,
 )
 from .service_process_cli import (  # noqa: F401
-    _BrokeredProcessHandle,
     _acquire_ensure_lock,
     _cmd_service,
     _daemon_launch_argv,
@@ -342,8 +341,6 @@ from .service_process_cli import (  # noqa: F401
     _service_stop,
     _spawn_detached_argv,
     _spawn_detached_daemon,
-    _spawn_via_wmi_broker,
-    _spawn_via_wmi_broker_pid,
     _spawn_watchdog_replacement,
     _systemd_available,
     _wait_for_ensure_owner,

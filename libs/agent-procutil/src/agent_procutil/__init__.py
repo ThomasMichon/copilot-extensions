@@ -48,7 +48,6 @@ this package's own ``README.md`` § Vendoring for the mechanism, and
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import ctypes
 import logging
 import math
@@ -56,8 +55,9 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
 from typing import Any, BinaryIO
+
+from .daemon import spawn_daemon
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
 # and fall back to the stable ABI literals so this module imports cleanly off
@@ -861,132 +861,3 @@ def _daemon_log_header(stamp: str, cwd: str, executable: str, display: str | Non
     if display:
         header += " display=" + _header_field(" ".join(str(display).split()))
     return (header + "\n").encode("utf-8", errors="backslashreplace")
-
-
-def spawn_daemon(
-    argv: Sequence[str | os.PathLike[str]],
-    *,
-    cwd: str | os.PathLike[str],
-    log_path: str | os.PathLike[str],
-    env: Mapping[str, str] | None = None,
-    env_overrides: Mapping[str, str] | None = None,
-    console_children: bool = False,
-    breakaway: bool = True,
-    contained_fallback: bool = False,
-    extra_creationflags: int = 0,
-    display: str | None = None,
-    stderr_log_path: str | os.PathLike[str] | None = None,
-) -> subprocess.Popen:
-    """Launch a long-lived daemon that outlives its caller.
-
-    The one shared launch primitive for resident daemons, built on
-    :func:`detached_kwargs` / :func:`windowless_daemon_kwargs` so the creation
-    flags never drift from the rest of this module:
-
-    * **Windowless.** ``console_children=False`` (default) detaches the daemon
-      from every console (``DETACHED_PROCESS``); pass ``True`` for a daemon that
-      repeatedly spawns console-subsystem children, which then inherit its
-      hidden ``CREATE_NO_WINDOW`` console instead of each allocating a window.
-    * **Escapes the caller.** With ``breakaway=True`` (default) the Windows
-      child requests ``CREATE_BREAKAWAY_FROM_JOB`` so a kill-on-close Job
-      around the caller (an installer, an updater, a hook) does not take the
-      daemon down with it; on POSIX the child gets its own session. A Job that
-      forbids breakaway rejects the spawn with ``ERROR_ACCESS_DENIED``, which
-      is surfaced as :class:`DaemonSpawnError` (an ``OSError``) and noted in
-      the daemon log: a daemon that silently inherits the caller's lifetime
-      would die when that Job closes. A caller whose daemon previously ran
-      inside the caller's Job anyway, and for which that degraded lifetime is
-      still better than no daemon, passes ``contained_fallback=True`` to start
-      it inside the Job instead (logged as a warning and in the daemon log).
-      That daemon then does **not** outlive the caller's Job; neither does one
-      started with ``breakaway=False`` or in contained test mode.
-    * **Explicit cwd.** ``cwd`` is required, must be absolute and existing,
-      and must not be inside an ``installed-plugins`` payload, either
-      lexically or once symlinks/junctions are resolved -- use the daemon's
-      runtime root or home directory, never the caller's cwd. Because the
-      daemon runs from ``cwd`` rather than the caller's directory, any path
-      the caller passes in ``argv`` or the environment should be absolute.
-    * **Logged.** stdin is ``DEVNULL``; stdout and stderr are appended to
-      ``log_path`` (must be absolute and, like ``cwd``, outside a plugin
-      payload, since the daemon holds it open; parent directories are
-      created), after a one-line launch
-      header. On POSIX the log is private to its owner: created ``0600``
-      (a created parent directory ``0700``), and an existing log readable by
-      group or others is tightened to ``0600`` before the child starts.
-      The parent closes its copy of the log handle before returning.
-      The header names the cwd and the executable (``argv[0]``) only, plus
-      ``display`` when given: the remaining argv and the environment are never
-      written, since either may carry a token, password or credential URL. A
-      caller that wants more context in the log passes an already-redacted
-      ``display`` label. A daemon whose operators read its stderr separately
-      passes ``stderr_log_path`` (validated, created and tightened exactly like
-      ``log_path``; the same path as ``log_path`` merges); the launch header
-      and any breakaway note are then written to both logs.
-
-    ``argv`` is a sequence of arguments; a bare ``str``/``bytes``/path raises
-    :class:`TypeError` rather than being split into characters. ``env``
-    defaults to a copy of ``os.environ``; ``env_overrides`` is layered on top.
-    ``extra_creationflags`` may add only a priority class or
-    ``CREATE_DEFAULT_ERROR_MODE`` to the Windows creation flags; any flag this
-    primitive owns (console, process-group, Job or session) raises
-    :class:`ValueError` on every platform. Contained test mode suppresses
-    breakaway and the new session exactly as the underlying helpers do.
-    Interpreter selection stays with the caller (:func:`windowless_python`
-    and :func:`windowless_python_env`). Never waits for the child.
-    """
-    command = _validated_daemon_argv(argv)
-    extra_creationflags = _validated_extra_creationflags(extra_creationflags)
-    cwd_path = _validated_daemon_cwd(cwd)
-    log_file = _validated_daemon_log_path(log_path)
-    err_file = None
-    if stderr_log_path is not None:
-        err_file = _validated_daemon_log_path(stderr_log_path, "stderr_log_path")
-        same = [os.path.normcase(os.path.normpath(p)) for p in (err_file, log_file)]
-        if same[0] == same[1]:
-            err_file = None
-
-    child_env = dict(os.environ if env is None else env)
-    if env_overrides:
-        child_env.update(env_overrides)
-    kwargs = _daemon_popen_kwargs(
-        console_children=console_children,
-        breakaway=breakaway,
-        extra_creationflags=extra_creationflags,
-    )
-    with contextlib.ExitStack() as stack:
-        log_fh = stack.enter_context(_open_daemon_log(log_file))
-        err_fh = stack.enter_context(_open_daemon_log(err_file)) if err_file else None
-        logs = [fh for fh in (log_fh, err_fh) if fh is not None]
-
-        def write_logs(data: bytes) -> None:
-            for fh in logs:
-                fh.write(data)
-                fh.flush()
-
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        write_logs(_daemon_log_header(stamp, cwd_path, command[0], display))
-        popen_kwargs = {
-            "cwd": cwd_path,
-            "env": child_env,
-            "stdin": subprocess.DEVNULL,
-            "stdout": log_fh,
-            "stderr": subprocess.STDOUT if err_fh is None else err_fh,
-            "close_fds": True,
-        }
-        try:
-            return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
-        except OSError as exc:
-            if not _breakaway_denied(exc, kwargs):
-                raise
-            note = "spawn_daemon: the caller's Job object forbids breakaway"
-            if not contained_fallback:
-                write_logs(f"{stamp} {note}; daemon not started\n".encode())
-                raise DaemonSpawnError(
-                    f"{note}; the daemon would die with its caller "
-                    f"({command[0]})"
-                ) from exc
-            note += "; starting the daemon inside it (contained_fallback)"
-            log.warning("%s (%s)", note, command[0])
-            write_logs(f"{stamp} {note}\n".encode())
-            kwargs["creationflags"] &= ~_CREATE_BREAKAWAY_FROM_JOB
-            return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603

@@ -71,19 +71,23 @@ def test_direct_start_spawns_once_and_records_the_daemon_pid(monkeypatch, direct
     assert direct_env.read_text(encoding="utf-8") == "4321"
 
 
-def test_direct_start_never_records_a_brokered_console_pid(monkeypatch, direct_env):
+def test_direct_start_records_the_brokered_actual_daemon_pid(monkeypatch, direct_env):
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+
     state = {"spawned": 0}
 
     def _launch(argv, **_kwargs):
         state["spawned"] += 1
-        return m._BrokeredProcessHandle(999)
+        process = WindowsDaemonProcess.__new__(WindowsDaemonProcess)
+        process.pid = 999
+        return process
 
     monkeypatch.setattr(m, "_launch_bridge_daemon", _launch)
     monkeypatch.setattr(m, "_service_is_running", lambda: state["spawned"] > 0)
 
     m._service_start(direct=True)
 
-    assert not direct_env.exists()
+    assert direct_env.read_text(encoding="utf-8") == "999"
 
 
 def test_direct_start_fails_when_the_daemon_never_becomes_healthy(monkeypatch, direct_env):
@@ -164,7 +168,12 @@ def test_direct_start_fails_instead_of_starting_inside_the_callers_job(
     monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
     monkeypatch.setattr(agent_procutil.subprocess, "Popen", _popen)
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
-    monkeypatch.setattr(m, "_spawn_via_wmi_broker_pid", lambda argv: None)
+    from agent_procutil import daemon
+
+    def broker_failed(*_args, **_kwargs):
+        raise agent_procutil.DaemonSpawnError("broker failed")
+
+    monkeypatch.setattr(daemon, "spawn_brokered_daemon", broker_failed)
     monkeypatch.setattr(m, "_daemon_launch_argv", lambda: ["py", "-m", "agent_bridge", "start"])
     monkeypatch.setattr(m, "_service_is_running", lambda: False)
 

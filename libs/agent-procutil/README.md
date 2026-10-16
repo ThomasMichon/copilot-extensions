@@ -69,16 +69,23 @@ It composes the helpers above, so its flags never drift from them:
   `CREATE_BREAKAWAY_FROM_JOB` on Windows so a kill-on-close Job around the
   caller (an installer or updater) does not kill the new daemon; POSIX gets a
   new session. When the caller's Job forbids breakaway (`ERROR_ACCESS_DENIED`),
-  the spawn fails with `DaemonSpawnError` (an `OSError`) and the daemon log
-  records why: a daemon that silently inherits its caller's lifetime dies when
-  that Job closes. A caller whose daemon already ran inside the caller's Job
-  before adopting `spawn_daemon`, and for which that lifetime still beats no
-  daemon, passes `contained_fallback=True` to start it inside the Job instead
-  (logged as a warning and in the daemon log). Contained test mode suppresses
-  breakaway and the new session, like the helpers it builds on. Survival is
-  therefore conditional: only a daemon whose breakaway was permitted outlives
-  the caller's Job. One started through `contained_fallback`, with
-  `breakaway=False`, or in contained test mode dies when that Job closes.
+  the shared launcher uses a bounded, windowless WMI bootstrap outside that
+  Job. It passes the original argv, cwd, complete environment, creation policy
+  and split log paths over an authenticated, one-use loopback channel; neither
+  credentials nor shell-interpolated daemon arguments go on the broker command
+  line or into temporary files. The actual daemon is staged suspended, its
+  native process handle is adopted and its independent lifetime checked, then
+  it is resumed. A failed uncommitted launch is reaped instead of orphaned.
+  The returned handle names the **actual daemon**, not PowerShell, WMI or a
+  console wrapper, and supports `pid`, `poll()`, `wait(timeout=...)`,
+  `terminate()` and `kill()`. Brokerage has a 30-second launch deadline with a
+  bounded cleanup wait. If both direct breakaway and brokerage fail,
+  `DaemonSpawnError` (an `OSError`) is raised and the daemon log records why.
+  A caller for which the shorter lifetime still beats no daemon may explicitly
+  pass `contained_fallback=True`; only after brokerage fails is that degraded
+  launch attempted, with a warning and a log entry. `breakaway=False` and
+  contained test mode never invoke the broker. Such contained daemons die when
+  the caller's Job closes.
 - **Explicit cwd.** `cwd` must be an existing absolute directory and must not be
   inside an `installed-plugins` payload, either as given or once symlinks and
   junctions are resolved (`<runtime>/current -> .../installed-plugins/...` is

@@ -35,8 +35,13 @@ class _Popen:
 
 @pytest.fixture()
 def fake_popen(monkeypatch):
+    from agent_procutil import daemon
+
     fake = _Popen()
     monkeypatch.setattr(pu.subprocess, "Popen", fake)
+    monkeypatch.setattr(
+        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError("fixture")),
+    )
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     return fake
 

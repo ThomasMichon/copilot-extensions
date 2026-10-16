@@ -9,6 +9,17 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The shared `agent-procutil` daemon-broker unit suite covers authenticated frame
+bounds, WMI's JSON-stdin environment boundary, containment opt-out, partial-start
+cleanup and adoption failures. Its Windows-only native regression launches from
+a windowless parent in both breakaway-permitted and breakaway-forbidden
+kill-on-close Jobs. Each mode runs two full launch/stop cycles and observes
+actual daemon survival, exact argv/environment, split logs and zero attributable
+visible windows or foreground changes. A separate broker-handle case checks
+wait timeout, termination and actual exit status. The forbidden-breakaway cases
+fail rather than skip when lifetime escape fails; contained-mode execution
+instead proves that the daemon dies with its caller's Job.
+
 Pull Requests' installer wiring contract covers both canonical development
 references and self-contained materialized payloads. Its fixture invokes the
 real installer-engine materializer without changing the source wrappers or
