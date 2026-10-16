@@ -278,6 +278,35 @@ def test_watchdog_replacement_promotes_active_passive_generation(monkeypatch):
     assert captured["argv"][4:] == ["start", "--port", "51103"]
 
 
+@pytest.mark.parametrize("active_port", [51103, None])
+@pytest.mark.parametrize("launch_args", [
+    ["--serving-launch-id", "ab" * 16],
+    ["--serving-launch-id=" + "ab" * 16],
+])
+def test_watchdog_replacement_discards_one_shot_worker_receipt(
+    monkeypatch, active_port, launch_args,
+):
+    captured = {}
+    monkeypatch.setattr(
+        m, "_spawn_detached_argv", lambda argv: captured.setdefault("argv", argv),
+    )
+    m._spawn_watchdog_replacement(
+        start_args=["start", "--port", "51103", "--passive", *launch_args],
+        active_port=active_port,
+    )
+    assert captured["argv"][4:] == [
+        "start", "--port", "51103", *(["--passive"] if active_port is None else []),
+    ]
+    import argparse
+    from agent_bridge.service_start_cli import register_service_start_commands
+
+    parser = argparse.ArgumentParser()
+    register_service_start_commands(parser.add_subparsers())
+    parsed = parser.parse_args(captured["argv"][4:])
+    assert parsed.serving_launch_id is None
+    assert parsed.passive is (active_port is None)
+
+
 def test_watchdog_dead_schedules_replacement_before_exit(monkeypatch):
     from agent_bridge import watchdog
 

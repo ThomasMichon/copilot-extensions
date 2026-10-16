@@ -48,7 +48,7 @@ def test_candidate_uses_retained_actual_worker_not_launcher(candidate):
 
 @pytest.mark.parametrize("case", [
     "wrong-launch", "missing-launch", "wrong-pid", "not-ready", "wrong-service",
-    "wrong-version", "exited", "changed-birth", "wrong-role", "wrong-route",
+    "wrong-version", "exited", "changed-birth", "wrong-role", "wrong-route", "draining",
 ])
 def test_candidate_refuses_unverified_responder(candidate, monkeypatch, case):
     value, body, reference, client = candidate
@@ -74,9 +74,11 @@ def test_candidate_refuses_unverified_responder(candidate, monkeypatch, case):
         body["slot"]["role"] = "active"
     elif case == "wrong-route":
         body["slot"]["active"] = {"pid": 2222}
+    elif case == "draining":
+        body["draining"] = True
     with pytest.raises(ServingReconcileError):
         value.verify_health(body)
-    if case not in ("not-ready", "exited"):
+    if case not in ("not-ready", "exited", "draining"):
         with pytest.raises(ServingReconcileError):
             value.terminate()
         client.shutdown.assert_not_called()
@@ -88,6 +90,7 @@ def test_candidate_cleanup_does_not_require_readiness(candidate):
     value, body, _, client = candidate
     body["ready"] = False
     body["status"] = "failed"
+    body["draining"] = True
     value.terminate()
     client.shutdown.assert_called_once()
     value.launcher.terminate.assert_not_called()
@@ -136,3 +139,27 @@ def test_worker_receipt_records_actual_self_and_is_not_overwritten(tmp_path, mon
     with pytest.raises(FileExistsError):
         record_worker(tmp_path, launch_id)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(("status", "ready", "service"), [
+    ("ok", True, "agent-bridge"), ("ok", False, "agent-bridge"),
+    ("failed", False, "agent-bridge"), ("ok", False, "other"),
+])
+def test_identity_probe_preserves_default_health_readiness(
+    monkeypatch, status, ready, service,
+):
+    import urllib.request
+    from unittest.mock import MagicMock
+    from agent_bridge.service_process_state import _service_health_on_port
+
+    body = {"status": status, "ready": ready, "service": service, "slot": {"pid": 2222}}
+    response = MagicMock(status=200)
+    response.__enter__.return_value = response
+    response.read.return_value = json.dumps(body).encode()
+    monkeypatch.setattr(urllib.request, "urlopen", Mock(return_value=response))
+    assert _service_health_on_port(9012) == (
+        body if status == "ok" and ready and service == "agent-bridge" else None
+    )
+    assert _service_health_on_port(9012, require_ready=False) == (
+        body if service == "agent-bridge" else None
+    )

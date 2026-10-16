@@ -71,6 +71,7 @@ def test_serving_reconcile_native_first_touch_never_activates(tmp_path, body, co
 def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path):
     import agent_bridge
     from agent_bridge.serving_candidate import ServingCandidate
+    from agent_bridge.service_process_state import _service_health_on_port
     from agent_bridge.serving_reconcile import ServingReconcileError
 
     root = tmp_path / "runtime"
@@ -91,7 +92,8 @@ def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path):
             return json.load(response)
 
     candidate = ServingCandidate(
-        root, port, agent_bridge.__version__, health,
+        root, port, agent_bridge.__version__,
+        lambda: _service_health_on_port(port, timeout=0.25, require_ready=False),
         lambda: BridgeClient(base, token, timeout=1, connect_grace=0),
     )
     deadline = time.monotonic() + 25

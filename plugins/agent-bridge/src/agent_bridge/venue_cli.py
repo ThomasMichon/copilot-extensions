@@ -271,7 +271,7 @@ def _cmd_deploy(
 
             candidate = ServingCandidate(
                 Path(config_dir()), port, __version__,
-                lambda: core._service_health_on_port(port, host=host),
+                lambda: core._service_health_on_port(port, host=host, require_ready=False),
                 lambda: BridgeClient(
                     f"http://{routing.format_authority(host, port)}", token,
                     timeout=2, connect_grace=0,

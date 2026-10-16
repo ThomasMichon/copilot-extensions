@@ -449,7 +449,7 @@ def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, 
     "success", "retirement-pending", "shutdown-error", "drain-refused", "successor-unhealthy",
     "rollback-owner-changed", "forward-race", "cleanup-drain-refused",
     "cleanup-successor-unhealthy", "cleanup-changed-previous", "cleanup-race-previous",
-    "initial-health-failed", "same-version-shadow",
+    "initial-health-failed", "same-version-shadow", "successor-drained",
 ])
 def test_serving_reconcile_actual_cutover_requires_native_retirement(
     serving, monkeypatch, scenario,
@@ -533,7 +533,9 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
             "service": "agent-bridge",
             "ready": not (pid == 2222 and scenario == "initial-health-failed"),
             "version": row["version"] if pid == row["pid"] else "1.2.3",
-            "draining": pid == row["pid"] and state["draining"],
+            "draining": state["draining"] and (
+                pid == row["pid"] or scenario == "successor-drained"
+            ),
             "slot": {"pid": 3333 if pid == 2222 and scenario == "same-version-shadow" else pid,
                      "role": "active" if active and active["pid"] == pid else "passive",
                      "active": active},
@@ -548,6 +550,10 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
         return response
 
     monkeypatch.setattr(venue_cli.urllib.request, "urlopen", urlopen)
+    if scenario == "initial-health-failed":
+        from agent_bridge.service_process_state import _service_health_on_port
+
+        core._service_health_on_port.side_effect = _service_health_on_port
     monkeypatch.setattr(routing, "_listening", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(routing, "_pid_alive", lambda _: True)
     calls = []
@@ -658,7 +664,7 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
     assert any(path == "/api/v1/session-hosts/reattach" for _, path, _ in calls) is (scenario == "success")
     core._ensure_retired_daemon_exited.assert_not_called()
     if scenario in (
-        "drain-refused", "successor-unhealthy",
+        "drain-refused", "successor-unhealthy", "successor-drained",
         "cleanup-drain-refused", "cleanup-successor-unhealthy",
     ):
         assert result["rolled_back"] is True

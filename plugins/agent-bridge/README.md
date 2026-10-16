@@ -54,6 +54,10 @@ unrelated responder is not a successful launch. Cleanup uses identity-verified
 graceful control, never a broker-PID tree kill; uncertain cleanup retains its
 receipt and writer-reconciliation breadcrumb. Failure before drain admission
 leaves the predecessor's raw route and any operator-owned drain unchanged.
+Promotion and verify-before-retire reject a draining successor. Cleanup's
+identity probe retains unready health payloads without weakening ordinary health
+readiness checks. Watchdog replacement strips the one-shot launch ID rather than
+replaying a receipt identity into a replacement process.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`

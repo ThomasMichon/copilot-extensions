@@ -73,7 +73,10 @@ class ServingCandidate:
             or diagnostics.process_start_time(pid) != self.process.start_time
             or not isinstance(body, dict)
             or body.get("service") != "agent-bridge"
-            or (ready and (body.get("status") != "ok" or body.get("ready") is not True))
+            or (ready and (
+                body.get("status") != "ok" or body.get("ready") is not True
+                or body.get("draining") is True
+            ))
             or compare_serving_version(body.get("version"), self.version) != "current"
             or not isinstance(slot, dict) or type(slot.get("pid")) is not int
             or slot["pid"] != pid

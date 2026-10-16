@@ -526,7 +526,13 @@ def _spawn_watchdog_replacement(
         "time.sleep(float(sys.argv[1]));"
         "os.execv(sys.executable,[sys.executable,'-m','agent_bridge',*sys.argv[2:]])"
     )
-    original_args = list(sys.argv[1:] if start_args is None else start_args)
+    arguments = iter(sys.argv[1:] if start_args is None else start_args)
+    original_args = []
+    for argument in arguments:
+        if argument == "--serving-launch-id":
+            next(arguments)
+        elif not argument.startswith("--serving-launch-id="):
+            original_args.append(argument)
     if "--passive" in original_args and active_port is not None:
         try:
             port_index = original_args.index("--port") + 1
