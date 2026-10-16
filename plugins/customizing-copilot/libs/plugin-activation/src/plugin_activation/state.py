@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -462,11 +462,12 @@ def run_install_preserving_activation(
     identity: str,
     *,
     home: Path | None = None,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     **run_kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
     """Run an install command and restore activation on every exit path."""
     snapshot = capture(identity, home)
     try:
-        return subprocess.run(argv, **run_kwargs)
+        return (runner if runner is not None else subprocess.run)(argv, **run_kwargs)
     finally:
         restore(snapshot, home)

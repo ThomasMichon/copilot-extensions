@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -143,3 +146,43 @@ def test_activation_state_errors_preserve_actual_usage_evidence(prepared, monkey
     assert _auth_status()["fallback_used"] == (
         [] if failure == "capture" else ["marketplace:copilot-extensions"]
     )
+
+
+@pytest.mark.parametrize("outcome", ["completed", "timeout"])
+def test_shipped_activation_source_accepts_acquisition_runner(tmp_path, monkeypatch, outcome):
+    source = (
+        Path(__file__).resolve().parents[3]
+        / "plugins/customizing-copilot/libs/plugin-activation/src/plugin_activation/state.py"
+    )
+    spec = importlib.util.spec_from_file_location("shipped_activation_state", source)
+    state = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, state)
+    spec.loader.exec_module(state)
+    home = tmp_path / "copilot"
+    home.mkdir()
+    settings = home / "settings.json"
+    settings.write_text('{"enabledPlugins":{"fixture@market":false}}', encoding="utf-8")
+    before = settings.read_bytes()
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append((argv, kwargs))
+        settings.write_text('{"enabledPlugins":{"fixture@market":true}}', encoding="utf-8")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, 1)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_a, **_k: pytest.fail("injected runner was bypassed"),
+    )
+    kwargs = {"home": home, "runner": runner, "env": {"FIXTURE": "acquisition"}, "timeout": 1}
+    if outcome == "timeout":
+        with pytest.raises(subprocess.TimeoutExpired):
+            state.run_install_preserving_activation(["fixture"], "fixture@market", **kwargs)
+    else:
+        result = state.run_install_preserving_activation(
+            ["fixture"], "fixture@market", **kwargs,
+        )
+        assert result.returncode == 0
+    assert calls == [(["fixture"], {"env": {"FIXTURE": "acquisition"}, "timeout": 1})]
+    assert json.loads(settings.read_bytes()) == json.loads(before)

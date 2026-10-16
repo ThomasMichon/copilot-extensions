@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from urllib.parse import urlsplit
 
 
@@ -46,6 +47,8 @@ def account_for_remote(remote: str) -> str | None:
         return None
     for entry in repos.read_registry().repos.values():
         if identity(entry.remote) == selected:
+            if selected[0] == "github.com":
+                entry = replace(entry, remote="https://github.com/" + selected[1])
             return repos.resolve_account(entry)
     if selected[0] == "github.com":
         return repos.account_for_github_slug(selected[1])

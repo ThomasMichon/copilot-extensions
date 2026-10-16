@@ -962,6 +962,32 @@ def test_registered_siblings_keep_their_own_account_overrides(monkeypatch):
     assert [item.expected_account for item in report.results] == ["account-one", "account-two"]
 
 
+@pytest.mark.parametrize("remote", [
+    "https://github.com:443/Team/Repo.git",
+    "https://GitHub.COM/Team/Repo.git",
+    "ssh://git@github.com:22/Team/Repo.git",
+    "git@GitHub.COM:Team/Repo.git",
+])
+@pytest.mark.parametrize("explicit", ["", "override"])
+def test_registered_public_remote_normalization_preserves_account_policy(
+    monkeypatch, remote, explicit,
+):
+    from agent_worktrees import repo_accounts, repos
+
+    entry = repos.RepoEntry(name="fixture", remote=remote, account=explicit)
+    registry = repos.ReposRegistry(repos={"fixture": entry}, account_map={"team": "mapped"})
+    monkeypatch.setattr(repos, "read_registry", lambda: registry)
+    monkeypatch.setattr(
+        repos, "write_registry", lambda *_: pytest.fail("account lookup must be read-only"),
+    )
+
+    assert repo_accounts.account_for_remote("https://github.com/team/repo") == (
+        explicit or "mapped"
+    )
+    assert registry.repos["fixture"] is entry
+    assert entry.remote == remote
+
+
 @pytest.mark.parametrize("remote_form", ["https", "ssh", "scp"])
 @pytest.mark.parametrize("public_port", ["", ":443"])
 def test_same_slug_on_different_hosts_uses_its_own_registered_account(
