@@ -258,9 +258,9 @@ def test_reattach_pending_verification_keeps_real_queue_and_reservation_unchange
     queue.claim_one("worker", repo=task.repo, task_id=task.id)
     queue.start(task.id, "worker")
     assert queue.complete(task.id, "worker").status == "submitted"
+    api = TestClient(create_app(queue))
     with queue._connect() as conn:
         before = "\n".join(conn.iterdump())
-    api = TestClient(create_app(queue))
     requests = []
 
     def exchange(request):

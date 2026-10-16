@@ -57,6 +57,7 @@ def test_pending_verification_dedup_keeps_actual_submission_and_read_only_detail
         == original
     )
     assert queue.lookup_dedup(KEY, repo=REPO) == original
+    api = TestClient(create_app(queue))
     with queue._connect() as conn:
         before = "\n".join(conn.iterdump())
     connect = queue._connect
@@ -67,7 +68,6 @@ def test_pending_verification_dedup_keeps_actual_submission_and_read_only_detail
         return conn
 
     monkeypatch.setattr(queue, "_connect", read_only_connection)
-    api = TestClient(create_app(queue))
     try:
         expected = api.get(f"/tasks/{original.id}").json()
         response = api.get("/tasks", params={"repo": REPO, "dedup_key": KEY})
