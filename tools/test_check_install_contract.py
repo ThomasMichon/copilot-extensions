@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 import pytest
 import install_contract_guard
+from bundle_input_cases import TestBundleInputs as TestBundleInputs
 
 pytest.register_assert_rewrite("runtime_profile_cases")
 from runtime_profile_cases import TestExactRuntimeProfile as TestExactRuntimeProfile
@@ -140,6 +141,15 @@ def test_machine_gate_contract_reports_missing_source(tmp_path: Path, name: str)
     source = _gate_source(tmp_path)
     (source / name).unlink()
     assert checker.check_machine_gate(source)
+
+
+def test_bundle_candidate_inputs_match_the_real_repository() -> None:
+    import sys
+
+    sys.path.insert(0, str(REPO / "tools"))
+    import bundle_lock
+
+    bundle_lock.check(REPO)
 
 
 def test_agent_pull_requests_wrapper_counts_as_real_engine_usage() -> None:
