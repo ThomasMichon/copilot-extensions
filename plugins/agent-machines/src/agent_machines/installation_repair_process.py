@@ -9,12 +9,40 @@ import subprocess
 import threading
 import time
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 MAX_OUTPUT = 64 * 1024
+_termination = threading.local()
+
+
+def _cancel_sigterm(signum, frame):
+    _termination.pending = True
+    if not getattr(_termination, "deferring", False):
+        # A second termination request must not interrupt descendant cleanup.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise KeyboardInterrupt
+
+
+@contextmanager
+def cancel_on_sigterm():
+    """Keep CLI termination inside the same cleanup/lock lifetime as cancellation."""
+    if os.name == "nt" or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = signal.getsignal(signal.SIGTERM)
+    if previous is _cancel_sigterm:
+        yield
+        return
+    _termination.pending = False
+    signal.signal(signal.SIGTERM, _cancel_sigterm)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 @dataclass(frozen=True)
@@ -24,9 +52,10 @@ class ActionResult:
     stdout: bytes = b""
 
 
+@cancel_on_sigterm()
 def run_action(
     argv: Sequence[str], *, cwd: Path, environment: Mapping[str, str],
-    timeout: float, readonly: bool,
+    timeout: float, readonly: bool, cmd: bool = False,
 ) -> ActionResult:
     """Bound both pipes and terminate owned transient descendants on every exit."""
     if not math.isfinite(timeout) or not 0 < timeout <= 3600 or not argv or any(
@@ -34,16 +63,30 @@ def run_action(
     ):
         raise ValueError("invalid bounded owner invocation")
     kwargs = no_window_kwargs()
+    command: list[str] | str = list(argv)
+    if cmd:
+        if os.name != "nt" or len(argv) != 5 or list(argv[1:4]) != ["/d", "/s", "/c"]:
+            raise ValueError("invalid admitted CMD invocation")
+        # CMD's already-quoted tail is not a CRT argument; do not escape it again.
+        command = subprocess.list2cmdline(argv[:4]) + " " + argv[4]
     if os.name != "nt":
         kwargs["start_new_session"] = True
+    # Defer in Python rather than masking SIGTERM, which a spawned service would inherit.
+    _termination.deferring = True
     try:
         process, job = spawn_sync_in_kill_on_close_job(
-            list(argv), require_job=True, allow_breakaway=not readonly,
+            command, require_job=True, allow_breakaway=not readonly,
             cwd=cwd, env=dict(environment), stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs,
         )
-    except (OSError, RuntimeError):
-        return ActionResult("launch-failed", None)
+    except BaseException as error:
+        _termination.deferring = False
+        if getattr(_termination, "pending", False):
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            raise KeyboardInterrupt from error
+        if isinstance(error, (OSError, RuntimeError)):
+            return ActionResult("launch-failed", None)
+        raise
     overflow = threading.Event()
     chunks: list[bytes] = []
     readers: list[threading.Thread] = []
@@ -78,12 +121,16 @@ def run_action(
         terminated = True
 
     try:
+        _termination.deferring = False
+        if getattr(_termination, "pending", False):
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            raise KeyboardInterrupt
         for stream, retain in ((process.stdout, True), (process.stderr, False)):
             assert stream is not None
             reader = threading.Thread(target=drain, args=(stream,), kwargs={"retain": retain},
                                       daemon=True)
-            readers.append(reader)
             reader.start()
+            readers.append(reader)
         deadline = time.monotonic() + timeout
         while process.poll() is None or any(reader.is_alive() for reader in readers):
             if overflow.is_set():
@@ -100,3 +147,6 @@ def run_action(
         terminate()
         for reader in readers:
             reader.join(timeout=5)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()

@@ -22,7 +22,7 @@ from installer_readiness.model import (
 from .installation_repair_admission import (
     HostAdmission, OwnerBinding, RepairAdmissionError, admit_host, digest, ordinary,
 )
-from .installation_repair_process import ActionResult, run_action
+from .installation_repair_process import ActionResult, cancel_on_sigterm, run_action
 from .installation_repair_restarts import RestartJournal
 
 
@@ -140,6 +140,7 @@ def _invoke(
     return run_action(
         argv, cwd=owner.installation.payload_root, environment=_environment(owner, readonly=readonly),
         timeout=timeout, readonly=readonly,
+        cmd=platform is Platform.WINDOWS and invocation.target.suffix.lower() == ".cmd",
     )
 
 
@@ -183,6 +184,8 @@ def _closure(host: HostAdmission, requested: Sequence[str], platform: Platform) 
     visiting: set[str] = set()
 
     def include(qualified: str):
+        if not 1 <= len(qualified) <= 256:
+            raise RepairAdmissionError("selected module identity exceeds its bound")
         if qualified in duplicates or qualified not in by_id:
             raise RepairAdmissionError("selected module identity is missing or ambiguous")
         if qualified in visiting:
@@ -280,6 +283,7 @@ def _readmit_owner(
     return fresh.bindings[owner_id]
 
 
+@cancel_on_sigterm()
 def repair(
     project_root: Path, *, modules: Sequence[str] = (), apply: bool = False,
     expected_plan_digest: str | None = None, home: Path | None = None,

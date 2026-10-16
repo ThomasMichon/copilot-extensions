@@ -157,6 +157,15 @@ class RestartJournal:
             temporary.unlink(missing_ok=True)
 
     def require(self, module: str, restart: str, plan_digest: str) -> None:
+        if (
+            not isinstance(module, str) or not 1 <= len(module) <= 256
+            or restart not in {"shell", "session", "machine"}
+            or not isinstance(plan_digest, str) or len(plan_digest) != 64
+            or any(char not in "0123456789abcdef" for char in plan_digest)
+        ):
+            raise RepairAdmissionError("invalid restart obligation")
+        if not self._locked:
+            raise RepairAdmissionError("restart mutation requires the repair lock")
         if module in self.pending:
             raise RepairAdmissionError("module has an unresolved restart obligation")
         self.pending[module] = {

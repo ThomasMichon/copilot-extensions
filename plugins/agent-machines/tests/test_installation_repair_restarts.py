@@ -47,6 +47,27 @@ def test_restart_mutations_require_exclusive_lock(tmp_path):
         assert len(later.pending) == 1
 
 
+@pytest.mark.parametrize("module,restart,plan", [
+    ("x" * 257, "session", "a" * 64),
+    ("valid::module", "none", "a" * 64),
+    ("valid::module", "session", "not-a-digest"),
+])
+def test_restart_writer_refuses_unreadable_rows_without_poisoning_batch(
+    tmp_path, module, restart, plan,
+):
+    journal = RestartJournal(tmp_path)
+    with journal.locked():
+        journal.require("fixture::valid/base", "shell", "b" * 64)
+        previous = journal.path.read_bytes()
+        with pytest.raises(RepairAdmissionError, match="invalid restart obligation"):
+            journal.require(module, restart, plan)
+        assert journal.path.read_bytes() == previous
+        assert list(journal.pending) == ["fixture::valid/base"]
+    reloaded = RestartJournal(tmp_path)
+    reloaded.load()
+    assert reloaded.pending == journal.pending
+
+
 def test_restart_publication_failure_is_explicit_and_cleans_temporary_file(tmp_path, monkeypatch):
     journal = RestartJournal(tmp_path)
     with journal.locked():

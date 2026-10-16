@@ -94,6 +94,10 @@ each installer. A digest is a stale-input check, **not** permission or signed
 release verification. Only the manifest's native owner actions execute, with
 bounded deadlines/output and caller-owned transient descendants. Declared
 installer-owned durable services keep their own supervision contract.
+On POSIX, CLI `SIGTERM` follows the cancellation cleanup path: transient
+installer descendants exit before the apply lock is released, and the caller's
+previous signal handler is restored. Every selected identity, including
+transitive prerequisites, must fit the 256-character bound before any probe.
 `--readiness-timeout` and `--installer-timeout` are seconds (positive, at most
 3600); defaults are 15 and 300.
 

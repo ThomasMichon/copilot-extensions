@@ -409,6 +409,15 @@ its phase diagnostics; it is not an end-to-end governance invocation. Actual
 owner admission and native installed first-touch repair are exercised separately
 by `test_installation_repair.py`.
 
+The multi-apply restart-confirmation and independent restart-batch items in that
+file have a 60-second native Windows item budget, retaining 30 seconds elsewhere.
+Their several real PowerShell calls exceeded the former 30-second item cap;
+an isolated unchanged-bound run took 24 seconds. Production readiness/installer
+deadlines and all restart, dependency and confirmation assertions are unchanged.
+Native CMD path/argument preservation and POSIX conductor-termination tests live
+in `test_installation_repair_boundaries.py`; the latter proves descendant cleanup
+before lock release and preservation of the caller's signal handler.
+
 The first-use items in
 `plugins/agent-machines/tests/test_payload_provisioning_powershell.py` separate
 stamp refusal from the real failed-provision-then-retry-then-warm sequences.

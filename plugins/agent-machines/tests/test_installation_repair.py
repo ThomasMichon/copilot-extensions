@@ -397,6 +397,7 @@ def test_installation_repair_restart_blocks_actual_dependents(repair_fixture):
 
 
 @pytest.mark.parametrize("restart", ["shell", "session", "machine"])
+@pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_installation_repair_restart_survives_repeated_apply_until_exact_confirmation(
     repair_fixture, restart,
 ):
@@ -428,6 +429,7 @@ def test_installation_repair_restart_survives_repeated_apply_until_exact_confirm
     assert final["outcomes"][1]["attempted"]
 
 
+@pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_installation_repair_accumulates_independent_restart_steps(repair_fixture):
     _, _, payload, configure, identity = repair_fixture
     configure(restart="session", dependencies=())

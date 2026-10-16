@@ -16,8 +16,9 @@ import sys, tarfile
 from pathlib import Path
 archive, target = map(Path, sys.argv[1:])
 target.mkdir()
-with tarfile.open(archive) as source:
-    source.extractall(target, filter="data")
+with archive.open("rb", buffering=1024 * 1024) as stream:
+    with tarfile.open(fileobj=stream, mode="r|") as source:
+        source.extractall(target, filter="data")
 PY
     then
         jam "path-binstub" "candidate snapshot extraction failed" "inspect extract-candidate.log"
@@ -126,7 +127,8 @@ fi
 export COPILOT_EXTENSIONS_TEST_CONTAINED=1
 if capture "packaging-tests" -- timeout 180 "$TEST_ENV/bin/python" -m pytest -q --timeout=30 \
     "$TEST_SOURCE/tools/test_materialize_main.py" "$TEST_SOURCE/tools/test_sync_vendored_libs.py" \
-    "$TEST_SOURCE/tools/test_check_vendored_libs_sync.py"; then
+    "$TEST_SOURCE/tools/test_check_vendored_libs_sync.py" \
+    "$TEST_SOURCE/tools/test_installation_context_packaging.py"; then
     pass "native direct/nested source guards pass, including real symlink refusal"
 else
     jam "machines-config" "native packaging regression tests failed" "inspect packaging-tests.log"
@@ -143,7 +145,8 @@ else
 fi
 if capture "repair-tests" -- timeout 180 "$TEST_ENV/bin/python" -m pytest -q --timeout=30 \
     "$TEST_SOURCE/plugins/agent-machines/tests/test_installation_repair.py" \
-    "$TEST_SOURCE/plugins/agent-machines/tests/test_installation_repair_restarts.py"; then
+    "$TEST_SOURCE/plugins/agent-machines/tests/test_installation_repair_restarts.py" \
+    "$TEST_SOURCE/plugins/agent-machines/tests/test_installation_repair_boundaries.py"; then
     pass "native Linux repair, active-cell observation/refusal and descendant cleanup pass"
 else
     jam "machines-config" "native repair regression tests failed" "inspect repair-tests.log"

@@ -459,7 +459,7 @@ async def spawn_in_kill_on_close_job(
 
 
 def spawn_sync_in_kill_on_close_job(
-    argv: list[str],
+    argv: list[str] | str,
     *,
     require_job: bool = False,
     allow_breakaway: bool = True,
