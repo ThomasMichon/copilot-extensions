@@ -130,6 +130,8 @@ matrix below are _(agent-recommended)_ implementation details.
 
 ### Phase 3 - Remove proven unnecessary work
 
+- [x] Verify existing final-integration deferral with native invocation counts
+  and current/changed/first-touch aggregate ordering (#6933).
 - [ ] Reconcile Bridge serving-version drift through the admitted runtime's
   existing cutover path rather than returning a misleading local-content
   no-op or rebuilding an already current slot (#6826).
@@ -219,8 +221,31 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-15 - Exercise Codespaces reuse through canonical admission
+
+- Added isolated native coverage of the existing #6598 venv/package reuse
+  path using a real Python venv, real module-launch health and the actual
+  attached canonical construction/retention adapter. Healthy reuse avoids
+  venv creation, package installation and build stamping.
+- Unhealthy entrypoints, conflicting same-version payloads and malformed
+  completion markers retain their precise refusal reasons and preserve the
+  tested runtime files and selector bytes/timestamps. This is not a stubbed
+  admission result or a production activation.
+- The four-state matrix and existing first-construction retry case pass five
+  cases per native host. The audit records validation boundaries and the
+  Linux pytest configuration warning explicitly.
+- Observed one remaining PowerShell-only UV-acquisition helper invocation
+  before the admitted-reuse return; Bash already avoids it. The production
+  scripts remain unchanged pending native-file ownership clearance.
+- Promoted-payload and installed reuse proof, full provisioning, real
+  construction/cutover costs and complete standalone presentation remain open.
+
 ### 2026-10-15 - Verify independent final-integration work counts
 
+- Landed the bounded test-and-audit slice in #6933, merge
+  `29259f83217bf82e1c091ebadefc143964a94094`, after current-head Copilot
+  approval with no findings and successful CI. No production implementation
+  change, installed update or service operation is part of this slice.
 - While shared standalone-presentation files remain reserved, verified #6836's
   existing reduction without editing its implementation or running an updater.
   The native Windows fixture observes two command-reconciliation callbacks

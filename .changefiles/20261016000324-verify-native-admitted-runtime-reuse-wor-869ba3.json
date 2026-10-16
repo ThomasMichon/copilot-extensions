@@ -1,0 +1,9 @@
+{
+  "comment": "Verify native admitted-runtime reuse work counts and preserve health, content-conflict and malformed-marker refusals.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

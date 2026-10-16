@@ -413,3 +413,43 @@ Those are validation costs, not claimed update savings. No installed updater
 or service lifecycle was invoked. Equivalent historical/current end-to-end
 durations and promoted installed operation counts remain separate,
 unresolved evidence.
+
+### Codespaces admitted-reuse work counts (isolated native fixtures)
+
+`test_installer_reuse_work_counts.py` exercises the actual Codespaces native
+venv/package functions, module-launch health probe and canonical attached
+construction/retention adapter against a real temporary Python venv.
+Admission is not replaced with a Boolean stub. A matching valid completion
+marker earns reuse; an unhealthy entrypoint, different payload fingerprint
+or malformed marker must refuse without constructing a venv, installing
+packages or stamping build information. Completion and selector bytes and
+timestamps, along with the interpreter, venv configuration and entrypoint,
+remain unchanged in all four cases.
+
+| Healthy admitted reuse | PowerShell | Bash |
+|---|---:|---:|
+| Venv-construction calls | 0 | 0 |
+| Package-install calls | 0 | 0 |
+| Build-stamp calls | 0 | 0 |
+| UV-acquisition helper calls | 1 | 0 |
+
+The remaining asymmetry is source-proven: PowerShell `Deploy-Venv` invokes
+`Assert-Uv` before canonical admission and its reuse return; Bash performs
+UV acquisition only after admission has established that construction is
+needed. The extra PowerShell helper invocation is a candidate reduction,
+not an implemented fix or a measured resolver/network cost. A change must
+retain health and canonical admission and respect the existing native-file
+reservation.
+
+The new four-state matrix plus the existing fresh-venv SRE retry case passed
+five native cases on Windows and five on Linux, with the opposite shell
+skipped on each host. The fresh fixture exercises real venv construction
+and explicit incomplete-candidate abort, not package installation or
+activation. The Linux run used the retained prepared interpreter and
+reported an `asyncio_mode` configuration warning because its pytest asyncio
+plugin was absent; no asynchronous test was selected. Original child,
+test-item and suite bounds remain in force.
+
+This verifies #6598's source-level reuse path without reimplementing it.
+Promoted-payload identity, full clean-room provisioning, live installed
+behavior and equivalent before/after update durations are still open.
