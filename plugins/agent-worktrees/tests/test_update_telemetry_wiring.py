@@ -570,6 +570,25 @@ def test_required_auth_exit_does_not_depend_on_optional_telemetry(wired, monkeyp
     assert m.cmd_update(_args()) == 1
 
 
+@pytest.mark.parametrize("error, expected", [
+    ("fatal: Authentication failed", 4),
+    ("fatal: unable to resolve host", 1),
+])
+def test_disabled_auth_preflight_retains_anchor_failure_without_telemetry(
+    wired, monkeypatch, error, expected,
+):
+    from agent_worktrees import update_auth_context
+
+    monkeypatch.setenv("CE_UPDATE_AUTH", "off")
+    monkeypatch.setattr(update_events, "_ut", None)
+    monkeypatch.setattr(
+        m, "_fast_forward_project_anchors",
+        lambda: update_auth_context.anchor_failure("fixture", error),
+    )
+    assert m.cmd_update(_args(no_anchor_sync=False)) == expected
+    assert update_events._run is None
+
+
 @pytest.mark.parametrize("failure", ["engine-exit", "engine-timeout", "engine-os", "registered"])
 def test_required_acquisition_failure_precedes_all_runtime_mutation(
     wired, monkeypatch, _update_home, failure,
