@@ -489,7 +489,7 @@ if [[ "$ACTION" == "slot-provision" ||
     __cell_slot_direct=1
 fi
 
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/installer-watchdog.sh"
+. "$SCRIPT_DIR/installer-watchdog.sh"
 
 # The common guard deliberately distrusts inherited stage markers.
 if [[ "$__cell_slot_direct" -ne 1 ]]; then

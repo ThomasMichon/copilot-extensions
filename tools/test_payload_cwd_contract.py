@@ -203,6 +203,37 @@ def _command(entry: Path, extension: str) -> list[str]:
     return [BASH, entry.as_posix()]
 
 
+@pytest.mark.skipif(not BASH, reason="bash required")
+@pytest.mark.parametrize(
+    "action",
+    ["slot-provision", "slot-validate", "slot-complete", "slot-completion-validate",
+     "slot-cutover", "cell-provision"],
+)
+def test_relative_machines_slot_entry_loads_watchdog_after_leaving_payload(tmp_path, action):
+    source = (ROOT / "plugins" / "agent-machines" / "scripts" / "init.sh").read_text("utf-8")
+    end = source.index("\n# === install-contract:v5 self-stage")
+    scripts = tmp_path / "payload" / "scripts"
+    scripts.mkdir(parents=True)
+    entry = scripts / "init.sh"
+    entry.write_text(
+        source[:end] + '\nprintf "ready:%s\\n" "$PWD"\n', encoding="utf-8",
+    )
+    shutil.copyfile(
+        ROOT / "libs" / "installer-engine" / "installer-watchdog.sh",
+        scripts / "installer-watchdog.sh",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    result = subprocess.run(
+        [BASH, entry.relative_to(tmp_path).as_posix(), action],
+        cwd=tmp_path, env=_env(home), capture_output=True, text=True, timeout=10,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.startswith("ready:")
+    assert _reported_path(result.stdout.strip().removeprefix("ready:")) == home.resolve()
+
+
 def _reported_path(value: str) -> Path:
     if os.name == "nt" and value.startswith("/") and BASH:
         result = subprocess.run(
