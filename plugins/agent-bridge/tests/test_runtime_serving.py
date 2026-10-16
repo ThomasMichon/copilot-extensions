@@ -98,6 +98,7 @@ def test_foreground_serves_real_authenticated_routes_only_after_fenced_commit(
 @pytest.mark.parametrize("drift", [
     "route", "previous", "server", "server-not-started", "server-exiting",
     "roster-expired", "config", "listener", "target", "writer-error", "middleware",
+    "sessions",
 ])
 def test_serving_commit_refuses_drift_and_never_exposes_foreground(captured, monkeypatch, drift):
     channel, pending = serving_candidate(captured, monkeypatch)
@@ -141,6 +142,8 @@ def test_serving_commit_refuses_drift_and_never_exposes_foreground(captured, mon
                     while type(stack) is not BearerAuthMiddleware:
                         stack = stack.app
                     stack._token = "different-fixture-token"
+                elif drift == "sessions":
+                    app.state.session_manager._sessions["uncovered"] = object()
                 else:
                     app.state.db._writer_error = RuntimeError("fixture writer failure")
                 with pytest.raises(PrivateIPCError):
@@ -232,7 +235,7 @@ def test_missing_roster_never_gets_serving_authority(captured, monkeypatch):
     asyncio.run(scenario())
 
 
-def test_hydrated_event_logs_use_adopted_owner_without_losing_turn_or_cursor(
+def test_roster_only_hydrated_sessions_cannot_bypass_nonempty_serving_refusal(
     captured, monkeypatch,
 ):
     import time
@@ -264,14 +267,17 @@ def test_hydrated_event_logs_use_adopted_owner_without_losing_turn_or_cursor(
                 publish(pending.runtime.origins.config_root, endpoint)
                 controls.execute(channel, request(controls, endpoint, Operation.ACTIVATE_RESOURCES))
                 assert hydrated.event_log._db is app.state.db
-                pending.prepare_serving(app, Deadline(2))
-                controls.execute(channel, request(controls, endpoint, Operation.ACTIVATE_SERVING))
-                hydrated.event_log.append("agent_message", {"content": "synthetic continuation"})
-                app.state.db.flush()
+                assert pending.runtime.sessions is None
+                with pytest.raises(PrivateIPCError):
+                    pending.prepare_serving(app, Deadline(2))
+                assert app._serving_target is None and not app.state.ready
+                assert app.state.db._writer_thread is None
                 assert hydrated.status is SessionStatus.RUNNING and hydrated.client is None
                 assert app.state.db.get_turn("live", 0)["completed_at"] is None
                 assert app.state.db.get_cursor("reader", "live") == 1
-                assert [row["event_id"] for row in app.state.db.get_events("live")] == [1, 2]
+                assert [row["event_id"] for row in app.state.db.execute_read(
+                    "SELECT event_id FROM events WHERE session_id=? ORDER BY event_id", ("live",),
+                )] == [1]
                 pending.verify_resources(app)
         assert readonly._local.conn is None
 

@@ -80,7 +80,14 @@ def test_candidate_lifespan_preserves_live_state_without_ordinary_startup(captur
         assert app.state.session_manager.get_session("live").status is SessionStatus.RUNNING
         assert app.state.db._writer_thread is None
         assert app.state.db.read_only
-        assert app.state.runtime_executable == Path(sys.executable).resolve()
+        if os.name == "nt":
+            from zdd.private_windows_native import Native
+
+            native = Native()
+            expected_image = Path(native.process_image(native.k.GetCurrentProcess())).resolve()
+        else:
+            expected_image = Path(sys.executable).resolve()
+        assert app.state.runtime_executable == expected_image
         assert not app.state.publish_on_ready
         assert not app.state.topology_ready
         assert not app.state.credential_relay_ready

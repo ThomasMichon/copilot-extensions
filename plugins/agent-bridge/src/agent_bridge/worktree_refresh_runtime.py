@@ -53,7 +53,9 @@ def _validate(value: object) -> dict:
 def capture_refresh(owner: WorktreeRefreshOwner) -> dict:
     if (
         type(owner) not in (WorktreeRefreshOwner, FrozenRefresh)
-        or any(task is not None for task in (owner.task, owner._live_task, owner._warm_holder))
+        or any(task is not None for task in (owner.task, owner._live_task))
+        or owner._warm_callbacks
+        or (owner._warm_holder is not None and not owner._warm_holder.done())
     ):
         raise PrivateIPCError(Refusal.AUTHORITY)
     return _validate({

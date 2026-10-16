@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 
 from zdd.private_protocol import PrivateIPCError, Refusal
@@ -15,6 +16,11 @@ from .models import ServiceConfig
 def executing_executable() -> Path:
     """Record this process's interpreter, never the predecessor's metadata."""
     try:
+        if os.name == "nt":
+            from zdd.private_windows_native import Native
+
+            native = Native()
+            return Path(native.process_image(native.k.GetCurrentProcess())).resolve(strict=True)
         if not sys.executable:
             raise PrivateIPCError(Refusal.AUTHORITY)
         return Path(sys.executable).resolve(strict=True)

@@ -26,6 +26,7 @@ class CandidateServing:
         if (
             runtime.roster is None or not runtime.roster.ready()
             or (runtime.sessions is not None and runtime.sessions.sessions)
+            or app.state.session_manager._sessions
         ):
             raise PrivateIPCError(Refusal.AUTHORITY)
 
@@ -36,6 +37,7 @@ class CandidateServing:
 
         self._app = app
         self._db = app.state.db
+        self._manager = app.state.session_manager
         self._runtime = runtime
         self._target = configure_serving_app(
             runtime.config, runtime.auth_token, lifespan=unused_lifespan,
@@ -99,6 +101,8 @@ class CandidateServing:
             self._writer is None or self._db._writer_thread is not self._writer
             or not self._writer.is_alive() or self._db._writer_error is not None
             or state.db is not self._db or self._db.read_only
+            or state.session_manager is not self._manager
+            or (not self.active and self._manager._sessions)
             or self._target.state is not state
             or self._target.middleware_stack is not self._stack
             or self._middleware_signature() != self._middleware

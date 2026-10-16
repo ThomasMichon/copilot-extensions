@@ -131,6 +131,7 @@ class WorktreeRefreshOwner:
         self.last_duration: float | None = None
         self.last_outcome: str | None = None
         self._warm_holder: asyncio.Task[None] | None = None
+        self._warm_callbacks: set[asyncio.Task[None]] = set()
 
     def sync_sources(
         self, resolver: AgentResolver | None, rows: dict[str, list[_Row]],
@@ -285,9 +286,11 @@ class WorktreeRefreshOwner:
         task = self.ensure(operation)
         if task is not None and not joined and task is not self._warm_holder:
             self._warm_holder = task
+            self._warm_callbacks.add(task)
             epoch = self.epoch
 
             def schedule(holder: asyncio.Task[None]) -> None:
+                self._warm_callbacks.discard(holder)
                 if (
                     not self.current(epoch) or holder.cancelled()
                     or holder.exception() is not None

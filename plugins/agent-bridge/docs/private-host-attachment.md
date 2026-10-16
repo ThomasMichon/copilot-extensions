@@ -282,8 +282,9 @@ ADOPT can be enabled; running/pending RPC transfer remains unsupported.
 
 ### Completed worktree-cache observations
 
-The current refresh owner is captured only when it retains no refresh, queued
-refresh or warming task. Its source generations, absolute observation times,
+The current refresh owner is captured only when no refresh, queued refresh,
+warming callback or classification backfill remains active. A completed warming
+holder is an observation, not an active task. Its source generations, absolute observation times,
 diagnostics and last-refresh evidence remain detached observations; restoration
 does not reset their age or authorize warming. Explicit live refresh refuses.
 Unsupported task-holder graphs refuse rather than being serialized or discarded.
