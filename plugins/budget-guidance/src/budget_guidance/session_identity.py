@@ -86,7 +86,7 @@ async def acquire_verified_session_quota(
     ):
         result["diagnostics"].append("requesting-session-missing-or-mismatch")
         return result
-    rpc = session.rpc
+    rpc = getattr(session, "rpc", None)
     getter = getattr(getattr(rpc, "git_hub_auth", None), "get_status", None)
     if not callable(getter):
         identity["status"] = "unsupported"
@@ -94,7 +94,10 @@ async def acquire_verified_session_quota(
         return result
 
     def same_session() -> bool:
-        if session.session_id != expected_session_id or session.rpc is not rpc:
+        if (
+            getattr(session, "session_id", None) != expected_session_id
+            or getattr(session, "rpc", None) is not rpc
+        ):
             identity["status"] = "changed"
             result["diagnostics"].append("requesting-session-changed-during-acquisition")
             return False

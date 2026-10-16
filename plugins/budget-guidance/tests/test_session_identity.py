@@ -94,6 +94,44 @@ def test_unsupported_status_does_not_fall_back_to_unverified_quota() -> None:
     assert result["allowance"] is None
 
 
+@pytest.mark.parametrize("missing", ["rpc", "null-rpc", "session-id"])
+def test_missing_session_capabilities_never_raise_or_read_quota(missing: str) -> None:
+    session = Session()
+    if missing == "null-rpc":
+        session.rpc = None
+    elif missing == "rpc":
+        del session.rpc
+    else:
+        del session.session_id
+    result = _read(session)
+    assert session.calls == []
+    assert result["availability"] == "unavailable"
+    assert result["allowance"] is None
+    assert result["account_identity"]["status"] == (
+        "unverified" if missing == "session-id" else "unsupported"
+    )
+
+
+@pytest.mark.parametrize("missing", ["session-id", "rpc"])
+def test_session_capabilities_disappearing_during_rpc_withhold_values(missing: str) -> None:
+    session = Session()
+    original = session.status
+
+    async def status(*, timeout: float | None = None) -> SimpleNamespace:
+        raw = await original(timeout=timeout)
+        if missing == "session-id":
+            del session.session_id
+        else:
+            del session.rpc
+        return raw
+
+    session.rpc.git_hub_auth.get_status = status
+    result = _read(session)
+    assert session.calls == ["status"]
+    assert result["account_identity"]["status"] == "changed"
+    assert result["consumption"] is None
+
+
 @pytest.mark.parametrize("session_id", ["", "different"])
 def test_requester_mismatch_precedes_any_status_or_quota_rpc(session_id: str) -> None:
     session = Session()
