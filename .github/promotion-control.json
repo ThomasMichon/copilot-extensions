@@ -1,0 +1,9 @@
+{
+  "files": [
+    ".github/workflows/base-branch-reminder.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/validate-and-promote.yml"
+  ],
+  "schema": "copilot-extensions.promotion-control",
+  "version": 1
+}
