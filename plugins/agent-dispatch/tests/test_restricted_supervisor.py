@@ -754,3 +754,38 @@ def test_default_recovery_retains_a_stopped_restricted_incarnation(rig, started)
     assert reservation(rig) == receipt
     assert sum("create" in argv for argv, _ in rig.calls) == 1
     assert sum("send" in argv for argv, _ in rig.calls) == 1
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_coordinator_liveness_preserves_restricted_incarnation_at_attempt_cap(rig, started):
+    rig.supervisor.poll_once()
+    if started:
+        response = rig.api.post(
+            f"/tasks/{rig.task.id}/start", headers={TASK_SCOPE_HEADER: rig.grants[-1]},
+            json={"worker_id": "ignored"},
+        )
+        assert response.status_code == 200, response.text
+    before, receipt = rig.queue.get(rig.task.id), reservation(rig)
+    counts = rig.queue.reconcile_liveness(
+        headless_local_verdict=lambda _sid: "gone", max_attempts=0,
+    )
+    assert counts["gone"] == 1
+    assert counts["requeued"] == counts["suspended"] == counts["dead_lettered"] == 0
+    assert asdict(rig.queue.get(before.id)) == {**asdict(before), "last_liveness": "gone"}
+    assert reservation(rig) == receipt
+
+
+def test_queue_recovery_preserves_a_claim_with_lost_ack_before_first_receipt(rig, monkeypatch):
+    save = delivery._save
+    monkeypatch.setattr(
+        delivery, "_save",
+        lambda *_args: (_ for _ in ()).throw(DispatchError(503, "interrupted before receipt")),
+    )
+    assert rig.supervisor.poll_once() == []
+    before = rig.queue.get(rig.task.id)
+    assert before.owner is not None and reservation(rig)["agent_info"] is None
+    counts = rig.queue.reconcile_liveness(resolver=lambda *_args: "gone", max_attempts=0)
+    assert counts["requeued"] == counts["dead_lettered"] == 0
+    assert asdict(rig.queue.get(before.id)) == {**asdict(before), "last_liveness": "unknown"}
+    monkeypatch.setattr(delivery, "_save", save)
+    assert rig.supervisor.reconcile_reserving() == 1

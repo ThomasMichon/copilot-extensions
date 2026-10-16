@@ -111,6 +111,10 @@ Generic confirmed-gone recovery never requeues a delivered restricted task or
 replaces its conversation: the provider's physical binding cannot adopt a new
 task generation. A stopped delivered worker retains its original incarnation
 for explicit repair, even when ordinary automatic recovery is enabled.
+The coordinator's independent liveness sweep follows the same rule, while
+still recording the observed verdict. It does not requeue, suspend or
+dead-letter a restricted incarnation, even at the ordinary recovery-attempt
+cap.
 
 On the existing supervision cadence, a positively live, exact native worker
 receives a fresh task grant through the same provider operation. Unknown
