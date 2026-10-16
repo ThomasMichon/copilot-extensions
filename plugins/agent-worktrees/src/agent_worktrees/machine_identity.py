@@ -73,11 +73,9 @@ def is_local_machine(name: str, config: cfg.Config) -> bool:
     Canonicalizes both sides through the registry (the same key/alias/
     hostname/display_name matching ``config.detect_machine`` itself uses)
     and, as a final ground-truth check, the real local OS hostname, before
-    deciding.
+    deciding. This read-only classification does not grant mutation authority;
+    owned writes must enforce the separate ``execution_spaces`` fences.
     """
-    from .execution_spaces import require_owner_identity
-
-    require_owner_identity(name, config, canonical_ref=False)
     return _mt_is_local_machine(
         name,
         config_machine=config.machine,

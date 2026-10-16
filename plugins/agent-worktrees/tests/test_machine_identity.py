@@ -3,12 +3,87 @@ same-machine check (never a bare string comparison against config.machine)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from agent_worktrees import config as cfg
 from agent_worktrees import machine_identity
+
+
+@pytest.fixture
+def mixed_registry_config(tmp_path: Path, monkeypatch) -> cfg.Config:
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n"
+        "  example-host:\n"
+        "    hostname: EXAMPLE-HOST\n"
+        "    ssh:\n"
+        "      ready: true\n"
+        "      environments:\n"
+        "        - {name: windows, alias: example-native}\n"
+        "  example-host-wsl:\n"
+        "    execution_platform: wsl\n"
+        "    physical_host: example-host\n"
+        "    ssh:\n"
+        "      ready: true\n"
+        "      environments:\n"
+        "        - {name: wsl, alias: example-guest}\n"
+        "  peer-space:\n"
+        "    execution_platform: linux\n"
+        "    physical_host: peer-host\n"
+        "    ssh:\n"
+        "      ready: true\n"
+        "      environments:\n"
+        "        - {name: linux, alias: peer-ssh}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "EXAMPLE-HOST")
+    entries = cfg.load_machines_yaml(tmp_path)
+    assert not entries["example-host"].execution_platform
+    assert entries["peer-space"].execution_platform == "linux"
+    return cfg.Config(
+        srcroot=str(tmp_path), machine="example-host", platform="windows",
+        repo_name="proj", repos={"proj": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "wt"),
+        )},
+    )
+
+
+@pytest.mark.parametrize(("name", "local"), [
+    ("EXAMPLE-HOST", True), ("peer-space", False), ("example-host-wsl", False),
+])
+def test_mixed_registry_locality_does_not_grant_mutation_authority(
+    mixed_registry_config, name, local,
+):
+    from agent_worktrees import execution_spaces
+
+    config = mixed_registry_config
+    assert machine_identity.is_local_machine(name, config) is local
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="owned mutation requires"):
+        execution_spaces.require_current_execution_space(config)
+
+
+def test_mixed_registry_locality_retains_guest_context(mixed_registry_config, monkeypatch):
+    config = replace(mixed_registry_config, machine="example-host-wsl", platform="wsl")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    assert machine_identity.is_local_machine("example-host-wsl", config)
+    assert not machine_identity.is_local_machine("example-host", config)
+    assert not machine_identity.is_local_machine("peer-space", config)
+
+
+def test_mixed_registry_remote_candidates_keep_guest_but_exclude_native(
+    mixed_registry_config, monkeypatch,
+):
+    from agent_worktrees import resolve_machine_cli
+
+    monkeypatch.setattr(resolve_machine_cli, "_in_ssh_session", lambda: False)
+    candidates = resolve_machine_cli._load_remote_machines(mixed_registry_config)
+    assert {
+        entry.key: [environment.name for environment in environments]
+        for entry, environments in candidates
+    } == {"example-host-wsl": ["wsl"], "peer-space": ["linux"]}
 
 
 def test_remote_legacy_projection_does_not_suppress_local_wsl_qualification() -> None:

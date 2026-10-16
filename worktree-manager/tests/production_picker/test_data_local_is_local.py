@@ -46,6 +46,18 @@ def _install_roster(monkeypatch, entries, *, machine):
         data_local.cfg, "load_machines_yaml", lambda _anchor: entries)
 
 
+@pytest.mark.parametrize("target", ["EXAMPLE-HOST", "example-host", "local-alias"])
+def test_empty_roster_windows_observed_hostname_is_case_insensitive(monkeypatch, target):
+    _install_roster(monkeypatch, {}, machine="local-alias")
+    monkeypatch.setattr(data_local, "LOCAL", ("EXAMPLE-HOST", "Win"))
+    monkeypatch.setattr(data_local, "local_execution_platform", lambda: "windows")
+    monkeypatch.setattr(mt_identity, "local_execution_platform", lambda: "windows")
+    assert data_local.is_local(target, "Win")
+    assert not data_local.is_local(target, "WSL")
+    assert not data_local.is_local("example-host-wsl", "Win")
+    assert not data_local.is_local("other-host", "Win")
+
+
 @pytest.mark.parametrize("shape", ["unrelated", "hostname-only"])
 @pytest.mark.parametrize("actual,env", [("windows", "Win"), ("linux", "Linux")])
 @pytest.mark.parametrize("target", ["preferred-name", "PREFERRED-NAME"])

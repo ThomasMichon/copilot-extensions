@@ -77,6 +77,8 @@ def is_local(machine: str, env: str) -> bool:
     Every readable roster uses the shared platform-aware lookup through
     ``roster``, including unscoped native/guest pairs. Registry outages retain
     the shared ``is_local_machine`` fallback with the actual guest context.
+    An empty roster uses that same fallback for case-insensitive observed
+    native hostnames, not just the exact-case hostname tuple fast path.
     An unregistered configured native name also retains its self fallback when
     the entire readable roster is legacy/unscoped; guest and scoped targets do not.
     """
