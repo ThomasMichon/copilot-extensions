@@ -7,6 +7,7 @@ import json
 import multiprocessing
 import subprocess
 from dataclasses import asdict
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -127,7 +128,10 @@ def assigned(tmp_path, monkeypatch, request):
 
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
     monkeypatch.setattr(ordinary_assignment, "agent_worktrees_launch_prefix", lambda: ["ground"])
-    monkeypatch.setattr(ordinary_bridge.subprocess, "run", run)
+    process_api = SimpleNamespace(**vars(subprocess))
+    process_api.run = run
+    monkeypatch.setattr(ordinary_bridge, "subprocess", process_api)
+    monkeypatch.setattr(ordinary_assignment, "subprocess", process_api)
     monkeypatch.setattr(bridge, "registered_agent_project", lambda *_a, **_kw: "changed-routing")
     return queue, snapshot, Client(), record, response, calls
 
