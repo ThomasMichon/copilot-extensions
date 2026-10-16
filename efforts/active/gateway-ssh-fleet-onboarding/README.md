@@ -27,6 +27,7 @@ and routing campaigns, not a replacement for their implementation or ownership.
 | Existing #6030 / #6240 / #6424 owners | Construction, role lifecycle and installation | Their existing issue threads; exact integration owner acceptance pending |
 | Existing #5789 / #6443 / #6804 owners | Routing, authentication, enrollment and Gateway integration | Their existing issue threads |
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
+| `wobbly-contraption` | Retained construction/admission/lifecycle integration | Existing #6030 / #6240 / #6424 source custody |
 
 ## Coordination
 
@@ -42,6 +43,13 @@ and routing campaigns, not a replacement for their implementation or ownership.
   Gateway/SSH onboarding integration and validation matrix.
 - No edits to reserved installer, authentication, ledger, controller or shared
   CLI files before their retained owners agree the integration seam.
+- The construction owner accepted two exclusive new source leaves:
+  `fleet-manager/src/fleet_manager/gateway_ssh_policy.py` and its matching
+  `test_gateway_ssh_policy.py` belong to `ticking-wrench`; the separate
+  `gateway_ssh_runtime.py` and matching tests belong to the existing runtime
+  integration participant. Shared CLI, staging, admission, manifests and
+  lifecycle files remain with the construction owner. Source-leaf acceptance
+  is not deployment or an implemented setup hook.
 
 ## Context
 
@@ -75,6 +83,48 @@ The following contract decomposition and validation techniques are
 **agent-recommended** implementation proposals, not additional operator grants.
 
 ## Proposed Contract
+
+### Accepted source-leaf boundary
+
+The policy leaf is pure, dependency-free decision data, not another topology
+store, installer or admission authority. The existing configuration owner
+projects declared canonical machine/environment keys and controller references
+into a bounded `fleet-manager.gateway-ssh-policy` version-1 document.
+
+The proposed concrete API is:
+
+```python
+GatewaySSHPolicy.from_dict(value) -> GatewaySSHPolicy
+GatewaySSHPolicy.resolve(machine, environment) -> SSHPolicyDecision
+GatewaySSHPolicy.policy_digest -> str
+SSHPolicyDecision.to_dict() -> dict
+```
+
+The policy retains immutable normalized canonical bytes and its revision/digest.
+Rows select `gateway`, `dtssh` or `cloudflare`, an exact execution environment,
+independent logical SSH `inbound` and `outbound` permissions, and an explicit
+`interactive`, `service`, `client-only` or `offline` role. A Gateway row also
+selects a declared controller and whether Gateway connector egress is allowed.
+This egress permission is **separate** from permission to initiate SSH sessions.
+
+A constrained guest can select a declared `host_hop` instead of local Gateway
+egress. Reject ambiguous local-plus-host paths, unknown references, cycles,
+cross-controller mediation and a client-only role that requests inbound SSH.
+An offline role retains its selected configuration but requests no effects.
+Missing target declarations, unsupported fields and malformed values fail
+explicitly; no alias guessing, network lookup or transport fallback occurs.
+
+The returned decision identifies requested/effective directions, controller,
+host path, policy revision/digest and a configured/offline/disabled/blocked
+reason. It always carries false execution-authorization and live-readiness
+claims. The runtime participant must separately check trusted current policy,
+authenticated selected identity and explicit effect authorization; a durable
+admission or policy DTO is not that authorization.
+
+The construction owner retains ordered setup-hook integration after its
+existing construction/admission validation. Neither leaf may invoke an
+installer, enroll, authorize keys, restart a service or announce a machine
+onboarded merely because its source is published.
 
 ### Configuration and transport authority
 
