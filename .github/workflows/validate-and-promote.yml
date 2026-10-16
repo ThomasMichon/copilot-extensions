@@ -1356,6 +1356,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: read
       checks: read
       statuses: read
     outputs:
@@ -1673,6 +1674,46 @@ jobs:
             --candidate-commit "$CANDIDATE_SHA" --dev-head "$DEV_SHA" --main-before "$MAIN_BEFORE" \
             --candidate-root candidate --promotion-run "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
             --qualification-receipt qualification/qualification.json --github-output "$GITHUB_OUTPUT"
+
+  refresh-promotion-attribution:
+    name: Refresh Dev attribution checks after an already qualified landing
+    needs: [merge-promotion]
+    if: needs.merge-promotion.outputs.merge_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch the bounded idempotent attribution refresh without release qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ needs.merge-promotion.outputs.merge_sha }}
+          PROMOTION_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          merged = os.environ["MERGE_SHA"]
+          promotion_run = os.environ["PROMOTION_RUN"]
+          if not re.fullmatch(r"[0-9a-f]{40}", merged):
+              raise RuntimeError("invalid landed promotion snapshot")
+          if not re.fullmatch(r"[0-9]{1,20}-[0-9]{1,10}", promotion_run):
+              raise RuntimeError("invalid promotion run identity")
+          subprocess.run(
+              ["gh", "api", "--method", "POST",
+               f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/workflow-lockdown-guard.yml/dispatches",
+               "--input", "-"],
+              input=json.dumps({"ref": "main", "inputs": {
+                  "promotion_sha": merged, "promotion_run": promotion_run,
+              }}),
+              text=True, check=True, timeout=60,
+          )
+          PY
 
   record-promotion:
     name: Record the landed commit for an already qualified and published Dev release
