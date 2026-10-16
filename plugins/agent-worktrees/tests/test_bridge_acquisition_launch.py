@@ -66,3 +66,14 @@ def test_wrong_native_identity_and_live_mux_refuse(monkeypatch):
     assert "identity" in launch.refusal(args, SimpleNamespace(resolved_head_session="native-a"), "worktree-a")
     monkeypatch.setattr(launch.sessions, "has_mux_session", lambda _wt: True)
     assert "mux" in launch.refusal(args, SimpleNamespace(), "worktree-a")
+
+
+@pytest.mark.parametrize("intent", ["native-a", "fresh"])
+def test_finalizing_record_refuses_both_preflight_and_locked_admission(monkeypatch, intent):
+    args = argparse.Namespace(bridge_acquisition=intent, seed=None, copilot_args=[])
+    record = SimpleNamespace(resolved_head_session="native-a", status="active")
+    monkeypatch.setattr(launch.sessions, "has_mux_session", lambda _wt: False)
+    monkeypatch.setattr(launch, "session_liveness", lambda _sid: "dead")
+    assert launch.refusal(args, record, "worktree-a") is None
+    record.status = "finalizing"
+    assert "finalizing" in launch.refusal(args, record, "worktree-a")

@@ -149,7 +149,7 @@ def _launch(
             or record.pending_handoffs
             or getattr(record, "execution_leg_opaque", False)
             or getattr(record, "session_backend_opaque", False)
-            or record.status in {"complete", "completed", "finalized", "archived"}
+            or record.status in {"finalizing", "complete", "completed", "finalized", "archived"}
             or sessions.has_mux_session(record.worktree_id)
             or session_liveness(native_resume_session) != "dead"
         ):

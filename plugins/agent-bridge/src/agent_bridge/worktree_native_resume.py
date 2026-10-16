@@ -149,7 +149,7 @@ async def _resume(
         or (row["bound_agent"] is not None and not isinstance(row["bound_agent"], str))
         or row.get("execution_leg_opaque") is not False
         or row.get("session_backend_opaque") is not False
-        or row.get("status") in {"finalized", "complete", "completed", "archived", "gone"}
+        or row.get("status") in {"finalizing", "finalized", "complete", "completed", "archived", "gone"}
     ):
         raise _refuse("workspace_identity_changed", "Owner did not confirm the active execution workspace")
     entry = replace(entry, bound_agent=row["bound_agent"])
@@ -166,11 +166,12 @@ async def _resume(
     ]
     for session in owned:
         if session.status not in {SessionStatus.STOPPED, SessionStatus.ENDED, SessionStatus.FAILED}:
+            already_live = await wt._resolve_already_live(manager, worktree_id, session)
             if (
                 mode == "acp" and session.acp_session_id == native
                 and session.target.cwd == entry.path and session.target.project == config.project
                 and session.client is not None and session.client.is_running
-                and await wt._resolve_already_live(manager, worktree_id, session)
+                and already_live
             ):
                 store.release_workspace_gate(worktree_id, delivery)
                 return _session_info(session)
@@ -182,9 +183,12 @@ async def _resume(
             and owner_live[0].get("id") == native
             and owner_sessions.get("head_session") == native
         ):
-            store.release_workspace_gate(worktree_id, delivery)
             represented = db.list_fresh_live_sessions(worktree_id, now=time.time())
+            if any(row["session_id"] != native for row in represented):
+                raise _refuse("live_holder", "A conflicting represented execution holds this workspace")
             registration = next((row for row in represented if row["session_id"] == native), None)
+            store.release_workspace_gate(worktree_id, delivery)
+            _release_cli_reservation(db, worktree_id, native)
             return _cli_info(native, owner, entry, config, registration)
         retained = [
             session for session in owned
@@ -201,6 +205,7 @@ async def _resume(
     if live:
         if mode == "cli" and len(live) == 1 and live[0]["session_id"] == native:
             store.release_workspace_gate(worktree_id, delivery)
+            _release_cli_reservation(db, worktree_id, native)
             return _cli_info(native, owner, entry, config, live[0])
         raise _refuse("live_holder", "A represented execution leg still holds this workspace")
 
@@ -247,7 +252,8 @@ async def _resume(
     reservation = db.get_cli_mode_reservation(worktree_id)
     if reservation and reservation["expires_at"] > time.time():
         raise _refuse("cli_launch_pending", "The existing CLI launch remains unconfirmed")
-    if not db.create_cli_mode_reservation(worktree_id, now=time.time(), ttl_seconds=300):
+    reservation_id = db.create_cli_mode_reservation(worktree_id, now=time.time(), ttl_seconds=300)
+    if reservation_id is None:
         raise _refuse("cli_launch_pending", "Another CLI launch holds this workspace")
     launched = await command([
         "embody", "--worktree-id", worktree_id, "--json",
@@ -283,10 +289,25 @@ async def _resume(
         # launch; a display-only owner liveness flag must not veto its runtime.
         if len(matches) == 1 or (len(represented) == 1 and registration is not None):
             store.release_workspace_gate(worktree_id, delivery)
+            _release_cli_reservation(db, worktree_id, native, owned_id=reservation_id)
             return _cli_info(native, owner, entry, config, registration)
         if time.monotonic() >= deadline:
             raise _refuse("cli_launch_unconfirmed", "The exact native CLI is not yet confirmed live")
         await asyncio.sleep(0.25)
+
+
+def _release_cli_reservation(
+    db: Any, worktree_id: str, native: str, *, owned_id: str | None = None,
+) -> None:
+    reservation = db.get_cli_mode_reservation(worktree_id)
+    if reservation is None:
+        return
+    if reservation.get("claimed_by_session_id") == native:
+        db.release_cli_mode_reservation(worktree_id, reservation_id=reservation["reservation_id"])
+    elif reservation["reservation_id"] == owned_id:
+        db.release_cli_mode_reservation(
+            worktree_id, reservation_id=owned_id, unclaimed_only=True,
+        )
 
 
 def _claim_gate(

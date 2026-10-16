@@ -69,11 +69,10 @@ async def resume_singleton_anchor(
         if not db.reserve_worktree_ownership(anchor, session.session_id, now=time.time()):
             raise _refuse("live_holder", "Singleton ownership changed before native load")
         ready = (
-            session.status in {SessionStatus.IDLE, SessionStatus.RUNNING}
+            await wt._resolve_already_live(manager, anchor, session)
             and session.client is not None and session.client.is_running
         )
         if not ready:
-            await wt._resolve_already_live(manager, anchor, session)
             if session.status != SessionStatus.STOPPED:
                 raise _refuse("singleton_execution_unconfirmed", "Singleton execution is not confirmed stopped")
             session = await manager.resume_session(session.session_id, drain=False, allow_recreate=False)

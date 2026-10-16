@@ -51,7 +51,7 @@ def test_unrepresented_native_incumbent_refuses_before_spawn(owner, monkeypatch,
 
 @pytest.mark.parametrize("change", [
     {"resolved_head_session": "new-head"}, {"pending_handoffs": [object()]},
-    {"status": "finalized"}, {"execution_leg_opaque": True},
+    {"status": "finalized"}, {"status": "finalizing"}, {"execution_leg_opaque": True},
     {"session_backend_opaque": True},
 ])
 def test_changed_owner_facts_refuse_under_the_launch_fence(owner, monkeypatch, change):
@@ -109,6 +109,22 @@ def test_deferred_plan_carries_native_authority_at_execution_boundary(owner):
     )
     assert command[command.index("--native-resume-session") + 1] == "native-original"
     assert command.index("--native-resume-session") < command.index("--")
+
+
+def test_native_record_becoming_finalizing_after_planning_refuses_execution(owner, monkeypatch):
+    path, record = owner
+    planned = launch_seed_exec.deferred_command(
+        ["copilot", "--acp"], path, admission_only=True,
+        native_resume_session="native-original",
+    )
+    record.status = "finalizing"
+    spawn = Mock()
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
+    assert launch_seed_exec.launch(
+        path, planned[planned.index("--") + 1:], admission_only=True,
+        native_resume_session="native-original",
+    ) == 3
+    spawn.assert_not_called()
 
 
 @pytest.mark.parametrize("changes", [

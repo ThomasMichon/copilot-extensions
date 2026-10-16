@@ -388,6 +388,10 @@ publication. After a verified exact-head mux launch, either the owner's live
 session observation or the exact session's fresh Bridge registration confirms
 execution. An advisory display flag cannot veto that registered runtime;
 foreign executions and a changed native head still refuse.
+Retained local Session Host liveness is reconciled before trusting client
+readiness in either mode. Confirmed CLI success releases only its matching
+reservation, allowing immediate recovery after exit; an uncertain outcome
+keeps its reservation and launch fence.
 An owner-observed CLI that is not represented in the requesting daemon is
 read-only there; its owning bridge and mux remain the control/attachment
 boundary. ACP native launch also requires the paired Worktrees owner's

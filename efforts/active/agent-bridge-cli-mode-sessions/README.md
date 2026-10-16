@@ -857,6 +857,22 @@ an unrelated credential relay. Python 3.10 timeout compatibility is retained.
 PR #7002 still requires current review, required CI and merge. Hosted Linux
 execution and the broader Phase 6 acquisition matrix remain open.
 
+### 2026-10-16 - Native recovery review regressions
+
+PR #7002's first review identified four recovery defects. Singleton and worktree
+resume now reconcile authoritative local host liveness before trusting retained
+client readiness, including missing/disconnected clients and CLI requests.
+Confirmed CLI success/replay compare-deletes only its own reservation; uncertain,
+foreign-claimed and newer reservations remain intact. Native ACP execution and
+mux admission reject `finalizing`, including a transition after planning.
+
+The bounded native/HTTP selection passed 212 tests; owner admission passed 27.
+The real isolated Windows CLI acceptance passed again with an additional
+assertion that confirmed execution leaves no CLI reservation. The earlier ACP
+owner/HTTP continuity proof remains distinct from these simulated failure cases.
+Current-head review, required CI and merge remain outstanding; no broader
+Phase 6 completion or installed rollout is claimed.
+
 ### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
 
 Moved native receipt binding into the final locked delivery section, after

@@ -44,6 +44,8 @@ def refusal(args: argparse.Namespace, record: object, worktree_id: str) -> str |
         return "native admission requires an exact existing native conversation"
     if not intent:
         return None
+    if getattr(record, "status", None) == "finalizing":
+        return "the worktree is finalizing and cannot start a native conversation"
     if getattr(record, "pending_handoffs", ()):
         return "the native worktree head has a pending handoff"
     if getattr(record, "execution_leg_opaque", False) or getattr(record, "session_backend_opaque", False):

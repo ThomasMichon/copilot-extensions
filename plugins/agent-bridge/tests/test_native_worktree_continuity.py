@@ -346,6 +346,8 @@ async def test_native_worktree_resume_through_owner_http_and_bridge_control(
             await asyncio.sleep(0.25)
         assert expected in json.dumps(snapshot), snapshot
         assert settled, "The restored turn must reach its actual idle boundary"
+        if mode == "cli":
+            assert db.get_cli_mode_reservation(worktree_id) is None
         record = await asyncio.to_thread(
             _owner, owner_python, owner_root, "record", "--worktree-id", worktree_id, "--json",
         )

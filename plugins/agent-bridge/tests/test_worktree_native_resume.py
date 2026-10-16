@@ -321,6 +321,12 @@ async def test_cli_launch_accepts_exact_fresh_runtime_despite_owner_display_flag
     launched.assert_awaited_once()
     assert boundary.state["launched"] is False
     assert not boundary.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    assert boundary.db.get_cli_mode_reservation("wt-example") is None
+    assert boundary.db.deregister_live_session("native-original") is True
+    result = await native_resume.resume_native_worktree("wt-example", boundary.request, "cli")
+    assert result.durable_session_id == "native-original"
+    assert launched.await_count == 2
+    assert boundary.db.get_cli_mode_reservation("wt-example") is None
     boundary.manager.start_session.assert_not_called()
 
 
@@ -528,7 +534,7 @@ async def test_owner_preflight_must_match_native_and_workspace(boundary):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", [
     {"last_session_id": "different-native"}, {"execution_leg_opaque": True},
-    {"session_backend_opaque": True}, {"status": "finalized"},
+    {"session_backend_opaque": True}, {"status": "finalized"}, {"status": "finalizing"},
 ])
 async def test_exact_record_unknown_or_changed_authority_refuses(boundary, change):
     boundary.state["record"].update(change)
@@ -727,6 +733,109 @@ async def test_reclaim_input_does_not_block_a_proven_dormant_native_head(boundar
         "wt-example", boundary.request, "acp", reclaim=True,
     )
     assert result.durable_session_id == "native-original"
+
+
+def _dead_local_host(boundary, session, monkeypatch, connected):
+    from agent_bridge.routes.worktree_probe import resolve_already_live
+
+    client = None if connected is None else SimpleNamespace(
+        is_running=connected, pid=123, mark_host_child_exited=Mock(),
+    )
+    session.client = client
+    record = SimpleNamespace(boundary="local")
+    boundary.manager._host_index = SimpleNamespace(get=lambda _sid: record)
+    monkeypatch.setattr(boundary.manager, "_rec_host_alive", lambda _rec: True)
+    monkeypatch.setattr(boundary.manager, "_rec_child_alive", lambda _rec: False)
+    monkeypatch.setattr(boundary.manager, "_reap_host_record", Mock())
+    monkeypatch.setattr(wt, "_resolve_already_live", resolve_already_live)
+    return client
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connected", [True, False, None])
+@pytest.mark.parametrize("status", [SessionStatus.IDLE, SessionStatus.RUNNING])
+async def test_singleton_reconciles_dead_host_before_client_readiness(
+    singleton_boundary, monkeypatch, connected, status,
+):
+    boundary = singleton_boundary
+    session = _singleton_session(boundary, status=status)
+    client = _dead_local_host(boundary, session, monkeypatch, connected)
+
+    async def load(session_id, **kwargs):
+        assert session_id == session.session_id and session.status == SessionStatus.STOPPED
+        assert kwargs == {"drain": False, "allow_recreate": False}
+        session.status = SessionStatus.IDLE
+        return session
+
+    boundary.manager.resume_session = AsyncMock(side_effect=load)
+    result = await native_resume.resume_native_worktree("example@anchor", boundary.request, "acp")
+    assert result.acp_session_id == "singleton-native"
+    boundary.manager.resume_session.assert_awaited_once()
+    if client is not None:
+        client.mark_host_child_exited.assert_called_once_with(-1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["acp", "cli"])
+@pytest.mark.parametrize("connected", [True, False, None])
+async def test_worktree_reconciles_dead_retained_host_in_both_modes(
+    boundary, monkeypatch, mode, connected,
+):
+    session = boundary.manager.import_native_session(
+        SpawnTarget(type="local", project="example-project", cwd=boundary.entry.path,
+                    worktree_id="wt-example"), "native-original", agent_name="example",
+    )
+    session.status = SessionStatus.RUNNING
+    _dead_local_host(boundary, session, monkeypatch, connected)
+    result = await native_resume.resume_native_worktree("wt-example", boundary.request, mode)
+    assert result.durable_session_id == "native-original"
+    if mode == "acp":
+        boundary.manager.resume_session.assert_awaited_once()
+    else:
+        assert session.status == SessionStatus.STOPPED
+        boundary.manager.resume_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cli_confirmed_exit_can_resume_immediately_without_old_reservation(boundary):
+    for _ in range(2):
+        await native_resume.resume_native_worktree("wt-example", boundary.request, "cli")
+        assert boundary.db.get_cli_mode_reservation("wt-example") is None
+        boundary.state["launched"] = False
+    assert sum("--ensure-mux" in call for call in boundary.calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("represented", [False, True])
+async def test_cli_replay_releases_only_its_claimed_reservation(boundary, represented):
+    boundary.state["launched"] = not represented
+    reservation = boundary.db.create_cli_mode_reservation("wt-example", now=time.time())
+    assert reservation
+    assert boundary.db.claim_cli_mode_reservation("wt-example", "native-original", now=time.time())
+    if represented:
+        boundary.db.register_live_session(
+            "native-original", machine="example", cwd=boundary.entry.path,
+            worktree_id="wt-example", repo="example-project", branch="worktree/example",
+            pid=123, role=None, now=time.time(),
+        )
+    await native_resume.resume_native_worktree("wt-example", boundary.request, "cli")
+    assert boundary.db.get_cli_mode_reservation("wt-example") is None
+    assert not any("--ensure-mux" in call for call in boundary.calls)
+
+
+@pytest.mark.parametrize("foreign", ["claimed", "newer"])
+def test_cli_reservation_cleanup_preserves_other_owners(boundary, foreign):
+    owned = boundary.db.create_cli_mode_reservation("wt-example", now=time.time())
+    if foreign == "claimed":
+        boundary.db.claim_cli_mode_reservation("wt-example", "other-native", now=time.time())
+    else:
+        boundary.db.release_cli_mode_reservation("wt-example", reservation_id=owned)
+        boundary.db.create_cli_mode_reservation("wt-example", now=time.time())
+    expected = boundary.db.get_cli_mode_reservation("wt-example")
+    native_resume._release_cli_reservation(
+        boundary.db, "wt-example", "native-original", owned_id=owned,
+    )
+    assert boundary.db.get_cli_mode_reservation("wt-example") == expected
 
 
 @pytest.mark.parametrize("mode", ["acp", "cli"])
