@@ -67,7 +67,9 @@ $payload = Join-Path $payloadRoot $Plugin
 $pwshExe = (Get-Process -Id $PID).Path
 $launched = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 
-function Start-Install([int]$sleep, [int]$deadline = 0, [bool]$grandchild = $false) {
+function Start-Install(
+    [int]$sleep, [int]$deadline = 0, [bool]$grandchild = $false, [string]$phase = ''
+) {
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $pwshExe
     # Reproduce the REAL sessionStart-hook condition: Copilot launches the hook
@@ -87,12 +89,14 @@ function Start-Install([int]$sleep, [int]$deadline = 0, [bool]$grandchild = $fal
     $psi.EnvironmentVariables['HOME'] = $sandbox
     $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_SMOKE'] = '1'
     $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP'] = "$sleep"
+    $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_SMOKE_PHASE'] = $phase
     if ($deadline -gt 0) { $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_DEADLINE_SEC'] = "$deadline" }
     if ($grandchild) { $psi.EnvironmentVariables['COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD'] = '1' }
     # ensure a clean guard state so staging actually fires
     $psi.EnvironmentVariables.Remove('COPILOT_PLUGIN_INSTALL_STAGED') | Out-Null
     $psi.EnvironmentVariables.Remove('COPILOT_PLUGIN_STAGED_FROM') | Out-Null
     $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
     $p = [System.Diagnostics.Process]::Start($psi)
     $launched.Add($p)
     return $p
@@ -201,6 +205,11 @@ try {
     Assert 'WATCHDOG killed the staged child' (-not $childAlive)
     Assert 'WATCHDOG killed the GRANDCHILD (whole tree)' (-not $grandAlive) "grand=$grandPid"
     Assert 'WATCHDOG payload still free after kill' (Test-Renamable $payload)
+
+    $phaseChild = Start-Install -sleep 7 -deadline 4 -phase cutover
+    $phaseChild.WaitForExit(30000) | Out-Null
+    Assert 'CUTOVER finishes beyond build deadline within its phase budget' `
+        ($phaseChild.HasExited -and $phaseChild.ExitCode -eq 0)
 
     # --- MARKER: watchdog-killed build left NO completion marker; a real (non-
     # smoke) rebuild would toss it. Assert versioned_runtime sees it incomplete. ---

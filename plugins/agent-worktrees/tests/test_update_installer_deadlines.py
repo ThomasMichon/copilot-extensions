@@ -19,12 +19,12 @@ pytestmark = pytest.mark.guard
 @pytest.mark.parametrize(
     ("environment", "expected"),
     [
-        ({}, 1080),
-        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 930),
+        ({}, 1380),
+        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 1230),
         ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "600",
-          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 630),
-        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "0"}, 510),
-        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "-1"}, 510),
+          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 930),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "0"}, 810),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "-1"}, 810),
     ],
 )
 def test_dispatch_effective_default_and_overrides(environment, expected):
@@ -43,16 +43,16 @@ def test_dispatch_effective_default_and_overrides(environment, expected):
 @pytest.mark.parametrize(
     ("environment", "expected"),
     [
-        ({}, 510),
-        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 930),
-        ({"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "1"}, 31),
+        ({}, 810),
+        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 1230),
+        ({"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "1"}, 331),
         ({"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "600",
-          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 630),
-        ({"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "",
           "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 930),
+        ({"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "",
+          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 1230),
         ({"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "0",
-          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 510),
-        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "-1"}, 510),
+          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 810),
+        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "-1"}, 810),
     ],
 )
 def test_watchdog_precedence_and_finite_disabled_fallback(environment, expected):
@@ -62,6 +62,12 @@ def test_watchdog_precedence_and_finite_disabled_fallback(environment, expected)
 @pytest.mark.parametrize("raw", ["invalid", "1.5", "inf"])
 def test_invalid_deadline_is_explicit(raw):
     with pytest.raises(ValueError, match="invalid installer deadline"):
+        runtime._installer_timeout("agent-example", {"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": raw})
+
+
+@pytest.mark.parametrize("raw", ["2147483648", "-2147483649", "18446744073709551616"])
+def test_deadline_cannot_overflow_native_seconds(raw):
+    with pytest.raises(ValueError, match="32-bit integer"):
         runtime._installer_timeout("agent-example", {"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": raw})
 
 
@@ -107,7 +113,7 @@ def test_registered_runtime_and_module_fallback_use_selected_deadline(payloads, 
     )}
     assert runtime._update_modules(plugin, "linux", None, force=True, targets=targets)
     assert len(calls) == 3
-    assert all(call["timeout"] == 930 and call["env"] == environment for call in calls)
+    assert all(call["timeout"] == 1230 and call["env"] == environment for call in calls)
 
 
 def test_declared_default_reaches_registered_and_module_installers(payloads, monkeypatch):
@@ -128,16 +134,41 @@ def test_declared_default_reaches_registered_and_module_installers(payloads, mon
         context=None, activation=runtime._PluginActivation.ACTIVE,
     )}
     assert runtime._update_modules(plugin, "linux", None, force=True, targets=targets)
-    assert len(calls) == 3 and all(call["timeout"] == 870 for call in calls)
+    assert len(calls) == 3 and all(call["timeout"] == 1170 for call in calls)
 
 
-@pytest.mark.parametrize("value", [0, -1, True, "1050", 1.5, None])
+@pytest.mark.parametrize("value", [0, -1, True, "1050", 1.5, None, 2147483648])
 def test_invalid_declared_deadline_is_explicit(payloads, value):
     plugin, environment = payloads
     environment.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC")
     payload = plugin.parent / "agent-example"
     (payload / "plugin.json").write_text(json.dumps({"installerDeadlineSeconds": value}))
     with pytest.raises(ValueError, match="installerDeadlineSeconds must be a positive integer"):
+        runtime._installer_timeout("agent-example", environment, payload)
+
+
+@pytest.mark.parametrize("override, expected", [(None, 990), ("900", 1050), ("0", 630)])
+def test_outer_deadline_includes_declared_cutover_even_with_build_override(
+    payloads, override, expected,
+):
+    plugin, environment = payloads
+    if override is None:
+        environment.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC")
+    else:
+        environment["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = override
+    payload = plugin.parent / "agent-example"
+    (payload / "plugin.json").write_text(json.dumps({
+        "installerDeadlineSeconds": 840, "cutoverDeadlineSeconds": 120,
+    }))
+    assert runtime._installer_timeout("agent-example", environment, payload) == expected
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "120", 1.5, None, 18446744073709551616])
+def test_invalid_cutover_budget_is_explicit_with_build_override(payloads, value):
+    plugin, environment = payloads
+    payload = plugin.parent / "agent-example"
+    (payload / "plugin.json").write_text(json.dumps({"cutoverDeadlineSeconds": value}))
+    with pytest.raises(ValueError, match="cutoverDeadlineSeconds must be a positive integer"):
         runtime._installer_timeout("agent-example", environment, payload)
 
 
@@ -208,5 +239,5 @@ def test_real_windows_installer_failure_survives_watchdog_cleanup_budget(payload
     assert runtime._reconcile_one_runtime(
         "agent-example", "windows", force=True,
     ) == "timed out (deadline hit during build)"
-    assert calls[0]["timeout"] == 31
+    assert calls[0]["timeout"] == 331
     assert calls[0]["env"]["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] == "1"
