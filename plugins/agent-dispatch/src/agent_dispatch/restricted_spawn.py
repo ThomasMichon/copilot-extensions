@@ -184,9 +184,15 @@ def start(task: dict, *, spec: dict, charter: str | None = None) -> dict:
     if info is None:
         worker = f"dispatch-{key}"
         if current.get("status") == "queued" and not current.get("owner"):
+            generation = current.get("generation")
             current = client.claim(
                 worker, task_id=task["id"], repo=current.get("repo"),
             )
+            if current is None:
+                return {
+                    "deferred": True, "expected_generation": generation,
+                    "error": "restricted claim did not acquire this task",
+                }
         if (
             not isinstance(current, dict) or current.get("id") != task["id"]
             or current.get("status") != "claimed" or current.get("owner") != worker
@@ -285,7 +291,8 @@ def make_spawn(value: object, *, charter: str | None = None):
 
     def spawn(task: dict) -> tuple[bool, dict]:
         try:
-            return True, start(task, spec=spec, charter=charter)
+            handle = start(task, spec=spec, charter=charter)
+            return not handle.get("deferred"), handle
         except (DispatchError, BridgeUnavailable, httpx.HTTPError) as exc:
             return False, {"error": str(exc), "retained": True}
 

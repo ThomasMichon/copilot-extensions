@@ -91,6 +91,10 @@ class FailSpawnBody(ReservationDetailBody):
     confirmed_absent: bool = False
 
 
+class DeferSpawnBody(ReservationDetailBody):
+    expected_generation: int | None = Field(default=None, ge=0, le=2**63 - 1, strict=True)
+
+
 class RecordColdBody(BaseModel):
     release_exclusive: bool = False
 
@@ -424,8 +428,12 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/defer")
-    def defer_spawn(key: str, body: ReservationDetailBody) -> dict:
-        result = _reservation_guard(lambda: queue.defer_spawn(key, detail=body.detail))
+    def defer_spawn(key: str, body: DeferSpawnBody) -> dict:
+        result = _reservation_guard(lambda: queue.defer_spawn(
+            key, detail=body.detail,
+            **({"expected_generation": body.expected_generation}
+               if body.expected_generation is not None else {}),
+        ))
         bus.publish({"type": "spawn.deferred", "reservation": result})
         return result
 

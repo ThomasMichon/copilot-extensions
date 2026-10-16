@@ -3013,6 +3013,16 @@ class Supervisor:
         prepared = self._prepare_spawn_task(task, reservation)
         ok, handle = self.spawn_fn(prepared)
         if not ok:
+            if handle.get("deferred"):
+                try:
+                    self.client.defer_spawn(
+                        reservation["key"], detail=handle.get("error"),
+                        expected_generation=handle.get("expected_generation"),
+                    )
+                except DispatchError:
+                    log.exception("could not defer unclaimed restricted startup %s", reservation["key"])
+                    return 0
+                return 1
             log.error("restricted startup %s retained: %s", reservation["key"], handle.get("error"))
             return 0
         try:
@@ -3783,7 +3793,11 @@ class Supervisor:
                     if handle.get("retained"):
                         log.error("spawn reservation %s retained for explicit repair: %s", key, detail)
                     elif handle.get("deferred"):
-                        self.client.defer_spawn(key, detail=detail)
+                        self.client.defer_spawn(
+                            key, detail=detail,
+                            **({"expected_generation": handle["expected_generation"]}
+                               if "expected_generation" in handle else {}),
+                        )
                         active -= 1
                         log.info(
                             "spawn deferred (carried session busy) for task %s (%s): %s",

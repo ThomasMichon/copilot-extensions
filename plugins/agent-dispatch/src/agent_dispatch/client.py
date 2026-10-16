@@ -763,11 +763,6 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
             )
         )
 
-    def defer_spawn(self, key: str, *, detail: str | None = None) -> dict:
-        return self._unwrap(
-            self._http.post(f"/spawn-reservations/{key}/defer", json={"detail": detail})
-        )
-
     def request_spawn_release(
         self, key: str, *, detail: str | None = None,
         disposition: str = "failed", session_handle: str | None = None,

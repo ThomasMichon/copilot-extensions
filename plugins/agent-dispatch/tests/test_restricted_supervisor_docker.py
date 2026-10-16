@@ -193,7 +193,10 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
             )
             monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", bridge_url)
             with DispatchClient(central_url, token=fleet_token, control_token=control_token) as client:
-                other = client._unwrap(client._http.post("/tasks", json={"title": "other", "repo": _REPO}))
+                other = client._unwrap(client._http.post("/tasks", json={
+                    "title": "unclaimable earlier task", "repo": _REPO,
+                    "labels": ["restricted"], "requires": ["unavailable-capability"],
+                }))
                 task = client._unwrap(client._http.post("/tasks", json={
                     "title": "restricted first touch", "repo": _REPO, "labels": ["restricted"],
                     "payload_inline": json.dumps({"other": other["id"]}),
@@ -230,6 +233,9 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                 receipt = client.list_reservations(task_id=task["id"])[0]
                 info = receipt["agent_info"]
                 session_id = info["session_id"]
+                deferred = client.list_reservations(task_id=other["id"])[0]
+                assert deferred["state"] == "deferred"
+                assert deferred["agent_info"] is None and deferred["session_handle"] is None
                 assert info["delivered"] is True and receipt["driver"] == "restricted-bridge"
                 assert receipt["worktree"] is None and receipt["allocation_project"] is None
                 assert client.get(task["id"])["owner_session_id"] == info["native_session_id"]

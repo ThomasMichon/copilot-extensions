@@ -300,6 +300,8 @@ It must reject cross-task, fleet-route and signature-tampering attempts, and
 observe protected task-file rotation by the trusted supervisor.
 Acceptance also waits for the witness's final proof after its post-completion
 revocation check, not merely for the central task row to become completed.
+An older matching-label task with unmet capabilities must be deferred without
+an agent, allowing the subsequent eligible task to run in the same lane.
 
 Build the central image from the candidate source with
 `services/dispatch/Dockerfile`, using the environment's approved package-index

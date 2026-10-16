@@ -86,6 +86,11 @@ control-issued grant, and publishes that grant through the provider's bounded
 stdin operation. Only after publication does it send the assignment to the
 native-fenced Bridge handle. The worker runs task-only `start`, reads its payload
 and reports its result directly.
+If the authoritative claim returns no matching task, the existing deferral
+transition can free the lane only while the same generation remains unclaimed
+and the reservation has no delivery receipt, workspace or body. Capability or
+target mismatches therefore do not consume the lane's only slot. A raced claim,
+unknown response or any prepared startup retains its identity instead.
 
 Nonsecret, monotonic startup receipts stay on the existing spawn reservation
 behind a control-only journal endpoint. They contain no shared/control/task

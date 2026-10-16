@@ -133,6 +133,101 @@ def test_existing_supervisor_claims_binds_projects_and_sends_in_order(rig):
     assert sum("send" in argv for argv, _ in rig.calls) == 1
 
 
+@pytest.mark.parametrize("selectors", [
+    {"requires": ["unavailable-capability"]},
+    {"excludes": [f"repo:{TEST_REPO}"]},
+    {"target_machine": "another-machine"},
+    {"target_worktree": "another-worktree"},
+])
+def test_unclaimable_task_does_not_block_a_later_eligible_task(rig, selectors):
+    blocked = rig.queue.create(
+        "not claimable by this lane", repo=TEST_REPO, labels=["restricted"],
+        now=rig.task.created_at - 1, **selectors,
+    )
+    assert rig.supervisor.poll_once() == [rig.task.id]
+    refused = rig.client.list_reservations(task_id=blocked.id)[0]
+    assert refused["state"] == "deferred"
+    assert refused["agent_info"] is None and refused["session_handle"] is None
+    after = rig.queue.get(blocked.id)
+    assert asdict(after) == {**asdict(blocked), "activity_updated_at": after.activity_updated_at}
+    assert after.activity_updated_at >= blocked.created_at
+    assert rig.supervisor._failed_spawn_counts().get(blocked.id, 0) == 0
+    assert sum("create" in argv for argv, _ in rig.calls) == 1
+    assert sum("send" in argv for argv, _ in rig.calls) == 1
+
+
+def test_claim_rejection_cannot_defer_a_concurrently_claimed_incarnation(rig, monkeypatch):
+    blocked = rig.queue.create(
+        "racing claim", repo=TEST_REPO, labels=["restricted"],
+        requires=["other-capability"], now=rig.task.created_at - 1,
+    )
+    claim = rig.client.claim
+
+    def race(worker_id, **kwargs):
+        result = claim(worker_id, **kwargs)
+        if kwargs.get("task_id") == blocked.id and result is None:
+            rig.queue.claim_one(
+                "other-worker", capabilities=["other-capability"],
+                repo=TEST_REPO, task_id=blocked.id,
+            )
+        return result
+
+    monkeypatch.setattr(rig.client, "claim", race)
+    assert rig.supervisor.poll_once() == []
+    refused = rig.client.list_reservations(task_id=blocked.id)[0]
+    assert refused["state"] == "reserving" and refused["agent_info"] is None
+    assert rig.queue.get(blocked.id).owner == "other-worker"
+    assert rig.calls == []
+
+
+def test_prepared_or_claimed_restricted_startup_cannot_be_deferred(rig):
+    rig.supervisor.poll_once()
+    receipt = reservation(rig)
+    with pytest.raises(DispatchError) as rejected:
+        rig.client.defer_spawn(
+            receipt["key"], expected_generation=rig.queue.get(rig.task.id).generation,
+        )
+    assert rejected.value.status_code == 409
+    assert reservation(rig) == receipt
+
+
+def test_restart_defers_a_previously_reserved_unclaimable_task(rig):
+    blocked = rig.queue.create(
+        "reserved before restart", repo=TEST_REPO, labels=["restricted"],
+        requires=["unavailable"], now=rig.task.created_at - 1,
+    )
+    result = rig.client.reserve_spawn(
+        blocked.id, reserved_by=rig.supervisor.supervisor_id, driver=DRIVER,
+    )
+    assert result["reserved"] is True
+    assert rig.supervisor.reconcile_reserving() == 1
+    assert rig.client.get_reservation(result["reservation"]["key"])["state"] == "deferred"
+    assert rig.calls == []
+    assert rig.supervisor.poll_once() == [rig.task.id]
+
+
+def test_lost_claim_ack_is_retained_and_recovered_without_deferral(rig, monkeypatch):
+    claim = rig.client.claim
+
+    def interrupted(*args, **kwargs):
+        result = claim(*args, **kwargs)
+        assert result["id"] == rig.task.id
+        raise DispatchError(503, "lost claim acknowledgement")
+
+    monkeypatch.setattr(rig.client, "claim", interrupted)
+    assert rig.supervisor.poll_once() == []
+    receipt = reservation(rig)
+    assert receipt["state"] == "reserving" and receipt["agent_info"] is None
+    held = rig.queue.get(rig.task.id)
+    assert held.owner == f"dispatch-{receipt['key']}"
+    with pytest.raises(DispatchError):
+        rig.client.defer_spawn(receipt["key"], expected_generation=rig.task.generation)
+    monkeypatch.setattr(rig.client, "claim", claim)
+    assert rig.supervisor.reconcile_reserving() == 1
+    assert reservation(rig)["agent_info"]["delivered"] is True
+    assert sum("create" in argv for argv, _ in rig.calls) == 1
+
+
 def test_projected_worker_starts_and_completes_without_fleet_authority(rig):
     rig.supervisor.poll_once()
     headers = {TASK_SCOPE_HEADER: rig.grants[-1]}
