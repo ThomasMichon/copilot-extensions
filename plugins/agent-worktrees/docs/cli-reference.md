@@ -780,6 +780,8 @@ a newer legacy revision still supersedes the typed seed.
 JSON existing-worktree previews retain the normal launch-plan shape and set
 `launch.preview` to `true`; the returned worktree retains its current resume
 count and timestamp. Base-repo JSON plans remain flat and set `preview: true`.
+Base-repo previews skip the informational dirty-file scan so Git cannot refresh
+the checkout's index as a side effect.
 Explicit profiles and existing-session profile replay remain visible. When a
 new random assignment would be needed, selection is deferred until a real
 launch: `launch.preview_warning` explains that no profile was reserved (the

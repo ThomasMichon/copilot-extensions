@@ -404,6 +404,43 @@ def test_explicit_base_interactive_preview_does_not_open_the_picker(
         assert _snapshot(case.root) == before
 
 
+@pytest.mark.parametrize("json_mode", [True, False])
+def test_base_preview_preserves_stale_git_index(
+    case: PreviewCase, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], json_mode: bool,
+) -> None:
+    anchor = Path(case.config.default_repo.anchor)
+    git = main.git_ops.git
+    git("init", "--quiet", cwd=anchor, isolated_repository=True, timeout=10)
+    tracked = anchor / "tracked.txt"
+    tracked.write_text("unchanged content\n", encoding="utf-8")
+    git("add", "tracked.txt", cwd=anchor, isolated_repository=True, timeout=10)
+    git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Initial fixture",
+        cwd=anchor, isolated_repository=True, no_hooks=True, timeout=10,
+    )
+    original = tracked.stat()
+    os.utime(tracked, ns=(original.st_atime_ns, original.st_mtime_ns + 2_000_000_000))
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+    index = anchor / ".git" / "index"
+    index_bytes, index_mtime = index.read_bytes(), index.stat().st_mtime_ns
+    before = _snapshot(case.root)
+    for _ in range(2):
+        args = main.build_parser().parse_args([
+            "resolve", "--base", "--dry-run", *(["--json"] if json_mode else []),
+        ])
+        assert resolve_cli.cmd_resolve(args) == 0
+        capfd.readouterr()
+        assert index.read_bytes() == index_bytes
+        assert index.stat().st_mtime_ns == index_mtime
+        assert _snapshot(case.root) == before
+
+    assert main.git_ops.get_dirty_files(anchor) == []
+    assert index.read_bytes() != index_bytes
+    assert index.stat().st_mtime_ns != index_mtime
+
+
 def test_preview_progress_heartbeat_and_failure_leave_no_activity(
     case: PreviewCase, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

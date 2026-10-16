@@ -315,7 +315,8 @@ def _resolve_base_repo(
     output.warn("Commits will go directly to the current branch.")
     print()
 
-    dirty = git_ops.get_dirty_files(repo.anchor) if sys.stdin.isatty() else []
+    # Even an informational status scan can refresh the Git index.
+    dirty = git_ops.get_dirty_files(repo.anchor) if not args.dry_run and sys.stdin.isatty() else []
     if dirty:
         output.warn(f"Anchor repo has {len(dirty)} uncommitted change(s):")
         for path in dirty[:5]:
