@@ -96,8 +96,8 @@ def anchors() -> list[Source]:
             continue
         seen.add(repo.anchor)
         anchor = Path(repo.anchor)
-        if not bare_anchor_sync.is_bare(anchor) and bare_anchor_sync.branch_skip_reason(
-            anchor, repo.default_branch
+        if bare_anchor_sync.branch_skip_reason(
+            anchor, repo.default_branch, bare=bare_anchor_sync.is_bare(anchor)
         ):
             continue
         item = source(

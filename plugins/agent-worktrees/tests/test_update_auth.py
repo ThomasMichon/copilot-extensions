@@ -426,7 +426,11 @@ def test_enterprise_environment_token_never_reaches_another_host(host):
 
 
 @pytest.mark.parametrize("branch", ["feature", None])
-def test_skipped_anchor_does_not_create_an_auth_requirement(tmp_path, monkeypatch, branch):
+@pytest.mark.parametrize("bare", [False, True])
+@pytest.mark.parametrize("inherited", [False, True])
+def test_skipped_anchor_does_not_create_an_auth_requirement(
+    tmp_path, monkeypatch, branch, bare, inherited
+):
     _clean_git_env(monkeypatch, tmp_path)
     anchor = tmp_path / "anchor"
     subprocess.run(
@@ -443,6 +447,25 @@ def test_skipped_anchor_does_not_create_an_auth_requirement(tmp_path, monkeypatc
             ["git", "-C", str(anchor), "checkout", "--detach", "-q"],
             check=True, **git_ops.no_window_kwargs(),
         )
+    if bare:
+        subprocess.run(
+            ["git", "-C", str(anchor), "config", "core.bare", "true"],
+            check=True, **git_ops.no_window_kwargs(),
+        )
+    if inherited:
+        caller = tmp_path / "caller"
+        subprocess.run(
+            ["git", "init", "-q", "-b", "main", str(caller)],
+            check=True, **git_ops.no_window_kwargs(),
+        )
+        subprocess.run(
+            ["git", "-C", str(caller), "-c", "user.name=Test", "-c",
+             "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"],
+            check=True, **git_ops.no_window_kwargs(),
+        )
+        monkeypatch.setenv("GIT_DIR", str(caller / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(caller))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(caller / ".git" / "index"))
     repo = cfg.RepoConfig(
         anchor=str(anchor), worktree_root=str(tmp_path / "worktrees"), default_branch="main",
         remote="https://example.test/team/repo",
@@ -528,7 +551,9 @@ def test_anchor_fetch_failure_is_auth_required(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(cfg, "load_config", lambda: config)
     monkeypatch.setattr(update_runtime.bare_anchor_sync, "is_bare", lambda _: False)
-    monkeypatch.setattr(git_ops, "current_branch", lambda _: "main")
+    monkeypatch.setattr(
+        update_runtime.bare_anchor_sync, "branch_skip_reason", lambda *a, **k: None
+    )
     monkeypatch.setattr(
         git_ops,
         "fast_forward_worktree",

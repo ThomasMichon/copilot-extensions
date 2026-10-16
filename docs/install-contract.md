@@ -1569,8 +1569,9 @@ User `settings.local.json` overrides `settings.json` before repository overrides
 an exact registered repository keeps its own account override, not a sibling's.
 The report resolves ancestor or transported marketplace settings through the same
 context selection as normal update, including its active-project fallback.
-Non-bare anchors on detached or non-default branches are excluded from preflight,
-matching the sync eligibility decision rather than inventing an auth requirement.
+Bare and non-bare anchors on detached or non-default branches are excluded from
+preflight. Branch selection is isolated from caller Git repository selectors
+and shared with synchronization rather than inventing an auth requirement.
 
 Public sources short-circuit anonymously. Other sources first exercise the
 caller's configured credentials through a read-only router, then try an
