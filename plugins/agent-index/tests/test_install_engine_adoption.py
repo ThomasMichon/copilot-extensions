@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -252,6 +253,64 @@ def test_canonical_references_and_both_runtime_builds(tmp_path: Path, materializ
     assert "Invoke-UvPipInstallResilient" in function("Invoke-IndexUvPipInstall", "ps1")
 
 
+@pytest.mark.parametrize(
+    ("extension", "name", "sources"),
+    [
+        ("ps1", "Install-Engine", '"$PluginDir", "$PluginDir\\server"'),
+        ("sh", "_install_engine", '"$PLUGIN_DIR" "$PLUGIN_DIR/server"'),
+    ],
+)
+def test_engine_transactions_keep_local_base_for_uv_and_fallback(extension, name, sources):
+    transactions = [
+        line for line in function(name, extension).splitlines()
+        if ("$pipArgs =" in line or "local uv_args=" in line or "local pip_args=" in line)
+        and ("/server" in line or "\\server" in line)
+    ]
+    assert len(transactions) == 2
+    assert all(sources in line for line in transactions)
+
+
+def test_engine_upgrade_resolves_unpublished_base_offline(tmp_path):
+    uv = shutil.which("uv")
+    assert uv is not None
+    wheels = []
+    for name, dependency in (("agent_index", ""), ("agent_index_engine", "Requires-Dist: agent-index\n")):
+        wheel = tmp_path / f"{name}-1.0.0-py3-none-any.whl"
+        metadata = f"{name}-1.0.0.dist-info"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr(
+                f"{metadata}/METADATA",
+                f"Metadata-Version: 2.1\nName: {name.replace('_', '-')}\nVersion: 1.0.0\n{dependency}",
+            )
+            archive.writestr(
+                f"{metadata}/WHEEL",
+                "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+            )
+            archive.writestr(f"{metadata}/RECORD", "")
+        wheels.append(wheel)
+    target = tmp_path / "venv"
+    env = environment(tmp_path)
+    created = subprocess.run(
+        [uv, "venv", "--offline", "--python", sys.executable, str(target)],
+        env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert created.returncode == 0, created.stderr
+    python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    def install(*args):
+        return subprocess.run(
+            [uv, "pip", "install", "--offline", "--no-index", "--python", str(python), *args],
+            env=env, capture_output=True, text=True, timeout=15,
+        )
+
+    base, engine = map(str, wheels)
+    missing_source = install("--upgrade", engine)
+    assert missing_source.returncode != 0
+    assert "agent-index" in missing_source.stderr
+    resolved = install("--upgrade", base, engine)
+    assert resolved.returncode == 0, resolved.stderr
+
+
 @pytest.mark.parametrize("failure_stage", ["zdd", "agent-procutil", "server", "torch"])
 def test_native_engine_failed_upgrade_preserves_selection_and_retries(tmp_path, failure_stage):
     for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime.py"):
@@ -284,8 +343,12 @@ function New-IndexVenv {{
     return $true
 }}
 function Invoke-IndexUvPipInstall {{
+    $server = @($args | Where-Object {{ "$_" -eq "$PluginDir\\server" }})
+    if ($server.Count -gt 0 -and "$PluginDir" -notin $args) {{
+        throw 'Engine dependency resolution lost the unpublished local base source'
+    }}
     $stage = if ($args[-1] -eq 'torch') {{ 'torch' }} else {{
-        @($args | Where-Object {{ "$_" -like "$PluginDir*" }})[0] | Split-Path -Leaf
+        @($args | Where-Object {{ "$_" -like "$PluginDir*" }})[-1] | Split-Path -Leaf
     }}
     $global:LASTEXITCODE = if ($stage -eq $script:FailStage) {{ 37 }} else {{ 0 }}
 }}
@@ -385,6 +448,7 @@ exit "$rc"
     else:
         assert str(tmp_path / "plugin") in installs[2]
         assert str(tmp_path / "plugin/server") in installs[3]
+        assert shlex.split(installs[3]).count(str(tmp_path / "plugin")) == 1
         assert "--index-url https://example.invalid/cuda --reinstall-package torch torch" in installs[4]
         assert len(installs) == 5
         assert (tmp_path / "engine/versions/1.0.0/.install-complete.json").is_file()

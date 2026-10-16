@@ -20,8 +20,9 @@ dependencies = [
     # capability) -- shared config/identity/HTTP-client surface, torch-free. This is
     # what makes this program a "separate program that talks to the client wrapper",
     # not a fork: both sides read the same ModelProfile/IndexConfig. Pre-installed
-    # from the local checkout by the installer (see agent-index's install.{ps1,sh}
-    # Install-Engine), the same way agent-index itself pre-installs vendored
+    # from the local checkout and included in the engine dependency transaction
+    # by the installer (see agent-index's install.{ps1,sh} Install-Engine),
+    # the same way agent-index itself pre-installs vendored
     # agent-zdd/agent-procutil before a plain `pip install` would try (and fail) to
     # resolve them from PyPI.
     "agent-index",

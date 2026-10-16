@@ -1777,8 +1777,8 @@ function Install-Engine {
     # installable program that owns the heavy embedding stack, into the DURABLE
     # venv only. It depends on the light `agent-index` base package (index_config,
     # engine.generation, engine.client) -- installed first, exactly like the zdd
-    # pre-install above, since neither is on PyPI and a plain `pip install
-    # agent-index-engine` cannot resolve "agent-index" on its own.
+    # pre-install above. Keep the base source in the engine transaction too:
+    # isolated dependency resolution and --upgrade cannot resolve it on PyPI.
     #
     # A selected CUDA feed must also resolve and season its transitive graph.
     $torchIdx = $env:AGENT_INDEX_TORCH_INDEX
@@ -1792,7 +1792,7 @@ function Install-Engine {
         $engRc = $LASTEXITCODE
         $engOut = @($baseOut)
         if ($engRc -eq 0) {
-            $pipArgs = @('--python', $EngineVenvPython, "$PluginDir\server")
+            $pipArgs = @('--python', $EngineVenvPython, "$PluginDir", "$PluginDir\server")
             if ($Upgrade) { $pipArgs += '--upgrade' }
             $srvOut = Invoke-IndexUvPipInstall @pipArgs
             $engRc = $LASTEXITCODE
@@ -1809,7 +1809,7 @@ function Install-Engine {
         $engRc = $LASTEXITCODE
         $engOut = @($baseOut)
         if ($engRc -eq 0) {
-            $pipArgs = @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $EngineVenvPython, "$PluginDir\server")
+            $pipArgs = @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $EngineVenvPython, "$PluginDir", "$PluginDir\server")
             if ($Upgrade) { $pipArgs += '--upgrade' }
             $srvOut = & $EngineVenvPython @pipArgs 2>&1
             $engRc = $LASTEXITCODE

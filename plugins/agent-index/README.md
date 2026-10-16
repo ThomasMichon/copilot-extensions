@@ -89,7 +89,10 @@ their independently owned full host runtime; they do not acquire a duplicate
 sibling merely to match the legacy layout. The durable embedding venv retains
 its separate lifecycle, building into immutable engine slots before completed
 selection. Failed selected dependencies cannot replace the healthy engine;
-`engine-update` constructs a distinct repair generation. These runtimes retain
+`engine-update` constructs a distinct repair generation. Engine dependency
+transactions include both the local base package and engine source, so isolated
+resolution and upgrades do not require the unpublished base on a package feed.
+These runtimes retain
 plugin-owned dependency/signature policy. PowerShell stamps are immutable,
 self-contained snapshots; see the
 [shared installer contract](../../docs/install-contract.md#shared-installer-engine-helpers-libsinstaller-engine)

@@ -1646,8 +1646,8 @@ _install_engine() {
     # installable program that owns the heavy embedding stack, into the DURABLE
     # venv only. It depends on the light `agent-index` base package (index_config,
     # engine.generation, engine.client) -- installed first, exactly like the zdd
-    # pre-install above, since neither is on PyPI and a plain `pip install
-    # agent-index-engine` cannot resolve "agent-index" on its own.
+    # pre-install above. Keep the base source in the engine transaction too:
+    # isolated dependency resolution and --upgrade cannot resolve it on PyPI.
     #
     # A selected CUDA feed must also resolve and season its transitive graph.
     local torch_idx="${AGENT_INDEX_TORCH_INDEX:-}"
@@ -1656,7 +1656,7 @@ _install_engine() {
     elif [[ "$have_uv" -eq 1 ]]; then
         _uv_pip_install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
         if [[ "$rc" -eq 0 ]]; then
-            local uv_args=(--python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
+            local uv_args=(--python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" "$PLUGIN_DIR/server")
             [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
             _uv_pip_install "${uv_args[@]}" || rc=$?
         fi
@@ -1667,7 +1667,7 @@ _install_engine() {
     else
         "$ENGINE_VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
         if [[ "$rc" -eq 0 ]]; then
-            local pip_args=(-I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
+            local pip_args=(-I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" "$PLUGIN_DIR/server")
             [[ "$upgrade" -eq 1 ]] && pip_args+=(--upgrade)
             "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
         fi
