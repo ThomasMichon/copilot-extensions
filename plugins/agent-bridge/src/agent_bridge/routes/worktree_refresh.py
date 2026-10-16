@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -20,6 +21,14 @@ SHUTDOWN_WAIT_SECONDS = 0.1
 FRESH_SECONDS = 30.0
 RETRY_SECONDS = 10.0
 _Row = TypeVar("_Row")
+
+
+class ObservedRows(list[_Row]):
+    """Compatible rows retaining the source's observation time."""
+
+    def __init__(self, rows: list[_Row], observed: float | None) -> None:
+        super().__init__(rows)
+        self.observed = observed
 
 
 class DiscoveryReadError(ValueError):
@@ -40,12 +49,13 @@ def is_classify_unsupported(stderr: str) -> bool:
     return is_option_unsupported(stderr, "--classify")
 
 
-def validate_inventory(raw: str) -> None:
+def validate_inventory(raw: str, *, fresh: bool = False) -> float | None:
     """Reject failed/partial/unknown envelopes before replacing good rows."""
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
         raise DiscoveryReadError("source-malformed") from None
+    observed = None
     if isinstance(data, dict):
         version = data.get("version", 1)
         if type(version) is not int:
@@ -55,8 +65,31 @@ def validate_inventory(raw: str) -> None:
         if (
             data.get("error") or data.get("errors") or data.get("incomplete")
             or ("complete" in data and data["complete"] is not True)
+            or ("ok" in data and data["ok"] is not True)
         ):
             raise DiscoveryReadError("source-incomplete")
+        if data.get("availability") is not None:
+            raise DiscoveryReadError("source-degraded")
+        if "projection" in data:
+            projection = data["projection"]
+            if (
+                type(data.get("contract_version")) is not int
+                or data["contract_version"] != 1
+                or not isinstance(projection, dict)
+                or projection.get("quality") != "current"
+            ):
+                raise DiscoveryReadError("source-incomplete")
+            timestamp = projection.get("observed_at")
+            if type(timestamp) not in (int, float) or not math.isfinite(timestamp):
+                raise DiscoveryReadError("source-malformed")
+            age = time.time() - timestamp
+            if timestamp < 0 or age < -1 or age >= FRESH_SECONDS:
+                raise DiscoveryReadError("source-stale")
+            if fresh:
+                # Current-roster-v1 dispatch ignores --fresh; it acknowledges
+                # a projection read, not a requested source-owner refresh.
+                raise DiscoveryReadError("source-refresh-unsupported")
+            observed = time.monotonic() - max(0.0, age)
         data = data.get("worktrees")
     if not isinstance(data, list) or any(
         not isinstance(row, dict)
@@ -65,6 +98,7 @@ def validate_inventory(raw: str) -> None:
         for row in data
     ):
         raise DiscoveryReadError("source-malformed")
+    return observed
 
 
 @dataclass
@@ -264,7 +298,10 @@ class WorktreeRefreshOwner:
             task.add_done_callback(schedule)
         return task
 
-    def published(self, epoch: int, errors: dict[str, str | None]) -> None:
+    def published(
+        self, epoch: int, errors: dict[str, str | None],
+        *, observed: dict[str, float] | None = None,
+    ) -> None:
         if not self.current(epoch):
             return
         self.generation += 1
@@ -274,7 +311,7 @@ class WorktreeRefreshOwner:
             source.diagnostic = error
             if error is None:
                 source.generation = self.generation
-                source.updated = now
+                source.updated = (observed or {}).get(name, now)
         self.initialized = True
 
     async def wait(self, task: asyncio.Task[None] | None) -> dict[str, Any]:

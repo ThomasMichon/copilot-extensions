@@ -284,6 +284,16 @@ before a child starts cannot cache a retired source's option rejection.
 External rendering consumers must adopt this versioned opt-in;
 their deployment is not implied by the server capability.
 
+Current-roster-v1 source envelopes retain their `projection.observed_at` age.
+Advisory/stale availability, non-current projection quality and expired or
+invalid observation times cannot replace a source's last good rows or renew
+their freshness. A successful projection read is not a live-refresh
+acknowledgement: Worktree Manager's resident dispatch does not act on `--fresh`,
+so this source contract reports `source-refresh-unsupported` for explicit
+refresh rather than claiming the wall goal was met. Legacy direct enumeration
+still uses its existing `--fresh` bypass. No new resident refresh API or
+termination authority is introduced.
+
 ### Session Management
 
 ```

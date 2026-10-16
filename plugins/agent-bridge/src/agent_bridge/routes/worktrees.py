@@ -31,7 +31,7 @@ from ..session_manager import (
 from ..worktree_charter import _apply_bound_charter
 from .worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 from .worktree_entry import WorktreeEntry as _WorktreeEntry
-from .worktree_refresh import DiscoveryReadError, WorktreeRefreshOwner, is_option_unsupported, validate_inventory
+from .worktree_refresh import DiscoveryReadError, ObservedRows, WorktreeRefreshOwner, is_option_unsupported, validate_inventory
 from .worktree_refresh import is_classify_unsupported as _is_classify_unsupported
 from .worktree_holders import (
     chosen_holder_id as _chosen_holder_id,
@@ -305,6 +305,7 @@ class WorktreeDiscoveryCache:
             return
         updated = dict(self._cache)
         errors: dict[str, str | None] = {}
+        observations: dict[str, float] = {}
         for (name, _), result in zip(eligible, results):
             if isinstance(result, BaseException):
                 log.warning("Worktree discovery failed for %s: %s", name, result)
@@ -314,8 +315,11 @@ class WorktreeDiscoveryCache:
             else:
                 updated[name] = result
                 errors[name] = None
+                observed = getattr(result, "observed", None)
+                if observed is not None:
+                    observations[name] = observed
         self._cache = updated
-        self._refresh.published(epoch, errors)
+        self._refresh.published(epoch, errors, observed=observations)
 
     async def _crawl_agent(
         self,
@@ -377,8 +381,8 @@ class WorktreeDiscoveryCache:
                         self._fresh_unsupported.add(agent_name)
                     raise DiscoveryReadError("source-refresh-unsupported")
                 raise DiscoveryReadError("source-read-failed")
-            validate_inventory(raw)
-            return _parse_worktree_list(raw, agent_name)
+            observed = validate_inventory(raw, fresh=fresh)
+            return ObservedRows(_parse_worktree_list(raw, agent_name), observed)
 
         # worktree-finality-and-obligations (Phase 5): --classify is included
         # so the crawl carries the canonical closure descriptor through to
@@ -424,8 +428,8 @@ class WorktreeDiscoveryCache:
                 raise DiscoveryReadError("source-refresh-unsupported")
             raise DiscoveryReadError("source-read-failed")
 
-        validate_inventory(raw)
-        return _parse_worktree_list(raw, agent_name)
+        observed = validate_inventory(raw, fresh=fresh)
+        return ObservedRows(_parse_worktree_list(raw, agent_name), observed)
 
     async def _loop(self, resolver: AgentResolver) -> None:
         first_pass = True
