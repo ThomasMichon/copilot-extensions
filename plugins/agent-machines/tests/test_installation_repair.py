@@ -168,6 +168,87 @@ def test_installation_repair_native_apply_freshly_probes_dependencies(repair_fix
     assert not any(row["attempted"] for row in again["outcomes"])
 
 
+def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixture):
+    _, _, payload, _, _ = repair_fixture
+    declaration = payload / "contracts" / "readiness.json"
+    declaration.parent.mkdir()
+    (payload / "installer-readiness.json").rename(declaration)
+    manifest = payload / "plugin.json"
+    value = json.loads(manifest.read_text(encoding="utf-8"))
+    value["installerReadiness"] = "contracts/readiness.json"
+    write_json(manifest, value)
+    plan = invoke(repair_fixture)
+    assert all(row["observedBefore"]["state"] == "not-ready" for row in plan["outcomes"])
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "ready"
+    assert all(row["attempted"] for row in result["outcomes"])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows execution-policy contract")
+def test_installation_repair_powershell_fallback_has_process_scoped_policy(
+    repair_fixture, monkeypatch,
+):
+    original = shutil.which
+    if not original("powershell"):
+        pytest.skip("Windows PowerShell is unavailable")
+    monkeypatch.setattr(
+        repair_api.shutil, "which", lambda name: None if name == "pwsh" else original(name),
+    )
+    monkeypatch.setenv("PSExecutionPolicyPreference", "Restricted")
+    plan = invoke(repair_fixture)
+    assert all(row["observedBefore"]["state"] == "not-ready" for row in plan["outcomes"])
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "ready"
+    assert all(row["observedAfter"]["state"] == "ready" for row in result["outcomes"])
+
+
+@pytest.mark.parametrize("failure", ["installer", "restart"])
+def test_installation_repair_ready_middle_cannot_hide_transitive_blocker(
+    repair_fixture, monkeypatch, failure,
+):
+    from agent_machines.installation_repair_process import ActionResult
+
+    home, _, payload, _, _ = repair_fixture
+    declaration = payload / "installer-readiness.json"
+    value = json.loads(declaration.read_text(encoding="utf-8"))
+    if failure == "restart":
+        value["modules"][0]["restart"] = "session"
+    leaf = json.loads(json.dumps(value["modules"][1]))
+    leaf["id"] = "agent-example/leaf"
+    leaf["dependsOn"] = ["agent-example/child"]
+    for action in leaf["installer"].values():
+        action["arguments"][-1] = leaf["id"]
+    for action in leaf["readiness"]["invocations"].values():
+        action["arguments"][-1] = leaf["id"]
+    value["modules"].append(leaf)
+    write_json(declaration, value)
+    original = repair_api._invoke
+
+    def invoke_owner(module, owner, platform, *, readonly, timeout):
+        if readonly and module.module_id == "agent-example/child":
+            return ActionResult("exited", 0, json.dumps({
+                "schema": "copilot-extensions.module-readiness", "version": 1,
+                "module": module.module_id, "state": "ready",
+            }).encode())
+        result = original(module, owner, platform, readonly=readonly, timeout=timeout)
+        if failure == "installer" and not readonly and module.module_id == "agent-example/base":
+            return ActionResult("exited", 7)
+        return result
+
+    monkeypatch.setattr(repair_api, "_invoke", invoke_owner)
+    plan = invoke(repair_fixture, selection=("leaf",))
+    result = invoke(
+        repair_fixture, selection=("leaf",), apply=True, digest=plan["planDigest"],
+    )
+    base, middle, leaf_outcome = result["outcomes"]
+    assert result["status"] == "incomplete"
+    assert middle["observedBefore"]["state"] == "ready"
+    assert middle["blockedBy"] == [base["module"]]
+    assert leaf_outcome["blockedBy"] == [middle["module"]]
+    assert not middle["attempted"] and not leaf_outcome["attempted"]
+    assert not (home / "agent-example-leaf.ready").exists()
+
+
 def test_installation_repair_stale_digest_refuses_before_execution(repair_fixture):
     plan = invoke(repair_fixture)
     home, _, payload, _, _ = repair_fixture

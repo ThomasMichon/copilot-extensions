@@ -97,6 +97,9 @@ setuptools `src/` layout. Consumers of a flat-module library therefore use
 materialization still copies that same canonical source into the shipped
 payload. Rebuild the consumer environment after changing such a library rather
 than weakening retained-input admission or adding a fake `src/` tree.
+The installed trusted materializer maintains the same admission/rewrite rules
+as an explicit static copy, never by loading fetched tooling as executable code.
+Its parity suite covers direct and nested flat references independently.
 
 ### Shared installer engine: direct source reference
 

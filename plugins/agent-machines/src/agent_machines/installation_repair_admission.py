@@ -253,7 +253,10 @@ def admit_host(
             )
             installations.append(installation)
             # Non-runtime payloads need discovery, not a new executable owner binding.
-            if not (root / "installer-readiness.json").exists():
+            manifest_path = root / "plugin.json"
+            if not manifest_path.exists():
+                manifest_path = root / ".claude-plugin" / "plugin.json"
+            if not _load(manifest_path).get("installerReadiness"):
                 continue
             binding = _binding(
                 installation, source=source, home=home, project_root=project_root,

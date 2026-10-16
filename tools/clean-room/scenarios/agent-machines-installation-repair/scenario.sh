@@ -132,6 +132,15 @@ else
     jam "machines-config" "native packaging regression tests failed" "inspect packaging-tests.log"
     cr_finalize
 fi
+if capture "trusted-materializer-tests" -- timeout 180 env \
+    PYTHONPATH="$TEST_SOURCE/worktree-manager/src:$TEST_SOURCE/tools" \
+    "$TEST_ENV/bin/python" -m pytest -q --timeout=30 \
+    "$TEST_SOURCE/worktree-manager/tests/test_trusted_materializer_parity.py"; then
+    pass "installed trusted materializer preserves canonical parity and native link refusals"
+else
+    jam "machines-config" "trusted materializer parity failed" "inspect trusted-materializer-tests.log"
+    cr_finalize
+fi
 if capture "repair-tests" -- timeout 180 "$TEST_ENV/bin/python" -m pytest -q --timeout=30 \
     "$TEST_SOURCE/plugins/agent-machines/tests/test_installation_repair.py"; then
     pass "native Linux repair, active-cell observation/refusal and descendant cleanup pass"

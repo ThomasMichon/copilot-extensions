@@ -93,7 +93,7 @@ def _argv(invocation: Invocation, platform: Platform) -> list[str]:
             interpreter = shutil.which("pwsh") or shutil.which("powershell")
             if not interpreter:
                 raise RepairAdmissionError("repair requires an existing PowerShell interpreter")
-            return [interpreter, "-NoProfile", "-NonInteractive", "-File",
+            return [interpreter, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
                     str(invocation.target), *invocation.arguments]
         if suffix == ".cmd":
             shell = os.environ.get("ComSpec")
@@ -320,6 +320,7 @@ def repair(
                 not _satisfies(dependency_outcome.module, dependency_outcome.observed)
                 or dependency_outcome.restart_required
                 or not dependency_outcome.installer_succeeded
+                or dependency_outcome.blocked_by
             ):
                 blockers.append(dependency)
         outcome.blocked_by = tuple(blockers)

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep trusted direct and nested flat canonical materialization aligned with governed retained dependencies",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
