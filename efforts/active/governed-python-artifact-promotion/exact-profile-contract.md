@@ -174,6 +174,8 @@ state. Unknown fields, including self-declared approval flags, refuse.
 
 Each wheel record carries name, exact version, basename, SHA-256,
 `requires_python`, `provides_extras`, `selected_extras` and `requires_dist`.
+An absent optional Requires-Python header sets `requires_python` to `""`,
+not an invented restriction; non-string and untrimmed values refuse.
 The graph starts at explicit `roots`, propagates extras through cycles and
 evaluates markers against the full recorded target environment. It rejects
 missing/incompatible edges, unknown or dropped extras, duplicate normalized

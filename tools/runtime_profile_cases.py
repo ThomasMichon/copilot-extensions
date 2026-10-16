@@ -126,6 +126,20 @@ class TestExactRuntimeProfile:
         with pytest.raises(ProfileError, match="incomplete applicable closure: leaf"):
             validate_profile(record)
 
+    def test_absent_optional_requires_python_has_no_invented_constraint(self):
+        record = _record()
+        record["wheels"][0]["requires_python"] = ""
+        profile = validate_profile(record)
+        assert profile.record()["wheels"][0]["requires_python"] == ""
+        assert _select([record]).profile == profile
+
+    @pytest.mark.parametrize("value", [None, 3.11, " ", " >=3.11", ">=3.11 "])
+    def test_requires_python_still_refuses_non_string_or_untrimmed_metadata(self, value):
+        record = _record()
+        record["wheels"][0]["requires_python"] = value
+        with pytest.raises(ProfileError, match="Requires-Python must be a trimmed string"):
+            validate_profile(record)
+
     def test_normalized_duplicate_distribution_refuses(self):
         record = _record()
         record["wheels"].extend([_wheel("some_pkg"), _wheel("some.pkg")])

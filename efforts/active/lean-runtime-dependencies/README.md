@@ -572,9 +572,12 @@ their open implementations. The effort and retained runtime/state stay open.
   adapters, inspected-wheel admission and native engine application remain
   open. No production rollout, model or corpus mutation occurred.
 - The existing wired installation-contract suite passed 171 cases with 14
-  unavailable native-POSIX skips on Windows. The final 47 exact-profile cases include
+  unavailable native-POSIX skips on Windows. The final 53 exact-profile cases include
   an actual fresh Python process using the API without creating a runtime.
   The focused cases also run under optimized Python with explicit production
   refusal checks, not removable production assertions.
   This is not a released lock, fresh installer or acquisition/admission proof.
   Hosted current-head checks and normal review remain required.
+- Review corrected optional Requires-Python handling: an absent wheel header
+  has an empty specifier, not an invented minimum. Empty values now remain
+  representable while malformed or untrimmed metadata still refuses.

@@ -119,7 +119,9 @@ def _closure(record: dict) -> None:
         if wheel_name != name or wheel_version != version or not tags & compatible:
             raise ProfileError(f"{name}: wheel identity or target tags disagree")
         _digest(entry["sha256"], "wheel digest")
-        requires_python = _text(entry["requires_python"], "requires_python")
+        requires_python = entry["requires_python"]
+        if not isinstance(requires_python, str) or requires_python != requires_python.strip():
+            raise ProfileError(f"{name}: Requires-Python must be a trimmed string")
         if not SpecifierSet(requires_python).contains(
             target["environment"]["python_full_version"], prereleases=True,
         ):
