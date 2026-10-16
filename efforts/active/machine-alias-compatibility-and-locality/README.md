@@ -146,12 +146,16 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
 - [x] Review the [#6945 guest-identity proposal](guest-execution-identity.md)
   before introducing new registration or ownership behavior; #6993 merged
   after exact-head approval and passing required checks.
-- [ ] Establish one authoritative guest identity across direct, SSH and
+- [x] Establish one authoritative guest identity across direct, SSH and
   supervised entry paths, preserving independent installation and execution
   spaces; do not derive the caller from an incumbent ownership record.
-- [ ] Represent the designated/default WSL selection and compact host/guest
+  The shared source contract landed in #7009; installed entry-path acceptance
+  remains part of the final Phase 3b gate below.
+- [x] Represent the designated/default WSL selection and compact host/guest
   addressing through existing identity owners, without adding suffix chains
   or a competing topology registry.
+  Source #7009 separates guest/default diagnostics from logical-address
+  authority; no OS default, distro name or existing record was changed.
 - [ ] Pass the proposal's same-guest, foreign-guest, default-drift and
   cross-runner validation, then land, qualify, release and perform only
   authorized installation/default-selection changes.
@@ -201,6 +205,32 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-16 - Guest source repair merged; release containment remains
+- #7009 merged as `6fe63b78740cc0adbf49fad4cd8970dca656ce83`, from exact head
+  `3752cad431173bbb789581d5c0252a4450699d99`. Current-head Copilot approval
+  `5548783502`, zero unresolved findings and successful required CI
+  `38909598711` preceded the ordinary managed merge.
+- That candidate's native installation-context smoke passed 186 cases with
+  one platform skip, including all three guest writers/readers and the six
+  enrollment-admission parameters. Windows core/native coverage passed 28
+  with one POSIX-only skip; targeted doctor passed 14. The POSIX admission
+  cases were executed in hosted CI, not counted as Windows proof.
+- The independent MCP follow-up #7000 and read-only preview repair #6998 also
+  merged. Existing Dispatch and MCP argument-binding repairs were preserved.
+  None of those independent source merges proves deployment.
+- Main remains under the operator-approved promotion pause #6949 while #6237
+  retains release-pipeline qualification. No unpause, manual promotion/retry,
+  updater, service restart, guest enrollment or OS/default change was made
+  for this containing rollout.
+- The operator approved canonical post-merge reconciliation of the three
+  clean, fully landed source worktrees. Recovery refs and checkout directories
+  were retained; no worktree cleanup or unrelated data deletion was performed.
+- **Next slice:** await the retained owner's qualified containing release,
+  then use the authorized unified update path and obtain explicit enrollment
+  consent where required. Prove actual direct/SSH/supervised/interactive
+  entry, default-drift behavior and real launch/update before closing
+  Phase 3b. The effort remains Active; installed acceptance is still open.
 
 ### 2026-10-16 - Guest review correction preserves comparison-only selectors
 - The first implementation review found one canonical defect, repeated across
