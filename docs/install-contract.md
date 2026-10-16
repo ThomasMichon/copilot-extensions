@@ -1605,6 +1605,8 @@ suffix. Tokens are never written into the overlay. Read-only probes suppress
 credential approval and rejection; no path switches the active `gh` account.
 Native replay preserves complete `authtype`/`credential` responses as well as
 password credentials instead of rejecting a working helper's authentication type.
+The slot-interpreter helper runs in isolated Python mode so checkout-local
+modules and inherited Python import paths cannot replace its code or standard library.
 Marketplace contexts and individual anchors have separate reports and overlays,
 even when they reference the same URL with different local credentials.
 

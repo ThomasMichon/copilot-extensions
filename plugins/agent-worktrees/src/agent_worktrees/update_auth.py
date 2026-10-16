@@ -148,7 +148,7 @@ def router_helper(python: str = sys.executable) -> str:
     return (
         "!"
         + shlex.quote(python.replace("\\", "/"))
-        + (" -m agent_worktrees._git_credential_route")
+        + (" -I -X utf8 -m agent_worktrees._git_credential_route")
     )
 
 

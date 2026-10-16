@@ -549,6 +549,34 @@ def test_failing_repo_does_not_route_another_repo_of_the_same_owner(monkeypatch)
     assert router.parse_attributes(answer)["username"] == "original"
 
 
+@pytest.mark.parametrize("module", ["json", "agent_worktrees"])
+def test_real_router_does_not_execute_checkout_local_python(tmp_path, monkeypatch, module):
+    _clean_git_env(monkeypatch, tmp_path)
+    checkout = tmp_path / "untrusted-checkout"
+    checkout.mkdir()
+    marker = tmp_path / "shadowed-code-ran"
+    shadow = checkout / (module + ".py")
+    shadow.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n"
+        "raise RuntimeError('checkout-local module executed')\n",
+        encoding="utf-8",
+    )
+    item = auth.SourceAuth(
+        _source(cwd=checkout), [], expected_account="mapped",
+        status="fixable_by_fallback", alternative={"method": "env"},
+    )
+    env = auth.fallback(auth.AuthReport([item])).environment({
+        **os.environ, "GH_TOKEN_TEAM": "fixture-secret", "GH_HOST": "example.test",
+    })
+    result = process.run(
+        ["git", "credential", "fill"], cwd=checkout, env=env,
+        input="protocol=https\nhost=example.test\npath=team/repo\n\n",
+    )
+    assert not marker.exists(), "credential helper executed code from the checkout"
+    assert result.status == 0, result.stderr
+    assert router.parse_attributes(result.stdout)[router.SECRET_KEY] == "fixture-secret"
+
+
 def test_real_git_ops_isolation_retains_only_the_scoped_auth_overlay(tmp_path, monkeypatch):
     _clean_git_env(monkeypatch, tmp_path)
     subprocess.run(
