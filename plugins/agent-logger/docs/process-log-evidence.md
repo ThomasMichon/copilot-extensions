@@ -268,7 +268,11 @@ to be supported and verified. It never uses transfer success, file count,
 size/mtime equality or a prior verification receipt as evidence.
 
 Readback pins the lexical destination ancestry without creating directories
-or issuing durability writes. A missing/offline root, redirected ancestor,
+or issuing durability writes. Before accepting a POSIX readback, it rechecks
+every lexical parent/child edge against the held directory identities; a moved
+original directory cannot stand in for a replaced configured destination.
+Ordinary publication still stays in its pinned original after a rename.
+A missing/offline root, redirected ancestor,
 changed ZIP entry, unsupported codec or corrupt member is a failed result.
 The result names the content-addressed archive and failure class without
 exposing configured paths. OneDrive readback proves local stored bytes only,

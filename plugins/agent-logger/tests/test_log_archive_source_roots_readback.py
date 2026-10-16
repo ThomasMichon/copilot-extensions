@@ -172,6 +172,35 @@ def test_source_roots_readback_rejects_entry_swap_during_verification(
     assert path.exists() and (tmp_path / "parked.zip").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory descriptors permit ancestor rename")
+@pytest.mark.parametrize("replacement", ["directory", "symlink"])
+def test_source_roots_readback_rejects_ancestor_swap_during_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str,
+) -> None:
+    destination = tmp_path / "destination"
+    target = _readback(destination)
+    assert target.directory is not None
+    _zip(target.directory)
+    parked = tmp_path / "parked"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    original = log_archives._verify_zip_stream
+
+    def swapped(raw: BinaryIO, name: str, digest: str, size: int) -> None:
+        original(raw, name, digest, size)
+        destination.rename(parked)
+        if replacement == "directory":
+            destination.mkdir()
+        else:
+            destination.symlink_to(outside, target_is_directory=True)
+
+    monkeypatch.setattr(log_archives, "_verify_zip_stream", swapped)
+    result = target.verify(REVISION)
+    assert not result.verified
+    assert (parked / "example" / "logs" / REVISION.archive_name).is_file()
+    assert list(outside.iterdir()) == []
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink ancestor and entry rejection")
 @pytest.mark.parametrize("kind", ["ancestor", "entry"])
 def test_source_roots_readback_rejects_symlink_redirects(tmp_path: Path, kind: str) -> None:
