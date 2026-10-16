@@ -70,6 +70,15 @@ repository/config selectors while retaining unrelated environment state.
 The companion real-Git identity test and native registered-only first-touch
 CLI test remain process-boundary coverage rather than mocked-runner evidence.
 
+The install-contract machine-gate probe exercises actual policy, gate, planner
+and execution-barrier source with synthetic config/inventory/installer
+boundaries. Registered and module plans cover forced and ordinary Windows/Linux
+updates, explicit enabling repositories and anchor fallback, missing manifests,
+universal runtimes and detection failures. Source-mutation tests independently
+break each planner and the shared policy/barrier; the production guard-wiring
+test prevents these probes from becoming an unwired helper. This source-level
+contract does not substitute for native installer or installed-update proof.
+
 The Worktrees standalone instruction-preflight fixture copies runtime files
 with at most 16 workers, waits for every copy and propagates copy errors.
 Byte-preservation and cache-exclusion guards cover that fixture separately.

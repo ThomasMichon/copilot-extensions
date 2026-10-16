@@ -1337,6 +1337,13 @@ that enables the plugin, and
 reports any other machine as `SKIPPED (not allowed on this machine)` -- even
 under `--force`, which re-deploys only runtimes this machine may run.
 
+The install-contract guard exercises the real policy, gate, registered/module
+planners and execution barrier with isolated configuration and installer
+boundaries. It covers both platform plans, forced updates, enabling-repository
+selection, missing manifests and detection failures without importing an
+installed runtime or executing an installer. Source-mutation regressions in
+the existing guard suite prove that bypassing these decisions fails the guard.
+
 The reusable installer/readiness contract for `machine-gated` plugins is defined
 by [`patterns/installer-readiness-modules.md`](patterns/installer-readiness-modules.md)
 and implemented by `libs/installer-readiness/`. A participating plugin points
