@@ -371,8 +371,9 @@ The Manager requests `resolve --stage-launch-seed --require-native-seed` for
 prompted requests. The latter is a capability handshake: engines without the
 native execution-leg fence reject it before allocation or staging. The fence
 itself is unconditional in current engines, including direct stage callers.
-Launch-seed stage/take mutation protocol version 5 excludes older resident
-handlers that lack that fence, using the existing same-code fallback.
+Launch-seed stage/take mutation protocol version 5 and structured
+`launch_request_stage` version 4 exclude older resident handlers that lack that
+fence, using the existing same-code fallback. Both retain launch-admission guards.
 
 Staging validates the actual execution leg while holding the same strict
 per-record lock that publishes the intent. Active, unknown, or opaque hosted

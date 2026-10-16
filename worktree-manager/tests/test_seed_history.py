@@ -297,6 +297,23 @@ def test_unsupported_composer_keeps_text_without_recording(tmp_path, monkeypatch
     asyncio.run(run())
 
 
+def test_remote_resume_refuses_before_composer_or_history_opens(monkeypatch):
+    from types import SimpleNamespace
+    from worktree_manager.production_picker.picker_tui import resume_prompt_actions
+
+    monkeypatch.setattr(
+        resume_prompt_actions, "PromptDlgScreen",
+        lambda *args, **kwargs: pytest.fail("unsupported target opened prompt history"),
+    )
+    record = {"is_local": False, "raw": {"id": "wt-a"}}
+    screen = SimpleNamespace(
+        debug="", _find_internal_worktree=lambda *args: (record, None),
+        _session_action_verbs=lambda _: ["Resume prompt…"],
+    )
+    resume_prompt_actions.open_resume_prompt(screen, record)
+    assert "local native target" in screen.debug
+
+
 @pytest.mark.parametrize("leg,ahp,reason", [
     ({"provider": "custom", "state": "active"}, False, "execution leg is active"),
     ({"provider": "custom", "state": "unknown"}, False, "execution leg is unknown"),

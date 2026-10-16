@@ -204,7 +204,7 @@ incompatible stores refuse access instead of being silently repaired or migrated
 Nonempty prompts with Anchor, Bare, AHP, or Local model selected refuse
 confirmation visibly and keep the draft open without recording it. Clear the
 prompt or change the options to continue. Remote and cross-environment
-(including Windows-to-WSL) creation does not offer a prompt composer; programmatic
+(including Windows-to-WSL) New and Resume do not offer a prompt composer; programmatic
 prompt requests for those transports, Bare resume, or active/uncertain execution
 legs refuse before engine staging. Seedless launches are unchanged. No Mux is a
 supported prompt launch modifier. History retains the exact paste buffer;

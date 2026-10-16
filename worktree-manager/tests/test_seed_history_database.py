@@ -12,6 +12,62 @@ import pytest
 from worktree_manager import seed_history
 
 
+@pytest.mark.parametrize("operation", ["entries", "remember"])
+def test_history_tolerates_real_journal_commit_during_sidecar_protection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    history = seed_history.SeedHistory("demo", tmp_path)
+    history.remember("previous")
+    connection = sqlite3.connect(history.path)
+    journal = history.path.with_name(history.path.name + "-journal")
+    protect = seed_history.protect
+    observed: list[Path] = []
+    try:
+        connection.execute(
+            "INSERT INTO seeds(project, prompt, submitted_at) VALUES (?, ?, ?)",
+            ("demo", "concurrent", 0),
+        )
+        assert journal.exists()
+
+        def commit_before_protection(path: Path, **kwargs) -> None:
+            if path == journal and not observed:
+                observed.append(path)
+                connection.commit()
+                assert not path.exists()
+            protect(path, **kwargs)
+
+        monkeypatch.setattr(seed_history, "protect", commit_before_protection)
+        if operation == "remember":
+            history.remember("next")
+        else:
+            assert history.entries() == ["concurrent", "previous"]
+        assert observed == [journal]
+    finally:
+        connection.close()
+    assert history.entries() == (
+        ["next", "concurrent", "previous"] if operation == "remember"
+        else ["concurrent", "previous"]
+    )
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), OSError("unsafe link")])
+def test_sidecar_protection_failures_other_than_disappearance_still_refuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: OSError,
+) -> None:
+    history = seed_history.SeedHistory("demo", tmp_path)
+    history.remember("previous")
+    protect = seed_history.protect
+
+    def fail_sidecar(path: Path, **kwargs) -> None:
+        if path.name.endswith("-journal"):
+            raise error
+        protect(path, **kwargs)
+
+    monkeypatch.setattr(seed_history, "protect", fail_sidecar)
+    with pytest.raises(seed_history.SeedHistoryError):
+        history.entries()
+
+
 def test_concurrent_identical_submissions_deduplicate_under_early_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

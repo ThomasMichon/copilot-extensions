@@ -24,7 +24,6 @@ from .engine_helpers import (
     C_WARN,
     MAINT_ACTION_DESC,
 )
-from .field_widgets import compose_field
 from .worktree_details_screen import WtDetailsScreen as WtDetailsScreen
 
 class QuitConfirmScreen(ModalScreen[bool]):

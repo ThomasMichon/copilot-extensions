@@ -58,8 +58,10 @@ class SeedHistory:
         for suffix in ("-journal", "-wal", "-shm"):
             sidecar = self.path.with_name(self.path.name + suffix)
             reject_links(sidecar)
-            if sidecar.exists():
+            try:
                 protect(sidecar)
+            except FileNotFoundError:
+                pass  # SQLite can remove an optional sidecar when another connection commits.
 
     def entries(self) -> list[str]:
         try:
