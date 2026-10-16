@@ -107,8 +107,12 @@ fulfilling that direction, not additional operator requirements.
   changefiles, review and source/release distinction intact.
 
 ### Phase 3 - Risk-first, resumable update execution
-- [ ] Collect one attributable desired-state plan and front-load cheap
-  deterministic blockers, costly acquisition and dependency admission.
+- [x] Collect one attributable runtime execution snapshot and check all
+  selected targets' cheap deterministic blockers before runtime mutation.
+- [x] Acquire required payloads before advisory inventory, stop on required
+  failure and retain successful acquisitions.
+- [ ] Front-load dependency admission with attributable retained candidate
+  inputs through the canonical installer contract.
 - [ ] Compose existing prepare/validate/activate contracts with the installer
   owners. Do not label a combined build-and-activate installer prepare-only.
 - [ ] Introduce a readiness barrier and dependency-aware recoverable activation
@@ -611,3 +615,55 @@ achieved by rearranging today's combined installer invocations.
   prepared-candidate identity, dependency admission, readiness barrier or
   resumable retry. The existing constructor owner still owes an accepted
   prepare/retention interface; Phase 3 and the parent effort remain open.
+
+### 2026-10-15 - Runtime preflight source merge
+- #6902 squash-merged into `dev` at
+  `5a0537ec291f5ae49455f58f15bc7c90d65fc17e`. Exact-head Copilot review
+  5541454153 Approved with zero findings; CI 38827508820 succeeded, including
+  hosted lint, POSIX guards and native Windows lanes. Final standalone
+  compatibility selection passed 52 cases. Source merge is not rollout.
+- Re-read the full Plan and Validation Plan. Split the first broad Phase 3 row
+  to mark only collected command preflight and fail-fast payload acquisition
+  complete; dependency admission and retained candidate identity remain open.
+- Next independent slice is bounded retry of explicitly transient acquisition
+  failures using existing failure classification and deadline primitives,
+  retaining successful peers and rechecking failed targets. Do not invent a
+  scheduler or retry authority/policy/integrity failures.
+- #6707 remains draft at the same head, without an accepted prepare/retention
+  handoff. #6867 remains at the handed-over head; the former bridge peer and
+  coordinator addresses no longer resolve. Preserve its local validated fix
+  and obligation records until the operator-named recipient affirmatively
+  accepts them. No transferred source was changed or published here.
+
+### 2026-10-15 - Bounded independent payload recovery
+- The operator selected keeping the canonical preparation draft with its
+  existing owner while this effort continues independent acquisition-retry
+  work. No preparation/constructor source or competing implementation was
+  created.
+- Regression-first exposed nine failures with one timeout control passing:
+  arbitrary policy/authentication/integrity failures could previously become
+  success through an unconditional install fallback; transient connection
+  errors also changed verbs rather than retrying the failed acquisition.
+- Engine and registered payloads now share a two-attempt recovery policy,
+  one-second transient backoff and a 240-second attempt budget with at most
+  120 seconds per command. Each attempt re-inspects only its own payload.
+  Known transport/gateway/contention failures may retry; only a matching
+  plugin's explicit missing-ledger error authorizes activation-preserving
+  install. Engine acquisition remains update-only.
+- Authority, permissions, source-policy, integrity, certificate and unknown
+  failures remain terminal. Timeout recovery is deliberately not automatic:
+  the current payload subprocess owner cannot prove descendant termination.
+  Starting an overlapping writer would be unsafe; this slice does not claim
+  process-tree custody or persistent candidate/checkpoint recovery.
+- The five-file native portfolio passes 223 cases with one platform skip.
+  Real failed-child acquisition proves successful peers are not revisited;
+  required outcome folding retains advisory attempt history while allowing
+  genuine recovery to succeed. Budget, fresh inspection, final-cause retention,
+  refusal precedence, bounded attempts and engine-only update are covered.
+  All thirteen install contracts pass.
+- Documentation impact: extended the install contract's payload-recovery
+  behavior and explicit limits. No installer construction or dependency
+  declaration changed; the fresh synthetic subprocess covers this local
+  consumer boundary rather than repeating a full clean-room build.
+  Hosted POSIX/lint, current-head review and CI still gate publication;
+  release consumption and actual installed-state proof remain open.

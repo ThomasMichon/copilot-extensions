@@ -14,7 +14,7 @@ from pathlib import Path
 from . import config as cfg
 from . import output, services as svc
 from . import picker_profiles_cli, services_cli
-from . import update_events as _events, update_options, update_runtime_plan
+from . import update_events as _events, update_options, update_runtime_plan, update_acquisition
 from . import worktree_identity
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 from .update_runtime import (  # noqa: F401 - compatibility seams used by the plan collector
@@ -260,34 +260,14 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     plugin_ref = "agent-worktrees@copilot-extensions"
     _events.enter("payload_refresh")
     output.info(f"Updating plugin: {plugin_ref}")
-    payloads_ok, payload_status = True, "OK"
     update_context = _core_helper(
         "_invocation_update_context", _invocation_update_context
     )() or _core_helper("_project_update_context", _project_update_context)()
-    try:
-        r = subprocess.run(
-            [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=update_context,
-        )
-        if r.returncode == 0:
-            for line in r.stdout.strip().splitlines():
-                output.ok(line)
-        else:
-            detail = "\n".join(x for x in [r.stdout.strip(), r.stderr.strip()] if x)
-            output.warn(f"Plugin update returned non-zero:\n{detail}")
-            payloads_ok, payload_status = (
-                False, f"plugin update failed: {_events.bounded(detail, 200, tail=True)}"
-            )
-    except OSError as exc:
-        message = _describe_copilot_spawn_error(exc, cwd=update_context)
-        output.warn(f"{message} -- skipping plugin update")
-        payloads_ok, payload_status = False, f"plugin update failed: {message}"
-    except subprocess.TimeoutExpired:
-        output.warn("Plugin update timed out -- runtime installation is blocked")
-        payloads_ok, payload_status = False, "timed out"
+    payload_status = update_acquisition.acquire(
+        "agent-worktrees", "copilot-extensions", _resolve_copilot() or "copilot",
+        cwd=update_context, engine=True,
+    )
+    payloads_ok = payload_status.startswith("OK")
     _events.record("payload_refresh", plugin_ref, payload_status)
 
     if (
@@ -580,74 +560,9 @@ def _uninstall_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | No
 
 def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None = None) -> str:
     """Update (or install) a single copilot-extensions plugin payload."""
-    from . import reconcile
-    from .activation_preservation import (
-        PluginStateError,
-        run_install_preserving_activation,
+    return update_acquisition.acquire(
+        name, marketplace, _resolve_copilot() or "copilot", cwd=cwd,
     )
-
-    ref = f"{name}@{marketplace}"
-    installed = reconcile.core_installed_payload_dir(name) is not None
-    verb = "update" if installed else "install"
-    copilot = _resolve_copilot() or "copilot"
-
-    def _run(selected_verb: str):
-        argv = [copilot, "plugin", selected_verb, ref]
-        kwargs = {
-            "capture_output": True,
-            "text": True,
-            "timeout": 120,
-            "cwd": cwd,
-        }
-        if selected_verb == "install":
-            return run_install_preserving_activation(argv, ref, **kwargs)
-        return subprocess.run(argv, **kwargs)
-
-    try:
-        r = _run(verb)
-    except OSError as exc:
-        message = _describe_copilot_spawn_error(exc, cwd=cwd)
-        output.warn(f"{message} -- skipping plugin payload update")
-        return message
-    except PluginStateError as exc:
-        output.warn(f"Plugin state for {name} could not be preserved: {exc}")
-        return f"plugin state error: {exc}"
-    except subprocess.TimeoutExpired:
-        output.warn(f"Plugin {verb} for {name} timed out -- continuing")
-        return "timed out"
-
-    if r.returncode == 0:
-        for line in r.stdout.strip().splitlines():
-            output.ok(line)
-        return "OK" if installed else "OK (installed)"
-
-    if installed:
-        output.info(f"Plugin update for {name} returned non-zero -- retrying with install")
-    else:
-        output.info(f"Plugin install for {name} returned non-zero -- retrying")
-    try:
-        r2 = _run("install")
-    except subprocess.TimeoutExpired:
-        output.warn(f"Plugin install retry for {name} timed out")
-        return "timed out"
-    except (FileNotFoundError, PluginStateError) as exc:
-        output.warn(f"Plugin install retry for {name} failed: {exc}")
-        if isinstance(exc, PluginStateError):
-            return f"plugin state error: {exc}"
-        return _describe_copilot_spawn_error(exc, cwd=cwd)
-    if r2.returncode == 0:
-        for line in r2.stdout.strip().splitlines():
-            output.ok(line)
-        return "OK (installed)"
-    if installed:
-        output.warn(
-            f"Plugin update for {name} returned non-zero (continuing with installed version)"
-        )
-        return f"update exited {r.returncode}"
-    else:
-        output.warn(f"Plugin install for {name} returned non-zero")
-    detail = "\n".join(x for x in [r2.stdout.strip(), r2.stderr.strip()] if x)
-    return detail or f"plugin install exited {r2.returncode}"
 
 
 from . import update_runtime

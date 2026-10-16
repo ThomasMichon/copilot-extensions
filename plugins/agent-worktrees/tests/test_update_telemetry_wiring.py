@@ -859,6 +859,40 @@ def _phase_outcomes(home: Path) -> dict[str, str]:
     return {p["phase"]: p["outcome"] for p in _status(home)["run"]["phases"]}
 
 
+@pytest.mark.parametrize("engine", [False, True])
+def test_recovered_payload_preserves_attempt_history_without_failing_run(
+    monkeypatch, _update_home, engine,
+):
+    from agent_worktrees import update_acquisition
+
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: Path("/payload"))
+    monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
+    attempts = []
+    def run(argv, **kwargs):
+        attempts.append(list(argv))
+        return subprocess.CompletedProcess(
+            argv, 1 if len(attempts) == 1 else 0, "", "ECONNRESET",
+        )
+    monkeypatch.setattr(subprocess, "run", run)
+    update_events.start("engine")
+    update_events.enter("payload_refresh")
+    status = update_acquisition.acquire(
+        "agent-example", "copilot-extensions", "copilot", engine=engine,
+    )
+    update_events.record("payload_refresh", "agent-example@copilot-extensions", status)
+    assert update_events.finish(0) == 0
+    document = _status(_update_home)
+    assert document["run"]["outcome"] == ut.VERIFIED_CURRENT
+    target = document["plugins"]["agent-example@copilot-extensions"]
+    assert target["required"] and target["outcome"] == ut.VERIFIED_CURRENT
+    assert "ECONNRESET" in target["advisory_detail"]
+    events = [event for event in _events(_update_home)
+              if event["component"] == "agent-example@copilot-extensions"]
+    assert len(events) == 2
+    assert events[0]["details"]["required"] is False
+    assert events[1]["details"]["required"] is True
+
+
 def test_missing_engine_installer_is_configuration_exit_3(wired, tmp_path, _update_home):
     (tmp_path / "agent-worktrees" / "scripts" / "install.sh").unlink()
     assert m.cmd_update(_args()) == 3
@@ -1036,7 +1070,9 @@ def test_payload_install_retry_timeout_is_a_timeout(monkeypatch):
 
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: Path("/inst/x"))
     monkeypatch.setattr(subprocess, "run",
-                        lambda argv, **kw: subprocess.CompletedProcess(argv, 3, "", "boom"))
+                        lambda argv, **kw: subprocess.CompletedProcess(
+                            argv, 3, "", "Plugin agent-x is not installed",
+                        ))
 
     def timeout(argv, identity, **kw):
         raise subprocess.TimeoutExpired(argv, kw.get("timeout"))

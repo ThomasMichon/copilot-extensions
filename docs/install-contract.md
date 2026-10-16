@@ -1201,6 +1201,23 @@ prepared candidate, or a readiness/activation transaction. The installers still
 own their combined construction and activation, live revalidation and recovery.
 The pull-free, cache-aware session-launch reconciler remains a separate path.
 
+Payload recovery attempts a target at most twice, with a 240-second attempt
+budget and a 120-second cap per command. A retry uses the remaining budget,
+re-inspects that target's installed payload and waits one second after an
+explicit connection/reset, temporary DNS, gateway or Windows sharing/lock
+failure. It does not revisit successfully acquired peers. A matching plugin's
+explicit "not installed" ledger error may instead select the existing
+activation-preserving install path; arbitrary failed updates no longer
+authorize an install fallback. The engine's own acquisition stays update-only.
+
+Authority, permissions, source-policy, integrity, certificate and unknown
+failures stop without automatic retry. A command timeout also stops: the
+payload subprocess path does not prove descendant cleanup, so starting another
+writer would be unsafe. Retried failures remain advisory attempt history;
+the final required outcome decides the run. This is in-run recovery, not a
+persistent acquisition checkpoint, a payload process-tree cleanup guarantee
+or permission to retry combined runtime activation.
+
 ### What the marketplace vendors (copied vs loaded)
 
 `copilot plugin update` copies the **entire git-tracked plugin folder** — the

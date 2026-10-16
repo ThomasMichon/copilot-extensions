@@ -530,7 +530,7 @@ def test_update_failure_on_existing_payload_retries_with_install(monkeypatch):
 
     def fake_run(argv, **kw):
         update_calls.append(list(argv))
-        return _fail()
+        return _fail(stderr="Plugin agent-machines is not installed")
 
     install_calls: list[tuple[list[str], str]] = []
 
@@ -557,11 +557,7 @@ def test_update_failure_on_existing_payload_retries_with_install(monkeypatch):
     assert result == "OK (installed)"
 
 
-def test_update_and_install_retry_both_fail_reports_original_update_error(monkeypatch):
-    """When the install retry ALSO fails, report the original `update`
-    failure (the payload genuinely exists; `update` is the verb a caller
-    should see reflected in the status string), not a misleading "install
-    exited" for a plugin that was never actually missing."""
+def test_unknown_update_failure_is_reported_without_install_retry(monkeypatch):
     monkeypatch.setattr(
         reconcile, "core_installed_payload_dir", lambda name: Path("/inst/agent-machines")
     )
@@ -574,7 +570,7 @@ def test_update_and_install_retry_both_fail_reports_original_update_error(monkey
 
     result = m._update_one_plugin_payload("agent-machines", "copilot-extensions")
 
-    assert result == "update exited 3"
+    assert result == "plugin update failed (exit 3): boom"
 
 
 def test_malformed_activation_state_is_reported_without_raising(monkeypatch):
@@ -683,10 +679,8 @@ def test_missing_plugin_uses_install_path(monkeypatch):
 def test_required_failure_stops_remaining_acquisition(monkeypatch, capsys):
     """Required failure retains prior successes without attempting later work.
 
-    ``bbb``'s first attempt (``update``, since it's already "installed") fails
-    and is retried once with ``install`` (the not-installed-ledger fallback --
-    see ``_update_one_plugin_payload``'s docstring); that retry also fails
-    here, so ``aaa`` remains acquired and ``ccc`` is not attempted.
+    ``bbb``'s unknown failure does not authorize an install fallback, so
+    ``aaa`` remains acquired and ``ccc`` is not attempted.
     """
     _install_config(monkeypatch, "/repo/anchor")
     monkeypatch.setattr(
@@ -706,7 +700,7 @@ def test_required_failure_stops_remaining_acquisition(monkeypatch, capsys):
         name = argv[3].split("@")[0]
         updated.append(name)
         if name == "bbb":
-            return _fail()  # middle plugin fails, on both update and retry
+            return _fail()
         return _ok()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -714,7 +708,7 @@ def test_required_failure_stops_remaining_acquisition(monkeypatch, capsys):
     # Must not raise despite bbb failing.
     assert m._update_registered_plugins() is False
 
-    assert updated == ["aaa", "bbb", "bbb"]
+    assert updated == ["aaa", "bbb"]
     captured = capsys.readouterr()
     assert "not attempted" in captured.out + captured.err
 
@@ -816,7 +810,7 @@ def test_real_failed_payload_keeps_completed_peer_and_blocks_inventory(
     assert m._update_registered_plugins(targets) is False
     assert (tmp_path / "bb-first").read_text() == "acquired"
     assert (tmp_path / "attempts").read_text().splitlines() == [
-        "update bb-first", "update cc-failure", "install cc-failure",
+        "update bb-first", "update cc-failure",
     ]
     assert not any((tmp_path / name).exists() for name in ("aa-inactive", "dd-retired", "zz-later"))
 
