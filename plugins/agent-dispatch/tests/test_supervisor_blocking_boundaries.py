@@ -582,3 +582,171 @@ def test_corrupt_companion_operation_does_not_abort_sibling_reconciliation(tmp_p
         assert "damaged" in caplog.text
     finally:
         daemon.shutdown()
+
+
+@pytest.mark.parametrize("blocked_id", ["orphan", "sibling"])
+def test_metadata_read_cannot_hold_master_launch_availability(tmp_path, monkeypatch, blocked_id):
+    from agent_dispatch import companion, companion_reconcile
+    from agent_dispatch.companion import CompanionResolution
+    from agent_dispatch.supervisor_daemon import companion_authority_fingerprint
+    from tests.test_bounded_receipt_reconcile import _unknown_operation
+    from tests.test_supervisor_daemon import FakeProc
+
+    class Process(FakeProc):
+        pid = 123
+
+        def release(self):
+            pass
+
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    for rid in ("orphan", "sibling"):
+        _unknown_operation(controller, rid)
+        controller._write_operation(rid, {**controller._operation_record(rid), "state": "complete"})
+    registration = _companion_reg("sibling")
+    registration["machine"] = "host"
+    resolution = CompanionResolution(
+        registration, ("unused",), None, None, str(tmp_path), {}, 0.5, 0.5, 0.5,
+    )
+    monkeypatch.setattr(controller, "resolver", lambda *args, **kwargs: resolution)
+    daemon = SupervisorDaemon(
+        FakeClient([registration]), "host", companion_controller=controller,
+        reconcile_call_budget=0.05,
+    )
+    confirmed = Future()
+    confirmed.set_result(resolution)
+    daemon._resolution_futures["sibling"] = (companion_authority_fingerprint(registration), confirmed)
+    entered, release = threading.Event(), threading.Event()
+    read = companion_reconcile._read_metadata
+
+    def blocked(root, path):
+        if path == controller._operation_path(blocked_id).absolute() and not entered.is_set():
+            entered.set()
+            assert release.wait(2)
+        return read(root, path)
+
+    monkeypatch.setattr(companion_reconcile, "_read_metadata", blocked)
+    monkeypatch.setattr(companion, "_launch_gated", lambda resolution: Process())
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        holder = pool.submit(controller.receipt_operation_progress)
+        try:
+            assert entered.wait(1)
+            started = time.monotonic()
+            summary = daemon.reconcile_once()
+            assert time.monotonic() - started < 0.5
+            if blocked_id == "orphan":
+                admission_deadline = started + 1
+                while not summary.started and time.monotonic() < admission_deadline:
+                    cycle_started = time.monotonic()
+                    summary = daemon.reconcile_once()
+                    assert time.monotonic() - cycle_started < 0.5
+                assert summary.started == ["sibling"]
+            else:
+                assert summary.started == []
+                assert any(not future.done() for future in controller.receipt_futures())
+        finally:
+            release.set()
+            holder.result(1)
+            daemon.shutdown()
+
+
+def test_confirmed_withdrawal_rejects_prewithdrawal_registry_read(tmp_path, monkeypatch):
+    from agent_dispatch import registrar_reconcile
+    from tests.test_managed_companion import Executor
+
+    rid = "declared:withdrawn"
+    declared = [_reg(rid, machine="host")]
+    unrelated = _reg("unrelated", machine="host")
+    unrelated["spec"]["labels"] = ["independent"]
+    client = FakeClient([unrelated])
+    daemon = SupervisorDaemon(
+        client, "host", launcher=FakeLauncher(), companion_controller=FakeCompanionController(),
+        declared_source=lambda: list(declared), reconcile_call_budget=0.05,
+    )
+    daemon._publication_executor = Executor()
+    monkeypatch.setattr(registrar_reconcile, "declared_registrations", lambda values, **kwargs: values)
+    read = client.list_registrations
+    entered, release = threading.Event(), threading.Event()
+    delay = [False]
+
+    def registry(**kwargs):
+        rows = read(**kwargs)
+        if delay[0] and kwargs.get("include_paused") is False:
+            entered.set()
+            assert release.wait(3)
+        return rows
+
+    monkeypatch.setattr(client, "list_registrations", registry)
+    try:
+        assert daemon._declared() == declared
+        assert {reg["id"] for reg in daemon._store_registrations()} == {rid, "unrelated"}
+        assert set(daemon.reconcile_once().started) == {rid, "unrelated"}
+        delay[0] = True
+        daemon.reconcile_once()
+        assert entered.is_set()
+        old_read = daemon._discovery_futures["registrations"]
+        declared.clear()
+        assert daemon.reconcile_once().stopped == [rid]
+        assert daemon.reconcile_once().started == []
+        assert rid in daemon._published_declared_ids
+        delay[0] = False
+        release.set()
+        old_read.result(1)
+        assert daemon.reconcile_once().started == []
+        assert daemon.reconcile_once().started == []
+        assert daemon.reconcile_once().running == ["unrelated"]
+        assert rid not in daemon._declaration_publisher.seen_ids
+        assert [name for name, _ in daemon.launcher.launched].count(rid) == 1
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
+def test_cancelled_provider_read_does_not_abort_unrelated_units():
+    from agent_dispatch.supervisor_daemon import companion_authority_fingerprint
+
+    registration = _companion_reg("queued")
+    registration["machine"] = "host"
+    controller = FakeCompanionController()
+    daemon = SupervisorDaemon(
+        FakeClient([registration, _reg("unrelated", machine="host")]), "host",
+        launcher=FakeLauncher(), companion_controller=controller,
+    )
+    release = threading.Event()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        daemon._provider_executor = pool
+        occupied = pool.submit(lambda: release.wait(3))
+        try:
+            daemon._reconcile_deadline = time.monotonic() + 0.05
+            with pytest.raises(CompanionIndeterminate, match="pending"):
+                daemon._resolve_companion("queued", registration, companion_authority_fingerprint(registration))
+            assert daemon._resolution_futures["queued"][1].cancel()
+            assert daemon.reconcile_once().started == ["unrelated"]
+            assert "queued" not in daemon._resolution_futures
+            release.set()
+            occupied.result(1)
+            assert daemon.reconcile_once().started == ["queued"]
+        finally:
+            release.set()
+            daemon.shutdown()
+
+
+def test_cancelled_registry_read_preserves_confirmed_snapshot():
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unrelated", machine="host")]), "host",
+        launcher=FakeLauncher(), companion_controller=FakeCompanionController(),
+    )
+    release = threading.Event()
+    assert [reg["id"] for reg in daemon._store_registrations()] == ["unrelated"]
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        daemon._read_executor = pool
+        occupied = pool.submit(lambda: release.wait(3))
+        try:
+            daemon._reconcile_deadline = time.monotonic() + 0.05
+            assert [reg["id"] for reg in daemon._store_registrations()] == ["unrelated"]
+            assert daemon._discovery_futures["registrations"].cancel()
+            assert daemon.reconcile_once().started == ["unrelated"]
+            assert "registrations" not in daemon._discovery_futures
+        finally:
+            release.set()
+            occupied.result(1)
+            daemon.shutdown()

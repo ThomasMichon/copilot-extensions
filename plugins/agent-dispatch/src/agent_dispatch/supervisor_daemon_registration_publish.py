@@ -34,32 +34,49 @@ class BoundedDeclarationPublisher:
         self.records: dict[str, dict] = {}
         self.inflight_ids: set[str] = set()
         self.seen_ids: set[str] = set()
+        self.withdrawn_ids: set[str] = set()
+        self.withdrawal_epoch = 0
+
+    def _harvest(self, records: dict[str, dict]) -> None:
+        withdrawn = self.inflight_ids - set(records)
+        if withdrawn - self.withdrawn_ids:
+            self.withdrawal_epoch += 1
+        self.withdrawn_ids.update(withdrawn)
+        self.records = records
+
+    def observe_registry(self, ids: set[str], started_epoch: int) -> set[str] | None:
+        if started_epoch != self.withdrawal_epoch:
+            return None
+        cleared = self.withdrawn_ids - ids
+        self.withdrawn_ids.difference_update(cleared)
+        self.seen_ids.difference_update(cleared)
+        return cleared
 
     def poll(self, client, registrations: list[dict], *, executor: Executor, deadline: float) -> set[str]:
         wanted = {reg["id"]: reg for reg in registrations if reg.get("kind") in RegistrationKind.DIRECT}
         self.seen_ids.update(wanted)
+        self.withdrawn_ids.difference_update(wanted)
         if self.future is not None and self.future.done():
             try:
-                self.records = self.future.result()
-                self.seen_ids.difference_update(self.inflight_ids - set(self.records))
+                self._harvest(self.future.result())
             except CancelledError:
                 pass  # queued batch performed no write; retain the prior ledger
             finally:
                 self.future = None
                 self.inflight_ids = set()
         if self.future is None and time.monotonic() < deadline:
-            for rid in self.seen_ids:
+            for rid in self.seen_ids - self.withdrawn_ids:
                 self.records.setdefault(rid, {"target": wanted.get(rid), "state": "pending"})
             self.inflight_ids = set(wanted) | set(self.records)
             self.future = executor.submit(self._advance, client, wanted, self.records, deadline)
         if self.future is not None:
             try:
-                self.records = self.future.result(timeout=max(0.0, deadline - time.monotonic()))
+                records = self.future.result(timeout=max(0.0, deadline - time.monotonic()))
             except TimeoutError:
                 if self.future.done():
                     raise
             else:
-                self.seen_ids.difference_update(self.inflight_ids - set(self.records))
+                self._harvest(records)
                 self.future = None
                 self.inflight_ids = set()
         return set(wanted) | set(self.records) | self.inflight_ids | self.seen_ids

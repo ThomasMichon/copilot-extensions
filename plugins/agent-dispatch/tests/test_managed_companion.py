@@ -1209,6 +1209,7 @@ def test_selected_state_recovery_validate_is_bounded(harness):
 def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatch):
     plugin = _project(tmp_path)
     script = plugin / "service.py"
+    # Keep worker/probe startup stdlib-only; this exercises lifecycle, not helper imports.
     script.write_text(
         "import json, os, subprocess, sys, time\n"
         "from pathlib import Path\n"
@@ -1223,9 +1224,8 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
         "        'python': os.environ['EXAMPLE_MANAGED_PYTHON']}), encoding='utf-8')\n"
         "    while not stop.exists(): time.sleep(0.05)\n"
         "elif sys.argv[1] == 'health':\n"
-        "    from agent_procutil import no_window_kwargs\n"
         "    subprocess.run([sys.executable.replace('pythonw.exe', 'python.exe'), '-c', 'pass'],\n"
-        "        check=True, **no_window_kwargs())\n"
+        "        check=True, creationflags=(subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0))\n"
         "    ready = state.exists() and json.loads(state.read_text(encoding='utf-8'))['mode'] == mode\n"
         "    print(json.dumps({'schema_version': 1, 'healthy': ready}))\n"
         "else:\n"
@@ -1267,12 +1267,21 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
     try:
         assert daemon.reconcile_once().started == [rid]
         snapshot = daemon._units[rid].companion_resolution.managed_snapshot
+        first_process = daemon._units[rid].proc
         first = json.loads(marker.read_text(encoding="utf-8"))
         for _ in range(2):
             time.sleep(0.1)
             assert controller.health(snapshot.resolution()) is True
         monkeypatch.setenv("MODE", "bad")
         summary = daemon.reconcile_once()
+        if not summary.revived:
+            assert rid in daemon._managed_uncertain
+            observation = controller._receipt_availability[rid]
+            assert not observation.consumed
+            assert daemon._units[rid].proc is first_process
+            assert json.loads(marker.read_text(encoding="utf-8")) == first
+            observation.future.result(timeout=daemon._reconcile_call_budget)
+            summary = daemon.reconcile_once()
         assert summary.revived == [rid]
         restored = json.loads(marker.read_text(encoding="utf-8"))
         assert restored["mode"] == "old"

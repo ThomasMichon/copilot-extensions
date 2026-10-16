@@ -7,7 +7,7 @@ import logging
 import time
 import threading
 from collections.abc import Callable
-from concurrent.futures import Executor, ThreadPoolExecutor, TimeoutError
+from concurrent.futures import CancelledError, Executor, ThreadPoolExecutor, TimeoutError
 from typing import Any
 
 from .companion import CompanionIndeterminate
@@ -246,19 +246,32 @@ class BoundedReconciliation:
                 self._discovery_futures.pop(key, None)
 
     def _store_registrations(self) -> list[dict]:
+        publisher = self._declaration_publisher
+        epoch = publisher.withdrawal_epoch if publisher is not None else 0
         try:
-            registrations = self._bounded_read(
-                "registrations", lambda: self.client.list_registrations(
+            started_epoch, registrations = self._bounded_read(
+                "registrations", lambda: (epoch, self.client.list_registrations(
                     machine=self.machine, env=self.env, include_paused=False,
-                ),
+                )),
             )
-        except TimeoutError as exc:
+        except (CancelledError, TimeoutError) as exc:
             if self._last_store_registrations is None:
                 raise CompanionIndeterminate(
                     "registration discovery pending; no confirmed registry snapshot"
                 ) from exc
-            log.warning("registration discovery remains pending; retaining confirmed registrations")
+            log.warning(
+                "registration discovery unavailable: error_type=%s; retaining confirmed registrations",
+                type(exc).__name__,
+            )
             return self._last_store_registrations
+        if publisher is not None:
+            cleared = publisher.observe_registry({reg["id"] for reg in registrations}, started_epoch)
+            if cleared is None:
+                log.warning("registration discovery predates confirmed withdrawal; discarding stale snapshot")
+                if self._last_store_registrations is None:
+                    raise CompanionIndeterminate("registration discovery has no confirmed current snapshot")
+                return self._last_store_registrations
+            self._published_declared_ids.difference_update(cleared)
         self._last_store_registrations = copy.deepcopy(registrations)
         return registrations
 
@@ -335,6 +348,8 @@ class BoundedReconciliation:
             future = entry[1]
         try:
             return future.result(timeout=max(0.0, self._reconcile_deadline - time.monotonic()))
+        except CancelledError as exc:
+            raise CompanionIndeterminate("companion provider observation was cancelled") from exc
         except TimeoutError as exc:
             raise CompanionIndeterminate("companion provider remains pending") from exc
         finally:
@@ -351,6 +366,7 @@ class BoundedReconciliation:
                     deadline=self._reconcile_deadline or time.monotonic(),
                     operation_budget=self._reconcile_call_budget,
                     cycle_tag=self._reconcile_token,
+                    availability_executor=self._provider_pool(),
                 ))
             finally:
                 self._probe_inflight.update(controller.receipt_futures())

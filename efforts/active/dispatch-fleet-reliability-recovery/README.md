@@ -570,3 +570,69 @@ requested contract.
   not waive the local failures or authorize merge. The selected rotation date
   must actually include agent-dispatch, and the run's pinned SHA and plugin
   outcome must be recorded before treating it as acceptance.
+
+### 2026-10-15 - Bound availability reads and retain withdrawal suppression
+
+- Fresh review found that the newly shared metadata lock could let one blocked
+  read hold unrelated master-side launch checks. Two real-executor regressions
+  demonstrate the original two-second stall; metadata locks are now bounded,
+  per path and reference-counted. Availability I/O uses the existing provider
+  executor, retains unfinished futures in shutdown accounting, and never
+  requires an unbounded master-side lock or metadata read.
+- Successful availability observations expire after their consuming cycle;
+  withdrawn observations cannot be reused. An additional fail-first test
+  commits an unknown operation and loses the write response, proving that
+  availability must be invalidated before the write attempt, not after its
+  return. Both the original record and unknown-outcome fence remain authoritative.
+- A delayed scoped registry read reproduced a withdrawn declaration being
+  started again after publication readback. The publisher now retains the
+  suppression tombstone until a scoped snapshot started after the confirmed
+  withdrawal observes absence. Older results are rejected by withdrawal epoch.
+  The two direct publisher tests now explicitly exercise that extra readback
+  boundary, without adding destructive retries.
+- Valid JSON operation states containing a list or object now fail as
+  indeterminate corruption, not an escaping `TypeError`. Both cases failed
+  before adding the state-type guard.
+- Current combined bounded coverage passes 101 cases with unchanged limits.
+  The injected descendant in the pipe fixture now uses only stdlib process
+  flags: it still creates a real inherited-pipe descendant, without measuring
+  an unrelated plugin import before readiness. The original four-second
+  execution, pipe-drain and elapsed assertions remain unchanged.
+- Required CI exposed an upstream guard added after this branch's old base.
+  Backed-up managed synchronization succeeded normally. The one-shot captured
+  helper's existing exemption moved with its extracted function; no exemption
+  count or launch authority increased. The new launch guard and its 67 tests
+  pass.
+- Hosted Windows run `38661141587` actually checked out the earlier published
+  candidate at both selection and test jobs. Its first seven deterministic
+  file groups completed with 4,953 passes and 44 skips, including the managed
+  companion, receipt and master groups. Its unchanged 30-minute job limit
+  interrupted the final group: the full suite did not pass. Local failures and
+  incomplete whole-portfolio coverage remain recorded, not relabeled flakes.
+  Fresh candidate review, required CI, release and live native keeper/worker
+  acceptance remain open.
+
+### 2026-10-15 - Preserve cancellation fences and incomplete native evidence
+
+- Coupled master, companion and gate coverage passes 115 cases on the
+  bounded-availability and withdrawal-epoch candidate. Subsequent fail-first
+  cases expose cancellation of queued availability, provider and registry
+  reads escaping reconciliation. All three now pass: canceled reads retain
+  indeterminate admission, release completed future references and preserve
+  the existing cached-registry or cold-start barrier. Cancellation does not
+  become an empty successful inventory or permission to launch.
+- The isolated real managed-companion readiness, rollback and stop case passes
+  within its unchanged 30-second test cap. Its fixture uses stdlib-only native
+  child flags and retains the real subprocess, health, rollback, stop and
+  unchanged-marker assertions. The subsequent complete managed cohort exceeds
+  that same test cap during concurrent governed runtime provisioning. That
+  overlap is correlation only; the full cohort is not green or an accepted
+  flake.
+- Whole-candidate bounded and native revalidation, source publication and fresh
+  review remain gated on coherent receiving-runtime evidence. No deadline was
+  enlarged, cancellation swallowed as success, live service repaired by this
+  source slice or incomplete hosted run reported as a full pass.
+- Independent native keeper custody and production adopter integration remain
+  separate open obligations under the canonical `versioned-singleton-manager`
+  effort and #5655. A bounded supervisor, a progress snapshot or the existing
+  Linux library does not close Windows custody or stalled-master recovery.

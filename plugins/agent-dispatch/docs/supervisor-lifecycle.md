@@ -35,7 +35,10 @@ uses one tracked publication batch on a separate single-worker pool: a slow
 register/remove cannot hold the master, and the batch checks its deadline
 between requests. Uncertain metadata writes are read back before an idempotent
 retry of that exact target; withdrawals stay suppressed until absence is
-confirmed. A changed declaration cannot submit a concurrent publication batch.
+confirmed by a scoped registry read started after publication withdrawal was
+confirmed. Earlier in-flight registry results are discarded, and cached registry
+rows remain suppressed during that wait. A changed declaration cannot submit a
+concurrent publication batch.
 Publication is metadata mirroring, not authority to replay task execution.
 
 Each withdrawn receipt has one durable `*.reconcile-operation.json` record tied
@@ -52,8 +55,17 @@ Unsupported or missing process-receipt schema versions remain indeterminate and
 cannot authorize retirement. Corrupt metadata is logged per path or identity and
 retained, fencing that identity without aborting valid sibling scheduling or
 progress collection. Provider metadata failures use the same indeterminate contract.
-Local operation-metadata readers and atomic writers share the controller lock,
-so a Windows reader cannot reject a simultaneous local atomic replacement.
+Local operation-metadata readers and atomic writers share bounded per-path locks,
+so a Windows reader cannot reject a simultaneous local atomic replacement or
+hold an unrelated identity's lock. Lock entries are released when their last
+user leaves. Master-side availability observations use the existing provider
+executor, with at most the remaining shared budget and a 50ms wait per check;
+unfinished metadata reads remain tracked through shutdown. A successful
+observation can serve nested checks in its consuming cycle, but expires before
+the next cycle. Operation-write attempts invalidate it before I/O, including
+committed writes whose response is lost; withdrawal invalidates unused results.
+Malformed operation state types remain indeterminate rather than escaping the
+per-identity corruption fence.
 Matching durable root selection pins must also be absent, including matching
 pins from another process-identity domain. Pin readback is non-mutating metadata
 inspection under the root lock and its deadline; a surviving pin keeps the

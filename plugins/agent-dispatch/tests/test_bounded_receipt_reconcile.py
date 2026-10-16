@@ -949,17 +949,17 @@ def test_native_captured_timeout_bounds_inherited_descendant_pipes(tmp_path):
         "while not os.path.exists(sys.argv[1]) and time.monotonic()<end: time.sleep(0.05)\n"
         "open(sys.argv[2],'w').write('done')\n"
     )
+    # The injected descendant is stdlib-only: this measures pipes, not plugin imports.
     script = (
         "import sys,time;"
         "trace=open(sys.argv[4],'w',buffering=1);"
         "trace.write(f'entered {time.monotonic()}\\n');"
         "import os,subprocess;"
         "trace.write(f'stdlib {time.monotonic()}\\n');"
-        "from agent_procutil import no_window_kwargs;"
-        "trace.write(f'procutil {time.monotonic()}\\n');"
+        "trace.write(f'launch-ready {time.monotonic()}\\n');"
         f"child=subprocess.Popen([sys.executable,'-c',{child_code!r},sys.argv[2],sys.argv[3]],"
         "stdout=sys.stdout,stderr=sys.stderr,close_fds=False,"
-        "**(no_window_kwargs() if os.name=='nt' else {}));"
+        "creationflags=(subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0));"
         "trace.write(f'spawned {time.monotonic()}\\n');"
         "open(sys.argv[1],'w').write(str(child.pid));time.sleep(10)"
     )

@@ -166,6 +166,10 @@ def test_publication_timeout_readback_precedes_retry_and_preserves_stale_suppres
         assert "declared:one" in publisher.poll(client, [], executor=pool, deadline=time.monotonic() + 1)
         publisher.poll(client, [], executor=pool, deadline=time.monotonic() + 1)
         assert client.removes == ["declared:one"]
+        assert publisher.poll(client, [], executor=pool, deadline=time.monotonic() + 1) == {"declared:one"}
+        assert publisher.observe_registry(set(), publisher.withdrawal_epoch - 1) is None
+        fresh = client.list_registrations(include_paused=False)
+        assert publisher.observe_registry({row["id"] for row in fresh}, publisher.withdrawal_epoch) == {"declared:one"}
         assert publisher.poll(client, [], executor=pool, deadline=time.monotonic() + 1) == set()
 
 
@@ -219,6 +223,9 @@ def test_publication_cancellation_preserves_owned_ids_until_readback():
             gate.set()
             occupied.result(1)
             publisher.future.result(1)
+            assert publisher.poll(Client(), [], executor=pool, deadline=time.monotonic() + 1) == {"declared:one"}
+            fresh = Client().list_registrations(include_paused=False)
+            assert publisher.observe_registry({row["id"] for row in fresh}, publisher.withdrawal_epoch) == {"declared:one"}
             assert publisher.poll(Client(), [], executor=pool, deadline=time.monotonic() + 1) == set()
         finally:
             gate.set()

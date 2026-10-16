@@ -7,7 +7,9 @@ import math
 import os
 import threading
 import time
-from concurrent.futures import Executor, Future, TimeoutError
+from concurrent.futures import CancelledError, Executor, Future, TimeoutError
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from plugin_activation import write_json_object_atomic
@@ -18,13 +20,26 @@ from .managed_runtime import ManagedRuntimeError, _canonical_digest, _read_metad
 log = logging.getLogger(__name__)
 
 
+@dataclass
+class _AvailabilityRead:
+    future: Future
+    valid: bool = True
+    consumed: bool = False
+
+
 class ReceiptReconciliation:
     """Internal controller mixin sharing its receipt and process-identity primitives."""
 
     def _init_receipt_reconciliation(self) -> None:
         self._receipt_operations: dict[str, Future] = {}
         self._receipt_adopted: set[str] = set()
-        self._receipt_state_lock = threading.RLock()
+        self._receipt_locks_guard = threading.Lock()
+        self._receipt_metadata_locks = {}
+        self._receipt_availability_guard = threading.RLock()
+        self._receipt_availability: dict[str, _AvailabilityRead] = {}
+        self._receipt_availability_executor: Executor | None = None
+        self._receipt_availability_deadline = 0.0
+        self._receipt_availability_tag = None
         self._receipt_owner_future: Future | None = None
         self._receipt_owner_identity: tuple[int, str] | None = None
         self._receipt_inventory_future: Future | None = None
@@ -33,16 +48,34 @@ class ReceiptReconciliation:
         self._receipt_last_scheduled: str | None = None
 
     def receipt_futures(self) -> tuple[Future, ...]:
+        with self._receipt_availability_guard:
+            availability = tuple(entry.future for entry in self._receipt_availability.values())
         return tuple(self._receipt_operations.values()) + (
             (self._receipt_owner_future,) if self._receipt_owner_future is not None else ()
-        ) + ((self._receipt_inventory_future,) if self._receipt_inventory_future is not None else ())
+        ) + ((self._receipt_inventory_future,) if self._receipt_inventory_future is not None else ()) + availability
 
     def request_receipt_inventory(
         self, adopted: set[str], *, inventory_executor: Executor, executor: Executor,
         deadline: float, operation_budget: float, cycle_tag=None,
+        availability_executor: Executor | None = None,
     ) -> set[str]:
         self._receipt_adopted = set(adopted)
         tag = cycle_tag if cycle_tag is not None else deadline
+        with self._receipt_availability_guard:
+            self._receipt_availability_executor = availability_executor
+            self._receipt_availability_deadline = deadline
+            if tag != self._receipt_availability_tag:
+                self._receipt_availability_tag = tag
+                for rid, entry in tuple(self._receipt_availability.items()):
+                    future = entry.future
+                    if rid not in adopted:
+                        future.cancel()
+                        if not future.done():
+                            entry.valid = False
+                            continue
+                    elif not (future.done() and (entry.consumed or future.cancelled())):
+                        continue
+                    self._receipt_availability.pop(rid)
         if self._receipt_inventory_future is None and self._receipt_inventory_tag != tag:
             self._receipt_inventory_tag = tag
             self._receipt_inventory_future = inventory_executor.submit(
@@ -97,8 +130,34 @@ class ReceiptReconciliation:
     def _operation_path(self, registration_id: str) -> Path:
         return self._receipt_path(registration_id).with_suffix(".reconcile-operation.json")
 
+    @contextmanager
+    def _receipt_metadata_lock(self, path: Path):
+        path = path.absolute()
+        with self._receipt_locks_guard:
+            lock, users = self._receipt_metadata_locks.get(path, (threading.RLock(), 0))
+            self._receipt_metadata_locks[path] = (lock, users + 1)
+        acquired = False
+        try:
+            acquired = lock.acquire(timeout=0.1)
+            if not acquired:
+                raise lifecycle.CompanionIndeterminate("receipt metadata remains in use")
+            yield
+        finally:
+            if acquired:
+                lock.release()
+            with self._receipt_locks_guard:
+                _, users = self._receipt_metadata_locks[path]
+                if users == 1:
+                    self._receipt_metadata_locks.pop(path)
+                else:
+                    self._receipt_metadata_locks[path] = (lock, users - 1)
+
     def _write_operation(self, rid: str, record: dict) -> None:
-        with self._receipt_state_lock:
+        with self._receipt_metadata_lock(self._operation_path(rid)):
+            with self._receipt_availability_guard:
+                entry = self._receipt_availability.get(rid)
+                if entry is not None:
+                    entry.valid = False
             history = _safe_directory(self.receipt_dir.absolute(), "reconcile-history")
             identity = {key: record[key] for key in (
                 "registration_id", "generation_digest", "owner_pid", "owner_start_token",
@@ -115,7 +174,7 @@ class ReceiptReconciliation:
 
     def _receipt_metadata(self, path: Path) -> dict:
         try:
-            with self._receipt_state_lock:
+            with self._receipt_metadata_lock(path):
                 return _read_metadata(self.receipt_dir.absolute(), path.absolute())
         except (ManagedRuntimeError, OSError) as exc:
             raise lifecycle.CompanionIndeterminate(
@@ -144,6 +203,7 @@ class ReceiptReconciliation:
         if (
             type(record.get("schema_version")) is not int or record["schema_version"] != 1
             or record.get("registration_id") != registration_id
+            or not isinstance(record.get("state"), str)
             or record.get("state") not in {"pending", "timeout", "unknown", "complete", "superseded"}
             or not isinstance(record.get("generation"), dict)
             or set(record["generation"]) != {"receipt", "selection"}
@@ -163,6 +223,45 @@ class ReceiptReconciliation:
         return record
 
     def _assert_receipt_available(self, registration_id: str) -> None:
+        with self._receipt_availability_guard:
+            executor = self._receipt_availability_executor
+        if executor is None:
+            self._check_receipt_available(registration_id)
+            return
+        with self._receipt_availability_guard:
+            entry = self._receipt_availability.get(registration_id)
+            if entry is not None and not entry.valid and entry.future.done():
+                self._receipt_availability.pop(registration_id)
+                entry = None
+            if entry is None:
+                entry = _AvailabilityRead(executor.submit(self._check_receipt_available, registration_id))
+                self._receipt_availability[registration_id] = entry
+            future = entry.future
+            deadline = self._receipt_availability_deadline
+        accepted = False
+        try:
+            try:
+                future.result(timeout=max(0.0, min(0.05, deadline - time.monotonic())))
+            except TimeoutError as exc:
+                if not future.done():
+                    raise lifecycle.CompanionIndeterminate("receipt availability remains pending") from exc
+                future.result()
+            with self._receipt_availability_guard:
+                current = self._receipt_availability.get(registration_id)
+                if current is None or current is not entry or not current.valid:
+                    raise lifecycle.CompanionIndeterminate("receipt availability observation is superseded")
+                current.consumed = True
+                accepted = True
+        except CancelledError as exc:
+            raise lifecycle.CompanionIndeterminate("receipt availability observation was cancelled") from exc
+        finally:
+            if future.done() and not accepted:
+                with self._receipt_availability_guard:
+                    current = self._receipt_availability.get(registration_id)
+                    if current is entry:
+                        self._receipt_availability.pop(registration_id)
+
+    def _check_receipt_available(self, registration_id: str) -> None:
         record = self._operation_record(registration_id)
         if record is not None and record["state"] in {"pending", "timeout", "unknown"}:
             raise lifecycle.CompanionIndeterminate("receipt reconciliation outcome is not confirmed")
@@ -207,7 +306,7 @@ class ReceiptReconciliation:
                 rid, self.receipt_dir, deadline=deadline,
             ):
                 state = "unknown"
-            with self._receipt_state_lock:
+            with self._receipt_metadata_lock(self._operation_path(rid)):
                 latest = self._operation_record(rid)
                 if latest == current:
                     self._write_operation(rid, {
@@ -305,7 +404,7 @@ class ReceiptReconciliation:
                     )
                     self._receipt_last_scheduled = rid
             elif self.monotonic() >= record["deadline"]:
-                with self._receipt_state_lock:
+                with self._receipt_metadata_lock(self._operation_path(rid)):
                     latest = self._operation_record(rid)
                     if latest is not None and latest["state"] == "pending":
                         self._write_operation(rid, {
@@ -381,7 +480,7 @@ class ReceiptReconciliation:
                     raise lifecycle.CompanionIndeterminate("managed selection withdrawal is not confirmed")
                 state = "complete"
         finally:
-            with self._receipt_state_lock:
+            with self._receipt_metadata_lock(self._operation_path(rid)):
                 current = self._operation_record(rid)
                 if current is not None and all(
                     current[key] == operation[key]
