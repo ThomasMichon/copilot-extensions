@@ -443,9 +443,11 @@ reservation.
 
 The new four-state matrix plus the existing fresh-venv SRE retry case passed
 five native cases on Windows and five on Linux, with the opposite shell
-skipped on each host. The fresh fixture exercises real venv construction
-and explicit incomplete-candidate abort, not package installation or
-activation. The Linux run used the retained prepared interpreter and
+skipped on each host. Both fresh fixtures exercise real venv construction,
+not package installation or activation. Only the Bash branch additionally
+verifies explicit incomplete-candidate abort; the PowerShell retry branch
+stubs slot admission and does not exercise construction teardown.
+The Linux run used the retained prepared interpreter and
 reported an `asyncio_mode` configuration warning because its pytest asyncio
 plugin was absent; no asynchronous test was selected. Original child,
 test-item and suite bounds remain in force.
