@@ -513,6 +513,71 @@ def test_install_runtime_rechecks_stamped_version_before_publishing() -> None:
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize(("action", "superseded_check"), [
+    ("Install", 0), ("Install", 1),
+    ("Update", 0), ("Update", 1), ("Update", 2),
+])
+@pytest.mark.parametrize("healthy", [False, True])
+def test_service_reconciliation_enters_cutover_after_live_guards(
+    tmp_path, action, superseded_check, healthy,
+):
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$NoService = $false\n"
+        "$script:phase = 'build'\n"
+        "$script:guards = 0\n"
+        "$script:events = [System.Collections.Generic.List[string]]::new()\n"
+        "function Write-Skip { param($m) }\n"
+        "function Write-Step { param($m) }\n"
+        "function Install-Runtime { }\n"
+        "function Invoke-DowngradeGuard { }\n"
+        "function Write-UpdateMarker { }\n"
+        "function Clear-UpdateMarker { }\n"
+        "function Remove-CoordinatorFirewallRule { }\n"
+        "function Invoke-SupervisorAudit { }\n"
+        "function Confirm-CoordinatorRunning { }\n"
+        "function Test-CoordinatorRouted { return $false }\n"
+        f"function Test-CoordinatorHealthy {{ return ${str(healthy).lower()} }}\n"
+        "function Stop-DispatchProcess { param($Subcommand) return 0 }\n"
+        "function Test-ActivationSupersededNow {\n"
+        "  $script:guards++\n"
+        f"  return ($script:guards -eq {superseded_check})\n"
+        "}\n"
+        "function Enter-PluginSnapshotLock {\n"
+        "  param($InstallDir, $TimeoutSeconds)\n"
+        "  return [System.Threading.Mutex]::new($true)\n"
+        "}\n"
+        "function Enter-InstallPhase {\n"
+        "  param($Name)\n"
+        "  $script:phase = $Name\n"
+        "  $script:events.Add($Name)\n"
+        "}\n"
+        "function Install-CoordinatorTask {\n"
+        "  param([switch]$NoStart)\n"
+        "  if ($script:phase -ne 'cutover') { throw 'coordinator started under build deadline' }\n"
+        "  $script:events.Add('coordinator')\n"
+        "}\n"
+        "function Install-SupervisorTask {\n"
+        "  if ($script:phase -ne 'cutover') { throw 'supervisor started under build deadline' }\n"
+        "  $script:events.Add('supervisor')\n"
+        "}\n"
+        + _extract_function_block(f"Invoke-{action}")
+        + f"\nInvoke-{action}\n"
+        + 'Write-Output ("EVENTS:" + ($script:events -join ","))\n'
+    )
+    script_path = tmp_path / "phase-order.ps1"
+    script_path.write_text(script, encoding="utf-8")
+    result = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_path)],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = "cutover,coordinator,supervisor" if not superseded_check else ""
+    assert f"EVENTS:{expected}\n" in result.stdout
+
+
+@pytest.mark.guard
 def test_invoke_update_aborts_cutover_when_superseded() -> None:
     """A superseded `update` invocation must not drive
     Invoke-CoordinatorCutover/Confirm-CoordinatorRunning from its own
