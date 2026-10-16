@@ -226,6 +226,28 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-16 - Process-log destination payload slice reviewed and merged
+- #7001 actually merged at `2026-10-16T11:05:25Z` as
+  `c9edb06f54c482976e2380ae0f7bb941bf28950f`, from final head
+  `7416402018b5dce32ab1d835a469de5a7330faf5`. Copilot approval
+  `5546826932` reported no open issues after both findings were fixed.
+  Complete same-head CI `38889754850` and the required workflow guards
+  passed before the normal submitter merge.
+- Parent durability barriers now run after either mkdir outcome, including
+  retries after a failed flush and concurrent creation. Windows destination
+  inspection retains extended-path support. The native archive-source job
+  executed 449 tests with 14 skips, including the new handle-lifetime,
+  read-only failure/cleanup and long-destination regressions; Linux CI
+  agent-logger groups passed 493 / 32 skipped and 835 / 32 skipped.
+- Managed PR completion reconciled the retained source worktree. Re-read
+  the effort Plan and Validation Plan: this closes only the process-log
+  payload destination slice. #5727 remains open for session-state,
+  health-metadata and admission/read containment. No full parent checkbox,
+  release, adoption, complete compaction or accounting parity is claimed.
+- Reclamation remains the next unassigned preservation stretch, not concurrent
+  shared-module work. Accounting, daily products and consumer adoption remain
+  active. No source evidence was retired and no runtime rollout was performed.
+
 ### 2026-10-16 - Bounded process-log payload destination containment
 - Continued the claimed #5727 process-log destination slice after the source-read
   receipt merged. Directory creation begins inside the held ancestor boundary:
