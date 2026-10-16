@@ -82,7 +82,10 @@ class FixtureDaemon:
                         payload = json.dumps(result).encode()
                         if self.behavior == "mismatch" and route == "/info":
                             payload = b'{"ID":"daemon-b"}'
-                        if route != "/info" and self.behavior in {"close", "oversize", "duplicate", "truncated", "redirect", "malformed", "warning"}:
+                        if route != "/info" and self.behavior in {
+                            "close", "oversize", "duplicate", "truncated", "redirect", "malformed", "warning",
+                            "chunk-missing-trailer-end", "chunk-bad-delimiter",
+                        }:
                             if self.behavior == "close":
                                 connection.sendall(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n[]")
                             elif self.behavior == "oversize":
@@ -96,6 +99,10 @@ class FixtureDaemon:
                             elif self.behavior == "warning":
                                 payload = b'{"Volumes":[],"Warnings":["incomplete"]}'
                                 connection.sendall(f"HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\n\r\n".encode() + payload)
+                            elif self.behavior == "chunk-missing-trailer-end":
+                                connection.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n[]\r\n0\r\n")
+                            elif self.behavior == "chunk-bad-delimiter":
+                                connection.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n[]XX0\r\n\r\n")
                             else:
                                 connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n[]")
                             break
@@ -166,6 +173,15 @@ def test_unknown_stream_never_reconnects_or_mutates(daemon: FixtureDaemon, behav
     assert daemon.accepts == 1
     assert IDENTIFIER in daemon.resources
     assert all(method != "DELETE" for method, _target in daemon.calls)
+
+
+@pytest.mark.parametrize("behavior", ["chunk-missing-trailer-end", "chunk-bad-delimiter"])
+def test_chunk_framing_failure_cannot_prove_absence(daemon: FixtureDaemon, behavior: str) -> None:
+    daemon.behavior = behavior
+    with pytest.raises(VerificationError):
+        verifier(daemon).probe(identity())
+    assert daemon.accepts == 1
+    assert IDENTIFIER in daemon.resources
 
 
 def test_volume_search_warning_is_not_complete_absence(daemon: FixtureDaemon) -> None:

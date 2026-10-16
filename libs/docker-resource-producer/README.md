@@ -72,6 +72,8 @@ complete inventory, birth inspection, exact-ID container deletion and post-delet
 absence. It never opens a second connection inside an operation. Broken streams,
 redirects, malformed/oversized/truncated responses, daemon mismatch and expired
 absolute operation deadlines raise `VerificationError`; none means absence.
+The limited HTTP parser validates every chunk delimiter and the complete
+trailer terminator. Chunk extensions are unsupported and refuse explicitly.
 This adapter spawns no child processes and requires no background daemon.
 
 `LocalDaemonAdmission` is a provider-trusted **configuration capability**, never

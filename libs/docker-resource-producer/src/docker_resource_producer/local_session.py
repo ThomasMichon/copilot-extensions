@@ -1,7 +1,6 @@
 """Bounded HTTP over one explicitly admitted direct local daemon connection."""
 from __future__ import annotations
 
-import http.client
 import io
 import math
 import os
@@ -14,10 +13,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .client import _json
+from .http_stream import MAX_BODY, read_response
 from .models import Endpoint, VerificationError
 
-_MAX_BODY = 8 * 1024 * 1024
-_MAX_WIRE = _MAX_BODY + 128 * 1024
+_MAX_WIRE = MAX_BODY + 128 * 1024
 _DIRECT_LOCAL_SUPPORTED = os.name == "posix" and hasattr(socket, "AF_UNIX")
 
 
@@ -58,15 +57,6 @@ class _DeadlineReader(io.RawIOBase):
         return count
 
 
-class _ResponseSocket:
-    def __init__(self, connection: socket.socket, deadline: float) -> None:
-        self.connection = connection
-        self.deadline = deadline
-
-    def makefile(self, _mode: str) -> io.BufferedReader:
-        return io.BufferedReader(_DeadlineReader(self.connection, self.deadline))
-
-
 class LocalDaemonSession:
     """One operation, one socket, fixed deadline, no reconnect or redirects."""
 
@@ -99,7 +89,7 @@ class LocalDaemonSession:
             if not isinstance(info, dict) or info.get("ID") != self.endpoint.daemon_id:
                 raise VerificationError("Connected daemon identity does not match the claim")
             return self
-        except (OSError, ValueError, http.client.HTTPException, VerificationError) as error:
+        except (OSError, ValueError, VerificationError) as error:
             self.close()
             raise VerificationError("Cannot admit the pinned local daemon session") from error
 
@@ -137,29 +127,14 @@ class LocalDaemonSession:
             assert self.connection is not None
             wire = f"{method} {target} HTTP/1.1\r\nHost: docker\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
             self.connection.sendall(wire.encode("ascii"))
-            response = http.client.HTTPResponse(_ResponseSocket(self.connection, self.deadline))
-            response.begin()
-            headers = response.getheaders()
-            lengths = [value for name, value in headers if name.lower() == "content-length"]
-            transfers = [value for name, value in headers if name.lower() == "transfer-encoding"]
-            if (response.version != 11 or response.will_close or len(lengths) > 1
-                    or len(transfers) > 1 or (lengths and transfers)
-                    or (transfers and transfers[0].lower() != "chunked")
-                    or (not lengths and not transfers and response.status != 204)
-                    or (lengths and (not lengths[0].isdigit() or int(lengths[0]) > _MAX_BODY))):
-                raise VerificationError("Daemon response framing is not reusable and bounded")
-            body = response.read(_MAX_BODY + 1)
-            response.close()
-            if len(body) > _MAX_BODY or (lengths and len(body) != int(lengths[0])):
-                raise VerificationError("Daemon response is oversized or truncated")
-            if response.status not in {200, 204}:
-                raise VerificationError(f"Daemon request refused (HTTP {response.status})")
-            if response.status == 204:
-                if body:
-                    raise VerificationError("Unexpected daemon deletion response body")
+            with io.BufferedReader(_DeadlineReader(self.connection, self.deadline)) as reader:
+                status, body = read_response(reader)
+            if status not in {200, 204}:
+                raise VerificationError(f"Daemon request refused (HTTP {status})")
+            if status == 204:
                 return None
             return _json(body.decode("utf-8", errors="strict"))
-        except (OSError, ValueError, UnicodeError, http.client.HTTPException, VerificationError) as error:
+        except (OSError, ValueError, UnicodeError, VerificationError) as error:
             self.close()
             raise VerificationError("Daemon session failed; no reconnect or absence verdict") from error
 
