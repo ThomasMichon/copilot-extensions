@@ -337,7 +337,7 @@ jobs:
       - name: Agent Bridge contract registry guard tests
         run: python -m pytest -q tools/test_check_agent_bridge_contracts.py
       - name: Git hook interpreter tests
-        run: python -m pytest -q tools/test_hook_interpreter.py
+        run: python -m pytest -q tools/test_hook_interpreter.py tools/test_pre_push_ref_scope.py
       - name: Promotion exact-PR merge wait regression tests
         run: python -m pytest -q tools/test_promotion_merge_wait.py
       - name: Trusted PR policy contract tests
@@ -832,7 +832,7 @@ jobs:
         with:
           version: "0.12.6"
       - run: python tools/seasoned_uv.py --uv uv -- --system pytest
-      - run: python -m pytest -q tools/test_hook_interpreter.py
+      - run: python -m pytest -q tools/test_hook_interpreter.py tools/test_pre_push_ref_scope.py
 
   bootstrap-killswitch-powershell-5-1:
     name: Bootstrap-killswitch guard (Windows PowerShell 5.1)

@@ -185,6 +185,12 @@ copilot-extensions finalize          # clean up the worktree
 - **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
   `pr/<slug>` head; it will NOT land on `main`).
 - Managed publication has a 30-second `pr.push_timeout_seconds` deadline.
+  Pre-push reads every non-deletion ref update from Git, validates its pushed
+  tree, and uses the published tip as the incremental base. First publication
+  or rewritten refs select a related contribution/release base; unavailable
+  objects or an unrelated base refuse publication instead of skipping checks.
+  This keeps main-based bootstrap branches independent of unrelated `dev`
+  history without weakening identifier or blob-size checks.
   Pre-push retains identifier-leak and pushed-blob size checks; repository
   contract, architecture, version, documentation, and whole-tree guards run
   in required CI instead of delaying transport. Staged Python lint, skill
