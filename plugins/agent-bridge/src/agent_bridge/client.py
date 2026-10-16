@@ -19,6 +19,7 @@ from .client_session_start import SessionStartClientMixin
 from .client_cli_mode import CliModeClientMixin
 from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
+from .client_worktrees import InventoryClientMixin
 if TYPE_CHECKING:
     from collections.abc import Callable
 DEFAULT_RESTART_GRACE = 30.0
@@ -145,7 +146,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin):
+class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -654,31 +655,6 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         if include_unaddressable:
             path += "?include_unaddressable=true"
         return self._request("GET", path) or {}
-
-    def list_machines(self) -> list[dict[str, Any]]:
-        """GET /api/v1/machines"""
-        machines, _errors = self.list_machines_with_diagnostics()
-        return machines
-
-    def list_machines_with_diagnostics(
-        self,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
-        """GET /api/v1/machines, including invalid-topology diagnostics."""
-        resp = self._request("GET", "/api/v1/machines")
-        if not resp:
-            return [], []
-        errors = [str(e) for e in resp.get("topology_errors", [])]
-        return resp.get("machines", []), errors
-
-    def list_worktrees_for_render(self) -> dict[str, Any]:
-        """Read the prompt snapshot; legacy daemons retain their blocking path."""
-        from .client_worktrees import worktree_inventory
-        return worktree_inventory(self, refresh=False)
-
-    def refresh_worktrees(self) -> dict[str, Any]:
-        """Join the owned live refresh with a bounded daemon-side wall wait."""
-        from .client_worktrees import worktree_inventory
-        return worktree_inventory(self, refresh=True)
 
     def list_sessions(self, *, status: str | None = None) -> list[dict[str, Any]]:
         """GET /api/v1/sessions"""

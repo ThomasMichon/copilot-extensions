@@ -503,6 +503,20 @@ async def test_native_source_budgets_and_optional_classify_fallback_unchanged(mo
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("response", [
+    None, {}, {"machines": [{"name": "example"}], "topology_errors": ["invalid"]},
+])
+def test_machine_inventory_facade_preserves_rows_and_diagnostics(response: Any) -> None:
+    client = BridgeClient(base_url="http://test", token="example")
+    client._request = MagicMock(return_value=response)
+    rows = response.get("machines", []) if response else []
+    errors = response.get("topology_errors", []) if response else []
+    assert client.list_machines_with_diagnostics() == (rows, errors)
+    assert client.list_machines() == rows
+    assert client._request.call_args.args == ("GET", "/api/v1/machines")
+
+
+@pytest.mark.guard
 @pytest.mark.parametrize("version", [0, 35, 36, 37])
 @pytest.mark.parametrize("live", [False, True])
 def test_client_version_gate_and_unknown_legacy_metadata(version, live):
