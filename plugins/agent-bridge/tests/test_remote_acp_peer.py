@@ -613,7 +613,7 @@ async def test_manager_stop_during_session_sse_open_keeps_attachment_stopped(
         request = wire._request
 
         async def gated(method, headers, content=None):
-            if method == "GET" and headers.get("Acp-Session-Id"):
+            if method == "GET" and headers.get("Acp-Session-Id") and not entered.is_set():
                 entered.set()
                 await asyncio.Event().wait()
             return await request(method, headers, content)
@@ -626,11 +626,16 @@ async def test_manager_stop_during_session_sse_open_keeps_attachment_stopped(
     pending = asyncio.create_task(connect_remote_session(manager, "peer"))
     await asyncio.wait_for(entered.wait(), 5)
     session = next(iter(manager._sessions.values()))
-    await manager.stop_session(session.session_id)
+    await asyncio.wait_for(manager.stop_session(session.session_id), 5)
     with pytest.raises(RemoteTransportError, match="closed during stream setup"):
         await asyncio.wait_for(pending, 5)
     assert session.client is None and session.status.value == "stopped"
     assert manager.db.get_session(session.session_id)["status"] == "stopped"
+    accepted_sid = manager.db.get_session(session.session_id)["acp_session_id"]
+    assert accepted_sid
+    await asyncio.wait_for(manager.resume_session(session.session_id), 5)
+    assert session.acp_session_id == accepted_sid and session.status.value == "idle"
+    await manager.stop_session(session.session_id)
     assert proc.poll() is None
 
 
@@ -662,4 +667,41 @@ async def test_auth_refresh_exception_never_exposes_provider_details(peer, mode)
         assert "SYNTHETIC-SENSITIVE-MARKER" not in "".join(traceback.format_exception(failure.value))
     finally:
         await wire.close()
+    assert proc.poll() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+async def test_auth_retry_retains_affinity_cookie_from_401(peer, mode):
+    url, context, proc = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/auth-cookie", transport=mode, allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"},
+        timeout_seconds=5, rpc_timeout_seconds=5,
+    )
+    wire = authenticated_wire(spec, context)
+
+    class Source:
+        calls = 0
+
+        def supports(self, action, fields):
+            return action == "get"
+
+        async def resolve(self, action, fields, *, timeout):
+            self.calls += 1
+            value = "expired" if self.calls == 1 else "synthetic-credential"
+            return "\n".join(("username=synthetic", "password=" + value, ""))
+
+    source = Source()
+    wire.auth = SourceHttpAuth(source, wire.context, spec.endpoint)
+    client = AcpClient()
+    try:
+        await asyncio.wait_for(client.start_remote(spec, transport=wire), 6)
+        await asyncio.wait_for(client.new_session(cwd="/workspace"), 6)
+        assert source.calls >= 2
+    finally:
+        await client.shutdown()
+    async with httpx.AsyncClient(verify=context, trust_env=False) as probe:
+        evidence = (await probe.get(url + "/evidence")).json()
+    assert evidence["auth_refused"] == 1 and evidence["created_sessions"] == 1
     assert proc.poll() is None

@@ -46,9 +46,9 @@ class WsAcpTransport(RemoteTransport):
         url = self.target.endpoint
         parsed = urlsplit(url)
         uri = parsed._replace(scheme="wss" if parsed.scheme == "https" else "ws").geturl()
-        request = Request(parsed.geturl())
-        self._cookies.add_cookie_header(request)
         for attempt in range(2):
+            request = Request(parsed.geturl())
+            self._cookies.add_cookie_header(request)
             headers = await self.headers()
             if request.has_header("Cookie"):
                 headers["Cookie"] = request.get_header("Cookie")
@@ -71,18 +71,12 @@ class WsAcpTransport(RemoteTransport):
                 connection_id = self._ws.response.headers.get("Acp-Connection-Id")
                 if not connection_id or len(connection_id) > 1024:
                     raise RemoteTransportError("Missing remote connection identity")
-                from email.message import Message
-                from types import SimpleNamespace
-                values = Message()
-                for value in self._ws.response.headers.get_all("Set-Cookie"):
-                    values.add_header("Set-Cookie", value)
-                self._cookies.extract_cookies(
-                    SimpleNamespace(info=lambda: values), request,
-                )
+                self._capture_cookies(self._ws.response.headers, request)
                 self.task(self._consume())
                 return self
             except InvalidStatus as exc:
                 if exc.response.status_code == 401 and attempt == 0 and self.auth:
+                    self._capture_cookies(exc.response.headers, request)
                     await self.refresh_auth()
                     continue
                 raise RemoteTransportError("Remote WS handshake refused") from None
@@ -91,6 +85,18 @@ class WsAcpTransport(RemoteTransport):
                     await self._ws.close()
                 raise RemoteTransportError("Remote WS handshake failed") from None
         raise RemoteTransportError("Remote WS authentication refused")
+
+    def _capture_cookies(self, headers, request) -> None:
+        from email.message import Message
+        from types import SimpleNamespace
+
+        try:
+            values = Message()
+            for value in headers.get_all("Set-Cookie"):
+                values.add_header("Set-Cookie", value)
+            self._cookies.extract_cookies(SimpleNamespace(info=lambda: values), request)
+        except Exception:
+            raise RemoteTransportError("Remote affinity cookie refused") from None
 
     async def send(self, message: dict[str, Any]) -> None:
         try:

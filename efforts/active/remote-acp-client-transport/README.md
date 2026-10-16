@@ -177,6 +177,20 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Stop-boundary accepted IDs and challenged affinity
+
+- Fresh review identified the explicit-stop path clearing a client before its
+  accepted server ID was persisted, and WS retries omitting affinity cookies
+  issued by a 401. Stop captures validated identity at its owned boundary;
+  the independent HTTP2 regression now resumes that exact conversation.
+- WS extracts refusal cookies with the existing in-memory jar and rebuilds
+  each retry's Cookie header. Independent HTTP2/WSS challenge fixtures require
+  the 401 cookie before accepting refreshed authentication.
+- Combined remote capability, legacy ACP, manager and stop selection:
+  357 passed. Required CI passed at the previous head after a normal failed-job
+  retry; the unrelated native PowerShell fixture also passed locally under
+  contained PowerShell 5.1. New-head full CI/review remain required.
+
 ### 2026-10-16 — Refresh privacy, actionable permissions and telemetry identity
 
 - Current review found a provider invalidation exception escaping the WS 401

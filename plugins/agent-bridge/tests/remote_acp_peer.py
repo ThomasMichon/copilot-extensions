@@ -284,19 +284,27 @@ async def app(scope, receive, send):
         evidence["redirect_followed"] += 1
     scheme = "Bear" + "er "
     authenticated = headers.get(b"authorization") == (scheme + "synthetic-credential").encode()
-    if scope["path"] == "/acp":
-        if not authenticated:
+    if scope["path"] in {"/acp", "/auth-cookie"}:
+        challenge = scope["path"] == "/auth-cookie"
+        has_challenge = b"challenge=synthetic" in headers.get(b"cookie", b"")
+        if not authenticated or (challenge and not has_challenge):
             evidence["auth_refused"] += 1
+            refusal_headers = [
+                (b"set-cookie", b"challenge=synthetic; Path=/; Secure; HttpOnly"),
+            ] if challenge else []
             if scope["type"] == "websocket":
                 await receive()
-                await send({"type": "websocket.http.response.start", "status": 401, "headers": []})
+                await send({
+                    "type": "websocket.http.response.start", "status": 401,
+                    "headers": refusal_headers,
+                })
                 await send({"type": "websocket.http.response.body", "body": b""})
             else:
                 while True:
                     event = await receive()
                     if not event.get("more_body"):
                         break
-                await respond(send, 401)
+                await respond(send, 401, headers=refusal_headers)
             return
         evidence["auth_ok"] += 1
     if scope["type"] == "websocket":

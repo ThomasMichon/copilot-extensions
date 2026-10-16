@@ -229,11 +229,15 @@ finishing after explicit teardown is refused and its acquired socket closed.
 Startup continuations cannot overwrite an operator stop/end. If the server
 returned a validated durable session ID but stream setup failed, the stopped
 ledger retains that ID for explicit `session/load`, never silent recreation.
+Explicit stop captures an already accepted ID before clearing the client, even
+when its session SSE opener is still pending.
 
 Affinity cookies stay in memory per target/identity and survive explicit resume
 within the same daemon; they are not persisted across daemon restart. `source:
 none` and cleartext are available only with `allow_loopback_test: true` for
 explicit loopback synthetic fixtures; neither enables arbitrary cleartext.
+Both transports retain cookies issued with a pre-admission 401 and include
+the updated scoped cookie jar in the single authenticated retry.
 Remote ACP connections are excluded from the process idle reaper and automatic
 process handoff. In particular, a healthy agent without `session/load` support
 is not automatically disconnected merely because its conversation is idle.
