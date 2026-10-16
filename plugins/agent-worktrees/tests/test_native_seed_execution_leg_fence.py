@@ -10,6 +10,7 @@ from threading import Event
 from typing import Iterator, Literal
 
 import pytest
+import yaml
 
 from agent_worktrees import __main__ as cli
 from agent_worktrees import config as cfg
@@ -80,15 +81,17 @@ def test_provider_wins_between_preflight_and_staging(
     assert outputs[-1]["execution_leg"]["provider"] == "ahp"
 
 
-def test_stopped_provider_does_not_block_native_prompt_staging(
+def test_disposed_provider_does_not_block_native_prompt_staging(
     native_record: NativeRecord,
 ) -> None:
     path, _outputs, _blob = native_record
     record = tracking.load_record(path)
     record.execution_leg = tracking.ExecutionLegBinding(
-        provider="ahp", state="stopped", binding_revision=1, blob={},
+        provider="ahp", state="disposed", binding_revision=1, blob={},
     )
     tracking.save_record(record, path)
+    persisted = tracking.parse_record_data(yaml.safe_load(path.read_text(encoding="utf-8")), path=path)
+    assert persisted.execution_leg is not None and persisted.execution_leg.state == "disposed"
     seed = seeds.stage(path, kind="resume", text="accepted draft")
     assert seed is not None and seeds.peek(path) == seed
 
