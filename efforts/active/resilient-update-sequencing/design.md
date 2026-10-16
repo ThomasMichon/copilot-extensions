@@ -54,6 +54,68 @@ durably. Those are explicit unsupported lanes, not completed convergence.
 Ordinary runtime installers retain their existing daemon/breakaway behavior;
 the strict process contract is opt-in for payload updates.
 
+### Durable activation-restoration boundary
+
+Extend the canonical `plugin-activation` state owner, not installer construction
+or the preparation draft. This is a restoration protocol, not a new scheduler
+or a second runtime transaction engine. The initial consumer is the Windows
+updater's inventory-install path; ordinary standalone consumers retain their
+current behavior until explicitly adopted and tested.
+
+1. Serialize participating preservation operations for one resolved Copilot
+   home through one canonical transaction owner. The settings and inventory
+   documents are home-wide, so independent per-plugin journals cannot authorize
+   overlapping recovery. An unresolved transaction blocks new participating
+   installs, including another identity. Do not claim this lock excludes the
+   Copilot CLI or unrelated writers that do not participate.
+2. Before launching the command, durably retain the original activation
+   snapshot, exact source-qualified identity, resolved state-home binding,
+   transaction identity and schema/phase. Persist only restoration fields;
+   no command output, credentials, environment or whole-document backup is
+   needed. Reject corrupt, foreign, linked or ambiguous transaction artifacts;
+   never replace them with a fresh capture of post-install activation.
+3. The existing process owner retains child custody. Only positive
+   non-breakaway Windows Job cleanup and root reap/drain may authorize a
+   durable quiescent transition. A normal root exit, elapsed time, missing PID,
+   released parent lock or CLI exit code alone is not that proof. Failure or
+   interruption before publishing the witness retains the snapshot and an
+   explicit unresolved-command blocker, even if cleanup probably happened.
+4. After that witness is durably published, restore the original activation
+   fields through the existing strict canonical restore operation. Re-read
+   current documents and retain refreshed inventory and unrelated settings.
+   The command must not run again while restoring either file. Keep the
+   transaction until both postconditions are verified; partial writes,
+   contention, cancellation and process death must retain the same snapshot.
+5. A later invocation that acquires canonical custody may automatically finish
+   only a validated quiescent transaction for the same state home. It must
+   finish recovery before capturing another snapshot or launching a command,
+   and never use PID death to promote an uncertain transaction. Unsupported
+   schemas, uncertain command settlement and invalid current documents remain
+   precise blockers with retained evidence, not success-shaped fallbacks.
+6. This first lane does not enable install-timeout replay. A settled timeout
+   may permit original-state restoration but still returns the timeout failure;
+   the existing two-attempt acquisition policy must not interpret restoration
+   success as installation success. POSIX cleanup and pre-witness crash
+   recovery remain unsupported until their owning process contract proves
+   writer settlement. No manual deletion, unconditional stale-lock reclaim or
+   silent journal discard is a recovery procedure.
+
+Before implementation, review this boundary and confirm that the selected
+canonical locking/custody primitive can express it without repurposing a
+runtime-installation lease for user-global Copilot state. Reuse an applicable
+existing primitive; if none is applicable, surface that design decision rather
+than embedding an ad hoc lock or PID-reaper in the updater.
+
+The validation gate includes real independent processes contending for the same
+home, native Job-owned child and grandchild settlement, and forced parent death
+before witness publication and between the two restoration writes. A fresh
+interpreter must retain the original activation tri-state, refuse uncertain
+command recovery, finish witnessed restoration without replay, and preserve
+refreshed inventory plus unrelated concurrent changes. Corrupt/foreign/symlinked
+records, unsupported schema, denied writes, failed cleanup, repeated recovery
+and transaction-clear failures must remain explicit. Unit-only simulated
+exceptions cannot substitute for the cross-process interruption tests.
+
 ## First slice: historical project commands
 
 Keep the current command owner until #1238's separate ownership transition.

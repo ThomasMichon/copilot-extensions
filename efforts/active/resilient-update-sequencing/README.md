@@ -125,7 +125,7 @@ fulfilling that direction, not additional operator requirements.
   incomplete runtime/local-finishing work through canonical contracts.
 - [x] Recover explicit transient activation-restoration contention against the
   original snapshot without replaying installation.
-- [ ] Recover Windows payload-update timeouts only after positive non-breakaway
+- [x] Recover Windows payload-update timeouts only after positive non-breakaway
   Job cleanup, preserving refusal precedence and the existing attempt budget.
 - [ ] Establish portable payload process-tree cleanup and durable interrupted
   activation-restoration custody before automatically retrying timeouts.
@@ -874,3 +874,28 @@ achieved by rearranging today's combined installer invocations.
   operator-selected recipient. This resolves the source bootstrap dependency,
   not containing-release consumption, installed acceptance or retained local
   worktree/claim cleanup. #6707 remains unchanged with its canonical owner.
+
+### 2026-10-16 - Windows timeout recovery source merge
+- #6932 squash-merged into `dev` at
+  `e4d423748e9453e1127d54c27b543f6db31b83dc`. Exact-head review 5545098715
+  Approved `7dd9d63f42b3713152b99b84a651225b41261cb3` with zero open
+  findings. Both current-head CI runs succeeded; the later run 38872721613
+  completed before merge. No pending check was bypassed.
+- Re-read the complete Plan and Validation Plan. Marked only confirmed Windows
+  payload-update timeout recovery complete. POSIX/install timeout replay and
+  durable interrupted restoration remain blocked; preparation, readiness,
+  retained-candidate reuse and installed-state acceptance remain open.
+- Managed pull-forward refused replaying the three already-squashed commits.
+  Preserved an owned backup and verified identical stable patch IDs for their
+  complete cumulative diff and the actual merge before advancing onto `dev`;
+  no unmerged change was dropped.
+- #6707 remains draft at its unchanged canonical head, without an accepted
+  preparation/retention handoff. Keep that owner's construction boundary.
+  Continue independent durable-recovery coordination and containing-release
+  tracking; a source merge does not authorize rollout or prove running health.
+- The next independent slice first reviews the durable activation-restoration
+  boundary in `design.md`. Recovery requires the original snapshot and a
+  durable positive child-settlement witness; a dead parent or missing PID cannot
+  authorize another writer. The first lane restores witnessed interruptions
+  without enabling install-timeout replay. Selection of an applicable canonical
+  home-wide custody primitive is an explicit pre-implementation design gate.
