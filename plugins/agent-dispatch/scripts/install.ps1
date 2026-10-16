@@ -398,7 +398,7 @@ function Get-UpdateMarkerMutex {
     return New-Object System.Threading.Mutex($false, $name)
 }
 function Write-UpdateMarker {
-    param([int]$TtlSeconds = $UpdateMarkerTtlDefault)
+    param([long]$TtlSeconds = $UpdateMarkerTtlDefault)
     if ($script:UpdateMarkerHeld) { return }
     New-Item -ItemType Directory -Force -Path (Split-Path $UpdateMarker -Parent) | Out-Null
     $countPath = "$UpdateMarker.refcount"
@@ -411,11 +411,12 @@ function Write-UpdateMarker {
             $raw = Get-Content -Path $countPath -Raw -ErrorAction SilentlyContinue
             if ($raw) { [int]::TryParse($raw.Trim(), [ref]$count) | Out-Null }
         }
-        if ($count -eq 0) {
-            # First holder: stamp a fresh marker. A later joiner deliberately
-            # does NOT refresh the expiry -- the TTL is a safety-net backstop,
-            # not a per-holder renewal lease.
-            $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+        $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+        $previousExpiry = 0L
+        if ($count -gt 0 -and (Test-Path $UpdateMarker)) {
+            [void][long]::TryParse((Get-Content $UpdateMarker -Raw).Trim(), [ref]$previousExpiry)
+        }
+        if ($count -eq 0 -or $expiry -gt $previousExpiry) {
             $tmp = "$UpdateMarker.$([Guid]::NewGuid().ToString('N'))"
             Set-Content -Path $tmp -Value $expiry -NoNewline
             Move-Item -Path $tmp -Destination $UpdateMarker -Force
@@ -472,7 +473,7 @@ if (-not $InstallDir) {
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $UpdateMarker = Join-Path $InstallDir 'update-in-progress'
-$UpdateMarkerTtlDefault = 1200  # 20 min -- generous past any observed real cutover
+$UpdateMarkerTtlDefault = Get-InstallWatchdogOuterWindow -Payload $PluginDir -Name 'agent-dispatch' -MinimumSec 1200
 $legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-dispatch'))
 $publishLegacyNames = [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)
 $serviceSuffix = if ($publishLegacyNames) {

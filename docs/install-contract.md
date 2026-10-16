@@ -2167,8 +2167,12 @@ exits `124`. The build budget is selected by
 `<NAME>_INSTALL_DEADLINE_SEC` → `COPILOT_PLUGIN_INSTALL_DEADLINE_SEC` →
 `plugin.json`'s `installerDeadlineSeconds` → **480s**; an environment override
 `<=0` disables the inner watchdog. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so a hung
-download degrades to "failed + retryable" rather than wedging. Backstop:
-`bootstrap-check`'s single-flight + stale-reap.
+download degrades to "failed + retryable" rather than wedging.
+`bootstrap-check` defers to a live reconcile owner regardless of its cached
+timestamp; it is not a second timeout authority. The native watchdog owns
+bounded tree termination and cleanup. A session hook never signals an existing
+process merely because a PID record is old. An explicitly disabled watchdog is
+therefore not silently overridden by a ten-minute hook timer.
 
 On Windows the parent retains the native child process handle and validates
 the captured birth identity before PID-based tree termination. An identity
@@ -2671,8 +2675,9 @@ self-update cutovers that nothing ever wraps.
 
 Each live-service installer (`agent-bridge`, `agent-dispatch`) writes its
 own well-known, documented marker at `$INSTALL_DIR/update-in-progress`: a
-file containing a single epoch-seconds expiry (20 minutes past write time
-by default — generous past any observed real cutover), atomically published
+file containing a single epoch-seconds expiry (at least 20 minutes past write
+time, extended to cover the effective build-plus-cutover-plus-cleanup outer
+window), atomically published
 (temp-file + rename, never a truncate-then-write race for a reader) at the
 start of `do_update`'s/`do_start`'s live-service branch, **after** every
 "nothing to do" early return (an already-healthy daemon, a forwarded host
@@ -2692,8 +2697,9 @@ a small on-disk counter with a dedicated lock — **`flock` on a separate fd
 (never the main install-lock fd)** for `.sh`, a named
 **`System.Threading.Mutex`** for `.ps1` (the Windows cross-process
 primitive; `flock` has no Windows equivalent) — so the first caller to
-enter (count 0→1) writes the marker with a fresh expiry, later concurrent
-callers just increment, and only the caller that brings the count back to
+enter (count 0→1) writes the marker with a fresh expiry. A later concurrent
+caller increments the count and extends the expiry to cover its own full
+window, never shortening another holder's expiry. Only the caller that brings the count back to
 0 actually removes the marker. A same-process nested call (`do_update`
 calling `do_start` internally, where that pattern exists) is tracked via a
 process-local "already held" flag so it reuses the outer holder's slot

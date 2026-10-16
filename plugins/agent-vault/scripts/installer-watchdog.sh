@@ -55,6 +55,16 @@ get_install_watchdog_budget() {
     printf '%s %s\n' "$build" "$cutover"
 }
 
+get_install_watchdog_outer_window() {
+    local policy build cutover minimum="${3:-0}" window
+    policy="$(get_install_watchdog_budget "$1" "$2")" || return $?
+    read -r build cutover <<<"$policy"
+    if [[ "$build" -le 0 ]]; then build=480; fi
+    window=$((build + cutover + 30))
+    if [[ "$window" -lt "$minimum" ]]; then window="$minimum"; fi
+    printf '%s\n' "$window"
+}
+
 enter_install_phase() {
     local name="$1" budget="${2:-${COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC:-0}}"
     local path="${COPILOT_PLUGIN_INSTALL_PHASE_FILE:-}" temporary
