@@ -221,6 +221,31 @@ def test_lock_failure_has_an_explicit_nonzero_cli_result(tmp_path: Path, monkeyp
     assert us.indicator_state(status=status, lock=tmp_path / "absent") == "idle"
 
 
+@pytest.mark.parametrize("failure", ["guard-open", "metadata-publication"])
+def test_lock_acquisition_failure_preserves_shared_completion(tmp_path, monkeypatch, failure):
+    status = tmp_path / "status.json"
+    completion = b'{"stage_done":true,"plugin_changed":true,"fingerprint":"successor"}\n'
+    status.write_bytes(completion)
+    lock = tmp_path / "updater.lock"
+    if failure == "guard-open":
+        parent = tmp_path / "not-a-directory"
+        parent.write_text("sentinel", encoding="utf-8")
+        lock = parent / "updater.lock"
+    else:
+        original = us._write_status
+
+        def publish(path, data):
+            if path == lock:
+                raise PermissionError("injected lock publication failure")
+            original(path, data)
+
+        monkeypatch.setattr(us, "_write_status", publish)
+    result = us.stage(status=status, lock=lock)
+    assert result["stage_done"] is False
+    assert "Update-stage lock unavailable" in result["stage_error"]
+    assert status.read_bytes() == completion
+
+
 def test_release_does_not_remove_a_foreign_record_and_always_frees_lease(tmp_path: Path):
     lock = tmp_path / "updater.lock"
     assert us.acquire_lock(lock)

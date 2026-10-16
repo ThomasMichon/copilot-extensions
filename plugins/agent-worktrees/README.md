@@ -327,6 +327,8 @@ attempt identity. Age never authorizes taking a live lease. A live legacy
 PID-only owner is preserved during migration; malformed ownership metadata and
 I/O failures refuse staging explicitly. A contending stage returns
 `skipped: locked` without replacing the owner's shared completion result.
+Acquisition failures likewise leave shared status untouched; stderr, the
+caller's JSON result and its nonzero exit report the failure.
 Lock and status records publish atomically, and the picker stops reporting
 `checking` once no live owner remains. This is a staging-only lease, not the
 installer's slot-admission lock or a machine-wide update-writer protocol.

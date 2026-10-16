@@ -340,7 +340,6 @@ def stage(
     except (OSError, ValueError) as error:
         result["stage_error"] = f"Update-stage lock unavailable: {error}"
         print(result["stage_error"], file=sys.stderr)
-        _write_status(status, result)
         return result
     if not acquired:
         result.update(stage_done=True, skipped="locked", plugin_changed=False)
