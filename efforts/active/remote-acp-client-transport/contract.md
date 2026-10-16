@@ -7,7 +7,7 @@ client has shipped or passed integration tests.
 
 ## Profile identity and qualification
 
-- Identifier: **`ce-remote-acp-http-ws-2026-10-15-a1`**.
+- Identifier: **`acp-http-ws-durable-v1alpha1`**.
 - RFD source: `agentclientprotocol/agent-client-protocol` commit
   **`ccff4e7d2e431880225804a8c136c2ccfcb313d0`**,
   `docs/rfds/streamable-http-websocket-transport.mdx`.
@@ -71,10 +71,12 @@ No `Last-Event-ID` wire replay is offered by this profile.
 
 Use ACP's permitted `_meta` fields on capability objects. Namespace:
 
-**`io.github.thomasmichon.copilot-extensions/remote-acp`**
+**`remote-acp/explicit-approvals`**
 
-This namespace and the following fields are this project's **experimental
-extension**, not standard ACP fields. No additional top-level protocol fields,
+This neutral namespace and the following fields define an **experimental
+extension**, not standard ACP fields or an officially registered namespace.
+It is reusable by arbitrary client/server implementations and names no author,
+operator or implementation project. No additional top-level protocol fields,
 out-of-band handshake or private POST-chat protocol is introduced.
 
 Client `initialize.params.clientCapabilities` includes its ordinary truthful
@@ -83,14 +85,11 @@ ACP callback capabilities and:
 ```json
 {
   "_meta": {
-    "io.github.thomasmichon.copilot-extensions/remote-acp": {
-      "profile": "ce-remote-acp-http-ws-2026-10-15-a1",
+    "remote-acp/explicit-approvals": {
+      "profile": "acp-http-ws-durable-v1alpha1",
       "applicationApprovals": {
         "version": 1,
-        "permissions": true,
-        "forms": true,
-        "explicitAnswers": true,
-        "operatorRelay": true
+        "explicitAnswers": true
       }
     }
   }
@@ -103,8 +102,8 @@ capabilities (`loadSession`, for example) and:
 ```json
 {
   "_meta": {
-    "io.github.thomasmichon.copilot-extensions/remote-acp": {
-      "profile": "ce-remote-acp-http-ws-2026-10-15-a1",
+    "remote-acp/explicit-approvals": {
+      "profile": "acp-http-ws-durable-v1alpha1",
       "applicationApprovals": {
         "version": 1,
         "required": true
@@ -122,6 +121,27 @@ client configured with required application approvals refuses a server that
 does not acknowledge them. Initialization itself must not perform application
 writes. Merely supporting ACP callbacks is not an agreement to this extension.
 
+### Why an extension remains necessary
+
+Use native ACP tool-call IDs, option IDs, permission outcomes and structured
+elicitation schema/content unchanged. Native form support is advertised through
+the ordinary `clientCapabilities.elicitation.form`, not duplicated custom flags.
+ACP does not negotiate whether a permission client will apply blanket tool
+autoapproval or require an explicit answer. The sole additional policy promise
+is therefore versioned `explicitAnswers`; `required` lets the server refuse
+before any write rather than discovering the gap at a later approval boundary.
+No custom methods, prompt dialect, business validation or approval UI protocol
+are added. Agent answers and human relay use the same existing callbacks.
+
+Native request-scoped forms retain the original `requestId` and its JSON type.
+It must identify an outstanding request on this bridge-owned connection and,
+when present, its remote session. No tool-call ID is invented for that variant:
+the bridge answer uses its live token with an empty `tool_call_id`, and exposes
+the original correlation separately as `native_request_id`. An application
+approval without a native durable tool-call ID supplies a separate opaque
+`decisionId`. A completed, replayed or unknown originating request confers no
+answer authority.
+
 ## Application approvals and identity
 
 Carry application decisions over existing `session/request_permission` or
@@ -131,7 +151,7 @@ advertised. On an application approval request, the callback's permitted
 
 ```json
 {
-  "io.github.thomasmichon.copilot-extensions/remote-acp": {
+  "remote-acp/explicit-approvals": {
     "applicationApproval": {
       "version": 1,
       "decisionId": "opaque-example-decision"
@@ -140,7 +160,10 @@ advertised. On an application approval request, the callback's permitted
 }
 ```
 
-`decisionId` is an arbitrary nonempty opaque server-owned string; it is not
+When the native tool-call ID already is the server's durable decision identity,
+use it unchanged and omit `decisionId`. Only when the application owns a
+separate durable identity is `decisionId` needed. It is an arbitrary nonempty
+opaque server-owned string; it is not
 derived from the RPC ID, bridge ID, option text or tool-call ID. Preserve native
 tool-call IDs, offered option IDs, requested form schema and structured input
 exactly within supported JSON types. The response echoes the same extension
@@ -171,7 +194,7 @@ Machine-local configuration proposal:
 remote_acp:
   example-agent:
     endpoint: https://example.com/acp
-    profile: ce-remote-acp-http-ws-2026-10-15-a1
+    profile: acp-http-ws-durable-v1alpha1
     draft_commit: ccff4e7d2e431880225804a8c136c2ccfcb313d0
     transport: streamable-http
     application_approvals: required

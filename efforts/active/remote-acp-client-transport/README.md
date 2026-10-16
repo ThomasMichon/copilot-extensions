@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-15
-- **Status:** Blocked
+- **Status:** Active
 - **Vision:** [agent-bridge / externally-hosted-acp-agents](../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents)
 - **Umbrella issue:** #6908
 
@@ -101,7 +101,7 @@ extension metadata is authorized, not represented as a standard ACP field.
   does not select an option or authorize a wire-profile deviation.
 - [x] Record the explicitly selected qualified profile and experimental
   approval negotiation in [contract.md](contract.md).
-- [ ] Resolve SDK ownership decision D2: public factory interfaces cannot
+- [x] Resolve SDK ownership decision D2: public factory interfaces cannot
   enforce the required transport bounds and redirect policy unchanged.
 
 ### Phase 2 — Scoped client implementation
@@ -163,15 +163,45 @@ extension metadata is authorized, not represented as a standard ACP field.
 and approval metadata are recorded in [contract.md](contract.md). The bridge
 must not claim unqualified RFD conformance.
 
-**D2 blocks implementation:** the inspected SDK's public remote factories do
-not expose the resource/redirect controls required by this effort. A wrapper
-after `receive()` cannot bound the HTTP factory's private producer queue or SSE
-parser. The WebSocket factory does not expose connector configuration. Select
-either a bounded bridge-owned implementation of the SDK's public message-level
-transport interface, or an upstream SDK enhancement with suitable public hooks;
-do not monkey-patch private SDK classes. [Evidence and alternatives](design.md#decision-d2--sdk-transport-ownership).
+**D2 resolved:** bridge-owned bounded HTTP/SSE and WebSocket implementations
+of the SDK's public message transport interface are explicitly authorized.
+SDK protocol/lifecycle/schema handling is retained; private SDK patches and
+vendored forks remain forbidden.
+
+The neutral profile is `acp-http-ws-durable-v1alpha1`; the minimal experimental
+policy namespace is `remote-acp/explicit-approvals`. Native ACP identifiers,
+permission outcomes and form content remain native. The extension negotiates
+explicit-answer policy, which native ACP callback availability alone does not
+express; a separate durable decision ID is optional when the native tool-call
+ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
+
+### 2026-10-15 — Bounded implementation and neutral contract correction
+
+- D2 selected bridge-owned bounded transports. Implemented against public SDK
+  connection/transport entry points without private SDK hooks or source copies.
+- Replaced the undeployed draft's author/project-specific wire identities with
+  neutral behavior-based identifiers, without compatibility aliases.
+- Kept standard ACP permission/form messages and opaque native IDs; reduced
+  extension capability flags to versioned explicit-answer policy.
+- Actual separate-process synthetic TLS HTTP/2/SSE and WSS consumers have
+  exercised initialize/new/load, permission/form roundtrips, cancellation,
+  disconnect survival, scoped auth refusal/refresh, cookies and redirects-off.
+- No installed payload, daemon rollout, live deployment or server business
+  validation was changed. Publication and final validation remain open.
+
+### 2026-10-15 — Qualified contract reviewed and merged
+
+- PR #6927 merged to `dev` as
+  `40c0fd93a6505255171e42e860b5a8a726333814` after Copilot approval with
+  no open findings and successful required CI, including the PR gate.
+- The stable contract is `contract.md`; D1 is resolved and D2 is the only
+  remaining pre-implementation decision. The recommended next step is a
+  bounded bridge-owned transport using the SDK's public message interface,
+  not its private factory implementation.
+- No runtime change, dependency installation, transport test or deployment
+  occurred. Implementation and validation remain open; retain the worktree.
 
 ### 2026-10-15 — Explicit option A and SDK suitability gate
 

@@ -69,7 +69,7 @@ invented.
 
 This option is explicitly accepted as a **qualification of the pinned draft**,
 not an assertion that its contradictory paragraphs are already identical.
-The distinct profile is `ce-remote-acp-http-ws-2026-10-15-a1`.
+The distinct profile is `acp-http-ws-durable-v1alpha1`.
 
 ### Option B — await clarified upstream intent
 
@@ -114,6 +114,9 @@ artifact-feed contract before implementation or test provisioning.
 
 ## Decision D2 — SDK transport ownership
 
+**Selected:** alternative 1, bridge-owned bounded transports over the SDK's
+public message transport interface. No private SDK patch or vendored fork.
+
 The SDK pin remains current public `main` on reinspection. These are source
 findings, not claimed runtime failures:
 
@@ -130,7 +133,7 @@ but does not solve the producer-queue or WS factory boundaries. Selecting a
 fixed-size outer queue or setting private attributes would falsely claim
 boundedness or depend on private implementation behavior.
 
-**Alternative 1 (agent-recommended):** authorize a small bridge-owned bounded
+**Alternative 1 (selected):** authorize a small bridge-owned bounded
 HTTP/SSE and WS wire transport implementing the SDK's public `Transport`
 protocol (`send`, `receive`, `close`) and using public `connect_to_agent`.
 Keep all ACP JSON-RPC dispatch, schema, sessions and callbacks in the SDK;
@@ -179,7 +182,7 @@ contract:
 remote_acp:
   example-agent:
     endpoint: https://example.com/acp
-    profile: ce-remote-acp-http-ws-2026-10-15-a1
+    profile: acp-http-ws-durable-v1alpha1
     draft_commit: ccff4e7d2e431880225804a8c136c2ccfcb313d0
     transport: streamable-http
     auth:
