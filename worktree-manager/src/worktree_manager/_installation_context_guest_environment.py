@@ -138,6 +138,10 @@ def register_guest_environment(
         path.parent / ".guest-environment.lock",
         kind="guest-environment", marketplace_id="os-profile",
     ) as lock:
+        current["wslDistro"] = _resolve_wsl_distribution(
+            profile, environment=environment, explicit=observed,
+        )
+        registration["distribution"] = current["wslDistro"]
         existing = _read_guest_environment(profile)
         if existing is not None and existing != registration:
             _fail("guest-identity-conflict: an existing guest registration cannot be replaced implicitly.")

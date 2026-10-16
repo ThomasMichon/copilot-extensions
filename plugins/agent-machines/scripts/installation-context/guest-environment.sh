@@ -109,6 +109,7 @@ guest_register_environment() {
     [[ ! -L "${path%/*}" ]] ||
         fail "guest-identity-invalid: guest registration directory may not be linked."
     acquire_lock "${path%/*}/.guest-environment.lock" guest-environment os-profile
+    guest_resolve_distribution "$CURRENT_PROFILE_HOME"
     guest_read_environment "$CURRENT_PROFILE_HOME"
     if [[ -z "$GUEST_REGISTERED_DISTRIBUTION" ]]; then
         guest_machine_id

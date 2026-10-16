@@ -115,6 +115,39 @@ def test_guest_status_selector_only_compares_independently_resolved_identity(
     assert result["environment"]["wslDistro"] == "Example"
 
 
+@pytest.mark.parametrize("competing", ["Other", "EXAMPLE"])
+def test_registration_rechecks_identity_after_lock_admission(
+    guest: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, competing: str,
+) -> None:
+    original_enter = guest._DirectoryLock.__enter__
+    registration = {
+        "schema": guest.GUEST_ENVIRONMENT_SCHEMA, "version": 1,
+        "distribution": competing, "machineId": "a" * 32,
+        "homeRealPath": str(tmp_path),
+    }
+
+    def enter(lock: Any) -> Any:
+        result = original_enter(lock)
+        guest._atomic_write_json(guest._guest_environment_path(tmp_path), registration, lock=lock)
+        return result
+
+    monkeypatch.setattr(guest._DirectoryLock, "__enter__", enter)
+    if competing == "Other":
+        with pytest.raises(guest.InstallationContextError, match="guest-identity-conflict"):
+            guest.register_guest_environment(
+                "Example", environment={"WSL_DISTRO_NAME": "Example"}, os_profile=tmp_path,
+            )
+    else:
+        result = guest.register_guest_environment(
+            "Example", environment={"WSL_DISTRO_NAME": "Example"}, os_profile=tmp_path,
+        )
+        assert result["created"] is False
+        assert result["environment"]["wslDistro"] == competing
+    path = guest._guest_environment_path(tmp_path)
+    assert json.loads(path.read_text(encoding="utf-8")) == registration
+    assert not (path.parent / ".guest-environment.lock").exists()
+
+
 @pytest.mark.parametrize("field,value", [
     ("version", True), ("version", 2), ("schema", "another-owner"),
     ("homeRealPath", "/another-profile"), ("machineId", "invalid"),

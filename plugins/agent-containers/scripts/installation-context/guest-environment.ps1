@@ -120,6 +120,7 @@ function Register-GuestEnvironment([string]$DistributionName) {
     }
     Acquire-Lock (Join-Path (Split-Path -Parent $path) '.guest-environment.lock') 'guest-environment' 'os-profile'
     try {
+        $current.wslDistro = Resolve-WslDistribution $current.homeRealPath
         $registration = Read-GuestEnvironment $current.homeRealPath
         $created = $null -eq $registration
         if ($created) {

@@ -20,6 +20,10 @@ native Windows tests separately cross both installed PowerShell hosts and
 prove inherited WSL/OS labels do not confer guest identity. Targeted Worktrees
 doctor tests cover explicit enrollment, repeated SSH-style no-write calls and
 refusal before unrelated repair machinery.
+Separate enrollment-admission fixtures inject another completed registration at
+real lock entry, using the native atomic writer. Every runner must revalidate
+the newly visible identity, refuse a conflicting name and retain canonical
+case for an idempotent enrollment; lock ownership and cleanup are not mocked.
 
 The shared `agent-procutil` daemon-broker unit suite covers authenticated frame
 bounds, WMI's JSON-stdin environment boundary, containment opt-out, partial-start

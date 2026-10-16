@@ -210,6 +210,11 @@ unrelated service changes or a second machine registry.
 - Added pre-enrollment SSH refusal coverage for every native runner and the
   targeted doctor, plus independent selector mismatch controls. All vendored
   copies were regenerated from the canonical source.
+- The same review overview identified an enrollment admission race. Every
+  runner now re-resolves identity under the real enrollment lock, refusing a
+  conflicting registration published after its initial read and preserving
+  canonical case for idempotent admission. Native publication-at-lock-entry
+  fixtures cover the interleaving without mocking lock ownership or writers.
 - Hosted candidate `fc33b115bc4e204b078177e592d2b88d14f871af` passed the existing
   installation-context smoke: 180 passed, one skip, with all three guest writer
   parameters executed. The correction requires fresh hosted proof and review;
