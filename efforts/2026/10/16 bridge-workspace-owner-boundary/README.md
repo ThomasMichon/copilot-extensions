@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** isolated repair; publication owned by coordinator
 - **Created:** 2026-10-14
-- **Status:** Active
+- **Status:** Done
 - **Vision:** Below-altitude repair of existing independent-plugin and owner-process contracts
 - **Umbrella issue:** #6757
 
@@ -69,8 +69,9 @@ proof with all removals intercepted. Keep this effort Active for integration.
 
 ### Phase 2 - Coordinator-owned completion
 - [x] Independently review the local candidate and reconcile review findings.
-- [ ] Publish through the normal PR/release flow after authorization.
-- [ ] Verify released source and correct dispatch/resume through authorized rollout.
+- [x] Publish and merge the repair through the normal PR flow after authorization.
+- [x] Confirm release promotion contains the reviewed repair.
+- [x] Verify released source and correct dispatch/resume through authorized rollout.
 
 ## Validation Plan
 
@@ -78,7 +79,7 @@ proof with all removals intercepted. Keep this effort Active for integration.
 - [x] Run real isolated owner subprocesses with no sibling package in bridge's interpreter.
 - [x] Run touched-code F/E9, architecture/bridge and install-contract guards.
 - [x] Record clean-room applicability and external-lane constraints explicitly.
-- [ ] Coordinator records released-source and authorized running-state proof.
+- [x] Coordinator records released-source and authorized running-state proof.
 
 ## Proposal
 
@@ -88,6 +89,40 @@ runtime-root/slot algorithm. Keep remote provider workspace ownership separate
 from local managed-worktree allocation. No new shared library or installer flow.
 
 ## Journal
+
+### 2026-10-16 - Released owner boundary and preserved-session resume verified
+
+- Released `main` snapshot `ad7376904b0e622f7f44abf516cbef560b322f36`
+  contained the exact reviewed transport, session manager, lifecycle-owner and
+  automatic-cleanup source blobs. The subsequent release
+  `6b2fa0ac2887a8fda669dfb8356e5c6083f6729d` also delivered the already-owned
+  hidden-installer diagnostic correction #6853.
+- The operator-authorized unified update installed bridge `0.9.64-dev1` and
+  Worktrees `1.24.68-dev1`. Actual activated source contains the independent
+  owner launch and automatic cleanup guard; bridge health is available.
+- A preserved managed local session resumed in its original worktree, retaining
+  its previous turn and entering a new owning-agent turn. This exercises the
+  failed owner-resolution boundary rather than substituting a new session.
+  Existing-checkout CodeSpace independence remains covered by the real
+  provider-routing tests; no external compute claim is made.
+- The aggregate update returned nonzero because three other runtime installers
+  failed, and anchor synchronization conservatively skipped a stale index.
+  Those results are not whole-host success. They do not erase the verified
+  activation and live managed-resume proof for this repair.
+- This bounded owner-boundary objective is Done. The consuming application
+  prototype and unrelated runtime reconciliation remain separate objectives.
+
+### 2026-10-15 - Repair merged; promotion and running-state gates remain
+
+- #6776 actually merged as `a4c6dac741bf3b67f92ea6d42d17d0d22568d40d`,
+  after current-head approval with zero findings and successful required CI.
+  Source attribution passed independently of review.
+- The operator authorized normal unified rollout after release promotion and
+  verification of the preserved managed dispatch. No installed files or shared
+  daemon state will be patched manually.
+- Post-merge CI run `38665055817` is pending. Promotion, released-source
+  identity, installed-state proof and actual resume remain open; merge is not
+  deployment and does not complete this effort.
 
 ### 2026-10-14 - Independent review and real owner-boundary verification
 
