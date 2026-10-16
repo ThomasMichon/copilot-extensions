@@ -19,7 +19,7 @@ _FIELDS = {
     "task_url": "AGENT_DISPATCH_TASK_URL",
     "task_worker": "AGENT_DISPATCH_TASK_WORKER_ID",
 }
-_COMMANDS = frozenset({"show", "payload", "progress", "heartbeat", "complete", "abandon"})
+_COMMANDS = frozenset({"show", "payload", "start", "progress", "heartbeat", "complete", "abandon"})
 
 
 @dataclass(frozen=True)
@@ -109,6 +109,7 @@ def run_task_worker(args: argparse.Namespace, worker: TaskWorker) -> int:
         raise DispatchError(403, "command is outside the projected task authority")
     forbidden_options = (
         "history", "machine", "worktree", "duplicate_of", "resolve", "base", "override_live",
+        "owner_session_id",
     )
     if any(getattr(args, name, None) for name in forbidden_options):
         raise DispatchError(403, "task-only commands cannot use fleet identity or history")
@@ -128,6 +129,8 @@ def run_task_worker(args: argparse.Namespace, worker: TaskWorker) -> int:
             response = client.get(worker.task_id)
         elif args.command == "payload":
             response = client.payload(worker.task_id)
+        elif args.command == "start":
+            response = client.start(worker.task_id, worker.worker_id)
         elif args.command == "progress":
             response = client.progress(
                 worker.task_id, worker.worker_id, phase=args.phase or "",

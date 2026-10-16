@@ -600,6 +600,12 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
 
     # -- spawn reservations --------------------------------------------------
 
+    def record_restricted_delivery(self, key: str, info: dict) -> dict:
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/restricted-delivery",
+            json=info, headers=self._control_headers(),
+        ))
+
     def reserve_spawn(
         self, task_id: str, *, reserved_by: str | None = None,
         allow_suspended_reembodiment: bool = False,

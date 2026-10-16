@@ -135,6 +135,13 @@ def _validate_spec_charter_mode(spec: dict) -> None:
     ``--spec`` bypasses that path entirely and would otherwise persist a
     registration the daemon can never actually start (agent-worktrees embody
     has no charter-binding flag)."""
+    if spec.get("restricted_worker") is not None:
+        from .restricted_spawn import validate_lane
+
+        try:
+            validate_lane(spec)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
     if spec.get("ci_repair_bindings") is not None:
         from .ci_repair_spawn import cli_bindings
 
@@ -236,6 +243,11 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
         spec["steering_disallowed_labels"] = steering_disallowed
     if getattr(args, "headless_agent", None):
         spec["headless_agent"] = args.headless_agent
+    if getattr(args, "restricted_worker", None):
+        from .restricted_spawn import configuration, validate_lane
+
+        spec["restricted_worker"] = configuration(args.restricted_worker)
+        validate_lane(spec)
     if getattr(args, "charter", None):
         # Mirrors _cmd_supervise's own runtime guard (and registrar.py's
         # load_declaration for the YAML-declaration path): agent-worktrees
@@ -681,6 +693,17 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         label for label in (getattr(args, "idle_nudge_exempt_label", None) or []) if label
     ]
     charter = getattr(args, "charter", None)
+    if getattr(args, "restricted_worker", None):
+        from .restricted_spawn import validate_lane
+
+        validate_lane({
+            "restricted_worker": args.restricted_worker, "labels": args.label,
+            "embody_backend": backend, "max_concurrent": args.max_concurrent,
+            "pool": getattr(args, "pool", None), "cli_labels": cli_labels,
+            "script_labels": script_labels, "headless_labels": headless_labels,
+            "ci_repair_bindings": getattr(args, "ci_repair_bindings", None),
+            "no_pair": getattr(args, "no_pair", False),
+        })
     if getattr(args, "ci_repair_bindings", None):
         from .ci_repair_spawn import cli_bindings
 
@@ -787,6 +810,10 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             all_repos=all_repos,
             no_pair=bool(getattr(args, "no_pair", False)),
         )
+        if getattr(args, "restricted_worker", None):
+            from .restricted_spawn import make_spawn
+
+            headless_spawn = make_spawn(args.restricted_worker, charter=charter)
         if getattr(args, "ci_repair_bindings", None):
             from .ci_repair_spawn import make_ci_repair_spawn
 
@@ -878,6 +905,8 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         )
         if getattr(args, "ci_repair_bindings", None):
             _preflight_agent = None  # Task-selected venues have their own admission probe.
+        if getattr(args, "restricted_worker", None):
+            _preflight_agent = None  # The exact prepared provider target does not exist until claim.
         _preflight_pool = None
     # Best-effort, fail-loud preflight: warn (never block) when the headless
     # embody agent isn't registered with agent-bridge on the host(s) where a body

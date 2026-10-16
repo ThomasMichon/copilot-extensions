@@ -138,12 +138,17 @@ def validate_start(
 ) -> None:
     ensure(conn)
     rows = conn.execute(
-        "SELECT a.*,s.agent_info,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree,"
+        "SELECT a.*,s.agent_info,s.driver,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree,"
         "s.conversation_retired,"
         "EXISTS(SELECT 1 FROM acquisition_markers m WHERE m.reservation_key=s.key) AS acquisition_marked FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON s.key=a.reservation_key WHERE s.task_id=? "
         "ORDER BY s.attempt DESC LIMIT 1", (task.id,),
     ).fetchall()
+    if rows and rows[0]["driver"] == "restricted-bridge":
+        from .restricted_delivery import validate_start as validate_restricted_start
+
+        validate_restricted_start(rows[0], task, native_id)
+        return
     if rows and rows[0]["agent_info"]:
         from .ordinary_agent_facts import identity
         ordinary = rows[0]

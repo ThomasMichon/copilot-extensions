@@ -515,15 +515,22 @@ def register_task_routes(
         )
         owner_session_id = owner_session_id or resolve_owner_session_id(worker_id)
         result = _guard(
-            lambda: queue.start(task_id, worker_id, owner_session_id=owner_session_id),
+            lambda: queue.start(
+                task_id, worker_id, owner_session_id=owner_session_id,
+                expected_owner_session_id=(
+                    owner_session_id if getattr(request.state, "task_scope", None) is not None else None
+                ),
+                expected_generation=_scoped_generation(request),
+            ),
             "task.started",
         )
-        token = mint_task_token(
-            control_token, fencing_guard, task_id, worker_id,
-            result.get("owner_session_id"), result["generation"],
-        )
-        if token is not None:
-            result["task_token"] = token
+        if getattr(request.state, "task_scope", None) is None:
+            token = mint_task_token(
+                control_token, fencing_guard, task_id, worker_id,
+                result.get("owner_session_id"), result["generation"],
+            )
+            if token is not None:
+                result["task_token"] = token
         return result
 
     @app.post("/tasks/{task_id}/yield")

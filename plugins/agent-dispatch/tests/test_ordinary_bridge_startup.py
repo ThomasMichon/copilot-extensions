@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import asdict
+from types import SimpleNamespace
 
 import pytest
 
@@ -80,7 +81,9 @@ def startup(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(argv, 0, '{"session_id":"bridge-a"}', "")
 
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
-    monkeypatch.setattr(ordinary_bridge.subprocess, "run", run)
+    monkeypatch.setattr(ordinary_bridge, "subprocess", SimpleNamespace(
+        run=run, TimeoutExpired=subprocess.TimeoutExpired,
+    ))
     monkeypatch.setattr(bridge, "registered_agent_project", lambda *args, **kw: None)
     return queue, snapshot, Client(), calls
 

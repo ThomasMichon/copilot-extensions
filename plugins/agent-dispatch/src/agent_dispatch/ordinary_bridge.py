@@ -21,8 +21,11 @@ if TYPE_CHECKING:
     from .client import DispatchClient
 
 
-def reserve_for_backend(client: DispatchClient, task: dict, supervisor_id: str, *, ordinary: bool) -> dict:
+def reserve_for_backend(client: DispatchClient, task: dict, supervisor_id: str, *, ordinary: bool, restricted: bool = False) -> dict:
     """Record the selected ordinary backend before its nontransactional create."""
+    if restricted:
+        from .restricted_delivery import DRIVER
+        return client.reserve_spawn(task["id"], reserved_by=supervisor_id, driver=DRIVER)
     if ordinary:
         return client.reserve_spawn(task["id"], reserved_by=supervisor_id, driver="ordinary-bridge",
                                     coordinator_launch=task.get("source") == "ci-repair")

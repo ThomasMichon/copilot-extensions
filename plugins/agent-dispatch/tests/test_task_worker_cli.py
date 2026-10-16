@@ -118,10 +118,30 @@ def test_task_worker_can_abandon_own_task_without_fleet_cleanup(worker):
     assert requests == [("POST", f"/tasks/{task_id}/abandon")]
 
 
+def test_task_worker_start_uses_only_projected_identity_and_does_not_renew(worker, capsys):
+    task_id, queue, requests = worker
+    assert cli.main(["start", task_id]) == 0
+    response = json.loads(capsys.readouterr().out)
+    assert "task_token" not in response
+    assert queue.get(task_id).owner_session_id == "native-worker"
+    assert requests == [("POST", f"/tasks/{task_id}/start")]
+
+
+def test_task_worker_client_import_keeps_server_stack_out_of_native_process():
+    child = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; from agent_dispatch.client import DispatchClient; "
+         "assert 'fastapi' not in sys.modules; "
+         "assert 'agent_dispatch.coordinator_auth' not in sys.modules"],
+        capture_output=True, text=True, timeout=20, creationflags=no_window_flags(),
+    )
+    assert child.returncode == 0, child.stderr
+
+
 @pytest.mark.parametrize("argv", [
     ["list"], ["health"], ["print-endpoint"], ["serve"], ["mcp"], ["watch"],
     ["_ensure-coordinator"], ["focus"], ["federation", "status"],
-    ["show", "another-task"], ["start", "TASK"],
+    ["show", "another-task"], ["start", "another-task"],
     ["show", "TASK", "--history"],
     ["progress", "TASK", "wrong", "--summary", "bad"],
     ["complete", "TASK", "wrong"],

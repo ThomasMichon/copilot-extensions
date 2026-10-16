@@ -618,6 +618,13 @@ def validate_registration(kind: str, spec: dict) -> None:
         raise RegistrationError("registration 'spec' must be a JSON object")
 
     if kind == RegistrationKind.SUPERVISED_LANE:
+        if "restricted_worker" in spec:
+            from .restricted_spawn import validate_lane
+
+            try:
+                validate_lane(spec)
+            except ValueError as exc:
+                raise RegistrationError(str(exc)) from exc
         if "ci_repair_bindings" in spec:
             from .ci_repair_spawn import validate_admission_command, validate_bindings
             try:

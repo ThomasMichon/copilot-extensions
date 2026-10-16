@@ -135,6 +135,8 @@ def register_spawn_routes(
     queue: TaskQueue,
     bus: EventBus,
     control_token: str | None = None,
+    *,
+    restricted_ingress_authenticated: bool = False,
 ) -> None:
     from .coordinator_auth import _make_control_auth
 
@@ -356,6 +358,10 @@ def register_spawn_routes(
 
     from .ordinary_bridge import register_routes
     register_routes(app, queue, bus)
+    from .restricted_delivery import register_routes as register_restricted_routes
+    register_restricted_routes(
+        app, queue, bus, control_token, authenticated_ingress=restricted_ingress_authenticated,
+    )
     @app.post("/spawn-reservations/{key}/allocation")
     def record_spawn_allocation(key: str, body: RecordSpawnAllocationBody) -> dict:
         result = _reservation_guard(lambda: queue.record_spawn_allocation(key, body.project))

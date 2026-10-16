@@ -72,7 +72,7 @@ closed rather than falling back to ordinary coordinator discovery. Global
 options require their full spelling, so task-worker flags do not intercept
 existing subcommand flags such as `claim --task` or `doctor --task`.
 
-Only `show`, `payload`, `progress`, `heartbeat`, `complete`, and
+Only `show`, `payload`, `start`, `progress`, `heartbeat`, `complete`, and
 `abandon --permit` are accepted, for the projected task only. `show` returns
 the authorized task snapshot without separate progress-history, attachment,
 or worktree-tracking reads. `heartbeat` retains its explicit worker positional;
@@ -81,6 +81,8 @@ reports the worker's own failure directly, not a fleet/session cleanup request.
 Fleet/history/cleanup options are refused. The coordinator independently
 checks the signed task, owner, session, generation, expiry and fencing epoch
 on every request; terminal transitions invalidate the grant.
+Task-only `start` uses the already-bound native session and never returns a
+new credential; grant renewal remains a trusted-supervisor operation.
 The coordinator's fencing floor is retained in the task queue database.
 Coordinator presence expiry, deregistration, demotion and process restart do
 not restore superseded grants or permit epoch-zero renewal after federation.

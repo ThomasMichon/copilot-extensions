@@ -402,6 +402,11 @@ def _lane_flags(spec: dict) -> list[str]:
             argv.append("--headless")
     if spec.get("headless_agent"):
         argv += ["--headless-agent", str(spec["headless_agent"])]
+    if spec.get("restricted_worker") is not None:
+        from .restricted_spawn import validate_lane
+
+        validate_lane(spec)
+        argv += ["--restricted-worker", json.dumps(spec["restricted_worker"])]
     if spec.get("charter"):
         argv += ["--charter", str(spec["charter"])]
     if spec.get("ci_repair_bindings") is not None:

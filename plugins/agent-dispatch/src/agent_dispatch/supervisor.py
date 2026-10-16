@@ -563,7 +563,8 @@ class Supervisor:
     def _prepare_spawn_task(self, task: dict, reservation: dict) -> dict:
         """Prepare the selected backend's reservation-bound startup facts."""
         ordinary = getattr(self.spawn_fn, "ordinary_bridge_for", None)
-        if callable(ordinary) and ordinary(task):
+        restricted = getattr(self.spawn_fn, "restricted_bridge_for", None)
+        if (callable(ordinary) and ordinary(task)) or (callable(restricted) and restricted(task)):
             return {**task, "spawn_reservation_key": reservation["key"], "_spawn_client": self.client}
         if not self._spawn_requires_reusable_worktree(task):
             return task
@@ -757,46 +758,9 @@ class Supervisor:
         session id instead. Bind that, not the escrow handle -- skip (retry
         next sweep) when it isn't known yet.
         """
-        bound = 0
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
-            local_sid = _parse_local_body_handle(res.get("session_handle"))
-            if local_sid is None:
-                continue
-            try:
-                task = self.client.get(res["task_id"])
-            except DispatchError:
-                continue
-            if (
-                not self._matches_pool(task)
-                or task.get("status") not in _LEASED
-                or not task.get("owner")
-                or task.get("owner_session_id")
-            ):
-                continue
-            try:
-                acp_session_id = self.local_acp_session_fn(local_sid)
-            except Exception:
-                log.exception(
-                    "failed to resolve ACP session id for bridge session %s",
-                    local_sid,
-                )
-                continue
-            if not acp_session_id:
-                continue  # not yet known -- leave unbound for a later sweep
-            try:
-                self.client.bind_owner_session(
-                    task["id"],
-                    task["owner"],
-                    acp_session_id,
-                    expected_generation=task.get("generation"),
-                )
-                bound += 1
-            except DispatchError:
-                log.exception(
-                    "failed to bind headless owner session for task %s",
-                    task.get("id"),
-                )
-        return bound
+        from .supervisor_identity import bind_owner_sessions
+
+        return bind_owner_sessions(self)
 
     def release_resumed_cold_tasks(self, *, now: float | None = None) -> int:
         """Resume viable cold bodies or release ones whose worktree vanished."""
@@ -1046,6 +1010,9 @@ class Supervisor:
             except DispatchError:
                 continue
             if not self._matches_pool(task):
+                continue
+            if res.get("driver") == "restricted-bridge":
+                reconciled += self._reconcile_restricted_start(res, task)
                 continue
             if res.get("agent_info") or res.get("driver") == "ordinary-bridge":
                 from .ordinary_bridge import reconcile_created
@@ -2885,6 +2852,8 @@ class Supervisor:
         from .activity_snapshots import capture
         snapshots = capture(self.client, self._pool_reservations(state=SpawnState.SPAWNED))
         for res, task in snapshots:
+            if res.get("driver") == "restricted-bridge":
+                continue  # Its renewal hook heartbeats with the exact scoped incarnation.
             if task.get("status") == Status.SUSPENDED:
                 continue
             owner = task.get("owner")
@@ -3032,6 +3001,31 @@ class Supervisor:
             except DispatchError:
                 pass
         return held
+
+    def _reconcile_restricted_start(self, reservation: dict, task: dict) -> int:
+        selected = getattr(self.spawn_fn, "restricted_bridge_for", None)
+        if (
+            reservation.get("reserved_by") != self.supervisor_id
+            or reservation.get("release_requested")
+            or not callable(selected) or not selected(task)
+        ):
+            return 0
+        prepared = self._prepare_spawn_task(task, reservation)
+        ok, handle = self.spawn_fn(prepared)
+        if not ok:
+            log.error("restricted startup %s retained: %s", reservation["key"], handle.get("error"))
+            return 0
+        try:
+            self.client.record_spawn(reservation["key"], session_handle=handle["session"])
+        except DispatchError:
+            log.exception("could not publish retained restricted startup %s", reservation["key"])
+            return 0
+        return 1
+
+    def renew_restricted_grants(self) -> int:
+        from .supervisor_identity import renew_restricted_grants
+
+        return renew_restricted_grants(self)
 
     def recover_gone(self) -> int:
         """Release the spawn reservation of a **confirmed-gone** embody so its
@@ -3621,6 +3615,7 @@ class Supervisor:
         self.reconcile_reserving()
         self.release_requested_bodies(now=now)
         self.bind_headless_owner_sessions()
+        self.renew_restricted_grants()
         self.nudge_idle_headless_tasks(now=now)
         self.cool_dormant_bodies()
         self.release_resumed_cold_tasks(now=now)
@@ -3681,7 +3676,11 @@ class Supervisor:
                     )
                     break
                 from .ordinary_bridge import reserve_for_backend
-                resp = reserve_for_backend(self.client, task, self.supervisor_id, ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task))
+                resp = reserve_for_backend(
+                    self.client, task, self.supervisor_id,
+                    ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task),
+                    restricted=getattr(self.spawn_fn, "restricted_bridge_for", lambda _: False)(task),
+                )
             except DispatchError:
                 continue
             if resp.get("coordinator_launch") and (resp["coordinator_launch"].get("ok") or resp["reservation"].get("state") != "failed"): return spawned + ([task["id"]] if resp["coordinator_launch"].get("ok") else [])

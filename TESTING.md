@@ -288,6 +288,36 @@ python tools\run-plugin-tests.py agent-dispatch -k native_cli_category_view_cont
 python tools\run-plugin-tests.py agent-dispatch --guards -k one_cold_cli_boundary
 ```
 
+### Restricted supervisor Docker acceptance
+
+`plugins/agent-dispatch/tests/test_restricted_supervisor_docker.py` is opt-in.
+It uses a disposable, test-owned host Bridge/supervisor, a real central service
+container and a separate restricted worker on an internal network. No installed
+service, live account, shared Docker socket mount or cloud token is used.
+The offline ACP witness creates its actual native identity, then starts,
+reads, reports progress and completes its own task through authenticated HTTP.
+It must reject cross-task, fleet-route and signature-tampering attempts, and
+observe protected task-file rotation by the trusted supervisor.
+
+Build the central image from the candidate source with
+`services/dispatch/Dockerfile`, using the environment's approved package-index
+configuration. Prepare the `agent-dispatch`, `agent-bridge` and
+`agent-containers` test runtimes through `tools/run-plugin-tests.py --prepare-only`.
+Set `AGENT_DISPATCH_RESTRICTED_E2E=1`,
+`AGENT_DISPATCH_E2E_CENTRAL_IMAGE` to that image, and
+`AGENT_DISPATCH_E2E_BRIDGE_PYTHON` / `AGENT_DISPATCH_E2E_PROVIDER_PYTHON` to the
+prepared Bridge/provider interpreters. Then run:
+
+```powershell
+python tools\run-plugin-tests.py agent-dispatch --test-file tests\test_restricted_supervisor_docker.py
+```
+
+The fixture owns its temporary Bridge state, provider runtime copy, containers
+and networks, and tears them down. Provider discovery uses an isolated legacy
+manifest to exercise its supported compatibility path without changing real
+plugin activation. The test is programmatic transport/authority acceptance,
+not a model evaluation or a claim of automatic pool placement.
+
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and
 `services/dispatch`, respectively. It normalizes aliases before environment

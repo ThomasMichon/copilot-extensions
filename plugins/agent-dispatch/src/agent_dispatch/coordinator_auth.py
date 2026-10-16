@@ -15,6 +15,7 @@ from .task_scope import TASK_SCOPE_HEADER, TaskScopeTokenError, verify_task_scop
 TASK_SCOPE_ROUTES = frozenset({
     ("GET", "/tasks/{task_id}"),
     ("GET", "/tasks/{task_id}/payload"),
+    ("POST", "/tasks/{task_id}/start"),
     ("POST", "/tasks/{task_id}/progress"),
     ("POST", "/tasks/{task_id}/heartbeat"),
     ("POST", "/tasks/{task_id}/complete"),
