@@ -6,11 +6,11 @@
   (promoted to `main` by the CI pipeline); Phase 7 work branches off `dev`
   per the current contributor flow.
 - **Created:** 2026-09-22
-- **Status:** Active (reopened 2026-10-02 for Phase 7; Phase 8 superseded by
+- **Status:** Active (Phases 7 and 9; Phase 8 superseded by
   main-owned-workflow-control Phase 5 — see Journal)
-- **Vision:** none yet for the pipeline itself — this effort may spawn a
-  `visions/release-pipeline` entry once the design settles; revisit at
-  Phase 2/3 boundary. It is, however, the named realization vehicle for the
+- **Vision:** [`release-pipeline`](../../../visions/release-pipeline/README.md)
+  (source-owned release identity and continuous delivery). Also the named
+  realization vehicle for the
   [`coverage-guided-ci`](../../../visions/coverage-guided-ci/README.md)
   vision's baseline-generation/correlation concept (this pipeline's
   promotion gate is the natural place to earn a coverage baseline and
@@ -44,6 +44,12 @@ version bumps, materializing vendored code, and validating the result — so
 in-flight merge. This removes the PR-time burden of precise version bumps and
 vendoring, while giving us a real pre-release validation gate for the first
 time.
+
+The verified development commit is the durable release and artifact owner.
+Generated main commits carry that source marker and remain operational landing
+receipts, not competing release identities. Versioning, materialization and
+explicitly governed control inputs still need one consistent, validated
+composition; content integrity does not reduce to trusting a source marker.
 
 ## Participants
 
@@ -92,6 +98,17 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-15 delivery and source-identity clarification:**
+
+> I feel like this issue happened a couple times in a row. We need to sweep over blockers of previous release attempts and check for repeat patterns. We really need a release once an hour, if not sooner.
+
+> When a dev-to-main promotion occurs, what matters is the `dev` commit hash. We expect to just "blit over" everything in main, and mark main with the source dev commit. We'll also publish artifacts, but frankly those artifacts really belong to the associated dev commit, which should be the durable marker. Exact main commits shouldn't matter, only the dev commit id stored in the main commit; we can tag the main commit with the dev commit once landed. We should avoid hash checks which result in catch-22s.
+
+Phase 9 is the agent-recommended decomposition of this clarification. It does
+not grant a new main-path exception, relax byte integrity or silently change
+the separately owned main-control preservation policy. The original pipeline
+request follows.
 
 > 1. Agree. We'll generate the entirety of main from the CI build, and apply
 > it whole, which will produce a nice incremental diff, accounting for
@@ -691,6 +708,36 @@ Historical proposal and supersession evidence:
       and [main-owned-workflow-control Phase 5](../main-owned-workflow-control/README.md#phase-5---finish-validation-and-automation-consolidation);
       the current-main audit does not establish deployed prevention.
 
+### Phase 9 - Source-owned release identity and repeat-blocker prevention
+
+_(Agent-recommended implementation and validation decomposition of the
+2026-10-15 operator clarification; not a replacement release writer.)_
+
+- [ ] Land the reviewed source-identity and cadence contract before changing
+      the mechanism.
+- [ ] Reconcile the recurrence audit with existing repair owners. Distinguish
+      source merges from actual trusted-control activation and qualified
+      releases; #6237, #4876 and #6865 retain their implementation boundaries.
+- [ ] Make the verified development commit the durable release/artifact-set
+      lookup and landed-release tag identity, reusing the existing source
+      marker. Keep candidate, parent and landed-main commits as operational
+      provenance and stale-write receipts rather than second release keys.
+- [ ] Freeze and reuse the admitted composition and lock for the source-owned
+      artifact set. Wire build, export, attestation, availability, publication,
+      tagging and readback consistently; preserve validated legacy lookup.
+- [ ] Reuse immutable artifacts for equivalent source, content and variants
+      across different Git containers. Reject conflicting bytes or provenance
+      under the same binding without silently retargeting published objects.
+- [ ] Preserve source governance, byte integrity, exact lock authority, required
+      qualification and atomic publication. Any change to independently owned
+      main control requires its existing explicit review/authorization path.
+- [ ] Measure actual qualified source advancement, queue time and blocking
+      stages against hourly-or-faster delivery while changes are pending;
+      retain the original faster 10-30-minute validation intent.
+- [ ] Prove normal release and client compatibility, journal the result and
+      retain responsibility for unresolved acceptance. A contract PR, source
+      merge, tag, or green wrapper alone does not complete this phase.
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
@@ -823,11 +870,40 @@ Its remaining compatible obligations are transferred to #6430 and the canonical
 main-owned-workflow-control Phase 5. Existing release gates and other
 participants' phase ownership remain unchanged.
 
+### Phase 9 validation
+
+- [ ] Same verified dev source, admitted payload and lock with a different
+      candidate/squash commit or bookkeeping-only main change reuses the
+      immutable artifact set without a new Main-SHA identity refusal.
+- [ ] Wrong source binding, altered source/wheel/bundle/index bytes,
+      wrong signatures, conflicting variants and missing/extra assets refuse.
+      A source marker alone cannot satisfy integrity.
+- [ ] A different dev commit with equal payload gets accurate source provenance;
+      a content-only no-op never claims a source marker that was not recorded.
+- [ ] Candidate/base races, unauthorized control changes and moved immutable
+      tags remain rejected. A safe retry does not overwrite another writer.
+- [ ] Legacy indexes, tags, deploy provenance and serving generations remain
+      usable under validated compatibility; missing dev lineage is not invented.
+      Optional client artifacts do not become a source-installation gate.
+- [ ] Exact generated consumers and validator bootstrap qualify the transition
+      that activates them, not merely a later dev source state.
+- [ ] Two natural qualified release cycles with pending source changes
+      demonstrate the cadence, source marker, artifact reuse and landed tag.
+      Missed targets and remaining blockers stay explicit and owned.
+
 ## Proposal
 
+Phase 9 extends the existing source marker, generator, artifact identity and
+tagger rather than introducing another release authority. The implementation
+must separate the development source key from canonical payload/lock identity
+and from operation-specific Git receipts. Main-derived inputs that genuinely
+affect versions or shipped bytes must be frozen and attributable, not silently
+discarded or re-read as mutable state at another stage.
 
-_Pending — Phase 1 design work will produce concrete tool choices and
-generator contract details here or in a linked sub-doc._
+The twelve historical manifest/candidate hash refusals were content-hash
+inequalities, not established generated-commit comparisons. Preserve and verify
+that byte contract while removing incidental container dependencies. The
+separately governed control-preservation policy is not changed by this proposal.
 
 ## Journal
 
@@ -2676,6 +2752,4 @@ than fully pre-solved in the plan — operator direction: land the plan now
 and resolve those with tests during implementation.
 
 Phase 7 implementation can now begin.
-
-
 
