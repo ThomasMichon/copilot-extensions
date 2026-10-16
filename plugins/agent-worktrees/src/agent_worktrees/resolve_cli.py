@@ -291,7 +291,7 @@ def _remote_selector_args(state: ResolveCommandState) -> list[str]:
             continue  # Structured admission already guarantees queued seed staging.
         if getattr(state.args, name, False):
             args.append("--" + name.replace("_", "-"))
-    for name in ("profile", "parent_session", "caller_worktree"):
+    for name in ("profile", "parent_session", "caller_worktree", "native_resume_session"):
         value = getattr(state.args, name, None)
         if value is not None:
             args.append("--" + name.replace("_", "-") + "=" + str(value))
@@ -310,6 +310,7 @@ def add_parsers(sub) -> None:
     parser.add_argument(
         "--no-resume", action="store_true", help="Don't auto-resume the last Copilot session"
     )
+    parser.add_argument("--native-resume-session", default=None, help="Require owner-fenced execution of this exact dormant native head")
     parser.add_argument(
         "--bare-resume",
         action="store_true",
@@ -443,6 +444,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
+    native_resume = getattr(args, "native_resume_session", None)
+    if native_resume is not None and (
+        not native_resume or not getattr(args, "worktree_id", None)
+        or not getattr(args, "no_resume", False)
+        or any(getattr(args, name, None) for name in (
+            "new_worktree", "base", "bare_resume", "restore", "seed", "seed_id",
+            "launch_request_b64", "launch_request_status",
+        ))
+    ):
+        return output._json_error("Native resume requires an existing unseeded --worktree-id and --no-resume", exit_code=3)
     if (
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
@@ -857,6 +868,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
 
     no_resume = getattr(state.args, "no_resume", False)
+    native_resume = getattr(state.args, "native_resume_session", None)
     last_session = None
     if not no_resume:
         with step("Resolving resume session", worktree_id=worktree_id):
@@ -871,8 +883,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 lane="new",
                 generation_key=f"new:{record.worktree_id}",
                 explicit_profile=explicit_profile,
-                resume_session=last_session,
-                allocate_new=not getattr(state.args, "dry_run", False),
+                resume_session=native_resume or last_session,
+                allocate_new=not native_resume and not getattr(state.args, "dry_run", False),
             )
     except profile_assignment.ProfileAssignmentError as exc:
         return output._json_error(str(exc), exit_code=3)
@@ -902,12 +914,15 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         _emit_parent_context_hint(record, to_stderr=True)
 
     seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
+    if native_resume and (seed_pending or not no_resume):
+        return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
     if seed_pending:
         launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
     else:
         launch_cmd = deferred_command(
             launch_cmd, yaml_path, admission_only=True,
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
+            native_resume_session=native_resume,
         )
 
     launch = {

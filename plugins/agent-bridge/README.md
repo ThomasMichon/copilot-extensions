@@ -628,6 +628,13 @@ admission, not acquisition or reviewer-specific transport. The successful result
 carries the native UUID that admitted the turn; admission does not prove the
 model completed it.
 
+Ordinary worktree `resume` derives the exact native head from the owning
+project, even when no bridge-owned record exists. It loads that conversation
+headlessly by default; `--cli` resumes it in the owner's existing mux launch
+path. It never substitutes a fresh conversation or takes over a live
+conflicting execution leg. See the [resume command contract](skills/agent-bridge/references/cli-commands.md#session-management)
+for protocol compatibility, native identity and uncertain-launch behavior.
+
 ## Platforms
 
 | Platform | Service manager | Auto-start |

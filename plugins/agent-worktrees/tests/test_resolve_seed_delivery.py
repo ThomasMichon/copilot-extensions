@@ -88,7 +88,7 @@ def _args(**overrides):
     return argparse.Namespace(**base)
 
 
-def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, **kwargs):
+def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, selection_calls=None, **kwargs):
     from agent_worktrees import resolve_launch_cli as rlc
 
     args = _args(
@@ -96,8 +96,14 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, *
         profile=None, **kwargs,
     )
     command = command if command is not None else ["copilot"]
+    def selection(*args, **kwargs):
+        if selection_calls is not None:
+            selection_calls.append(kwargs)
+        return SimpleNamespace(profile=None, assignment=None)
     monkeypatch.setattr(m, "_build_launch_cmd", lambda *a, **kw: command)
     if surface == "json":
+        if selection_calls is not None:
+            monkeypatch.setattr(m, "_launch_profile_selection", selection)
         code = resolve_cli.cmd_resolve(args)
         payload = json.loads(capfd.readouterr().out)
         return code, payload.get("launch", payload)
@@ -107,7 +113,7 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, *
     monkeypatch.setattr(rlc.tracking, "stamp_bound_live", lambda *a, **kw: None)
     monkeypatch.setattr(
         rlc, "_dispatch_launch_profile_selection",
-        lambda *a, **kw: SimpleNamespace(profile=None, assignment=None),
+        selection,
     )
     monkeypatch.setattr(rlc, "_dispatch_reflect_assignment", lambda *a: None)
     monkeypatch.setattr(rlc, "_dispatch_apply_assignment_env", lambda env, selection: env)
@@ -121,6 +127,32 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, *
         config=config, args=args, record=record,
     ))
     return code, plans[-1]
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+def test_native_resume_is_carried_to_the_real_deferred_owner_boundary(
+    tmp_path, monkeypatch, capfd, surface,
+):
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path, codename="already-set",
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    selected = []
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface=surface,
+        no_resume=True, native_resume_session="native-original", selection_calls=selected,
+    )
+    assert code == 0
+    command = plan["cmd"]
+    assert command[command.index("--native-resume-session") + 1] == "native-original"
+    assert "--admission-only" in command
+    assert command[-2:] == ["--", "copilot"]
+    assert len(selected) == 1
+    assert selected[0]["resume_session"] == "native-original"
+    assert selected[0]["allocate_new"] is False
 
 
 @pytest.mark.parametrize("surface", ["json", "interactive"])

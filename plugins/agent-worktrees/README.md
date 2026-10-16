@@ -156,6 +156,18 @@ launchers retain the shared helper's permissive default outside this seam.
 POSIX retains its process-group timeout cleanup. This is not a durable-daemon
 launch or an interactive terminal.
 
+## Native resume admission
+
+Bridge's exact-head ACP resume uses `resolve --no-resume
+--native-resume-session <id>` for the selected existing worktree. The returned
+command retains the worktree owner's process-exclusion guard through backend
+execution and rechecks native identity, process liveness and pending intent at
+the actual invocation boundary. A live or unknown incumbent refuses; a dry-run
+plan is not launch authority. Mux embodiment takes that same per-worktree guard
+before creating a new execution leg. Older owners reject the new flag rather
+than silently returning an unfenced launch. The caller-facing mode contract is
+owned by the [Bridge resume reference](../agent-bridge/skills/agent-bridge/references/cli-commands.md#session-management).
+
 ## Static instruction preparation
 
 Startup copies every declared instruction unchanged in process, after applicable

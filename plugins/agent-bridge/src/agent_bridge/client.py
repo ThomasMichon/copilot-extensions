@@ -1002,30 +1002,24 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
         *,
         reclaim: bool = False,
         strict: bool = False,
+        mode: str = "acp",
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
-        """POST /api/v1/worktrees/{id}/resume -- ensure a worktree has a live
-        owned session (resume its latest, or start a fresh one if the worktree
-        still exists on disk but has no resumable session).
+        """Resume the authoritative native head in explicit ACP or CLI mode.
 
-        ``reclaim`` is the break-glass take-over: a *fresh live* interactive CLI
-        holding the worktree normally yields a 409
-        (``reason: live_cli_holds_worktree``); ``reclaim=true`` bypasses that
-        guard so the caller can own a worktree it has just freed.
-
-        ``strict`` is the identity-preserving contract: never a silent fresh
-        replacement conversation. Either the existing session resumes, or the
-        call raises a 409 (``reason: resume_requires_existing_session``).
-
-        Gated on ``STRICT_RESUME_PROTOCOL_VERSION`` -- unlike most gated
-        fields, this one **fails closed** rather than degrading: ``strict`` is
-        a behaviorful request parameter an older daemon's ``/resume`` handler
-        would silently ignore, falling through to its own pre-existing
-        fresh-session fallback and defeating the exact history-loss guarantee
-        the caller explicitly asked for. Silently sending a non-strict
-        request in that case would be worse than refusing outright, so an
-        unsupported daemon raises instead of quietly downgrading.
+        The mode-qualified route is absent on older daemons, so a downgrade
+        between capability check and POST cannot select legacy fresh fallback.
+        Native resume always preserves history; ``strict`` remains accepted for
+        existing callers. ``reclaim`` never authorizes stopping a live holder.
         """
+        from .protocol import WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION
+
+        if mode not in {"acp", "cli"}:
+            raise ValueError("worktree resume mode must be acp or cli")
+        if not self.daemon_supports(WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION):
+            raise BridgeClientError(
+                426, "daemon cannot preserve an authoritative native head in the requested mode",
+            )
         params = {}
         if reclaim:
             params["reclaim"] = "true"
@@ -1044,7 +1038,7 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
         return (
             self._request(
                 "POST",
-                f"/api/v1/worktrees/{worktree_id}/resume",
+                f"/api/v1/worktrees/{worktree_id}/resume/{mode}",
                 params=params or None,
                 request_timeout=request_timeout,
             )

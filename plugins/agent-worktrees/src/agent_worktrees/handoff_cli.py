@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import time
-from pathlib import Path
+from contextlib import ExitStack
 
-from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
+from . import config as cfg, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
 from . import launch_seed_state, embody_resume
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
@@ -247,6 +247,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
     """
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
+    if getattr(args, "require_native_admission", False) and getattr(args, "bridge_acquisition", None) in {None, "fresh"}:
+        return output._json_error("Native admission requires an exact existing conversation", exit_code=3)
     if getattr(args, "bridge_acquisition", None) and (not raw_id or getattr(args, "seed", None) or getattr(args, "copilot_args", None)):
         return output._json_error("bridge acquisition requires an explicit worktree and no seed/passthrough args", exit_code=3)
     codename_arg = getattr(args, "codename", None)
@@ -354,13 +356,16 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     record,
                     lane="new",
                     generation_key=f"new:{wt_id}",
-                    allocate_new=not getattr(args, "dry_run", False),
+                    resume_session=acquisition,
+                    allocate_new=not acquisition and not getattr(args, "dry_run", False),
                 )
                 _reflect_assignment(record, selection)
             except profile_assignment.ProfileAssignmentError as exc:
                 return output._json_error(str(exc), exit_code=3)
 
     if getattr(args, "dry_run", False):
+        if acquisition and (error := bridge_acquisition_launch.refusal(args, record, wt_id)):
+            return output._json_error(error, exit_code=3)
         launch_cmd = _build_launch_cmd(
             config,
             args,
@@ -381,6 +386,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "work_dir": work_dir,
                 "would": "resume" if already else "create",
                 "resume_session": resume_target,
+                **({"native_admission_version": 1} if acquisition else {}),
                 "cmd": list(launch_cmd),
                 "seed_len": len(seed) if seed else 0,
             }
@@ -453,15 +459,14 @@ def cmd_embody(args: argparse.Namespace) -> int:
     repo = _repo_for_record(config, record)
     if repo is None:
         return output._json_error(f"Repository not found for worktree: {record.repo}")
-    lifecycle_lock = fin.FinalizeLock(
-        Path(repo.worktree_root) / ".finalize.lock",
-        timeout=300,
-        stale_after=3600,
-    )
+    admission = ExitStack()
     try:
-        lifecycle_lock.acquire()
-    except TimeoutError:
-        return output._json_error("worktree lifecycle remained busy for five minutes", exit_code=3,)
+        admission.enter_context(bridge_acquisition_launch.launch_fence(
+            repo, cfg.tracking_dir() / f"{wt_id}.yaml",
+        ))
+    except (TimeoutError, ValueError) as exc:
+        admission.close()
+        return output._json_error(str(exc), exit_code=3)
     try:
         # A managed-GC pass may have completed while launch preflight ran.
         # Re-check under the shared lifecycle fence before creating a process.
@@ -532,7 +537,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         result = sessions.mux_new_session(
             wt_id, work_dir, embody_resume.with_resume(launch_cmd, resume_target), env)
     finally:
-        lifecycle_lock.release()
+        admission.close()
     if not result.get("ok"):
         return output._json_error(
             f"failed to create session wt-{wt_id}: {result.get('error')}",

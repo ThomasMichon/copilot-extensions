@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from . import __version__, telemetry
+from . import __version__, telemetry, worktree_native_resume
 from .agent_registry import AgentResolver, daemon_resolver
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
 from .auth import BearerAuthMiddleware
@@ -1116,7 +1116,7 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
 
     from .routes import acquisitions
     for router in (
-        acquisitions.router, health.router, ui.router, acp_ws.router,
+        worktree_native_resume.router, acquisitions.router, health.router, ui.router, acp_ws.router,
         sessions.router, live_sessions.router, remote.router, agents.router,
         worktrees.router, admin.router, dispatch_tasks.router,
     ):

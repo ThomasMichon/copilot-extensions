@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import time
+import uuid
+from dataclasses import replace
 from typing import Any
 
 from .acp_client import AcpClient
 from .session_preferences import client_preferences
 from .models import SessionStatus
+from .transport import SpawnTarget
 from .session_manager import (
     _MAX_RESUME_ROUNDS,
     _default_cwd,
@@ -17,6 +21,8 @@ from .session_manager import (
     Session,
     log,
 )
+
+_NATIVE_OWNER_CALLER_PREFIX = "native-owner-resume:"
 
 
 def _core() -> Any:
@@ -39,6 +45,60 @@ def _record_launch_refused(session: Any, exc: Any) -> None:
 class _SessionResumeMixin:
     """Session resume and resync helpers."""
 
+    def import_native_session(
+        self, target: SpawnTarget, native_session_id: str, *, agent_name: str,
+    ) -> Session:
+        """Persist a dormant owner-verified conversation without creating one."""
+        if self.is_draining:
+            from .session_manager import DaemonDrainingError
+
+            raise DaemonDrainingError("session")
+        worktree_id = target.worktree_id
+        if not worktree_id or not target.cwd or not native_session_id:
+            raise ValueError("native import requires an exact workspace and conversation")
+        matches = [
+            session for session in self._sessions.values()
+            if session.acp_session_id == native_session_id
+            and session.target.worktree_id == target.worktree_id
+        ]
+        if len(matches) > 1:
+            raise ValueError("multiple bridge records claim the native worktree head")
+        if matches:
+            session = matches[0]
+            if session.target.cwd != target.cwd or session.status != SessionStatus.STOPPED:
+                raise ValueError("native conversation already has a different or live owner")
+            return session
+        from .events import EventLog
+
+        session_id = str(uuid.uuid4())[:12]
+        session = Session(
+            session_id, f"resumed-{native_session_id[:8]}", target, agent_name,
+            caller_id=_NATIVE_OWNER_CALLER_PREFIX + worktree_id,
+        )
+        session.acp_session_id = native_session_id
+        session.status = SessionStatus.STOPPED
+        session.background_recovery_enabled = False
+        session.mcp_servers = [dict(server) for server in target.mcp_servers]
+        self._db.create_session(
+            session_id=session_id,
+            name=session.name,
+            agent_name=agent_name,
+            caller_id=session.caller_id,
+            target_dir=target.cwd,
+            target_type=target.type,
+            status=SessionStatus.STOPPED.value,
+            now=time.time(),
+            target_json=target.to_json(),
+            config_json=json.dumps({"mcp_servers": session.mcp_servers}),
+            acp_session_id=native_session_id,
+            background_recovery_enabled=False,
+        )
+        session.event_log = EventLog(
+            db=self._db, session_id=session_id, worktree_id=target.worktree_id,
+        )
+        self._sessions[session_id] = session
+        return session
+
     async def resume_session(
         self,
         session_id: str,
@@ -46,6 +106,7 @@ class _SessionResumeMixin:
         *,
         drain: bool = True,
         allow_recreate: bool = False,
+        owner_native_resume: bool = False,
     ) -> Session:
         """Resume a stopped session by spawning a new process.
 
@@ -67,6 +128,11 @@ class _SessionResumeMixin:
         recovering a working session at the cost of prior-turn context. The
         ``send``/auto-resume path opts in; an explicit ``resume`` leaves it False
         so a resume never silently drops context.
+
+        ``owner_native_resume`` selects exact owner-fenced worktree recovery.
+        Imported native series retain that policy in their existing caller
+        affinity across frontend restarts and cannot opt into recreation.
+        Other provider/singleton sessions keep their existing transport.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
@@ -90,6 +156,15 @@ class _SessionResumeMixin:
         async with session._lifecycle_lock:
             from .acquisition_gates import assert_resume_allowed
             assert_resume_allowed(self._db, session)
+            worktree_id = session.target.worktree_id
+            owner_native_resume = owner_native_resume or (
+                worktree_id is not None
+                and session.caller_id == _NATIVE_OWNER_CALLER_PREFIX + worktree_id
+            )
+            if owner_native_resume:
+                allow_recreate = False
+                if not session.target.project or not session.target.worktree_id or not session.acp_session_id:
+                    raise ValueError("Native owner resume requires a complete workspace binding")
             if self._db.execute_read(
                 "SELECT 1 FROM provider_embodiments WHERE session_id=? LIMIT 1",
                 (session_id,),
@@ -135,6 +210,12 @@ class _SessionResumeMixin:
                 return session
 
             await self._refresh_provider_target(session)
+            original_target = session.target
+            resume_target = original_target
+            if owner_native_resume:
+                resume_target = replace(
+                    session.target, native_resume_id=session.acp_session_id,
+                )
 
             session.status = SessionStatus.STARTING
             self._db.update_session_status(
@@ -155,6 +236,7 @@ class _SessionResumeMixin:
             for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
                 client = None
                 try:
+                    session.target = resume_target
                     load_existing = bool(session.acp_session_id)
                     host_result = await self._resume_via_new_remote_host(
                         session,
@@ -211,6 +293,8 @@ class _SessionResumeMixin:
                                 timeout=self._timeouts.session_new,
                             )
 
+                    if load_existing and resumed_acp_id != session.acp_session_id:
+                        raise RuntimeError("native resume returned a different conversation identity")
                     if resumed_acp_id and (
                         resumed_acp_id != session.acp_session_id
                     ):
@@ -319,6 +403,8 @@ class _SessionResumeMixin:
                         session_id, _MAX_RESUME_ROUNDS, exc_desc,
                     )
                     break
+                finally:
+                    session.target = original_target
 
             # End+create last resort (opt-in, ladder exhausted). The stop->resume
             # rounds above all failed to reattach the persisted ACP session; as a

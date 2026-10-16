@@ -125,6 +125,7 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "execution_leg": None,
         "execution_leg_opaque": False,
         "sessions_indexed": True,
+        "bound_agent": None,
         "session_backend": None,
         "session_backend_opaque": False,
         "dispatch_attempt": None,
@@ -222,6 +223,7 @@ def test_record_read_missing_is_not_terminal_or_suffix_lookup(record_fixture, ra
         ({"creation_nonce": True}, "record-malformed"),
         ({"machine": []}, "record-malformed"),
         ({"owner_ref": {}}, "record-malformed"),
+        ({"bound_agent": {}}, "record-malformed"),
         ({"checkout_managed": "false"}, "record-malformed"),
         ({"resume_count": "not-an-int"}, "record-malformed"),
     ],
@@ -232,6 +234,15 @@ def test_record_read_rejects_malformed_identity(record_fixture, change, code):
     rc, result = invoke(data["worktree_id"])
     assert rc == 1 and result["error"]["code"] == code
     assert result["worktree"] is None
+
+
+def test_record_read_preserves_bound_agent(record_fixture):
+    data, path = record_fixture
+    data["bound_agent"] = "example-role"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["bound_agent"] == "example-role"
 
 
 @pytest.mark.parametrize("raw", ["[", "- a", "", "worktree_id: [", "\x07", b"\xff"])

@@ -11,39 +11,29 @@ import asyncio
 import json
 import logging
 import os
-import shlex
 import signal
 import time
-from dataclasses import replace
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..agent_registry import AgentConfig, AgentResolver
-from ..acquisition_gates import AcquisitionGateHeld
 from ..loop_governance import LoopGovernance
-from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
+from ..models import SessionInfo, WorktreeHandoffRequest
 from ..session_manager import (
     DaemonDrainingError,
-    ProviderTargetRefreshError,
     SessionManager,
 )
-from ..worktree_charter import _apply_bound_charter
 from .worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 from .worktree_entry import WorktreeEntry as _WorktreeEntry
 from .worktree_refresh import DiscoveryReadError, ObservedRows, WorktreeRefreshOwner, is_option_unsupported, validate_inventory
 from .worktree_refresh import is_classify_unsupported as _is_classify_unsupported
-from .worktree_holders import (
-    chosen_holder_id as _chosen_holder_id,
-    reservation_conflict_detail as _reservation_conflict_detail,
-)
 from .worktree_probe import (
-    find_worktree_entry as _find_cached_worktree_entry,
+    find_worktree_entry as _find_cached_worktree_entry,  # noqa: F401 -- native resume shares this owner boundary
     owning_agent as _owning_agent,
     probe_archived_owner as _probe_archived_owner,
     probe_live_worktree as _probe_live_worktree,
-    reassign_worktree_ownership as _reassign_worktree_ownership,
-    resolve_already_live as _resolve_already_live,
+    resolve_already_live as _resolve_already_live,  # noqa: F401 -- native resume shares this liveness boundary
 )
 
 log = logging.getLogger("agent-bridge")
@@ -485,18 +475,19 @@ def _is_local_target(
 
 async def _run_ssh(
     host: str, user: str | None, project: str, args: list[str] | None = None,
-    *, timeout: float | None = None,
+    *, timeout: float | None = None, ssh_shell: str | None = None,
 ) -> str | None:
     """Run ``<project> <args>`` on a remote machine via SSH."""
     stdout, _stderr = await _run_ssh_ex(
         host=host, user=user, project=project, args=args, timeout=timeout,
+        **({"ssh_shell": ssh_shell} if ssh_shell is not None else {}),
     )
     return stdout
 
 
 async def _run_ssh_ex(
     host: str | None, user: str | None, project: str,
-    args: list[str] | None = None, *, timeout: float | None = None,
+    args: list[str] | None = None, *, timeout: float | None = None, ssh_shell: str | None = None,
 ) -> tuple[str | None, str]:
     """Run the profile and return stdout/stderr.
 
@@ -505,8 +496,11 @@ async def _run_ssh_ex(
     """
     if not host:
         raise ValueError("SSH target requires a host (SSH alias)")
-    sub = " ".join(shlex.quote(a) for a in (args if args is not None else ["list", "--json"]))
-    remote_cmd = f"{shlex.quote(project)} {sub}"
+    from ..worktree_owner_operation import owner_ssh_command
+
+    remote_cmd = owner_ssh_command(
+        project, args if args is not None else ["list", "--json"], ssh_shell,
+    )
 
     cmd = [
         "ssh",
@@ -774,323 +768,14 @@ def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
     return None
 
 
-async def _start_fresh_worktree_session(
-    worktree_id: str, request: Request, mgr: Any, reclaim: bool
-) -> Any:
-    """Start a *fresh* owned ACP session in an existing worktree that has no
-    prior bridge session (#1683), or None if it can't be resolved/started.
-
-    Resolves the worktree's owning agent + on-disk path from the discovery
-    cache and spawns a target scoped to that worktree directory -- keeps
-    "take over a worktree whose interactive Copilot never persisted a
-    session" working instead of 404-ing after the mux Copilot was killed.
-
-    Serialized on a per-worktree lock (local/SSH targets aren't
-    hard-guarded by the SessionManager) so two concurrent resumes can't
-    each spawn a second owned controller. Returns the new (or raced-in)
-    ``Session``, or None when unresolvable (caller then 404s). Raises 409
-    on a raced-in live CLI and 502/503 on spawn failure.
-    """
-    if mgr is None:
-        return None
-    resolver = getattr(request.app.state, "resolver", None)
-    if resolver is None:
-        return None
-
-    owner_agent, entry = await _find_cached_worktree_entry(worktree_id, resolver)
-    if entry is None or owner_agent is None:
-        return None
-    if not entry.path:
-        # Defense in depth alongside the live probe's own exclusion of
-        # reaped/tombstoned records (review #3121): even a cache-sourced
-        # entry must carry a usable on-disk path before we spawn a fresh
-        # session into it.
-        log.warning(
-            "resume_worktree %s: resolved entry has no on-disk path; "
-            "refusing fresh-session fallback", worktree_id,
-        )
-        return None
-
-    lock = _fresh_start_locks.setdefault(worktree_id, asyncio.Lock())
-    async with lock:
-        # Re-check under the lock (we awaited on the crawl above): a concurrent
-        # resume may have already created the session, or a live interactive CLI
-        # may have registered -- either way, do not spawn a second controller.
-        raced = _latest_session_for_worktree(mgr, worktree_id)
-        if raced is not None:
-            # A concurrent fresh-start that connect-failed leaves a FAILED
-            # session registered -- surface that as a 502 too, not a healthy 200.
-            if getattr(raced, "status", None) == SessionStatus.FAILED:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        f"Fresh session for worktree {worktree_id} failed to "
-                        "start (connect/spawn error)"
-                    ),
-                )
-            return raced
-        if not reclaim:
-            db = getattr(request.app.state, "db", None)
-            if db is not None:
-                holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
-                if holders:
-                    # A live CLI registered during discovery -- return the same
-                    # structured 409 the top-of-resume guard uses (consumers map
-                    # it to "represent read-only"), not a misleading 404.
-                    raise HTTPException(
-                        status_code=409,
-                        detail={
-                            "reason": "live_cli_holds_worktree",
-                            "worktree_id": worktree_id,
-                            "session_id": _chosen_holder_id(holders),
-                        },
-                    )
-
-        try:
-            target = resolver.resolve(owner_agent)
-        except (KeyError, ValueError) as exc:
-            log.warning(
-                "resume_worktree %s: cannot resolve owning agent %s for a fresh "
-                "session: %s", worktree_id, owner_agent, exc,
-            )
-            return None
-        target = _apply_bound_charter(target, resolver, entry, worktree_id)
-
-        # Scope the agent's spawn target to this worktree's directory + id (the
-        # same augmentation a session roll / new-owned-chat applies), so the
-        # fresh ACP session lands in the right worktree and is discoverable by
-        # worktree id.
-        target = replace(target, worktree_id=worktree_id, cwd=entry.path)
-        try:
-            fresh = await mgr.start_session(
-                target, agent_name=owner_agent, caller_id=worktree_id,
-            )
-        except DaemonDrainingError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except Exception as exc:
-            log.warning(
-                "resume_worktree %s: fresh session start failed: %s",
-                worktree_id, exc,
-            )
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"Could not start a fresh session for worktree "
-                    f"{worktree_id}: {exc}"
-                ),
-            ) from exc
-        # start_session catches spawn/connection failures and returns a FAILED
-        # session rather than raising -- surface that as a 502, not a healthy 200.
-        if getattr(fresh, "status", None) == SessionStatus.FAILED:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"Fresh session for worktree {worktree_id} failed to start "
-                    "(connect/spawn error)"
-                ),
-            )
-        # Claim the per-worktree ownership reservation for the fresh owned
-        # session (#2912). The pre-spawn live-holder recheck above doesn't
-        # cover mgr.start_session's own (slow, awaited) window, so this
-        # result must be checked, not assumed.
-        db = getattr(request.app.state, "db", None)
-        if db is not None and not db.reserve_worktree_ownership(
-            worktree_id, fresh.session_id, now=time.time(), reclaim=reclaim
-        ):
-            try:  # 'fresh' already started -- best-effort cleanup, don't leak it.
-                await mgr.end_session(fresh.session_id, force=True)
-            except Exception:
-                log.warning("resume_worktree %s: fresh cleanup failed", worktree_id, exc_info=True)
-            raise HTTPException(
-                status_code=409, detail=_reservation_conflict_detail(db, worktree_id)
-            )
-        return fresh
-
-
 @router.post("/api/v1/worktrees/{worktree_id}/resume", response_model=SessionInfo)
 async def resume_worktree(
     worktree_id: str, request: Request, reclaim: bool = False, strict: bool = False
 ) -> SessionInfo:
-    """Resume a worktree by ensuring it has a live session.
+    """Keep the original HTTP shape while always preserving the native head."""
+    from ..worktree_native_resume import resume_native_worktree
 
-    Worktree-level convenience verb: finds the current (most recent) session
-    for the worktree and ensures it is live.
-
-    - An already-live session is returned as-is.
-    - A stopped session is resumed (ACP load_session reuses the same acp
-      session id).
-    - If that session can no longer be resumed (e.g. old/finalized
-      worktrees), fall back to starting a fresh session in the same
-      worktree directory, since it still exists on disk.
-
-    **Atomic ownership guard (#2879).** If a *fresh* live interactive
-    Copilot CLI already holds this worktree, refuse to resume it as an
-    OWNED ACP session and return **409** (``reason: live_cli_holds_
-    worktree``) -- owning it would spawn a second ``copilot`` child on the
-    same worktree and the two would contend. This is race-free, unlike a
-    consumer's best-effort represent-if-live preflight. ``reclaim=true``
-    bypasses the guard: the caller has just terminated the interactive CLI.
-
-    ``strict=true`` is the **identity-preserving contract**: a caller that
-    needs the GUARANTEE it gets back the exact existing conversation (or a
-    clear refusal), never a silent replacement. It disables BOTH fresh-
-    session fallbacks below -- a missing bridge record and a failed resume
-    each raise **409** (``reason: resume_requires_existing_session``)
-    instead of starting a new session under this worktree. Default False
-    preserves today's behavior (a taken-over or resume-exhausted worktree
-    stays usable via a fresh session).
-
-    Returns 404 if the worktree has no session at all and ``strict`` is
-    False. Under ``strict=true`` that same case returns **409**
-    (``reason: resume_requires_existing_session``), never 404 -- the
-    identity-preserving contract's refusal status, not the non-strict
-    not-found status.
-    """
-    from .sessions import _session_info
-
-    db = getattr(request.app.state, "db", None)
-    if not reclaim and db is not None:
-        holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
-        if holders:
-            chosen_id = _chosen_holder_id(holders)
-            log.info(
-                "resume_worktree %s refused: fresh live CLI %s holds it "
-                "(represent read-only)",
-                worktree_id, chosen_id,
-            )
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason": "live_cli_holds_worktree",
-                    "worktree_id": worktree_id,
-                    "session_id": chosen_id,
-                },
-            )
-
-    def _strict_refusal(reason_detail: str) -> HTTPException:
-        return HTTPException(
-            status_code=409, detail={"reason": "resume_requires_existing_session",
-                                    "worktree_id": worktree_id, "detail": reason_detail},
-        )
-
-    mgr = getattr(request.app.state, "session_manager", None)
-    session = _latest_session_for_worktree(mgr, worktree_id)
-    if session is None:
-        # No bridge session has ever existed for this worktree (e.g. a bare
-        # interactive Copilot that took no turn, or a just-taken-over worktree
-        # whose interactive CLI never persisted an ACP session). The worktree
-        # still exists on disk, so -- rather than 404 and leave a taken-over
-        # worktree unusable (#1683) -- start a *fresh* owned session in it,
-        # UNLESS the caller asked for the strict identity-preserving contract.
-        if strict:
-            raise _strict_refusal(f"no existing session for worktree {worktree_id}")
-        fresh = await _start_fresh_worktree_session(
-            worktree_id, request, mgr, reclaim
-        )
-        if fresh is not None:
-            return _session_info(fresh)
-        raise HTTPException(
-            status_code=404,
-            detail=f"No session found for worktree {worktree_id}",
-        )
-
-    # Ownership reservation (#2912): take the per-worktree ACP-ownership
-    # reservation before resuming, so a live-CLI registration must respect
-    # it. Atomic across processes; ``reclaim`` force-takes it. A False
-    # result means either a fresh live CLI raced it, or another active ACP
-    # reservation owns it -- see worktree_holders.reservation_conflict_detail.
-    if db is not None:
-        reserved = db.reserve_worktree_ownership(
-            worktree_id, session.session_id, now=time.time(), reclaim=reclaim
-        )
-        if not reserved:
-            detail = _reservation_conflict_detail(db, worktree_id)
-            log.info(
-                "resume_worktree %s refused: %s (session %s)",
-                worktree_id, detail["reason"], detail["session_id"],
-            )
-            raise HTTPException(status_code=409, detail=detail)
-
-    if await _resolve_already_live(mgr, worktree_id, session):  # live-checked, #6744
-        return _session_info(session)
-
-    try:
-        resumed = await mgr.resume_session(session.session_id)
-        return _session_info(resumed)
-    except KeyError as exc:
-        # A concurrent removal between the `_latest_session_for_worktree`
-        # lookup above and this resume call (e.g. a racing cleanup) -- under
-        # the strict identity-preserving contract this is the exact same
-        # "resume failed" case the generic ``Exception`` branch below
-        # refuses for, not a 404 a non-strict caller's singleton fallback
-        # would otherwise treat as license to spawn a fresh replacement.
-        if strict:
-            raise _strict_refusal(
-                f"resume of session {session.session_id} failed: {exc}"
-            ) from exc
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session {session.session_id} not found",
-        ) from exc
-    except ValueError as exc:
-        if isinstance(exc, AcquisitionGateHeld):
-            raise HTTPException(409, detail={"reason": "acquisition_launch_gate_held"}) from exc
-        log.info("resume_worktree %s: %s; returning current state", worktree_id, exc)
-        return _session_info(session)
-    except ProviderTargetRefreshError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=ProviderTargetRefreshError.public_message,
-        ) from exc
-    except Exception as exc:
-        # Resume failed (e.g. ACP session gone). Fall back to a fresh session
-        # in the same worktree so the worktree remains usable -- UNLESS the
-        # caller asked for the strict identity-preserving contract, in which
-        # case a failed resume must be a clear refusal, never a silent
-        # replacement conversation.
-        if strict:
-            raise _strict_refusal(
-                f"resume of session {session.session_id} failed: {exc}"
-            ) from exc
-        log.warning(
-            "resume_worktree %s: resume of %s failed (%s); starting fresh session",
-            worktree_id, session.session_id, exc,
-        )
-        restart_target = session.target
-        resolver = getattr(request.app.state, "resolver", None)
-        if resolver is not None:
-            owner_agent, cached_entry = await _find_cached_worktree_entry(
-                worktree_id, resolver,
-            )
-            if cached_entry is not None and owner_agent is not None:
-                # Re-resolve a CLEAN venue target rather than layering onto
-                # ``session.target`` -- a session created through the fresh-
-                # spawn path already carries the charter's copilot_args, so
-                # re-applying the charter on top would append them a second
-                # time on every resume-failed restart (review #3163).
-                try:
-                    restart_target = replace(
-                        resolver.resolve(owner_agent),
-                        worktree_id=worktree_id, cwd=cached_entry.path,
-                    )
-                except (KeyError, ValueError):
-                    restart_target = session.target
-                restart_target = _apply_bound_charter(
-                    restart_target, resolver, cached_entry, worktree_id,
-                )
-        try:
-            fresh = await mgr.start_session(
-                restart_target,
-                agent_name=session.agent_name, caller_id=session.caller_id,
-                caller_session_id=getattr(session, "caller_session_id", None),
-            )
-        except Exception as start_exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Could not resume or restart worktree {worktree_id}: {start_exc}",
-            ) from start_exc
-        _reassign_worktree_ownership(db, worktree_id, fresh.session_id)  # #3142
-        return _session_info(fresh)
+    return await resume_native_worktree(worktree_id, request, "acp", reclaim=reclaim, strict=strict)
 
 
 @router.post("/api/v1/worktrees/{worktree_id}/handoff", response_model=SessionInfo)
@@ -1239,6 +924,7 @@ async def _run_for_agent(
         user=target.user or config.ssh_user,
         project=config.project,
         args=args,
+        **({"ssh_shell": target.ssh_shell} if target.ssh_shell in {"pwsh", "powershell", "cmd"} else {}),
     )
 
 

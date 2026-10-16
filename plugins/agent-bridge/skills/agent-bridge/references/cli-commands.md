@@ -363,13 +363,45 @@ be discarded (or the cancel signature *persists* across sends). See the
 # The target may be an owned ACP session id, a worktree handle, or a
 # singleton repo key / agent name. Singleton repos are keyed internally by a
 # stable `<repo>@anchor` pseudo-worktree id, but the CLI accepts the repo key.
-# If the target's interactive CLI has stopped (e.g. after a reboot), resume
-# loads it as a fresh owned session -- a dormant target is just a note. If a
-# *live* interactive CLI still holds the checkout, resume refuses
-# (break-glass); stop that CLI first, then re-run with --force to take it over.
+# A stopped worktree resumes its owner's exact native head, including a CLI
+# conversation with no retained bridge record. Default: headless ACP.
+# --cli chooses a headed/muxed CLI without changing conversation identity.
+# A live conflicting holder, unknown head, pending handoff or failed native
+# load refuses. Stop the incumbent explicitly; cold resume never kills it or
+# creates replacement history, including when --force was supplied.
 <agent-bridge catalog argv[0]> resume <session-id|worktree-handle|repo-or-agent>
-<agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --force   # affirmative take-over
+<agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --cli
+```
 
+The client requires HTTP protocol 39 and uses
+`POST /api/v1/worktrees/{id}/resume/{mode}` (`mode`: `acp` or `cli`). The mode-qualified route is
+absent on older daemons, so even a downgrade after capability negotiation
+cannot select an old daemon's fresh-conversation fallback. The original
+unqualified HTTP route also applies native-preserving ACP resume; older
+clients retain its request/response shape, not unsafe replacement semantics.
+Native resume returns the durable
+conversation ID and selected mode; a CLI whose process is live but not yet
+represented reports `starting`, not invented idle readiness. Uncertain owner
+launches retain their process and exact native fence for reconciliation.
+An owner-observed CLI that is not represented in the requesting daemon is
+read-only there; its owning bridge and mux remain the control/attachment
+boundary. ACP native launch also requires the paired Worktrees owner's
+[native admission capability](../../../../agent-worktrees/README.md#native-resume-admission);
+an older owner refuses rather than launching without its fence.
+Preflight requires exact `native_admission_version: 1`; the launch also carries
+`--require-native-admission`, so an owner downgrade between preflight and
+execution cannot silently select an older unfenced command.
+Owner-fenced recovery is scoped to native-worktree resume and imported native
+series; ordinary provider and singleton session resumes retain their existing
+transport. Imported origin affinity survives a frontend restart and does not
+authorize automatic conversation recreation.
+
+Singleton anchors are not managed worktrees: their existing ACP-only first
+initialization remains available when no conversation has ever been recorded.
+`strict` refuses that initialization. Known singleton history always loads its
+exact native conversation without a fresh fallback; CLI mode is unsupported.
+
+```bash
 # Retire the current session and continue in a fresh successor in place.
 <agent-bridge catalog argv[0]> handoff <session-id|worktree-handle|repo-or-agent>
 

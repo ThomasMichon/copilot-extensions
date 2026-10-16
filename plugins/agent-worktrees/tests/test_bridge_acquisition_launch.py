@@ -12,6 +12,15 @@ from agent_worktrees import bridge_acquisition_launch as launch, embody_resume
 pytestmark = pytest.mark.contract("agent_worktrees.bridge_acquisition_launch")
 
 
+def test_explicit_native_admission_flag_is_not_a_fresh_create_alias():
+    parser = argparse.ArgumentParser()
+    launch.add_arguments(parser)
+    args = parser.parse_args([
+        "--bridge-acquisition", "fresh", "--require-native-admission",
+    ])
+    assert "existing" in launch.refusal(args, SimpleNamespace(), "worktree-a")
+
+
 @pytest.mark.parametrize("intent,expected", [("fresh", None), ("native-a", "native-a")])
 def test_exact_native_resume_without_filesystem_fallback(monkeypatch, intent, expected):
     args = argparse.Namespace(bridge_acquisition=intent, seed=None, copilot_args=[])

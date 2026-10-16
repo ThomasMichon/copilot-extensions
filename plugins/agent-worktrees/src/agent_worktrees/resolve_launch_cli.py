@@ -195,7 +195,13 @@ def _launch_profile_selection(
     if record is None:
         return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     copilot_args = getattr(args, "copilot_args", []) or []
-    if "--acp" in copilot_args or getattr(record, "resolved_interface", "cli") != "cli":
+    native_replay = resume_session is not None and resume_session in {
+        getattr(args, "native_resume_session", None),
+        getattr(args, "bridge_acquisition", None),
+    }
+    if not native_replay and (
+        "--acp" in copilot_args or getattr(record, "resolved_interface", "cli") != "cli"
+    ):
         return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if (
         getattr(record, "resolved_origin", "user") != "user"
@@ -527,6 +533,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             record.worktree_path, compose_pair=True, config=config,
         )
 
+    native_resume = getattr(args, "native_resume_session", None)
     resume_target = None
     if not getattr(args, "no_resume", False):
         resume_target = sessions.resolve_resume_target(record)
@@ -539,8 +546,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             generation_key=f"new:{record.worktree_id}",
             ordinary_profile=context.profile,
             explicit_profile=context.profile if context.profile_is_explicit else None,
-            resume_session=resume_target,
-            allocate_new=(not args.dry_run and not bool(verdict and verdict.mux_live)),
+            resume_session=native_resume or resume_target,
+            allocate_new=(not native_resume and not args.dry_run and not bool(verdict and verdict.mux_live)),
         )
     except profile_assignment.ProfileAssignmentError as exc:
         output.err(str(exc))
@@ -605,6 +612,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         merged_env[_session_bind_session_key()] = resume_target
 
     seed_pending = bool(staged_seed and not bare_resume)
+    if native_resume and (seed_pending or not no_resume):
+        return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
     if seed_pending:
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
@@ -614,6 +623,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, admission_only=True,
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
+            native_resume_session=native_resume,
         )
 
     print()

@@ -125,6 +125,7 @@ class SessionInfo(BaseModel):
     target_host: str | None = None
     project: str | None = None  # resolved repo/binstub (agent-worktrees project)
     worktree_id: str | None = None  # agent-worktrees worktree ID
+    mode: Literal["acp", "cli"] = "acp"
     elevated: bool = False
     read_only: bool = False
     status: SessionStatus

@@ -799,6 +799,26 @@ from the host's).
 
 ## Journal
 
+### 2026-10-16 - Ordinary native-head recovery implementation
+
+Following merged plan #6936, implemented #6934's ordinary worktree resume
+boundary for explicit ACP and headed/muxed CLI. Both paths retain the owner's
+exact native conversation, require exact owner metadata and fenced process
+admission, reject uncertain/live holders, and retain launch fences after
+uncertain outcomes. Imported native affinity survives frontend restart;
+ordinary provider sessions and singleton first initialization retain their
+separate contracts. Saved profile replay covers local and SSH ACP as well as
+headed native recovery without allocating a replacement assignment.
+
+Bounded targeted Bridge runs passed 473 tests (6 skipped) and 16 tests
+(1 skipped); owner admission/record coverage passed 244 tests, and combined
+profile/embodiment/resolver coverage passed 254. Independent review identified
+two profile-replay gaps, now corrected and rechecked. Ruff F/E9, scoped module
+size, and the 13-plugin install contract pass. These are simulated provider
+tests plus real cross-process exclusion coverage, not live native conversation
+acceptance. Native process-exit continuity, hosted Linux execution, dependency
+integration, PR review/merge, and the remaining Phase 6 gates stay open.
+
 ### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
 
 Moved native receipt binding into the final locked delivery section, after

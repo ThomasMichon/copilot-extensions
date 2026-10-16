@@ -796,6 +796,97 @@ class TestCmdEmbody:
         assert out["resume_session"] == resumed
         assert out["cmd"] == (["copilot", "--resume=head-1"] if resumed else ["copilot"])
 
+    @pytest.mark.parametrize("state", ["live", "unknown"])
+    def test_native_dry_run_checks_real_liveness_before_reporting_admission(
+        self, monkeypatch, capfd, tmp_path, state,
+    ):
+        from agent_worktrees import bridge_acquisition_launch
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda _: type("Rec", (), {
+                "worktree_path": "/w/wtR", "resolved_head_session": "native-original",
+            })(),
+        )
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: state)
+        rc = m.cmd_embody(_ns(
+            worktree_id="wtR", dry_run=True, bridge_acquisition="native-original",
+            copilot_args=[],
+        ))
+        assert rc == 3
+        assert "stopped" in capfd.readouterr().out
+
+    def test_native_dry_run_advertises_the_verified_owner_contract(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from agent_worktrees import bridge_acquisition_launch
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda _: type("Rec", (), {
+                "worktree_path": "/w/wtR", "resolved_head_session": "native-original",
+            })(),
+        )
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: "dead")
+        rc = m.cmd_embody(_ns(
+            worktree_id="wtR", dry_run=True, bridge_acquisition="native-original",
+            require_native_admission=True, copilot_args=[],
+        ))
+        assert rc == 0
+        result = json.loads(capfd.readouterr().out)
+        assert type(result["native_admission_version"]) is int
+        assert result["native_admission_version"] == 1
+        assert result["resume_session"] == "native-original"
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    def test_native_embody_replays_profile_without_new_allocation(
+        self, monkeypatch, capfd, tmp_path, dry_run,
+    ):
+        from agent_worktrees import bridge_acquisition_launch, profile_assignment
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda _: type("Rec", (), {
+                "worktree_path": "/w/wtR", "resolved_head_session": "native-original",
+            })(),
+        )
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: "dead")
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda _: "dead")
+        seen = []
+
+        def select(*args, **kwargs):
+            seen.append(kwargs)
+            return profile_assignment.LaunchProfileSelection(profile=None)
+
+        monkeypatch.setattr(m, "_launch_profile_selection", select)
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **kw: {
+            "ok": True, "session": "wt-wtR", "new_pane": "%5",
+        })
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", dry_run=dry_run, bridge_acquisition="native-original",
+            require_native_admission=True, copilot_args=[],
+        )) == 0
+        assert seen[0]["resume_session"] == "native-original"
+        assert seen[0]["allocate_new"] is False
+        assert json.loads(capfd.readouterr().out)["resume_session"] == "native-original"
+
+    def test_actual_mux_launch_respects_an_acp_owner_admission_fence(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from agent_worktrees import launch_admission
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            sessions, "mux_new_session", lambda *a, **k: pytest.fail("ACP owner still holds admission"),
+        )
+        with launch_admission.guard(tmp_path / "wtR.yaml"):
+            rc = m.cmd_embody(_ns(worktree_id="wtR"))
+        assert rc == 3
+        assert "admission is busy" in capfd.readouterr().out
+
     def test_create_resumes_the_head_conversation(self, monkeypatch, capfd, tmp_path):
         self._stub_existing(monkeypatch, tmp_path)
         monkeypatch.setattr(embody_resume, "session_liveness", lambda sid: "dead")

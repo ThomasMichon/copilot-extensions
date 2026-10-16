@@ -115,6 +115,8 @@ class _SessionStartMixin:
 
         if parity_fault not in {None, FAILED_ACP_HANDSHAKE_FAULT}:
             raise ValueError(f"unsupported parity fault: {parity_fault}")
+        if target.native_resume_id:
+            raise ValueError("native resume authority cannot create a fresh conversation")
         core = _core()
         # Per-session copilot args: append to the resolved target's args for
         # THIS spawn only (a fresh target copy so a shared/cached AgentConfig

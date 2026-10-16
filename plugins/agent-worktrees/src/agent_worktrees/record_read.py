@@ -159,6 +159,7 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
             "caller_worktree",
             "parent_session",
             "head_session",
+            "bound_agent",
         ):
             if key in data and data[key] is not None and not isinstance(data[key], str):
                 raise ValueError(f"Record field must be a string or null: {key}")
@@ -211,6 +212,7 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
                 else record.dispatch_attempt_raw
             ),
             "dispatch_attempt_opaque": record.dispatch_attempt_opaque,
+            "bound_agent": record.bound_agent,
         }
         for key in (
             "machine",
