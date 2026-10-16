@@ -65,6 +65,7 @@ def producer_probe(a: Any, terminal: Any, seed: dict, consent: bytes) -> tuple[d
     channel.recv.return_value = consent
     executed = []
     read_text = Path.read_text
+    synthetic_home = Path("C:/capture-home") if os.name == "nt" else Path("/capture-home")
 
     def read_settings(path: Path, *args: Any, **kwargs: Any) -> str:
         if path.name == "settings.json" and path.parent.name == ".copilot":
@@ -79,6 +80,7 @@ def producer_probe(a: Any, terminal: Any, seed: dict, consent: bytes) -> tuple[d
         executed.append((program, argv, os.getpid()))
 
     with (
+        patch.object(Path, "home", return_value=synthetic_home),
         patch.dict(os.environ, bindings, clear=True),
         patch.object(Path, "read_text", read_settings),
         patch.object(terminal.os, "getpid", return_value=321),

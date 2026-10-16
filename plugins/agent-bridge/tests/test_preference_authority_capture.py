@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -51,6 +52,39 @@ def test_preference_authority_capture_replays_terminal_and_host(capture_tool) ->
     frame["proof"]["nonce"] = "wrong"
     events, accepted = asyncio.run(capture_tool.host_probe(a, host, frame, expected))
     assert not accepted and "consent" not in events
+
+
+def test_preference_authority_capture_without_home_environment(
+    capture_tool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = Path(__file__).resolve().parents[1] / (
+        "contract/fixtures/session-host/current/wrapper-authority-v1.json"
+    )
+    seed = json.loads(path.read_text(encoding="utf-8"))
+    home_variables = ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
+    for key in home_variables:
+        monkeypatch.delenv(key, raising=False)
+
+    def unavailable_home(_path: str) -> str:
+        assert not any(key in os.environ for key in home_variables)
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(os.path, "expanduser", unavailable_home)
+    actual_reader = terminal.execution_settings
+
+    def read_without_home(*args: Any, **kwargs: Any) -> dict:
+        assert not any(key in os.environ for key in home_variables)
+        return actual_reader(*args, **kwargs)
+
+    reader = Mock(side_effect=read_without_home)
+    monkeypatch.setattr(terminal, "execution_settings", reader)
+    frame, status, executed = capture_tool.producer_probe(a, terminal, seed, b"\x01")
+    assert reader.call_count == 1
+    assert status == 0 and executed
+    assert frame["receipt"]["status"] == "resolved"
+    assert frame["receipt"]["values"] == seed["receipt"]["values"]
+    assert frame["receipt"]["sources"] == seed["receipt"]["sources"]
+    assert frame["receipt"]["authority"]["space"] == seed["receipt"]["authority"]["space"]
 
 
 def test_preference_authority_capture_refuses_dirty_source(
