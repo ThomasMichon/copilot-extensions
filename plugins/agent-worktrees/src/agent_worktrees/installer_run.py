@@ -29,7 +29,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from agent_procutil import contained_test_mode, spawn_sync_in_kill_on_close_job
+from agent_procutil import contained_test_mode, no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 from . import push_timeout
 
@@ -65,7 +65,7 @@ def _spawn(
     if os.name == "nt":
         # Without a Job the deadline could not own the tree, so refuse to run.
         strict = (
-            {"allow_breakaway": False, "creationflags": subprocess.CREATE_NO_WINDOW}
+            {"allow_breakaway": False, **no_window_kwargs()}
             if require_tree_exit else {}
         )
         return spawn_sync_in_kill_on_close_job(

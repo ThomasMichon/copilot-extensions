@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -162,11 +163,12 @@ def test_current_runtime_does_not_require_an_unused_installer(portfolio, monkeyp
 
 
 def test_native_update_preflight_prevents_real_installer_side_effect(tmp_path):
-    """Cross a real Python process, with only marketplace acquisition stubbed."""
+    """Cross a real Python process and require the actual runtime preflight failure."""
     program = textwrap.dedent(r"""
         import argparse, json, os, subprocess, sys
         from pathlib import Path
-        from agent_worktrees import __main__ as core, config, reconcile, update_cli, update_runtime
+        sys.path[:] = json.loads(sys.argv[2])
+        from agent_worktrees import __main__ as core, reconcile, update_acquisition, update_cli, update_runtime
 
         root = Path(sys.argv[1])
         engine, peer = root / "agent-worktrees", root / "agent-example"
@@ -190,26 +192,26 @@ def test_native_update_preflight_prevents_real_installer_side_effect(tmp_path):
         core._update_registered_plugins = lambda targets: True
         core._find_installed_plugin_dir = lambda: engine
         core._invocation_update_context = lambda: root
+        core._resolve_copilot = lambda: "fixture-copilot"
         reconcile.runtime_installer_environment = lambda name, path: (dict(os.environ), root / name)
         reconcile.runtime_deployed_version = lambda *a, **k: "1"
         update_runtime._machine_gate_blocks = lambda *a: False
-        run = subprocess.run
-        def acquire(argv, **kwargs):
-            if "plugin" in argv:
-                return subprocess.CompletedProcess(argv, 0, "", "")
-            return run(argv, **kwargs)
-        subprocess.run = acquire
+        update_acquisition._run_update = (
+            lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", "")
+        )
         args = argparse.Namespace(force=True, skip_modules=None, no_anchor_sync=True,
                                   no_prune_pivots=True)
         rc = update_cli._update_in_plugin_steps(args)
         assert rc == 1 and not marker.exists()
         print("PREFLIGHT_BLOCKED_WITHOUT_ACTIVATION")
     """)
+    dependency = Path(__file__).resolve().parents[3] / "libs" / "agent-procutil" / "src"
     result = subprocess.run(
-        [sys.executable, "-c", program, str(tmp_path)],
+        [sys.executable, "-c", program, str(tmp_path), json.dumps([str(dependency), *sys.path])],
         capture_output=True, text=True, encoding="utf-8", timeout=30,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "Required runtime preflight failed" in result.stdout + result.stderr
     assert "PREFLIGHT_BLOCKED_WITHOUT_ACTIVATION" in result.stdout

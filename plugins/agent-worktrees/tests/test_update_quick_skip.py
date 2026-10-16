@@ -27,6 +27,9 @@ from agent_worktrees import reconcile
 from agent_worktrees import update_runtime_plan
 
 
+pytestmark = pytest.mark.usefixtures("payload_subprocess_double")
+
+
 class _Completed:
     def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
         self.returncode = returncode

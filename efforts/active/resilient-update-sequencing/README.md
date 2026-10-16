@@ -808,3 +808,31 @@ achieved by rearranging today's combined installer invocations.
   changes require a full clean-room build. Hosted POSIX/lint, exact-head review
   and CI remain publication gates. Live rollout is not authorized by this
   source slice and remains a separate running-state obligation.
+
+### 2026-10-16 - Timeout recovery review corrections
+- #6932's first review identified one high and three medium issues. Replaced
+  the raw Windows creation flag with the shared headless helper, as required
+  by the actual failing CI guard. Local headless admission passes for all
+  thirteen adopters; no exemption or rule change was introduced.
+- Extended explicit subprocess-double routing to quick-skip and pivot-pruning
+  consumers. The embedded native preflight process now stubs the acquisition
+  adapter directly, pins a synthetic CLI and requires the actual required
+  preflight diagnostic, not just exit 1 and an absent activation marker.
+  Its fresh interpreter resolves the declared canonical process helper rather
+  than an older already-installed test helper.
+- Added an opt-in live desktop regression using the existing Win32 window and
+  foreground observer: two windowless-parent cycles, real console descendants,
+  forced deadlines and native process-handle exit checks. The install contract
+  names the exact command and prerequisites. The current host has no observable
+  foreground window, so that lane reports unavailable rather than claiming
+  headlessness proof; it stays outside the fast required lane.
+- Current-head review and hosted CI remain required. Unsupported POSIX/install
+  timeout recovery, canonical preparation/readiness, release and running-state
+  acceptance remain open.
+- Final eleven-file review-corrected coverage passes 340 cases with eight
+  explicit platform/desktop skips. The enlarged selection exceeded the
+  existing 300-second single-sub-suite budget, so the existing runner partitions
+  exactly the same files into disjoint six- and five-file groups: 133 passed
+  with seven skips in 201.94 seconds, then 207 passed with one skip in 220.56
+  seconds. Per-test, 300-second sub-suite and 900-second aggregate limits are
+  unchanged; no assertion, case or required CI lane was dropped.

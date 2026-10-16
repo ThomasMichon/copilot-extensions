@@ -1241,6 +1241,14 @@ Retried failures remain advisory attempt history; the final required outcome
 decides the run. This is in-run recovery, not a persistent acquisition
 checkpoint or permission to retry combined runtime activation.
 
+From a source checkout on an interactive Windows desktop, run
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_update_payload_windowless.py`
+for the opt-in live launch regression. It observes two `pythonw.exe` parent
+cycles with real console descendants, requires no new visible windows or
+foreground transitions, forces owner deadlines and checks native child handles
+are signalled. A missing observable desktop is reported as unavailable, not
+headlessness proof. This host-dependent case is outside the fast guard lane.
+
 ### What the marketplace vendors (copied vs loaded)
 
 `copilot plugin update` copies the **entire git-tracked plugin folder** — the
