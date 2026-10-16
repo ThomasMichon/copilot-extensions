@@ -200,6 +200,10 @@ materializes a standalone snapshot with both installer-engine files and all
 declared local libraries; local-checkout stamps use content-addressed snapshot
 identities over the materialized tree. Unchanged stamps reuse one snapshot,
 while source, engine or library edits publish a new immutable identity.
+Windows runtime builds use the snapshot's own dependency-policy helper for
+both the library pre-installs and the selected package extras. This attributes
+the copied sources without widening the caller's trusted roots or relaxing
+dependency seasoning; a missing snapshot helper aborts the build.
 Delayed same-version local stamps reject a superseded snapshot candidate before
 publishing markers or launchers. POSIX
 retains its owning-payload pointer. First use primarily fetches and runs the
