@@ -1261,8 +1261,9 @@ def test_unsupported_explicit_source_reports_a_structured_decline(capsys):
 
 @pytest.mark.parametrize("suffix", ["", ".git"])
 @pytest.mark.parametrize("account", [None, "mapped"])
+@pytest.mark.parametrize("authority", ["example.test", "github.com:443", "enterprise.test:8443"])
 def test_fill_discovery_and_replay_keep_the_actual_source_path(
-    tmp_path, monkeypatch, suffix, account,
+    tmp_path, monkeypatch, suffix, account, authority,
 ):
     config = _clean_git_env(monkeypatch, tmp_path)
     path = "team/repo" + suffix
@@ -1271,11 +1272,14 @@ def test_fill_discovery_and_replay_keep_the_actual_source_path(
         if account is None else ""
     )
     helper = (
-        '!f() { matched=; while IFS= read -r line; do '
+        '!f() { matched=; host_matched=; while IFS= read -r line; do '
         + username_guard
+        + 'if test "$line" = host='
+        + authority
+        + '; then host_matched=1; fi; '
         + 'if test "$line" = path='
         + path
-        + '; then matched=1; fi; done; if test "$matched" = 1; '
+        + '; then matched=1; fi; done; if test "$matched$host_matched" = 11; '
         + "then printf '%s\\n' username=mapped "
         + router.SECRET_KEY
         + "=fixture; fi; }; f"
@@ -1298,7 +1302,7 @@ def test_fill_discovery_and_replay_keep_the_actual_source_path(
             return process.run(argv, **kwargs)
         return probe(argv, **kwargs)
 
-    item = auth.source("source", "https://example.test/" + path, cwd=tmp_path)
+    item = auth.source("source", f"https://{authority}/{path}", cwd=tmp_path)
     report = auth.report(
         [item], env=dict(os.environ), runner=run, account_for=lambda _: account
     )
@@ -1308,7 +1312,7 @@ def test_fill_discovery_and_replay_keep_the_actual_source_path(
         ["git", "credential", "fill"],
         cwd=tmp_path,
         env=auth.fallback(report).environment(os.environ),
-        input=f"protocol=https\nhost=example.test\npath={path}\n\n",
+        input=f"protocol=https\nhost={authority}\npath={path}\n\n",
     )
     assert result.status == 0, result.stderr
     assert router.parse_attributes(result.stdout)[router.SECRET_KEY] == "fixture"
