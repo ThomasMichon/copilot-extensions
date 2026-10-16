@@ -47,6 +47,11 @@ def add_parser(sub) -> None:
         "(identity-bound duplicate/stale generation reap). Default: report only.",
     )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
+    sp.add_argument(
+        "--guest-distribution", metavar="NAME",
+        help="Inspect only the designated WSL guest/default. With --fix, register "
+        "a verified named guest entry; never change the host default or repair records.",
+    )
     from .tracking_yaml_repair import add_doctor_arguments
     add_doctor_arguments(sp)
     sp.add_argument(

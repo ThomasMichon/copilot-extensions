@@ -36,6 +36,17 @@ scalar read; the shortcut does not change that targeting contract.
 
 ## Session machine identity
 
+For entry-path-independent WSL installation identity, use
+`doctor --guest-distribution "Example Distro" --json`. This is a targeted
+report: it never enters general session/record repair. On Windows it checks
+the designated name against the current user's WSL default; inside the guest
+it checks the guest registration and reports host-default evidence unavailable.
+`--fix` can enroll only a verified named direct guest entry. It is idempotent
+from SSH once enrolled, never changes the OS default, and cannot be combined
+with other doctor repair scopes. The shared
+[guest-identity contract](../../../libs/installation-context/README.md#wsl-guest-identity)
+owns enrollment, refusal and cross-runner mechanics.
+
 The existing `instructions/agent-worktrees/session-guidance.instructions.md`
 file in the exact Copilot session contains a compact **Current machine
 identity** block. `hostname` is the observed OS hostname; `machine` is the

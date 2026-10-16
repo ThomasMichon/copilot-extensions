@@ -143,8 +143,9 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
   adopting environments; verify the selected running versions.
 
 ### Phase 3b - Entry-path-independent guest installation identity
-- [ ] Review the [#6945 guest-identity proposal](guest-execution-identity.md)
-  before introducing new registration or ownership behavior.
+- [x] Review the [#6945 guest-identity proposal](guest-execution-identity.md)
+  before introducing new registration or ownership behavior; #6993 merged
+  after exact-head approval and passing required checks.
 - [ ] Establish one authoritative guest identity across direct, SSH and
   supervised entry paths, preserving independent installation and execution
   spaces; do not derive the caller from an incumbent ownership record.
@@ -200,6 +201,31 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-16 - Guest identity candidate prepared; POSIX proof pending
+- The shared Python, Bash and PowerShell primitive now supports explicit
+  guest enrollment and read-only status, without consulting incumbent runtime
+  ownership. Native/container detection and distribution conflicts retain
+  independent-space refusal.
+- Worktrees adds a targeted `doctor --guest-distribution` surface. Report mode
+  does not create enrollment; `--fix` enrolls only a matching named direct
+  guest entry and never repairs unrelated records or changes the OS default.
+- Native Windows core/PowerShell boundaries pass 24 cases with one POSIX-only
+  skip; targeted doctor passes 13, including real primitive enrollment and
+  repeated SSH-style no-write checks. Existing context and vendoring coverage
+  passes 45 with five platform skips. These counts are separate rosters.
+- Local remote POSIX test invocation was denied before execution. That is a
+  validation-surface blocker, not a product verdict. All three POSIX writers
+  and readers remain in the existing hosted smoke selection; the candidate
+  stays draft until that native proof passes. No installed enrollment,
+  release, rollout or acceptance is claimed.
+
+### 2026-10-16 - Guest-identity proposal merged; implementation starts
+- #6993 merged as `7887dfb2c6f40e556a298f015e1d629f63a89e63`.
+  The source worktree was pulled forward through the supported sync path.
+- Phase 3b now implements the reviewed identity/registration and default
+  diagnostic boundary. The canonical effort remains Active; proposal approval
+  is not implementation, release qualification or installed acceptance.
 
 ### 2026-10-16 - Installed compatibility succeeds; guest identity follow-up proposed
 - The operator confirmed a successful real launch after the authorized

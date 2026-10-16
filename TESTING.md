@@ -9,6 +9,18 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+Guest-environment coverage runs the actual Python, Bash and PowerShell CLIs
+with only operating-system observations substituted (account home, guest kind
+and machine-id). Each writer's private registration is read repeatedly by all
+three runners with and without direct-entry variables. Exact profile snapshots,
+registration mode, foreign/conflicting identity and malformed-version controls
+retain real filesystem, parser, lock and atomic-write behavior. All three
+writer parameters participate in `installation_context_smoke` on native POSIX;
+native Windows tests separately cross both installed PowerShell hosts and
+prove inherited WSL/OS labels do not confer guest identity. Targeted Worktrees
+doctor tests cover explicit enrollment, repeated SSH-style no-write calls and
+refusal before unrelated repair machinery.
+
 The shared `agent-procutil` daemon-broker unit suite covers authenticated frame
 bounds, WMI's JSON-stdin environment boundary, containment opt-out, partial-start
 cleanup and adoption failures. Its Windows-only native regression launches from

@@ -358,6 +358,9 @@ def cmd_backfill_sessions(args) -> int:
 
 def cmd_doctor(args) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
+    if getattr(args, "guest_distribution", None) is not None:
+        from .guest_environment_cli import targeted_doctor
+        return targeted_doctor(args)
     if getattr(args, "repair_creation", None) is not None or getattr(args, "seed_id", None):
         from .creation_tail_repair import targeted_doctor
         return targeted_doctor(args)
