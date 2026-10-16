@@ -206,7 +206,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
-          "sha256": "d47d925011c895a3c6cbfd047d6ca8b409551fa92ed2aece639ffe07dcc99c3e",
+          "sha256": "0eba2e4febff9aee01d8950ace8d1a4023927f172e184aa812c5e9adb7cee0a8",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -748,7 +748,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-37.json",
-          "sha256": "eacd8addadc27ab70af750d05a2df099b5a20415a4442a3422e9741470677aa6",
+          "sha256": "a3e2aead46e2f773b8bbfb0d47daf89a0045e6aaf4e1ed1a37d6dd8ecaf546bd",
           "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
           "generation": 37
         },
@@ -2309,6 +2309,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
           "source_git_blob": "d43bb04d1ba5fa05191bd84eeba57a953b8cb1bb",
           "capture_method": "Capture committed current-roster source-evidence corrections; deterministic regressions preserve observation age and last-good rows, and real source CLI dispatch cannot acknowledge a live refresh."
+        },
+        {
+          "commit": "b0799ad2c0296011f0d3c8b68bb9a8edac403e7d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "d155a2e05781484053fee33253fcbf053edaf97e",
+          "capture_method": "Re-attest the committed source after the supported Python 3.10 async-timeout correction; the version-independent regression preserves pending-holder ownership and the timed-out outcome."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
