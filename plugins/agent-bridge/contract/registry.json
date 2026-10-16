@@ -182,7 +182,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
-          "sha256": "f92a052889feda87ce29dd63b4e3f2fa42b8a21fc1dbae699a4f6a24ecbd0a8e",
+          "sha256": "6d60b6aa410991b2f45baae5187d9d549b9ca896bd0954a9881c4b2ca1b9e082",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -780,6 +780,12 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-37.json",
           "sha256": "65922704d1d7da731524b11bee54aca8b46f72598e3cdd0992d15cb75e3f700c",
           "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-37.json",
+          "sha256": "46d9ac3f68871931a1b4b86c45f96cda379413748fb30d0d29a4d4a31775bd83",
+          "role": "Generation-37 keyed workspace finalization refuses retryably without replacing allocation or native history",
           "generation": 37
         },
         {
@@ -4011,6 +4017,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
           "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
           "capture_method": "Re-attest unchanged HTTP-40 packets against combined committed native-recovery and SSH-profile producers; real OpenSSH effective-config and encoded-command tests cover routing without a network connection."
+        },
+        {
+          "commit": "95cdb907d5ad1276a47960630a21b0e27d84a0bc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "27fee5e86ead7bbe780b194956e60c3d25c0dbe6",
+          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after clarifying optional-host validation and the retained legacy user keyword; native profile regressions retain both configured identities."
+        },
+        {
+          "commit": "f00cc454af9e1f3ed9b0d385672a00918cc75b4a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Capture the production start_request adapter's retryable finalizing refusal with the isolated exact-owner creation rig; retain historical provider-creation captures and the original allocation/native-history contract."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",

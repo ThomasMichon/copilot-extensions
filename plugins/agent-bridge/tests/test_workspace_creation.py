@@ -1,6 +1,7 @@
 """Standalone creation retains one allocation, native session and first turn."""
 
 import asyncio
+import json
 import os
 import sys
 import subprocess
@@ -12,11 +13,12 @@ from pathlib import Path
 
 import pytest
 from agent_procutil import no_window_kwargs
+from fastapi import HTTPException
 
 from agent_bridge import workspace_creation, acquisition_authority
 from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge.client import BridgeClient, BridgeClientError
-from agent_bridge.models import SessionStatus
+from agent_bridge.models import SessionStatus, StartSessionRequest
 from agent_bridge.session_manager import Session
 from agent_bridge.transport import SpawnTarget
 from test_acquisition_runtime import rig as _connected_rig
@@ -60,6 +62,32 @@ def creation_rig(rig, monkeypatch, tmp_path):
     rig.row = row
     rig.target = SpawnTarget(type="local", project="test-project")
     return rig
+
+
+@pytest.mark.asyncio
+async def test_finalizing_workspace_matches_frozen_retryable_http_refusal(creation_rig):
+    fixture = json.loads(
+        (Path(__file__).resolve().parents[1] / "contract/fixtures/http/current"
+         / "workspace-finalization-retry-generation-37.json").read_text(encoding="utf-8")
+    )
+    rig = creation_rig
+    rig.row["status"] = "finalizing"
+    request = StartSessionRequest.model_validate(fixture["request"]["json"])
+    with pytest.raises(HTTPException) as refused:
+        await workspace_creation.start_request(
+            request, rig.manager, rig.target,
+            agent_name=None, env={}, source="caller-settings",
+        )
+    assert {
+        "status": refused.value.status_code,
+        "json": {"detail": refused.value.detail},
+    } == fixture["response"]
+    assert rig.db.execute_read(
+        "SELECT state FROM workspace_embodiments"
+    )[0]["state"] == "allocated"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
 
 
 @pytest.mark.asyncio
