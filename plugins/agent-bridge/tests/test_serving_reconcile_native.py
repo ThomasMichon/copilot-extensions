@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -67,11 +68,18 @@ def test_serving_reconcile_native_first_touch_never_activates(tmp_path, body, co
 
 
 @pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
-def test_serving_reconcile_native_current_daemon_keeps_same_process(tmp_path):
+@pytest.mark.parametrize("bind", ["127.0.0.1", "::1"])
+def test_serving_reconcile_native_current_daemon_keeps_same_process(tmp_path, bind):
+    if bind == "::1":
+        try:
+            with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as probe:
+                probe.bind((bind, 0))
+        except OSError:
+            pytest.skip("IPv6 loopback is unavailable")
     root = tmp_path / "runtime"
     root.mkdir()
     (root / "config.yaml").write_text(
-        "schema_version: 2\nport: 0\nbind: 127.0.0.1\n"
+        f"schema_version: 2\nport: 0\nbind: '{bind}'\n"
         "enable_credential_relay: false\ntopologies: {}\n"
         "retention:\n  enabled: false\n",
     )
@@ -81,6 +89,23 @@ def test_serving_reconcile_native_current_daemon_keeps_same_process(tmp_path):
     # four seconds left for cleanup inside the runner's unchanged 30-second cap.
     deadline = time.monotonic() + 25
     with (root / "fixture.log").open("wb") as log, ExitStack() as cleanup:
+        client_out = cleanup.enter_context((root / "client.out").open("wb"))
+        client_err = cleanup.enter_context((root / "client.err").open("wb"))
+        # Import in a separate cold CLI process while the daemon imports.
+        # The barrier prevents any command execution before verified readiness.
+        client, client_job = spawn_sync_in_kill_on_close_job(
+            [
+                sys.executable, "-u", "-c",
+                "import sys; from agent_bridge.__main__ import main; "
+                "sys.stdin.buffer.read(1); main()",
+                "deploy", "--reconcile-serving", "--json",
+                *(["--probe-serving"] if bind == "::1" else []),
+            ],
+            require_job=sys.platform == "win32", allow_breakaway=False,
+            cwd=root, env=_environment(root), stdin=subprocess.PIPE,
+            stdout=client_out, stderr=client_err, **no_window_kwargs(),
+        )
+        cleanup.callback(_stop_fixture, client, client_job)
         daemon, job = spawn_sync_in_kill_on_close_job(
             [sys.executable, "-u", "-m", "agent_bridge", "start"],
             require_job=sys.platform == "win32", allow_breakaway=False,
@@ -88,7 +113,8 @@ def test_serving_reconcile_native_current_daemon_keeps_same_process(tmp_path):
             **no_window_kwargs(),
         )
         cleanup.callback(_stop_fixture, daemon, job)
-        while time.monotonic() < deadline - 8:
+        last_probe = None
+        while time.monotonic() < deadline:
             table = routing.read_table(root) or {}
             row = table.get("active")
             if isinstance(row, dict):
@@ -98,22 +124,36 @@ def test_serving_reconcile_native_current_daemon_keeps_same_process(tmp_path):
                         with urllib.request.urlopen(
                             f"{endpoint.base_url}/health", timeout=0.25,
                         ) as response:
-                            if json.load(response).get("ready") is True:
+                            ready = json.load(response).get("ready")
+                            last_probe = f"HTTP {response.status}, ready={ready!r}"
+                            if ready is True:
                                 break
-                    except (OSError, ValueError):
-                        pass
+                    except (OSError, ValueError) as exc:
+                        last_probe = f"{type(exc).__name__}: {exc}"
             assert daemon.poll() is None, (root / "fixture.log").read_text()
             time.sleep(0.05)
         else:
-            pytest.fail(f"fixture daemon never became ready: {(root / 'fixture.log').read_text()}")
+            pytest.fail(
+                f"fixture daemon never became ready: row={row!r}, probe={last_probe}; "
+                f"{(root / 'fixture.log').read_text()}"
+            )
         reference = process_exit.open_process(
             row["pid"], diagnostics.process_start_time(row["pid"]),
         )
         cleanup.callback(reference.close)
-        result = _run_reconcile(root, timeout=min(12, deadline - time.monotonic()))
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert json.loads(result.stdout)["serving_reconcile"] == "current"
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, "daemon startup exhausted the shared consumer budget"
+        assert client.poll() is None, (root / "client.err").read_text()
+        assert client.stdin is not None
+        client.stdin.write(b"\n")
+        client.stdin.close()
+        client.wait(timeout=min(12, remaining))
+        stdout = (root / "client.out").read_text()
+        stderr = (root / "client.err").read_text()
+        assert client.returncode == 0, stdout + stderr
+        assert json.loads(stdout)["serving_reconcile"] == "current"
         assert (routing.read_table(root) or {}).get("active") == row
+        assert not (root / "update-in-progress").exists()
         assert reference.wait(0) is False
         BridgeClient(endpoint.base_url, token, timeout=1).shutdown()
         assert reference.wait(2), "owned fixture daemon did not gracefully stop"

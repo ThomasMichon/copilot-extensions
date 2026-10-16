@@ -188,6 +188,8 @@ def _cmd_deploy(
     from .config import config_dir, load_config, load_or_create_auth_token
     from .routing_state import active_route_is_forward
 
+    if getattr(args, "probe_serving", False) and not getattr(args, "reconcile_serving", False):
+        raise ValueError("serving probe requires --reconcile-serving")
     if getattr(args, "reconcile_serving", False) and serving is None:
         if conditional is not None:
             raise ValueError("serving reconcile cannot replace a conditional repair")
@@ -250,10 +252,10 @@ def _cmd_deploy(
         token = existing_auth_token(serving.root)
     else:
         token = load_or_create_auth_token()
-    host = cfg.bind if cfg.bind not in ("0.0.0.0", "") else "127.0.0.1"
+    host = "::1" if cfg.bind == "::" else cfg.bind if cfg.bind not in ("0.0.0.0", "") else "127.0.0.1"
 
     def pick_free_port() -> int:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
         s.bind((host, 0))
         port = s.getsockname()[1]
         s.close()
@@ -269,7 +271,9 @@ def _cmd_deploy(
 
     def health_check(h: str, port: int) -> bool:
         try:
-            with urllib.request.urlopen(f"http://{h}:{port}/health", timeout=2) as resp:
+            with urllib.request.urlopen(
+                f"http://{routing.format_authority(h, port)}/health", timeout=2,
+            ) as resp:
                 if resp.status != 200:
                     return False
                 body = json.loads(resp.read().decode("utf-8"))
@@ -483,6 +487,10 @@ def add_deploy_cutover_flags(
         parser.add_argument(
             "--reconcile-serving", action="store_true",
             help="Installer reconcile: cut over only an adopted healthy older daemon; never cold-start, force retirement or repair stale cutovers.",
+        )
+        parser.add_argument(
+            "--probe-serving", action="store_true",
+            help="Installer-only read-only serving check; exits 10 when an older daemon needs a transition.",
         )
     # `default=argparse.SUPPRESS`, not `False`: the top-level `--json` flag
     # (`build_parser()`) already sets `args.json` in the shared Namespace

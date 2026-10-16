@@ -96,11 +96,11 @@ class ServingRuntime:
             and current.generation >= expected.generation
             and replace(current, generation=expected.generation) == expected
         )
-        if active_route_is_forward(active) or (
+        if expected is None or active_route_is_forward(active) or (
             not restored and current != expected and (current is None or predecessor != expected)
         ):
             raise ServingReconcileError("serving ownership changed before predecessor control")
-        health = _core()._service_health_on_port(self.route["port"])
+        health = _core()._service_health_on_port(expected.port, host=expected.client_host)
         self.verify_health(health)
         if restored and (
             health["slot"].get("role") != "active" or health["slot"].get("active") != active
@@ -144,7 +144,7 @@ def observe_serving(root: Path) -> Iterator[ServingRuntime | None]:
         ):
             raise ServingReconcileError("active route does not identify an adopted local daemon")
         core = _core()
-        health = core._service_health_on_port(endpoint.port)
+        health = core._service_health_on_port(endpoint.port, host=endpoint.client_host)
         slot = health.get("slot") if isinstance(health, dict) else None
         if (
             not isinstance(health, dict)
@@ -195,8 +195,9 @@ def guarded_client(serving: ServingRuntime, base_url: str, token: str, timeout: 
             return response
 
     endpoint = routing.Endpoint.from_dict(serving.route)
-    client_type = ServingClient if endpoint is not None and base_url == endpoint.base_url else BridgeClient
-    return client_type(base_url, token, timeout=timeout)
+    if endpoint is not None and base_url == endpoint.base_url:
+        return ServingClient(base_url, token, timeout=timeout, connect_grace=0)
+    return BridgeClient(base_url, token, timeout=timeout)
 
 
 def reconcile_serving(args: argparse.Namespace) -> None:
@@ -204,6 +205,7 @@ def reconcile_serving(args: argparse.Namespace) -> None:
     from .config import config_dir
     from .venue_cli import _cmd_deploy
 
+    code = 0
     try:
         if getattr(args, "force", False) or getattr(args, "recover", False):
             raise ServingReconcileError("serving reconcile cannot force retirement or run recovery")
@@ -215,8 +217,11 @@ def reconcile_serving(args: argparse.Namespace) -> None:
             if state == "newer":
                 raise ServingReconcileError("serving daemon is newer than the selected runtime")
             if state == "older":
-                _cmd_deploy(args, serving=serving)
-                return
+                if getattr(args, "probe_serving", False):
+                    code = 10
+                else:
+                    _cmd_deploy(args, serving=serving)
+                    return
             result = {"ok": True, "serving_reconcile": state, "skipped": serving is None}
     except ServingReconcileError as exc:
         result = {"ok": False, "error": str(exc)}
@@ -226,4 +231,4 @@ def reconcile_serving(args: argparse.Namespace) -> None:
         print(f"[OK] Serving runtime reconcile: {result['serving_reconcile']} (no cutover).")
     else:
         print(f"[FAIL] Serving runtime reconcile: {result['error']}", file=sys.stderr)
-    sys.exit(0 if result["ok"] else 1)
+    sys.exit(code if result["ok"] else 1)

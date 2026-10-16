@@ -97,13 +97,15 @@ def _service_is_running() -> bool:
 
 
 def _service_health_on_port(
-    port: int, *, timeout: float = 2.0
+    port: int, *, timeout: float = 2.0, host: str = "127.0.0.1"
 ) -> dict[str, Any] | None:
     """Return one verified agent-bridge health payload for *port*."""
     import http.client
     import urllib.request
 
-    url = f"http://127.0.0.1:{port}/health"
+    from zdd.routing import format_authority
+
+    url = f"http://{format_authority(host, port)}/health"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             if resp.status != 200:

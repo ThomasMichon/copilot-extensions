@@ -34,6 +34,13 @@ refusal, not the initial forwarded-installation no-op. Native predecessor exit
 is confirmed before the cutover lock and durable breadcrumb are released;
 unresolved retirement or retained cutover evidence also blocks a later
 healthy/current shortcut without attempting automatic recovery.
+The installers first use `--reconcile-serving --probe-serving` read-only:
+exit 0 means no transition, exit 10 identifies an older serving daemon, and
+other exits fail. Only exit 10 acquires the existing reference-counted
+`update-in-progress` marker around a freshly guarded reconcile, with cleanup
+on success or failure. Current, inactive and forwarded no-ops remain marker-free.
+Health observation and control probe the routed client address, including IPv6;
+the captured predecessor's client never retries a connection into a replacement.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`

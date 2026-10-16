@@ -2451,10 +2451,22 @@ _update_core() {
 }
 
 _reconcile_serving_runtime() {
-    "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --health-timeout 180 || {
+    local rc=0
+    "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --probe-serving --health-timeout 180 || rc=$?
+    [[ "$rc" != 0 ]] || return 0
+    if [[ "$rc" != 10 ]]; then
+        _fail "Serving runtime reconcile failed (probe exit $rc); completed slot left unchanged."
+        return 1
+    fi
+    trap '_clear_update_marker; _exit_install_lock' EXIT
+    _write_update_marker
+    rc=0
+    "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --health-timeout 180 || rc=$?
+    _clear_update_marker
+    if [[ "$rc" != 0 ]]; then
         _fail "Serving runtime reconcile failed; completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
         return 1
-    }
+    fi
 }
 
 do_update() {

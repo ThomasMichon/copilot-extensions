@@ -229,6 +229,34 @@ def test_serving_reconcile_rejects_force_and_recovery(serving, monkeypatch, flag
     process_exit.open_process.assert_not_called()
 
 
+@pytest.mark.parametrize(("running", "code"), [("1.2.2", 10), ("1.2.3", 0)])
+def test_serving_probe_never_starts_a_transition(serving, monkeypatch, running, code):
+    import agent_bridge
+    from agent_bridge import config, venue_cli
+
+    root, row, health, _, _ = serving
+    row["version"] = health["version"] = running
+    health["slot"]["active"] = row.copy()
+    route = root / "active.json"
+    route.write_text(json.dumps({"active": row}))
+    before = {
+        path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()
+    }
+    monkeypatch.setattr(config, "config_dir", lambda: root)
+    monkeypatch.setattr(agent_bridge, "__version__", "1.2.3")
+    deploy = Mock(side_effect=AssertionError("read-only probe attempted deployment"))
+    monkeypatch.setattr(venue_cli, "_cmd_deploy", deploy)
+    with pytest.raises(SystemExit) as result:
+        reconcile.reconcile_serving(Namespace(
+            force=False, recover=False, json=True, probe_serving=True,
+        ))
+    assert result.value.code == code
+    deploy.assert_not_called()
+    assert {
+        path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()
+    } == before
+
+
 def test_serving_reconcile_rechecks_port_owner_before_control(serving, monkeypatch):
     from agent_bridge.client import BridgeClient
 
@@ -287,6 +315,44 @@ def test_serving_reconcile_never_cold_starts_after_endpoint_probe_fails(serving,
     spawn.assert_not_called()
 
 
+@pytest.mark.parametrize("path", ["/api/v1/drain", "/api/v1/undrain", "/api/v1/shutdown"])
+def test_serving_control_never_retries_into_a_replacement(serving, monkeypatch, path):
+    import urllib.error
+    import urllib.request
+
+    from agent_bridge.client import BridgeClient, BridgeConnectionError, DEFAULT_RESTART_GRACE
+
+    root, row, health, reference, _ = serving
+    attempts = []
+
+    def urlopen(request, **_kwargs):
+        attempts.append(request)
+        if len(attempts) == 1:
+            reference.wait.return_value = True
+            health["slot"]["pid"] = 9999
+            raise urllib.error.URLError(ConnectionRefusedError("captured predecessor exited"))
+        response = MagicMock(status=200)
+        response.__enter__.return_value = response
+        response.read.return_value = b'{"shutting_down":true}'
+        return response
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    with reconcile.observe_serving(root) as observed:
+        client = reconcile.guarded_client(
+            observed, f"http://127.0.0.1:{row['port']}", "test-credential", 1,
+        )
+        with pytest.raises(BridgeConnectionError):
+            client._request("POST", path)
+        ordinary = reconcile.guarded_client(
+            observed, "http://127.0.0.1:9012", "test-credential", 1,
+        )
+        assert type(ordinary) is BridgeClient
+        assert ordinary._connect_grace == DEFAULT_RESTART_GRACE
+    assert len(attempts) == 1
+    scheme = "Be" + "arer "
+    assert attempts[0].get_header("Authorization") == scheme + "test-credential"
+
+
 def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, monkeypatch):
     from zdd import breadcrumb, cutover, routing
     from agent_bridge import config, venue_cli
@@ -325,7 +391,8 @@ def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, 
 
 @pytest.mark.parametrize("scenario", [
     "success", "retirement-pending", "shutdown-error", "drain-refused", "successor-unhealthy",
-    "rollback-owner-changed", "forward-race",
+    "rollback-owner-changed", "forward-race", "cleanup-drain-refused",
+    "cleanup-successor-unhealthy", "cleanup-changed-previous", "cleanup-race-previous",
 ])
 def test_serving_reconcile_actual_cutover_requires_native_retirement(
     serving, monkeypatch, scenario,
@@ -366,21 +433,29 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
         core._active_endpoint_is_forward.side_effect = forward_changed
     handle = Mock(pid=2222)
     handle.poll.side_effect = lambda: 0 if state["successor_stopped"] else None
-    handle.terminate.side_effect = lambda: state.update(successor_stopped=True)
+    def terminate():
+        if scenario.startswith("cleanup-"):
+            assert routing.clear_if_owner(root, handle.pid)
+            if scenario == "cleanup-changed-previous":
+                (root / "active.json").write_text(json.dumps({"previous": {
+                    **row, "pid": 3333, "generation": 20, "process_start_time": "999999",
+                }}))
+        state["successor_stopped"] = True
+    handle.terminate.side_effect = terminate
     core._launch_bridge_daemon.return_value = handle
 
-    def health(port):
-        active = routing.read_table(root)["active"]
+    def health(port, **_kwargs):
+        active = routing.read_table(root).get("active")
         pid = row["pid"] if port == row["port"] else 2222
         return {
             "status": (
                 "failed" if pid == 2222 and state["draining"]
-                and scenario == "successor-unhealthy" else "ok"
+                and scenario.endswith("successor-unhealthy") else "ok"
             ),
             "service": "agent-bridge", "ready": True,
             "version": row["version"] if pid == row["pid"] else "1.2.3",
             "draining": pid == row["pid"] and state["draining"],
-            "slot": {"pid": pid, "role": "active" if active["pid"] == pid else "passive",
+            "slot": {"pid": pid, "role": "active" if active and active["pid"] == pid else "passive",
                      "active": active},
         }
 
@@ -406,7 +481,9 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
                 (root / "active.json").write_text(json.dumps({"active": {
                     **row, "pid": 3333, "generation": 20, "process_start_time": "999999",
                 }}))
-            if scenario in ("drain-refused", "rollback-owner-changed"):
+            if scenario.endswith("drain-refused") or scenario in (
+                "rollback-owner-changed", "cleanup-changed-previous", "cleanup-race-previous",
+            ):
                 return {"drained": False, "clean": False, "forced": False, "busy_sessions": ["busy"]}
             return {"drained": True, "clean": True, "forced": False, "busy_sessions": []}
         if path == "/api/v1/undrain":
@@ -431,24 +508,39 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
             return routing.read_table(directory)
 
         def read_active_endpoint(self, directory):
-            return routing.Endpoint.from_dict(self.read_table(directory)["active"])
+            active = self.read_table(directory).get("active")
+            return routing.Endpoint.from_dict(active) if active else None
 
         def reap_stale_active(self, *_args, **_kwargs):
             pass
 
         def publish_active_with_previous_guarded(self, directory, **kwargs):
-            active = self.read_table(directory)["active"]
+            table = self.read_table(directory)
+            if (
+                scenario == "cleanup-race-previous" and kwargs["pid"] == row["pid"]
+                and table.get("active") is None
+            ):
+                table = {"previous": {
+                    **row, "pid": 3333, "generation": 20, "process_start_time": "999999",
+                }}
+                (directory / "active.json").write_text(json.dumps(table))
+            active = table.get("active")
             if kwargs.get("refuse_current") is not None:
-                assert kwargs["refuse_current"](active) is None
-            assert kwargs["expected_active"] == routing.Endpoint.from_dict(active)
+                refusal = kwargs["refuse_current"](active)
+                if refusal:
+                    raise routing.ActivePublicationRefused(refusal)
+            assert kwargs["expected_active"] == (
+                routing.Endpoint.from_dict(active) if active else None
+            )
             successor = routing.Endpoint(
                 kwargs["bind"], kwargs["port"], kwargs["pid"], kwargs["version"],
-                active["generation"] + 1, kwargs.get("process_start_time", "123456"),
+                (active or table["previous"])["generation"] + 1,
+                kwargs.get("process_start_time", "123456"),
             )
             (directory / "active.json").write_text(json.dumps({
                 "active": successor.to_dict(), "previous": active,
             }))
-            return successor, routing.Endpoint.from_dict(active)
+            return successor, routing.Endpoint.from_dict(active) if active else None
 
     real_orchestrator = cutover.CutoverOrchestrator
     monkeypatch.setattr(
@@ -478,7 +570,10 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
     )
     assert any(path == "/api/v1/session-hosts/reattach" for _, path, _ in calls) is (scenario == "success")
     core._ensure_retired_daemon_exited.assert_not_called()
-    if scenario in ("drain-refused", "successor-unhealthy"):
+    if scenario in (
+        "drain-refused", "successor-unhealthy",
+        "cleanup-drain-refused", "cleanup-successor-unhealthy",
+    ):
         assert result["rolled_back"] is True
         assert routing.read_table(root)["active"]["pid"] == row["pid"]
         assert routing.read_table(root)["active"]["generation"] > row["generation"]
@@ -487,6 +582,12 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
     elif scenario == "rollback-owner-changed":
         assert result["rolled_back"] is False
         assert routing.read_table(root)["active"]["pid"] == 3333
+        assert not any(path == "/api/v1/undrain" for _, path, _ in calls)
+        handle.terminate.assert_called_once()
+    elif scenario in ("cleanup-changed-previous", "cleanup-race-previous"):
+        assert result["rolled_back"] is False
+        assert routing.read_table(root).get("active") is None
+        assert routing.read_table(root)["previous"]["pid"] == 3333
         assert not any(path == "/api/v1/undrain" for _, path, _ in calls)
         handle.terminate.assert_called_once()
     else:

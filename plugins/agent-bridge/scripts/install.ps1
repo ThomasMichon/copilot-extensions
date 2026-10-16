@@ -3070,9 +3070,19 @@ function Invoke-UpdateSlotBuild {
 }
 
 function Invoke-ServingRuntimeReconcile {
-    & $VenvPython -m agent_bridge deploy --reconcile-serving --health-timeout 180
-    if ($LASTEXITCODE -ne 0) {
-        throw "Serving runtime reconcile failed (exit $LASTEXITCODE); completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
+    & $VenvPython -m agent_bridge deploy --reconcile-serving --probe-serving --health-timeout 180
+    if ($LASTEXITCODE -eq 0) { return }
+    if ($LASTEXITCODE -ne 10) {
+        throw "Serving runtime reconcile failed (probe exit $LASTEXITCODE); completed slot left unchanged."
+    }
+    Write-UpdateMarker
+    try {
+        & $VenvPython -m agent_bridge deploy --reconcile-serving --health-timeout 180
+        if ($LASTEXITCODE -ne 0) {
+            throw "Serving runtime reconcile failed (exit $LASTEXITCODE); completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
+        }
+    } finally {
+        Clear-UpdateMarker
     }
 }
 

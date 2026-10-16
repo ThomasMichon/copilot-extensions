@@ -90,20 +90,36 @@ def _rollback(
             )
             if predecessor_live:
                 if guarded:
-                    current_raw = self._raw_active()
-                    current = Endpoint.from_dict(current_raw) if current_raw else None
+                    table = self.routing.read_table(self.config_dir) or {}
+                    current_raw = table.get("active")
+                    current = Endpoint.from_dict(current_raw) if isinstance(current_raw, dict) else None
+                    previous_raw = table.get("previous")
+                    previous = Endpoint.from_dict(previous_raw) if isinstance(previous_raw, dict) else None
+                    retracted = (
+                        successor_stopped and flipped and current_raw is None
+                        and expected_new is not None and previous == expected_new
+                    )
                     if (
                         (not flipped and current != expected_old)
                         or (flipped and (
-                            expected_new is None or current != expected_new
+                            expected_new is None or (current != expected_new and not retracted)
                         ))
                     ):
                         raise CutoverError("active owner changed; cannot restore predecessor")
+                    expected_previous = previous_raw
+
+                    def refuse_retraction(active: dict | None) -> str | None:
+                        retained = self.routing.read_table(self.config_dir) or {}
+                        if active is not None or retained.get("previous") != expected_previous:
+                            return "successor retraction changed before predecessor restoration"
+                        return None
+
                     self.routing.publish_active_with_previous_guarded(
                         self.config_dir, bind=old.bind, port=old.port,
                         pid=old.pid, version=old.version, demote_existing=True,
                         process_start_time=old.process_start_time,
                         expected_active=current,
+                        **({"refuse_current": refuse_retraction} if retracted else {}),
                     )
                 else:
                     self.routing.publish_active(

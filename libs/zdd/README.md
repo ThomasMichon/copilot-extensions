@@ -175,6 +175,11 @@ retirement before `shutdown()` returns, raising if native exit is unconfirmed.
 Post-commit failures retain full predecessor identity and a writer-reconciliation
 breadcrumb; keeping a healthy successor serving does not make retirement
 successful. Callers without `expected_old` retain the existing behavior.
+If the confirmed-exited successor retracted its own active route during
+shutdown, rollback can restore the predecessor only while `active` is absent
+and `previous` still exactly identifies that successor. Recheck that condition
+inside the publication fence; an unrelated active or previous owner is not
+authority to restore over it.
 
 #### Conditional owner operation (partial lifecycle support)
 

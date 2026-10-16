@@ -17,13 +17,24 @@ engines and their required support files must exist locally and match the
 canonical bytes. Missing or modified assets and mixed source/local references
 remain failures, not accepted release-layout variations.
 
-Bridge's native Bash completed-slot admission and serving-reconcile refusal
+Bridge's native PowerShell/Bash completed-slot admission and serving-reconcile refusal
 matrices use a minimal plugin payload. Both setup and admission still compute
 the real fingerprint and use real versioned-runtime evidence; dedicated
 shared-library fingerprint cases retain the full transitive fixture. This
 keeps unrelated MSYS hashing subprocesses from consuming the admission cases'
 unchanged 30-second item budget. Install and update partitions retain every
 case without extending the 300-second suite budget.
+The current-daemon native fixture starts independent cold daemon and CLI
+processes concurrently. A stdin barrier holds the actual CLI entrypoint until
+the daemon is verified ready; neither process is pooled or replaced by a mock.
+Their imports and consumer execution share the same 25-second budget, with
+cleanup inside the unchanged 30-second item cap. IPv4 exercises reconcile and
+IPv6 exercises the read-only installer probe. Fresh-root cases retain ordinary
+`python -m agent_bridge` invocation.
+Conditional cutover's native contention checks retain their one-second limit,
+measured from actual holder acquisition. Earlier healthy publication/fixture I/O
+is not part of that contention interval; the native lock and whole-item deadline
+remain real and unchanged.
 
 The registered-repository Git-probe guard follows the real `repos._git` to
 `git_ops.git` call chain. It checks headless options at that subprocess owner,
