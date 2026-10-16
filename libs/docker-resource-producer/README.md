@@ -28,6 +28,8 @@ absent material so ambient Docker configuration cannot supply another identity
 or replace system trust roots. A context's `SkipTLSVerify` enables TLS even
 without stored material.
 Inaccessible files remain a verification error, not a CA-only fallback.
+Verified TLS with neither CA nor client material is rejected before invocation,
+because empty file options can make Docker CLI omit its TLS configuration.
 
 `Identity` binds a full container ID, or a unique volume name plus creation
 evidence, to daemon identity and reservation/creator/generation labels.

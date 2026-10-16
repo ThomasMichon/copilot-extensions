@@ -91,6 +91,8 @@ class Endpoint:
             raise VerificationError("TLS verification requires TLS")
         if self.tls and parsed.scheme != "tcp":
             raise VerificationError("TLS flags require a TCP endpoint")
+        if self.tls_verify and not any((self.tls_ca, self.tls_cert, self.tls_key)):
+            raise VerificationError("Verified TLS requires pinned CA or client TLS material")
         if bool(self.tls_cert) != bool(self.tls_key):
             raise VerificationError("TLS certificate and key must be paired")
         for field in ("tls_ca", "tls_cert", "tls_key"):

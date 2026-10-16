@@ -511,3 +511,19 @@ def test_partial_client_identity_refuses_before_docker_invocation(fixture: tuple
     with pytest.raises(VerificationError, match="must be paired"):
         DockerClient.pin(docker_argv=client.docker_argv, environment=env)
     assert not path.with_suffix(".log").exists()
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_verified_tls_without_material_refuses_before_invocation(fixture: tuple, restore: bool) -> None:
+    client, path, _state = fixture
+    endpoint = Endpoint("tcp://example.invalid:2376", "fixture-daemon", tls=True)
+    with pytest.raises(VerificationError, match="requires pinned CA or client TLS material"):
+        if restore:
+            value = endpoint.to_json()
+            value["tls_verify"] = True
+            endpoint = Endpoint.from_json(value)
+        else:
+            endpoint = replace(endpoint, tls_verify=True)
+        DockerClient(endpoint, docker_argv=client.docker_argv,
+                     environment=client.environment).diagnostic_observation(identity())
+    assert not path.with_suffix(".log").exists()
