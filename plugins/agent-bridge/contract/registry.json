@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 36,
+        "current": 37,
         "minimum": 1,
-        "previous_generation": 35,
+        "previous_generation": 36,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -42,7 +42,8 @@
           33,
           34,
           35,
-          36
+          36,
+          37
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -97,13 +98,13 @@
         "workspace_creation": 34,
         "qualified_live_peer": 35,
         "provider_creation": 36,
-        "worktree_render_cache": 36
+        "worktree_render_cache": 37
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "7a95e07b8edea48624319ededb6103362f087e87c09c5dfc34e7fe7a7ce3a5fb",
+          "sha256": "1a62163bbfc060bdc7bae0a2c901a520317485f3d2b65dc4a9ed1f322f3e30bd",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -199,7 +200,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "631d2e50dc02831922b9a80584226652785019a161dd29364001282c86aa6f43",
+          "sha256": "20be2788ebbbb1d378017a54a74c698c206b73b768b0cd4a34636d09e30d1614",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -211,7 +212,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
-          "sha256": "d8d7d928eabde20e76e10582430c3ade8e2fc451c04f1c5668629bca560a22d9",
+          "sha256": "15b4598ea31081173f418fc0e03a1bbecf0dac5d451cf27a726cf43a45671335",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -555,25 +556,25 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-36.json",
-          "sha256": "9379222ffffa21e4765b28922ee8e7ec231942980ded603cfa89f93539d7d283",
+          "sha256": "271cea4715f17018ee5d71b9266b70a9a71bc249d69a1e7e7a9b5362a3d158ea",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-36.json",
-          "sha256": "406dc9f5bab2669dd16cb94fd184483272a7d6ddf6b5fb8ade16758adca670fc",
+          "sha256": "7e2956bff9d4a143966bcba848baa08b5079f8ae54642d27c56301a270980040",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-36.json",
-          "sha256": "03727f9a2b0e4e8e70e7910fb33b482c1029b062addc9e5b836c6ad660550632",
+          "sha256": "3811285342608356602eba9ed8f7edec711e5af86113950a93d8c6296587014e",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-36.json",
-          "sha256": "d648c8590e7f16f124e8624dd3b144fd6a027091239fd4e493820b784814c293",
+          "sha256": "1fcfb666530a7c4a5f6883d4764815aaecdbeba381dcfc0f991f7f1666d94892",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
@@ -585,13 +586,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-36.json",
-          "sha256": "070c41433f05d2a94c2f84175fbcfd15c58e488a35e287c4cd7738ef11771b96",
+          "sha256": "9cd342636129145c786781d08b33e3bbd8444ba62f387334d33153666d6bb59e",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-36.json",
-          "sha256": "b543070bec7cd45b3cbd9fbe2ff5b83e197fac683eb9367a59a04c50d91cdff2",
+          "sha256": "c8c64c794fd5f9f40700541fd92e33ae1acf553a60597110b1bb2fd45f373ff2",
           "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
           "generation": 36
         },
@@ -654,6 +655,114 @@
           "sha256": "475bd3fdeb815f191109cc593e1593e0d566070f140e0d806eb1aea24b3e7513",
           "role": "Generation-36 stable worktree row schema and rendering evidence",
           "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-37.json",
+          "sha256": "cbc858ceffe8334f4c5d9b2b3d9548e38f129a0fc91e2358e4fd911b670b6f37",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-37.json",
+          "sha256": "51b45c2563a18cf9fe7740672d29755612db0c8900d7d12f892716cda1af3e30",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-37.json",
+          "sha256": "b5aaee735cfd259b98b915a0125f41cb2475da66f22bdeafdca0f98b03ac3598",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-37.json",
+          "sha256": "ad3729be58a52b685579a8656ffe70fa571cdf910c1d33b1084b94a91afb7921",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-37.json",
+          "sha256": "e82617f36df2b13a4910bbf4cf775084bb206dfbf88867abb95bd06fd1046e36",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-37.json",
+          "sha256": "604164f5133e37debe9f0606cf00f8bd25836cb6bc9f11d3a66a7ec8dca8c175",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-37.json",
+          "sha256": "da47cd7745b7ca3755c7671981cba3e5077d8496eda9497e07557ed20a7881a3",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-37.json",
+          "sha256": "72264919781d7f0db44f8bd14d09bfa573fdbdce9dfa5fb8023b7f1eaacf8707",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-37.json",
+          "sha256": "65922704d1d7da731524b11bee54aca8b46f72598e3cdd0992d15cb75e3f700c",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-37.json",
+          "sha256": "02e5af6080e73998b2657757874e5f1857edc23c6c82342e7d5c1cd29b47ac31",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-37.json",
+          "sha256": "09199d46ab625cb12968d3d05f21ceec7e83236f0a7e9db246ccbf7f8189b0fa",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-37.json",
+          "sha256": "5abd2e4310a7b816bc9f77b314219f88c194c163c60844c1b58b63cf9dd5e6e9",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-37.json",
+          "sha256": "b3860f0db4ac8a7fa38a3b957e174a72138a194dd16d3a4973744a1a4fa41e51",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-37.json",
+          "sha256": "441d484d65b83f7487a77e148dc7e620cf7473144ecce9f733a959547cecfd2a",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-37.json",
+          "sha256": "ea9e9eb531dfb2e14ee25fbbded5179fc95215955b4d336d555bb468a203cd62",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-37.json",
+          "sha256": "269222bf13012dd17e3cab9e542ebc070e190b8e979645312587a91e4636cd4e",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-37.json",
+          "sha256": "6311e82f3112b343fa0e76c511084df3c61365fcec08f792e76422bad8df5463",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-37.json",
+          "sha256": "1e0cf0f8374bdeda86d35d4cc97bcd52345f5041385a4c511638ad487b4b99b1",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
         }
       ],
       "provenance": [
@@ -1928,6 +2037,262 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
           "source_git_blob": "3cb55835ff01c56096d01534621fb5ae227b9aea",
           "capture_method": "Committed replacement warm-up continuation; independent single-render cached/live retirement, repeated epochs, cancellation, shutdown and non-overlap regressions establish current projection completion."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "a1424f1cc719707e6df8f690eac0599c86458569",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "95d0d8d3a14c8c9b9513abf8fcbbeb5931cf6b5f",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1b251b41ec48c41d47ff4026edce83f29b0db97f",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "6e29f6d7366650d17f63a69ffea384275784ca33",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "3cb55835ff01c56096d01534621fb5ae227b9aea",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "bb841c4b584411eead3a318c35a7c6c3de1524d1",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "a1424f1cc719707e6df8f690eac0599c86458569",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "95d0d8d3a14c8c9b9513abf8fcbbeb5931cf6b5f",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1b251b41ec48c41d47ff4026edce83f29b0db97f",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "6e29f6d7366650d17f63a69ffea384275784ca33",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "3cb55835ff01c56096d01534621fb5ae227b9aea",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",

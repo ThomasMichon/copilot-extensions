@@ -138,7 +138,7 @@ def test_native_bound_wire_is_preserved_at_later_generations(owner, generation) 
 def test_worktree_render_contract_declares_versioned_opt_in_and_retained_holder() -> None:
     from agent_bridge.routes.worktree_refresh import LIVE_WAIT_SECONDS
 
-    fixture = _fixture("fixtures/http/current/worktree-render-generation-36.json")
+    fixture = _fixture("fixtures/http/current/worktree-render-generation-37.json")
     capability = fixture["capability"]
     assert capability["required_protocol_version"] == bridge_protocol.WORKTREE_RENDER_CACHE_PROTOCOL_VERSION
     assert capability["live_wall_wait_seconds"] == LIVE_WAIT_SECONDS
