@@ -3832,6 +3832,7 @@ switch ($Action) {
             Write-ServiceOk "Context runtime installed at $InstallDir"
             exit 0
         }
+        Write-V3Manifest
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental
@@ -3873,8 +3874,6 @@ switch ($Action) {
         } catch {
             Write-ServiceWarn "Config migration skipped: $_"
         }
-
-        Write-V3Manifest
 
         Write-Host ""
         Write-ServiceOk "Installation complete"
@@ -4182,6 +4181,7 @@ switch ($Action) {
         Deploy-VenvAndPackage
         if (-not (Deploy-Wrappers)) { exit 1 }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
+        Write-V3Manifest
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental
@@ -4229,8 +4229,6 @@ switch ($Action) {
         } catch {
             Write-ServiceWarn "Config migration skipped: $_"
         }
-
-        Write-V3Manifest
 
         Write-ServiceOk "Update complete"
     }

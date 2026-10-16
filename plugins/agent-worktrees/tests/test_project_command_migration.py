@@ -71,6 +71,9 @@ def seed_old(monkeypatch, roots, *, receipted=True):
             ).items()
         ])
         inst._deploy_project_binstub("demo")
+    receipt = inst._read_receipt("demo")
+    receipt["runtime"]["resolver"] = "payload-local"
+    inst._write_receipt("demo", receipt)
     if not receipted:
         inst._receipt_path("demo").unlink()
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
@@ -149,6 +152,52 @@ def test_installed_payload_command_is_automatically_repaired(command_home, monke
     assert inst.reconcile_binstubs()["added"] == 0
 
 
+@pytest.mark.parametrize("registered", [False, True])
+def test_receipt_free_user_shortcut_does_not_identify_an_owner(
+    command_home, monkeypatch, tmp_path, registered,
+):
+    inst._deploy_project_binstub("demo")
+    inst._receipt_path("demo").unlink()
+    before = {p: p.read_bytes() for p, _ in inst._project_binstub_specs("demo")}
+    foreign = tmp_path / "foreign" / "agent-worktrees"
+    foreign.mkdir(parents=True)
+    (foreign / "plugin.json").write_bytes((command_home[0] / "plugin.json").read_bytes())
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(foreign))
+    if not registered:
+        _registry(monkeypatch, {})
+    result = inst.reconcile_binstubs()
+    assert result["preserved"] == ["demo"]
+    assert result["blocked"] == (["demo"] if registered else [])
+    assert result["removed"] == []
+    assert {p: p.read_bytes() for p in before} == before
+    assert not inst._receipt_path("demo").exists()
+
+
+def test_pre_upgrade_pending_payload_journal_recovers_then_migrates(command_home, monkeypatch):
+    current, _ = command_home
+    before = seed_old(monkeypatch, (current, current))
+    receipt = inst._read_receipt("demo")
+    assert receipt["runtime"]["resolver"] == "payload-local"
+    receipt["transaction"] = {
+        "version": 1,
+        "before": {p.name: {"bytes": None, "mode": 0o755} for p in before},
+        "after": {
+            p.name: {"bytes": base64.b64encode(data).decode("ascii"), "mode": 0o755}
+            for p, data in before.items()
+        },
+        "receipt": json.loads(json.dumps(receipt)),
+    }
+    inst._write_receipt("demo", receipt)
+    result = inst.reconcile_binstubs()
+    assert result["blocked"] == []
+    assert result["migrated"] == ["demo"]
+    final = inst._read_receipt("demo")
+    assert "transaction" not in final
+    assert final["runtime"]["resolver"] == "user-binstub"
+    assert all(data != p.read_bytes() for p, data in before.items())
+    assert inst.reconcile_binstubs()["added"] == 0
+
+
 def test_registration_repairs_checkout_command_without_manual_transfer(
     command_home, monkeypatch, tmp_path,
 ):
@@ -168,6 +217,79 @@ def test_registration_repairs_checkout_command_without_manual_transfer(
     assert receipt["runtime"]["resolver"] == "user-binstub"
     assert all(str(checkout).encode() not in p.read_bytes()
                for p, _ in inst._project_binstub_specs("demo"))
+
+
+@pytest.mark.parametrize("action", ["install", "update"])
+@pytest.mark.parametrize("activated", [False, True])
+def test_native_activation_publishes_manifest_before_checkout_reconciliation(
+    command_home, monkeypatch, tmp_path, request, action, activated,
+):
+    windows = inst.platform.system() == "Windows"
+    if windows != (os.name == "nt"):
+        pytest.skip("native installer ordering boundary")
+    current, old = command_home
+    checkout = tmp_path / "checkout" / "plugins" / "agent-worktrees"
+    checkout.mkdir(parents=True)
+    (checkout / "plugin.json").write_bytes((old / "plugin.json").read_bytes())
+    before = seed_old(monkeypatch, (current, checkout))
+    manifest = inst.install_dir() / "deploy-manifest.json"
+    previous = json.dumps({"source": {"kind": "local", "path": checkout.as_posix()}})
+    selected = json.dumps({"source": {
+        "kind": "marketplace", "plugin": "agent-worktrees",
+        "path": current.as_posix(), "version": "1.1.0",
+    }})
+    manifest.write_text(previous, encoding="utf-8")
+    plugin = Path(__file__).resolve().parents[1]
+    ext = "ps1" if windows else "sh"
+    source = (plugin / "scripts" / f"install.{ext}").read_text(encoding="utf-8")
+    marker = f"    '{action}' {{" if windows else f"    {action})"
+    body = source.split(marker, 1)[1].split("# -- Shared runtime", 1)[1]
+    body = body[body.index("\n"):].split("# -- Project-specific", 1)[0]
+    if windows:
+        host = request.getfixturevalue("native_powershell")
+        setup = "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
+        for name in (
+            "Deploy-VenvAndPackage", "Deploy-CopilotPlugin", "Deploy-GlobalBinstub",
+            "Ensure-CopilotExperimental", "Assert-PathIncludes", "Remove-LegacyBinstubs",
+            "Deploy-TerminalScripts", "Ensure-Psmux",
+        ):
+            setup += f"function {name} {{ }}\n"
+        setup += f"""
+function Deploy-Wrappers {{ return $true }}
+function Invoke-VersionedActivate {{ return ${str(activated).lower()} }}
+function Write-V3Manifest {{ [IO.File]::WriteAllText('{manifest}', '{selected}') }}
+function Reconcile-Binstubs {{
+    if ([IO.File]::ReadAllText('{manifest}') -cne '{selected}') {{ throw 'previous manifest still selected' }}
+}}
+"""
+        command = [str(host), "-NoProfile", "-NonInteractive", "-File"]
+    else:
+        host = request.getfixturevalue("native_bash")
+        setup = "set -e\nCONTEXTUAL_INSTALL=false\n"
+        for name in (
+            "_deploy_venv_and_package", "deploy_wrappers", "remove_legacy_scripts",
+            "remove_legacy_binstubs", "deploy_tool_binstub", "deploy_copilot_plugin",
+            "ensure_copilot_experimental", "assert_path",
+        ):
+            setup += f"{name}() {{ :; }}\n"
+        setup += f"_versioned_activate() {{ {'true' if activated else 'false'}; }}\n"
+        setup += f"write_deploy_manifest() {{ printf '%s' {shlex.quote(selected)} > {shlex.quote(str(manifest))}; }}\n"
+        setup += f"reconcile_binstubs() {{ [[ $(cat {shlex.quote(str(manifest))}) == {shlex.quote(selected)} ]]; }}\n"
+        command = [str(host)]
+    script = tmp_path / f"native-order.{ext}"
+    script.write_text(setup + body, encoding="utf-8")
+    result = subprocess.run(
+        command + [str(script)], capture_output=True, text=True,
+        timeout=15, **inst.no_window_kwargs(),
+    )
+    assert result.returncode == (0 if activated else 1), result.stdout + result.stderr
+    if activated:
+        assert manifest.read_text(encoding="utf-8") == selected
+        assert inst.reconcile_binstubs()["blocked"] == []
+        assert inst._read_receipt("demo")["runtime"]["resolver"] == "user-binstub"
+    else:
+        assert manifest.read_text(encoding="utf-8") == previous
+        assert {p: p.read_bytes() for p in before} == before
 
 
 @pytest.mark.parametrize("receipted", [True, False])
@@ -879,16 +1001,11 @@ def test_admission_to_capture_edit_never_becomes_authorized(
 
     from agent_worktrees import project_command_migration as migration
 
-    current, old = command_home
-    if generation != "current":
-        monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(old))
-    owner, identity = inst._binstub_owner(), inst._project_identity("demo")
-    inst.local_bin().mkdir(parents=True, exist_ok=True)
-    tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"),
-               admitted=migration.validate("demo", None, owner, identity))
-    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
-    if generation == "pre-receipt":
-        inst._receipt_path("demo").unlink()
+    if generation == "current":
+        inst._deploy_project_binstub("demo")
+    else:
+        seed_old(monkeypatch, command_home, receipted=generation != "pre-receipt")
+    identity = inst._project_identity("demo")
     paths = [p for p, _ in inst._project_binstub_specs("demo")]
     receipt_path = inst._receipt_path("demo")
     receipt_before = receipt_path.read_bytes() if receipt_path.exists() else None
@@ -977,14 +1094,8 @@ def test_validation_checks_only_the_captured_admission_bytes(command_home, monke
     from agent_worktrees import project_command_templates as templates
     from agent_worktrees import project_command_transaction as tx
 
-    current, old = command_home
-    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(old))
+    seed_old(monkeypatch, command_home, receipted=False)
     owner, identity = inst._binstub_owner(), inst._project_identity("demo")
-    inst.local_bin().mkdir(parents=True, exist_ok=True)
-    tx.publish("demo", owner, identity, inst._project_binstub_specs("demo"),
-               admitted=migration.validate("demo", None, owner, identity))
-    inst._receipt_path("demo").unlink()
-    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
     paths = [p for p, _ in inst._project_binstub_specs("demo")]
     before = {inst._stub_key(p.name): p.read_bytes() for p in paths}
     original_matches = templates.matches

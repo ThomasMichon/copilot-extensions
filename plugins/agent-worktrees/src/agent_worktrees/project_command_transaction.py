@@ -172,6 +172,12 @@ def recover(
             if not inst._same_identity(final["owner"], owner, inst._OWNER_IDENTITY_FIELDS):
                 raise ValueError("intended owner changed; refuse stale publication")
             content = dict(inst._project_binstub_specs(project))
+            if final["runtime"]["resolver"] == "payload-local":
+                historical = templates.render(
+                    project, Path(final["owner"]["payload_root"]),
+                    windows=inst.platform.system() == "Windows", family="payload",
+                )
+                content = {p: historical[p.name] for p in paths}
             for p in paths:
                 data = _decode(after[inst._stub_key(p.name)]["bytes"])
                 if data is None or not templates.matches(data, content[p]) or inst._stub_hash(final, p) != _digest(data):

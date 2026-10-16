@@ -86,6 +86,12 @@ of another installation.
    version; matching repository URLs alone do not authorize a transfer.
    Edited, foreign, and ambiguous launchers remain protected. Cell-scoped
    shortcuts continue to use their selected payload-local command.
+   User-side shortcut bytes contain no payload identity and therefore require an
+   ownership receipt; receipt-free recognition is limited to historical
+   payload-bearing templates. Native installers publish the successfully
+   activated runtime's manifest before shortcut registration or reconciliation.
+   Intact interrupted `payload-local` journals complete against their recorded
+   payload template before reconciliation migrates the recovered shortcut.
 7. Missing, ambiguous, or mismatched provenance fails closed. Same-cell sibling
    discovery is explicit, and a same-named peer from another cell is never
    selected through `PATH`, a wildcard installed-plugin scan, or a shared

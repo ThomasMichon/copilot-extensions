@@ -143,7 +143,9 @@ def _candidate_payload(project: str, contents: dict[str, bytes], owner: dict) ->
     if snapshots.is_dir():
         candidates += [p for p in snapshots.iterdir() if p.is_dir() and snapshot_lineage(p, owner, inst.install_dir())]
     for payload in candidates:
-        for family in ("current", "payload", "traced", "ambient"):
+        # User-side shortcuts contain no owner identity; only a receipt can
+        # attribute them. Receipt-free admission needs a payload-bearing family.
+        for family in ("payload", "traced", "ambient"):
             expected = {
                 inst._stub_key(name): text
                 for name, text in templates.render(
