@@ -1,0 +1,9 @@
+{
+  "comment": "Bind native idle continuation to the pending runtime session manager and single writable database owner without enabling serving or ADOPT",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

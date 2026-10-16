@@ -1,0 +1,9 @@
+{
+  "comment": "Retain completed worktree cache observations on the private pending runtime without granting discovery or maintenance authority",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

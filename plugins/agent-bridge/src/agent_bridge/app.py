@@ -11,30 +11,23 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
-from . import __version__, telemetry
+from . import telemetry
 from .agent_registry import AgentResolver, daemon_resolver
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
-from .auth import BearerAuthMiddleware
+from .app_routes import configure_serving_app
+from .app_worktree_cache import start_worktree_cache, stop_worktree_cache
 from .config import load_config, load_or_create_auth_token
 from .db import Database
 from .loop_governance import LoopGovernance
-from .routes import (
-    acp_ws,
-    admin,
-    agents,
-    dispatch_tasks,
-    health,
-    live_sessions,
-    remote,
-    sessions,
-    ui,
-    worktrees,
-)
 from .session_manager import session_manager_from_config
 from .transport import shutdown_ssh
+
+if TYPE_CHECKING:
+    from .runtime_restore import RestoredRuntime
 
 log = logging.getLogger("agent-bridge")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
@@ -386,6 +379,7 @@ async def lifespan(app: FastAPI):
     else:
         record_manager_generation_id(mgr)
     governance = LoopGovernance()
+    app.state.loop_governance = governance
     app.state.resolver = AgentResolver({}, {})
     mgr.set_resolver(app.state.resolver)
     app.state.ready = False
@@ -484,11 +478,7 @@ async def lifespan(app: FastAPI):
                 mgr.set_resolver(resolver)
                 app.state.topology_ready = True
                 await start_agent_roster_cache(app, resolver, cfg)
-                if resolver.agents or resolver.machines:
-                    from .routes.worktrees import get_cache
-                    wt_cache = get_cache()
-                    wt_cache.configure(interval=cfg.worktree_discovery_interval)
-                    wt_cache.start(resolver, governance=governance)
+                start_worktree_cache(app, resolver, cfg, governance)
 
                 if not getattr(cfg, "enable_credential_relay", True):
                     log.info(
@@ -1042,8 +1032,7 @@ async def lifespan(app: FastAPI):
         log.info("Credential relay stopped")
 
     # Shutdown: stop worktree discovery
-    from .routes.worktrees import get_cache
-    await get_cache().stop()
+    await stop_worktree_cache(app)
     await stop_agent_roster_cache(app)  # Phase 3b
 
     # Shutdown: prepare in-flight turns for the frontend restart. By default
@@ -1083,8 +1072,19 @@ async def lifespan(app: FastAPI):
         log.warning("Failed to stop event writer cleanly", exc_info=True)
 
 
-def create_app(*, config=None, token: str | None = None) -> FastAPI:
+def create_app(
+    *, config=None, token: str | None = None,
+    restored_runtime: RestoredRuntime | None = None,
+) -> FastAPI:
     """Create and configure the FastAPI application."""
+    if restored_runtime is not None:
+        from zdd.private_protocol import PrivateIPCError, Refusal
+
+        from .restored_app import create_restored_app
+
+        if config is not None or token is not None:
+            raise PrivateIPCError(Refusal.AUTHORITY)
+        return create_restored_app(restored_runtime)
     cfg = config or load_config()
     auth_token = token or load_or_create_auth_token()
 
@@ -1095,31 +1095,4 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     if not telemetry.load_sink_from_config():
         telemetry.load_sink_from_env()
 
-    app = FastAPI(
-        title="Agent Bridge",
-        description="Persistent inter-agent communication service",
-        version=__version__,
-        lifespan=lifespan,
-    )
-
-    app.state.config = cfg
-    # Stash the token so the websocket transport (which bypasses
-    # BearerAuthMiddleware) can authenticate connections itself.
-    app.state.auth_token = auth_token
-    # In-memory registry of represented live-session event logs (Phase 5). Kept
-    # off the ACP-owned SessionManager; see live_representation for rationale.
-    from .live_representation import LiveEventStore
-    app.state.live_event_store = LiveEventStore()
-
-    # Auth middleware
-    app.add_middleware(BearerAuthMiddleware, token=auth_token)
-
-    from .routes import acquisitions
-    for router in (
-        acquisitions.router, health.router, ui.router, acp_ws.router,
-        sessions.router, live_sessions.router, remote.router, agents.router,
-        worktrees.router, admin.router, dispatch_tasks.router,
-    ):
-        app.include_router(router)
-
-    return app
+    return configure_serving_app(cfg, auth_token, lifespan=lifespan)

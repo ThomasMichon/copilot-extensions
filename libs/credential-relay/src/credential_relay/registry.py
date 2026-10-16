@@ -20,8 +20,9 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .server import CredentialRelayServer, RelayPolicy, ScopeDenied
+from .server import CredentialRelayServer, RelayPolicy
 from .sources import CredentialSource
+from .token_gate import RelayTokenGate
 
 
 class TokenRegistry:
@@ -188,47 +189,13 @@ class RelayBuilder:
         if self.ado_host is not None:
             kwargs["ado_host"] = self.ado_host
         if self.token_required_actions:
-            validators = list(self._token_validators)
-            authorizers = list(self._token_authorizers)
-            if authorizers:
-                static_resources = set(self.azure_resources)
-
-                def _authorize(tok: str, action: str, fields: dict[str, str]) -> bool:
-                    # Any provider's request-scoped authorizer accepting wins.
-                    # A ``ScopeDenied`` from one authorizer (this provider
-                    # recognizes the token but not this request's scope) is
-                    # remembered and re-raised only if no authorizer -- this
-                    # one or another provider's -- ultimately accepts (#4367):
-                    # an unrecognized token must still stay silently denied.
-                    scope_denied = False
-                    for a in authorizers:
-                        try:
-                            if a(tok, action, fields):
-                                return True
-                        except ScopeDenied:
-                            scope_denied = True
-                    # Otherwise fall back to the boolean validators; a valid
-                    # token is still scope-checked against the static allowlist
-                    # for get-azure-token so the validator-only (containers) path
-                    # keeps its existing source-level scope guarantee.
-                    if not any(v(tok) for v in validators):
-                        if scope_denied:
-                            raise ScopeDenied
-                        return False
-                    if action != "get-azure-token":
-                        return True
-                    requested = fields.get("scope") or fields.get("resource") or ""
-                    normalized = requested.removesuffix("/.default").rstrip("/")
-                    allowed = {
-                        value.removesuffix("/.default").rstrip("/")
-                        for value in static_resources
-                    }
-                    if "*" in static_resources or normalized in allowed:
-                        return True
-                    raise ScopeDenied
-
-                kwargs["token_authorizer"] = _authorize
+            gate = RelayTokenGate(
+                tuple(self._token_validators), tuple(self._token_authorizers),
+                frozenset(self.azure_resources),
+            )
+            if gate.authorizers:
+                kwargs["token_authorizer"] = gate.authorize
             else:
-                kwargs["token_validator"] = lambda tok: any(v(tok) for v in validators)
+                kwargs["token_validator"] = gate.validate
             kwargs["token_required_actions"] = frozenset(self.token_required_actions)
         return CredentialRelayServer(**kwargs)

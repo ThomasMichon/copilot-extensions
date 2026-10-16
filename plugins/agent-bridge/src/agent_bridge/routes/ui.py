@@ -27,6 +27,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
+from ..auth_custody import owned_auth_operation
 from . import ui_history, ui_tasks
 
 router = APIRouter()
@@ -89,6 +90,7 @@ def _login_codes(request: Request) -> dict[str, float]:
 
 
 @router.post("/api/v1/ui/login-codes", include_in_schema=False)
+@owned_auth_operation
 async def create_login_code(request: Request) -> dict[str, Any]:
     """Mint a one-time code that lets a browser sign in to /ui (auth required).
 
@@ -101,6 +103,7 @@ async def create_login_code(request: Request) -> dict[str, Any]:
 
 
 @router.post("/ui/exchange", include_in_schema=False)
+@owned_auth_operation
 async def exchange_login_code(request: Request) -> JSONResponse:
     """Trade a valid, unused login code for the bearer token (auth-exempt; single use)."""
     try:

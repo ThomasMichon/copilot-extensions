@@ -8,8 +8,7 @@ import json
 import os
 import time
 from dataclasses import replace
-from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .cold_store import ColdStoreSession, fetch_cold_store_session
 from .db import Database
@@ -30,9 +29,13 @@ from .session_manager import (
     log,
 )
 from .transport import SpawnTarget
+from .session_drain_gate import _SessionDrainGateMixin
+
+if TYPE_CHECKING:
+    from .session_snapshot import SessionSnapshot
 
 
-class _SessionCoreMixin:
+class _SessionCoreMixin(_SessionDrainGateMixin):
     """Session-manager core state, drain, and persistence helpers."""
 
     MAX_SESSIONS = 100
@@ -65,6 +68,8 @@ class _SessionCoreMixin:
         session_host_unexpected_reap_seconds: float = 60.0,
         session_host_active_reap_seconds: float = 0.0,
         remote_acp_targets: dict | None = None,
+        read_only_rehydrate: bool = False,
+        captured_sessions: SessionSnapshot | None = None,
     ) -> None:
         self._db = db
         self._remote_acp_targets = dict(remote_acp_targets or {})
@@ -157,8 +162,15 @@ class _SessionCoreMixin:
             sd = _Path(session_host_state_dir).expanduser()
         else:
             sd = _Path(self._db.db_path).expanduser().parent / "hosts"
-        sd.mkdir(parents=True, exist_ok=True)
-        self._host_index = HostIndex(sd / "index.json")
+        if captured_sessions is not None:
+            if not read_only_rehydrate:
+                raise ValueError("Captured sessions require passive preparation")
+        elif read_only_rehydrate:
+            if not sd.is_dir():
+                raise ValueError("Passive hydration requires an existing session-host root")
+        else:
+            sd.mkdir(parents=True, exist_ok=True)
+        self._host_index = HostIndex(sd / "index.json", load=captured_sessions is None)
         # This process's own generation identity (effort
         # agent-bridge-unified-zdd-cutover, Phase 3): the outgoing generation
         # releases every session-host claim it holds under this id as part of
@@ -194,6 +206,7 @@ class _SessionCoreMixin:
         self._drain_reason: str | None = None
         self._drain_source: str | None = None
         self._drain_watchdog: asyncio.Task[None] | None = None
+        self._drain_private = False
         self._drain_auto_release_s = (
             self.DRAIN_AUTO_RELEASE_S if drain_auto_release_s is None
             else float(drain_auto_release_s)
@@ -202,11 +215,24 @@ class _SessionCoreMixin:
             self.DRAIN_WARN_INTERVAL_S if drain_warn_interval_s is None
             else float(drain_warn_interval_s)
         )
-        self._rehydrate()
+        self._private_session_snapshot = None
+        if captured_sessions is not None:
+            from .session_snapshot import hydrate_sessions
+
+            hydrate_sessions(self, captured_sessions)
+        else:
+            self._rehydrate(read_only=read_only_rehydrate)
 
     def set_resolver(self, resolver: Any) -> None:
         """Attach the live resolver used for safe provider target refresh."""
         self._resolver = resolver
+
+    def _route_acp_event(self, session: Session, event_type: str, data: dict[str, Any]) -> None:
+        if session.event_log:
+            session.event_log.append(event_type, data)
+        self._capture_progress(session, event_type, data)
+        if event_type == "usage_update":
+            self._handle_usage_update(session, data)
 
     async def fetch_cold_store_session(
         self, session_id: str
@@ -305,149 +331,6 @@ class _SessionCoreMixin:
             session.session_id,
             session.agent_name,
         )
-
-    @property
-    def is_draining(self) -> bool:
-        """True once drain() has begun -- new sessions/turns are refused."""
-        return self._draining
-
-    def set_draining(
-        self,
-        value: bool,
-        *,
-        reason: str | None = None,
-        source: str | None = None,
-    ) -> None:
-        """Open (True) or release (False) the drain gate.
-
-        Logs the transition (with ``source``/``reason``) so a drained daemon is
-        never invisible, and -- on open -- arms a watchdog that bounds how long
-        the daemon may sit drained before auto-releasing (#1757). Idempotent: a
-        call that does not change the gate state is a quiet no-op (the existing
-        watchdog and its ``since`` timestamp are preserved).
-        """
-        value = bool(value)
-        if value == self._draining:
-            return
-        self._draining = value
-        if value:
-            self._draining_since = time.time()
-            self._drain_reason = reason
-            self._drain_source = source
-            log.info(
-                "Drain gate OPENED (source=%s reason=%s) -- refusing new "
-                "sessions/turns; reads and teardown still served",
-                source or "?", reason or "?",
-            )
-            self._arm_drain_watchdog()
-        else:
-            held = (
-                time.time() - self._draining_since
-                if self._draining_since is not None else 0.0
-            )
-            log.info(
-                "Drain gate RELEASED (source=%s) after %.0fs -- accepting new "
-                "work", source or "?", held,
-            )
-            self._draining_since = None
-            self._drain_reason = None
-            self._drain_source = None
-            self._cancel_drain_watchdog()
-
-    def drain_status(self) -> dict[str, Any]:
-        """Snapshot of the drain gate for /health and monitoring (#1757).
-
-        Exposes *how long* the daemon has been drained and when the watchdog
-        will auto-release, so a stuck drain is visible without grepping logs.
-        """
-        now = time.time()
-        since = self._draining_since
-        held = (now - since) if since is not None else None
-        auto_at = (
-            since + self._drain_auto_release_s
-            if since is not None and self._drain_auto_release_s > 0 else None
-        )
-        return {
-            "draining": self._draining,
-            "since": (
-                datetime.fromtimestamp(since, tz=timezone.utc).isoformat()
-                if since is not None else None
-            ),
-            "held_s": round(held, 1) if held is not None else None,
-            "reason": self._drain_reason,
-            "source": self._drain_source,
-            "auto_release_at": (
-                datetime.fromtimestamp(auto_at, tz=timezone.utc).isoformat()
-                if auto_at is not None else None
-            ),
-            # Live Session Host census (dotfiles#1656): how many independent
-            # Session Hosts (each owning a possibly-mid-turn child) this daemon
-            # is currently fronting. Surfaced on /health so a drain/cutover never
-            # looks "clean" while live hosts it must preserve go unaccounted for.
-            "live_host_count": self.live_host_count,
-        }
-
-    def _arm_drain_watchdog(self) -> None:
-        """Start the bounded-drain watchdog if an event loop is running."""
-        self._cancel_drain_watchdog()
-        if self._drain_auto_release_s <= 0:
-            return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No event loop (e.g. a synchronous unit test toggling the gate).
-            # The bounded-lifetime backstop is a no-op here; the gate can still
-            # be released manually or by the next drain() call under a loop.
-            return
-        self._drain_watchdog = loop.create_task(self._drain_watchdog_loop())
-
-    def _cancel_drain_watchdog(self) -> None:
-        wd = self._drain_watchdog
-        self._drain_watchdog = None
-        if wd is not None and not wd.done():
-            wd.cancel()
-
-    async def _drain_watchdog_loop(self) -> None:
-        """Bound how long the daemon may sit drained (#1757).
-
-        WARNs on an interval while the gate is open, then auto-releases it once
-        the drain outlives ``_drain_auto_release_s`` with no cutover retiring
-        the daemon. A completed handoff shuts the process down before this
-        fires; a manual undrain cancels it. This is the self-heal for an
-        aborted cutover (or a diagnosis session that can't get in because it is
-        itself 503'd) that would otherwise leave the daemon drained forever.
-        """
-        interval = max(1.0, self._drain_warn_interval_s)
-        deadline = (
-            (self._draining_since or time.time()) + self._drain_auto_release_s
-        )
-        try:
-            while self._draining:
-                await asyncio.sleep(interval)
-                if not self._draining:
-                    return
-                held = (
-                    time.time() - self._draining_since
-                    if self._draining_since is not None else 0.0
-                )
-                if time.time() >= deadline:
-                    log.warning(
-                        "Drain gate open %.0fs (source=%s reason=%s) with no "
-                        "handoff completing -- auto-releasing to self-heal (a "
-                        "cutover likely aborted)",
-                        held, self._drain_source or "?",
-                        self._drain_reason or "?",
-                    )
-                    self.set_draining(False, source="watchdog-auto-release")
-                    return
-                log.warning(
-                    "Still draining after %.0fs (source=%s reason=%s); "
-                    "auto-release at %.0fs",
-                    held, self._drain_source or "?", self._drain_reason or "?",
-                    self._drain_auto_release_s,
-                )
-        except asyncio.CancelledError:
-            return
 
     @property
     def cancel_turns_on_redeploy(self) -> bool:
@@ -718,13 +601,17 @@ class _SessionCoreMixin:
             if markers:
                 session.progress.update(markers)
 
-    def _rehydrate(self) -> None:
+    def _rehydrate(self, *, read_only: bool = False) -> None:
         """Reload session metadata from DB on startup.
 
         Running processes are gone after a restart, so any session that
         was RUNNING/IDLE/STARTING gets marked STOPPED (resumable).
         Sessions that were ENDED get cleaned up. Incomplete turns are
         marked as interrupted.
+
+        A passive successor uses read-only hydration: the predecessor and
+        independent hosts may still own live turns. Preserve status/cursors,
+        do not append restart events, delete sessions or run startup GC.
         """
         rows = self._db.list_sessions()
         now = time.time()
@@ -733,6 +620,8 @@ class _SessionCoreMixin:
             status = row["status"]
 
             if status == SessionStatus.ENDED.value:
+                if read_only:
+                    continue
                 # Defense-in-depth: a single session's cleanup must never brick
                 # daemon startup -- log and skip on failure rather than aborting
                 # rehydrate (and thus the whole service).
@@ -788,7 +677,7 @@ class _SessionCoreMixin:
 
             # Mark formerly-active sessions as stopped
             interrupted_on_restart = False
-            if status in (
+            if not read_only and status in (
                 SessionStatus.RUNNING.value,
                 SessionStatus.IDLE.value,
                 SessionStatus.STARTING.value,
@@ -816,7 +705,7 @@ class _SessionCoreMixin:
                 acp_session_id=session.acp_session_id,
                 worktree_id=target.worktree_id,
             )
-            if status in (
+            if not read_only and status in (
                 SessionStatus.RUNNING.value,
                 SessionStatus.IDLE.value,
                 SessionStatus.STARTING.value,
@@ -852,6 +741,9 @@ class _SessionCoreMixin:
             self._sessions[sid] = session
 
         log.info("Rehydrated %d sessions from DB", len(self._sessions))
+
+        if read_only:
+            return
 
         # Startup GC: prune aged terminal/disconnected sessions and compact
         # the DB so a long-lived daemon's sessions.db doesn't grow without
