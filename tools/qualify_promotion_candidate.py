@@ -43,7 +43,10 @@ def _snapshot(repository: str, candidate_ref: str, candidate_sha: str, main_befo
 def _complete_run(
     repository: str, run: dict, *, workflow_id: int, candidate_ref: str,
     candidate_sha: str, expected: set[str], allowed_skips: set[str], deadline: float,
+    promotion_run: str,
 ) -> tuple[int, int, list[dict]]:
+    if run.get("display_title") != f"CI promotion {promotion_run} at {candidate_sha}":
+        raise VerificationError("candidate CI run belongs to a different owning promotion attempt")
     run_id = _identity(
         run, repository=repository, workflow_id=workflow_id,
         merge_sha=candidate_sha, branch=candidate_ref,
@@ -146,7 +149,7 @@ def qualify(
                 run_id, attempt, jobs = _complete_run(
                     repository, run, workflow_id=workflow["id"], candidate_ref=candidate_ref,
                     candidate_sha=candidate_sha, expected=expected, allowed_skips=allowed_skips,
-                    deadline=deadline,
+                    deadline=deadline, promotion_run=promotion_run,
                 )
                 break
         remaining = deadline - time.monotonic()
@@ -202,7 +205,7 @@ def verify_receipt(
     run_id, attempt, jobs = _complete_run(
         repository, run, workflow_id=receipt["workflow_id"], candidate_ref=receipt["candidate_ref"],
         candidate_sha=candidate_sha, expected=expected, allowed_skips=allowed_skips,
-        deadline=time.monotonic() + 120,
+        deadline=time.monotonic() + 120, promotion_run=promotion_run,
     )
     if run_id != receipt["run_id"] or attempt != receipt.get("run_attempt") or jobs != receipt.get("jobs"):
         raise VerificationError("candidate qualification receipt no longer matches its successful attempt")

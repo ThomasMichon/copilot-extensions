@@ -174,6 +174,24 @@ def test_source_owned_tag_refuses_changed_payload_under_the_same_development_ide
     assert _remote_tag(origin, tag) == first
 
 
+def test_equivalent_never_landed_candidate_is_not_an_existing_main_landing_receipt(repo):
+    work, origin = repo
+    tag = f"promote-dev-{DEV_SHA}"
+    state = {"tag": tag, "dev_head": DEV_SHA, "release_id": DEV_SHA}
+    _commit_state(work, state)
+    _git(["checkout", "-qb", "never-landed-candidate"], work)
+    _git(["commit", "-q", "--allow-empty", "-m", "candidate, not a Main landing"], work)
+    candidate = _git(["rev-parse", "HEAD"], work)
+    _git(["tag", "-a", tag, "-m", "unlanded receipt collision", candidate], work)
+    _git(["push", "-q", "origin", f"refs/tags/{tag}"], work)
+    _git(["checkout", "-q", "main"], work)
+    landed = _commit_state(work, state)
+    assert tp._same_source_release(candidate, landed, DEV_SHA, repo=work)
+    with pytest.raises(tp.TagError, match="already exists"):
+        _tag(work, landed)
+    assert _remote_tag(origin, tag) == candidate
+
+
 @pytest.mark.parametrize("field,value", [
     ("release_id", "f" * 40), ("tag", STEM), ("tag", f"promote-dev-{'f' * 40}"),
 ])

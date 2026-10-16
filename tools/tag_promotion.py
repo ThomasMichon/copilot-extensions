@@ -127,7 +127,13 @@ def tag_promotion(
             return tag_name, False
         if source_owned:
             _git(["fetch", "-q", remote, f"refs/tags/{tag_name}"], cwd=repo)
-            if _same_source_release(existing, merge_sha, dev_sha, repo=repo):
+            landed = _git(
+                ["merge-base", "--is-ancestor", existing, f"{remote}/{main_branch}"],
+                cwd=repo, check=False,
+            )
+            if landed.returncode not in (0, 1):
+                raise TagError(f"cannot verify existing source landing ancestry: {landed.stderr.strip()}")
+            if landed.returncode == 0 and _same_source_release(existing, merge_sha, dev_sha, repo=repo):
                 return tag_name, False
         raise TagError(f"{tag_name} already exists on {existing}, not {merge_sha}")
 

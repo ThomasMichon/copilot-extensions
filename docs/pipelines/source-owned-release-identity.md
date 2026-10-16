@@ -58,6 +58,9 @@ The receipt binds the repository, Dev, candidate, content tree, Main parent,
 trusted control, exact CI run-attempt and executed job IDs. Its SHA-256 covers
 the exact canonical UTF-8/LF file bytes. Repeated calls reuse the same exact
 successful run; ambiguous runs refuse.
+Receipt replay also checks the provider's actual run title against the owning
+promotion run-attempt; editing that field in a local receipt cannot relabel
+old evidence for a new attempt.
 CI workflow source parsing and its source fingerprint use declared UTF-8/LF,
 normalizing CRLF checkout/staging representation first; an unsupported lone CR
 refuses. This changes no downloaded index, archive, wheel or receipt bytes.
@@ -98,6 +101,9 @@ New landed releases are recorded as `promote-dev-<full-dev-sha>`.
 container reuses the original immutable tag without moving it; different
 payload bytes under the same source identity refuse. Legacy timestamp/Main-SHA
 tags remain verifiable under their original rules.
+Unlike prepublished per-plugin version aliases, an existing landing tag must
+actually belong to fetched Main history. An equivalent never-landed candidate
+is an immutable collision, not a successful landing receipt.
 
 The direct/report producer also reuses an existing Dev tag only for the same
 recorded source and payload; `--force` does not authorize rebinding immutable

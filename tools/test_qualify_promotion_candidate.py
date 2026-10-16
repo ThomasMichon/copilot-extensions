@@ -177,6 +177,17 @@ def test_stale_qualification_cannot_authorize_artifact_publication(backend: dict
         _verify(receipt)
 
 
+def test_relabelled_receipt_cannot_claim_a_different_owning_promotion_attempt(backend: dict) -> None:
+    receipt = _qualify()
+    receipt["promotion_run"] = "123-2"
+    with pytest.raises(workflows.VerificationError, match="different owning promotion attempt"):
+        qualification.verify_receipt(
+            receipt, repository="example/project", candidate_sha=SHA, dev_sha=DEV,
+            main_before=MAIN, control_sha=MAIN, promotion_run="123-2", candidate_root=ROOT,
+        )
+    assert backend["runs"][0]["display_title"] == f"CI promotion {RUN} at {SHA}"
+
+
 def _candidate_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     workflow = tmp_path / "ci.yml"
     text = (ROOT / ".github/workflows/ci.yml").read_text("utf-8")
