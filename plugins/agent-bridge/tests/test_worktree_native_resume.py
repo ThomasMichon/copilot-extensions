@@ -838,6 +838,16 @@ def test_cli_reservation_cleanup_preserves_other_owners(boundary, foreign):
     assert boundary.db.get_cli_mode_reservation("wt-example") == expected
 
 
+def test_cli_replay_does_not_treat_unknown_reservation_id_as_ownership(boundary, monkeypatch):
+    monkeypatch.setattr(boundary.db, "get_cli_mode_reservation", lambda _wid: {
+        "reservation_id": None, "claimed_by_session_id": None,
+    })
+    release = Mock()
+    monkeypatch.setattr(boundary.db, "release_cli_mode_reservation", release)
+    native_resume._release_cli_reservation(boundary.db, "wt-example", "native-original")
+    release.assert_not_called()
+
+
 @pytest.mark.parametrize("mode", ["acp", "cli"])
 def test_client_gates_and_sends_explicit_native_resume_mode(mode):
     client = object.__new__(BridgeClient)

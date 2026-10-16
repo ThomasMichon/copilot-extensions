@@ -304,7 +304,7 @@ def _release_cli_reservation(
         return
     if reservation.get("claimed_by_session_id") == native:
         db.release_cli_mode_reservation(worktree_id, reservation_id=reservation["reservation_id"])
-    elif reservation["reservation_id"] == owned_id:
+    elif owned_id is not None and reservation["reservation_id"] == owned_id:
         db.release_cli_mode_reservation(
             worktree_id, reservation_id=owned_id, unclaimed_only=True,
         )
