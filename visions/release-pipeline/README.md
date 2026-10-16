@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-15
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -19,6 +19,8 @@ Promotion should continuously deliver qualified development changes, ordinarily
 within the intended short validation cycle and at an hourly-or-faster cadence
 while changes await release. Repeated bookkeeping, composition or bootstrap
 failures should not turn release control into a barrier to its own repair.
+Agreement between artifact production and verification belongs in ordinary
+contribution checks, not as a first discovery during release qualification.
 
 ## Concepts & Components
 
@@ -75,7 +77,27 @@ Publication and runtime activation remain distinct outcomes. Optional client
 artifact use and governed source assembly follow the
 [runtime admission contract](../plugin-services/runtime-assembly/README.md).
 
+### pr-time-integrity-contracts
+
+Changes affecting hashing, materialization, source-closure declarations or
+normalization prove producer and verifier agreement before entering development
+trunk. Bounded checks exercise the real composition and verification paths,
+including relevant platform and checkout representations. Coverage follows the
+actual contract inputs, not just edits to the verifier's own file. Release
+qualification confirms that tested contract rather than serving as its first
+integration test.
+
 ## Behaviors
+
+### canonical-source-comparison
+
+Producer and verifier share one declared canonical source representation.
+Known non-semantic checkout, staging or container differences are handled
+consistently before source comparison rather than becoming unexplained release
+refusals. Normalization never makes changed shipped code, dependencies or an
+incorrect source binding equivalent. Published archive and wheel digests still
+verify their actual stored bytes; downloads are not rewritten to make a digest
+pass.
 
 ### idempotent-source-publication
 

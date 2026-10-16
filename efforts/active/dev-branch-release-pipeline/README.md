@@ -105,6 +105,10 @@ rewrite)._
 
 > When a dev-to-main promotion occurs, what matters is the `dev` commit hash. We expect to just "blit over" everything in main, and mark main with the source dev commit. We'll also publish artifacts, but frankly those artifacts really belong to the associated dev commit, which should be the durable marker. Exact main commits shouldn't matter, only the dev commit id stored in the main commit; we can tag the main commit with the dev commit once landed. We should avoid hash checks which result in catch-22s.
 
+**PR-time hash-compatibility clarification (verbatim):**
+
+> The has refusals are also a problem, because they get easily broken and nothing is catching the breaks before PRs go in. This is the kind of thing which needs to be caught at PR time; by the time a release goes out, we may need be more forgiving, or at least perform some normalization before hash-comparison
+
 Phase 9 is the agent-recommended decomposition of this clarification. It does
 not grant a new main-path exception, relax byte integrity or silently change
 the separately owned main-control preservation policy. The original pipeline
@@ -715,6 +719,10 @@ _(Agent-recommended implementation and validation decomposition of the
 
 - [ ] Land the reviewed source-identity and cadence contract before changing
       the mechanism.
+- [ ] Exercise actual producer, materializer and verifier agreement in bounded
+      ordinary PR checks before development merge, reusing existing CI lanes.
+      Cover relevant attribute, closure and materializer inputs even when no
+      artifact-tool file changed; do not add an unconditional exhaustive matrix.
 - [ ] Reconcile the recurrence audit with existing repair owners. Distinguish
       source merges from actual trusted-control activation and qualified
       releases; #6237, #4876 and #6865 retain their implementation boundaries.
@@ -725,6 +733,10 @@ _(Agent-recommended implementation and validation decomposition of the
 - [ ] Freeze and reuse the admitted composition and lock for the source-owned
       artifact set. Wire build, export, attestation, availability, publication,
       tagging and readback consistently; preserve validated legacy lookup.
+- [ ] Share a declared canonical source representation between production and
+      verification. Normalize known non-semantic checkout/staging differences
+      before source comparison while preserving raw published-byte digests.
+      Unknown or semantic differences must remain explicit, actionable failures.
 - [ ] Reuse immutable artifacts for equivalent source, content and variants
       across different Git containers. Reject conflicting bytes or provenance
       under the same binding without silently retargeting published objects.
@@ -872,6 +884,14 @@ participants' phase ownership remain unchanged.
 
 ### Phase 9 validation
 
+- [ ] An ordinary PR that breaks producer/verifier agreement fails before merge.
+      Prove the selector covers root/nested attributes, declared source closures,
+      materializers and hash/canonicalization helpers on the relevant platforms.
+      Reuse bounded contract portfolios rather than duplicating full validation.
+- [ ] The actual entry points agree across declared LF/CRLF and attribute-policy
+      representations, canonical/materialized layouts and irrelevant staging
+      noise. Changed shipped source/dependency content still fails; no downloaded
+      wheel or archive is normalized to bypass its raw digest.
 - [ ] Same verified dev source, admitted payload and lock with a different
       candidate/squash commit or bookkeeping-only main change reuses the
       immutable artifact set without a new Main-SHA identity refusal.
@@ -902,8 +922,13 @@ discarded or re-read as mutable state at another stage.
 
 The twelve historical manifest/candidate hash refusals were content-hash
 inequalities, not established generated-commit comparisons. Preserve and verify
-that byte contract while removing incidental container dependencies. The
-separately governed control-preservation policy is not changed by this proposal.
+that byte contract while removing incidental container dependencies. They are
+also integration/coverage failures when a changed producer and verifier reach
+release without proving agreement at PR time. Existing artifact CI portfolios
+should be reused with correct input/path selection and a shared canonical
+representation, not replaced by blanket acceptance of mismatched bytes.
+The separately governed control-preservation policy is not changed by this
+proposal.
 
 ## Journal
 
@@ -2752,4 +2777,3 @@ than fully pre-solved in the plan — operator direction: land the plan now
 and resolve those with tests during implementation.
 
 Phase 7 implementation can now begin.
-
