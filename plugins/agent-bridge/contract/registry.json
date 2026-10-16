@@ -196,7 +196,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-          "sha256": "a07ac679fe72d0db78c0db2831eb6159c51616c98a02c28c873ae287ae406b17",
+          "sha256": "30ae8988e1ad5215aaed4b3b2e5c00121f8cfa3e72b9a7ae1ca89ff3905273c9",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -926,6 +926,12 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-38.json",
           "sha256": "29457081de2cef9c2c51383c495cf3d3271c9ad594525e2d045376466a42a4dc",
           "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-38.json",
+          "sha256": "445ffcf9384c61e7b1761dc8d781ad64ad3add8527817b919c6ac271b03ce499",
+          "role": "Independently expected progress and freshness projection, verified through actual manager rehydration with live failure followed by historical success.",
           "generation": 38
         }
       ],
@@ -2657,6 +2663,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
           "source_git_blob": "3623fb72eb874573d9a3d141f8f17d10df7e0a46",
           "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "1f8c7242444df382d4649d292cd118a164d982c2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
+          "capture_method": "Independently expected progress and freshness projection, verified through actual manager rehydration with live failure followed by historical success."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 38 supported; retained evidence exercises generations 9 through 38, with generations 16 through 18 represented by their historical health fixtures rather than the current producer. Generation 38 adds opt-in remote ACP client controls; all prior generations and capability floors remain supported.",

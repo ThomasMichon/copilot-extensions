@@ -177,6 +177,17 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Replay-safe progress after daemon rehydration
+
+- Review followed the marked-history path through manager restart and found
+  the shared progress reducer still accepting historical milestones. It now
+  returns before changing either progress or output freshness.
+- A real database-backed manager rehydration regression retains live
+  `build=failed` when later marked history reports `build=ok`; an independently
+  expected current-generation projection fixture records that contract.
+- Remote-manager and legacy manager selection: 207 passed. No historical
+  fixture bytes, protocol identity or rollout authorization changed.
+
 ### 2026-10-16 — Drain-safe attachment accounting
 
 - Review identified a stopped-session attachment waiting on an old client

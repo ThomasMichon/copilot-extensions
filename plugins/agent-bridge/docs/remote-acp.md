@@ -223,6 +223,9 @@ Failure also starts idempotent connection cleanup automatically: sibling
 consumers are cancelled and wire resources close without a later operator stop.
 Consumer-drain and wire-close phases each use the configured ordinary timeout.
 Historical tool output never establishes a live background-task inventory.
+The shared progress reducer also ignores marked history during manager
+rehydration: historical milestones cannot overwrite live progress or refresh
+the current-output timestamp after a daemon restart.
 New/load results are adopted by the client before session-stream events are
 admitted; prompt sends wait for the session stream to be ready. A handshake
 finishing after explicit teardown is refused and its acquired socket closed.

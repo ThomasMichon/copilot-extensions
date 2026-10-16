@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 import asyncio
 import json
@@ -406,21 +407,25 @@ async def test_remote_attachment_accounting_releases_on_failed_old_client_shutdo
 
 @pytest.mark.asyncio
 async def test_rehydration_ignores_historical_progress_and_freshness(remote_manager):
+    fixture = json.loads((
+        Path(__file__).resolve().parents[1] / "contract" / "fixtures" / "http"
+        / "current" / "remote-acp-progress-generation-38.json"
+    ).read_text(encoding="utf-8"))
     manager, _ = remote_manager
     session = await connect_remote_session(manager, "example")
-    live = {"text": "PROGRESS: build=failed"}
+    live = fixture["events"][0]["data"]
     session.event_log.append("agent_message", live)
     manager._capture_progress(session, "agent_message", live)
     await manager.stop_session(session.session_id)
-    historical = {"text": "PROGRESS: build=ok", "history_replay": True}
+    historical = fixture["events"][1]["data"]
     session.event_log.append("agent_message", historical)
     session.last_output_at = 123
     manager._capture_progress(session, "agent_message", historical)
-    assert session.last_output_at == 123 and session.progress["build"] == "failed"
+    assert session.last_output_at == 123 and session.progress == fixture["expected"]["progress"]
     restored = session_manager_from_config(
         manager.db, ServiceConfig(remote_acp=manager._remote_acp_targets),
     )
-    assert restored._sessions[session.session_id].progress["build"] == "failed"
+    assert restored._sessions[session.session_id].progress == fixture["expected"]["progress"]
 
 
 def test_cli_status_request_scoped_form_has_token_without_empty_tool_flag(monkeypatch, capsys):
