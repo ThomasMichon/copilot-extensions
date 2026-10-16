@@ -31,7 +31,8 @@ which repository wins.
 
 ## Coordination
 
-- **Topology:** Independent per-slice pull requests, merged serially.
+- **Topology:** Independent per-slice pull requests, each merged when its own
+  review, CI and mergeability gates pass; sequence actual dependencies only.
 - **Host (owns PRs):** Primary contributor.
 - **Delegates:** None initially; bounded implementation or review slices may be added here before dispatch.
 - **Handoff:** The effort README, issue state, merged pull requests, and Journal are the durable relay.

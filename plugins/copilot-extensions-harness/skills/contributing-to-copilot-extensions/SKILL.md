@@ -342,9 +342,9 @@ file-an-issue fallback:
 
 `copilot-extensions` is **public** and may be driven from **more than one
 private control repo at once** (for example a personal control repo and a work
-control repo). Everyone lands through the same PR-required `dev`. Two
-disciplines keep them from colliding — and keep private context off the public
-face.
+control repo). Everyone lands through the same PR-required `dev`. Coordinate
+overlapping work and keep private context off the public face; independent
+pull requests do not need a shared merge queue.
 
 ### Claim work with a public GitHub issue
 
@@ -409,12 +409,12 @@ reconcile or yield before publishing. The temporary downstream claim prevents a
 blocked identity from duplicating work within its control plane; the required
 pre-publication search closes the cross-control-repo gap.
 
-### Serial, single-writer merges
+### Independent PR merges
 
-Treat `dev` as a single-writer lane:
+Independent PRs may be reviewed and merged concurrently once each satisfies
+its own review, CI and mergeability gates. Do not require a repository-wide
+merge slot, single-writer lane or coordinator permission.
 
-- Land one coherent change, then the next — avoid parallel in-flight PR merges from
-  different worktrees or drivers.
 - **Changefiles make concurrent merges safe by design** — unlike a hand-picked
   version, a changefile just accumulates; the promotion pipeline computes the
   real version once, at promotion time, from whatever's pending. You do not
@@ -423,6 +423,8 @@ Treat `dev` as a single-writer lane:
   reconcile the actual conflict before updating/merging your PR rather than
   force-landing — that's a real collision the changefile mechanism doesn't
   paper over.
+- Sequence changes only when they have an actual dependency or content conflict,
+  not merely because another driver's PR is in flight.
 
 ### Sanitization — keep private context off the public face
 

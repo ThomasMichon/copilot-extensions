@@ -32,10 +32,10 @@ Preserve the owning ground-layer, installer and configuration authorities.
 
 ## Coordination
 
-- **Topology:** Independent per-slice worktrees and PRs; merge serially and
-  reconcile actual content conflicts before publication.
+- **Topology:** Independent per-slice worktrees and PRs may merge concurrently
+  after their own gates pass; reconcile actual content conflicts.
 - **Host (owns PRs):** Coordinator; implementation participants may prepare
-  their own slice PRs, but do not merge concurrently.
+  and merge their own slice PRs after their required gates pass.
 - **Delegates:** The three implementation slices above. No shared-checkout Git
   operations and no nested delegation without explicit authorization.
 - **Handoff:** Return source changes, exact validation results, PR state and

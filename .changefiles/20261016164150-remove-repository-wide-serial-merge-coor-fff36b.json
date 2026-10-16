@@ -1,0 +1,9 @@
+{
+  "comment": "Remove repository-wide serial merge coordination; allow independent PRs to merge after their own gates pass.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
