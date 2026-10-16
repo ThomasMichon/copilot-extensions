@@ -80,8 +80,10 @@ async def _attach_remote_session(
         await previous.shutdown()
     if manager.is_draining:
         raise ValueError("Bridge is draining")
+    if manager._sessions.get(session.session_id) is not session or session.status == SessionStatus.ENDED:
+        raise RemoteTransportError("Remote session ended or was superseded during attachment")
     def on_event(kind: str, data: dict) -> None:
-        if session.client is not client:
+        if session.client is not client or manager._sessions.get(session.session_id) is not session:
             return
         replay = client._loading_session
         if client.acp_session_id:
@@ -102,7 +104,11 @@ async def _attach_remote_session(
     def require_current() -> None:
         if manager.is_draining:
             raise ValueError("Bridge is draining")
-        if session.client is not client or not client.is_running:
+        if (
+            manager._sessions.get(session.session_id) is not session
+            or session.status != SessionStatus.STARTING
+            or session.client is not client or not client.is_running
+        ):
             raise RemoteTransportError("Remote session startup was closed or superseded")
 
     try:
@@ -138,14 +144,14 @@ async def _attach_remote_session(
     except BaseException:
         accepted_sid = client.acp_session_id
         await client.shutdown()
-        if session.client is client:
+        if session.client is client and manager._sessions.get(session.session_id) is session:
             if accepted_sid:
                 session.acp_session_id = accepted_sid
                 manager._db.update_session_acp_id(session.session_id, accepted_sid)
             session.status = SessionStatus.STOPPED
         raise
     finally:
-        if session.client is client:
+        if session.client is client and manager._sessions.get(session.session_id) is session:
             session.event_log.set_telemetry_identity(acp_session_id=session.acp_session_id)
             manager._db.update_session_status(
                 session.session_id, session.status.value, time.time(),

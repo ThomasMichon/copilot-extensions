@@ -428,6 +428,39 @@ async def test_rehydration_ignores_historical_progress_and_freshness(remote_mana
     assert restored._sessions[session.session_id].progress == fixture["expected"]["progress"]
 
 
+@pytest.mark.asyncio
+async def test_end_during_old_client_shutdown_prevents_untracked_remote_resume(remote_manager):
+    manager, calls = remote_manager
+    session = await connect_remote_session(manager, "example")
+    client = session.client
+    client._remote_lost()
+    session.status = SessionStatus.STOPPED
+    shutdown = client.shutdown
+    entered, release = asyncio.Event(), asyncio.Event()
+    invocations = 0
+
+    async def pause_resume_only():
+        nonlocal invocations
+        invocations += 1
+        if invocations == 1:
+            entered.set()
+            await release.wait()
+        await shutdown()
+
+    client.shutdown = pause_resume_only
+    pending = asyncio.create_task(manager.resume_session(session.session_id, drain=False))
+    await entered.wait()
+    await asyncio.wait_for(manager.end_session(session.session_id), 5)
+    assert session.session_id not in manager._sessions
+    assert manager.db.get_session(session.session_id) is None
+    release.set()
+    with pytest.raises(RemoteTransportError, match="ended or was superseded"):
+        await asyncio.wait_for(pending, 5)
+    assert calls.count("connect") == 1 and not any(isinstance(call, tuple) for call in calls)
+    assert manager._active_acquisitions == 0
+    assert session.status == SessionStatus.ENDED
+
+
 def test_cli_status_request_scoped_form_has_token_without_empty_tool_flag(monkeypatch, capsys):
     from agent_bridge import service_start_cli
 
