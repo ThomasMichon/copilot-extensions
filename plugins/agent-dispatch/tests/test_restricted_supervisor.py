@@ -733,3 +733,24 @@ def test_supervisor_does_not_adopt_a_replacement_native_via_generic_binding(rig)
     rig.supervisor.local_acp_session_fn = lambda _sid: "replacement-native"
     assert rig.supervisor.bind_headless_owner_sessions() == 0
     assert rig.queue.get(rig.task.id).owner_session_id is None
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_default_recovery_retains_a_stopped_restricted_incarnation(rig, started):
+    rig.supervisor.recover = True
+    assert rig.supervisor.poll_once() == [rig.task.id]
+    if started:
+        response = rig.api.post(
+            f"/tasks/{rig.task.id}/start", headers={TASK_SCOPE_HEADER: rig.grants[-1]},
+            json={"worker_id": "ignored"},
+        )
+        assert response.status_code == 200, response.text
+    task, receipt = rig.queue.get(rig.task.id), reservation(rig)
+    rig.supervisor.local_body_verdict_fn = lambda _sid: "gone"
+    rig.supervisor.local_body_activity_fn = lambda _sid: None
+    assert rig.supervisor.recover_gone() == 0
+    assert rig.supervisor.poll_once() == []
+    assert rig.queue.get(task.id) == task
+    assert reservation(rig) == receipt
+    assert sum("create" in argv for argv, _ in rig.calls) == 1
+    assert sum("send" in argv for argv, _ in rig.calls) == 1

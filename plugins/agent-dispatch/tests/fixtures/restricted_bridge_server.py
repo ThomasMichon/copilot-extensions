@@ -13,7 +13,9 @@ from agent_bridge.models import ServiceConfig
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s",
+    )
     logging.getLogger("agent-bridge").setLevel(logging.DEBUG)
     root = Path(os.environ["AGENT_BRIDGE_CONFIG_DIR"])
     with socket.socket() as listener:

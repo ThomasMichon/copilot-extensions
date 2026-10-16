@@ -3041,6 +3041,8 @@ class Supervisor(RestrictedStartupMixin):
 
         recovered = 0
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
+            if res.get("driver") == "restricted-bridge":
+                continue  # Physical task-incarnation bindings require explicit repair, not requeue.
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:

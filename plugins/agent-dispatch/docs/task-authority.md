@@ -107,6 +107,10 @@ original conversation through its keyed identity and strict, unprompted resume.
 Every acknowledged send retains its delivery receipt and advances spawn
 bookkeeping atomically, so completion during or after delivery cannot strand
 a reserving lane slot after interrupted generic publication.
+Generic confirmed-gone recovery never requeues a delivered restricted task or
+replaces its conversation: the provider's physical binding cannot adopt a new
+task generation. A stopped delivered worker retains its original incarnation
+for explicit repair, even when ordinary automatic recovery is enabled.
 
 On the existing supervision cadence, a positively live, exact native worker
 receives a fresh task grant through the same provider operation. Unknown

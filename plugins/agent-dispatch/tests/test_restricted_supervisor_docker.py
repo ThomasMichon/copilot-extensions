@@ -72,6 +72,37 @@ def _provider_runtime(python: str, destination: Path):
 
 
 def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monkeypatch):
+    evidence = tmp_path
+    if override := os.environ.get("AGENT_DISPATCH_E2E_EVIDENCE_DIR"):
+        evidence = Path(override)
+        assert evidence.is_absolute()
+        evidence.mkdir(exist_ok=False)
+    trace_path = evidence / "stages.jsonl"
+
+    def trace(stage, event):
+        with trace_path.open("a", encoding="utf-8") as output:
+            output.write(json.dumps({
+                "stage": stage, "event": event, "monotonic": time.monotonic(),
+                "utc": datetime.now(timezone.utc).isoformat(),
+            }) + "\n")
+
+    run_delivery = restricted_spawn._run
+
+    def traced_delivery(argv, payload=None):
+        stage = next((part for part in argv if part in {
+            "dispatch-prepare", "dispatch-project", "create", "send", "status", "resume",
+        }), "unknown")
+        trace(stage, "start")
+        try:
+            result = run_delivery(argv, payload)
+        except BaseException:
+            trace(stage, "failed")
+            raise
+        trace(stage, "complete")
+        return result
+
+    monkeypatch.setattr(restricted_spawn, "_run", traced_delivery)
+    trace("acceptance", "start")
     bridge_python = os.environ["AGENT_DISPATCH_E2E_BRIDGE_PYTHON"]
     provider_python = os.environ["AGENT_DISPATCH_E2E_PROVIDER_PYTHON"]
     central_image = os.environ["AGENT_DISPATCH_E2E_CENTRAL_IMAGE"]
@@ -98,7 +129,9 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
         "acp_command": f"""/usr/local/bin/node -e 'eval(Buffer.from("{program}","base64").toString())' --""",
     }
     config_path.write_text(yaml.safe_dump({"fleets": {"acceptance": fleet}}), encoding="utf-8")
+    trace("provider-runtime-copy", "start")
     _provider_runtime(provider_python, provider_root)
+    trace("provider-runtime-copy", "complete")
     for name, value in {
         "AGENT_CONTAINERS_CONFIG": str(config_path), "AGENT_CONTAINERS_HOME": str(provider_root),
         "AGENT_CONTAINERS_STATE_DIR": str(provider_root), "AGENT_CONTAINERS_NO_SELFPROVISION": "1",
@@ -167,7 +200,8 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
         _wait(central_ready)
         _run(provider_python, "-c", provider_launcher)
         physical = json.loads(_run("docker", "inspect", worker))[0]["Id"]
-        with (bridge_root / "server.log").open("wb") as log:
+        bridge_log = evidence / "server.log"
+        with bridge_log.open("wb") as log:
             process = subprocess.Popen(
                 [bridge_python, str(_FIXTURES / "restricted_bridge_server.py")],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=log,
@@ -175,7 +209,7 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
             )
 
             def bridge_ready():
-                assert process.poll() is None, (bridge_root / "server.log").read_text(encoding="utf-8")
+                assert process.poll() is None, bridge_log.read_text(encoding="utf-8")
                 listener = bridge_root / "listener.json"
                 if not listener.exists():
                     return None
@@ -189,7 +223,7 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                     return None
 
             bridge_url = _wait(
-                bridge_ready, diagnostic=lambda: (bridge_root / "server.log").read_text(encoding="utf-8"),
+                bridge_ready, diagnostic=lambda: bridge_log.read_text(encoding="utf-8"),
             )
             monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", bridge_url)
             with DispatchClient(central_url, token=fleet_token, control_token=control_token) as client:
@@ -228,7 +262,7 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                 polled = supervisor.poll_once()
                 assert polled == [task["id"]], json.dumps({
                     "reservations": client.list_reservations(task_id=task["id"]),
-                    "bridge_log": (bridge_root / "server.log").read_text(encoding="utf-8"),
+                    "bridge_log": bridge_log.read_text(encoding="utf-8"),
                 })
                 receipt = client.list_reservations(task_id=task["id"])[0]
                 info = receipt["agent_info"]
@@ -275,7 +309,9 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                 inspected = _run("docker", "inspect", physical)
                 assert fleet_token not in inspected and control_token not in inspected
                 assert bridge_state(session_id)["acp_session_id"] == info["native_session_id"]
+                trace("acceptance", "complete")
     finally:
+        trace("cleanup", "start")
         try:
             if bridge_url:
                 response = httpx.get(
@@ -306,3 +342,4 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                         ["docker", "network", "rm", name], capture_output=True, text=True,
                         timeout=30, creationflags=no_window_flags(),
                     )
+                trace("cleanup", "complete")

@@ -321,6 +321,11 @@ and networks, and tears them down. Provider discovery uses an isolated legacy
 manifest to exercise its supported compatibility path without changing real
 plugin activation. The test is programmatic transport/authority acceptance,
 not a model evaluation or a claim of automatic pool placement.
+For timeout diagnosis, `AGENT_DISPATCH_E2E_EVIDENCE_DIR` may name a new absolute
+directory under an ignored local test-output root. The fixture refuses reuse
+and retains timestamped Bridge diagnostics and operation-label-only stage
+timing, without writing provider stdin or task credentials into the stage log.
+All diagnostics remain inside the unchanged test and subprocess deadlines.
 
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and
