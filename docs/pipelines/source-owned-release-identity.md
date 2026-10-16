@@ -45,6 +45,14 @@ apply. Legacy version-1 aliases retain their original ancestry rules.
 
 ## Qualification before Main publication
 
+The full-source gate also requires a collected baseline for every enrolled
+plugin. `tools/coverage_guided_selection/baseline.py` defaults to five-file
+sequential instrumentation batches, each retaining the 300-second subprocess
+limit. Every discovered test file still executes; coverage attribution, tiers
+and durations merge across batches. A failed or timed-out batch aborts collection
+without returning partial evidence or retrying a smaller subset. A successful
+upload step with no file does not satisfy the required baseline gate.
+
 `qualify_promotion_candidate.py` dispatches canonical `ci.yml` in candidate
 mode at the exact generated branch/SHA and owning promotion run-attempt. It
 validates the actual candidate/dev/base relationship and derives required job

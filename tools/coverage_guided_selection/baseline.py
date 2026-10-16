@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASELINE_SCHEMA_VERSION = 3
+DEFAULT_MAX_FILES_PER_CHUNK = 5
 # v1: {schema_version, plugin, cov_source, generated_at, tests, coverage}
 # v2: adds `measured_commit` (the `dev` SHA this run was measured against,
 #     see `correlation.py`) -- nullable, so a v1 consumer that only reads
@@ -408,9 +409,9 @@ def _relative_or_absolute(path: Path, cwd: Path) -> str:
 
 def _plan_chunks(cwd: Path, test_path: str, max_files_per_chunk: int) -> list[list[str]]:
     """Split `test_path` into chunks of at most `max_files_per_chunk` test
-    files each -- mirrors `tools/run-plugin-tests.py`'s own sub-suite
-    chunking (`_test_file_groups`, default 25 files), which this function
-    reuses the same `partition` helper for. A suite within the limit (or a
+    files each, using the trusted runner's same `partition` helper.
+    Coverage instrumentation needs smaller batches than ordinary pytest.
+    A suite within the limit (or a
     single file rather than a directory) stays exactly one chunk, naming
     `test_path` itself unchanged, so collection behavior for every
     already-enrolled plugin is bit-for-bit identical to before chunking
@@ -461,7 +462,7 @@ def collect_baseline(
     timeout_s: float = 300.0,
     measured_commit: str | None = None,
     project_dir: Path | None = None,
-    max_files_per_chunk: int = 25,
+    max_files_per_chunk: int = DEFAULT_MAX_FILES_PER_CHUNK,
 ) -> dict:
     """Run `test_path` under coverage and return a portable baseline dict.
 
@@ -486,8 +487,11 @@ def collect_baseline(
     plugin like `ai-attribution` with no installable package.
 
     `max_files_per_chunk` bounds how many test files run in a single pytest
-    process at once (default 25, matching `run-plugin-tests.py`'s own
-    `--max-files-per-sub-suite` default). Confirmed live: `agent-mcp`'s
+    process at once (default 5). The instrumented Worktrees collection
+    exceeded the unchanged 300-second cap with a 25-file batch even while
+    ordinary pytest passed. Smaller sequential batches preserve every file
+    and the same timeout per subprocess; a single oversized file still
+    fails rather than being retried or partially accepted. `agent-mcp`'s
     full suite (54 files, real process/watchdog-management tests) reliably
     crashed a single unchunked collection pass with near-zero captured
     output, while the trusted runner's own chunked sub-suites pass it
@@ -556,6 +560,11 @@ def collect_baseline(
                 str(basetemp),
             ]
             command = [*command_prefix, *driver_args]
+            print(
+                f"Collecting coverage baseline chunk {index + 1}/{len(chunks)} "
+                f"({len(chunk_paths)} path(s), {timeout_s:g}s limit)",
+                flush=True,
+            )
 
             proc = None
             try:
@@ -664,10 +673,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     parser.add_argument(
         "--max-files-per-chunk",
         type=int,
-        default=25,
+        default=DEFAULT_MAX_FILES_PER_CHUNK,
         help="split a suite larger than this many test files into sequential "
-             "chunks, matching run-plugin-tests.py's own sub-suite chunking "
-             "(default: 25)",
+             "coverage-instrumented chunks (default: "
+             f"{DEFAULT_MAX_FILES_PER_CHUNK})",
     )
     args = parser.parse_args(argv)
 

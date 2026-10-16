@@ -938,6 +938,32 @@ proposal.
 
 ## Journal
 
+### 2026-10-16 - Required baseline collection blocks paused replacement before publication
+
+Paused qualification run `38967279712` tested Dev
+`883623d68b5813ed8d6fa08c26cfd8f02fe9628f`. Every full-source suite,
+artifact build and signed validation passed, but promotion job `117213929076`
+correctly refused the missing Worktrees coverage baseline (#7032). The producer
+log proves a 25-file instrumented batch exceeded its unchanged 300-second cap;
+the nonblocking collection step and missing-file-ignore upload explain its
+otherwise green job. Candidate creation, qualification, publication and Main
+merge did not run. Main remains paused and unqualified.
+
+The bounded repair changes only the collector's default batch size to five
+files and reports each batch before execution. It retains the entire inventory,
+300-second cap, attribution merging and fail-closed behavior. The existing
+#5694 corpus, fixture, containment and runner ownership is untouched. Real
+Python 3.12 collection of the exact failed 25-file/722-item inventory passes in
+five batches of 8.41, 16.00, 64.70, 184.87 and 8.03 seconds. The full selector
+regression file passes 127 tests; explicit real collection/plan/error contracts
+pass 22 tests, including default and explicit chunking with shared-line
+attribution. These local witnesses do not qualify a release.
+
+Next: merge the reviewed collector repair through Dev, then earn a fresh
+paused replacement with complete source, candidate and artifact evidence.
+Resume, consumer deployment and both natural pending-source cadence cycles
+remain open.
+
 ### 2026-10-16 - Source-owned helper implementation; activation remains open
 
 The source-identity/PR-time contract merged as #6939. Source helpers now bind
