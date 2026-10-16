@@ -92,11 +92,20 @@ def spawn_daemon(
                     log_path=log_file, stderr_log_path=err_file,
                 )
             except pu.DaemonSpawnError as broker_error:
-                if not contained_fallback:
-                    write_logs(f"{stamp} {note}; broker failed; daemon not started\n".encode())
-                    raise pu.DaemonSpawnError(f"{note}; Windows lifetime broker failed") from (
-                        broker_error
+                if not contained_fallback or not broker_error.cleanup_confirmed:
+                    outcome = (
+                        "daemon not started" if broker_error.cleanup_confirmed
+                        else "partial launch cleanup unconfirmed"
                     )
+                    write_logs(f"{stamp} {note}; broker failed; {outcome}\n".encode())
+                    if not broker_error.cleanup_confirmed:
+                        write_logs(
+                            f"{stamp} spawn_daemon: cleanup uncertain; contained retry refused\n".encode()
+                        )
+                    raise pu.DaemonSpawnError(
+                        f"{note}; Windows lifetime broker failed; {outcome}",
+                        cleanup_confirmed=broker_error.cleanup_confirmed,
+                    ) from broker_error
             note += "; broker failed; starting the daemon inside it (contained_fallback)"
             pu.log.warning("%s (%s)", note, command[0])
             write_logs(f"{stamp} {note}\n".encode())

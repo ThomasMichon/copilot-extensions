@@ -82,13 +82,18 @@ of discarding it.
 Do not remove the caller's Job or make every child break away to repair one
 daemon. If Windows refuses its explicit breakaway request, `spawn_daemon`
 uses the shared, bounded WMI lifetime broker. Its windowless, stdlib-only
-bootstrap receives launch data through an authenticated one-use channel,
+bootstrap uses the actual base interpreter with WMI's supported detached-process
+flag, so a venv redirector cannot change the identity being adopted. It receives
+launch data through an authenticated one-use channel,
 stages the actual child suspended, and transfers a pinned native process
 handle before resume. Shell interpolation, credential-bearing command lines,
 temporary launch files and wrapper PIDs are not part of this contract.
 The caller receives the actual daemon's PID and exit/control methods.
-An uncommitted failed launch is reaped; both direct and broker failure produce
-`DaemonSpawnError`, never an apparently successful contained daemon.
+An uncommitted failed launch is reaped before retry; both direct and broker
+failure produce `DaemonSpawnError`, never an apparently successful contained
+daemon. Independent cleanup branches preserve that failure type. If process
+exit cannot be confirmed, the error carries `cleanup_confirmed=False` and no
+contained retry is permitted.
 A caller for which the degraded lifetime is still better than no daemon may
 opt in to `contained_fallback=True`: only after broker failure does the daemon
 start inside the caller's Job, with a warning and log entry. That daemon does

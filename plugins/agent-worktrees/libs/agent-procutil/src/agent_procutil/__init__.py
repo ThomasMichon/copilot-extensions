@@ -55,9 +55,11 @@ import os
 import subprocess
 import sys
 import time
-from typing import Any, BinaryIO
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, BinaryIO
 
-from .daemon import spawn_daemon
+if TYPE_CHECKING:
+    from .daemon_broker import WindowsDaemonProcess
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
 # and fall back to the stable ABI literals so this module imports cleanly off
@@ -695,6 +697,10 @@ _DAEMON_EXTRA_CREATIONFLAGS = (
 class DaemonSpawnError(OSError):
     """:func:`spawn_daemon` could not give the daemon its own lifetime."""
 
+    def __init__(self, message: str = "", *, cleanup_confirmed: bool = True) -> None:
+        super().__init__(message)
+        self.cleanup_confirmed = cleanup_confirmed
+
 
 def _validated_daemon_cwd(cwd: str | os.PathLike[str] | None) -> str:
     """Reject a daemon cwd that is missing, relative, or inside a plugin payload.
@@ -861,3 +867,33 @@ def _daemon_log_header(stamp: str, cwd: str, executable: str, display: str | Non
     if display:
         header += " display=" + _header_field(" ".join(str(display).split()))
     return (header + "\n").encode("utf-8", errors="backslashreplace")
+
+
+def spawn_daemon(
+    argv: Sequence[str | os.PathLike[str]],
+    *,
+    cwd: str | os.PathLike[str],
+    log_path: str | os.PathLike[str],
+    env: Mapping[str, str] | None = None,
+    env_overrides: Mapping[str, str] | None = None,
+    console_children: bool = False,
+    breakaway: bool = True,
+    contained_fallback: bool = False,
+    extra_creationflags: int = 0,
+    display: str | None = None,
+    stderr_log_path: str | os.PathLike[str] | None = None,
+) -> subprocess.Popen | WindowsDaemonProcess:
+    """Launch a resident daemon; load its implementation only for daemon callers.
+
+    Short-lived standalone loaders and minimal bundles can use this file's
+    containment helpers without carrying the resident-daemon module closure.
+    The complete lifetime, logging and validation contract is in the README.
+    """
+    from .daemon import spawn_daemon as launch
+
+    return launch(
+        argv, cwd=cwd, log_path=log_path, env=env, env_overrides=env_overrides,
+        console_children=console_children, breakaway=breakaway,
+        contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
+        display=display, stderr_log_path=stderr_log_path,
+    )

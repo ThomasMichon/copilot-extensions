@@ -70,12 +70,17 @@ It composes the helpers above, so its flags never drift from them:
   caller (an installer or updater) does not kill the new daemon; POSIX gets a
   new session. When the caller's Job forbids breakaway (`ERROR_ACCESS_DENIED`),
   the shared launcher uses a bounded, windowless WMI bootstrap outside that
-  Job. It passes the original argv, cwd, complete environment, creation policy
+  Job. Its bootstrap uses the actual base interpreter with WMI's supported
+  detached-process flag, not a venv redirector or a console window. It passes
+  the original argv, cwd, complete environment, creation policy
   and split log paths over an authenticated, one-use loopback channel; neither
   credentials nor shell-interpolated daemon arguments go on the broker command
   line or into temporary files. The actual daemon is staged suspended, its
   native process handle is adopted and its independent lifetime checked, then
-  it is resumed. A failed uncommitted launch is reaped instead of orphaned.
+  it is resumed. Failed uncommitted launches are reaped before a retry.
+  Cleanup branches run independently and preserve `DaemonSpawnError`;
+  `cleanup_confirmed=False` reports uncertain process exit and prohibits even
+  an explicitly requested contained retry.
   The returned handle names the **actual daemon**, not PowerShell, WMI or a
   console wrapper, and supports `pid`, `poll()`, `wait(timeout=...)`,
   `terminate()` and `kill()`. Brokerage has a 30-second launch deadline with a

@@ -57,6 +57,8 @@ import json, subprocess, sys, traceback
 spec = json.loads(sys.argv[1])
 try:
     import agent_procutil
+    if spec.get("bootstrap_redirector"):
+        agent_procutil.windowless_python = lambda _exe: spec["bootstrap_redirector"]
     proc = agent_procutil.spawn_daemon(
         spec["argv"],
         cwd=spec["cwd"],
@@ -76,7 +78,7 @@ try:
         result["returncode"] = proc.wait(timeout=5)
         result["poll"] = proc.poll()
 except agent_procutil.DaemonSpawnError as exc:
-    result = {"daemon_spawn_error": str(exc)}
+    result = {"daemon_spawn_error": str(exc), "cause": str(exc.__cause__)}
 except BaseException:
     result = {"error": traceback.format_exc()}
 with open(spec["result"], "w", encoding="utf-8") as fh:
@@ -238,7 +240,7 @@ def _console_python() -> str:
 
 def _run_cycle(
     tmp_path: Path, cycle: int, console_children: bool, kernel32,
-    *, allow_breakaway: bool = True, terminate: bool = False,
+    *, allow_breakaway: bool = True, terminate: bool = False, redirector: bool = False,
 ) -> None:
     root = tmp_path / f"cycle-{cycle}"
     workdir = root / "home with spaces"
@@ -264,7 +266,11 @@ def _run_cycle(
         "stderr_log_path": str(err_path),
         "env_overrides": {"BROKER_ENV_FIXTURE": environment},
         "terminate": terminate,
+        "bootstrap_redirector": str(Path(sys.executable).with_name("pythonw.exe"))
+        if redirector else None,
     }
+    if redirector:
+        assert Path(spec["bootstrap_redirector"]).is_file(), "a real venv redirector is required"
 
     env = os.environ.copy()
     env.pop("__PYVENV_LAUNCHER__", None)
@@ -286,7 +292,7 @@ def _run_cycle(
         assert result is not None, "parent did not record a result"
         if "daemon_spawn_error" in result:
             if not allow_breakaway:
-                pytest.fail(result["daemon_spawn_error"])
+                pytest.fail(result["daemon_spawn_error"] + "; " + result.get("cause", ""))
             pytest.skip(
                 "this runner's own Job forbids breakaway: " + result["daemon_spawn_error"]
             )
@@ -390,5 +396,16 @@ def test_broker_handle_wait_timeout_and_termination_control_the_actual_child(tmp
         _run_cycle(
             tmp_path, 0, True, kernel32, allow_breakaway=False, terminate=True,
         )
+    assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
+    assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
+
+
+def test_broker_outlives_job_when_windowless_selection_falls_back_to_venv_redirector(tmp_path):
+    user32, kernel32, callback_type = _configure_win32()
+    with _WindowObserver(user32, kernel32, callback_type) as observer:
+        for cycle in range(_CYCLES):
+            _run_cycle(
+                tmp_path, cycle, True, kernel32, allow_breakaway=False, redirector=True,
+            )
     assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
     assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"

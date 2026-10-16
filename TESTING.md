@@ -19,6 +19,12 @@ visible windows or foreground changes. A separate broker-handle case checks
 wait timeout, termination and actual exit status. The forbidden-breakaway cases
 fail rather than skip when lifetime escape fails; contained-mode execution
 instead proves that the daemon dies with its caller's Job.
+The redirector-fallback case also runs two native cycles; standalone import
+tests cover both an alias-loaded single file and a minimal package. Consumer
+checks exercise the real Session Host zipapp and the actual standalone
+Worktrees lifecycle loader. Fault-injected cleanup waits/closes verify
+independent cleanup, normalized errors and refusal to retry with uncertain
+process ownership.
 
 Pull Requests' installer wiring contract covers both canonical development
 references and self-contained materialized payloads. Its fixture invokes the

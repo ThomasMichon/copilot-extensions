@@ -29,6 +29,7 @@ try {
     $s = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
         ShowWindow = [uint16]0
+        CreateFlags = [uint32]$s.creationflags
         EnvironmentVariables = [string[]]$s.environment
     }
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
@@ -119,9 +120,9 @@ class WindowsDaemonProcess:
     def close(self) -> None:
         handle = getattr(self, "_handle", None)
         if handle:
-            self._handle = None
             if not _kernel32().CloseHandle(handle):
                 raise ctypes.WinError(ctypes.get_last_error())
+            self._handle = None
 
     def __del__(self) -> None:
         handle = getattr(self, "_handle", None)
@@ -186,7 +187,7 @@ def _resume(process: WindowsDaemonProcess) -> None:
 
 
 def _activate(command: list[str], env: dict[str, str], cwd: str, deadline: float) -> int:
-    from . import no_window_kwargs
+    from . import detached_kwargs, no_window_kwargs
 
     powershell = Path(os.environ["SystemRoot"]) / (
         r"System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -195,6 +196,7 @@ def _activate(command: list[str], env: dict[str, str], cwd: str, deadline: float
         "command": subprocess.list2cmdline(command),
         "cwd": cwd,
         "environment": [f"{key}={value}" for key, value in env.items()],
+        "creationflags": detached_kwargs(breakaway=False).get("creationflags", 0),
     }
     result = subprocess.run(
         [str(powershell), "-NoProfile", "-NonInteractive", "-Command", _WMI_CREATE],
@@ -213,17 +215,49 @@ def _activate(command: list[str], env: dict[str, str], cwd: str, deadline: float
     return pid
 
 
+def _bootstrap_python() -> str:
+    # Use the actual base interpreter, never a venv redirector. WMI supports
+    # DETACHED_PROCESS for this non-captured bootstrap (not CREATE_NO_WINDOW).
+    python = Path(sys.base_prefix) / "python.exe"
+    if not python.is_file():
+        raise OSError("daemon broker requires its base Python interpreter")
+    return str(python)
+
+
+def _cleanup_process(
+    process: WindowsDaemonProcess, *, terminate: bool,
+) -> tuple[bool, list[str]]:
+    problems = []
+    if terminate:
+        try:
+            process.terminate()
+        except (OSError, subprocess.SubprocessError):
+            problems.append("terminate")
+    exited = False
+    try:
+        process.wait(timeout=5)
+        exited = True
+    except (OSError, subprocess.SubprocessError):
+        problems.append("wait")
+    try:
+        process.close()
+    except OSError:
+        problems.append("close")
+    return exited, problems
+
+
 def spawn_brokered_daemon(
     command: list[str], *, cwd: str, env: dict[str, str], creationflags: int,
     log_path: str, stderr_log_path: str | None,
 ) -> WindowsDaemonProcess:
     """Launch through WMI only after the direct Job-breakaway request failed."""
-    from . import DaemonSpawnError, windowless_python
+    from . import DaemonSpawnError
 
     deadline = time.monotonic() + _TIMEOUT
     child = bootstrap = None
     cookie = secrets.token_hex(32)
     stage = "activation"
+    problems = []
     try:
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -233,7 +267,7 @@ def spawn_brokered_daemon(
                 _BOOT_COOKIE: cookie,
                 _BOOT_PORT: str(listener.getsockname()[1]),
             }
-            argv = [windowless_python(sys.executable), "-I", str(Path(__file__).resolve())]
+            argv = [_bootstrap_python(), "-I", str(Path(__file__).resolve())]
             pid = _activate(argv, bootstrap_env, cwd, deadline)
             bootstrap = WindowsDaemonProcess(pid, argv)
             stage = "bootstrap-identity"
@@ -247,6 +281,8 @@ def spawn_brokered_daemon(
                     or hello.get("pid") != pid
                 ):
                     raise OSError("daemon broker identity mismatch")
+                if not _outside_job(bootstrap):
+                    raise OSError("daemon broker bootstrap still belongs to a Job")
                 stage = "child-staging"
                 _send(connection, {
                     "argv": command, "cwd": cwd, "env": env,
@@ -267,24 +303,27 @@ def spawn_brokered_daemon(
             stage = "bootstrap-exit"
             if bootstrap.wait(timeout=_remaining(deadline)) != 0:
                 raise OSError("daemon broker did not finish successfully")
-            result, child = child, None
-            return result
     except (OSError, ValueError, subprocess.SubprocessError):
-        raise DaemonSpawnError(f"spawn_daemon: Windows lifetime broker failed ({stage})") from None
-    finally:
-        if child is not None:
-            try:
-                child.terminate()
-                child.wait(timeout=5)
-            finally:
-                child.close()
-        if bootstrap is not None:
-            try:
-                # Closing the channel asks an uncommitted bootstrap to reap its
-                # suspended child. Killing the bootstrap first could orphan it.
-                bootstrap.wait(timeout=5)
-            finally:
-                bootstrap.close()
+        problems.append(stage)
+    cleanup_confirmed = True
+    if bootstrap is not None:
+        # Channel closure lets an uncommitted bootstrap reap its suspended
+        # child. Killing the bootstrap first could orphan that child.
+        exited, cleanup = _cleanup_process(bootstrap, terminate=False)
+        cleanup_confirmed &= exited
+        problems.extend("bootstrap-" + problem for problem in cleanup)
+    if problems and child is not None:
+        exited, cleanup = _cleanup_process(child, terminate=True)
+        cleanup_confirmed &= exited
+        problems.extend("child-" + problem for problem in cleanup)
+    if problems:
+        raise DaemonSpawnError(
+            "spawn_daemon: Windows lifetime broker failed (" + ", ".join(problems) + ")",
+            cleanup_confirmed=cleanup_confirmed,
+        ) from None
+    if child is None:
+        raise DaemonSpawnError("spawn_daemon: Windows lifetime broker did not return a child")
+    return child
 
 
 def _bootstrap() -> int:

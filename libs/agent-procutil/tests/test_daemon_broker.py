@@ -83,6 +83,21 @@ def test_broker_errors_are_sanitized_in_both_logs(monkeypatch, tmp_path):
         assert "daemon not started" in text and "sensitive-fixture-detail" not in text
 
 
+def test_uncertain_cleanup_prohibits_a_contained_retry(monkeypatch, tmp_path):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    popen = Mock(side_effect=[_denied(), Mock(pid=123)])
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    error = pu.DaemonSpawnError("cleanup uncertain")
+    error.cleanup_confirmed = False
+    monkeypatch.setattr(daemon, "spawn_brokered_daemon", Mock(side_effect=error))
+    with pytest.raises(pu.DaemonSpawnError):
+        pu.spawn_daemon(
+            ["py"], cwd=tmp_path, log_path=tmp_path / "out.log", contained_fallback=True,
+        )
+    assert popen.call_count == 1, "uncertainty must not create a second daemon"
+
+
 def test_frames_preserve_unicode_environment_and_embedded_newlines():
     deadline = time.monotonic() + 5
     spec = {"env": {"VALUE": "quotes ' \" ; & \n \u65e5"}, "argv": ["spaced argument", ""]}
@@ -138,6 +153,8 @@ def test_wmi_activation_uses_json_stdin_not_shell_interpolation(monkeypatch, tmp
     assert 0 < kwargs["timeout"] <= 20
     assert "ProcessStartupInformation" in command[-1]
     assert "EnvironmentVariables" in command[-1]
+    assert "CreateFlags" in command[-1]
+    assert payload["creationflags"] == pu.detached_kwargs(breakaway=False).get("creationflags", 0)
 
 
 @pytest.mark.parametrize(
@@ -163,6 +180,7 @@ def broker_channel(monkeypatch):
     monkeypatch.setattr(socket, "socket", Mock(return_value=listener))
     monkeypatch.setattr(broker.secrets, "token_hex", lambda _: "fixture-cookie")
     monkeypatch.setattr(broker, "_activate", Mock(return_value=100))
+    monkeypatch.setattr(broker, "_bootstrap_python", lambda: "base-python-fixture")
     processes = {}
 
     def process(pid, args):
@@ -218,13 +236,24 @@ def test_identity_mismatch_never_sends_environment(
     processes[100].close.assert_called_once()
 
 
+def test_bootstrap_uses_base_python_even_without_a_gui_sibling(monkeypatch, tmp_path):
+    base = tmp_path / "base"
+    base.mkdir()
+    python = base / "python.exe"
+    python.write_bytes(b"base-interpreter-fixture")
+    monkeypatch.setattr(broker.sys, "base_prefix", str(base))
+    monkeypatch.setattr(pu, "windowless_python", lambda _: "venv-redirector/pythonw.exe")
+    assert broker._bootstrap_python() == str(python)
+    assert not (base / "pythonw.exe").exists()
+
+
 @pytest.mark.parametrize("failure", ["contained", "confirmation", "bootstrap-exit"])
 def test_partial_start_reaps_pinned_child_before_releasing_handles(
     monkeypatch, broker_channel, tmp_path, failure,
 ):
     processes, _ = broker_channel
     if failure == "contained":
-        monkeypatch.setattr(broker, "_outside_job", Mock(return_value=False))
+        monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
     elif failure == "confirmation":
         monkeypatch.setattr(broker, "_receive", Mock(side_effect=[
             {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 999},
@@ -244,6 +273,32 @@ def test_partial_start_reaps_pinned_child_before_releasing_handles(
     processes[200].close.assert_called_once()
     processes[100].close.assert_called_once()
     processes[100].terminate.assert_not_called()
+
+
+@pytest.mark.parametrize(("pid", "method"), [
+    (100, "wait"), (200, "wait"), (100, "close"), (200, "close"),
+])
+def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
+    monkeypatch, broker_channel, tmp_path, pid, method,
+):
+    processes, _ = broker_channel
+    original = broker.WindowsDaemonProcess
+
+    def process(number, args):
+        result = original(number, args)
+        if number == pid:
+            error = subprocess.TimeoutExpired(args, 5) if method == "wait" else OSError("close")
+            getattr(result, method).side_effect = error
+        return result
+
+    monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
+    monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
+    with pytest.raises(pu.DaemonSpawnError) as caught:
+        _launch(tmp_path)
+    assert caught.value.cleanup_confirmed is (method == "close")
+    processes[100].close.assert_called_once()
+    processes[200].close.assert_called_once()
+    processes[200].terminate.assert_called_once()
 
 
 @pytest.fixture()
