@@ -68,14 +68,17 @@ def test_serving_reconcile_native_first_touch_never_activates(tmp_path, body, co
 
 
 @pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
-@pytest.mark.parametrize("bind", ["127.0.0.1", "::1"])
-def test_serving_reconcile_native_current_daemon_keeps_same_process(tmp_path, bind):
-    if bind == "::1":
+@pytest.mark.parametrize(("bind", "stopped"), [
+    ("127.0.0.1", False), ("::1", False), ("127.0.0.2", False), ("127.0.0.1", True),
+])
+def test_serving_reconcile_native_daemon_lifecycle_never_activates(tmp_path, bind, stopped):
+    if bind != "127.0.0.1":
         try:
-            with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as probe:
+            family = socket.AF_INET6 if ":" in bind else socket.AF_INET
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
                 probe.bind((bind, 0))
         except OSError:
-            pytest.skip("IPv6 loopback is unavailable")
+            pytest.skip(f"native local bind {bind} is unavailable")
     root = tmp_path / "runtime"
     root.mkdir()
     (root / "config.yaml").write_text(
@@ -141,6 +144,15 @@ def test_serving_reconcile_native_current_daemon_keeps_same_process(tmp_path, bi
             row["pid"], diagnostics.process_start_time(row["pid"]),
         )
         cleanup.callback(reference.close)
+        if stopped:
+            BridgeClient(endpoint.base_url, token, timeout=1).shutdown()
+            assert reference.wait(2), "owned fixture did not stop before reconciliation"
+            assert (routing.read_table(root) or {}).get("active") is None
+            before = {
+                path.relative_to(root): path.read_bytes()
+                for path in root.rglob("*") if path.is_file()
+                and path.name not in ("fixture.log", "client.out", "client.err")
+            }
         remaining = deadline - time.monotonic()
         assert remaining > 0, "daemon startup exhausted the shared consumer budget"
         assert client.poll() is None, (root / "client.err").read_text()
@@ -151,9 +163,19 @@ def test_serving_reconcile_native_current_daemon_keeps_same_process(tmp_path, bi
         stdout = (root / "client.out").read_text()
         stderr = (root / "client.err").read_text()
         assert client.returncode == 0, stdout + stderr
-        assert json.loads(stdout)["serving_reconcile"] == "current"
-        assert (routing.read_table(root) or {}).get("active") == row
+        assert json.loads(stdout)["serving_reconcile"] == (
+            "inactive-or-forwarded" if stopped else "current"
+        )
+        if stopped:
+            assert {
+                path.relative_to(root): path.read_bytes()
+                for path in root.rglob("*") if path.is_file()
+                and path.name not in ("fixture.log", "client.out", "client.err")
+            } == before
+        else:
+            assert (routing.read_table(root) or {}).get("active") == row
         assert not (root / "update-in-progress").exists()
-        assert reference.wait(0) is False
-        BridgeClient(endpoint.base_url, token, timeout=1).shutdown()
-        assert reference.wait(2), "owned fixture daemon did not gracefully stop"
+        assert reference.wait(0) is stopped
+        if not stopped:
+            BridgeClient(endpoint.base_url, token, timeout=1).shutdown()
+            assert reference.wait(2), "owned fixture daemon did not gracefully stop"

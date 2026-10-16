@@ -31,6 +31,10 @@ Their imports and consumer execution share the same 25-second budget, with
 cleanup inside the unchanged 30-second item cap. IPv4 exercises reconcile and
 IPv6 exercises the read-only installer probe. Fresh-root cases retain ordinary
 `python -m agent_bridge` invocation.
+The same native lifecycle fixture also exercises a supported non-default
+loopback bind and graceful start/stop/reconcile. The stopped case compares
+runtime files after confirmed native exit, excluding only its own log/output
+files, and requires inactive success without activation or runtime writes.
 Conditional cutover's native contention checks retain their one-second limit,
 measured from actual holder acquisition. Earlier healthy publication/fixture I/O
 is not part of that contention interval; the native lock and whole-item deadline

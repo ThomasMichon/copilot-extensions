@@ -74,7 +74,7 @@ class ProcessExitReference:
         self.close()
 
 
-def _open_linux(pid: int, token: str) -> ProcessExitReference:
+def _open_linux(pid: int, token: str, *, allow_exited: bool = False) -> ProcessExitReference:
     from .singleton_linux import _open_pidfd
 
     fd = _open_pidfd(pid)
@@ -85,7 +85,7 @@ def _open_linux(pid: int, token: str) -> ProcessExitReference:
     try:
         if diagnostics.process_start_time(pid) != token:
             raise ProcessLookupError("process identity does not match captured reference")
-        if reference.wait(0):
+        if reference.wait(0) and not allow_exited:
             raise ProcessLookupError("captured process exited before identity validation")
         return reference
     except BaseException:
@@ -93,7 +93,7 @@ def _open_linux(pid: int, token: str) -> ProcessExitReference:
         raise
 
 
-def _open_windows(pid: int, token: str) -> ProcessExitReference:
+def _open_windows(pid: int, token: str, *, allow_exited: bool = False) -> ProcessExitReference:
     import ctypes
     from ctypes import wintypes
 
@@ -134,7 +134,7 @@ def _open_windows(pid: int, token: str) -> ProcessExitReference:
         actual = str((creation.dwHighDateTime << 32) | creation.dwLowDateTime)
         if actual != token:
             raise ProcessLookupError("process identity does not match captured reference")
-        if reference.wait(0):
+        if reference.wait(0) and not allow_exited:
             raise ProcessLookupError("captured process exited before identity validation")
         return reference
     except BaseException:
@@ -142,8 +142,16 @@ def _open_windows(pid: int, token: str) -> ProcessExitReference:
         raise
 
 
-def open_process(pid: int, expected_start_time: str) -> ProcessExitReference:
-    """Capture one live identity or refuse; unsupported platforms never guess."""
+def open_process(
+    pid: int, expected_start_time: str, *, allow_exited: bool = False,
+) -> ProcessExitReference:
+    """Capture one identity; allow an exited object only for inactive observation.
+
+    Retirement still requires a live reference captured before control; the
+    opt-in is never a replacement for that retained reference.
+    """
+    if type(allow_exited) is not bool:
+        raise ValueError("allow_exited requires a boolean")
     if (
         type(pid) is not int
         or not 0 < pid <= 0xFFFFFFFF
@@ -154,7 +162,11 @@ def open_process(pid: int, expected_start_time: str) -> ProcessExitReference:
     ):
         raise ValueError("process identity requires a positive PID and ASCII decimal start token")
     if sys.platform == "win32":
+        if allow_exited:
+            return _open_windows(pid, expected_start_time, allow_exited=True)
         return _open_windows(pid, expected_start_time)
     if sys.platform == "linux":
+        if allow_exited:
+            return _open_linux(pid, expected_start_time, allow_exited=True)
         return _open_linux(pid, expected_start_time)
     raise NotImplementedError("native process exit references require Windows or Linux")

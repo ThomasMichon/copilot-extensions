@@ -41,6 +41,11 @@ other exits fail. Only exit 10 acquires the existing reference-counted
 on success or failure. Current, inactive and forwarded no-ops remain marker-free.
 Health observation and control probe the routed client address, including IPv6;
 the captured predecessor's client never retries a connection into a replacement.
+A previous-only route after graceful shutdown is inactive only when its native
+process has verifiably exited or is absent and the route stays unchanged.
+Permission failures, reused/live PIDs and retained cutover evidence still refuse
+without repair. Supported bind addresses are checked against local OS binding,
+not a literal-address list; native process and health ownership checks remain.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`

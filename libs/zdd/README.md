@@ -138,6 +138,11 @@ after shutdown. Use its context manager or `close()` to release the reference;
 closed references reject waiting. References remain local to their creating
 process: a forked child refuses wait/close/context entry before touching a
 possibly orphaned inherited lock or its parent's native reference.
+`allow_exited=True` permits an identity-matched, already-exited kernel object
+only for read-only inactive-state observation. The default still requires a
+live object. This opt-in is not late retirement evidence: graceful control must
+retain the live reference captured before shutdown. A caller recognizing an
+absent PID must distinguish native absence from permission or identity errors.
 
 Windows validates creation time through the captured query/synchronization
 handle, without requesting termination rights. Linux reuses canonical pidfd

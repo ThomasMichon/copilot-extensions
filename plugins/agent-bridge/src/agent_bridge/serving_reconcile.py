@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import errno
+import socket
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -49,6 +51,36 @@ def existing_auth_token(root: Path) -> str:
             "existing Bridge credential is empty or malformed; no credential was changed"
         )
     return token
+
+
+def _local_bind_supported(bind: str) -> bool:
+    try:
+        addresses = socket.getaddrinfo(bind or "0.0.0.0", 0, type=socket.SOCK_DGRAM)
+        for family, kind, protocol, _, address in addresses:
+            try:
+                with socket.socket(family, kind, protocol) as probe:
+                    probe.bind(address)
+                return True
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return False
+
+
+def _previous_has_exited(previous: dict | None) -> bool:
+    endpoint = routing.Endpoint.from_dict(previous) if isinstance(previous, dict) else None
+    if endpoint is None or endpoint.pid is None or not endpoint.process_start_time:
+        return False
+    try:
+        with process_exit.open_process(
+            endpoint.pid, endpoint.process_start_time, allow_exited=True,
+        ) as reference:
+            return reference.wait(0)
+    except OSError as exc:
+        if exc.errno == errno.ESRCH or getattr(exc, "winerror", None) == 87:
+            return True
+        raise
 
 
 @dataclass
@@ -129,6 +161,11 @@ def observe_serving(root: Path) -> Iterator[ServingRuntime | None]:
             yield None
             return
         routing._validate_endpoint_rows(table)
+        if active is None and _previous_has_exited(table.get("previous")):
+            if routing.read_table(root, strict=True) != table:
+                raise ServingReconcileError("stopped predecessor route changed during observation")
+            yield None
+            return
         endpoint = routing.Endpoint.from_dict(active) if isinstance(active, dict) else None
         if (
             endpoint is None
@@ -138,7 +175,7 @@ def observe_serving(root: Path) -> Iterator[ServingRuntime | None]:
             or endpoint.pid <= 0
             or endpoint.generation <= 0
             or not 0 < endpoint.port < 65536
-            or endpoint.bind not in ("127.0.0.1", "::1", "0.0.0.0", "::", "")
+            or not _local_bind_supported(endpoint.bind)
             or not isinstance(endpoint.version, str)
             or not endpoint.process_start_time
         ):

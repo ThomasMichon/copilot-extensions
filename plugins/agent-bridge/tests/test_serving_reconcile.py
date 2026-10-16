@@ -165,6 +165,62 @@ def test_serving_reconcile_invalid_version_refuses():
         reconcile.compare_serving_version("unknown", "1.2.3")
 
 
+@pytest.mark.parametrize("state", [
+    "exited", "absent-posix", "absent-windows", "live", "reused", "unknown", "route-changed",
+])
+def test_serving_reconcile_previous_only_requires_verified_exit(serving, monkeypatch, state):
+    root, row, _, reference, core = serving
+    table = {"previous": row}
+    path = root / "active.json"
+    path.write_text(json.dumps(table))
+
+    def open_process(pid, start, *, allow_exited):
+        import errno
+
+        assert (pid, start) == (row["pid"], row["process_start_time"])
+        assert allow_exited is True
+        if state == "absent-posix":
+            raise ProcessLookupError(errno.ESRCH, "native process is absent")
+        if state == "absent-windows":
+            class NativeAbsent(OSError):
+                winerror = 87
+            raise NativeAbsent("native process is absent")
+        if state == "reused":
+            raise ProcessLookupError("native process identity changed")
+        if state == "unknown":
+            raise PermissionError("native identity unavailable")
+        if state == "route-changed":
+            path.write_text(json.dumps({"active": row}))
+        reference.wait.return_value = state != "live"
+        return reference
+
+    capture = Mock(side_effect=open_process)
+    monkeypatch.setattr(process_exit, "open_process", capture)
+    if state in ("exited", "absent-posix", "absent-windows"):
+        before = path.read_bytes()
+        with reconcile.observe_serving(root) as observed:
+            assert observed is None
+        assert path.read_bytes() == before
+    else:
+        with pytest.raises(reconcile.ServingReconcileError):
+            with reconcile.observe_serving(root):
+                pytest.fail("uncertain previous owner was admitted as inactive")
+    core._service_health_on_port.assert_not_called()
+    capture.assert_called_once_with(row["pid"], row["process_start_time"], allow_exited=True)
+
+
+@pytest.mark.parametrize("bind", ["127.0.0.2", "localhost"])
+def test_serving_reconcile_accepts_supported_local_bind(serving, bind):
+    root, row, health, _, core = serving
+    row["bind"] = bind
+    health["slot"]["active"] = row.copy()
+    (root / "active.json").write_text(json.dumps({"active": row}))
+    with reconcile.observe_serving(root) as observed:
+        assert observed.route["bind"] == bind
+        observed.verify_control()
+    core._service_health_on_port.assert_called_with(row["port"], host=bind)
+
+
 @pytest.mark.parametrize("body", [
     None, "token: [", "[]", "{}", "token: 123", "token: true", 'token: "   "',
 ])
