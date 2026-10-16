@@ -735,7 +735,7 @@ class TestPlanChunks:
     ) -> None:
         tests_dir = tmp_path / "tests"
         tests_dir.mkdir()
-        paths = [f"tests/test_{index:02d}.py" for index in range(25)]
+        paths = [str(Path("tests") / f"test_{index:02d}.py") for index in range(25)]
         for path in paths:
             (tmp_path / path).write_text("def test_x(): pass\n")
         calls: list[list[str]] = []
