@@ -348,9 +348,10 @@ def test_invalid_identity_rejected_before_transport(field: str, value: object) -
         Identity.from_json(payload)
 
 
-def test_identity_and_endpoint_round_trip_strictly() -> None:
+def test_identity_and_endpoint_round_trip_strictly(tmp_path: Path) -> None:
     assert Identity.from_json(identity().to_json()) == identity()
-    endpoint = Endpoint("tcp://example.invalid:2376", "fixture", tls=True, tls_verify=True)
+    endpoint = Endpoint("tcp://example.invalid:2376", "fixture", tls=True, tls_verify=True,
+                        tls_ca=str(tmp_path / "ca.pem"))
     assert Endpoint.from_json(endpoint.to_json()) == endpoint
     with pytest.raises(VerificationError):
         Endpoint.from_json({**endpoint.to_json(), "extra": "refused"})
