@@ -337,7 +337,31 @@ jobs:
       - name: Agent Bridge contract registry guard tests
         run: python -m pytest -q tools/test_check_agent_bridge_contracts.py
       - name: Git hook interpreter tests
-        run: python -m pytest -q tools/test_hook_interpreter.py tools/test_pre_push_ref_scope.py
+        run: python -m pytest -q tools/test_hook_interpreter.py
+      - &detect_pre_push_scope
+        id: pre-push-scope
+        name: Detect publication guard changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "push" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|tools/hooks/.*|tools/(check-no-internal-identifiers|check-large-files|test_pre_push_ref_scope|test_hook_interpreter|test_check_large_files|test_check_no_internal_identifiers)\.py)$'; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - name: Real Git publication scope tests
+        if: steps.pre-push-scope.outputs.run == 'true'
+        run: python -m pytest -q tools/test_pre_push_ref_scope.py
       - name: Promotion exact-PR merge wait regression tests
         run: python -m pytest -q tools/test_promotion_merge_wait.py
       - name: Trusted PR policy contract tests
@@ -825,6 +849,8 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -832,7 +858,11 @@ jobs:
         with:
           version: "0.12.6"
       - run: python tools/seasoned_uv.py --uv uv -- --system pytest
-      - run: python -m pytest -q tools/test_hook_interpreter.py tools/test_pre_push_ref_scope.py
+      - run: python -m pytest -q tools/test_hook_interpreter.py
+      - *detect_pre_push_scope
+      - name: Real Git publication scope tests
+        if: steps.pre-push-scope.outputs.run == 'true'
+        run: python -m pytest -q tools/test_pre_push_ref_scope.py
 
   bootstrap-killswitch-powershell-5-1:
     name: Bootstrap-killswitch guard (Windows PowerShell 5.1)
