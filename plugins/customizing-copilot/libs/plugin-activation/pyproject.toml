@@ -16,11 +16,13 @@ dependencies = [
     "pyyaml>=6.0",
     "agent-dropin-registry",
     "agent-plugin-resolve",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
 agent-dropin-registry = { path = "../dropin-registry" }
 agent-plugin-resolve = { path = "../plugin-resolve" }
+agent-single-instance-lease = { path = "../single-instance-lease" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

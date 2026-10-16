@@ -9,8 +9,12 @@ from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 from time import monotonic, sleep
+from typing import TYPE_CHECKING
 
 from . import output, update_events, update_auth_context as _auth
+
+if TYPE_CHECKING:
+    from .activation_preservation import ActivationCustody
 
 
 _REFUSAL = re.compile(
@@ -59,6 +63,44 @@ def _run_update(
     )
 
 
+def _run_install(
+    argv: list[str], identity: str, *, cwd: Path | None, timeout: float,
+    env: Mapping[str, str] | None = None, custody: ActivationCustody | None = None,
+) -> subprocess.CompletedProcess[str]:
+    from . import activation_preservation, installer_run
+
+    environment = {"env": env} if env is not None else {}
+    if not _WINDOWS:
+        return activation_preservation.run_install_preserving_activation(
+            argv, identity, runner=partial(_auth.run_acquisition, subprocess.run, context=cwd),
+            capture_output=True, text=True, timeout=timeout, cwd=cwd, **environment,
+        )
+    started = monotonic()
+    guard = (
+        custody.preserve(identity) if custody is not None
+        else activation_preservation.preserve_activation_durably(identity)
+    )
+    with guard as preservation:
+        remaining = timeout - (monotonic() - started)
+        if remaining <= 0:
+            preservation.confirm_not_launched()
+            raise installer_run.InstallerLaunchError(
+                "payload command budget exhausted during activation recovery; no child launched"
+            )
+        try:
+            result = _auth.run_acquisition(
+                _run_update, argv, context=cwd, cwd=cwd, timeout=remaining, **environment,
+            )
+        except _QuiescentPayloadTimeout:
+            preservation.confirm_quiescent()
+            raise
+        except (installer_run.InstallerLaunchError, OSError):
+            preservation.confirm_not_launched()
+            raise
+        preservation.confirm_quiescent()
+        return result
+
+
 def _refusal_reason(detail: str) -> str | None:
     refusal = _REFUSAL.search(detail)
     return refusal.group(0) if refusal else _numeric_refusal(detail)
@@ -91,6 +133,29 @@ def acquire(
     name: str, marketplace: str, copilot: str, *,
     cwd: Path | None = None, engine: bool = False,
 ) -> str:
+    """Recover original activation before selecting or running a Windows acquisition."""
+    from . import activation_preservation
+
+    started = monotonic()
+    if not _WINDOWS:
+        return _acquire(name, marketplace, copilot, cwd=cwd, engine=engine, started=started)
+    try:
+        with activation_preservation.activation_custody() as custody:
+            return _acquire(
+                name, marketplace, copilot, cwd=cwd, engine=engine,
+                started=started, custody=custody,
+            )
+    except (activation_preservation.PluginStateError, OSError) as error:
+        status = f"plugin state error: {update_events.bounded(str(error), 200)}"
+        output.warn(f"{name}: {status}")
+        return status
+
+
+def _acquire(
+    name: str, marketplace: str, copilot: str, *,
+    cwd: Path | None, engine: bool, started: float,
+    custody: ActivationCustody | None = None,
+) -> str:
     """Attempt at most twice within one target budget, re-inspecting each time.
 
     A completed command's explicit transport/contention failure may retry after
@@ -110,7 +175,6 @@ def acquire(
         r"['\"`]?\s+(?:is\s+)?not installed\b",
         re.IGNORECASE,
     )
-    started = monotonic()
     repair_ledger = False
     status = "payload acquisition budget exhausted"
     for attempt in range(2):
@@ -119,23 +183,18 @@ def acquire(
             return status
         installed = reconcile.core_installed_payload_dir(name) is not None
         verb = "update" if engine or (installed and not repair_ledger) else "install"
-        if verb == "update" and _WINDOWS:
+        if _WINDOWS:
             remaining -= installer_run._REAP_GRACE_S
+            if verb == "install":
+                remaining -= activation_preservation.SETTLEMENT_RETRY_RESERVE_S
             if remaining <= 0:
                 return status
         argv = [copilot, "plugin", verb, ref]
         timeout = min(_ATTEMPT_TIMEOUT_S, remaining)
         environment = _auth.child_environment(cwd)
-        kwargs = {
-            "capture_output": True, "text": True,
-            "timeout": timeout, "cwd": cwd, **environment,
-        }
         try:
             result = (
-                activation_preservation.run_install_preserving_activation(
-                    argv, ref, runner=partial(_auth.run_acquisition, subprocess.run, context=cwd),
-                    **kwargs,
-                )
+                _run_install(argv, ref, cwd=cwd, timeout=timeout, custody=custody, **environment)
                 if verb == "install" else _auth.run_acquisition(
                     _run_update, argv, context=cwd, cwd=cwd, timeout=timeout, **environment,
                 )
@@ -153,17 +212,26 @@ def acquire(
             output.warn(f"{name}: {status}")
             return status
         except subprocess.TimeoutExpired as error:
+            refusal = (
+                _refusal_reason(error.output or "")
+                if isinstance(error, _QuiescentPayloadTimeout) else None
+            )
+            if refusal:
+                status = f"plugin {verb} timed out after refusal ({refusal})"
+                output.warn(f"{name}: {status}")
+                return status
+            if verb == "install" and isinstance(error, _QuiescentPayloadTimeout):
+                output.warn(
+                    f"Plugin install for {name} timed out after confirmed cleanup and "
+                    "activation restoration; automatic install replay remains disabled"
+                )
+                return "timed out"
             if verb != "update" or not isinstance(error, _QuiescentPayloadTimeout):
                 output.warn(
                     f"Plugin {verb} for {name} timed out; automatic retry is blocked "
                     "because payload subprocess descendant cleanup is not proven"
                 )
                 return "timed out"
-            refusal = _refusal_reason(error.output or "")
-            if refusal:
-                status = f"plugin update timed out after refusal ({refusal})"
-                output.warn(f"{name}: {status}")
-                return status
             status, retryable, missing_ledger = "timed out", True, False
         except OSError as error:
             if verb == "install":
@@ -191,6 +259,9 @@ def acquire(
                 f"failed (exit {result.returncode})"
             )
             status = f"plugin {verb} {reason}: {update_events.bounded(detail, 200, tail=True)}"
+            if verb == "install" and result.returncode == installer_run._WATCHDOG_EXIT:
+                output.warn(f"{name}: {status}; automatic install-timeout replay remains disabled")
+                return status
             missing_ledger = (
                 not engine and verb == "update" and not refused
                 and bool(missing_ledger_pattern.search(detail))

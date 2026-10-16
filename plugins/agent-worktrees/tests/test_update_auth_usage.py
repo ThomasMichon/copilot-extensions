@@ -120,16 +120,20 @@ def test_anchor_inspection_does_not_claim_fetch_fallback_use(prepared, monkeypat
 
 
 @pytest.mark.parametrize("failure", ["capture", "restore"])
-def test_activation_state_errors_preserve_actual_usage_evidence(prepared, monkeypatch, failure):
+@pytest.mark.parametrize("windows", [False, True])
+def test_activation_state_errors_preserve_actual_usage_evidence(
+    prepared, monkeypatch, failure, windows,
+):
     from plugin_activation import state
 
     project, _ = prepared
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", windows)
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: None)
 
     def capture(*args):
         if failure == "capture":
             raise state.PluginStateError("capture refused")
-        return SimpleNamespace()
+        return state.ActivationSnapshot(args[0], False, False, False, None, None)
 
     def restore(*args):
         raise state.PluginStateError("restore refused")
@@ -141,6 +145,7 @@ def test_activation_state_errors_preserve_actual_usage_evidence(prepared, monkey
     monkeypatch.setattr(state, "capture", capture)
     monkeypatch.setattr(state, "restore", restore)
     monkeypatch.setattr(subprocess, "run", runner)
+    monkeypatch.setattr(update_acquisition, "_run_update", runner)
     assert update_acquisition.acquire(
         "fixture", "copilot-extensions", "copilot-fixture", cwd=project,
     ).startswith("plugin state error:")

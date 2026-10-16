@@ -100,11 +100,12 @@ current behavior until explicitly adopted and tested.
    writer settlement. No manual deletion, unconditional stale-lock reclaim or
    silent journal discard is a recovery procedure.
 
-Before implementation, review this boundary and confirm that the selected
-canonical locking/custody primitive can express it without repurposing a
-runtime-installation lease for user-global Copilot state. Reuse an applicable
-existing primitive; if none is applicable, surface that design decision rather
-than embedding an ad hoc lock or PID-reaper in the updater.
+Use the shared lease library's distinct operation-scoped custody contract,
+reusing its kernel-lock mechanism without repurposing a daemon-lifetime or
+runtime-installation lease for user-global Copilot state. The owning canonical
+state library consumes that contract; do not embed an ad hoc lock or PID-reaper
+in the updater. A pre-execution refusal may settle without an empty Job only
+when the process owner positively proves that no child executed.
 
 The validation gate includes real independent processes contending for the same
 home, native Job-owned child and grandchild settlement, and forced parent death

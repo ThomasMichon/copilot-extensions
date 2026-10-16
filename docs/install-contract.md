@@ -1221,12 +1221,12 @@ a wrapped state-read error. It reuses the original activation snapshot, not the
 post-install state, and never replays the command. Partial settings restoration
 is retained while inventory restoration is retried. Permission errors, malformed
 state and exhausted restoration still propagate as failures.
-Windows payload **updates** run in a required, non-breakaway Job through the
-existing process owner. On every exit, including an owner deadline, that owner
-terminates the Job and positively queries zero active processes, then drains
+Windows payload updates and inventory installs run in a required, non-breakaway
+Job through the existing process owner. On every exit, including an owner
+deadline, that owner terminates the Job and positively queries zero active processes, then drains
 and reaps the root within one thirty-second cleanup grace. That grace is
-reserved inside the remaining acquisition budget. Only a confirmed owner
-timeout may retry, within the same two-attempt limit; captured authority or
+reserved inside the remaining acquisition budget. Only an update's confirmed
+owner timeout may retry, within the same two-attempt limit; captured authority or
 integrity refusals still stop. A CLI exit code 124 alone is not proof of an
 owner deadline. Failed termination, accounting or output drain is an explicit
 cleanup failure and cannot license replay. Native spawn errors retain their
@@ -1237,11 +1237,35 @@ for that snapshot. Auth usage is retained for a launched child even when
 cleanup fails, but a refused launch does not claim credential use. Post-launch
 I/O errors are cleanup failures, not retryable spawn contention.
 
-Install timeouts still stop because original-snapshot recovery custody is not
-durable across interruption. POSIX timeouts also stop: the current session
-owner intentionally permits detached daemons to survive and cannot attest the
-entire payload writer tree. Existing runtime-installer daemon/breakaway behavior
-is unchanged; the strict contract is opt-in for Windows payload updates.
+Windows inventory installs additionally retain their original activation
+snapshot through canonical `plugin-activation` preservation, under one
+operation-scoped shared lease for the resolved Copilot home. A durable
+quiescence witness follows positive Job cleanup and root reap/drain before
+restoration begins. Later invocations finish only witnessed restoration,
+verify both activation postconditions and clear the record before capturing
+another snapshot or launching a command. A partial restoration retains the
+original snapshot, refreshed inventory and unrelated settings. A pre-witness
+interruption stays blocked even if its parent PID is gone. Invalid or foreign
+records and unverified cleanup never authorize another writer.
+Every Windows acquisition enters this custody before auth refusal or
+update/install selection and holds it through the target's attempts. A payload
+already copied by the interrupted install therefore cannot bypass restoration
+by selecting update. Original-state recovery itself needs no remote credentials.
+Update-only custody does not capture a new install snapshot.
+Snapshot and settlement-witness publication retry explicit Windows lock errors
+32/33 once, against the same transition and original snapshot. The possible
+witness-publication delay and final restoration backoff are reserved inside the
+existing target budget; prior recovery time reduces the remaining command
+allowance. This coordinates participating preservation calls, not unrelated CLI/user writers, and provides
+process-interruption recovery rather than universal power-loss durability.
+
+Install timeouts still stop: confirmed cleanup may permit restoration but
+automatic install replay remains disabled. An install's watchdog exit 124
+cannot retry even when its output also contains a transient marker; captured
+timeout refusals retain precedence. POSIX timeouts also stop: the current
+session owner intentionally permits detached daemons to survive and cannot attest
+the entire payload writer tree. Existing runtime-installer daemon/breakaway behavior
+is unchanged; the strict contract is opt-in for Windows payload acquisition.
 Retried failures remain advisory attempt history; the final required outcome
 decides the run. This is in-run recovery, not a persistent acquisition
 checkpoint or permission to retry combined runtime activation.

@@ -7,19 +7,27 @@ import json
 from collections.abc import Sequence
 
 from plugin_activation import (
+    SETTLEMENT_RETRY_RESERVE_S,
+    ActivationCustody,
     ActivationSnapshot,
     PluginStateError,
     capture,
+    activation_custody,
     installed_plugin_identities,
+    preserve_activation_durably,
     restore,
     run_install_preserving_activation,
 )
 
 __all__ = [
+    "SETTLEMENT_RETRY_RESERVE_S",
+    "ActivationCustody",
     "ActivationSnapshot",
     "PluginStateError",
     "capture",
+    "activation_custody",
     "installed_plugin_identities",
+    "preserve_activation_durably",
     "restore",
     "run_install_preserving_activation",
 ]

@@ -1039,6 +1039,7 @@ jobs:
           python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel &&
           python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
+          libs/single-instance-lease/tests/test_operation.py
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
@@ -1389,6 +1390,7 @@ jobs:
           python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel &&
           python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
+          libs/single-instance-lease/tests/test_operation.py
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
@@ -1640,6 +1642,11 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           -k "status_daemon_console_root_contains_psmux_descendants or test_default_setup_ps1_double_dash_copilot_args_not_mis_bound_positionally"
+      - name: Test durable payload activation restoration
+        timeout-minutes: 2
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_update_install_preservation.py
       - name: Stop psmux test session
         if: always()
         shell: pwsh

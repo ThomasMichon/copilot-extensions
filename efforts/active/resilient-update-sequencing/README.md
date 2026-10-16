@@ -127,8 +127,10 @@ fulfilling that direction, not additional operator requirements.
   original snapshot without replaying installation.
 - [x] Recover Windows payload-update timeouts only after positive non-breakaway
   Job cleanup, preserving refusal precedence and the existing attempt budget.
-- [ ] Establish portable payload process-tree cleanup and durable interrupted
-  activation-restoration custody before automatically retrying timeouts.
+- [ ] Retain and recover witnessed Windows activation restoration across
+  interruption through canonical operation custody, without install replay.
+- [ ] Establish portable payload process-tree cleanup and interrupted-command
+  settlement before enabling unsupported timeout-replay lanes.
 - [ ] Adopt reuse and bounded independent preparation only where measured
   benefit and existing isolation/resource contracts justify them.
 
@@ -899,3 +901,100 @@ achieved by rearranging today's combined installer invocations.
   authorize another writer. The first lane restores witnessed interruptions
   without enabling install-timeout replay. Selection of an applicable canonical
   home-wide custody primitive is an explicit pre-implementation design gate.
+
+### 2026-10-16 - Durable recovery design reviewed; custody selection next
+- #6989 squash-merged into `dev` at
+  `6e6c5e46c8d2f4af46f950b549bc6d184578630b`. Exact-head Copilot review
+  5545906362 Approved `73c69788f6ce58a9d3d47188389f0bc5d0263c35` with no
+  open findings; required CI 38881676280 succeeded before merge.
+- Re-read the Plan and Validation Plan. This is a reviewed protocol, not a
+  completed implementation or a running-state claim. The next gate is selecting
+  canonical operation-scoped, crash-releasing home-wide custody. Existing
+  installation-context directory locks retain dead-owner reservations for
+  explicit repair; the daemon-oriented single-instance lease and ZDD's
+  cutover-specific lock have different scopes. Do not silently repurpose those
+  contracts or add an updater-local mutex.
+- Containing promotion 38874649872 failed only Worktrees job 116899383732 at
+  `6b2fa0ac2887a8fda669dfb8356e5c6083f6729d`. Sixteen complete sub-suites
+  passed; the final seven-file group was stopped with exit 124 after receiving
+  only 5.86083 seconds of the unchanged aggregate budget. This is the existing
+  #6919/#5694 portfolio-performance boundary, not an assertion failure or an
+  accepted flake. Routed the newer witness to #6919 in comment 6212960680.
+  No competing optimization, budget increase, coverage deletion, forced retry
+  or release waiver was started.
+- #6707 retains preparation ownership and has not accepted the adapter request.
+  The parent remains Active. Canonical custody selection, durable recovery,
+  preparation/readiness/reuse, legitimate promotion and separately authorized
+  local healthy-current proof remain open.
+
+### 2026-10-16 - Canonical operation custody and witnessed restoration
+- The operator selected the shared operation-custody extension, not an
+  updater-local lock or a repurposed daemon lease. The canonical lease library
+  now provides process/thread-owned, crash-releasing custody using its existing
+  OS locking primitive. Same-process Windows handles are also serialized;
+  ownership checks retain file identity without deleting or PID-reaping locks.
+- The canonical activation-state owner persists the original snapshot before
+  launch, and permits recovery only after a positive process-owner witness.
+  Interrupted settings/inventory restoration reuses that snapshot and verifies
+  both postconditions before clearing the record. Unproven command settlement,
+  invalid records, cleanup failures and failed verification retain explicit
+  blockers rather than recapturing enabled post-install state.
+- Windows inventory installs compose this opt-in protocol with the existing
+  strict Job owner and scoped-auth wrapper. Install timeouts still fail without
+  replay. Prior recovery consumes the command allowance, and final restoration
+  backoff plus Job cleanup remain reserved inside the existing target budget.
+  Legacy standalone preservation and runtime daemon behavior are unchanged.
+- Complete canonical coverage passes 177 cases with six ordinary platform
+  skips. Real native tests kill the actual owning process before/after witness
+  publication and between restoration writes. They bind a grandchild's native
+  handle before Job cleanup, proving no writer remains before witnessed
+  restoration. Windows consumer/auth coverage passes 26 cases; existing
+  retry/registered/quick-skip/pruning consumers pass 133 with one platform skip.
+- The standalone activation CLI passes eight cases. An isolated import using
+  only bundled library roots proves its new dependency closure without
+  canonical source paths; nested materialization and canonical/transitive
+  admission contracts pass 28 cases. Source/copy parity, all thirteen install
+  contracts and headless-launch admission pass.
+- Fresh synthetic homes and actual native children exercise first-touch and
+  interruption directly. No constructor or external dependency was added, so
+  a full fresh-machine installer build is not repeated. Hosted POSIX coverage,
+  targeted lint and exact-head review/CI remain publication gates. Local
+  governed Ruff is unavailable; its required hosted check is not waived.
+  Live rollout is still separately authorized and blocked on legitimate
+  containing promotion, not claimed from these fixtures.
+- Documentation impact: updated canonical and standalone library contracts,
+  the unified-update installation contract and the selected design. All eleven
+  direct consumer identities carry patch intent; no source versions were
+  hand-edited. Preparation stays with #6707, performance stays with #5694/#6919,
+  and the parent completion gate remains open.
+- Final consumer inspection caught a resume-path defect before publication:
+  an interrupted install may already have copied its payload, causing a later
+  update verb to bypass install-only restoration. Every Windows acquisition
+  now enters canonical custody before auth or verb selection. Native tests
+  resume through the real acquisition entry point with the payload present,
+  prove restoration precedes update, and prove an auth refusal still leaves
+  original activation restored without launching a command. A pre-witness
+  transaction blocks both verbs. The complete updated four-file consumer
+  portfolio passes 89 cases with one platform skip, including ten native
+  preservation/budget cases; no cleanup proof or retry admission was weakened.
+- Rebuilt the actual declared Worktrees test environment from scratch through
+  governed `--reinstall --prepare-only`, then exercised the native consumer
+  again. A subsequent validation failure exposed error masking: an exception
+  before durable witness publication was replaced by a generic unproven-state
+  error. The original triggering cause was not recoverable from that run.
+  The canonical context now retains the record while propagating the actual
+  body failure; confirmed timeout/restoration exceptions keep their contract.
+- Added bounded publication recovery for explicit Windows sharing/lock errors
+  32/33, with custody and previous-record revalidation before the same transition
+  is retried. It neither recaptures activation nor replays a command; permission
+  and exhaustion cases stay terminal. Witness-publication and final-restoration
+  delays are both reserved inside the original budget. A separate presence flag
+  ensures a disappeared inventory record cannot be mistaken for an originally
+  absent activation flag. Fault-injection covers all these boundaries; the
+  final canonical 177/6 and consumer 89/1 selections above pass unchanged
+  time/resource limits.
+- The final timeout-policy check also covers the inner watchdog's exit 124:
+  an install cannot replay merely because that output contains a transient
+  marker. Captured refusals precede timeout reporting after verified cleanup.
+  The native preservation selection now passes twelve cases, and the Windows
+  payload-owner selection passes seventeen with one platform skip.

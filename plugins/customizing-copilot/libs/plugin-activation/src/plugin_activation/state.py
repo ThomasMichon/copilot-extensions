@@ -13,6 +13,8 @@ from pathlib import Path
 from time import sleep
 from typing import Any
 
+RESTORE_RETRY_DELAY_S = 1.0
+
 
 class PluginStateError(ValueError):
     """Raised when Copilot plugin state cannot be handled safely."""
@@ -28,6 +30,7 @@ class ActivationSnapshot:
     user_value_existed: bool
     user_value: bool | None
     inventory_enabled: bool | None
+    inventory_record_existed: bool = False
 
 
 @dataclass
@@ -412,6 +415,7 @@ def capture(identity: str, home: Path | None = None) -> ActivationSnapshot:
             if documents.record is not None
             else None
         ),
+        inventory_record_existed=documents.record is not None,
     )
 
 
@@ -431,7 +435,7 @@ def restore(snapshot: ActivationSnapshot, home: Path | None = None) -> None:
                 "retrying the original snapshot once",
                 snapshot.identity, code,
             )
-            sleep(1.0)
+            sleep(RESTORE_RETRY_DELAY_S)
 
 
 def _restore_once(snapshot: ActivationSnapshot, home: Path | None) -> None:

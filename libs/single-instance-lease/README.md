@@ -19,6 +19,25 @@ retiring every predecessor *and* every stray a plain restart would strand.
 
 ## What's inside
 
+### `operation` -- custody for one operation
+
+`OperationLock(Path(lock_file))` holds an exclusive, non-blocking lock only
+through one context-manager operation. It reuses the lease's OS locking
+primitive without borrowing daemon-lifetime or installation ownership.
+The parent directory must already exist at an absolute, resolved path.
+Linked/nonregular lock files are refused, `assert_owned()` verifies the
+opened file still occupies that path, and only the acquiring process and
+thread may assert or release custody. Separate handles in the same process
+also exclude one another on Windows.
+
+The lock file is never removed and no PID or age is used to reclaim it.
+Closing the descriptor releases custody; a process crash does the same through
+the kernel. This does **not** attest that a dead owner's subprocesses stopped,
+or settle its unfinished work. A consumer must retain its own durable state
+and require the relevant positive completion witness before recovery.
+Uncooperative file replacement is detected at ownership checks, not prevented
+by filesystem compare-and-swap.
+
 ### `lease` -- the single-instance lease
 
 `SingleInstance` takes an OS-level, exclusive, non-blocking lock on a lock file
@@ -76,12 +95,15 @@ python -m pytest
 
 ## Vendoring
 
-**In dev**, every consumer's `pyproject.toml` references this library through
+**In dev**, runtime consumers' `pyproject.toml` references this library through
 a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
 Phase 1) --
 `agent-single-instance-lease = { path = "../../libs/single-instance-lease",
 editable = true }` -- so every consumer resolves to this one source tree; there
 is no per-plugin dev copy to keep in sync.
+The standalone `customizing-copilot` payload is the explicit exception: its
+vendored `plugin-activation` library carries a real sibling copy for a
+self-contained dependency closure without a consuming runtime `pyproject.toml`.
 
 **At release**, `tools/materialize_main.py` rewrites that same pointer into a
 real, promoted copy at `plugins/<plugin>/libs/single-instance-lease/` for each
