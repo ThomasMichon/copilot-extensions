@@ -66,6 +66,36 @@ _setup_progress_wait() {
     return 1
 }
 
+_setup_progress_job() {
+    local job pid state remainder snapshot="$_SETUP_PROGRESS_DIR/jobs"
+    _SETUP_PROGRESS_FOUND_JOB=""
+    _SETUP_PROGRESS_FOUND_STATE=""
+    if [[ "${1:-active}" == all ]]; then
+        jobs -l > "$snapshot"
+    else
+        jobs -l -r > "$snapshot"
+        jobs -l -s >> "$snapshot"
+    fi
+    while read -r job pid state remainder; do
+        [[ "$pid" == "$_SETUP_PROGRESS_PID" ]] || continue
+        [[ "$remainder" == *"-m update_telemetry.shell"* ]] || continue
+        job="${job#\[}"
+        job="${job%%\]*}"
+        [[ -z "${_SETUP_PROGRESS_JOB:-}" || "$job" == "$_SETUP_PROGRESS_JOB" ]] || continue
+        _SETUP_PROGRESS_FOUND_JOB="$job"
+        _SETUP_PROGRESS_FOUND_STATE="$state"
+        return 0
+    done < "$snapshot"
+    return 1
+}
+
+_setup_progress_signal() {
+    [[ -n "${_SETUP_PROGRESS_JOB:-}" ]] || return 1
+    _setup_progress_job || return 1
+    # Resolve the shell's still-owned job, never signal a cached numeric PID.
+    kill "-$1" -- "%$_SETUP_PROGRESS_FOUND_JOB" 2>/dev/null
+}
+
 _start_setup_progress() {
     if ! _SETUP_PROGRESS_DIR="$(mktemp -d "$_SETUP_LOG_DIR/progress-$$-XXXXXXXX")"; then
         printf 'WARNING: could not create private launch progress spool; native timing remains unavailable.\n' >&2
@@ -78,6 +108,8 @@ _start_setup_progress() {
         --log "$SETUP_LOG" --parent "$$" --interactive "$_SHOW_LAUNCH_STATUS" \
         </dev/null >/dev/null &
     _SETUP_PROGRESS_PID=$!
+    _setup_progress_job || true
+    _SETUP_PROGRESS_JOB="$_SETUP_PROGRESS_FOUND_JOB"
     if ! _setup_progress_wait 0; then
         printf 'WARNING: launch progress formatter did not become ready; timing is unavailable.\n' >&2
         _SETUP_PROGRESS_FAILED=1
@@ -107,18 +139,20 @@ _stop_setup_progress() {
         sleep 0.01
     done
     if kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null; then
-        kill "$_SETUP_PROGRESS_PID" 2>/dev/null || true
+        _setup_progress_signal TERM || true
         _SETUP_PROGRESS_FAILED=1
         for (( attempt=0; attempt<100; attempt++ )); do
             kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null || break
             sleep 0.01
         done
         if kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null; then
-            kill -KILL "$_SETUP_PROGRESS_PID" 2>/dev/null || true
+            _setup_progress_signal KILL || true
         fi
     fi
-    if wait "$_SETUP_PROGRESS_PID" && [[ "$_SETUP_PROGRESS_FAILED" != 1 ]]; then
-        rm -f -- "$_SETUP_PROGRESS_DIR/events" "$_SETUP_PROGRESS_DIR/ready"
+    if [[ -n "${_SETUP_PROGRESS_JOB:-}" ]] && _setup_progress_job all \
+        && { [[ "$_SETUP_PROGRESS_FOUND_STATE" == Done ]] || wait "%$_SETUP_PROGRESS_FOUND_JOB"; } \
+        && [[ "$_SETUP_PROGRESS_FAILED" != 1 ]]; then
+        rm -f -- "$_SETUP_PROGRESS_DIR/events" "$_SETUP_PROGRESS_DIR/ready" "$_SETUP_PROGRESS_DIR/jobs"
         rmdir -- "$_SETUP_PROGRESS_DIR"
     else
         printf 'WARNING: launch progress formatter failed; retained private diagnostics at %s.\n' "$_SETUP_PROGRESS_DIR" >&2
@@ -459,7 +493,7 @@ invoke_update_apply() {
     _SHOW_LAUNCH_STATUS="${2:-0}"
     [[ -n "$_UPDATE_APPLIED" ]] && return 0
     _UPDATE_APPLIED=1
-    local _SETUP_PROGRESS_DIR="" _SETUP_PROGRESS_PID="" _SETUP_PROGRESS_SEQUENCE=0 _SETUP_PROGRESS_FAILED=0
+    local _SETUP_PROGRESS_DIR="" _SETUP_PROGRESS_PID="" _SETUP_PROGRESS_JOB="" _SETUP_PROGRESS_SEQUENCE=0 _SETUP_PROGRESS_FAILED=0
     _start_setup_progress
 
     local status_file="$HOME/.agent-worktrees/updater-status.json"

@@ -469,3 +469,42 @@ def test_bash_progress_failure_is_bounded_and_preserves_native_outcome(tmp_path,
         assert "did not become ready" in result.stderr
         assert "elapsed unavailable" in result.stderr
         assert "native command failed (exit 7); continuing" in log.read_text()
+
+
+@pytest.mark.parametrize("replacement", ["unrelated-process", "different-job"])
+def test_bash_progress_shutdown_does_not_signal_a_reused_pid(tmp_path, replacement):
+    if os.name != "posix":
+        pytest.skip("POSIX native shell contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.sh").read_text()
+    functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+    spool = tmp_path / "retained-progress"
+    spool.mkdir()
+    fixture = tmp_path / "stale-renderer.sh"
+    fixture.write_text("\n".join([
+        "set -euo pipefail",
+        functions,
+        f"_SETUP_PROGRESS_DIR={shlex.quote(str(spool))}",
+        # A stale renderer PID now names a live non-renderer process. The
+        # fixture itself is disposable; shutdown must not signal it.
+        (
+            "sleep 8 & unrelated=$!; _SETUP_PROGRESS_PID=$unrelated; _SETUP_PROGRESS_JOB=1"
+            if replacement == "different-job"
+            else "_SETUP_PROGRESS_PID=$$; _SETUP_PROGRESS_JOB=''"
+        ),
+        "_SETUP_PROGRESS_FAILED=1",
+        "_stop_setup_progress",
+        (
+            'kill -0 "$unrelated"; kill "$unrelated"; wait "$unrelated" || true'
+            if replacement == "different-job" else ":"
+        ),
+        "printf '%s\\n' 'unrelated process preserved'",
+    ]))
+    result = subprocess.run(
+        ["/bin/bash", str(fixture)], cwd=tmp_path,
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "unrelated process preserved\n"
+    assert "retained private diagnostics" in result.stderr
+    assert spool.exists()

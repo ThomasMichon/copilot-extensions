@@ -217,6 +217,14 @@ bounded source delta inspection.
 
 ### 2026-10-15 - Native maintenance acceptance and isolated Windows blocker
 
+- Review of #6904 identified cached-PID shutdown targeting. A contained
+  pre-fix regression reproduced signalling a disposable unrelated process.
+  Shutdown now verifies the parent shell's renderer job, command and PID
+  before signalling or waiting, including completed-job cleanup. A separate
+  regression preserves a different job even when its numeric identity is
+  supplied as the stale renderer handle. The complete native Linux
+  preparation file passed 20 cases with 12 Windows-only skips afterward;
+  stopped/missing helpers and normal spool cleanup remain covered.
 - Native PowerShell 5.1/7 progress and real output-sink fixtures passed on
   Windows: 26 cases with two POSIX skips. Native Linux engine/library and
   Manager coverage passed 128 cases with 12 Windows-only skips, including
