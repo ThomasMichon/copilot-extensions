@@ -24,6 +24,12 @@ repository/config selectors while retaining unrelated environment state.
 The companion real-Git identity test and native registered-only first-touch
 CLI test remain process-boundary coverage rather than mocked-runner evidence.
 
+The Worktrees standalone instruction-preflight fixture copies runtime files
+with at most 16 workers, waits for every copy and propagates copy errors.
+Byte-preservation and cache-exclusion guards cover that fixture separately.
+Native PowerShell and Bash preflight checks assert the framed launch-progress
+events while retaining the existing test and subprocess deadlines.
+
 The optional profile-assignment-state failure guard follows both real command
 layers returned by worktree creation: exact record-bound execution admission,
 then the installed setup launcher. It checks the underlying model arguments,
