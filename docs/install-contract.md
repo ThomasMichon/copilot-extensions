@@ -2170,6 +2170,14 @@ exits `124`. The build budget is selected by
 download degrades to "failed + retryable" rather than wedging. Backstop:
 `bootstrap-check`'s single-flight + stale-reap.
 
+On Windows the parent retains the native child process handle and validates
+the captured birth identity before PID-based tree termination. An identity
+mismatch refuses termination explicitly; root fallback uses that retained
+`Process` instance, not an unbound PID. A child that exits during the deadline
+check returns its own exit status without a false timeout or PID action.
+The timeout log distinguishes a requested termination from a refused/failed
+attempt rather than claiming every attempt succeeded.
+
 Unified `agent-worktrees update` gives module and registered-runtime installers
 the selected positive build budget **plus the cutover budget plus 30 seconds**
 for cleanup and failure publication. A disabled inner watchdog still leaves a
@@ -2199,6 +2207,10 @@ an optional positive integer, defaulting to **300 seconds**. The parent's
 selected value is inherited by the phase writer, not rediscovered from a
 different installation. The smoke-only `COPILOT_PLUGIN_INSTALL_SMOKE_PHASE=cutover`
 seam exercises the same writer and deadline policy without starting a daemon.
+Its PowerShell seams fail nonzero when phase publication or fixture-child
+startup fails. The native smoke check requires a fresh boundary receipt and
+a child still running beyond the build budget before accepting successful
+completion; a fast exit alone cannot prove deadline extension.
 
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job
