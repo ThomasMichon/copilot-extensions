@@ -633,6 +633,23 @@ SessionManager/SQLite and durable first-turn admission are real; Copilot ACP/
 provider I/O is simulated. This is connected first-touch evidence, not a
 deployed binstub, full host installation or live model transcript check.
 
+Native conversation-continuity probes should use the normal worktree launcher
+and Bridge CLI control when exercising the complete ownership path. A deliberately
+manual mux/TTY probe must establish folder trust before waiting for model output:
+use the owner's `permissions.add_trusted_folder()` against the fixture's actual
+Copilot configuration, or explicitly handle the one-session trust prompt with a
+known key sequence. An isolated `COPILOT_HOME` must not accidentally leave that
+helper writing production configuration. Assert the fixture trust entry before
+launch; an unanswered trust prompt is not evidence that native resume failed.
+
+For a cold-resume claim, observe the predecessor process exit, the exact native
+conversation ID, and a new response proving remembered context. Use UTF-8 for
+captured Windows mux output. Keep backend-only evidence distinct from managed
+owner/HTTP acceptance, and close registered fixtures through Bridge control
+rather than inventing a second controller. A failed terminal-exit sequence must
+preserve the fixture's exact PID/identity for authorized cleanup; it is not a
+passing complete lifecycle test.
+
 Resident list-warm snapshot policy tests keep process calls mocked and verify
 exact output shapes, filter/project separation, next-pass freshness, unavailable
 classification, and unchanged standalone reads. Their bounded native companion
