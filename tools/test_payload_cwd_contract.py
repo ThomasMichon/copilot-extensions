@@ -446,6 +446,86 @@ def test_watchdog_cutover_cannot_extend_past_the_hard_cap(
     assert 6 <= elapsed < 16
 
 
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("action", ["engine", "engine-update"])
+def test_watchdog_index_engine_actions_extend_for_startup(
+    tmp_path: Path, extension: str, action: str,
+) -> None:
+    if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
+        pytest.skip(f"{extension} interpreter unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    payload, entry = _entry(tmp_path, extension)
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-example","cutoverDeadlineSeconds":15}\n', encoding="utf-8",
+    )
+    text = (ROOT / "plugins/agent-index/scripts" / f"install.{extension}").read_text(encoding="utf-8")
+    names = (
+        ("Ensure-EngineRunning", "Restart-EngineDaemon")
+        if extension == "ps1" else ("_register_engine_daemon", "_restart_engine_daemon")
+    )
+    functions = []
+    for name in names:
+        start = f"function {name}" if extension == "ps1" else f"{name}() {{"
+        tail = text.split(start, 1)[1]
+        next_function = r"\nfunction \w" if extension == "ps1" else r"\n[a-z_]+\(\) [\{(]"
+        functions.append(start + re.split(next_function, tail, maxsplit=1)[0])
+    if extension == "ps1":
+        branch = next(line for line in text.splitlines() if line.startswith(f"    '{action}' {{"))
+        fixture = (
+            "$ErrorActionPreference = 'Stop'\n$NoService = $false\n"
+            "$EngineVenvPython = 'Invoke-EngineFixture'\n$EngineHome = $env:USERPROFILE\n"
+            "$EngineEnvFile = 'fixture.env'\n$EngineTaskName = 'fixture'\n"
+            "function Test-Path { param($Path) return $true }\n"
+            "function Get-ActiveSlotPython { return 'Invoke-EngineFixture' }\n"
+            "function Write-EngineFiles { }\nfunction Test-EnginePort { return $false }\n"
+            "function Get-ScheduledTask { param($TaskName, $ErrorAction) return $null }\n"
+            "function Write-Ok { param($Msg) }\nfunction Write-Skip { param($Msg) }\n"
+            "function Write-Warn { param($Msg) }\n"
+            "function Install-Engine { param([switch]$Upgrade) Start-Sleep -Seconds 2; return $true }\n"
+            "function Invoke-WithEnvFile { param($Path, $Extra, $Body) & $Body }\n"
+            "function Invoke-EngineFixture {\n"
+            "  if ($args -contains 'start') { Start-Sleep -Seconds 7 }\n"
+            "  $global:LASTEXITCODE = 0\n"
+            "}\n"
+            + "\n".join(functions)
+            + "\nswitch ($Action) {\n" + branch + "\n}\n"
+        )
+    else:
+        start = text.index(f"    {action})")
+        branch = text[start:text.index(";;", start) + 2]
+        fixture = (
+            'NO_SERVICE=0\nENGINE_HOME="$HOME"\nENGINE_ENV_FILE="$HOME/engine.env"\n'
+            'ENGINE_LAUNCHER="$HOME/engine.sh"\nENGINE_VENV_PYTHON="$(command -v bash)"\n'
+            'UNIT_DIR="$HOME/units"\nENGINE_SYSTEMD_UNIT=fixture.service\n'
+            'mkdir -p "$UNIT_DIR"; touch "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT"\n'
+            '_ok() { :; }; _skip() { :; }; _warn() { :; }; _write_engine_files() { :; }\n'
+            '_install_engine() { sleep 2; }\n'
+            'systemctl() {\n'
+            '  case "$2" in\n'
+            '    start|restart) sleep 7; touch "$HOME/started" ;;\n'
+            '    is-active) [[ -f "$HOME/started" ]] ;;\n'
+            '    *) return 0 ;;\n'
+            '  esac\n'
+            '}\n'
+            + "\n".join(functions)
+            + '\ncase "$1" in\n' + branch + "\nesac\n"
+        )
+    with entry.open("a", encoding="utf-8") as stream:
+        stream.write(fixture)
+    env = _env(home)
+    env.pop("COPILOT_PLUGIN_INSTALL_SMOKE")
+    env["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = "6"
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    started = time.monotonic()
+    result = subprocess.run(
+        _command(entry, extension) + [action], cwd=home, env=env,
+        capture_output=True, text=True, timeout=30, **kwargs,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert time.monotonic() - started >= 9, "engine startup did not outlive the build budget"
+
+
 def _native_watchdog(
     tmp_path: Path, extension: str, bodies: dict[str, str], arguments: list[str],
     env: dict[str, str] | None = None,

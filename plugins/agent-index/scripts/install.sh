@@ -1839,6 +1839,7 @@ _restart_engine_daemon() {
         _skip "Engine daemon restart skipped (--no-service)"
         return 0
     fi
+    enter_install_phase cutover
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
         systemctl --user restart "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
         if systemctl --user is-active "$ENGINE_SYSTEMD_UNIT" >/dev/null 2>&1; then
@@ -1896,6 +1897,7 @@ _register_engine_daemon() {
         _skip "Engine runtime not provisioned -- daemon not registered"
         return 0
     fi
+    enter_install_phase cutover
     _write_engine_files
     if ! command -v systemctl >/dev/null 2>&1; then
         _skip "systemd not available -- run 'agent-index engine run' via your own supervisor on this host"
