@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from ._git_credential_route import (
     NON_INTERACTIVE,
+    NATIVE_KEY,
     SECRET_KEY,
     base_config,
     env_token,
@@ -186,6 +187,18 @@ def helper_chain(source: Source, env: Mapping[str, str], runner=run) -> list[str
     return helpers
 
 
+def _has_extra_headers(src: Source, env: Mapping[str, str], runner) -> bool:
+    result = runner(
+        ["git", "config", "--null", "--get-urlmatch", "http.extraHeader", src.url],
+        cwd=src.cwd, env=env,
+    )
+    if result.missing:
+        raise ResolverUnavailable("git is not available")
+    if result.timed_out or result.truncated or result.status not in (0, 1):
+        raise ProbeUnavailable("cannot read effective Git HTTP header configuration")
+    return any(result.stdout.split("\0")) if result.status == 0 else False
+
+
 def _probe(
     item: SourceAuth,
     env: Mapping[str, str],
@@ -194,10 +207,12 @@ def _probe(
     *,
     candidate: str | None = None,
     account: str | None = None,
+    native: Mapping[str, str] | None = None,
 ) -> str:
     src = item.source
     helper = "" if anonymous else router_helper()
-    entries = ([(f"http.{src.url}.extraHeader", "")] if candidate is not None else []) + [
+    clear_headers = anonymous or candidate is not None or native is not None
+    entries = ([(f"http.{src.url}.extraHeader", "")] if clear_headers else []) + [
         (f"credential.https://{src.host}.useHttpPath", "true"),
         ("credential.helper", ""),
         (f"credential.https://{src.host}.helper", ""),
@@ -211,10 +226,14 @@ def _probe(
         "SSH_ASKPASS": "",
         "CE_UPDATE_AUTH_READONLY": "1",
         "CE_UPDATE_AUTH_BASE_CONFIG": base_config(env),
-        "CE_UPDATE_AUTH_ROUTES": json.dumps({src.route_key: {"method": "env", "account": account}})
-        if candidate is not None
+        "CE_UPDATE_AUTH_ROUTES": json.dumps({
+            src.route_key: {"method": "native" if native is not None else "env", "account": account}
+        })
+        if candidate is not None or native is not None
         else "{}",
     }
+    if native is not None:
+        probe_env[NATIVE_KEY] = json.dumps(native)
     if candidate is not None:
         key = "GH_TOKEN_" + re.sub(r"[^A-Z0-9]", "_", src.owner.upper())
         probe_env[key] = candidate
@@ -248,6 +267,36 @@ def _check_token(secret: str, src: Source, expected: str | None, env, runner) ->
         "status": "timeout"
         if git_status == "timeout"
         else ("ok" if git_status == "ok" else "denied"),
+        "observed_login": observed,
+    }
+
+
+def _check_native(
+    credential: Mapping[str, str], src: Source, expected: str | None, env, runner,
+) -> dict[str, str]:
+    identity = runner(
+        [sys.executable, "-I", "-X", "utf8", "-m", "agent_worktrees.update_auth_probe"],
+        input=json.dumps({"host": src.host, **credential}), env=env,
+    )
+    if identity.timed_out:
+        return {"status": "timeout"}
+    if identity.missing or identity.truncated or identity.status != 0:
+        return {"status": "unavailable"}
+    try:
+        payload = json.loads(identity.stdout)
+    except ValueError:
+        return {"status": "unavailable"}
+    if not isinstance(payload, dict):
+        return {"status": "unavailable"}
+    observed = payload.get("login")
+    if payload.get("status") != "ok" or not isinstance(observed, str) or not observed:
+        status = payload.get("status")
+        return {"status": status if status in ("denied", "timeout", "unavailable") else "unavailable"}
+    if expected and observed.casefold() != expected.casefold():
+        return {"status": "mismatch", "observed_login": observed}
+    contents = _probe(SourceAuth(src, []), env, False, runner, native=credential)
+    return {
+        "status": "timeout" if contents == "timeout" else "ok" if contents == "ok" else "denied",
         "observed_login": observed,
     }
 
@@ -298,15 +347,26 @@ def _alternatives(item: SourceAuth, env: Mapping[str, str], runner) -> list[dict
         (f"credential.https://{src.host}.useHttpPath", "true"),
     ]
     fill_env.update(command_scope(env, entries))
-    attributes = f"protocol=https\nhost={src.host}\npath={urlsplit(src.url).path.lstrip('/')}\n"
+    attributes = (
+        "capability[]=authtype\n"
+        f"protocol=https\nhost={src.host}\npath={urlsplit(src.url).path.lstrip('/')}\n"
+    )
     if expected:
         attributes += f"username={expected}\n"
     fill = runner(
         ["git", "credential", "fill"], env=fill_env, cwd=src.cwd, input=attributes + "\n"
     )
-    secret = parse_attributes(fill.stdout).get(SECRET_KEY) if fill.status == 0 else None
+    filled = (
+        parse_attributes(fill.stdout)
+        if fill.status == 0 and not fill.truncated and not fill.timed_out else {}
+    )
+    secret = filled.get(SECRET_KEY)
     check = {"status": "timeout" if fill.timed_out else "denied"}
-    if secret and not fill.truncated:
+    if filled.get("authtype") and filled.get("credential"):
+        check = _check_native(
+            {key: filled[key] for key in ("authtype", "credential")}, src, expected, env, runner,
+        )
+    elif secret:
         check = _check_token(secret, src, expected, env, runner)
     attempts.append({"method": "fill", **check})
     return attempts
@@ -331,14 +391,21 @@ def report(
             probe_env.pop("CE_UPDATE_AUTH_BASE_CONFIG", None)
         try:
             chain = helper_chain(src, probe_env, runner)
+            public = _probe(SourceAuth(src, chain), probe_env, True, runner) == "ok"
+            has_headers = public and _has_extra_headers(src, probe_env, runner)
         except ProbeUnavailable as error:
             item = SourceAuth(src, [], status="unavailable", fix=str(error))
             item.duration_ms = round((time.monotonic() - started) * 1000)
             results.append(item)
             continue
         item = SourceAuth(src, chain)
-        if _probe(item, probe_env, True, runner) == "ok":
+        if public:
             item.visibility, item.status = "public", "anonymous"
+            if has_headers:
+                item.as_configured = _probe(item, probe_env, False, runner)
+                if item.as_configured != "ok":
+                    item.status = "fixable_by_fallback"
+                    item.alternative = {"method": "anonymous", "status": "ok"}
         else:
             item.expected_account = (
                 account_for(f"{src.owner}/{src.repo}") if account_for is not None

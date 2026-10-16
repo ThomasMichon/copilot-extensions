@@ -42,6 +42,8 @@ class Probe:
         self.calls.append((argv, kwargs))
         env = kwargs["env"]
         if argv[:2] == ["git", "config"]:
+            if "--get-urlmatch" in argv:
+                return process.Result(1)
             return process.Result(0, "one\0\0two\0")
         if argv[:2] == ["git", "ls-remote"]:
             if json.loads(env.get("CE_UPDATE_AUTH_ROUTES", "{}")):
@@ -751,6 +753,86 @@ def test_real_configured_router_preserves_non_password_credentials(tmp_path, mon
     assert router.SECRET_KEY not in response
 
 
+@pytest.mark.parametrize("account", [None, "mapped", "other"])
+def test_native_credentials_are_discovered_validated_and_replayed(
+    tmp_path, monkeypatch, account,
+):
+    config = _clean_git_env(monkeypatch, tmp_path)
+    helper = (
+        "!f() { echo capability[]=authtype; echo username=mapped; "
+        "echo authtype=fixture-scheme; echo credential=fixture-secret; }; f"
+    )
+    for key, value in (
+        ("credential.helper", helper),
+        ("http.https://example.test/.extraHeader", "Authorization: stale"),
+    ):
+        subprocess.run(
+            ["git", "config", "--file", str(config), key, value],
+            check=True, **git_ops.no_window_kwargs(),
+        )
+    before = config.read_bytes()
+    item = _source(cwd=tmp_path)
+    request = (
+        "capability[]=authtype\nprotocol=https\nhost=example.test\npath=team/repo\n\n"
+    )
+    api_calls, contents_calls = [], []
+
+    def run(argv, **kwargs):
+        if argv[:2] == ["git", "config"] or argv == ["git", "credential", "fill"]:
+            return process.run(argv, **kwargs)
+        if argv[:2] == ["git", "ls-remote"]:
+            headers = process.run(
+                ["git", "config", "--get-urlmatch", "http.extraHeader", item.url],
+                cwd=tmp_path, env=kwargs["env"],
+            )
+            if headers.stdout.strip():
+                return process.Result(1)
+            credential = process.run(
+                ["git", "credential", "fill"], cwd=tmp_path,
+                input=request, env=kwargs["env"],
+            )
+            response = router.parse_attributes(credential.stdout)
+            if response.get("credential") != "fixture-secret":
+                return process.Result(1)
+            contents_calls.append(response)
+            return process.Result(0 if response.get("authtype") == "fixture-scheme" else 1)
+        if argv[:3] == ["gh", "auth", "token"]:
+            return process.Result(1)
+        if argv[-1] == "agent_worktrees.update_auth_probe":
+            payload = json.loads(kwargs["input"])
+            assert payload == {
+                "host": "example.test", "authtype": "fixture-scheme",
+                "credential": "fixture-secret",
+            }
+            api_calls.append(payload)
+            return process.Result(0, json.dumps({"status": "ok", "login": "mapped"}))
+        pytest.fail("unexpected native credential probe")
+
+    report = auth.report(
+        [item], env=dict(os.environ), runner=run, account_for=lambda _: account,
+    )
+    assert api_calls, "native discovery must validate the actual credential and scheme"
+    if account == "other":
+        assert report.results[0].status == "mismatch"
+        assert auth.fallback(report).denies == [item.id]
+        assert contents_calls == []
+    else:
+        assert report.results[0].status == "fixable_by_fallback"
+        assert report.results[0].alternative["method"] == "fill"
+        assert contents_calls, "identity alone does not prove repository access"
+        overlay = auth.fallback(report)
+        assert "fixture-secret" not in json.dumps(overlay.variables)
+        replay = process.run(
+            ["git", "credential", "fill"], cwd=tmp_path, input=request,
+            env=overlay.environment(os.environ),
+        )
+        assert replay.status == 0, replay.stderr
+        response = router.parse_attributes(replay.stdout)
+        assert response["authtype"] == "fixture-scheme"
+        assert response["credential"] == "fixture-secret"
+    assert config.read_bytes() == before
+
+
 def test_helper_configuration_failure_is_local_and_missing_git_is_explicit():
     def runner(argv, **kwargs):
         return process.Result(128)
@@ -1206,6 +1288,62 @@ def test_fill_discovery_and_replay_keep_the_actual_source_path(
     )
     assert result.status == 0, result.stderr
     assert router.parse_attributes(result.stdout)[router.SECRET_KEY] == "fixture"
+    assert config.read_bytes() == before
+
+
+@pytest.mark.parametrize("working_header", [False, True])
+def test_public_source_header_fallback_is_failure_only_and_source_scoped(
+    tmp_path, monkeypatch, working_header,
+):
+    config = _clean_git_env(monkeypatch, tmp_path)
+    configured_header = "X-Fixture: working" if working_header else "Authorization: stale"
+    subprocess.run(
+        ["git", "config", "--file", str(config),
+         "http.https://example.test/.extraHeader", configured_header],
+        check=True, **git_ops.no_window_kwargs(),
+    )
+    before = config.read_bytes()
+    item = _source(cwd=tmp_path)
+
+    def effective_headers(url, env):
+        result = process.run(
+            ["git", "config", "--get-urlmatch", "http.extraHeader", url],
+            cwd=tmp_path, env=env,
+        )
+        assert result.status in (0, 1)
+        return result.stdout.strip()
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[:2] == ["git", "config"]:
+            return process.run(argv, **kwargs)
+        if argv[:2] == ["git", "ls-remote"]:
+            headers = effective_headers(item.url, kwargs["env"])
+            return process.Result(0 if headers in ("", "X-Fixture: working") else 1)
+        pytest.fail("public fallback must not discover credentials")
+
+    report = auth.report(
+        [item], env=dict(os.environ), runner=run,
+        account_for=lambda _: pytest.fail("public source does not need an account"),
+    )
+    if working_header:
+        assert not report.failing
+        assert auth.fallback(report) is None
+    else:
+        assert report.results[0].status == "fixable_by_fallback"
+        assert report.results[0].visibility == "public"
+        assert report.results[0].alternative["method"] == "anonymous"
+        overlay = auth.fallback(report)
+        env = overlay.environment(os.environ)
+        assert effective_headers(item.url, env) == ""
+        assert effective_headers("https://example.test/team/other", env) == configured_header
+        assert router.route(
+            "get", "protocol=https\nhost=example.test\npath=team/repo\n\n", env,
+        ) == ""
+        readonly = auth.fallback(report, apply_fixes=False)
+        assert readonly.applies_to == [] and readonly.denies == [item.id]
     assert config.read_bytes() == before
 
 

@@ -1575,7 +1575,12 @@ Bare and non-bare anchors on detached or non-default branches are excluded from
 preflight. Branch selection is isolated from caller Git repository selectors
 and shared with synchronization rather than inventing an auth requirement.
 
-Public sources short-circuit anonymously. Other sources first exercise the
+Public probes clear source-scoped HTTP headers as well as disabling helpers.
+When a clean public probe succeeds, an effective-header diagnostic avoids
+another network request unless configured headers exist. Working configured
+headers remain untouched; a failing configured path can use an anonymous,
+source-scoped header-clearing overlay, without acquiring credentials.
+Other sources first exercise the
 caller's configured credentials through a read-only router, then try an
 environment token, the mapped `gh` account, and `git credential fill`. A candidate
 uses case-insensitive host matching; enterprise environment tokens require the
@@ -1603,8 +1608,12 @@ preserving native helper matching, ordering, resets, and includes. Credential
 discovery and replay use the source URL's actual path without adding a `.git`
 suffix. Tokens are never written into the overlay. Read-only probes suppress
 credential approval and rejection; no path switches the active `gh` account.
-Native replay preserves complete `authtype`/`credential` responses as well as
-password credentials instead of rejecting a working helper's authentication type.
+Discovery negotiates native `authtype`/`credential` responses as well as password
+credentials. Native identity validation preserves the helper's HTTP scheme,
+uses an isolated, bounded stdlib probe with credential input over stdin rather
+than argv, refuses redirects, and still checks the mapped principal and Git
+contents access. The resulting fallback stores only the fill route, never the
+credential; acquisition replays the original helper response.
 The slot-interpreter helper runs in isolated Python mode so checkout-local
 modules and inherited Python import paths cannot replace its code or standard library.
 Marketplace contexts and individual anchors have separate reports and overlays,

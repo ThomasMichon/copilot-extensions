@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from .update_auth_process import publish_group, run
 
 SECRET_KEY = "pass" + "word"
+NATIVE_KEY = "CE_UPDATE_AUTH_NATIVE_CREDENTIAL"
 NON_INTERACTIVE = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
 
 
@@ -96,8 +97,16 @@ def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
     repository = attributes.get("path", "").strip("/").removesuffix(".git").lower()
     selected = routes.get(host + "/" + repository)
     if selected is not None:
-        if operation != "get" or selected["method"] == "deny":
+        if operation != "get" or selected["method"] in ("deny", "anonymous"):
             return ""
+        if selected["method"] == "native":
+            native = json.loads(env[NATIVE_KEY])
+            if not isinstance(native, dict) or set(native) != {"authtype", "credential"} or any(
+                not isinstance(value, str) or not value for value in native.values()
+            ):
+                raise ValueError("invalid native probe credential")
+            response = {key: value for key, value in attributes.items() if key != "capability[]"}
+            return "capability[]=authtype\n" + format_attributes({**response, **native})
         if selected["method"] == "fill":
             account = selected.get("account")
             request = stdin.rstrip("\n") + f"\nusername={account}\n\n" if account else stdin
