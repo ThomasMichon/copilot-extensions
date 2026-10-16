@@ -58,6 +58,9 @@ Promotion and verify-before-retire reject a draining successor. Cleanup's
 identity probe retains unready health payloads without weakening ordinary health
 readiness checks. Watchdog replacement strips the one-shot launch ID rather than
 replaying a receipt identity into a replacement process.
+The passive serving worker also reads only the existing credential: a missing,
+empty or malformed file after the parent's check fails without regeneration.
+Ordinary daemon startup retains its create-capable credential loader.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`

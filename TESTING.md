@@ -31,6 +31,12 @@ Their imports and consumer execution share the same 25-second budget, with
 cleanup inside the unchanged 30-second item cap. IPv4 exercises reconcile and
 IPv6 exercises the read-only installer probe. Fresh-root cases retain ordinary
 `python -m agent_bridge` invocation.
+Native fixture processes are contained before execution: required no-breakaway
+Jobs on Windows, owned sessions/process groups on POSIX. Bounded teardown covers
+broker descendants even before a serving-worker receipt exists; an injected
+early-failure case verifies both actual processes exit. Real worker CLI cases
+also prove missing/corrupt serving credentials stay unchanged, while ordinary
+startup retains first-run credential creation.
 The same native lifecycle fixture also exercises a supported non-default
 loopback bind and graceful start/stop/reconcile. The stopped case compares
 runtime files after confirmed native exit, excluding only its own log/output

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -35,9 +36,22 @@ def _run_reconcile(root: Path, *, timeout: float = 12) -> subprocess.CompletedPr
     )
 
 
+def _spawn_fixture(argv, **kwargs):
+    return spawn_sync_in_kill_on_close_job(
+        argv, require_job=sys.platform == "win32", allow_breakaway=False,
+        **({"start_new_session": True} if os.name == "posix" else {}),
+        **kwargs, **no_window_kwargs(),
+    )
+
+
 def _stop_fixture(daemon, job) -> None:
     if job is not None:
         job.close()
+    elif os.name == "posix":
+        try:
+            os.killpg(daemon.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     if daemon.poll() is None:
         daemon.terminate()
     daemon.wait(timeout=2)
@@ -65,6 +79,88 @@ def test_serving_reconcile_native_first_touch_never_activates(tmp_path, body, co
     else:
         assert "error" in data
     assert {p.name: p.read_bytes() for p in root.iterdir()} == before
+
+
+@pytest.mark.parametrize(("credential", "serving"), [
+    (None, True), (b"token: ''\n", True), (b"token: [\n", True), (None, False),
+])
+def test_serving_worker_never_creates_or_repairs_credentials(tmp_path, credential, serving):
+    import hashlib
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    path = root / "auth.yaml"
+    if credential is not None:
+        path.write_bytes(credential)
+    (root / "config.yaml").write_text(
+        "schema_version: 2\nbind: '127.0.0.1'\nenable_credential_relay: false\n"
+        "topologies: {}\nretention:\n  enabled: false\n",
+    )
+    with socket.socket() as occupied, (root / "worker.log").open("wb") as log, ExitStack() as cleanup:
+        if sys.platform == "win32":
+            occupied.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen()
+        worker, job = _spawn_fixture(
+            [
+                sys.executable, "-m", "agent_bridge", "start", "--passive",
+                "--port", str(occupied.getsockname()[1]),
+                *(["--serving-launch-id", "ab" * 16] if serving else []),
+            ],
+            cwd=root, env=_environment(root), stdout=log, stderr=log,
+        )
+        cleanup.callback(_stop_fixture, worker, job)
+        worker.wait(timeout=20)
+        assert worker.returncode != 0, "invalid worker credentials unexpectedly admitted startup"
+        if not serving:
+            assert path.exists(), "ordinary startup lost its create-capable credential loader"
+            return
+        assert path.exists() is (credential is not None), "worker created a missing credential"
+        if credential is not None:
+            assert hashlib.sha256(path.read_bytes()).digest() == hashlib.sha256(credential).digest()
+        assert "existing Bridge credential" in (root / "worker.log").read_text()
+        assert not list(root.glob("serving-launch-*.json"))
+
+
+@pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
+def test_native_fixture_early_failure_stops_broker_and_worker_before_receipt(tmp_path):
+    broker_file, worker_file = tmp_path / "broker.json", tmp_path / "worker.json"
+    worker_code = (
+        "import os,sys,time; from pathlib import Path; "
+        "p=Path(sys.argv[1]); t=p.with_suffix('.tmp'); "
+        "t.write_text(str(os.getpid())); t.replace(p); time.sleep(60)"
+    )
+    broker_code = (
+        "import os,subprocess,sys; from pathlib import Path; "
+        "child=subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[3]],"
+        "creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0); "
+        "p=Path(sys.argv[2]); t=p.with_suffix('.tmp'); "
+        "t.write_text(str(os.getpid())); t.replace(p); child.wait()"
+    )
+    with ExitStack() as references:
+        with pytest.raises(RuntimeError, match="injected early readiness failure"):
+            with ExitStack() as cleanup:
+                launcher, job = _spawn_fixture(
+                    [sys.executable, "-c", broker_code, worker_code, str(broker_file), str(worker_file)],
+                    cwd=tmp_path, env=_environment(tmp_path),
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                cleanup.callback(_stop_fixture, launcher, job)
+                deadline = time.monotonic() + 10
+                while not (broker_file.exists() and worker_file.exists()):
+                    assert time.monotonic() < deadline, "fixture children did not report startup"
+                    time.sleep(0.05)
+                captured = []
+                for path in (broker_file, worker_file):
+                    pid = int(path.read_text())
+                    reference = process_exit.open_process(pid, diagnostics.process_start_time(pid))
+                    references.callback(reference.close)
+                    captured.append(reference)
+                assert captured[0].pid != captured[1].pid
+                assert not list(tmp_path.glob("serving-launch-*.json"))
+                raise RuntimeError("injected early readiness failure")
+        assert launcher.poll() is not None
+        assert all(reference.wait(2) for reference in captured), "fixture leaked an actual child"
 
 
 @pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
@@ -109,10 +205,9 @@ def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path):
             "creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0))",
             *worker_command,
         ]
-        launcher, job = spawn_sync_in_kill_on_close_job(
+        launcher, job = _spawn_fixture(
             command,
-            require_job=sys.platform == "win32", allow_breakaway=False,
-            cwd=root, env=_environment(root), stdout=log, stderr=log, **no_window_kwargs(),
+            cwd=root, env=_environment(root), stdout=log, stderr=log,
         )
         candidate.launcher = launcher
         cleanup.callback(_stop_fixture, launcher, job)
@@ -175,7 +270,7 @@ def test_serving_reconcile_native_daemon_lifecycle_never_activates(tmp_path, bin
         client_err = cleanup.enter_context((root / "client.err").open("wb"))
         # Import in a separate cold CLI process while the daemon imports.
         # The barrier prevents any command execution before verified readiness.
-        client, client_job = spawn_sync_in_kill_on_close_job(
+        client, client_job = _spawn_fixture(
             [
                 sys.executable, "-u", "-c",
                 "import sys; from agent_bridge.__main__ import main; "
@@ -183,16 +278,13 @@ def test_serving_reconcile_native_daemon_lifecycle_never_activates(tmp_path, bin
                 "deploy", "--reconcile-serving", "--json",
                 *(["--probe-serving"] if bind == "::1" else []),
             ],
-            require_job=sys.platform == "win32", allow_breakaway=False,
             cwd=root, env=_environment(root), stdin=subprocess.PIPE,
-            stdout=client_out, stderr=client_err, **no_window_kwargs(),
+            stdout=client_out, stderr=client_err,
         )
         cleanup.callback(_stop_fixture, client, client_job)
-        daemon, job = spawn_sync_in_kill_on_close_job(
+        daemon, job = _spawn_fixture(
             [sys.executable, "-u", "-m", "agent_bridge", "start"],
-            require_job=sys.platform == "win32", allow_breakaway=False,
             cwd=root, env=_environment(root), stdout=log, stderr=log,
-            **no_window_kwargs(),
         )
         cleanup.callback(_stop_fixture, daemon, job)
         last_probe = None
