@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Remote ACP Client Transport](active/remote-acp-client-transport/README.md) | Active; qualified neutral profile and bridge-owned bounded implementation | #6908 |
 | [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; alias/locality repair, empty-mux readiness and installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
 | [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Draft; follow-up gated on primary repairs and hosted publication | #6639; #6535/#6632 owners retained |
@@ -112,6 +111,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Remote ACP Client Transport](2026/10/16%20remote-acp-client-transport/README.md) | Done; runtime merged to dev, pending release, no rollout | #6908; runtime #6997 |
 | [Bridge Workspace Owner Boundary](2026/10/16%20bridge-workspace-owner-boundary/README.md) | Done; released owner-process repair and preserved managed-session resume verified | #6757; #6776 |
 | [Workspace Acquisition Continuity](2026/10/13%20workspace-acquisition-continuity/README.md) | Done; runtime merged to dev, main publication unconfirmed, no host rollout | #6440; automatic promotion remains #3336 |
 | [agent-bridge Attention Waits](2026/09/03%20agent-bridge-attention-waits/README.md) | Done; archived | #1450 |

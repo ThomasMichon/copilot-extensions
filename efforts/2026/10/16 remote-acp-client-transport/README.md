@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-15
-- **Status:** Active
-- **Vision:** [agent-bridge / externally-hosted-acp-agents](../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents)
+- **Status:** Done
+- **Vision:** [agent-bridge / externally-hosted-acp-agents](../../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents)
 - **Umbrella issue:** #6908
 
 ## Guiding Intent
@@ -27,8 +27,9 @@ Both Streamable HTTP and WebSocket belong to the selected experimental profile.
 - **Topology:** serial plan and implementation PRs against `dev`.
 - **Host (owns PRs):** Remote transport implementer.
 - **Delegates:** none.
-- **Handoff:** #6908 and this canonical public effort retain the unresolved
-  lifecycle decision and subsequent implementation obligation.
+- **Completion:** #6908 and this archived public effort record the resolved
+  lifecycle decisions and merged generic implementation. Release promotion and
+  any separately authorized operator rollout are not claimed as complete.
 - No server implementation, deployment, rollout, fleet controller or
   application-specific adapter is owned here.
 - Existing bridge workspace and installation repair efforts retain their
@@ -130,10 +131,10 @@ extension metadata is authorized, not represented as a standard ACP field.
   and close semantics, resource limits and unsupported features.
 - [x] Add required plugin changefiles and run touched lint, install-contract
   and repository gates; complete documentation/cutover-impact review.
-- [ ] Drive implementation PR review and required checks through actual merge.
-- [ ] Record merged/pending-release or released/pending-rollout accurately;
+- [x] Drive implementation PR review and required checks through actual merge.
+- [x] Record merged/pending-release or released/pending-rollout accurately;
   no runtime update/restart or deployment is authorized by this effort.
-- [ ] Resolve every Plan and Validation Plan item before marking Done and
+- [x] Resolve every Plan and Validation Plan item before marking Done and
   releasing/finalizing ownership.
 
 ## Validation Plan
@@ -176,6 +177,24 @@ express; a separate durable decision ID is optional when the native tool-call
 ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
+
+### 2026-10-16 — Generic runtime merged; effort complete
+
+- Runtime PR #6997 merged to `dev` as
+  `040a0a2b11565a4afd0c2764f6d45986d086b5cd`. The current-head owner-authored
+  review was a clean Comment with no open findings, all review threads were
+  resolved and every required check passed. The public uv-manifest setup
+  timeout was retried through normal CI; no required gate was bypassed.
+- All implementation and validation items are resolved. The neutral profile,
+  pinned draft, standard-first callback identities, scoped auth injection and
+  explicit headless-answer contract are documented in the plugin's durable
+  remote-client guide.
+- Status at completion: merged/pending release. Main promotion is not asserted;
+  the existing release pipeline owns that publication. Runtime update, restart,
+  live deployment, downstream integration and server business validation remain
+  outside this effort's authorization and scope.
+- Archive publication and managed worktree finalization complete the repository
+  lifecycle; they are not runtime rollout evidence.
 
 ### 2026-10-16 — Canonical diagnostic paths and completed-request forms
 
