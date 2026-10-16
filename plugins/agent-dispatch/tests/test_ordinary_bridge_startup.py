@@ -212,7 +212,10 @@ def test_retry_reservation_carries_agent_without_exclusive_key(startup):
     assert retry.session_handle == "local-body:bridge-a"
     assert retry.worktree == "worktree-a"
 
-def test_lost_create_response_replays_key_after_restart_and_routing_change(startup, monkeypatch):
+@pytest.mark.parametrize("released_origin", [False, True])
+def test_lost_create_response_replays_key_after_restart_and_routing_change(
+    startup, monkeypatch, released_origin,
+):
     queue, task, client, calls = startup
     original = ordinary_bridge.subprocess.run
     lost = True
@@ -246,6 +249,28 @@ def test_lost_create_response_replays_key_after_restart_and_routing_change(start
     assert len(creates) == 2 and creates[0] == creates[1]
     assert queue.get_reservation(retry.key).worktree_path == "synthetic-worktree-a"
     assert [call[0] for call in calls].count("send") == 1
+    queue.defer_spawn(retry.key, detail="later turn on the replayed allocation")
+    third, admitted = restarted.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert admitted and third.allocation_reservation_key == first.key
+    assert third.creation_key == first.creation_key
+    assert third.worktree == queue.get_reservation(retry.key).worktree == "worktree-a"
+    assert queue.get_reservation(first.key).worktree is None
+    if released_origin:
+        with queue._connect() as conn:
+            conn.execute("UPDATE spawn_reservations SET state='failed',release_requested=1 WHERE key=?",
+                         (first.key,))
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no proven native"):
+            ordinary_bridge.start(
+                {**task, "spawn_reservation_key": third.key}, client=client,
+                agent="local", project="changed-routing", charter="reviewer", prompt="assigned task",
+            )
+    else:
+        ordinary_bridge.start(
+            {**task, "spawn_reservation_key": third.key}, client=client,
+            agent="local", project="changed-routing", charter="reviewer", prompt="assigned task",
+        )
+    assert [call[0] for call in calls].count("create") == 2
+    assert [call[0] for call in calls].count("send") == (1 if released_origin else 2)
 
 
 def test_unrecorded_keyed_creation_reconciles_without_liveness_guess(startup):

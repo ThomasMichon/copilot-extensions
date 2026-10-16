@@ -9,34 +9,56 @@ from .ordinary_agent_facts import identity
 from .queue_records import SpawnState, TaskError
 
 
+def _validate_origin(conn: Any, row: Any, origin: str | None) -> None:
+    source = conn.execute(
+        "SELECT * FROM spawn_reservations WHERE key=?", (origin,),
+    ).fetchone()
+    if (
+        source is None or source["allocation_reservation_key"] not in (None, source["key"])
+        or source["worktree_ownership"] == "reused" and source["inherited_worktree"]
+        or source["worktree"] not in (None, row["worktree"])
+    ):
+        raise TaskError("inherited workspace native origin is unproven")
+    if source["worktree"] is not None:
+        return
+    # A lost create response can leave the root unbound after a successful keyed replay.
+    bindings = conn.execute(
+        "SELECT * FROM spawn_reservations WHERE allocation_reservation_key=? "
+        "AND creation_key=? AND worktree=? AND agent_info IS NOT NULL",
+        (origin, source["creation_key"], row["worktree"]),
+    ).fetchall()
+    if not source["creation_key"] or not bindings:
+        raise TaskError("inherited workspace native origin is unproven")
+    for binding in bindings:
+        actual = identity(json.loads(binding["agent_info"]))
+        if (
+            actual.worktree != row["worktree"] or actual.project != binding["allocation_project"]
+            or actual.path != binding["worktree_path"]
+            or row["allocation_project"] and actual.project != row["allocation_project"]
+            or row["worktree_path"] and actual.path != row["worktree_path"]
+        ):
+            raise TaskError("inherited workspace replay binding conflicts with its allocation")
+
+
 def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str]]:
     """Classify handles using their producing driver, not the retry's driver."""
     origin = row["allocation_reservation_key"]
     if row["worktree_ownership"] == "reused" and row["inherited_worktree"]:
-        source = conn.execute(
-            "SELECT * FROM spawn_reservations WHERE key=? AND worktree=?",
-            (origin, row["worktree"]),
-        ).fetchone()
-        if (
-            source is None or source["allocation_reservation_key"] not in (None, source["key"])
-            or source["worktree_ownership"] == "reused"
-            and source["inherited_worktree"]
-            and source["allocation_reservation_key"] in (None, source["key"])
-        ):
-            raise TaskError("inherited workspace native origin is unproven")
+        _validate_origin(conn, row, origin)
     known = {task.owner_session_id} if task.owner_session_id else set()
     retired: set[str] = set()
     handle_natives: dict[str, str] = {}
     histories = conn.execute(
         "SELECT s.*,a.native_session_id FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON a.reservation_key=s.key "
-        "WHERE s.worktree=? AND (s.task_id=? OR s.creation_key=? "
+        "WHERE (s.worktree=? OR s.worktree IS NULL AND (s.key=? OR s.allocation_reservation_key=?)) "
+        "AND (s.task_id=? OR s.creation_key=? "
         "OR s.key=? OR s.allocation_reservation_key=? OR ("
         "s.exclusive_key=? AND s.session_handle IS NOT NULL AND EXISTS ("
         "SELECT 1 FROM spawn_reservations carried WHERE carried.worktree=s.worktree "
         "AND (carried.task_id=? OR carried.creation_key=?) "
         "AND carried.session_handle=s.session_handle)))",
-        (row["worktree"], task.id, row["creation_key"], origin, origin, row["exclusive_key"],
+        (row["worktree"], origin, origin, task.id, row["creation_key"], origin, origin, row["exclusive_key"],
          task.id, row["creation_key"]),
     ).fetchall() if row["worktree"] else [row]
     evidence: list[tuple[Any, str | None]] = []

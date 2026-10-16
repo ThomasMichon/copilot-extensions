@@ -2441,6 +2441,10 @@ cannot authorize a replacement. Ordinary exclusive-lane inheritance retains the
 original allocation reservation across distinct task/creation keys, so handleless
 predecessor receipts remain in scope without importing unrelated lane history.
 Legacy handleless inheritance with an unproven origin refuses before resume.
+If a lost create response left the original reservation without a workspace,
+a successful replay's stored agent facts can prove that workspace within the
+same allocation and creation key; the original origin and retirement history
+remain intact.
 Both paths recheck the authenticated
 reservation/task admission fence immediately before delivery. That coordinator
 transaction is a pre-send admission point, not a cross-service transaction:
