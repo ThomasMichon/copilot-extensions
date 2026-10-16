@@ -75,6 +75,16 @@ class ProcessLogReadback:
         )
 
 
+def filesystem_log_readback(name: str, root: Path, machine: str) -> ProcessLogReadback:
+    """Resolve local stored bytes, not a cloud client's upload acknowledgement."""
+    if (
+        not machine or machine in {".", ".."}
+        or any(char in machine for char in "/\\:\0")
+    ):
+        raise ValueError("process-log readback requires a local machine, not a namespace")
+    return ProcessLogReadback(name, root.expanduser().absolute() / machine / "logs")
+
+
 @dataclass(frozen=True)
 class RequiredLogReadbackResult:
     results: tuple[LogArchiveReadbackResult, ...]

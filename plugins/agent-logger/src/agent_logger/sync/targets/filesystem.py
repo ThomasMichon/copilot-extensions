@@ -38,7 +38,7 @@ from agent_logger.sync.detritus import (
     is_excluded,
 )
 from agent_logger.sync.lock import sync_lock
-from agent_logger.sync.log_archive_readback import ProcessLogReadback
+from agent_logger.sync.log_archive_readback import ProcessLogReadback, filesystem_log_readback
 from agent_logger.sync.publication_directory import PublicationDirectory, publication_directory
 from agent_logger.sync.meta import (
     heartbeat_sync_meta,
@@ -1950,10 +1950,7 @@ class FilesystemTarget(Target):
         return PushResult(ok=True, detail=detail, file_count=copied, byte_count=nbytes)
 
     def process_log_readback(self, machine: str) -> ProcessLogReadback:
-        """Resolve local stored bytes, not a cloud client's upload acknowledgement."""
-        relative = Path(machine) / "logs"
-        _validate_relative_path(relative)
-        return ProcessLogReadback(self.name, _anchored_path(self._root()) / relative)
+        return filesystem_log_readback(self.name, self._root(), machine)
 
     def sync_status(self, machine: str) -> SyncStatus:
         try:

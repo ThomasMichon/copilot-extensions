@@ -61,6 +61,14 @@ def test_source_roots_readback_unsupported_is_not_success(transport: str) -> Non
     assert not result.supported and not result.verified
 
 
+@pytest.mark.parametrize("machine", ["", ".", "..", "namespace/example", "x\\y", "x:y"])
+def test_source_roots_readback_filesystem_namespace_is_rejected(
+    tmp_path: Path, machine: str,
+) -> None:
+    with pytest.raises(ValueError, match="local machine"):
+        build_target("local", {"path": str(tmp_path)}).process_log_readback(machine)
+
+
 @pytest.mark.parametrize("existing", [False, True])
 def test_source_roots_readback_missing_target_creates_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bool,
