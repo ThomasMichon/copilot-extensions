@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 39,
+        "current": 40,
         "minimum": 1,
-        "previous_generation": 38,
+        "previous_generation": 39,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -45,7 +45,8 @@
           36,
           37,
           38,
-          39
+          39,
+          40
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -102,19 +103,20 @@
         "provider_creation": 36,
         "worktree_render_cache": 37,
         "remote_acp": 38,
-        "live_message_receipt": 39
+        "live_message_receipt": 39,
+        "worktree_native_resume": 40
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "9232ecccd116704648768e33e053606f86af3ccb1bae5faae1b7845259ca25a0",
+          "sha256": "7dcba30c6b554d346d3f37bb39c4c2f2aec10d9f3a3c01322144634843850714",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "3f8bbcd2f4fa48ee73432c34b59ae44870594f886f3444c66cf7be38eb6e6d41",
+          "sha256": "463e459b58bc7df195f38843d1d1a56a9ad4b4a36ba4e7dd11d0402522b29fa0",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -192,7 +194,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-          "sha256": "39a8ed46121e1fc543f4e6b06942858704ff6cbb61cb4ecaaf5a36fe956daae8",
+          "sha256": "6ebaa0820e120c96504b6183c1b01f48f006f79f57da7c35fb1ebc7c23e1f6ed",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -204,7 +206,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "5cfe4e5c81e16e1bb47394cc8acb000f7480638567b550c85a4998fec8db8a54",
+          "sha256": "5e995bb3a1515e09070c27add425632f4e02f38c14456509f27bbce20c730a5d",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -265,6 +267,24 @@
         {
           "path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
           "sha256": "17d5d8c5c054feeb080000b77bdb33dacd255160c24b1bab16a46f71dd844cf1",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "sha256": "d8dc3d2bc7c3d9a1133ef89bdd01ad5677ba966fca6139a8d3af706e6e0de1d5",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/client.py",
+          "sha256": "2bda377094adaef7d730926970d86d1ef569483f5c265d4c12678c33ed6f4d99",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "sha256": "3d359864f9c08c85d7c1f288eb98264f0ddc8ca3c1c242cda22147175da66ebe",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -1139,6 +1159,150 @@
           "sha256": "f98ded39e1cbb604ee01bfd4c70b88c9080edcf6d64ec4f5cc5d3a9a7c7ba0ed",
           "generation": 39,
           "role": "Extracted bridge-owned carrier version selection; real request matrix and two-bridge tests retain wire behavior"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-generation-39.json",
+          "sha256": "af6e8b7c43bb4de85b7238c8a506f21f9ecd8a9b0e60a7006b06c992ceb0178c",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-models-generation-39.json",
+          "sha256": "7e5d771a5ac793beffc58df08c7f2b6e74349ab400d32ed672f8e0ae36307021",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/workspace-creation-routes-generation-39.json",
+          "sha256": "0b9d6be67b6b17c1523eee2740d88672608433753d826b51ead97fc68e063972",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-peer-generation-39.json",
+          "sha256": "5689080b90045bac976cd44c39e58a4c5aa11d34a1274fa5c4eb559f92dee65e",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/agents-list-generation-39.json",
+          "sha256": "39a86054bb9f404f3f905c0b0e03567517a16b274c442a85808f7434a4b0addc",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/native-bound-extracted-prompt_models-generation-39.json",
+          "sha256": "f7118a525d9e185e755b6450c412157ccffdab9ddd4eac443fece5ce1f2196aa",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-models-generation-39.json",
+          "sha256": "608e764b535e6e245e58df139be57a2d30dd0254dfde6614c6a974bf03d660ec",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/native-bound-extracted-routes-prompts-generation-39.json",
+          "sha256": "e98ecd570693e8acf17bf429ab7190ac55eb994bc33c86dc63ff9af3487dd437",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/live-registration-generation-39.json",
+          "sha256": "4f2be75060ac400c9ef63ceaf075f55abb2f076a1290b79dd9a214382b6625db",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-admission-generation-39.json",
+          "sha256": "aeb025923a05d904fcbf3bb4ceae425efec463c337efed4bcb81f487d88290d7",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-native-generation-39.json",
+          "sha256": "4b6c741e487d0326170d96c97f6abe88a85042bf6f1c42207ac532613825a86f",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-resume-generation-39.json",
+          "sha256": "0abbae52caaf3d63cbb1f501b6b6b67a5cd62318fd2071f98fb03d38fac2eea7",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-refresh-generation-39.json",
+          "sha256": "28207ae5f42af5b45bf77ec360641b2c7c0d11b20ea45f4f0d38f268eabb8ccb",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/worktree-render-worktrees-generation-39.json",
+          "sha256": "92f723da0f8e02340a536ef10825e4259c24513a2e5a53a31a4ef84ba0d9a5e7",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/worktree-render-worktree_refresh-generation-39.json",
+          "sha256": "163692ea6e098bb51cca109e4c7d0ff8c3fc486e9e7d7e8a8f4c713d2febb41e",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/worktree-render-client_worktrees-generation-39.json",
+          "sha256": "d2daca825850e987672d256aaa01bb90aadd5c266053880922bf167711a0b986",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/worktree-render-worktree_entry-generation-39.json",
+          "sha256": "f0da1b984581a6de100843b88cd0b56dcd7b030585b62d00286a990fb9f42d47",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-client_session_start-generation-39.json",
+          "sha256": "7dc06391e4ba205cad5e8bd7515becff34f0cfdbc5216c93f35e7015d2223d0c",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-client_answers-generation-39.json",
+          "sha256": "13bf5bc7de839c004fe7963a831b217286e885bb190d0d2fa294f04671c8a28f",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-routes-answers-generation-39.json",
+          "sha256": "9019bf69f29ff90ea0fb146bc6d339bb1876b2058fcb051e1cac712707647623",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-remote_acp_sessions-generation-39.json",
+          "sha256": "b14a997693783ece4a00e69c70a8287f7300b9e1cc4b7c6c37b1dffc9f824d1f",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-39.json",
+          "sha256": "2057af4d5a435ea6ef7c8151491c7adb1ee83a2cfa0383e59210dc2e14a5e7a2",
+          "role": "Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-39.json",
+          "sha256": "1074a13694ab1541b8ef1c92c42a93f17972e0b2b65180d14dfabe2436d45ccc",
+          "role": "Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-39.json",
+          "sha256": "138186648eee6d7f17eb8b07a49cbcf0d01e65710167da2060dcbdb27ae9be83",
+          "role": "Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
         }
       ],
       "provenance": [
@@ -3079,6 +3243,198 @@
           "capture_method": "Re-attest committed carrier version extraction against unchanged independent receipt wait packet and version-skew expectations."
         },
         {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "a8230efb6cc11dc710c1c8d2541ae4b049dc34e3",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "9abaefff89267fa0742855b9dab07e22f375f8b0",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "73a077eaaf14ae64365268b0a857b2b912594998",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "0f10a43a6b6ce23e03ef674d95f0bc6a7f7eff95",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "1e8acf28f921b8737a0bdd4f23c1ea16d306cba3",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "ff9b0f6b3dc5a7e6e9b939d916d9564487943eb8",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "e1c95c1065f20e29cf40e933701222b3ba2ea6ce",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "04c7dcb340ef9826aa6e030903a1440ecfc325b7",
+          "capture_method": "Freeze exact native-resume route, identity, capability and refusal assertions from the committed source; actual client route construction and owner/native boundary regressions independently exercise this evidence."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+          "source_git_blob": "bc00673acf0433ced3352a2263f52a6e1fe3fa0d",
+          "capture_method": "Freeze exact native-resume route, identity, capability and refusal assertions from the committed source; actual client route construction and owner/native boundary regressions independently exercise this evidence."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "280ba9b618b0f343d59d393333296bae75eb4e1e",
+          "capture_method": "Freeze exact native-resume route, identity, capability and refusal assertions from the committed source; actual client route construction and owner/native boundary regressions independently exercise this evidence."
+        },
+        {
           "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
           "plugin_version": "0.4.1-dev3",
           "generation": 39,
@@ -3103,7 +3459,7 @@
           "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after clarifying optional-host validation and the retained legacy user keyword; native profile regressions retain both configured identities."
         }
       ],
-      "support_window": "HTTP generations 1 through 39 remain supported. Immutable native33, workspace34, qualified-peer35, provider-creation36, render-cache37 and remote-ACP38 evidence is retained independently from receipt generation 39.",
+      "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",

@@ -799,6 +799,24 @@ from the host's).
 
 ## Journal
 
+### 2026-10-16 - Remote ACP integration and native backend evidence
+
+Concurrent remote ACP support landed in #6997 at HTTP generation 38. Native
+worktree recovery now uses generation 39 and preserves the remote target's
+serialized connection/capability metadata, prior capability floor, and immutable
+generation-38 corpus. Resolver reconciliation also preserves the upstream
+read-only preview boundary instead of allocating profiles during previews.
+
+A native Windows backend exercise recovered one exited CLI conversation through
+ACP, retained its exact native identity and remembered context, then recovered
+that same conversation through a headed CLI with a fresh response marker.
+The headed fixture uses the existing Worktrees trusted-folder helper against
+its isolated configuration before launch. These are backend continuity facts,
+not passing managed-owner HTTP acceptance: the manual terminal-exit sequence
+did not confirm shutdown and required explicitly approved, identity-pinned
+fixture cleanup. Full owner-discovery integration remains gated on #6704.
+No installed plugin or shared service was changed for these experiments.
+
 ### 2026-10-16 - Ordinary native-head recovery implementation
 
 Following merged plan #6936, implemented #6934's ordinary worktree resume

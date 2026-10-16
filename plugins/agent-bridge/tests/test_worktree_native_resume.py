@@ -307,6 +307,21 @@ def test_import_is_atomic_and_not_automatically_recoverable(boundary):
     assert restarted.get_session(session.session_id).caller_id == "native-owner-resume:wt-example"
 
 
+def test_runtime_native_admission_preserves_remote_acp_target_serialization():
+    target = SpawnTarget(
+        type="remote-acp", remote_acp={"name": "example-remote"},
+        remote_acp_capabilities={"generation": 1}, native_resume_id="native-original",
+    )
+    stored = target.to_json()
+    restored = SpawnTarget.from_json(stored)
+    assert restored.remote_acp == target.remote_acp
+    assert restored.remote_acp_capabilities == target.remote_acp_capabilities
+    assert restored.native_resume_id is None
+    assert "native_resume_id" not in json.loads(stored)
+    legacy = json.loads(SpawnTarget().to_json())
+    assert "remote_acp" not in legacy and "remote_acp_capabilities" not in legacy
+
+
 @pytest.mark.asyncio
 async def test_imported_native_origin_survives_restart_without_recreate(boundary, monkeypatch):
     imported = boundary.manager.import_native_session(

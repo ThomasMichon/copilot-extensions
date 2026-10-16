@@ -198,13 +198,30 @@ def test_structured_seed_refuses_unsupported_options_before_admission(
         remote_seed_launch.prepare(None, "guest", "bash", ["--new", flag], "task")
 
 
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_remote_native_resume_preserves_exact_head_and_no_resume(remote, json_mode):
+    _, _, plans = remote
+    args = _parse([
+        "--machine", "remote-host", "--worktree-id", "example-worktree",
+        "--no-resume", "--native-resume-session", "native-original",
+        *(["--json"] if json_mode else []),
+    ])
+    assert resolve_cli.cmd_resolve(args) == 0
+    plan, = plans
+    _, _, command = shlex.split(plan["remote_command"])
+    forwarded = _parse(shlex.split(command)[1:])
+    assert forwarded.native_resume_session == "native-original"
+    assert forwarded.worktree_id == "example-worktree"
+    assert forwarded.no_resume is True
+
+
 def test_remote_option_inventory_covers_all_resolve_parser_destinations() -> None:
     # New options must join the forwarding/refusal policy rather than disappear.
     assert set(vars(_parse([]))) == {
         "dry_run", "recovery", "defer_projections", "no_resume", "bare_resume", "restore",
         "no_mux", "no_fast_forward", "json", "worktree_id", "codename", "base", "auto",
         "new_worktree", "bridge", "profile", "defer_new_seed", "stage_launch_seed",
-        "require_native_seed",
+        "require_native_seed", "native_resume_session",
         "seed_id", "launch_request_b64", "launch_request_status", "machine", "environment",
         "target_no_mux", "parent_session", "caller_worktree", "owner_ref", "seed", "copilot_args",
     }
