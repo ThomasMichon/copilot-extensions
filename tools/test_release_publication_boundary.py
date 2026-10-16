@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from dataclasses import dataclass, field
@@ -82,12 +83,27 @@ def python_body(shell: str, marker: str | None = None) -> str:
     return matches[0]
 
 
-def trusted_control(path: Path) -> types.ModuleType:
-    source = path.resolve().parents[2] / "tools/promotion_control.py"
+def trusted_control(_path: Path) -> types.ModuleType:
+    # Prepared YAML is input data; it must not select the Python helper authority.
+    source = Path(__file__).resolve().with_name("promotion_control.py")
     module = types.ModuleType("boundary_trusted_control")
     module.__file__ = str(source)
     exec(compile(source.read_text(encoding="utf-8"), str(source), "exec"), module.__dict__)
     return module
+
+
+class TrustedHarnessTests(unittest.TestCase):
+    def test_standalone_prepared_yaml_does_not_require_an_adjacent_checkout_or_helper(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="prepared-control-yaml-") as temporary:
+            staged = Path(temporary) / "standalone" / "base-branch-reminder.yml"
+            staged.parent.mkdir()
+            staged.write_bytes(b"name: prepared control data\n")
+            control = trusted_control(staged)
+            self.assertEqual(
+                Path(control.__file__), Path(__file__).resolve().with_name("promotion_control.py"),
+            )
+            self.assertEqual(control.MANIFEST_PATH, MANIFEST)
+            self.assertTrue(callable(control._paths))
 
 
 def controller(text: str, marker: str) -> None:
