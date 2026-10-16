@@ -55,6 +55,15 @@ def add_parser(sub) -> None:
     from .tracking_yaml_repair import add_doctor_arguments
     add_doctor_arguments(sp)
     sp.add_argument(
+        "--repair-machine-record", metavar="WORKTREE_ID",
+        help="Inspect one exact native record's legacy local machine label; "
+        "--fix normalizes only that label to the configured local identity.",
+    )
+    sp.add_argument(
+        "--from-machine", metavar="NAME",
+        help="Exact previous local machine label; requires --repair-machine-record.",
+    )
+    sp.add_argument(
         "--repair-creation", metavar="WORKTREE_ID",
         help="Inspect only a cold worktree's retained New setup; --fix completes it.",
     )

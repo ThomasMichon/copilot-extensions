@@ -358,6 +358,12 @@ def cmd_backfill_sessions(args) -> int:
 
 def cmd_doctor(args) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
+    if (
+        getattr(args, "repair_machine_record", None) is not None
+        or getattr(args, "from_machine", None) is not None
+    ):
+        from .machine_record_repair import targeted_doctor
+        return targeted_doctor(args)
     if getattr(args, "guest_distribution", None) is not None:
         from .guest_environment_cli import targeted_doctor
         return targeted_doctor(args)
