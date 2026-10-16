@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -27,6 +28,12 @@ def primitive(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 def guest(primitive: ModuleType, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: True)
     monkeypatch.setattr(primitive, "_guest_machine_id", lambda: "a" * 32)
+    current = primitive._current_environment
+
+    def environment(**kwargs: Any) -> tuple[dict[str, Any], Path]:
+        return current(**{**kwargs, "platform": kwargs.get("platform") or "posix"})
+
+    monkeypatch.setattr(primitive, "_current_environment", environment)
     return primitive
 
 
@@ -65,6 +72,10 @@ def test_missing_guest_identity_refuses_without_creating_state(
 ) -> None:
     with pytest.raises(guest.InstallationContextError, match="guest-identity-unregistered"):
         _current(guest, tmp_path, {})
+    with pytest.raises(guest.InstallationContextError, match="guest-identity-unregistered"):
+        guest.inspect_guest_environment(
+            distribution="Any selected name", environment={}, os_profile=tmp_path,
+        )
     assert list(tmp_path.iterdir()) == []
     with pytest.raises(guest.InstallationContextError, match="matching named direct"):
         guest.register_guest_environment("Example", environment={}, os_profile=tmp_path)
@@ -84,6 +95,24 @@ def test_foreign_guest_and_conflicting_observation_cannot_reuse_registration(
     with pytest.raises(guest.InstallationContextError, match="guest-identity-foreign"):
         _current(guest, tmp_path, {})
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_guest_status_selector_only_compares_independently_resolved_identity(
+    guest: ModuleType, tmp_path: Path, registered: bool,
+) -> None:
+    direct = {"WSL_DISTRO_NAME": "Example"}
+    if registered:
+        guest.register_guest_environment("Example", environment=direct, os_profile=tmp_path)
+    observation = {} if registered else direct
+    with pytest.raises(guest.InstallationContextError, match="guest-identity-conflict"):
+        guest.inspect_guest_environment(
+            distribution="Other", environment=observation, os_profile=tmp_path,
+        )
+    result = guest.inspect_guest_environment(
+        distribution="example", environment=observation, os_profile=tmp_path,
+    )
+    assert result["environment"]["wslDistro"] == "Example"
 
 
 @pytest.mark.parametrize("field,value", [

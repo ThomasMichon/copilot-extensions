@@ -82,7 +82,9 @@ by the existing machine map, separate from distribution and host-default names.
 
 Use `guest-status --distribution "Example Distro"` to inspect the current guest,
 or, on Windows, compare that designated name with the current user's registered
-WSL default. Reports never select a different guest, alter the OS default or
+WSL default. The requested name is a comparison only: it cannot supply missing
+guest identity or authorize enrollment over an unregistered SSH entry.
+Reports never select a different guest, alter the OS default or
 rewrite existing runtime/worktree records. A guest cannot observe the Windows
 host default through this API: `hostDefault.status` is honestly `unavailable`.
 

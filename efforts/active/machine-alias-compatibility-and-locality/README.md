@@ -202,6 +202,22 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-16 - Guest review correction preserves comparison-only selectors
+- The first implementation review found one canonical defect, repeated across
+  its generated copies: the Python status comparison selector could supply
+  otherwise missing guest identity. Status now resolves actual identity first,
+  then compares the requested name, matching Bash and PowerShell.
+- Added pre-enrollment SSH refusal coverage for every native runner and the
+  targeted doctor, plus independent selector mismatch controls. All vendored
+  copies were regenerated from the canonical source.
+- Hosted candidate `fc33b115bc4e204b078177e592d2b88d14f871af` passed the existing
+  installation-context smoke: 180 passed, one skip, with all three guest writer
+  parameters executed. The correction requires fresh hosted proof and review;
+  that earlier pass is not reused as current-head acceptance.
+- A later Containers CI assertion matches the retained #6791 timing failure,
+  owned by #6551. No competing lock-protocol fix or timeout change is included.
+  Actual passing required CI remains mandatory.
+
 ### 2026-10-16 - Guest identity candidate prepared; POSIX proof pending
 - The shared Python, Bash and PowerShell primitive now supports explicit
   guest enrollment and read-only status, without consulting incumbent runtime

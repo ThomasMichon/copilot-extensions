@@ -189,8 +189,13 @@ def inspect_guest_environment(
     current, profile = _current_environment(
         environment=environment if environment is not None else os.environ,
         os_profile=os_profile, platform=None,
-        wsl_distro=expected if _is_wsl_guest() else None,
+        wsl_distro=None,
     )
+    if (
+        expected is not None and current["wslDistro"] is not None
+        and _guest_distribution_key(expected) != _guest_distribution_key(current["wslDistro"])
+    ):
+        _fail("guest-identity-conflict: requested distribution differs from the current guest.")
     default = _host_default_wsl_distribution()
     matches = (
         _guest_distribution_key(default) == _guest_distribution_key(expected)

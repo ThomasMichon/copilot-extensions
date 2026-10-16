@@ -111,7 +111,10 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
     wrappers = {}
     for entry, observation in (("direct", distribution), ("ssh", None), ("conflict", "Other Distro")):
         wrapper = profile / f"{entry}.ps1"
-        command = "& '" + str(library / "guest-powershell.ps1").replace("'", "''") + "' 'guest-status'"
+        command = (
+            "& '" + str(library / "guest-powershell.ps1").replace("'", "''")
+            + "' 'guest-status' -Distribution 'Example Distro'"
+        )
         context = (
             "$env:WSL_DISTRO_NAME='" + observation.replace("'", "''") + "'"
             if observation is not None else "Remove-Item Env:WSL_DISTRO_NAME -ErrorAction SilentlyContinue"
@@ -150,6 +153,13 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
         )
 
     try:
+        unregistered = _snapshot(profile)
+        for runner in ("python", "bash", "powershell"):
+            refused = run(runner, "guest-status", None)
+            assert refused.returncode == 1, refused.stdout + refused.stderr + "".join(host.errors)
+            if runner != "powershell":
+                assert "guest-identity-unregistered" in refused.stderr
+            assert _snapshot(profile) == unregistered
         created = run(writer, "guest-register", distribution)
         assert created.returncode == 0, created.stdout + created.stderr + "".join(host.errors)
         registration = json.loads(created.stdout)

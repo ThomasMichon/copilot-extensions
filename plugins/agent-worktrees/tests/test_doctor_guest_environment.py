@@ -109,6 +109,10 @@ def test_doctor_registers_via_real_primitive_then_ssh_is_read_only(
     monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: True)
     monkeypatch.setattr(primitive, "_guest_machine_id", lambda: "a" * 32)
     monkeypatch.setattr(primitive, "_host_default_wsl_distribution", lambda: None)
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    assert maintenance_cli.cmd_doctor(_args("--fix")) == 1
+    assert "guest-identity-unregistered" in json.loads(capsys.readouterr().out)["detail"]
+    assert list(tmp_path.iterdir()) == []
     monkeypatch.setenv("WSL_DISTRO_NAME", "Example")
     assert maintenance_cli.cmd_doctor(_args()) == 1
     assert json.loads(capsys.readouterr().out)["status"] == "registration-required"
