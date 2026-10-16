@@ -290,7 +290,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol.json",
-          "sha256": "5d9bcda1bf06b453eb2f4e4c13a2e0bfd526da9cb386b7cb654d200007e27ae6",
+          "sha256": "edcf2d53edae6aca9684f5438f0fd21b07df155ad69c73fe9de8ba1d986711b3",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },

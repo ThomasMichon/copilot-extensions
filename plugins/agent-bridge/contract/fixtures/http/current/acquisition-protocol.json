@@ -13,7 +13,7 @@
   },
   "capability": {
     "operation": "POST /api/v1/acquisitions",
-    "required_protocol_version": 39,
+    "required_protocol_version": 32,
     "unsupported_status": 426,
     "unsupported_code": "unsupported_acquisition_protocol"
   }

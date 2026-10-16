@@ -153,11 +153,12 @@ def test_worktree_render_contract_declares_versioned_opt_in_and_retained_holder(
 
 
 @pytest.mark.asyncio
-async def test_generation_38_remote_route_matches_independent_expected_wire(monkeypatch):
+@pytest.mark.parametrize("generation", [38, 39])
+async def test_remote_acp_route_matches_independent_expected_wire(monkeypatch, generation):
     from agent_bridge import remote_acp_sessions
     from agent_bridge.models import SessionStatus
 
-    fixture = _fixture("fixtures/http/current/remote-acp-models-generation-38.json")
+    fixture = _fixture(f"fixtures/http/current/remote-acp-models-generation-{generation}.json")
     observed = []
 
     async def connect(manager, name, **kwargs):
@@ -175,24 +176,27 @@ async def test_generation_38_remote_route_matches_independent_expected_wire(monk
     response = await start_session(
         StartSessionRequest.model_validate(fixture["request"]["json"]), request,
     )
-    assert response.model_dump(mode="json", exclude_none=True) == fixture["response"]
+    expected = {**fixture["response"], "protocol_version": bridge_protocol.HTTP_PROTOCOL_VERSION}
+    assert response.model_dump(mode="json", exclude_none=True) == expected
     assert observed == [("example-agent", {
         "cwd": "/workspace", "caller_id": None, "caller_session_id": None,
         "remote_session_id": "saved-example",
     })]
 
 
-def test_generation_38_remote_clients_retain_native_request_identity():
+@pytest.mark.parametrize("generation", [38, 39])
+def test_remote_acp_clients_retain_native_request_identity(generation):
     from agent_bridge.client import BridgeClient, BridgeClientError
 
-    fixture = _fixture("fixtures/http/current/remote-acp-models-generation-38.json")
+    fixture = _fixture(f"fixtures/http/current/remote-acp-models-generation-{generation}.json")
     assert fixture["capability"]["remote_acp"] == bridge_protocol.REMOTE_ACP_PROTOCOL_VERSION
     client = BridgeClient.__new__(BridgeClient)
-    client._daemon_proto = (38, 1)
+    client._daemon_proto = (generation, 1)
     calls = []
     client._request = lambda *args, **kwargs: calls.append((args, kwargs)) or {}
     client.start_session(**fixture["request"]["json"])
-    assert calls[-1][0][2] == fixture["client_requests"]["start"]
+    expected = {**fixture["client_requests"]["start"], "protocol_version": bridge_protocol.HTTP_PROTOCOL_VERSION}
+    assert calls[-1][0][2] == expected
     client.answer_ask_user("bridge-example", **fixture["client_requests"]["form"])
     assert calls[-1][1]["body"] == fixture["client_requests"]["form"]
     client.answer_permission("bridge-example", **fixture["client_requests"]["permission"])
