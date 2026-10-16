@@ -8,10 +8,12 @@ import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 
 from agent_logger.sync.archive_directory import archive_directory
+from agent_logger.sync import log_retirement_file
 from agent_logger.sync.log_archives import _fingerprint
 from agent_logger.sync.log_retirement_file import LogRetirementRevision, retirement_file
 from agent_logger.sync.provenance import windows_extended_path
@@ -20,6 +22,36 @@ pytestmark = [pytest.mark.guard, pytest.mark.contract("agent_logger.process_logs
 native = pytest.mark.skipif(os.name != "nt", reason="native Windows sharing/disposition proof")
 NAME = "process-1000-123.log"
 CONTENT = b"preserved process evidence\n"
+
+
+@native
+def test_source_roots_retirement_policy_guard_runs_after_final_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, revision = _source(tmp_path)
+    events = []
+    original = log_retirement_file._hash_stream
+
+    def hashed(raw: BinaryIO, size: int) -> str:
+        digest = original(raw, size)
+        events.append("hash")
+        return digest
+
+    @contextmanager
+    def changed_policy() -> Iterator[None]:
+        assert events == ["hash"]
+        events.append("guard")
+        if "hash" in events:
+            raise ValueError("synthetic policy change during final hashing")
+        yield
+
+    monkeypatch.setattr(log_retirement_file, "_hash_stream", hashed)
+    with archive_directory(tmp_path) as directory:
+        with retirement_file(directory, NAME) as held:
+            with pytest.raises(ValueError, match="policy change"):
+                held.retire(revision, commit_guard=changed_policy())
+            assert not held.committed
+    assert events == ["hash", "guard"] and source.read_bytes() == CONTENT
 
 
 def _source(tmp_path: Path) -> tuple[Path, LogRetirementRevision]:

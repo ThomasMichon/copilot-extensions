@@ -6,7 +6,7 @@ import errno
 import os
 import stat
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import BinaryIO
 
@@ -36,7 +36,15 @@ class RetirementFile:
     _delete_by_handle: Callable[[], None]
     _committed: bool = False
 
-    def retire(self, revision: LogRetirementRevision) -> None:
+    @property
+    def committed(self) -> bool:
+        """Disposition was accepted, even if a later acknowledgement fails."""
+        return self._committed
+
+    def retire(
+        self, revision: LogRetirementRevision, *,
+        commit_guard: AbstractContextManager[None] | None = None,
+    ) -> None:
         """Mark only the held, unchanged original for deletion on context exit."""
         if self._committed:
             raise RuntimeError("process-log retirement already committed")
@@ -48,8 +56,12 @@ class RetirementFile:
             raise ValueError("process-log retirement content changed")
         if _fingerprint(os.fstat(self.stream.fileno())) != revision.fingerprint:
             raise ValueError("process-log changed during retirement verification")
-        self._delete_by_handle()
-        self._committed = True
+        # Policy must still hold after the potentially long final content hash.
+        with commit_guard if commit_guard is not None else nullcontext():
+            if _fingerprint(os.fstat(self.stream.fileno())) != revision.fingerprint:
+                raise ValueError("process-log changed at retirement commit")
+            self._delete_by_handle()
+            self._committed = True
 
 
 @contextmanager

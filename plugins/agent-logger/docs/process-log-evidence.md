@@ -247,7 +247,11 @@ ancestry; the source opens with read/delete access and no sharing. Existing and
 new writable opens and source renames are excluded while that original handle
 is held. Full revision fingerprint and content hash must still match before
 an explicit disposition commit; abandoning the context without commit retains
-the source. Read-only sources and hardlinked/reparse entries are rejected
+the source. An optional caller-owned commit guard enters after the final raw
+hash and metadata checks, not before that potentially long read. Its lifetime
+spans disposition. The `committed` observation stays true if a subsequent guard
+or close acknowledgement fails; such failures cannot truthfully claim rollback.
+Read-only sources and hardlinked/reparse entries are rejected
 without attribute changes or pathname-delete fallbacks.
 
 POSIX retirement is explicitly unsupported by this primitive. Directory
@@ -322,6 +326,38 @@ remains unverified. This helper is not called by scheduled sync or manual
 snapshotting yet and does not enable reclamation. The orchestration and
 retirement gates in the [reclamation contract](../../../efforts/active/session-intelligence-and-accounting/process-log-reclamation.md)
 remain open.
+
+### Internal post-publication retirement sequence
+
+`sync.log_reclamation.reclaim_process_logs` composes the prepared primitives
+for isolated validation. It has no scheduled, tenant, namespace or manual CLI
+caller. Enabled runtime reclamation is still refused: correct machine-local
+configuration provenance and scheduling integration remain unimplemented.
+
+A caller must own the sync lock and supply the complete resolved target set,
+explicit preservation/retention settings and a current-policy commit guard.
+The internal sequence requires native Windows for any retirement. It selects
+only quiet, old raw producer files with an exited PID, holds the original
+exclusively, and requires an existing local ZIP for the current raw hash.
+A late raw revision lacking its own ZIP is retained for another snapshot pass.
+It never substitutes an older archive or creates a new local snapshot itself.
+
+All required target roots are pinned before exact-ZIP publication. After
+publication and fresh readback, the complete local and target ZIPs are verified
+again through protected handles held across the retirement commit. Final raw
+hashing precedes the caller's policy guard; source-root identity, retention,
+quietness and producer exit are checked inside that guard immediately before
+original-handle disposition. A changed policy or any missing, corrupt,
+unsupported, redirected or unreadable replacement retains the raw source.
+
+Results separately count inspected, eligible, retained and retired files,
+confirmed reclaimed raw bytes and filename-only failures. A disposition that
+committed but lost a later acknowledgement is separately
+`committed_unconfirmed`, never counted as retained, confirmed retired bytes or
+a successful rollback. Every local/target ZIP and unrelated raw/gzip/session
+file remains untouched by retirement. Dry run only inspects raw and existing
+ZIP evidence, with no publication, mkdir, durability write or retirement;
+eligible files remain retained and missing verification stays visible.
 
 ### Combined transfer health
 

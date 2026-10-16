@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_logger.sync.log_archive_readback import ProcessLogReadback
@@ -31,12 +32,30 @@ def resolve_required_log_targets(
         or any(char in machine for char in "/\\:\0")
     ):
         raise ValueError("reclamation requires a local machine name, not a namespace")
-    source = cfg.process_logs_source.resolve(strict=True)
-    resolved: list[ProcessLogReadback] = []
+    resolved = tuple(
+        build_target(name, cfg.target_options(name)).process_log_readback(machine)
+        for name in names
+    )
+    validate_required_log_targets(cfg.process_logs_source, settings, resolved)
+    return resolved
+
+
+def validate_required_log_targets(
+    source_root: Path, settings: LogReclamationSettings,
+    targets: tuple[ProcessLogReadback, ...],
+) -> None:
+    """Require the complete resolved set, including distinct non-source roots."""
+    names = tuple(target.target_name for target in targets)
+    if (
+        not settings.required_targets
+        or len(set(settings.required_targets)) != len(settings.required_targets)
+        or names != settings.required_targets
+    ):
+        raise ValueError("resolved process-log targets do not match the complete policy")
+    source = source_root.resolve(strict=True)
     identities: set[str] = set()
-    for name in names:
-        target = build_target(name, cfg.target_options(name))
-        readback = target.process_log_readback(machine)
+    for readback in targets:
+        name = readback.target_name
         if readback.directory is None:
             raise ValueError(f"required target {name!r} does not support process-log readback")
         destination = readback.directory.resolve(strict=False)
@@ -46,5 +65,3 @@ def resolve_required_log_targets(
         if identity in identities:
             raise ValueError("required process-log targets resolve to the same destination")
         identities.add(identity)
-        resolved.append(readback)
-    return tuple(resolved)

@@ -130,6 +130,8 @@ cloud acknowledgement.
   Complete final-head CI and actual native Windows execution passed.
 - [ ] Wire post-publication all-target verification and policy-gated retirement
   under the existing lock, keeping dry-run and manual additive behavior intact.
+  The exact-ZIP-only publisher landed in #7038 with current-head Linux/native
+  Windows coverage; it remains internal and does not yet orchestrate retirement.
 - [ ] Document actual supported behavior and land a plugin changefile with the
   implementation; release/install and live retirement remain separate gates.
 

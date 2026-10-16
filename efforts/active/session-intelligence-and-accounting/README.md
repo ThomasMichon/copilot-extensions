@@ -238,6 +238,43 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-16 - Internal all-target retirement sequence
+- Composed the prepared exact-ZIP publisher, full readback and native exclusive
+  original-file boundary in an internal post-publication routine. It requires
+  an existing exact local ZIP, pins every target root before publication, and
+  holds fully verified local/target replacement ZIP handles through commit.
+- Extended the retirement primitive with a caller-owned commit guard entered
+  after the final bounded raw hash. Source-root identity, age/quiet eligibility
+  and producer exit are checked within that final policy boundary. Post-commit
+  acknowledgement failures remain explicitly unconfirmed, not false rollback.
+- Reused complete-target validation and retained explicit POSIX non-support.
+  Dry run makes no publication or retirement changes. Synthetic native cases
+  exercise both required copies, corrupt/missing/offline evidence, late raw
+  revisions, final cancellation, protected replacement handles and committed
+  acknowledgement failure; Linux-only execution cannot establish native proof.
+- This is internal mechanism validation, not an operational feature. Runtime
+  enabled settings remain refused until correct machine-local policy provenance
+  and scheduling integration exist. Both parent completion gates remain open.
+
+### 2026-10-16 - Exact-ZIP publisher reviewed and merged
+- #7038 actually merged at `2026-10-16T22:02:39Z` as
+  `7169d091b1a35be36292eee7f58015f4e9ccaed6`, from final head
+  `76fa1c19e5fb5f04c2d94cba539017fce0169345`. Fresh Copilot approval
+  `5554095832` reported no open issues after the ancestry correction.
+  Complete same-head CI `38970751480` and workflow guard `38970752067`
+  passed before the normal author merge.
+- The corrected publisher keeps a read-only guard bound to the original target
+  root across publication and fresh readback. Valid-ZIP replacement directories
+  and replacement between the original and guard pins are rejected, not accepted
+  as successful publication. The addressed review thread is resolved.
+- Complete isolated Linux validation passed 1,418 tests with 86 skips and verified
+  cleanup. Native Windows archive CI executed 504 tests with 35 skips on the
+  exact final-head merge candidate, including real handle-sharing coverage.
+- Both canonical Plan/Validation Plans were re-read after actual merge. This
+  internal helper enables no runtime reclamation. Post-publication orchestration,
+  final source/policy revalidation, catalog/accounting, daily outputs and
+  release-backed adoption remain open; the effort stays Active.
+
 ### 2026-10-16 - Exact-ZIP additional-target publication preparation
 - Added a bounded internal publisher for one content-addressed ZIP revision to
   explicitly resolved filesystem targets. It reuses the pinned directory,
