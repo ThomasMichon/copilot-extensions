@@ -374,7 +374,7 @@ def test_self_stage_watchdog_still_times_out(tmp_path: Path, extension: str) -> 
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 @pytest.mark.parametrize("contextual", [False, True], ids=["legacy", "context"])
-def test_cutover_can_extend_the_build_deadline(
+def test_watchdog_cutover_can_extend_the_build_deadline(
     tmp_path: Path, extension: str, contextual: bool,
 ) -> None:
     if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
@@ -406,7 +406,7 @@ def test_cutover_can_extend_the_build_deadline(
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 @pytest.mark.parametrize("contextual", [False, True], ids=["legacy", "context"])
-def test_cutover_cannot_extend_past_the_hard_cap(
+def test_watchdog_cutover_cannot_extend_past_the_hard_cap(
     tmp_path: Path, extension: str, contextual: bool,
 ) -> None:
     if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
@@ -566,7 +566,7 @@ def test_native_watchdog_caps_phase_extension(
 
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
-def test_native_phase_writer_publishes_an_atomic_receipt(tmp_path: Path, extension: str) -> None:
+def test_watchdog_native_phase_writer_publishes_an_atomic_receipt(tmp_path: Path, extension: str) -> None:
     phase = tmp_path / "phase.json"
     env = _env(tmp_path)
     env.update({
@@ -732,7 +732,7 @@ def test_unavailable_home_refuses_in_place_install(tmp_path: Path, extension: st
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell smoke seam")
 @pytest.mark.parametrize("failure", ["invalid-phase", "receipt-publication"])
-def test_powershell_smoke_phase_failure_cannot_report_success(tmp_path: Path, failure: str) -> None:
+def test_watchdog_powershell_smoke_phase_failure_cannot_report_success(tmp_path: Path, failure: str) -> None:
     payload, entry = _entry(tmp_path, "ps1")
     home = tmp_path / "home"
     home.mkdir()
