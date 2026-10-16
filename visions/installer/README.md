@@ -246,6 +246,10 @@ when installation lineage and unchanged ownership can be established. A
 physical payload relocation does not by itself require manual ownership
 transfer. Foreign, edited or ambiguous commands remain protected, and an
 unresolved required command is never reported as synchronized.
+On legacy non-cell installations, project shortcuts delegate to the installed
+user-side runtime command, not a source checkout or replaceable plugin payload.
+Their generated targets are repaired by ordinary install and update flows.
+Installation-cell entry points remain bound to their selected cell.
 
 ### change-driven-local-integration
 Terminal profiles, shortcuts and other owned local projections are reconciled

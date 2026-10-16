@@ -76,6 +76,16 @@ of another installation.
    Non-cell hosts retain supported user-global plugin commands, but consumers
    still invoke the selected installation's exact command. Installers never
    compete for a global generic plugin command last-writer-wins.
+   Legacy project shortcuts call the exact installed user-side `agent-worktrees`
+   binstub under the same resolved local-bin directory, carrying `--project`
+   and the caller's arguments. They do not embed a checkout or payload path.
+   Receipt-gated registration and update reconciliation migrate unchanged
+   historical payload-pinned shortcuts automatically. Checkout-to-marketplace
+   adoption additionally requires the same legacy runtime, plugin/repository,
+   project identity, and a deploy manifest naming the selected payload and
+   version; matching repository URLs alone do not authorize a transfer.
+   Edited, foreign, and ambiguous launchers remain protected. Cell-scoped
+   shortcuts continue to use their selected payload-local command.
 7. Missing, ambiguous, or mismatched provenance fails closed. Same-cell sibling
    discovery is explicit, and a same-named peer from another cell is never
    selected through `PATH`, a wildcard installed-plugin scan, or a shared

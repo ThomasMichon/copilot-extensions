@@ -120,14 +120,14 @@ def test_project_binstub_uses_project_flag(monkeypatch, tmp_path: Path):
     assert "WORKTREE_PROJECT" not in content
     assert "agent-worktrees project binstub" in content
     if platform.system() == "Windows":
-        assert "bin\\payload\\agent-worktrees.cmd" in content
+        assert str(lb / "agent-worktrees.cmd") in content
         assert "--project demoproj" in content
         assert "launch-session.cmd" not in content
     else:
-        assert "bin/payload/agent-worktrees" in content
+        assert str(lb / "agent-worktrees") in content
         assert "--project demoproj" in content
         assert "launch-session.sh" not in content
-        assert ".local/bin/agent-worktrees" not in content
+        assert "bin/payload/agent-worktrees" not in content
 
 
 def test_global_stub_does_not_clear_worktree_id(monkeypatch, tmp_path: Path):
@@ -144,12 +144,7 @@ def test_global_stub_does_not_clear_worktree_id(monkeypatch, tmp_path: Path):
 
 
 def test_posix_stubs_never_self_reference(monkeypatch, tmp_path: Path):
-    """Regression guard for the fork/exec storm: NO POSIX binstub -- neither the
-    global ``agent-worktrees`` stub nor a per-project stub -- may exec
-    ``~/.local/bin/agent-worktrees``. The global stub doing so exec'd *itself*
-    unboundedly; a per-project stub doing so delegated to the (self-exec'ing)
-    global stub. Both must instead resolve the versioned runtime directly and
-    run ``-m agent_worktrees``."""
+    """Only the global command resolves the runtime; it must never exec itself."""
     if platform.system() == "Windows":
         import pytest
         pytest.skip("POSIX-only binstub content")
@@ -166,11 +161,10 @@ def test_posix_stubs_never_self_reference(monkeypatch, tmp_path: Path):
     assert "bin/resolve-runtime.sh" in gcontent
     assert "_aw_exec_resolved" in gcontent
 
-    # Per-project stub: resolves the versioned runtime with its OWN --project,
-    # never delegating to (and thus recursing through) the global stub.
+    # Per-project delegation is safe because the reserved global never names a project.
     pcontent = (lb / "demoproj").read_text()
-    assert ".local/bin/agent-worktrees" not in pcontent, "project stub self-references"
-    assert "bin/payload/agent-worktrees" in pcontent
+    assert str(lb / "agent-worktrees") in pcontent
+    assert "bin/payload/agent-worktrees" not in pcontent
     assert "--project demoproj" in pcontent
 
 
@@ -196,7 +190,7 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
 
     for name in ("demoproj.cmd", "demoproj.ps1"):
         content = (lb / name).read_text()
-        assert "bin\\payload\\agent-worktrees" in content
+        assert str(lb / "agent-worktrees") in content
         assert "AGENT_WORKTREES_LAUNCH_ID" in content
         assert "picker-launches.jsonl" not in content
         assert "binstub_start" not in content
@@ -230,7 +224,7 @@ def test_windows_binstubs_resolve_via_current_version_marker(monkeypatch, tmp_pa
     assert "\\.venv\\" not in global_ps1
     for name in ("demoproj.cmd", "demoproj.ps1"):
         content = (lb / name).read_text()
-        assert "bin\\payload\\agent-worktrees" in content
+        assert str(lb / "agent-worktrees") in content
 
 
 def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_path: Path):
@@ -275,9 +269,7 @@ def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_p
     second = _generate_under(tmp_path / "install-B")
 
     assert first == second, "binstub content must not depend on live install state"
-    assert b"bin/payload/agent-worktrees" in next(iter(first.values())).replace(
-        b"\\", b"/"
-    )
+    assert str(lb).encode() in next(iter(first.values()))
 
 
 def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
@@ -295,8 +287,10 @@ def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
     ps1 = lb / "demoproj.ps1"
     assert ps1.exists()
     content = ps1.read_text()
-    assert "bin\\payload\\agent-worktrees.ps1" in content
+    assert str(lb / "agent-worktrees.ps1") in content
     assert "--project 'demoproj'" in content
+    assert (lb / "agent-worktrees.ps1").is_file()
+    assert (lb / "agent-worktrees.cmd").is_file()
 
 
 def test_posix_binstub_has_no_pre_context_trace(monkeypatch, tmp_path: Path):
@@ -311,7 +305,7 @@ def test_posix_binstub_has_no_pre_context_trace(monkeypatch, tmp_path: Path):
     assert "$RANDOM-$(date +%s)" in content
     assert "binstub_start" not in content
     assert "if [[ $# -eq 0 ]]" not in content
-    assert "bin/payload/agent-worktrees" in content.replace("\\", "/")
+    assert str(tmp_path / "bin" / "agent-worktrees") in content
     assert "%N" not in content
 
 
@@ -558,7 +552,7 @@ def test_project_binstub_writes_attributable_receipt(monkeypatch, tmp_path: Path
     assert receipt is not None
     assert receipt["owner"]["marketplace"] == "example"
     assert receipt["project"]["name"] == "demo"
-    assert receipt["runtime"]["resolver"] == "payload-local"
+    assert receipt["runtime"]["resolver"] == "user-binstub"
     assert set(receipt["stubs"]) == {
         path.name for path, _ in inst._project_binstub_specs("demo")
     }
@@ -625,7 +619,7 @@ def test_project_binstub_requires_transfer_for_exact_legacy_signature(
     inst.transfer_project_binstub("demo")
     assert inst._read_receipt("demo") is not None
     content = target.read_text(encoding="utf-8").replace("\\", "/")
-    assert "bin/payload/agent-worktrees" in content
+    assert str(lb / "agent-worktrees").replace("\\", "/") in content
 
 
 def test_legacy_environment_binstub_remains_detectable_for_migration():
@@ -828,18 +822,19 @@ def test_explicit_payload_root_precedes_stale_manifest(monkeypatch, tmp_path: Pa
     assert inst._payload_root() == current.resolve()
 
 
-def test_project_binstub_escapes_payload_paths(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
-    payload = tmp_path / "payload with 'quote' and $dollar"
+def test_project_binstub_escapes_user_command_paths(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin with 'quote' and $dollar"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    payload = tmp_path / "payload"
     monkeypatch.setattr(inst, "_payload_root", lambda repo_dir=None: payload)
 
     if platform.system() == "Windows":
         specs = dict(inst._project_binstub_specs("demo"))
-        ps1 = specs[tmp_path / "bin" / "demo.ps1"]
-        assert str(payload).replace("'", "''") in ps1
+        ps1 = specs[lb / "demo.ps1"]
+        assert str(lb).replace("'", "''") in ps1
     else:
         content = inst._project_binstub_specs("demo")[0][1]
-        assert shlex.quote(str(payload / "bin/payload/agent-worktrees")) in content
+        assert shlex.quote(str(lb / "agent-worktrees")) in content
 
 
 def test_payload_shims_propagate_ownership_root() -> None:
@@ -892,10 +887,11 @@ def test_project_binstubs_never_launch_through_legacy_runtime(
     for _path, content in inst._project_binstub_specs("example"):
         normalized = content.replace("\\", "/")
         assert ".agent-worktrees/bin/launch-session" not in normalized
-        assert "bin/payload/agent-worktrees" in normalized
+        assert str(tmp_path / "bin" / "agent-worktrees").replace("\\", "/") in normalized
+        assert str(payload).replace("\\", "/") not in normalized
 
 
-def test_native_installers_generate_payload_pinned_project_binstubs() -> None:
+def test_native_installers_generate_user_command_project_binstubs() -> None:
     plugin = Path(__file__).resolve().parents[1]
     posix = (plugin / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (plugin / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -906,12 +902,24 @@ def test_native_installers_generate_payload_pinned_project_binstubs() -> None:
         "function Deploy-GlobalBinstub {", 1
     )[0]
 
-    assert "bin/payload/agent-worktrees" in posix_binstub
+    assert '"$LOCAL_BIN/agent-worktrees"' in posix_binstub
+    assert "bin/payload/agent-worktrees" not in posix_binstub
     assert ".agent-worktrees/bin/launch-session" not in posix_binstub
     assert "_root=" not in posix_binstub
-    assert "bin\\payload\\agent-worktrees" in powershell_binstub
+    assert "Join-Path $LocalBin 'agent-worktrees" in powershell_binstub
+    assert "bin\\payload\\agent-worktrees" not in powershell_binstub
     assert ".agent-worktrees\\bin\\launch-session" not in powershell_binstub
     assert "resolve-runtime.ps1" not in powershell_binstub
+
+
+def test_cell_project_binstub_keeps_selected_payload(monkeypatch, tmp_path):
+    payload = tmp_path / "cell-payload"
+    monkeypatch.setattr(inst, "_payload_root", lambda repo_dir=None: payload)
+    monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "user-bin")
+    monkeypatch.setattr(inst.registry_paths, "installation_context", lambda: {"pluginId": "agent-worktrees"})
+    for _path, content in inst._project_binstub_specs("demo"):
+        assert str(payload) in content
+        assert str(tmp_path / "user-bin") not in content
 
 
 def test_hook_deployment_includes_registry_root_helper() -> None:

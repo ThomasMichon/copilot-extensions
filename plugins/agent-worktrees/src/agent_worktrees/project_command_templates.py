@@ -6,14 +6,23 @@ import shlex
 from pathlib import Path
 
 
-def render(project: str, payload: Path, *, windows: bool, family: str = "current") -> dict[str, str]:
+def render(
+    project: str, payload: Path, *, windows: bool, family: str = "current",
+    user_bin: Path | None = None,
+) -> dict[str, str]:
     """Render current bytes or a historical family from #1901/#1909."""
-    historical = family != "current"
+    historical = family in ("traced", "ambient")
     ambient = family == "ambient"
+    installed = family == "current" and user_bin is not None
+    command_dir = user_bin if installed else payload / "bin" / "payload"
+    comment = (
+        "This project entry point delegates to the installed user-side command."
+        if installed else "This attributable project entry point is pinned to its owning payload."
+    )
     p = project.replace("'", "''")
     if windows:
-        cmd_path = str(payload / "bin" / "payload" / "agent-worktrees.cmd").replace("%", "%%")
-        ps1_path = str(payload / "bin" / "payload" / "agent-worktrees.ps1").replace("'", "''")
+        cmd_path = str(command_dir / "agent-worktrees.cmd").replace("%", "%%")
+        ps1_path = str(command_dir / "agent-worktrees.ps1").replace("'", "''")
         cmd = ["@echo off"]
         ps1 = []
         if not ambient:
@@ -63,9 +72,9 @@ def render(project: str, payload: Path, *, windows: bool, family: str = "current
                 ps1 += [f'    & "$env:USERPROFILE\\.agent-worktrees\\bin\\launch-session.ps1" --project \'{p}\'',  # marketplace-isolation: allow historical-template-comparison
                         "    exit $LASTEXITCODE"]
             ps1.append("}")
-        cmd += ["rem This attributable project entry point is pinned to its owning payload.",
-                f'"{cmd_path}" --project {project} %*', "exit /b %ERRORLEVEL%"]
-        ps1 += ["# This attributable project entry point is pinned to its owning payload.",
+        cmd += [f"rem {comment}",
+                f'{"call " if installed else ""}"{cmd_path}" --project {project} %*', "exit /b %ERRORLEVEL%"]
+        ps1 += [f"# {comment}",
                 f"& '{ps1_path}' --project '{p}' @args", "exit $LASTEXITCODE"]
         return {f"{project}.ps1": "\r\n".join(ps1), f"{project}.cmd": "\r\n".join(cmd)}
     lines = ["#!/usr/bin/env bash"]
@@ -87,8 +96,8 @@ def render(project: str, payload: Path, *, windows: bool, family: str = "current
         else:
             lines.append(f'  exec "$HOME/.agent-worktrees/bin/launch-session.sh" --project {shlex.quote(project)}')  # marketplace-isolation: allow historical-template-comparison
         lines.append("fi")
-    lines += ["# This attributable project entry point is pinned to its owning payload.",
-              f'exec {shlex.quote(str(payload / "bin" / "payload" / "agent-worktrees"))} --project {shlex.quote(project)} "$@"']
+    lines += [f"# {comment}",
+              f'exec {shlex.quote(str(command_dir / "agent-worktrees"))} --project {shlex.quote(project)} "$@"']
     return {project: "\n".join(lines) + "\n"}
 
 

@@ -120,7 +120,7 @@ def _validate_final_shape(final: object, expected: set[str]) -> None:
         not set(inst._OWNER_IDENTITY_FIELDS + ("plugin_version",)) <= final["owner"].keys()
         or not {"name", "path", "remote"} <= final["project"].keys()
         or not {"root", "resolver"} <= final["runtime"].keys()
-        or final["runtime"]["resolver"] != "payload-local"
+        or final["runtime"]["resolver"] not in ("payload-local", "user-binstub")
         or type(final.get("version")) is not int
     ):
         raise ValueError("incomplete intended receipt")
@@ -230,10 +230,11 @@ def publish(
             "bytes": base64.b64encode(data).decode("ascii") if data is not None else None,
             "mode": before[key]["mode"] if os.name == "nt" or inst.platform.system() == "Windows" else 0o755,
         }
+    resolver = "user-binstub" if inst.registry_paths.installation_context() is None else "payload-local"
     final = None if retire else {
         "schema": inst._BINSTUB_RECEIPT_SCHEMA, "version": inst._BINSTUB_RECEIPT_VERSION,
         "owner": owner, "project": identity,
-        "runtime": {"root": str(inst.install_dir()), "resolver": "payload-local"},
+        "runtime": {"root": str(inst.install_dir()), "resolver": resolver},
         "stubs": {key: _digest(_decode(entry["bytes"])) for key, entry in after.items()},
     }
     changed = sum(before[key]["bytes"] != after[key]["bytes"] for key in before)
@@ -242,7 +243,7 @@ def publish(
     journal = dict((None if transfer else previous) or final or {
         "schema": inst._BINSTUB_RECEIPT_SCHEMA, "version": inst._BINSTUB_RECEIPT_VERSION,
         "owner": owner, "project": identity, "stubs": {},
-        "runtime": {"root": str(inst.install_dir()), "resolver": "payload-local"},
+        "runtime": {"root": str(inst.install_dir()), "resolver": resolver},
     })
     journal["transaction"] = {"version": 1, "before": before, "after": after, "receipt": final}
     # The durable receipt is the recovery record; no separate command store.

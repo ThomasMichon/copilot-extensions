@@ -84,6 +84,12 @@ one per-project entry point reaches every layer.**
 
 ## Invariants
 
+- **Legacy project shortcuts front the installed user command.** They name
+  `agent-worktrees` in their resolved user-local bin directory, never a checkout
+  or replaceable plugin payload. The user-side command owns runtime resolution;
+  install/update reconciliation repairs recognized generated shortcuts while
+  preserving edited or foreign commands. Cell-scoped shortcuts keep their
+  selected payload-local entry point rather than falling back to a global runtime.
 - **Same result, two paths.** `--project X` from anywhere and being CWD-anchored
   inside `X` resolve to the identical active project. `--project` is not a
   second, weaker mode — it is the CWD-independent spelling of the same resolution.

@@ -58,13 +58,23 @@ def command_home(request, monkeypatch, tmp_path):
 
 
 def seed_old(monkeypatch, roots, *, receipted=True):
+    from agent_worktrees import project_command_templates as templates
+
     current, old = roots
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(old))
-    inst._deploy_project_binstub("demo")
+    original_specs = inst._project_binstub_specs
+    with monkeypatch.context() as patch:
+        patch.setattr(inst, "_project_binstub_specs", lambda project, **_kwargs: [
+            (inst.local_bin() / name, content)
+            for name, content in templates.render(
+                project, old, windows=inst.platform.system() == "Windows", family="payload",
+            ).items()
+        ])
+        inst._deploy_project_binstub("demo")
     if not receipted:
         inst._receipt_path("demo").unlink()
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
-    return {p: p.read_bytes() for p, _ in inst._project_binstub_specs("demo")}
+    return {p: p.read_bytes() for p, _ in original_specs("demo")}
 
 
 @pytest.mark.parametrize("receipted", [True, False])
@@ -82,6 +92,82 @@ def test_snapshot_command_migration(command_home, monkeypatch, receipted):
     assert second["migrated"] == []
     assert mtimes == {p: p.stat().st_mtime_ns for p in before}
     assert inst._receipt_path("demo").stat().st_mtime_ns == receipt_mtime
+
+
+@pytest.mark.parametrize("damage", [None, "removed-checkout", "source", "version", "repository", "cell", "edited", "project"])
+def test_checkout_to_installed_owner_migrates_only_proven_generated_commands(
+    command_home, monkeypatch, tmp_path, damage,
+):
+    current, snapshot = command_home
+    checkout = tmp_path / "checkout" / "plugins" / "agent-worktrees"
+    checkout.mkdir(parents=True)
+    (checkout / "plugin.json").write_bytes((snapshot / "plugin.json").read_bytes())
+    before = seed_old(monkeypatch, (current, checkout))
+    manifest = inst.install_dir() / "deploy-manifest.json"
+    source = {
+        "kind": "marketplace", "plugin": "agent-worktrees",
+        "path": current.as_posix(), "version": "1.1.0",
+    }
+    if damage in ("source", "version"):
+        source["path" if damage == "source" else "version"] = "another-installation"
+    manifest.write_text(json.dumps({"source": source}), encoding="utf-8")
+    receipt = inst._read_receipt("demo")
+    if damage == "repository":
+        receipt["owner"]["repository"] = "https://example.invalid/other.git"
+    elif damage == "cell":
+        receipt["owner"]["install_receipt"] = "another-cell"
+    elif damage == "project":
+        receipt["project"]["path"] = str(tmp_path / "another-project")
+    elif damage == "edited":
+        next(iter(before)).write_bytes(b"operator-edited\n")
+    elif damage == "removed-checkout":
+        (checkout / "plugin.json").unlink()
+        checkout.rmdir()
+    inst._write_receipt("demo", receipt)
+    before = {p: p.read_bytes() for p in before}
+    receipt_before = inst._receipt_path("demo").read_bytes()
+    result = inst.reconcile_binstubs()
+    if damage not in (None, "removed-checkout"):
+        assert result["blocked"] == result["preserved"] == ["demo"]
+        assert {p: p.read_bytes() for p in before} == before
+        assert inst._receipt_path("demo").read_bytes() == receipt_before
+    else:
+        assert result["migrated"] == ["demo"]
+        assert result["blocked"] == []
+        assert inst._read_receipt("demo")["runtime"]["resolver"] == "user-binstub"
+        assert all(str(checkout).encode() not in p.read_bytes() for p in before)
+        assert all(str(inst.local_bin()).encode() in p.read_bytes() for p in before)
+        assert inst.reconcile_binstubs()["added"] == 0
+
+
+def test_installed_payload_command_is_automatically_repaired(command_home, monkeypatch):
+    current, _ = command_home
+    seed_old(monkeypatch, (current, current))
+    result = inst.reconcile_binstubs()
+    assert result["migrated"] == ["demo"]
+    assert result["blocked"] == []
+    assert inst.reconcile_binstubs()["added"] == 0
+
+
+def test_registration_repairs_checkout_command_without_manual_transfer(
+    command_home, monkeypatch, tmp_path,
+):
+    current, old = command_home
+    checkout = tmp_path / "checkout" / "plugins" / "agent-worktrees"
+    checkout.mkdir(parents=True)
+    (checkout / "plugin.json").write_bytes((old / "plugin.json").read_bytes())
+    seed_old(monkeypatch, (current, checkout))
+    (inst.install_dir() / "deploy-manifest.json").write_text(json.dumps({
+        "source": {"kind": "marketplace", "plugin": "agent-worktrees",
+                   "path": current.as_posix(), "version": "1.1.0"},
+    }), encoding="utf-8")
+    with inst.project_binstub_registration("demo", repo_dir=None) as registration:
+        registration.commit()
+    receipt = inst._read_receipt("demo")
+    assert receipt["owner"]["payload_root"] == current.as_posix()
+    assert receipt["runtime"]["resolver"] == "user-binstub"
+    assert all(str(checkout).encode() not in p.read_bytes()
+               for p, _ in inst._project_binstub_specs("demo"))
 
 
 @pytest.mark.parametrize("receipted", [True, False])
@@ -983,8 +1069,7 @@ def _seed_foreign_transfer(command_home, monkeypatch, receipt_kind):
     foreign = current.parent.parent / "foreign" / "agent-worktrees"
     foreign.mkdir(parents=True)
     (foreign / "plugin.json").write_bytes((current / "plugin.json").read_bytes())
-    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(foreign))
-    inst._deploy_project_binstub("demo")
+    seed_old(monkeypatch, (foreign, foreign))
     receipt_path = inst._receipt_path("demo")
     if receipt_kind == "foreign-project":
         receipt = inst._read_receipt("demo")
@@ -1192,15 +1277,14 @@ def test_unknown_unreceipted_bytes_are_preserved(command_home, monkeypatch, caps
     assert "in sync" not in capsys.readouterr().out
 
 
-def test_native_relocated_command_routes_to_selected_payload(
+def test_native_relocated_command_routes_to_installed_user_binstub(
     command_home, monkeypatch, request
 ):
     windows = inst.platform.system() == "Windows"
     if windows != (os.name == "nt"):
         pytest.skip("native platform command boundary")
     seed_old(monkeypatch, command_home)
-    payload = command_home[0] / "bin" / "payload"
-    payload.mkdir(parents=True)
+    payload = inst.local_bin()
     if windows:
         native_powershell = request.getfixturevalue("native_powershell")
         (payload / "agent-worktrees.ps1").write_text(
@@ -1219,3 +1303,21 @@ def test_native_relocated_command_routes_to_selected_payload(
     result = subprocess.run(argv, capture_output=True, text=True, timeout=15, **inst.no_window_kwargs())
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "selected:--project,demo,status"
+
+
+@pytest.mark.parametrize("exit_code", [0, 17])
+def test_native_cmd_project_binstub_returns_installed_command_exit(
+    command_home, monkeypatch, exit_code,
+):
+    if inst.platform.system() != "Windows" or os.name != "nt":
+        pytest.skip("native CMD boundary")
+    seed_old(monkeypatch, command_home)
+    assert inst.reconcile_binstubs()["blocked"] == []
+    command = inst.local_bin() / "agent-worktrees.cmd"
+    command.write_text(f"@echo off\n@echo installed:%*\n@exit /b {exit_code}\n", encoding="utf-8")
+    result = subprocess.run(
+        [os.environ["ComSpec"], "/d", "/c", str(inst.local_bin() / "demo.cmd"), "status", "two words"],
+        capture_output=True, text=True, timeout=15, **inst.no_window_kwargs(),
+    )
+    assert result.returncode == exit_code
+    assert result.stdout.strip() == 'installed:--project demo status "two words"'

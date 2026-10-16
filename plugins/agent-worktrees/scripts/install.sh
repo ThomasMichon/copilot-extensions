@@ -2197,8 +2197,7 @@ deploy_binstub() {
         warn "Refusing to deploy project binstub for reserved runtime name 'agent-worktrees' (global command owned by deploy_tool_binstub)"
         return 0
     fi
-    # Generate a project entry point pinned to this payload. The payload owns
-    # runtime/context selection for both interactive and subcommand paths.
+    # Leave runtime resolution to the installed user-side command.
     local tmp
     tmp="$(mktemp "$LOCAL_BIN/$PROJECT_NAME.XXXXXX")"
     cat > "$tmp" <<'BINSTUB_HEAD'
@@ -2208,7 +2207,7 @@ BINSTUB_HEAD
     cat >> "$tmp" <<BINSTUB_BODY
 export PYTHONUTF8=1
 export AGENT_WORKTREES_LAUNCH_ID="$PROJECT_NAME-\$\$-\$RANDOM-\$(date +%s)"
-exec "$PLUGIN_DIR/bin/payload/agent-worktrees" --project "$PROJECT_NAME" "\$@"
+exec "$LOCAL_BIN/agent-worktrees" --project "$PROJECT_NAME" "\$@"
 BINSTUB_BODY
     chmod +x "$tmp"
     mv -f "$tmp" "$LOCAL_BIN/$PROJECT_NAME"
