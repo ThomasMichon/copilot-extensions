@@ -25,15 +25,23 @@ def arguments(**changes):
     })
 
 
-@pytest.fixture
-def local_record(tmp_path, monkeypatch):
-    anchor = tmp_path / "anchor"
-    checkout = tmp_path / "worktrees" / "old-host-win-example"
+@pytest.fixture(scope="session")
+def git_checkout(tmp_path_factory):
+    root = tmp_path_factory.mktemp("machine-repair-repository")
+    anchor = root / "anchor"
+    checkout = root / "worktrees" / "old-host-win-example"
     anchor.mkdir()
     git_ops.git("init", cwd=anchor)
     git_ops.git("-c", "user.name=Example", "-c", "user.email=example@example.com",
                 "commit", "--allow-empty", "-m", "fixture", cwd=anchor)
     git_ops.git("worktree", "add", "-b", "worktree/example", str(checkout), cwd=anchor)
+    return anchor, checkout
+
+
+@pytest.fixture
+def local_record(tmp_path, monkeypatch, git_checkout):
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    anchor, checkout = git_checkout
     config = cfg.Config(
         srcroot=str(tmp_path), machine="canonical-host", platform=cfg.detect_platform(),
         repo_name="example", repos={"example": cfg.RepoConfig(
@@ -187,6 +195,25 @@ def test_duplicate_machine_field_refuses(local_record, capsys):
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("line,expected", [
+    ("machine: old-host  # operator note\r\n",
+     'machine: "canonical-host"  # operator note\r\n'),
+    ("machine : 'old-host'   #\tnote\r\n",
+     'machine : "canonical-host"   #\tnote\r\n'),
+    ('machine: "old-host"   \n', 'machine: "canonical-host"   \n'),
+])
+def test_only_scalar_source_span_changes(line, expected):
+    raw = "# preserved\r\n" + line + "status: active\r\n"
+    data = repair.tracking_yaml_repair.strict_mapping(raw)
+    fixed = repair._replacement(raw, data, "canonical-host")
+    assert fixed == "# preserved\r\n" + expected + "status: active\r\n"
+
+
+@pytest.mark.guard
+@pytest.mark.skipif(
+    cfg.detect_platform() not in ("windows", "linux"),
+    reason="success contract requires native execution; guest refusal is tested separately",
+)
 def test_real_cli_uses_selected_project_and_preserves_claims(tmp_path):
     home, anchor = tmp_path / "home", tmp_path / "anchor"
     anchor.mkdir()

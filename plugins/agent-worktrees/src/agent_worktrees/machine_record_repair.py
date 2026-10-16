@@ -61,14 +61,22 @@ def _prove_checkout(data: dict, config) -> None:
 
 
 def _replacement(raw: str, data: dict, target: str) -> str:
-    headers = list(re.finditer(r"(?m)^machine:[^\r\n]*(?:\r?\n|$)", raw))
-    if len(headers) != 1:
+    document = yaml.compose(raw)
+    if not isinstance(document, yaml.MappingNode):
+        raise ValueError("record must be a YAML mapping")
+    values = [
+        value for key, value in document.value
+        if isinstance(key, yaml.ScalarNode) and key.value == "machine"
+    ]
+    if len(values) != 1:
         raise ValueError("record needs exactly one top-level machine scalar")
-    header = headers[0]
-    if tracking_yaml_repair.strict_mapping(header.group()).get("machine") != data["machine"]:
+    value = values[0]
+    if (
+        not isinstance(value, yaml.ScalarNode) or value.value != data["machine"]
+        or value.start_mark.line != value.end_mark.line
+    ):
         raise ValueError("machine label is not a standalone scalar")
-    ending = "\r\n" if header.group().endswith("\r\n") else "\n" if header.group().endswith("\n") else ""
-    fixed = raw[:header.start()] + "machine: " + json.dumps(target) + ending + raw[header.end():]
+    fixed = raw[:value.start_mark.index] + json.dumps(target) + raw[value.end_mark.index:]
     if tracking_yaml_repair.strict_mapping(fixed) != {**data, "machine": target}:
         raise ValueError("repair would change fields outside the machine label")
     return fixed
