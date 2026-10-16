@@ -2,7 +2,7 @@
 
 Parent: [Session Intelligence and Accounting](README.md), Phase 1; issue #5676.
 
-**Status:** Proposed amendment; review and merge before implementation.
+**Status:** Policy amendment reviewed and merged in #7016; implementation active.
 This document specifies future behavior, not an available command or setting.
 
 ## Selected policy and boundary

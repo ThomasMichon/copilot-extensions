@@ -238,6 +238,20 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-16 - All-target reclamation policy reviewed
+- #7016 merged as `2d7640c56fa0f344bdd0b1d068c83e133105110b` after
+  exact-head approval `5552430865` with no open findings and complete
+  same-head CI `38951000049`. The selected policy requires explicit opt-in,
+  an explicit retention age, local ZIP verification and verified publication
+  to every required configured target.
+- The first implementation slice is the exact-file retirement boundary and
+  isolated platform proof, not an enabled deletion mode. POSIX remains
+  unsupported unless exact-entry identity and writer exclusion can be proved;
+  a pinned directory and a final stat/unlink sequence do not satisfy that bar.
+- All-target verification, configuration, scheduler integration, native
+  acceptance, released adoption and the parent Plan/Validation items remain
+  open. No live source retirement or rollout is authorized by the amendment.
+
 ### 2026-10-16 - Process-log destination payload slice reviewed and merged
 - #7001 actually merged at `2026-10-16T11:05:25Z` as
   `c9edb06f54c482976e2380ae0f7bb941bf28950f`, from final head

@@ -238,6 +238,25 @@ ZIP preservation, **not storage reclamation or completed compaction**. Source
 retirement, full normalized-storage parity, and native platform acceptance
 remain separate completion gates.
 
+### Retirement boundary prototype
+
+`sync.log_retirement_file` supplies an internal exact-file boundary for native
+Windows safety validation. It is not called by sync or the manual snapshot
+command and enables no retirement policy. A caller-held archive directory pins
+ancestry; the source opens with read/delete access and no sharing. Existing and
+new writable opens and source renames are excluded while that original handle
+is held. Full revision fingerprint and content hash must still match before
+an explicit disposition commit; abandoning the context without commit retains
+the source. Read-only sources and hardlinked/reparse entries are rejected
+without attribute changes or pathname-delete fallbacks.
+
+POSIX retirement is explicitly unsupported by this primitive. Directory
+descriptors and advisory file locks alone do not prove exact-entry deletion
+and writer exclusion. The all-target readback, required-target set, explicit
+retention age, scheduler integration and native acceptance gates remain in the
+[reclamation contract](../../../efforts/active/session-intelligence-and-accounting/process-log-reclamation.md).
+No local or target ZIP is removed by this primitive.
+
 ### Combined transfer health
 
 Filesystem `sync-meta.json` retains independently recoverable `sync_legs`
