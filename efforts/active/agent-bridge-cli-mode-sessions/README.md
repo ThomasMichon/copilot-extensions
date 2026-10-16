@@ -661,6 +661,28 @@ mechanism CLI mode binds through.
 
 ### Phase 6 — Unified dispatch session acquisition
 
+**Operator clarification (2026-10-15):**
+
+> We expect it at this point to be able to cold-resume any worktree, into
+> either a headless ACP or headed/muxed CLI session.
+
+The ordinary, task-independent resume repair is tracked by
+[#6934](https://github.com/ThomasMichon/copilot-extensions/issues/6934).
+It closes the retained-conversation part of the existing acquisition contract;
+it does not expand Dispatch's authority or replace its task reservations.
+
+- [ ] Resume an owner-asserted dormant native head even when no bridge session
+      record exists, preserving its exact conversation in explicit ACP or
+      headed/muxed CLI mode.
+- [ ] Compose the worktree owner's head/holder facts, existing ACP session load,
+      and existing CLI/mux embodiment across local and SSH targets. Missing
+      native history, conflicting holders, changed heads and failed resume must
+      refuse without creating a replacement conversation.
+- [ ] Cover both modes, exact native identity, absent bridge records,
+      concurrency and protocol skew; document the ordinary CLI/HTTP boundary.
+      Native process-exit verification must remain distinct from simulated
+      provider tests.
+
 - [x] Review and land the [scoped acquisition contract](dispatch-session-acquisition.md)
       before runtime changes; coordinate through #6076 with the adjacent
       durable CLI worker tracker #4038. Plan PR #6078 merged.
