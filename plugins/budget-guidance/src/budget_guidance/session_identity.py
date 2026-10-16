@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from .models import ModelError
 from .quota import QuotaSession, _base, acquire_session_quota
 
-LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
+LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9])?")
 HOST = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?")
 
 

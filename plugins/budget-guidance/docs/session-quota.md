@@ -59,6 +59,9 @@ the existing quota `get`. All three calls share one deadline of at most
 origin must match. A missing, unauthenticated, mismatched, unsupported, changed,
 timed-out, or failed status cannot return even cached balances. Replacing the
 session ID or RPC object during acquisition also withholds the result.
+Login validation supports the underscore in Enterprise Managed User and setup
+admin names while retaining GitHub's 39-character bound. The expected HTTPS
+origin is supplied explicitly, including when using an enterprise host.
 
 Only matching login/origin and a bounded status are added under
 `account_identity`. Authentication type, plan, status message, tokens, raw

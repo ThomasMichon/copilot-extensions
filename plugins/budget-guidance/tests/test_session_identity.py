@@ -66,6 +66,24 @@ def test_stable_identity_brackets_only_existing_session_get() -> None:
     assert result["advice"]["operator_launch_blocked"] is False
 
 
+@pytest.mark.parametrize(
+    ("login", "host"),
+    [
+        ("mona-cat_octo", "https://github.com"),
+        ("octo_admin", "https://github.com"),
+        ("managed-user", "https://enterprise.example.ghe.com"),
+        ("a" * 35 + "_org", "https://github.com"),
+    ],
+)
+def test_managed_user_and_enterprise_host_identity_can_match(login: str, host: str) -> None:
+    session = Session(_status(login=login, host=host), _status(login=login.upper(), host=host))
+    result = _read(session, expected_login=login, expected_host=host)
+    assert session.calls == ["status", "quota", "status"]
+    assert result["account_identity"]["status"] == "matched"
+    assert result["account_identity"]["login"] == login
+    assert result["availability"] == "cached"
+
+
 @pytest.mark.parametrize("when", ["before", "after"])
 @pytest.mark.parametrize("status", [
     _status(login="other-user"), _status(host="https://other.example"),
@@ -268,6 +286,7 @@ def test_status_transport_failure_redacted_and_programming_errors_propagate() ->
 
 @pytest.mark.parametrize("kwargs", [
     {"expected_login": "../user"}, {"expected_host": "http://github.com"},
+    {"expected_login": "a" * 40}, {"expected_login": "_user"}, {"expected_login": "user_"},
     {"expected_host": "https://github.com/path"}, {"expected_host": "https://github.com?q=x"},
     {"expected_host": "https://git\nhub.com"}, {"expected_host": " https://github.com"},
     {"timeout": True}, {"timeout": float("nan")}, {"timeout": 31},
