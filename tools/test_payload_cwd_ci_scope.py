@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -56,6 +57,26 @@ def test_platform_payload_selection_is_unchanged(index, suffix):
     selector = f"legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or {suffix}"
     assert f'-k "{selector}"' in JOBS[index]
     assert f'-k "{selector}"' in STANDALONE
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_existing_native_selector_collects_phase_watchdog_contracts(tmp_path, index):
+    selector = re.search(r'test_payload_cwd_contract\.py -q -k "([^"]+)"', JOBS[index]).group(1)
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "pytest", str(ROOT / "tools/test_payload_cwd_contract.py"),
+            "--collect-only", "-q", "-k", selector, "--basetemp", str(tmp_path / "collection"),
+        ],
+        cwd=ROOT, capture_output=True, text=True, timeout=30, creationflags=FLAGS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    for contract in (
+        "cutover_can_extend_the_build_deadline",
+        "cutover_cannot_extend_past_the_hard_cap",
+        "native_phase_writer_publishes_an_atomic_receipt",
+        "powershell_smoke_phase_failure_cannot_report_success",
+    ):
+        assert contract in result.stdout, f"native selector omitted {contract}\n{result.stdout}"
 
 
 @pytest.mark.parametrize("path,selected", [
