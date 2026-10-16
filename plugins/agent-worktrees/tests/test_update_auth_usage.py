@@ -7,7 +7,6 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import update_telemetry as ut

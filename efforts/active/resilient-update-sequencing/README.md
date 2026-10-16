@@ -998,3 +998,23 @@ achieved by rearranging today's combined installer invocations.
   marker. Captured refusals precede timeout reporting after verified cleanup.
   The native preservation selection now passes twelve cases, and the Windows
   payload-owner selection passes seventeen with one platform skip.
+
+### 2026-10-16 - Source review custody corrections
+- #7033's exact-head review identified two high-severity defects in the new
+  generic operation primitive: forked children retained descriptors after the
+  parent released custody, and concurrent acquire attempts on the same
+  instance could clear the successful owner's fields.
+- Descriptor setup, ownership publication and release now share one process
+  guard, including the fork boundary. Child callbacks close inherited raw
+  file objects without explicitly unlocking the parent's open-file description;
+  inherited objects still reject child execution. Only the attempt that
+  reserved custody may clear fields while the guard is held.
+- A deterministic two-thread gate reproduces the same-instance interleaving
+  and checks actual independent-process kernel exclusion while the winner
+  stays active. Its native Windows selection passes five cases with three
+  POSIX skips. A new real-fork case keeps the child alive after parent release;
+  required hosted Linux CI must execute it before merge.
+- The separate failed CI step was literal F401 for a now-unused
+  `SimpleNamespace` import in the updated auth fixture. Removed that import;
+  required lint is rerun normally, not bypassed. Fresh review and all
+  exact-head checks remain open.

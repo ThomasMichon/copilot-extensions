@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -12,6 +13,7 @@ import pytest
 from agent_procutil import direct_python, no_window_kwargs
 
 from single_instance_lease import OperationLock, OperationLockedError, OperationOwnershipError
+from single_instance_lease import operation
 
 
 _HOLDER = """
@@ -26,6 +28,27 @@ with OperationLock(Path(sys.argv[1])) as custody:
     pending.replace(ready)
     sys.stdin.read(1)
 """
+
+_PROBE = """
+import sys
+from pathlib import Path
+from single_instance_lease import OperationLock, OperationLockedError
+try:
+    with OperationLock(Path(sys.argv[1])):
+        sys.exit(7)
+except OperationLockedError:
+    pass
+"""
+
+
+def _assert_kernel_held(path):
+    python, extra_env = direct_python(sys.executable)
+    result = subprocess.run(
+        [python, "-c", _PROBE, str(path)],
+        env={**os.environ, **extra_env, "PYTHONPATH": os.pathsep.join(sys.path)},
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
 
 
 @pytest.mark.parametrize("crash", [False, True])
@@ -83,11 +106,80 @@ def test_same_process_handles_and_threads_cannot_overlap(tmp_path):
             executor.submit(contend).result(timeout=5)
         assert len(errors) == 2
         custody.assert_owned()
+        _assert_kernel_held(path)
         with pytest.raises(OperationOwnershipError, match="already acquired"):
             custody.acquire()
     custody.release()
     with custody:
         custody.assert_owned()
+
+
+def test_concurrent_acquire_on_one_instance_cannot_clear_the_winner(tmp_path, monkeypatch):
+    path = tmp_path / "operation.lock"
+    custody = OperationLock(path)
+    owner_at_native, contender_at_guard = threading.Event(), threading.Event()
+    owner_acquired, contender_done, release_owner = (
+        threading.Event(), threading.Event(), threading.Event()
+    )
+    role = threading.local()
+    native_guard = threading.Lock()
+
+    class Gate:
+        def acquire(self):
+            return native_guard.acquire()
+
+        def release(self):
+            native_guard.release()
+
+        def __enter__(self):
+            if getattr(role, "name", None) == "contender" and not getattr(role, "seen", False):
+                role.seen = True
+                contender_at_guard.set()
+                assert owner_acquired.wait(5)
+            self.acquire()
+
+        def __exit__(self, *_):
+            self.release()
+
+    original = operation._acquire_os_lock
+
+    def native(stream):
+        if getattr(role, "name", None) == "owner":
+            owner_at_native.set()
+            assert contender_at_guard.wait(5)
+        original(stream)
+
+    monkeypatch.setattr(operation, "_guard", Gate())
+    monkeypatch.setattr(operation, "_acquire_os_lock", native)
+
+    def own():
+        role.name = "owner"
+        with custody:
+            owner_acquired.set()
+            assert contender_done.wait(5)
+            custody.assert_owned()
+            assert release_owner.wait(15)
+
+    def contend():
+        role.name = "contender"
+        try:
+            with pytest.raises((OperationOwnershipError, OperationLockedError)):
+                custody.acquire()
+        finally:
+            contender_done.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        owner = executor.submit(own)
+        try:
+            assert owner_at_native.wait(5)
+            contender = executor.submit(contend)
+            contender.result(timeout=10)
+            _assert_kernel_held(path)
+        finally:
+            release_owner.set()
+        owner.result(timeout=10)
+    with OperationLock(path) as next_operation:
+        next_operation.assert_owned()
 
 
 def test_linked_or_nonregular_lock_is_refused(tmp_path):
@@ -142,3 +234,59 @@ def test_inherited_reference_cannot_release_parent(tmp_path):
         custody.assert_owned()
         with pytest.raises(OperationLockedError):
             OperationLock(path).acquire()
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="native fork unavailable")
+def test_live_forked_child_does_not_retain_released_parent_custody(tmp_path):
+    import select
+    import signal
+
+    path = tmp_path / "operation.lock"
+    ready_read, ready_write = os.pipe()
+    stop_read, stop_write = os.pipe()
+    custody = OperationLock(path)
+    custody.acquire()
+    pid = os.fork()
+    if pid == 0:
+        os.close(ready_read)
+        os.close(stop_write)
+        try:
+            os.write(ready_write, b"ready")
+            if not select.select([stop_read], [], [], 10)[0]:
+                os._exit(2)
+            os.read(stop_read, 1)
+            os._exit(0)
+        except BaseException:
+            os._exit(3)
+    os.close(ready_write)
+    os.close(stop_read)
+    child_status = None
+    try:
+        assert select.select([ready_read], [], [], 5)[0]
+        assert os.read(ready_read, 5) == b"ready"
+        custody.release()
+        with OperationLock(path) as successor:
+            successor.assert_owned()
+        reaped, status = os.waitpid(pid, os.WNOHANG)
+        if reaped:
+            child_status = status
+        assert reaped == 0, "forked child must still be alive"
+    finally:
+        custody.release()
+        try:
+            os.write(stop_write, b"x")
+        except BrokenPipeError:
+            pass
+        os.close(stop_write)
+        os.close(ready_read)
+        deadline = time.monotonic() + 5
+        while child_status is None and time.monotonic() < deadline:
+            reaped, status = os.waitpid(pid, os.WNOHANG)
+            if reaped:
+                child_status = status
+            else:
+                time.sleep(.01)
+        if child_status is None:
+            os.kill(pid, signal.SIGKILL)
+            _, child_status = os.waitpid(pid, 0)
+        assert os.waitstatus_to_exitcode(child_status) == 0

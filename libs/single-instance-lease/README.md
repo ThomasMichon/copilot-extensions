@@ -29,6 +29,11 @@ Linked/nonregular lock files are refused, `assert_owned()` verifies the
 opened file still occupies that path, and only the acquiring process and
 thread may assert or release custody. Separate handles in the same process
 also exclude one another on Windows.
+Acquisition publication and release use the same process-local guard, so a
+losing concurrent attempt on one instance cannot clear its successful owner.
+Fork preparation serializes descriptor setup/close; the child closes inherited
+operation descriptors without issuing an unlock against the parent's open-file
+description. Inherited operation objects remain invalid for the child's execution.
 
 The lock file is never removed and no PID or age is used to reclaim it.
 Closing the descriptor releases custody; a process crash does the same through
