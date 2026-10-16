@@ -272,7 +272,13 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
-          "sha256": "d8dc3d2bc7c3d9a1133ef89bdd01ad5677ba966fca6139a8d3af706e6e0de1d5",
+          "sha256": "12d372747dd29a468db88efec36f6e8882b7b821ab06642d9970f24c37589783",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "sha256": "12a12cecebbe3f663b69623e6882a3492eb7732b506c6dbe9cfd4cffbd1f2789",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1303,9 +1309,45 @@
           "sha256": "138186648eee6d7f17eb8b07a49cbcf0d01e65710167da2060dcbdb27ae9be83",
           "role": "Generation-39 native recovery and retained wire compatibility evidence",
           "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-39.json",
+          "sha256": "cb3c8f5338c34221102417e6ebbe39c67b26795ed096446db4fb3b8a3764e1b9",
+          "role": "Generation-39 exact native launch receipt and fresh runtime confirmation",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-39.json",
+          "sha256": "7eb3b7139efb201d63d129adb77cd97d4f50f826cd5962853c2ac2020711e57b",
+          "role": "Generation-39 cache-blind exact-record owner lookup without roster publication",
+          "generation": 39
         }
       ],
       "provenance": [
+        {
+          "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "94c94293ff2a03e4b959639cd5adb1fa0577baf6",
+          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after the internal SSH profile-authority correction; native profile and missing-alias regressions preserve valid routing."
+        },
+        {
+          "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+          "capture_method": "Preserve independent receipt-39 packet and version-skew expectations after selecting configured SSH profiles without topology user or port overrides."
+        },
+        {
+          "commit": "95cdb907d5ad1276a47960630a21b0e27d84a0bc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "27fee5e86ead7bbe780b194956e60c3d25c0dbe6",
+          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after clarifying optional-host validation and the retained legacy user keyword; native profile regressions retain both configured identities."
+        },
         {
           "commit": "9aa7aa03f5ba2762eba4c92d02bf7b6c6b425934",
           "plugin_version": "0.4.1-dev3",
@@ -3435,28 +3477,20 @@
           "capture_method": "Freeze exact native-resume route, identity, capability and refusal assertions from the committed source; actual client route construction and owner/native boundary regressions independently exercise this evidence."
         },
         {
-          "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
+          "commit": "107727e4b4ae83cf3591971e41dd9b5fd70742d3",
           "plugin_version": "0.4.1-dev3",
           "generation": 39,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "source_git_blob": "94c94293ff2a03e4b959639cd5adb1fa0577baf6",
-          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after the internal SSH profile-authority correction; native profile and missing-alias regressions preserve valid routing."
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "721d52c5fdfb04b948129a15dce2946457378add",
+          "capture_method": "Freeze the committed exact owner launch receipt and fresh represented-runtime confirmation contract; real owner/HTTP/native continuity and refusal regressions independently exercise both modes."
         },
         {
-          "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
+          "commit": "107727e4b4ae83cf3591971e41dd9b5fd70742d3",
           "plugin_version": "0.4.1-dev3",
           "generation": 39,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
-          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
-          "capture_method": "Preserve independent receipt-39 packet and version-skew expectations after selecting configured SSH profiles without topology user or port overrides."
-        },
-        {
-          "commit": "95cdb907d5ad1276a47960630a21b0e27d84a0bc",
-          "plugin_version": "0.4.1-dev3",
-          "generation": 39,
-          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "source_git_blob": "27fee5e86ead7bbe780b194956e60c3d25c0dbe6",
-          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after clarifying optional-host validation and the retained legacy user keyword; native profile regressions retain both configured identities."
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "source_git_blob": "149d82a7f33756bbe30edd94796a483a09f23866",
+          "capture_method": "Freeze the committed exact-record lookup request and validation contract; cache-blind HTTP and independent owner subprocess tests exercise lookup without resident inventory."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",

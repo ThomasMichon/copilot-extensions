@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import base64
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -51,16 +52,20 @@ def boundary(tmp_path, monkeypatch):
         "work_dir": entry.path, "resume_session": "native-original",
         "native_admission_version": 1,
     }
+    confirmation = Path(__file__).resolve().parents[1] / (
+        "contract/fixtures/http/current/native-worktree-confirmation-generation-39.json"
+    )
+    launch_receipt = json.loads(confirmation.read_text(encoding="utf-8"))["owner_launch"]
+    launch_receipt.update(
+        worktree_id=entry.id, work_dir=entry.path, resume_session="native-original",
+    )
     calls = []
     state = {"head": head, "preflight": preflight, "launched": False, "record": {
         "id": entry.id, "path": entry.path, "repo": config.project, "status": "active",
         "last_session_id": "native-original",
         "execution_leg_opaque": False, "session_backend_opaque": False,
         "bound_agent": None,
-    }, "launch": {
-        "ok": True, "worktree_id": entry.id, "work_dir": entry.path,
-        "resume_session": "native-original", "mux_verified": True,
-    }}
+    }, "launch": launch_receipt}
 
     async def owner(_owner, _config, _resolver, args):
         calls.append(args)

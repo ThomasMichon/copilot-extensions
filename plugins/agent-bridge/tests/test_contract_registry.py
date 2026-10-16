@@ -84,6 +84,26 @@ def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, 
     assert result["durable_session_id"] == fixture["identity"]["durable_session_id"]
     assert fixture["capability"]["native_history_replacement"] is False
 
+
+@pytest.mark.asyncio
+async def test_owner_record_fixture_matches_real_cold_lookup(monkeypatch):
+    from agent_bridge.agent_registry import AgentConfig
+    from agent_bridge.routes import worktree_probe, worktrees
+    from unittest.mock import AsyncMock
+
+    fixture = _fixture("fixtures/http/current/worktree-owner-record-generation-39.json")
+    owner = AgentConfig(name="example", project="example")
+    resolver = SimpleNamespace(agents={"example": owner})
+    command = AsyncMock(return_value=json.dumps(fixture["required_owner_record"]))
+    monkeypatch.setattr(worktrees, "_run_for_agent", command)
+    match = await worktree_probe.probe_live_worktree("example-worktree", resolver)
+    assert match is not None
+    agent, entry = match
+    assert agent == "example" and entry.id == "example-worktree"
+    assert entry.path == fixture["required_owner_record"]["worktree"]["path"]
+    command.assert_awaited_once_with("example", owner, resolver, fixture["owner_query"])
+
+
 def test_provider_creation_fixture_requires_explicit_capability() -> None:
     fixture = _fixture("fixtures/http/current/provider-creation-generation-36.json")
     request = StartSessionRequest.model_validate(fixture["request"]["json"])
