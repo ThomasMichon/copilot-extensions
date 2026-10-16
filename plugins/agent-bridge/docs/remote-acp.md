@@ -203,6 +203,10 @@ bounded validated adjustments. Overflow or stream loss invalidates the live
 connection, not a quiet fallback. Server SSE keepalives must arrive within the
 idle deadline. Compressed HTTP responses are refused to bound frame decoding.
 SSE accepts LF, CR and CRLF delimiters, including CRLF split across reads.
+Failure also starts idempotent connection cleanup automatically: sibling
+consumers are cancelled and wire resources close without a later operator stop.
+Consumer-drain and wire-close phases each use the configured ordinary timeout.
+Historical tool output never establishes a live background-task inventory.
 
 Affinity cookies stay in memory per target/identity and survive explicit resume
 within the same daemon; they are not persisted across daemon restart. `source:

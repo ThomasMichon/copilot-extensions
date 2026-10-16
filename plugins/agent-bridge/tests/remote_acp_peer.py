@@ -171,7 +171,25 @@ class Connection:
                 }, sid)
             elif text == "wait":
                 self.pending["cancel"] = message, sid
+            elif text == "drop-session-only":
+                if self.ws_send:
+                    await self.ws_send({"type": "websocket.close", "code": 1000})
+                else:
+                    await self.queues[sid].put(None)
             elif text == "drop":
+                sessions[sid]["history"].append({
+                    "jsonrpc": "2.0", "method": "session/update",
+                    "params": {"sessionId": sid, "update": {
+                        "sessionUpdate": "tool_call", "toolCallId": "historical/background",
+                        "title": "Historical completed task", "kind": "other",
+                        "status": "completed", "content": [{
+                            "type": "content", "content": {
+                                "type": "text",
+                                "text": "started in background with agent_id: old-worker",
+                            },
+                        }],
+                    }},
+                })
                 sessions[sid]["history"].append({
                     "jsonrpc": "2.0", "method": "session/update",
                     "params": {"sessionId": sid, "update": {

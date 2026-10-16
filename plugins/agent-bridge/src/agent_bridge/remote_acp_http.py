@@ -204,10 +204,7 @@ class HttpAcpTransport(RemoteTransport):
             if not self.closed:
                 self.fail("Remote SSE stream lost; outcome unknown")
 
-    async def close(self) -> None:
-        if self.closed:
-            return
-        await super().close()
+    async def _close_wire(self) -> None:
         try:
             if self._connection_id:
                 response = await self._request(

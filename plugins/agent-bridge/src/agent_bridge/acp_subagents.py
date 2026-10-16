@@ -28,6 +28,14 @@ from acp.schema import (
 
 log = logging.getLogger("agent-bridge")
 
+
+def background_task_text(content: list[str] | None, raw_output: Any) -> str:
+    parts = list(content or [])
+    if raw_output is not None:
+        parts.append(raw_output if isinstance(raw_output, str) else repr(raw_output))
+    return "\n".join(parts)
+
+
 # -- Background-task (sub-agent) detection --------------------------------------
 #
 # Copilot's `task` tool can launch a sub-agent in *background* mode. The

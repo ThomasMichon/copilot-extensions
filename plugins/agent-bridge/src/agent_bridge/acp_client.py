@@ -55,6 +55,7 @@ from .acp_subagents import (
     BG_TASK_LAUNCH_RE as _BG_TASK_LAUNCH_RE,
     BG_TASK_STATUS_RE as _BG_TASK_STATUS_RE,
     SubagentAttribution,
+    background_task_text,
     client_capabilities,
     subagent_event_meta,
 )
@@ -1012,14 +1013,11 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
         the same id, and the launch phrase has no ``status:`` field, so the two
         branches are mutually exclusive in practice.
         """
-        parts: list[str] = []
-        if content:
-            parts.extend(content)
-        if raw_output is not None:
-            parts.append(raw_output if isinstance(raw_output, str) else repr(raw_output))
-        if not parts:
+        if self._remote_transport is not None and self._loading_session:
             return
-        text = "\n".join(parts)
+        text = background_task_text(content, raw_output)
+        if not text:
+            return
 
         launched = False
         for match in _BG_TASK_LAUNCH_RE.finditer(text):

@@ -177,6 +177,24 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Failed-connection cleanup and historical background inventory
+
+- A delayed prior-head review found historical background-task output entering
+  the client's live inventory and failed connections awaiting a later explicit
+  stop to close resources. These are corrected in addition to log/telemetry
+  replay isolation.
+- Remote replay retains completed tool history without scanning it into live
+  background work. Real manager stop/resume tests include that exact history
+  and verify ordinary stop remains available.
+- A single idempotent cleanup task owns failed-generation teardown separately
+  from consumer tasks, avoiding self-cancellation/self-await. Consumer drain
+  and HTTP/WS close are bounded. Independent authenticated HTTP2/WSS tests
+  exercise RPC deadlines and stream loss (including only one HTTP SSE stream
+  ending), proving resources close automatically and the server survives.
+- The remote/ledger/peer/legacy ACP selection passes 113 tests. Extracted
+  background-output normalization to its existing sub-agent helper owner to
+  preserve the shrink-only client ceiling. No profile change or rollout.
+
 ### 2026-10-16 — Additional protocol and non-resumable-session corrections
 
 - A subsequent review identified CR-only SSE framing and healthy non-loadable

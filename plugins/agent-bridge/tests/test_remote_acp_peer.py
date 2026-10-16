@@ -347,6 +347,7 @@ async def test_actual_service_resume_retains_history_as_replay_without_spawn(pee
         assert len([event for event in replay if event.event == "agent_message"]) == 6
         assert any(event.data.get("text") == "unseen during disconnect" for event in replay)
         assert session.client.pending_ask_user() == []
+        assert not session.client.has_active_background_tasks
         assert any(event.event == "tool_call_start" for event in replay)
         assert session.event_log.active_tool_call() is None
         assert "historical/tool" not in json.dumps(records)
@@ -446,3 +447,49 @@ async def test_answer_admitted_before_cancel_still_has_terminal_route(peer, mode
         data = (await probe.get(url + "/evidence")).json()
     assert data["prompts"] == 2 and data["accepted_actions"] == 0
     assert proc.poll() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+@pytest.mark.parametrize("failure", ["wait", "drop-session-only"])
+async def test_failure_closes_wire_and_sibling_resources_without_stop(peer, mode, failure):
+    url, context, proc = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/acp", transport=mode, allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"},
+        rpc_timeout_seconds=2, timeout_seconds=5, idle_seconds=5,
+    )
+    wire = (
+        HttpAcpTransport(spec, client=httpx.AsyncClient(
+            http2=True, verify=context, trust_env=False, follow_redirects=False,
+        )) if mode == "streamable-http" else WsAcpTransport(spec, ssl=context)
+    )
+
+    class Source:
+        def supports(self, action, fields):
+            return action == "get"
+
+        async def resolve(self, action, fields, *, timeout):
+            return "\n".join(("username=synthetic", "password=synthetic-credential", ""))
+
+    wire.auth = SourceHttpAuth(Source(), wire.context, spec.endpoint)
+    client = AcpClient()
+    try:
+        await client.start_remote(spec, transport=wire)
+        await client.new_session(cwd="/workspace")
+        with pytest.raises((ConnectionError, RemoteTransportError)):
+            await asyncio.wait_for(client.send_prompt(failure), 5)
+        for _ in range(200):
+            if wire._close_task is not None and wire._close_task.done():
+                break
+            await asyncio.sleep(0.02)
+        assert wire._close_task is not None and wire._close_task.done()
+        assert wire._close_task.exception() is None
+        assert all(task.done() for task in wire._tasks)
+        if mode == "streamable-http":
+            assert wire._client.is_closed
+        else:
+            assert wire._ws.close_code is not None
+        assert proc.poll() is None
+    finally:
+        await client.shutdown()

@@ -117,10 +117,7 @@ class WsAcpTransport(RemoteTransport):
         except Exception:
             self.fail("Remote WS connection lost; outcome unknown")
 
-    async def close(self) -> None:
-        if self.closed:
-            return
-        await super().close()
+    async def _close_wire(self) -> None:
         if self._ws is not None:
             with contextlib.suppress(Exception):
                 await self._ws.close()

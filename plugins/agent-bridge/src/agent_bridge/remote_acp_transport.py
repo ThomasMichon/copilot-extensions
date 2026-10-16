@@ -46,6 +46,7 @@ class RemoteTransport:
         self._deadlines: dict[tuple[type, object], float] = {}
         self._deadline_changed = asyncio.Event()
         self._watching = False
+        self._close_task: asyncio.Task | None = None
         self.sessions: set[str] = set()
 
     async def send(self, message: dict[str, Any]) -> None:
@@ -206,6 +207,7 @@ class RemoteTransport:
         self._pending.clear()
         self._deadlines.clear()
         self._deadline_changed.set()
+        self._begin_close()
         if self.on_lost:
             self.on_lost()
 
@@ -233,16 +235,33 @@ class RemoteTransport:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+    def _begin_close(self) -> asyncio.Task:
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(self._close_resources())
+            self._close_task.add_done_callback(
+                lambda task: task.exception() if not task.cancelled() else None,
+            )
+        return self._close_task
+
     async def close(self) -> None:
+        await asyncio.shield(self._begin_close())
+
+    async def _close_resources(self) -> None:
         self.closed = True
         self._ended.set()
         self._callbacks.clear()
         self._pending.clear()
         self._deadlines.clear()
         self._deadline_changed.set()
-        tasks = list(self._tasks)
+        tasks = [task for task in self._tasks if task is not asyncio.current_task()]
         for task in tasks:
             task.cancel()
-        for task in tasks:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+        if tasks:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True), self.target.timeout_seconds,
+                )
+        await asyncio.wait_for(self._close_wire(), self.target.timeout_seconds)
+
+    async def _close_wire(self) -> None:
+        pass
