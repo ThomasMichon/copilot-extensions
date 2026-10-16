@@ -2272,6 +2272,7 @@ def test_apply_plan_strips_caller_payload_environment(monkeypatch, tmp_path):
     assert captured["env"]["RECONCILE_KEEP"] == "present"
 
 
+@pytest.mark.guard
 def test_launch_adapters_apply_planned_runtime_environment():
     # The interactive mux launch scripts relocated to Worktree Manager in
     # Phase 3b Sub-slice 2a Step 2 (efforts/active/worktree-manager-control-
@@ -2284,16 +2285,26 @@ def test_launch_adapters_apply_planned_runtime_environment():
         REPO / "worktree-manager" / "bin" / "launch-session.sh"
     ).read_text(encoding="utf-8")
 
-    assert "$u.PSObject.Properties['unset_environment']" in powershell
-    assert "$u.PSObject.Properties['environment'] -and $u.environment" in powershell
-    assert "$u.unset_environment" in powershell
-    assert "$u.environment.PSObject.Properties" in powershell
+    environment_helper = powershell.split("function Push-UpdateEnvironment {", 1)[1].split(
+        "\n}\n", 1,
+    )[0]
+    assert "param([object]$Update)" in environment_helper
+    assert "$Update.PSObject.Properties['unset_environment']" in environment_helper
+    assert "$Update.PSObject.Properties['environment'] -and $Update.environment" in environment_helper
+    assert "$Update.unset_environment" in environment_helper
+    assert "$Update.environment.PSObject.Properties" in environment_helper
     assert "update.get('unset_environment', [])" in posix
     assert "update.get('environment', {}).items()" in posix
     assert "status.get('unset_environment', [])" in posix
     assert '--install-dir "$runtime_root"' in posix
     assert "Push-UpdateEnvironment $status" in powershell
-    assert "Push-UpdateEnvironment $update" in powershell
+    action_helper = powershell.split("function Invoke-SetupAction {", 1)[1].split(
+        "\n}\n", 1,
+    )[0]
+    assert "Push-UpdateEnvironment $Update" in action_helper
+    assert "Pop-UpdateEnvironment $savedEnvironment" in action_helper
+    assert "Invoke-SetupAction -CommandArgv $argv -Update $update" in powershell
+    assert "Invoke-SetupAction -CommandArgv $rargv -Update $u" in powershell
     assert "'-InstallDir'" in powershell
 
 
