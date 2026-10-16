@@ -96,9 +96,13 @@ the spool before Copilot starts. Startup and shutdown waits are bounded;
 parent loss ends the renderer. A missing/failed renderer warns explicitly and
 uses unavailable timing labels rather than invented durations. Failure
 diagnostics remain in the named private spool instead of being discarded.
+Parent-loss termination is independent of terminal writes and admission
+waits; the dedicated CLI exits nonzero and retains a `ready.failure` reason.
 Shutdown resolves the renderer's still-owned Bash job and command before
-signalling or waiting; a cached PID alone never authorizes either operation.
-The private job snapshot is written only at lifecycle boundaries, not per line.
+signalling; a cached PID alone never authorizes termination. A final receipt
+is written after output closes and the clock thread joins. Cleanup requires
+both that receipt and the absence of a live owned job, even if Bash already
+reaped its exit status. Job-table checks run only at lifecycle boundaries.
 Early/late Bash launcher diagnostics outside maintenance, inherited bootstrap
 child streams and detached installer output retain their existing behavior;
 these are not evidence of standalone installer presentation convergence.

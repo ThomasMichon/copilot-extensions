@@ -217,6 +217,23 @@ bounded source delta inspection.
 
 ### 2026-10-15 - Native maintenance acceptance and isolated Windows blocker
 
+- Further review found successful jobs could already be reaped before
+  cleanup, and a blocked terminal could keep an orphaned renderer alive.
+  Both were reproduced before their repairs. Final cleanup now requires
+  an explicit drained/closed receipt and absence of a live owned job,
+  rather than relying on retained Bash exit status. The parent monitor
+  starts before output, checks liveness during admission, remains active
+  through final drain and can terminate only its dedicated CLI process
+  without waiting for sink locks. A private failure reason survives.
+  Native regressions keep a pipe open and unread while the actual parent
+  exits, covering both a blocked start and final status/drain. Both now
+  exit; Linux pidfds constrain fixture cleanup to its exact grandchild.
+  Final complete-file acceptance passed 113 telemetry and 22 preparation
+  cases on Linux (12 Windows-only skips); canonical Windows telemetry
+  passed 111 cases (two Linux-only skips). The equivalent final 256-line
+  comparison measured medians of 3.724s before and 2.154s after, with
+  256 versus zero `date` processes, one formatter and all messages retained.
+  These replace all earlier overhead figures, not runtime/update cost proof.
 - A subsequent review identified queued output inflating native action
   durations. A blocked-sink regression failed before the repair: completion
   could not be sampled until that sink was released. One in-process clock
@@ -229,7 +246,7 @@ bounded source delta inspection.
   Windows shared renderer coverage passed 30 cases; complete native Linux
   telemetry and preparation files passed 111 and 21 cases respectively
   (12 Windows-only skips), retaining the original limits.
-  Repeated the equivalent 256-line comparison against the final repair,
+  Repeated the equivalent 256-line comparison at that clock-repair stage,
   including clock-reader and job-shutdown costs: before 3.435s median,
   after 1.900s, still 256 `date` processes versus none and one formatter.
   All diagnostics remain; these supersede the pre-review overhead figures.

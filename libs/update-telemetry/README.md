@@ -138,6 +138,14 @@ handling; ordinary lines remain live while credential prefixes wait for their
 continuation. An end record completes the corresponding action, and a finish
 record drains the phase without waiting for inherited descriptors in detached
 descendants. A known warning/failure prevents a misleading clean phase summary.
+The final ready-file receipt follows closed output and clock-thread shutdown;
+the launcher can distinguish successful completion from failure even after
+Bash reaps the completed job.
+The CLI's parent monitor starts before its first output write and remains
+active during action admission and final output drain. Parent loss records
+`parent-exited` in `ready.failure` and exits only this dedicated renderer
+process nonzero, without waiting for a blocked terminal writer or its locks.
+Embedded `render()` callers retain their normal exception/lifetime ownership.
 The shell owns bounded startup/shutdown and cleanup; the renderer also exits
 when its launch parent disappears. Renderer failures report an explicit error
 and never replace the native command's exit or launch-continuation policy.

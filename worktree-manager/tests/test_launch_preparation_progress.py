@@ -536,3 +536,35 @@ def test_bash_spool_initialization_failure_does_not_abort_native_launch(tmp_path
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == "native continuation preserved\n"
     assert "could not initialize launch progress spool" in result.stderr
+
+
+def test_bash_completed_renderer_cleanup_survives_shell_reaping(tmp_path):
+    if os.name != "posix":
+        pytest.skip("POSIX native shell contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.sh").read_text()
+    functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+    finish = '_setup_progress_emit finish "" "" || true'
+    assert functions.count(finish) == 1
+    # Remove the completed job from Bash's table before cleanup inspects it.
+    functions = functions.replace(finish, finish + '\n    wait "$_SETUP_PROGRESS_PID"')
+    fixture = tmp_path / "already-reaped.sh"
+    fixture.write_text("\n".join([
+        "set -euo pipefail",
+        functions,
+        f"PYTHON={shlex.quote(getattr(sys, '_base_executable', sys.executable))}",
+        f"_SETUP_LOG_DIR={shlex.quote(str(tmp_path))}; SETUP_LOG={shlex.quote(str(tmp_path / 'setup.log'))}",
+        "_SHOW_LAUNCH_STATUS=0; _SETUP_PROGRESS_DIR=''; _SETUP_PROGRESS_PID=''; _SETUP_PROGRESS_JOB=''",
+        "_SETUP_PROGRESS_FAILED=0; _SETUP_PROGRESS_SEQUENCE=0",
+        "_start_setup_progress",
+        'spool=$_SETUP_PROGRESS_DIR',
+        "_stop_setup_progress",
+        '[[ ! -d "$spool" ]]',
+    ]))
+    result = subprocess.run(
+        ["/bin/bash", str(fixture)], cwd=tmp_path,
+        env=dict(os.environ, PYTHONPATH=str(root.parent / "libs/update-telemetry/src")),
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == result.stderr == ""

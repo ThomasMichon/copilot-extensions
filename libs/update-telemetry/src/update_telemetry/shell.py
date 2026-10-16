@@ -11,6 +11,7 @@ import argparse
 import os
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
@@ -89,13 +90,17 @@ class ShellProgress:
         return True
 
 
+class _ParentExited(RuntimeError):
+    pass
+
+
 def _records(events: Path, parent: int, stopped: threading.Event):
     with events.open("rb") as source:
         pending = b""
         number = 0
         while not stopped.is_set():
             if os.getppid() != parent:
-                raise RuntimeError("launch parent exited before stopping its formatter")
+                raise _ParentExited("launch parent exited before stopping its formatter")
             chunk = source.read(65536)
             if not chunk:
                 stopped.wait(0.01)
@@ -107,7 +112,10 @@ def _records(events: Path, parent: int, stopped: threading.Event):
                 number += 1
 
 
-def render(events: Path, ready: Path, log: TextIO, terminal: TextIO, *, parent: int, interactive: bool) -> None:
+def render(
+    events: Path, ready: Path, log: TextIO, terminal: TextIO, *,
+    parent: int, interactive: bool, _parent_loss: Callable[[], None] | None = None,
+) -> None:
     progress = ShellProgress(log, terminal, interactive=interactive)
     stopped = threading.Event()
     changed = threading.Condition()
@@ -122,61 +130,64 @@ def render(events: Path, ready: Path, log: TextIO, terminal: TextIO, *, parent: 
                 if fields[0] == b"begin":
                     with changed:
                         while number not in started and not stopped.is_set():
-                            changed.wait()
+                            changed.wait(0.1)
+                            if not stopped.is_set() and os.getppid() != parent:
+                                raise _ParentExited("launch parent exited before admitting its action")
                         started.discard(number)
                 elif fields[0] == b"end":
                     boundary = progress.root.monotonic()
                     with changed:
                         completed[number] = boundary
                         changed.notify_all()
-                elif fields[0] == b"finish":
-                    return
         except BaseException as exc:
+            if isinstance(exc, _ParentExited) and _parent_loss is not None:
+                _parent_loss()
             with changed:
                 clock_error = exc
                 changed.notify_all()
 
-    with progress.root:
-        # Only boundary clocks are retained in memory. Diagnostic bytes stay in
-        # the existing private spool, independent of slow presentation sinks.
-        sampler = threading.Thread(target=sample, name="launch-action-clock")
-        sampler.start()
-        try:
-            ready.write_text("0\n", encoding="ascii")
-            for number, raw, pending in _records(events, parent, stopped):
-                fields = [part.decode("utf-8", errors="replace") for part in raw]
-                boundary = None
-                if fields[0] == "end":
-                    with changed:
-                        while number not in completed:
-                            if clock_error is not None:
-                                raise clock_error
-                            changed.wait()
-                        boundary = completed.pop(number)
-                if not progress.record(*fields, completed_at=boundary):
-                    if pending:
-                        raise ValueError("launcher wrote records after stopping its formatter")
-                    return
-                if fields[0] == "begin":
-                    # Admit native execution only after prior output and the
-                    # start line drain; end sampling never waits for that sink.
-                    assert progress.action is not None
-                    progress.action.started = progress.root.monotonic()
-                    with changed:
-                        started.add(number)
-                        changed.notify_all()
-                    ready.write_text(fields[1] + "\n", encoding="ascii")
-        except BaseException as exc:
-            progress.echo = False
-            progress.lines.flush()
-            if progress.action is not None:
-                progress.action.__exit__(type(exc), exc, exc.__traceback__)
-            raise
-        finally:
-            stopped.set()
-            with changed:
-                changed.notify_all()
-            sampler.join()
+    # Start before any sink write, including the root's first line. Only
+    # boundary clocks are retained; diagnostic bytes stay in the private spool.
+    sampler = threading.Thread(target=sample, name="launch-action-clock")
+    sampler.start()
+    try:
+        with progress.root:
+            try:
+                ready.write_text("0\n", encoding="ascii")
+                for number, raw, pending in _records(events, parent, stopped):
+                    fields = [part.decode("utf-8", errors="replace") for part in raw]
+                    boundary = None
+                    if fields[0] == "end":
+                        with changed:
+                            while number not in completed:
+                                if clock_error is not None:
+                                    raise clock_error
+                                changed.wait()
+                            boundary = completed.pop(number)
+                    if not progress.record(*fields, completed_at=boundary):
+                        if pending:
+                            raise ValueError("launcher wrote records after stopping its formatter")
+                        return
+                    if fields[0] == "begin":
+                        # Admit only after earlier output and the start line
+                        # drain; end sampling never waits for that sink.
+                        assert progress.action is not None
+                        progress.action.started = progress.root.monotonic()
+                        with changed:
+                            started.add(number)
+                            changed.notify_all()
+                        ready.write_text(fields[1] + "\n", encoding="ascii")
+            except BaseException as exc:
+                progress.echo = False
+                progress.lines.flush()
+                if progress.action is not None:
+                    progress.action.__exit__(type(exc), exc, exc.__traceback__)
+                raise
+    finally:
+        stopped.set()
+        with changed:
+            changed.notify_all()
+        sampler.join()
 
 
 def main() -> int:
@@ -187,12 +198,25 @@ def main() -> int:
     parser.add_argument("--parent", type=int, required=True)
     parser.add_argument("--interactive", choices=("0", "1"), required=True)
     args = parser.parse_args()
+
+    def parent_loss():
+        try:
+            args.ready.with_name(args.ready.name + ".failure").write_text(
+                "parent-exited\n", encoding="ascii",
+            )
+        finally:
+            # This is the dedicated CLI child only: never wait for a blocked
+            # terminal writer or its locks when the launch owner has gone.
+            os._exit(1)
+
     try:
         with args.log.open("a", encoding="utf-8") as log:
             render(
                 args.events, args.ready, log, sys.stderr,
                 parent=args.parent, interactive=args.interactive == "1",
+                _parent_loss=parent_loss,
             )
+        args.ready.write_text("finished\n", encoding="ascii")
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"Launch progress formatter failed: {redact(str(exc))}", file=sys.stderr, flush=True)
         return 1

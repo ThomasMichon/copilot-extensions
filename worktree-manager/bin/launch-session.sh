@@ -67,25 +67,17 @@ _setup_progress_wait() {
 }
 
 _setup_progress_job() {
-    local job pid state remainder snapshot="$_SETUP_PROGRESS_DIR/jobs"
+    local job pid remainder
     _SETUP_PROGRESS_FOUND_JOB=""
-    _SETUP_PROGRESS_FOUND_STATE=""
-    if [[ "${1:-active}" == all ]]; then
-        jobs -l > "$snapshot"
-    else
-        jobs -l -r > "$snapshot"
-        jobs -l -s >> "$snapshot"
-    fi
-    while read -r job pid state remainder; do
+    while read -r job pid remainder; do
         [[ "$pid" == "$_SETUP_PROGRESS_PID" ]] || continue
         [[ "$remainder" == *"-m update_telemetry.shell"* ]] || continue
         job="${job#\[}"
         job="${job%%\]*}"
         [[ -z "${_SETUP_PROGRESS_JOB:-}" || "$job" == "$_SETUP_PROGRESS_JOB" ]] || continue
         _SETUP_PROGRESS_FOUND_JOB="$job"
-        _SETUP_PROGRESS_FOUND_STATE="$state"
         return 0
-    done < "$snapshot"
+    done < <(jobs -l -r; jobs -l -s)
     return 1
 }
 
@@ -136,27 +128,28 @@ _setup_progress_end() {
 _stop_setup_progress() {
     [[ -n "$_SETUP_PROGRESS_DIR" ]] || return 0
     _setup_progress_emit finish "" "" || true
-    local attempt
+    local attempt completed=""
     for (( attempt=0; attempt<500; attempt++ )); do
-        kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null || break
+        _setup_progress_job || break
         [[ "$_SETUP_PROGRESS_FAILED" == 1 ]] && break
         sleep 0.01
     done
-    if kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null; then
+    if _setup_progress_job; then
         _setup_progress_signal TERM || true
         _SETUP_PROGRESS_FAILED=1
         for (( attempt=0; attempt<100; attempt++ )); do
-            kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null || break
+            _setup_progress_job || break
             sleep 0.01
         done
-        if kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null; then
+        if _setup_progress_job; then
             _setup_progress_signal KILL || true
         fi
     fi
-    if [[ -n "${_SETUP_PROGRESS_JOB:-}" ]] && _setup_progress_job all \
-        && { [[ "$_SETUP_PROGRESS_FOUND_STATE" == Done ]] || wait "%$_SETUP_PROGRESS_FOUND_JOB"; } \
-        && [[ "$_SETUP_PROGRESS_FAILED" != 1 ]]; then
-        rm -f -- "$_SETUP_PROGRESS_DIR/events" "$_SETUP_PROGRESS_DIR/ready" "$_SETUP_PROGRESS_DIR/jobs"
+    if [[ -f "$_SETUP_PROGRESS_DIR/ready" ]]; then
+        IFS= read -r completed < "$_SETUP_PROGRESS_DIR/ready" || completed=""
+    fi
+    if [[ "$completed" == finished && "$_SETUP_PROGRESS_FAILED" != 1 ]] && ! _setup_progress_job; then
+        rm -f -- "$_SETUP_PROGRESS_DIR/events" "$_SETUP_PROGRESS_DIR/ready"
         rmdir -- "$_SETUP_PROGRESS_DIR"
     else
         printf 'WARNING: launch progress formatter failed; retained private diagnostics at %s.\n' "$_SETUP_PROGRESS_DIR" >&2

@@ -136,7 +136,7 @@ def test_shell_progress_cli_uses_one_process_and_rejects_parent_loss(tmp_path):
     result = subprocess.run(command, env=environment, capture_output=True, timeout=10, **flags)
     assert result.returncode == 0, result.stderr
     assert result.stdout == result.stderr == b""
-    assert ready.read_text() == "1\n"
+    assert ready.read_text() == "finished\n"
     rendered = log.read_text(encoding="utf-8")
     assert "x" * 70000 in rendered
     assert records[3][2] in rendered
@@ -147,8 +147,7 @@ def test_shell_progress_cli_uses_one_process_and_rejects_parent_loss(tmp_path):
     lost = subprocess.run(command, env=environment, capture_output=True, timeout=10, **flags)
     assert lost.returncode == 1
     assert lost.stdout == b""
-    assert b"parent exited" in lost.stderr
-    assert "failed RuntimeError:" in log.read_text(encoding="utf-8")
+    assert ready.with_name(ready.name + ".failure").read_text() == "parent-exited\n"
 
 
 def test_shell_action_clock_excludes_queued_output_drain(tmp_path, monkeypatch):
@@ -217,6 +216,71 @@ def test_shell_action_clock_excludes_queued_output_drain(tmp_path, monkeypatch):
     assert not worker.is_alive()
     assert errors == []
     assert "native-action done exit 0 [duration 2.0s]" in sink.getvalue()
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "pidfd_open"), reason="Linux identity-bound grandchild cleanup",
+)
+@pytest.mark.parametrize("blocked", ["begin", "status"])
+def test_shell_parent_loss_exits_while_terminal_pipe_is_blocked(tmp_path, blocked):
+    import select
+    import signal
+    import time
+
+    events, ready = tmp_path / "events", tmp_path / "ready"
+    log, pid_file, exit_gate = tmp_path / "setup.log", tmp_path / "pid", tmp_path / "parent-exit"
+    events.write_bytes(b"")
+    controller = tmp_path / "controller.py"
+    controller.write_text(
+        "import os,subprocess,sys,time\nfrom pathlib import Path\n"
+        f"child=subprocess.Popen([sys.executable,'-m','update_telemetry.shell',"
+        f"'--events',{str(events)!r},'--ready',{str(ready)!r},'--log',{str(log)!r},"
+        "'--parent',str(os.getpid()),'--interactive','1'],"
+        "stdout=subprocess.DEVNULL,stderr=sys.stderr)\n"
+        f"Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        "deadline=time.monotonic()+15\n"
+        f"while not Path({str(exit_gate)!r}).exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+    )
+    reader, writer = os.pipe()
+    parent = subprocess.Popen(
+        [getattr(sys, "_base_executable", sys.executable), str(controller)],
+        env=dict(os.environ, PYTHONPATH=str(LIB / "src")),
+        stdout=subprocess.DEVNULL, stderr=writer,
+    )
+    os.close(writer)
+    identity = None
+    try:
+        deadline = time.monotonic() + 5
+        while (not pid_file.exists() or not ready.exists()) and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert pid_file.exists() and ready.exists(), "renderer did not start"
+        identity = os.pidfd_open(int(pid_file.read_text()))
+        message = "blocked-output-" + "x" * (1024 * 1024)
+        record = ("begin", "1", message) if blocked == "begin" else ("status", "INFO", message)
+        with events.open("ab") as target:
+            target.write(b"".join(field.encode() + b"\0" for field in record))
+            if blocked == "status":
+                target.write(b"finish\0\0\0")
+        deadline = time.monotonic() + 5
+        while log.stat().st_size < len(message) and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert log.stat().st_size >= len(message), "renderer did not enter its terminal write"
+        assert not select.select([identity], [], [], 0)[0]
+        exit_gate.write_text("exit")
+        assert parent.wait(timeout=5) == 0
+        # Keep the pipe's reader open and deliberately never consume it.
+        assert select.select([identity], [], [], 5)[0], "blocked renderer survived parent loss"
+        assert ready.with_name(ready.name + ".failure").read_text() == "parent-exited\n"
+    finally:
+        exit_gate.write_text("exit")
+        if identity is not None:
+            if not select.select([identity], [], [], 0)[0]:
+                signal.pidfd_send_signal(identity, signal.SIGKILL)
+            os.close(identity)
+        if parent.poll() is None:
+            parent.kill()
+        parent.wait(timeout=5)
+        os.close(reader)
 
 
 @pytest.mark.guard
