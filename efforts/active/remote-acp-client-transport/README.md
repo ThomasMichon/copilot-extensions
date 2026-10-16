@@ -45,6 +45,8 @@ extend that connection seam, not introduce a second chat protocol.
 [Design and validation detail](design.md) records the immutable RFD pin, newer
 public Python SDK prior art, credential ownership, proposed configuration,
 approval requirements, and the decision gate.
+[Qualified wire contract](contract.md) fixes the selected profile identifier,
+extension metadata, approval identity rules and configured target shape.
 
 ## Request
 
@@ -79,6 +81,12 @@ and structured input integrity. Authorized agents may answer explicitly or
 relay a human answer. Missing required approval capability must produce an
 explicit refusal with no write, never a forced remote web UI.
 
+Decision clarification: option A is explicitly selected. Durable conversation
+history is distinct from connection-local resources; resume only through
+advertised `session/load`. No live-inference continuity or automatic prompt
+replay is promised. Experimental headless approval negotiation in namespaced
+extension metadata is authorized, not represented as a standard ACP field.
+
 ## Plan
 
 ### Phase 1 — Reviewed intent and lifecycle decision
@@ -88,9 +96,13 @@ explicit refusal with no write, never a forced remote web UI.
 - [x] Pin the public transport draft and inspect current public SDK prior art.
 - [x] Record owner seams, a configuration proposal, lifecycle contradiction,
   concrete options and the validation matrix in [design.md](design.md).
-- [ ] Land reviewed generic intent through the normal `dev` PR policy.
-- [ ] Resolve decision D1 in #6908 before implementing. A reviewed plan alone
+- [x] Land reviewed generic intent through the normal `dev` PR policy.
+- [x] Resolve decision D1 in #6908 before implementing. A reviewed plan alone
   does not select an option or authorize a wire-profile deviation.
+- [x] Record the explicitly selected qualified profile and experimental
+  approval negotiation in [contract.md](contract.md).
+- [ ] Resolve SDK ownership decision D2: public factory interfaces cannot
+  enforce the required transport bounds and redirect policy unchanged.
 
 ### Phase 2 — Scoped client implementation
 
@@ -126,7 +138,7 @@ explicit refusal with no write, never a forced remote web UI.
 
 ## Validation Plan
 
-- [ ] Effort/vision schema and changed-document links pass for this plan.
+- [x] Effort/vision schema and changed-document links pass for this plan.
 - [ ] D1 has a recorded explicit decision and any profile qualifications are
   reflected consistently in code, configuration, docs and synthetic peers.
 - [ ] Unit coverage validates target admission, origin/identity-qualified auth,
@@ -147,20 +159,45 @@ explicit refusal with no write, never a forced remote web UI.
 
 ## Proposal
 
-**Decision D1 blocks implementation.** The pinned draft promises durable
-sessions across disconnects while also specifying WebSocket disconnect cleanup
-of associated sessions and DELETE termination of all associated sessions.
-Its resume ordering also opens a session GET before load, despite returning
-404 for a session unknown to the new connection. The current SDK documents a
-different load routing order. See [the exact alternatives](design.md#decision-d1--lifecycle-clarification).
+**D1 resolved: option A explicitly selected.** The distinct experimental profile
+and approval metadata are recorded in [contract.md](contract.md). The bridge
+must not claim unqualified RFD conformance.
 
-Agent recommendation: option A, an explicitly qualified experimental profile
-separating connection cleanup from persisted agent-session state and adopting
-the SDK's load/replay ordering. This recommendation is **not selected**.
-Option B is to wait for an upstream clarification and pin that revision.
-Do not silently choose a hybrid or claim unqualified RFD conformance.
+**D2 blocks implementation:** the inspected SDK's public remote factories do
+not expose the resource/redirect controls required by this effort. A wrapper
+after `receive()` cannot bound the HTTP factory's private producer queue or SSE
+parser. The WebSocket factory does not expose connector configuration. Select
+either a bounded bridge-owned implementation of the SDK's public message-level
+transport interface, or an upstream SDK enhancement with suitable public hooks;
+do not monkey-patch private SDK classes. [Evidence and alternatives](design.md#decision-d2--sdk-transport-ownership).
 
 ## Journal
+
+### 2026-10-15 — Explicit option A and SDK suitability gate
+
+- Option A and namespaced experimental application-approval negotiation were
+  explicitly selected. The wire contract now has its own qualified profile
+  identifier and preserves opaque server decision/tool-call identity.
+- Rechecked public SDK `main`; it still resolves to the inspected pin.
+  Examined HTTP/WS factory signatures, producer queue, SSE parser and protocol
+  response routing before any dependency installation or runtime edit.
+- The public factory seams do not satisfy required bounds/redirect policy
+  unchanged. D2 records the concrete choice between a bridge-owned bounded
+  message transport and an SDK enhancement. No private patch was attempted.
+- No runtime implementation or HTTP/2/WS execution evidence is claimed.
+
+### 2026-10-15 — Reviewed intent merged; implementation remains blocked
+
+- Plan PR #6911 merged to `dev` as
+  `aac70d09d214962a5a00824e1f4c1e2a220b2748` after Copilot approval with
+  no open findings and successful required CI, including the PR gate.
+- Plan schema, new local links, file-size and whitespace checks passed.
+  No runtime/integration test pass is claimed for this documentation-only slice.
+- Next action: the protocol decision owner selects D1 and settles the
+  application-required approval capability declaration through #6908.
+  The implementation obligation remains open; the worktree is retained.
+- This is a reviewed planning milestone, not a shipped transport, release or
+  deployment. Runtime code and dependency changes await the decision.
 
 ### 2026-10-15 — Pinned investigation and decision gate
 

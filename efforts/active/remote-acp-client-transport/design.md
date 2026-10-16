@@ -2,6 +2,7 @@
 
 Parent: [Remote ACP Client Transport](README.md). Coordination: #6908.
 This is a proposal, not a shipped configuration or implementation claim.
+The selected option A is made concrete in [the qualified wire contract](contract.md).
 
 ## Immutable protocol reference
 
@@ -52,7 +53,7 @@ unknown to that connection. Whether persisted-session lookup counts as known
 before attachment is not defined. Load history routing must therefore be
 qualified rather than guessed.
 
-### Option A — explicitly qualified experimental profile (agent-recommended)
+### Option A — explicitly qualified experimental profile (selected)
 
 Distinguish connection-local attachments/agent tasks from durable persisted
 agent-session state. Disconnect and DELETE clean up attachments and may cancel
@@ -66,9 +67,9 @@ load. This avoids pre-load unknown-session GETs. Explicit client close releases
 the connection, not the remote server process. No remote session deletion is
 invented.
 
-This needs explicit acceptance as a **qualification of the pinned draft**,
+This option is explicitly accepted as a **qualification of the pinned draft**,
 not an assertion that its contradictory paragraphs are already identical.
-Record the decision and a distinct qualified-profile identifier before code.
+The distinct profile is `ce-remote-acp-http-ws-2026-10-15-a1`.
 
 ### Option B — await clarified upstream intent
 
@@ -78,7 +79,8 @@ revision and review any changed intent. Do not narrow to WebSocket-only,
 substitute MCP Streamable HTTP, or implement an application-specific POST chat.
 
 Neither option weakens exact-action approval validation or permits prompt
-replay. A plan review does not implicitly choose option A.
+replay. Option A was explicitly selected after the plan review, not inferred
+from that review.
 
 ## Public SDK prior art
 
@@ -110,6 +112,41 @@ No SDK source is vendored and no dependency is installed by this proposal.
 All new manifests/resolutions must obey seven-day seasoning and the governed
 artifact-feed contract before implementation or test provisioning.
 
+## Decision D2 — SDK transport ownership
+
+The SDK pin remains current public `main` on reinspection. These are source
+findings, not claimed runtime failures:
+
+| Required contract | Public SDK source | Why an outer wrapper is insufficient |
+|-------------------|-------------------|--------------------------------------|
+| Bounded HTTP receive queue | `http/client.py`: `_HttpStreamTransport.__init__` creates `asyncio.Queue()` without `maxsize`; `_handle_incoming` uses `put_nowait` | Factory accepts only URL, client and headers; `Transport.receive()` consumes after the private producer has already queued |
+| Bounded SSE frame accumulation | `_sse.py`: `buffer += decoder.decode(chunk)` and `data_lines.append(value)` without a size limit | Limiting a response read chunk does not bound a frame split across arbitrarily many chunks |
+| Explicit WS redirect and resource policy | `ws/client.py`: `create_websocket_stream(url, headers, cookie_store)` calls `ws_connect` directly | Factory exposes no connector, redirect policy, max-frame or queue configuration; post-connect wrappers cannot govern the handshake |
+| Correlated HTTP callback-response headers | `http/client.py` and `http/protocol.py`: session header selected from method/params, but a JSON-RPC response has neither | The factory offers no callback-routing hook; a response wrapper cannot add HTTP headers inside its POST owner |
+| Session stream failure visibility | `http/client.py`: session EOF only removes the stream from a set | Silent loss is not safe uncertainty reporting for pending approvals/prompts |
+
+Public `client=` injection can help HTTP auth/timeouts and response validation,
+but does not solve the producer-queue or WS factory boundaries. Selecting a
+fixed-size outer queue or setting private attributes would falsely claim
+boundedness or depend on private implementation behavior.
+
+**Alternative 1 (agent-recommended):** authorize a small bridge-owned bounded
+HTTP/SSE and WS wire transport implementing the SDK's public `Transport`
+protocol (`send`, `receive`, `close`) and using public `connect_to_agent`.
+Keep all ACP JSON-RPC dispatch, schema, sessions and callbacks in the SDK;
+do not fork the protocol implementation or import its private transport
+classes/parser. Reuse seasoned governed HTTP/WS dependencies and shared
+credential owners. This is more owned wire code than the preferred factory
+adapter, so it needs an explicit choice rather than silent expansion.
+
+**Alternative 2:** contribute public queue/frame/connector/routing hooks to the
+upstream SDK, wait for a seasoned governed release and consume that. Keep this
+effort blocked until those seams exist. No SDK issue or PR is opened as a side
+effect of this decision record.
+
+Do not lower the safety requirements, monkey-patch `_HttpStreamTransport`,
+replace `ws_connect` globals, or vendor SDK internals to avoid this choice.
+
 ## Existing owners and proposed extension seams
 
 - `plugins/agent-bridge/src/agent_bridge/acp_client.py`: share initialization,
@@ -134,14 +171,15 @@ credential backend. The real existing consumers must retain focused tests.
 
 ## Proposed configured target
 
-Illustrative machine-local configuration; exact schema remains implementation
-work after D1. Only synthetic values appear here:
+The exact proposed configured target is recorded in [contract.md](contract.md).
+Only synthetic values appear there. This earlier shape is superseded by that
+contract:
 
 ```yaml
 remote_acp:
   example-agent:
     endpoint: https://example.com/acp
-    profile: experimental-streamable-http-websocket
+    profile: ce-remote-acp-http-ws-2026-10-15-a1
     draft_commit: ccff4e7d2e431880225804a8c136c2ccfcb313d0
     transport: streamable-http
     auth:
@@ -200,8 +238,8 @@ Advertise only the callback/form/permission capabilities the bridge can
 actually answer through its existing protocol negotiation. A server requiring
 an unsupported approval capability must fail explicitly before a write,
 not proceed under tool autoapproval or force a remote web UI. The exact
-application-required capability declaration is an interoperability item to
-settle with D1; this proposal does not invent a standard ACP capability name
+application-required capability declaration is now fixed in [contract.md](contract.md)
+under permitted namespaced `_meta`; it is not a standard ACP capability name
 or a second handshake. Ordinary ACP callback support alone must not be
 misreported as proof of arbitrary application approval semantics.
 
