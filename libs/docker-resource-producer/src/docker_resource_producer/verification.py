@@ -30,7 +30,10 @@ class LocalDockerVerifier:
             target += "?" + urlencode(parameters)
         result = session.request("GET", target)
         if kind == "volume":
-            if not isinstance(result, dict) or result.get("Warnings"):
+            if not isinstance(result, dict):
+                raise VerificationError("Incomplete Docker volume inventory")
+            warnings = result.get("Warnings")
+            if warnings is not None and (not isinstance(warnings, list) or warnings):
                 raise VerificationError("Incomplete Docker volume inventory")
             result = result.get("Volumes")
         if not isinstance(result, list):
@@ -72,7 +75,7 @@ class LocalDockerVerifier:
         """Prove current existence against the same admitted daemon connection."""
         with LocalDaemonSession(self.endpoint, self.admission, timeout=self.timeout) as session:
             exists = self._probe(session, identity)
-            session._set_deadline()
+            session._check_response_boundary()
             return exists
 
     def find_reservation(self, token: str, creator: str) -> list[Identity]:
@@ -84,7 +87,7 @@ class LocalDockerVerifier:
                 for kind in ("container", "volume")
                 for identifier in self._inventory(session, kind, token)
             ]
-            session._set_deadline()
+            session._check_response_boundary()
             return identities
 
     def remove(self, identity: Identity, *, authorized: bool = False) -> bool:
@@ -95,10 +98,10 @@ class LocalDockerVerifier:
             raise VerificationError("Docker has no birth-conditional volume deletion; automatic cleanup remains blocked")
         with LocalDaemonSession(self.endpoint, self.admission, timeout=self.timeout) as session:
             if not self._probe(session, identity):
-                session._set_deadline()
+                session._check_response_boundary()
                 return False
             session.request("DELETE", f"/containers/{identity.resource_id}?force=1")
             if self._probe(session, identity):
                 raise VerificationError("Container removal did not establish absence")
-            session._set_deadline()
+            session._check_response_boundary()
             return True

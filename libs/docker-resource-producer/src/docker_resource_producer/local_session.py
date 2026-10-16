@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import math
 import os
+import select
 import socket
 import stat
 import time
@@ -43,6 +44,7 @@ class _DeadlineReader(io.RawIOBase):
         self.connection = connection
         self.deadline = deadline
         self.remaining = _MAX_WIRE
+        self.received = 0
 
     def readable(self) -> bool:
         return True
@@ -54,7 +56,24 @@ class _DeadlineReader(io.RawIOBase):
         self.connection.settimeout(remaining)
         count = self.connection.recv_into(buffer, min(len(buffer), self.remaining))
         self.remaining -= count
+        self.received += count
         return count
+
+
+class _ResponseReader(io.BufferedReader):
+    def __init__(self, raw: _DeadlineReader) -> None:
+        super().__init__(raw)
+        self.consumed = 0
+
+    def read(self, size: int = -1) -> bytes:
+        value = super().read(size)
+        self.consumed += len(value)
+        return value
+
+    def readline(self, size: int = -1) -> bytes:
+        value = super().readline(size)
+        self.consumed += len(value)
+        return value
 
 
 class LocalDaemonSession:
@@ -69,7 +88,7 @@ class LocalDaemonSession:
         self.path = Path(urlsplit(admission.host).path)
         self.deadline = time.monotonic() + timeout
         self.connection: socket.socket | None = None
-        self.reader: io.BufferedReader | None = None
+        self.reader: _ResponseReader | None = None
         self.raw_reader: _DeadlineReader | None = None
         self.used = False
 
@@ -79,6 +98,7 @@ class LocalDaemonSession:
         self.used = True
         if not _DIRECT_LOCAL_SUPPORTED:
             raise VerificationError("Direct local daemon admission is unavailable on this platform")
+        admitted = False
         try:
             before = self._socket_identity()
             connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -88,14 +108,17 @@ class LocalDaemonSession:
             if self._socket_identity() != before:
                 raise VerificationError("Daemon socket changed during connection admission")
             self.raw_reader = _DeadlineReader(connection, self.deadline)
-            self.reader = io.BufferedReader(self.raw_reader)
+            self.reader = _ResponseReader(self.raw_reader)
             info = self.request("GET", "/info")
             if not isinstance(info, dict) or info.get("ID") != self.endpoint.daemon_id:
                 raise VerificationError("Connected daemon identity does not match the claim")
+            admitted = True
             return self
         except (OSError, ValueError, VerificationError) as error:
-            self.close()
             raise VerificationError("Cannot admit the pinned local daemon session") from error
+        finally:
+            if not admitted:
+                self.close()
 
     def _socket_identity(self) -> tuple[tuple[int, int], ...]:
         identities: list[tuple[int, int]] = []
@@ -127,7 +150,7 @@ class LocalDaemonSession:
         ):
             raise VerificationError("Invalid daemon request")
         try:
-            self._set_deadline()
+            self._check_response_boundary()
             assert self.connection is not None
             wire = f"{method} {target} HTTP/1.1\r\nHost: docker\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
             self.connection.sendall(wire.encode("ascii"))
@@ -138,14 +161,23 @@ class LocalDaemonSession:
             if status not in {200, 204}:
                 raise VerificationError(f"Daemon request refused (HTTP {status})")
             if status == 204:
-                self._set_deadline()
+                self._check_response_boundary()
                 return None
             decoded = _json(body.decode("utf-8", errors="strict"))
-            self._set_deadline()
+            self._check_response_boundary()
             return decoded
         except (OSError, ValueError, UnicodeError, VerificationError) as error:
             self.close()
             raise VerificationError("Daemon session failed; no reconnect or absence verdict") from error
+
+    def _check_response_boundary(self) -> None:
+        self._set_deadline()
+        if self.reader is None or self.raw_reader is None or self.connection is None:
+            raise VerificationError("Daemon response stream is unavailable")
+        if self.reader.consumed != self.raw_reader.received:
+            raise VerificationError("Unsolicited buffered daemon response bytes")
+        if select.select([self.connection], [], [], 0)[0]:
+            raise VerificationError("Unsolicited daemon bytes or closed connection between requests")
 
     def close(self) -> None:
         connection, self.connection = self.connection, None

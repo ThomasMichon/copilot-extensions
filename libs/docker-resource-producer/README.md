@@ -76,9 +76,15 @@ The limited HTTP parser validates every chunk delimiter and the complete
 trailer terminator. Chunk extensions are unsupported and refuse explicitly.
 A single buffered reader preserves all unread bytes between requests; padding
 or unsolicited bytes cannot be discarded to reveal a later apparent response.
+Byte accounting rejects surplus buffered responses, and a nonblocking socket
+readability check refuses pending bytes or a disconnected peer at each request
+boundary. This is a sequential protocol with no response pipelining.
 The absolute deadline is rechecked after decoding and before an operation returns.
 Excessive JSON nesting is a verification error; failed admission and later
 decoding failures close both the connection and response reader without reconnecting.
+Admission also closes every resource on interruption or unexpected exceptions
+while preserving cancellation unchanged. Volume inventories accept only null
+or an empty list as a present no-warning value; other warning shapes refuse.
 This adapter spawns no child processes and requires no background daemon.
 
 `LocalDaemonAdmission` is a provider-trusted **configuration capability**, never

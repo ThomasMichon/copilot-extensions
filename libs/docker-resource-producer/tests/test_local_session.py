@@ -34,6 +34,8 @@ class FixtureDaemon:
             "Id": IDENTIFIER, "Created": CREATED, "Config": {"Labels": birth_labels(TOKEN, CREATOR, 1)},
         }}
         self.behavior = ""
+        self.warning: object = None
+        self.connection: socket.socket | None = None
         self.error: BaseException | None = None
         self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.listener.bind(str(path))
@@ -52,6 +54,7 @@ class FixtureDaemon:
                 except socket.timeout:
                     continue
                 self.accepts += 1
+                self.connection = connection
                 connection.settimeout(2)
                 with connection, connection.makefile("rb") as source:
                     while not self.stopping.is_set():
@@ -74,6 +77,10 @@ class FixtureDaemon:
                             result = list(self.resources.values())
                         elif route == "/volumes":
                             result = {"Volumes": [], "Warnings": []}
+                            if self.behavior == "custom-warning":
+                                result["Warnings"] = self.warning
+                            elif self.behavior == "warning":
+                                result["Warnings"] = ["incomplete"]
                         elif method == "DELETE":
                             if self.behavior != "retain":
                                 self.resources.pop(IDENTIFIER, None)
@@ -82,6 +89,10 @@ class FixtureDaemon:
                         else:
                             result = self.resources[IDENTIFIER]
                         payload = json.dumps(result).encode()
+                        if self.behavior == "unsolicited" and route == "/info":
+                            first = f"HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\n\r\n".encode() + payload
+                            connection.sendall(first + b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]")
+                            continue
                         if (self.behavior == "nested-info" and route == "/info") or (
                             self.behavior == "nested-inventory" and route == "/containers/json"
                         ):
@@ -94,7 +105,7 @@ class FixtureDaemon:
                         if self.behavior == "mismatch" and route == "/info":
                             payload = b'{"ID":"daemon-b"}'
                         if route != "/info" and self.behavior in {
-                            "close", "oversize", "duplicate", "truncated", "redirect", "malformed", "warning",
+                            "close", "oversize", "duplicate", "truncated", "redirect", "malformed",
                             "chunk-missing-trailer-end", "chunk-bad-delimiter",
                         }:
                             if self.behavior == "close":
@@ -107,9 +118,6 @@ class FixtureDaemon:
                                 connection.sendall(b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n")
                             elif self.behavior == "malformed":
                                 connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{")
-                            elif self.behavior == "warning":
-                                payload = b'{"Volumes":[],"Warnings":["incomplete"]}'
-                                connection.sendall(f"HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\n\r\n".encode() + payload)
                             elif self.behavior == "chunk-missing-trailer-end":
                                 connection.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n[]\r\n0\r\n")
                             elif self.behavior == "chunk-bad-delimiter":
@@ -123,7 +131,7 @@ class FixtureDaemon:
                         else:
                             connection.sendall(f"HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\n\r\n".encode() + payload)
         except (OSError, KeyError, ValueError) as error:
-            expected_rejection = self.behavior == "padding" and isinstance(
+            expected_rejection = self.behavior in {"padding", "unsolicited"} and isinstance(
                 error, (BrokenPipeError, ConnectionResetError),
             )
             if not self.stopping.is_set() and not expected_rejection:
@@ -228,6 +236,60 @@ def test_read_ahead_padding_cannot_be_discarded_to_expose_fake_absence(daemon: F
     assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
 
 
+def test_unsolicited_buffered_response_cannot_prove_absence(daemon: FixtureDaemon) -> None:
+    daemon.behavior = "unsolicited"
+    with pytest.raises(VerificationError):
+        verifier(daemon).probe(identity())
+    assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
+    assert all(method != "DELETE" for method, _target in daemon.calls)
+
+
+def test_unsolicited_socket_bytes_refuse_before_next_request(daemon: FixtureDaemon) -> None:
+    host = "unix://" + str(daemon.path)
+    with LocalDaemonSession(Endpoint(host, "daemon-a"), LocalDaemonAdmission(host)) as session:
+        daemon.behavior = "unsolicited"
+        assert daemon.connection is not None
+        daemon.connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]")
+        with pytest.raises(VerificationError):
+            session.request("GET", "/containers/json?all=1")
+        assert session.connection is None and session.reader is None
+    assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
+    assert daemon.calls == [("GET", "/info")]
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt(), SystemExit(9), RuntimeError("interrupted")])
+def test_interrupted_admission_closes_every_resource_and_propagates(
+    daemon: FixtureDaemon, monkeypatch: pytest.MonkeyPatch, interruption: BaseException,
+) -> None:
+    from docker_resource_producer import local_session
+
+    host = "unix://" + str(daemon.path)
+    session = LocalDaemonSession(Endpoint(host, "daemon-a"), LocalDaemonAdmission(host))
+    resources: list[tuple[socket.socket | None, io.BufferedReader | None, io.RawIOBase | None]] = []
+    read = local_session.read_response
+
+    def interrupt(source: io.BufferedReader) -> tuple[int, bytes]:
+        read(source)
+        resources.append((session.connection, session.reader, session.raw_reader))
+        raise interruption
+
+    monkeypatch.setattr(local_session, "read_response", interrupt)
+    try:
+        with pytest.raises(type(interruption)) as caught:
+            with session:
+                pytest.fail("Interrupted admission must not complete")
+        assert caught.value is interruption
+        assert session.connection is None and session.reader is None and session.raw_reader is None
+        assert len(resources) == 1
+        connection, reader, raw_reader = resources[0]
+        assert connection is not None and connection.fileno() == -1
+        assert reader is not None and reader.closed
+        assert raw_reader is not None and raw_reader.closed
+        assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
+    finally:
+        session.close()
+
+
 @pytest.mark.parametrize("behavior", ["nested-info", "nested-inventory"])
 def test_nested_json_closes_all_session_resources_without_reconnect(
     daemon: FixtureDaemon, monkeypatch: pytest.MonkeyPatch, behavior: str,
@@ -308,6 +370,27 @@ def test_volume_search_warning_is_not_complete_absence(daemon: FixtureDaemon) ->
     with LocalDaemonSession(Endpoint(host, "daemon-a"), LocalDaemonAdmission(host)) as session:
         with pytest.raises(VerificationError, match="volume inventory"):
             verifier(daemon)._inventory(session, "volume")
+
+
+@pytest.mark.parametrize("warning", [False, 0, "", {}, True, 1, "warning", ["warning"]])
+def test_malformed_volume_warning_cannot_prove_absence(daemon: FixtureDaemon, warning: object) -> None:
+    daemon.behavior = "custom-warning"
+    daemon.warning = warning
+    volume = replace(identity(), resource_type="volume", resource_id="absent-volume")
+    with pytest.raises(VerificationError, match="volume inventory"):
+        verifier(daemon).probe(volume)
+    assert daemon.accepts == 1
+
+
+@pytest.mark.parametrize("warning", [None, []])
+def test_only_null_or_empty_volume_warnings_allow_complete_inventory(
+    daemon: FixtureDaemon, warning: object,
+) -> None:
+    daemon.behavior = "custom-warning"
+    daemon.warning = warning
+    volume = replace(identity(), resource_type="volume", resource_id="absent-volume")
+    assert verifier(daemon).probe(volume) is False
+    assert daemon.accepts == 1
 
 
 def test_retained_container_refuses_cleanup_success(daemon: FixtureDaemon) -> None:
