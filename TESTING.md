@@ -1086,7 +1086,11 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
 
 - **agent-bridge:** transport, sessions, config, CLI, and the **Session Host**
   (framing, reattach/ack/buffering, reap logic, protocol-aware turn boundaries,
-  version-mux, host-index persistence).
+  version-mux, host-index persistence). Preference-authority tests require a
+  real release-label mutation, exercise the promotion fallback writer and
+  materializer against a disposable payload, and reject old receipts after
+  executable authority-code changes. Only standalone root-module release
+  labels are normalized; the complete staged authority closure remains bound.
 - **agent-dispatch:** queue/coordinator/supervisor behavior plus the opt-in
   worktree-focus `sessionStart` kernel (payload cwd authority, Git/config and
   agent-worktrees status-core gates, strict bounded input, exact config shape,

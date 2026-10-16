@@ -1,23 +1,30 @@
 {
   "captured_from": {
-    "commit": "147d5829ceebdb6eec0bfbfaa976cd5d8647b3e5",
+    "commit": "e736ab5182587b2fef26a4044783d45d0a485803",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
-    "source_git_blob": "cfc60efa921c38e1d8683c59cd07a6ae72261148",
-    "source_sha256": "328543932b380484e7c454f90e6bc0c31c45b515087a7a94b5907158f2613868"
+    "source_git_blob": "b7b62f6ab7bb3ca499359f8a3fdb26e037a79743",
+    "source_sha256": "1b233a1f1043aff0a3568f7cd4aeb9d3e8a0f16695f6b6b1511763fd10083704"
   },
   "wrapper_version": 1,
   "receipt_version": 2,
   "hello_prefix_bytes": 16,
   "maximum_private_frame_bytes": 8192,
   "token": "{{target_preference_launcher}}",
-  "selected_target": {"user": "runner", "instance": "instance"},
+  "selected_target": {
+    "user": "runner",
+    "instance": "instance"
+  },
   "receipt": {
     "version": 2,
     "child_pid": 321,
     "status": "resolved",
-    "values": {"model": "target", "reasoning_effort": "medium", "context": "long_context"},
+    "values": {
+      "model": "target",
+      "reasoning_effort": "medium",
+      "context": "long_context"
+    },
     "sources": {
       "model": "target-settings",
       "reasoning_effort": "target-settings",
@@ -25,29 +32,88 @@
     },
     "authority": {
       "kind": "wrapper-v1",
-      "digest": "23c7c119d06e4b712ec7dd89ee4458efbc59ac082632f4a666ddb144c24ffe80",
+      "digest": "5bb61b2689afa39723f4834bda0dfaa026ae02483d5d0d1e0f73729dc5e0ffdc",
       "mode": "defaults",
       "target": "9032997c94da9512223bde48704c19c2d587c4ff4f1105f61204524b68662819",
-      "start": "99",
       "space": {
         "platform": "linux",
         "uid": 1000,
         "namespace": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "home": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "cwd": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      }
+      },
+      "start": "99"
     }
   },
   "invalid_vectors": [
-    {"path": ["version"], "value": 1},
-    {"path": ["version"], "value": 2.0},
-    {"path": ["child_pid"], "value": 322},
-    {"path": ["authority", "kind"], "value": "caller"},
-    {"path": ["authority", "digest"], "value": "unattributed"},
-    {"path": ["authority", "space", "platform"], "value": "windows"},
-    {"path": ["authority", "space", "uid"], "value": true},
-    {"path": ["authority", "space", "namespace"], "value": "hostname"},
-    {"path": ["sources", "model"], "value": "caller-settings"},
-    {"path": ["nonce"], "value": "must-not-travel"}
+    {
+      "path": [
+        "version"
+      ],
+      "value": 1
+    },
+    {
+      "path": [
+        "version"
+      ],
+      "value": 2.0
+    },
+    {
+      "path": [
+        "child_pid"
+      ],
+      "value": 322
+    },
+    {
+      "path": [
+        "authority",
+        "kind"
+      ],
+      "value": "caller"
+    },
+    {
+      "path": [
+        "authority",
+        "digest"
+      ],
+      "value": "unattributed"
+    },
+    {
+      "path": [
+        "authority",
+        "space",
+        "platform"
+      ],
+      "value": "windows"
+    },
+    {
+      "path": [
+        "authority",
+        "space",
+        "uid"
+      ],
+      "value": true
+    },
+    {
+      "path": [
+        "authority",
+        "space",
+        "namespace"
+      ],
+      "value": "hostname"
+    },
+    {
+      "path": [
+        "sources",
+        "model"
+      ],
+      "value": "caller-settings"
+    },
+    {
+      "path": [
+        "nonce"
+      ],
+      "value": "must-not-travel"
+    }
   ]
 }

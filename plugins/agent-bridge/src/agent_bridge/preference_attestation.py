@@ -52,8 +52,8 @@ def component_digest() -> str:
         if name == "agent_bridge":
             # Promotion rewrites only this release label, not authority code.
             source = re.sub(
-                r'(?m)^__version__\s*=\s*["\'][^"\']+["\']\s*$',
-                '__version__ = "<release-metadata>"', source,
+                r'''(?m)^(__version__|_FALLBACK_VERSION)[ \t]*=[ \t]*(["'])[^"'\r\n]+\2[ \t]*$''',
+                r'\1 = "<release-metadata>"', source,
             )
         digest.update(name.encode() + b"\0")
         digest.update(source.replace("\r\n", "\n").encode("utf-8") + b"\0")
