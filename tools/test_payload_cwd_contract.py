@@ -21,8 +21,8 @@ BASH = str(GIT_BASH) if os.name == "nt" and GIT_BASH.is_file() else shutil.which
 
 def _block(path: Path, name: str) -> str:
     text = path.read_text(encoding="utf-8")
-    start = text.index(f"# === install-contract:v4 {name}")
-    end_marker = f"# === end install-contract:v4 {name.split(' (')[0]} ==="
+    start = text.index(f"# === install-contract:v5 {name}")
+    end_marker = f"# === end install-contract:v5 {name.split(' (')[0]} ==="
     end = text.index(end_marker, start) + len(end_marker)
     return text[start:end]
 
@@ -150,6 +150,13 @@ def _entry(tmp_path: Path, extension: str, contextual: bool = False) -> tuple[Pa
     header = "param([string]$Action = 'install')\n" if extension == "ps1" else "#!/usr/bin/env bash\nset -e\n"
     if extension == "ps1":
         header += _stage_copy_function() + "\n"
+    helper = f"installer-watchdog.{extension}"
+    shutil.copyfile(ROOT / "libs" / "installer-engine" / helper, scripts / helper)
+    header += (
+        ". (Join-Path $PSScriptRoot 'installer-watchdog.ps1')\n"
+        if extension == "ps1" else
+        '. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/installer-watchdog.sh"\n'
+    )
     staging = _block(canonical, "self-stage")
     if contextual:
         text = canonical.read_text(encoding="utf-8")
@@ -158,7 +165,7 @@ def _entry(tmp_path: Path, extension: str, contextual: bool = False) -> tuple[Pa
             if extension == "ps1"
             else "    # The standard self-stage block is intentionally byte-identical"
         )
-        staging = text[text.index(marker):text.index("# === install-contract:v4 self-stage")]
+        staging = text[text.index(marker):text.index("# === install-contract:v5 self-stage")]
         if extension == "ps1":
             header += (
                 "$ErrorActionPreference = 'Stop'\n"
@@ -363,6 +370,241 @@ def test_self_stage_watchdog_still_times_out(tmp_path: Path, extension: str) -> 
     )
     assert result.returncode == 124, (result.stdout, result.stderr)
     assert "WATCHDOG-KILL" in (home / ".agent-example" / "reconcile.err.log").read_text()
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("contextual", [False, True], ids=["legacy", "context"])
+def test_cutover_can_extend_the_build_deadline(
+    tmp_path: Path, extension: str, contextual: bool,
+) -> None:
+    if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
+        pytest.skip(f"{extension} interpreter unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    payload, entry = _entry(tmp_path, extension, contextual)
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-example","cutoverDeadlineSeconds":12}\n', encoding="utf-8",
+    )
+    env = _env(home)
+    env.update({
+        "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "4",
+        "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "7",
+        "COPILOT_PLUGIN_INSTALL_SMOKE_PHASE": "cutover",
+    })
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        _command(entry, extension), cwd=home, env=env,
+        capture_output=True, text=True, timeout=30, **kwargs,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert (home / ".agent-example" / "smoke.json").is_file()
+    log = home / (".agent-example" if not contextual else "runtime") / "reconcile.err.log"
+    assert not log.exists() or "WATCHDOG-KILL" not in log.read_text()
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("contextual", [False, True], ids=["legacy", "context"])
+def test_cutover_cannot_extend_past_the_hard_cap(
+    tmp_path: Path, extension: str, contextual: bool,
+) -> None:
+    if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
+        pytest.skip(f"{extension} interpreter unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    payload, entry = _entry(tmp_path, extension, contextual)
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-example","cutoverDeadlineSeconds":3}\n', encoding="utf-8",
+    )
+    text = entry.read_text(encoding="utf-8")
+    call = (
+        "Enter-InstallPhase -Name $env:COPILOT_PLUGIN_INSTALL_SMOKE_PHASE"
+        if extension == "ps1" else
+        'enter_install_phase "$COPILOT_PLUGIN_INSTALL_SMOKE_PHASE"'
+    )
+    assert text.count(call) == 1
+    entry.write_text(text.replace(
+        call, call + (" -BudgetSec 100" if extension == "ps1" else " 100"),
+    ), encoding="utf-8", newline="\n")
+    env = _env(home)
+    env.update({
+        "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "4",
+        "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "12",
+        "COPILOT_PLUGIN_INSTALL_SMOKE_PHASE": "cutover",
+    })
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    started = time.monotonic()
+    result = subprocess.run(
+        _command(entry, extension), cwd=home, env=env,
+        capture_output=True, text=True, timeout=25, **kwargs,
+    )
+    elapsed = time.monotonic() - started
+    assert result.returncode == 124, (result.stdout, result.stderr)
+    log = home / (".agent-example" if not contextual else "runtime") / "reconcile.err.log"
+    assert "phase=cutover, build=4s, cutover=3s" in log.read_text()
+    assert 6 <= elapsed < 16
+
+
+def _native_watchdog(
+    tmp_path: Path, extension: str, bodies: dict[str, str], arguments: list[str],
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
+        pytest.skip(f"{extension} interpreter unavailable")
+    helper = ROOT / "libs" / "installer-engine" / f"installer-watchdog.{extension}"
+    header = (
+        f"$ErrorActionPreference = 'Stop'\nSet-StrictMode -Version Latest\n. '{helper}'\n"
+        if extension == "ps1" else f'#!/usr/bin/env bash\nset -euo pipefail\n. "{helper.as_posix()}"\n'
+    )
+    entry = tmp_path / f"probe.{extension}"
+    entry.write_text(header + bodies[extension] + "\n", encoding="utf-8")
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    return subprocess.run(
+        _command(entry, extension) + arguments, cwd=tmp_path, env=env or _env(tmp_path),
+        capture_output=True, text=True, timeout=15, **kwargs,
+    )
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("manifest,environment,expected", [
+    ({}, {}, (480, 300)),
+    ({"installerDeadlineSeconds": 12, "cutoverDeadlineSeconds": 7}, {}, (12, 7)),
+    ({"cutoverDeadlineSeconds": 7}, {"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "8"}, (8, 7)),
+    ({}, {
+        "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "8",
+        "AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "0",
+    }, (0, 300)),
+    ({}, {"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "-1"}, (-1, 300)),
+    ({}, {"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": " +09 "}, (9, 300)),
+    ({"installerDeadlineSeconds": "unused"},
+     {"AGENT_EXAMPLE_INSTALL_DEADLINE_SEC": "8"}, (8, 300)),
+])
+def test_native_watchdog_budget(
+    tmp_path: Path, extension: str, manifest: dict, environment: dict, expected: tuple,
+) -> None:
+    (tmp_path / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    env = _env(tmp_path)
+    env.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC", None)
+    env.update(environment)
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": (
+            "$b = Get-InstallWatchdogBudget -Payload $args[0] -Name 'agent-example'\n"
+            '"$($b.BuildSec) $($b.CutoverSec)"'
+        ),
+        "sh": 'get_install_watchdog_budget "$1" agent-example',
+    }, [tmp_path.as_posix()], env)
+    assert result.returncode == 0, result.stderr
+    assert tuple(map(int, result.stdout.split())) == expected
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("raw", ["2147483648", "-2147483649", "18446744073709551616"])
+def test_native_watchdog_rejects_deadline_overflow(tmp_path: Path, extension: str, raw: str) -> None:
+    (tmp_path / "plugin.json").write_text("{}", encoding="utf-8")
+    env = _env(tmp_path)
+    env["AGENT_EXAMPLE_INSTALL_DEADLINE_SEC"] = raw
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": "Get-InstallWatchdogBudget -Payload $args[0] -Name 'agent-example'",
+        "sh": 'get_install_watchdog_budget "$1" agent-example',
+    }, [tmp_path.as_posix()], env)
+    assert result.returncode != 0
+    assert "32-bit integer" in result.stderr
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("field,value", [
+    ("installerDeadlineSeconds", 0),
+    ("installerDeadlineSeconds", "12"),
+    ("cutoverDeadlineSeconds", -1),
+    ("cutoverDeadlineSeconds", True),
+    ("cutoverDeadlineSeconds", 1.5),
+    ("cutoverDeadlineSeconds", 18446744073709551616),
+])
+def test_native_watchdog_rejects_invalid_manifest_budget(
+    tmp_path: Path, extension: str, field: str, value: object,
+) -> None:
+    (tmp_path / "plugin.json").write_text(json.dumps({field: value}), encoding="utf-8")
+    env = _env(tmp_path)
+    env.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC", None)
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": "Get-InstallWatchdogBudget -Payload $args[0] -Name 'agent-example'",
+        "sh": 'get_install_watchdog_budget "$1" agent-example',
+    }, [tmp_path.as_posix()], env)
+    assert result.returncode != 0
+    assert field in result.stderr
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("receipt,expected", [
+    (None, (110, "build")),
+    ({"phase": "cutover", "extend_until": 105}, (110, "cutover")),
+    ({"phase": "cutover", "extend_until": 120}, (120, "cutover")),
+    ({"phase": "cutover", "extend_until": 999}, (130, "cutover")),
+    ({"phase": "cutover", "extend_until": "999"}, (110, "invalid")),
+    ({"phase": "unknown", "extend_until": 999}, (110, "invalid")),
+    ("{partial", (110, "invalid")),
+])
+def test_native_watchdog_caps_phase_extension(
+    tmp_path: Path, extension: str, receipt: object, expected: tuple,
+) -> None:
+    phase = tmp_path / "phase.json"
+    if receipt is not None:
+        phase.write_text(
+            receipt if isinstance(receipt, str) else json.dumps(receipt), encoding="utf-8",
+        )
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": (
+            "$s = Get-InstallWatchdogDeadline -BuildSec 10 -CutoverSec 20 -StartedAt 100 "
+            '-PhaseFile $args[0]\n"$($s.Deadline) $($s.Phase)"'
+        ),
+        "sh": 'get_install_watchdog_deadline 10 20 100 "$1"',
+    }, [phase.as_posix()])
+    assert result.returncode == 0, result.stderr
+    deadline, state = result.stdout.split()
+    assert (int(deadline), state) == expected
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+def test_native_phase_writer_publishes_an_atomic_receipt(tmp_path: Path, extension: str) -> None:
+    phase = tmp_path / "phase.json"
+    env = _env(tmp_path)
+    env.update({
+        "COPILOT_PLUGIN_INSTALL_PHASE_FILE": phase.as_posix(),
+        "COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC": "17",
+    })
+    before = time.time()
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": "Enter-InstallPhase -Name cutover\nEnter-InstallPhase -Name cutover",
+        "sh": "enter_install_phase cutover\nenter_install_phase cutover",
+    }, [], env)
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads(phase.read_text(encoding="utf-8"))
+    assert receipt["phase"] == "cutover"
+    assert before + 16 <= receipt["extend_until"] <= time.time() + 17
+    assert list(tmp_path.glob("phase.json.*.tmp")) == []
+
+
+@pytest.mark.skipif(os.name != "nt" or not shutil.which("powershell"), reason="Windows PowerShell 5.1")
+def test_native_watchdog_supports_windows_powershell(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setitem(globals(), "PWSH", shutil.which("powershell"))
+    (tmp_path / "plugin.json").write_text('{"cutoverDeadlineSeconds":7}', encoding="utf-8")
+    phase = tmp_path / "phase.json"
+    env = _env(tmp_path)
+    env.update({
+        "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "8",
+        "COPILOT_PLUGIN_INSTALL_PHASE_FILE": phase.as_posix(),
+        "COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC": "7",
+    })
+    result = _native_watchdog(tmp_path, "ps1", {
+        "ps1": (
+            "$b = Get-InstallWatchdogBudget -Payload $args[0] -Name 'agent-example'\n"
+            "Enter-InstallPhase -Name cutover\nEnter-InstallPhase -Name cutover\n"
+            '"$($b.BuildSec) $($b.CutoverSec)"'
+        ),
+    }, [tmp_path.as_posix()], env)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "8 7"
+    assert json.loads(phase.read_text(encoding="utf-8"))["phase"] == "cutover"
+    assert not list(tmp_path.glob("phase.json.*.tmp"))
 
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
