@@ -708,6 +708,8 @@ class _SessionCoreMixin:
     @staticmethod
     def _capture_progress(session: Session, event_type: str, data: dict) -> None:
         """Update a session's structured progress from a captured event (#46.3)."""
+        if data.get("history_replay") is True:
+            return
         # Every ACP frame is fresh output -- stamp it so liveness reflects the
         # real event stream, not just turn boundaries (#145).
         session.last_output_at = time.time()

@@ -404,6 +404,25 @@ async def test_remote_attachment_accounting_releases_on_failed_old_client_shutdo
     await manager.stop_session(session.session_id)
 
 
+@pytest.mark.asyncio
+async def test_rehydration_ignores_historical_progress_and_freshness(remote_manager):
+    manager, _ = remote_manager
+    session = await connect_remote_session(manager, "example")
+    live = {"text": "PROGRESS: build=failed"}
+    session.event_log.append("agent_message", live)
+    manager._capture_progress(session, "agent_message", live)
+    await manager.stop_session(session.session_id)
+    historical = {"text": "PROGRESS: build=ok", "history_replay": True}
+    session.event_log.append("agent_message", historical)
+    session.last_output_at = 123
+    manager._capture_progress(session, "agent_message", historical)
+    assert session.last_output_at == 123 and session.progress["build"] == "failed"
+    restored = session_manager_from_config(
+        manager.db, ServiceConfig(remote_acp=manager._remote_acp_targets),
+    )
+    assert restored._sessions[session.session_id].progress["build"] == "failed"
+
+
 def test_cli_status_request_scoped_form_has_token_without_empty_tool_flag(monkeypatch, capsys):
     from agent_bridge import service_start_cli
 
