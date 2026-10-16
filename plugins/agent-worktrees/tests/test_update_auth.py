@@ -646,6 +646,83 @@ def test_cli_auth_report_bypasses_manager_and_writes_no_run(tmp_path, monkeypatc
     assert update_events._run is None
 
 
+@pytest.mark.parametrize("equals", [False, True])
+def test_cli_explicit_source_report_needs_no_adopted_project(
+    tmp_path, monkeypatch, capsys, equals
+):
+    from agent_worktrees import __main__ as main, update_cli
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(main, "_resolve_active_project", lambda _: (None, None))
+    monkeypatch.setattr(
+        update_cli, "_usable_worktree_manager",
+        lambda: pytest.fail("report reached the Manager"),
+    )
+    monkeypatch.setattr(
+        main, "_cmd_update_in_plugin", lambda _: pytest.fail("report reached the updater")
+    )
+    seen = []
+
+    def report(items):
+        seen.extend(items)
+        return auth.AuthReport([auth.SourceAuth(item, [], status="anonymous") for item in items])
+
+    monkeypatch.setattr(auth, "report", report)
+    source = "https://github.com/team/repo"
+    flags = ["--auth-source=" + source] if equals else ["--auth-source", source]
+    assert main.main([
+        "update", "--no-manager", "--auth-report", "--no-anchor-sync",
+        "--auth-cwd", str(tmp_path), "--json", *flags,
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["all_ok"] is True
+    assert seen[0].cwd == tmp_path and seen[0].url == source
+    assert update_events._run is None
+    assert not main._is_no_project_invocation(["update"])
+    assert not main._is_no_project_invocation(["update", "--auth-source", source])
+
+
+@pytest.mark.parametrize("method", ["configured", "fill"])
+def test_real_configured_router_preserves_non_password_credentials(tmp_path, monkeypatch, method):
+    config = _clean_git_env(monkeypatch, tmp_path)
+    helper = (
+        "!f() { echo capability[]=authtype; "
+        "echo authtype=fixture-scheme; echo credential=fixture-secret; }; f"
+    )
+    subprocess.run(
+        ["git", "config", "--file", str(config), "credential.helper", helper],
+        check=True, **git_ops.no_window_kwargs(),
+    )
+    item = auth.SourceAuth(_source(cwd=tmp_path), [])
+    request = (
+        "capability[]=authtype\ncapability[]=state\n"
+        "protocol=https\nhost=example.test\npath=team/repo\n\n"
+    )
+    captured = []
+
+    def probe(argv, **kwargs):
+        result = process.run(["git", "credential", "fill"], input=request, **kwargs)
+        captured.append(result)
+        return result
+
+    if method == "configured":
+        assert auth._probe(item, dict(os.environ), False, probe) == "ok"
+    else:
+        item.status = "fixable_by_fallback"
+        item.alternative = {"method": "fill"}
+        result = process.run(
+            ["git", "credential", "fill"], cwd=tmp_path, input=request,
+            env=auth.fallback(auth.AuthReport([item])).environment(os.environ),
+        )
+        assert result.status == 0, result.stderr
+        captured.append(result)
+    response = router.parse_attributes(captured[0].stdout)
+    assert response["authtype"] == "fixture-scheme"
+    assert response["credential"] == "fixture-secret"
+    assert router.SECRET_KEY not in response
+
+
 def test_helper_configuration_failure_is_local_and_missing_git_is_explicit():
     def runner(argv, **kwargs):
         return process.Result(128)

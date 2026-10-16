@@ -22,6 +22,12 @@ def format_attributes(attributes: Mapping[str, str]) -> str:
     return "".join(f"{key}={value}\n" for key, value in attributes.items()) + "\n"
 
 
+def _has_credentials(attributes: Mapping[str, str]) -> bool:
+    return SECRET_KEY in attributes or bool(
+        attributes.get("authtype") and attributes.get("credential")
+    )
+
+
 def env_token(owner: str, env: Mapping[str, str], host: str = "github.com") -> str:
     enterprise = host.casefold() != "github.com"
     if enterprise and env.get("GH_HOST", "").casefold() != host.casefold():
@@ -64,23 +70,20 @@ def base_config(env: Mapping[str, str]) -> str:
 
 def run_chain(
     operation: str,
-    attributes: Mapping[str, str],
+    request: str,
     env: Mapping[str, str],
-) -> dict[str, str]:
+) -> str:
     # Let Git replay its own configuration at the child's actual cwd. Rebuilding
     # a host-only helper list loses URL-specific helpers, includes and reset order.
+    # Keep repeated capability/state attributes intact across the native protocol.
     command = {"get": "fill", "store": "approve", "erase": "reject"}[operation]
     result = run(
         ["git", "credential", command],
         env={**original_environment(env), **NON_INTERACTIVE},
-        input=format_attributes(attributes),
+        input=request,
         timeout=helper_timeout(env),
     )
-    return (
-        {**attributes, **parse_attributes(result.stdout)}
-        if (result.status == 0 and not result.truncated)
-        else dict(attributes)
-    )
+    return result.stdout if result.status == 0 and not result.truncated else ""
 
 
 def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
@@ -97,8 +100,9 @@ def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
             return ""
         account = selected.get("account") or "x-access-token"
         if selected["method"] == "fill":
-            filled = run_chain("get", {**attributes, "username": account}, env)
-            return format_attributes(filled) if filled.get(SECRET_KEY) else ""
+            request = stdin.rstrip("\n") + f"\nusername={account}\n\n"
+            filled = run_chain("get", request, env)
+            return filled if _has_credentials(parse_attributes(filled)) else ""
         if selected["method"] == "env":
             secret = env_token(owner, env, host)
         elif selected["method"] == "gh":
@@ -127,10 +131,11 @@ def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
         return ""
     if operation != "get" and env.get("CE_UPDATE_AUTH_READONLY") == "1":
         return ""
-    filled = run_chain(operation, attributes, env)
+    filled = run_chain(operation, stdin, env)
+    response = parse_attributes(filled)
     return (
-        format_attributes(filled)
-        if operation == "get" and (filled.get(SECRET_KEY) or filled.get("quit"))
+        filled
+        if operation == "get" and (_has_credentials(response) or response.get("quit"))
         else ""
     )
 

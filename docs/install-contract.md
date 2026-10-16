@@ -1601,6 +1601,8 @@ preserving native helper matching, ordering, resets, and includes. Credential
 discovery and replay use the source URL's actual path without adding a `.git`
 suffix. Tokens are never written into the overlay. Read-only probes suppress
 credential approval and rejection; no path switches the active `gh` account.
+Native replay preserves complete `authtype`/`credential` responses as well as
+password credentials instead of rejecting a working helper's authentication type.
 Marketplace contexts and individual anchors have separate reports and overlays,
 even when they reference the same URL with different local credentials.
 
@@ -1625,7 +1627,9 @@ explicit environment removals as well as additions. Local-only anchors without
 a configured remote produce no HTTPS auth source.
 The internal `--auth-source`/`--auth-environment` report options transport only
 child environment differences over that pipe; never persist or publish that
-environment. Repository-isolated engine Git calls continue to discard arbitrary
+environment. Explicit-source reports can run from an unadopted directory without
+a selected project; ordinary updates still require their normal project context.
+Repository-isolated engine Git calls continue to discard arbitrary
 inherited Git selectors, including inherited updater snapshots, and receive only
 the updater's explicitly scoped auth overlay. Anchor preflight uses that same
 isolation. Auth-managed anchors suppress legacy injected headers even when
