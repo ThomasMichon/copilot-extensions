@@ -45,10 +45,15 @@ same authority and path. No redirects or cross-origin auth forwarding.
    Replies arrive on GET streams correlated by JSON-RPC ID. No batching.
 3. **New session:** POST with connection header; result on connection SSE.
    Open session SSE with both `Acp-Connection-Id` and `Acp-Session-Id`.
-4. **Session methods and callback responses:** POST with both identity headers.
+4. **Session methods and session-scoped callback responses:** POST with both identity headers.
    For responses without `sessionId` in their body, retain the originating
    server request's exact session mapping; never infer from the current tab,
    sole outstanding request, title, RPC-ID string conversion or global state.
+   A request-scoped form with no associated remote session (for example, while
+   `session/new` is pending) is delivered on the **connection SSE stream**;
+   its response POST carries **only `Acp-Connection-Id`**, not an invented
+   `Acp-Session-Id`. When its originating request has a known session, retain
+   that session context and include both headers on the response.
 5. **WS initialize:** GET Upgrade, expect HTTP 101 and connection ID header;
    initialize is the first JSON-RPC text message. All subsequent messages use
    that bidirectional socket. Ignore bounded binary frames per the RFD.
