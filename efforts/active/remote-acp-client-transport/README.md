@@ -177,6 +177,19 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Drain-safe attachment accounting
+
+- Review identified a stopped-session attachment waiting on an old client
+  before becoming visible to drain. Remote connect/resume now participates in
+  the existing active-acquisition counter before its first await and releases
+  that accounting on success, failure and cancellation.
+- Drain is rechecked before new connection work and lifecycle adoption.
+  A paused old-client shutdown cannot produce a clean drain or resume work
+  after that gate. Remote manager selection: 17 passed.
+- The carried-over accepted-ID thread is already covered by the explicit-stop
+  boundary fix and real same-ID load regression; it is not treated as an
+  unimplemented path.
+
 ### 2026-10-16 — Stop-boundary accepted IDs and challenged affinity
 
 - Fresh review identified the explicit-stop path clearing a client before its

@@ -231,6 +231,10 @@ returned a validated durable session ID but stream setup failed, the stopped
 ledger retains that ID for explicit `session/load`, never silent recreation.
 Explicit stop captures an already accepted ID before clearing the client, even
 when its session SSE opener is still pending.
+Remote connect/resume also participates in existing manager acquisition/drain
+accounting before awaiting an old client. Drain cannot report clean while
+attachment is pending; a drain that starts during attachment refuses further
+connection adoption instead of allowing a later prompt through.
 
 Affinity cookies stay in memory per target/identity and survive explicit resume
 within the same daemon; they are not persisted across daemon restart. `source:

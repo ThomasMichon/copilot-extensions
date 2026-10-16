@@ -244,7 +244,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-          "sha256": "aee180c73f07ba573a74d52a1e6a926e182ac36e06d936a55b3b87c02b2ad24f",
+          "sha256": "928e240468db1c77052fdbaaaa89d5dfe364b11cbae267974622b9db0ce719dc",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -924,7 +924,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-38.json",
-          "sha256": "2acc7ac051ff221daf2a956684adc4d26a39c8db2da99ebb8dd8c6cb55667e73",
+          "sha256": "29457081de2cef9c2c51383c495cf3d3271c9ad594525e2d045376466a42a4dc",
           "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
           "generation": 38
         }
@@ -2651,11 +2651,11 @@
           "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
         },
         {
-          "commit": "5456a1f8641ec691441b681c096e634ee40842c0",
+          "commit": "310a367b0007d371764f05d628802833a0d98926",
           "plugin_version": "0.4.1-dev3",
           "generation": 38,
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-          "source_git_blob": "cbc8f6696694688c501c8fd0200d7321b6fd5ea5",
+          "source_git_blob": "3623fb72eb874573d9a3d141f8f17d10df7e0a46",
           "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
         }
       ],
