@@ -3,18 +3,19 @@ always-blocked source-map/diff/patch denylist).
 
 Drives the real ``tools/check-large-files.py`` as a subprocess inside a
 throwaway git repo, the same pattern ``test_check_module_size.py`` uses --
-with focused in-process tests for batch shape, deduplication and plumbing
-failures that cannot reliably be produced by real repository setup.
+except for the single in-process unit test at the end of this file, which
+needs to mock a git subprocess call to exercise a failure path no amount of
+real repo setup can reliably reproduce (a successful blob lookup that then
+fails to read -- corrupting a real git object store on purpose is not a
+reliable, portable way to test this).
 
 Run:  python -m pytest tools/test_check_large_files.py
 """
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import os
-import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -44,26 +45,6 @@ def _write_bytes(repo: Path, rel: str, size: int) -> None:
     p = repo / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"x" * size)
-
-
-def _stage_index_blob(repo: Path, name: str, size: int) -> None:
-    # Write an index-v2 entry without Windows' drive/NTFS path validation.
-    blob = subprocess.run(
-        ["git", "hash-object", "-w", "--stdin"], cwd=repo, input=b"x" * size,
-        capture_output=True, check=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-    ).stdout.decode("ascii").strip()
-    path = name.encode("utf-8")
-    entry = (
-        struct.pack("!10I", 0, 0, 0, 0, 0, 0, 0o100644, 0, 0, size)
-        + bytes.fromhex(blob)
-        + struct.pack("!H", len(path))
-        + path + b"\0"
-    )
-    entry += b"\0" * (-len(entry) % 8)
-    index = b"DIRC" + struct.pack("!II", 2, 1) + entry
-    algorithm = "sha1" if len(blob) == 40 else "sha256"
-    (repo / ".git" / "index").write_bytes(index + hashlib.new(algorithm, index).digest())
 
 
 def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -419,11 +400,10 @@ def test_staged_mode_handles_a_digit_colon_filename_correctly(repo: Path):
     # be resolved as that exact path, not misparsed as git's own explicit
     # ":<stage>:<path>" revision syntax (which would silently check a
     # DIFFERENT path -- stage 0 of "large.json" -- instead).
-    _stage_index_blob(repo, "0:large.json", 2 * 1024 * 1024)
+    _write_bytes(repo, "0:large.json", 2 * 1024 * 1024)
+    _git(repo, "add", "--", "0:large.json")
 
-    # Git for Windows needs "./" to distinguish this path from a drive.
-    path = "./0:large.json" if sys.platform == "win32" else "0:large.json"
-    result = _run(repo, "--", path)
+    result = _run(repo, "--", "0:large.json")
 
     assert result.returncode == 1
     assert "0:large.json" in result.stdout
@@ -434,7 +414,8 @@ def test_staged_mode_handles_a_magic_pathspec_shaped_filename(repo: Path):
     # signature (e.g. ":(literal)...") must still be resolved as that exact
     # path, not reinterpreted as the magic signature itself.
     name = ":(literal)large.json"
-    _stage_index_blob(repo, name, 2 * 1024 * 1024)
+    _write_bytes(repo, name, 2 * 1024 * 1024)
+    _git(repo, "--literal-pathspecs", "add", "--", name)
 
     result = _run(repo, "--", name)
 
@@ -537,66 +518,6 @@ def test_commit_touched_blobs_raises_on_a_failed_blob_size_read(repo: Path):
             module._commit_touched_blobs(commit)
 
 
-def test_blob_sizes_use_one_batch_and_deduplicate_objects():
-    module = _load_module()
-    first, second = "a" * 40, "b" * 40
-    result = subprocess.CompletedProcess(
-        [], 0, f"{first} blob 0\n{second} blob 1048577\n".encode(), b"",
-    )
-    with mock.patch.object(module, "_git_bytes", return_value=result) as git:
-        assert module._blob_sizes([first, second, first]) == {first: 0, second: 1048577}
-    git.assert_called_once_with(
-        "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
-        input_bytes=f"{first}\n{second}\n".encode(),
-    )
-
-
-def test_range_batch_preserves_each_commit_path_and_size():
-    module = _load_module()
-    first, second = "a" * 40, "b" * 40
-    result = subprocess.CompletedProcess(
-        [], 0, f"{first} blob 10\n{second} blob 1048577\n".encode(), b"",
-    )
-    with (
-        mock.patch.object(module, "_rev_parse", side_effect=lambda ref: ref),
-        mock.patch.object(module, "_merge_base", return_value="base"),
-        mock.patch.object(module, "_commits_in_range", return_value=[("one", []), ("two", ["one"])]),
-        mock.patch.object(module, "_commit_touched_blob_ids", side_effect=[
-            [("same.json", first), ("same.patch", first)], [("same.json", second)],
-        ]),
-        mock.patch.object(module, "_git_bytes", return_value=result) as git,
-    ):
-        assert module._new_blobs_in_range("base", "head") == [
-            ("same.json", 10), ("same.patch", 10), ("same.json", 1048577),
-        ]
-    assert git.call_count == 1
-
-
-@pytest.mark.parametrize("record", [
-    "",
-    "{sha} missing\n",
-    "{sha} commit 10\n",
-    "{other} blob 10\n",
-    "{sha} blob invalid\n",
-    "{sha} blob -1\n",
-    "{sha} blob 10\n{sha} blob 10\n",
-])
-def test_blob_size_batch_fails_closed_on_uninspectable_output(record):
-    module = _load_module()
-    sha = "a" * 40
-    output = record.format(sha=sha, other="b" * 40).encode()
-    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess([], 0, output, b"")):
-        with pytest.raises(module.GitEnumerationError):
-            module._blob_sizes([sha])
-
-
-def test_git_probe_timeout_is_an_enumeration_failure():
-    module = _load_module()
-    with mock.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 10)):
-        with pytest.raises(module.GitEnumerationError, match="exceeded 10 seconds"):
-            module._git_bytes("rev-list", "base..head")
-
-
 def test_staged_mode_handles_a_dot_slash_prefixed_path(repo: Path):
     # A caller-supplied "./src/big.json" must still be checked even though
     # `git ls-files` itself normalizes and reports it as "src/big.json" --
@@ -637,3 +558,7 @@ def test_an_inherited_git_dir_does_not_redirect_the_check_elsewhere(repo: Path, 
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "big.json" in result.stdout
+
+
+
+

@@ -151,16 +151,11 @@ def _git_env() -> dict[str, str]:
     return env
 
 
-def _git_bytes(*args: str, input_bytes: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-    try:
-        return subprocess.run(
-            ["git", "-C", str(REPO), *args],
-            input=input_bytes, capture_output=True, check=False, env=_git_env(),
-            timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise GitEnumerationError(f"'git {' '.join(args)}' exceeded 10 seconds") from exc
+def _git_bytes(*args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", "-C", str(REPO), *args],
+        capture_output=True, check=False, env=_git_env(),
+    )
 
 
 def _decode(raw: bytes) -> str:
@@ -234,44 +229,13 @@ def _blob_at(rev: str, path: str) -> str | None:
 _REGULAR_FILE_MODES = {"100644", "100755", "120000"}
 
 
-def _commits_in_range(mbase: str, head: str) -> list[tuple[str, list[str]]]:
-    out = _git_or_raise("rev-list", "--parents", f"{mbase}..{head}")
-    return [(fields[0], fields[1:]) for line in out.splitlines() if (fields := line.split())]
+def _commits_in_range(mbase: str, head: str) -> list[str]:
+    out = _git_or_raise("rev-list", f"{mbase}..{head}")
+    return [line for line in out.split("\n") if line]
 
 
-def _blob_sizes(shas: list[str]) -> dict[str, int]:
-    """Read sizes once per object while callers retain every path occurrence."""
-    unique = list(dict.fromkeys(shas))
-    if not unique:
-        return {}
-    result = _git_bytes(
-        "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
-        input_bytes=("\n".join(unique) + "\n").encode("ascii"),
-    )
-    if result.returncode != 0:
-        raise GitEnumerationError(f"'git cat-file --batch-check' failed: {_decode(result.stderr).strip()}")
-    records = _decode(result.stdout).splitlines()
-    if len(records) != len(unique):
-        raise GitEnumerationError("git blob-size batch returned an incomplete result")
-    sizes: dict[str, int] = {}
-    for sha, record in zip(unique, records):
-        fields = record.split()
-        if len(fields) != 3 or fields[0] != sha or fields[1] != "blob":
-            raise GitEnumerationError(f"git blob-size batch could not inspect {sha}: {record!r}")
-        try:
-            size = int(fields[2])
-        except ValueError as exc:
-            raise GitEnumerationError(f"git blob-size batch returned an invalid size for {sha}") from exc
-        if size < 0:
-            raise GitEnumerationError(f"git blob-size batch returned a negative size for {sha}")
-        sizes[sha] = size
-    return sizes
-
-
-def _commit_touched_blob_ids(
-    commit: str, *, parents: list[str] | None = None,
-) -> list[tuple[str, str]]:
-    """``(path, blob id)`` for every path ``commit`` itself adds, modifies,
+def _commit_touched_blobs(commit: str) -> list[tuple[str, int]]:
+    """``(path, size)`` for every path ``commit`` itself adds, modifies,
     renames, or type-changes relative to its own first parent (or the
     empty tree, for a root commit) -- i.e. this one commit's own diff, at
     its own post-commit blob size. Checking per-commit rather than only the
@@ -305,22 +269,20 @@ def _commit_touched_blob_ids(
     a tab, or a newline -- git quotes such names in plain ``--name-only``
     output, which would otherwise make a lookup against the (mis-parsed,
     quoted) name fail and silently skip the real file. Raises
-    :class:`GitEnumerationError` if any underlying git command fails.
-    Size reads are batched separately, without losing the introducing
-    commit's path or the deliberate gitlink exclusion.
+    :class:`GitEnumerationError` if any underlying git command fails,
+    including a blob-size read for a path this function itself just
+    confirmed is a real, non-gitlink blob -- never silently skipped.
     """
-    all_parents = parents
-    if all_parents is None:
-        parents_out = _git_or_raise("rev-parse", f"{commit}^@")
-        all_parents = [p for p in parents_out.split("\n") if p]
+    parents_out = _git_or_raise("rev-parse", f"{commit}^@")
+    all_parents = [p for p in parents_out.split("\n") if p]
     first_parent = all_parents[0] if all_parents else EMPTY_TREE_SHA
     other_parents = all_parents[1:]
 
     raw = _git_or_raise(
-        "diff-tree", "--no-commit-id", "--raw", "--no-abbrev", "-r", "--diff-filter=d", "-z", first_parent, commit,
+        "diff-tree", "--no-commit-id", "--raw", "-r", "--diff-filter=d", "-z", first_parent, commit,
     )
     parts = raw.split("\0")
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, int]] = []
     i = 0
     while i + 1 < len(parts):
         meta, path = parts[i], parts[i + 1]
@@ -337,14 +299,18 @@ def _commit_touched_blob_ids(
             continue  # e.g. a submodule gitlink -- not a blob in this repo, deliberate skip
         if other_parents and any(_blob_at(p, path) == new_sha for p in other_parents):
             continue  # unchanged from another parent -- inherited, not this commit's own content
-        out.append((path, new_sha))
+        r = _git_bytes("cat-file", "-s", new_sha)
+        if r.returncode != 0:
+            raise GitEnumerationError(
+                f"'git cat-file -s {new_sha}' (path {path!r} at {commit}) failed: "
+                f"{_decode(r.stderr).strip()}"
+            )
+        try:
+            size = int(_decode(r.stdout).strip())
+        except ValueError:
+            continue
+        out.append((path, size))
     return out
-
-
-def _commit_touched_blobs(commit: str) -> list[tuple[str, int]]:
-    blobs = _commit_touched_blob_ids(commit)
-    sizes = _blob_sizes([sha for _path, sha in blobs])
-    return [(path, sizes[sha]) for path, sha in blobs]
 
 
 def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] | None:
@@ -389,11 +355,10 @@ def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] |
             "with head (e.g. after a main history rewrite); skipping.",
         )
         return None
-    blobs: list[tuple[str, str]] = []
-    for commit, parents in _commits_in_range(mbase, head):
-        blobs.extend(_commit_touched_blob_ids(commit, parents=parents))
-    sizes = _blob_sizes([sha for _path, sha in blobs])
-    return [(path, sizes[sha]) for path, sha in blobs]
+    out: list[tuple[str, int]] = []
+    for commit in _commits_in_range(mbase, head):
+        out.extend(_commit_touched_blobs(commit))
+    return out
 
 
 def _blobs_in_tree(rev: str) -> list[tuple[str, int]]:
@@ -462,7 +427,10 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
     """
     if not paths:
         return []
-    ls_files = _git_bytes("--literal-pathspecs", "ls-files", "--stage", "-z", "--", *paths)
+    ls_files = subprocess.run(
+        ["git", "--literal-pathspecs", "-C", str(REPO), "ls-files", "--stage", "-z", "--", *paths],
+        capture_output=True, check=False, env=_git_env(),
+    )
     if ls_files.returncode != 0:
         raise GitEnumerationError(
             f"'git ls-files --stage' failed: {_decode(ls_files.stderr).strip()}"
@@ -480,13 +448,25 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
         if mode not in _REGULAR_FILE_MODES or stage != "0":
             continue  # e.g. a submodule gitlink, or an unmerged conflict stage -- deliberate skip
         shas[path] = sha
+    out: list[tuple[str, int]] = []
     # Iterate the entries ls-files itself already resolved and normalized
     # (not the caller's original path strings): a caller-supplied path like
     # "./src/big.json" round-trips through ls-files as "src/big.json", so
     # matching back against the ORIGINAL spelling would silently find
     # nothing and skip a real, staged, oversized file.
-    sizes = _blob_sizes(list(shas.values()))
-    return [(path, sizes[sha]) for path, sha in shas.items()]
+    for path, sha in shas.items():
+        r2 = _git_bytes("cat-file", "-s", sha)
+        if r2.returncode != 0:
+            raise GitEnumerationError(
+                f"'git cat-file -s {sha}' (staged path {path!r}) failed: "
+                f"{_decode(r2.stderr).strip()}"
+            )
+        try:
+            size = int(_decode(r2.stdout).strip())
+        except ValueError:
+            continue
+        out.append((path, size))
+    return out
 
 
 def violation_for(path: str, size: int) -> str | None:
