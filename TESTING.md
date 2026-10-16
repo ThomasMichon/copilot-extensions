@@ -101,6 +101,9 @@ suite collects native POSIX flock, live PID-fallback, link-target and failure
 cases. Linked roots with terminal slash/dot components must be refused, and a
 symlink followed by `..` must purge only the physical directory holding the lock.
 Root/home resolution preserves trailing newlines and ignores `CDPATH`.
+An unprivileged mode-0300 case holds the real transaction lock and requires
+unreadable roots to fail; its source-mutation control reproduces the old false
+success without changing item or job deadlines.
 Vault's transaction suite runs the real shared helper under both Windows
 PowerShell 5.1 and PowerShell 7, with a held lock, open staged source and outside
 junction target. Native PowerShell purge cases compare home directory identities

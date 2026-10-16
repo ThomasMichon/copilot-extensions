@@ -179,6 +179,45 @@ echo 'unexpected-purge-success'
     assert "unexpected-purge-success" not in result.stdout
 
 
+@pytest.mark.parametrize("legacy", [False, True], ids=["current", "negative-control"])
+def test_posix_purge_refuses_unreadable_root(tmp_path, monkeypatch, legacy):
+    check = (
+        '    if [[ ! -r "$root" || ! -x "$root" ]]; then\n'
+        "        printf '%s\\n' 'Runtime purge requires a readable and searchable install directory' >&2\n"
+        "        return 1\n"
+        "    fi\n"
+    )
+    source = (ENGINE / "installer-engine.sh").read_text(encoding="utf-8")
+    assert source.count(check) == 1
+    if os.name == "nt" or os.geteuid() == 0:
+        pytest.skip("unprivileged native POSIX permission checks required")
+    if shutil.which("flock") is None:
+        pytest.skip("native flock unavailable")
+    if legacy:
+        engine = tmp_path / "legacy-engine"
+        engine.mkdir()
+        (engine / "installer-engine.sh").write_text(source.replace(check, ""), encoding="utf-8")
+        monkeypatch.setitem(globals(), "ENGINE", engine)
+    root, _ = _purge_fixture(tmp_path)
+    root.chmod(0o300)
+    try:
+        result = _purge_bash(tmp_path, root, r"""
+exec 8>>"$ROOT/.install.lock"; flock -n 8
+remove_install_runtime_content "$ROOT"
+echo 'unexpected-purge-success'
+""")
+    finally:
+        root.chmod(0o700)
+    if legacy:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "unexpected-purge-success" in result.stdout
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "readable and searchable" in result.stderr
+        assert "unexpected-purge-success" not in result.stdout
+    assert (root / "versions" / "old" / "data").read_text(encoding="utf-8") == "runtime"
+
+
 def test_posix_purge_refuses_home_and_link_roots(tmp_path):
     root, outside = _purge_fixture(tmp_path)
     result = _purge_bash(tmp_path, root, r"""

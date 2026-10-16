@@ -41,6 +41,10 @@ remove_install_runtime_content() {
             return 1
         fi
     fi
+    if [[ ! -r "$root" || ! -x "$root" ]]; then
+        printf '%s\n' 'Runtime purge requires a readable and searchable install directory' >&2
+        return 1
+    fi
     for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         [[ -e "$entry" || -L "$entry" ]] || continue
         name="${entry##*/}"
