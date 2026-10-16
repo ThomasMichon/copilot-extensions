@@ -82,12 +82,12 @@ def _rollback(
 
     # 1. Try to restore the old endpoint as active (only if it is still alive).
     old_restored = False
-    if old is not None and (not guarded or flipped or drain_started):
+    if (
+        old is not None and (not guarded or flipped or drain_started)
+        and (not guarded or successor_stopped)
+    ):
         try:
-            predecessor_live = (
-                old_live if old_live is not None
-                else self.health_check(old.client_host, old.port)
-            )
+            predecessor_live = self.health_check(old.client_host, old.port)
             if predecessor_live:
                 if guarded:
                     table = self.routing.read_table(self.config_dir) or {}

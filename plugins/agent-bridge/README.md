@@ -66,6 +66,12 @@ non-forcingly drain a successor that may have accepted work before requesting
 its shutdown, even if another owner has since replaced its route. A busy or
 unverified successor is retained with reconciliation evidence; never-published
 passive cleanup does not acquire a drain gate.
+After draining a published successor, rollback revalidates the captured
+predecessor's native identity and health before successor shutdown, and probes
+again before restoring routing. Predecessor shutdown also requires its own
+verified drain gate to remain closed. Confirmed clean guarded rollback clears
+its transient breadcrumb inside the transaction so a fresh update can retry;
+uncertain cleanup or retirement retains reconciliation evidence.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`

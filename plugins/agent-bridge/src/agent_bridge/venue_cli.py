@@ -277,6 +277,7 @@ def _cmd_deploy(
                     timeout=2, connect_grace=0,
                 ),
                 drain_timeout=args.drain_timeout,
+                before_shutdown=verify_predecessor_for_rollback,
             )
             cmd.extend(["--serving-launch-id", candidate.launch_id])
         # A passive generation inside the deploy's Job would die with it once
@@ -367,6 +368,15 @@ def _cmd_deploy(
         except Exception as exc:
             return f"successor identity changed before publication ({type(exc).__name__})"
         return None
+
+    def verify_predecessor_for_rollback() -> None:
+        if serving is None or predecessor is None:
+            from .serving_reconcile import ServingReconcileError
+
+            raise ServingReconcileError("rollback has no captured predecessor")
+        serving.verify_health(core._service_health_on_port(
+            predecessor.port, host=predecessor.client_host,
+        ))
 
     def record_successor_publication(endpoint: routing.Endpoint) -> None:
         if candidate is None:

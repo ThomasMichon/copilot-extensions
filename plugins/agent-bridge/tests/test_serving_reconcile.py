@@ -371,6 +371,25 @@ def test_serving_reconcile_never_cold_starts_after_endpoint_probe_fails(serving,
     spawn.assert_not_called()
 
 
+def test_predecessor_shutdown_requires_its_drain_gate(serving, monkeypatch):
+    from agent_bridge.client import BridgeClient
+
+    root, row, health, reference, _ = serving
+    reference.wait.side_effect = lambda timeout: timeout == 15.0
+    request = Mock(return_value={"shutting_down": True})
+    monkeypatch.setattr(BridgeClient, "_request", request)
+    with reconcile.observe_serving(root) as observed:
+        client = reconcile.guarded_client(
+            observed, f"http://127.0.0.1:{row['port']}", "test-credential", 1,
+        )
+        with pytest.raises(reconcile.ServingReconcileError, match="drain gate reopened"):
+            client.shutdown()
+        request.assert_not_called()
+        health["draining"] = True
+        assert client.shutdown() == {"shutting_down": True}
+        request.assert_called_once()
+
+
 @pytest.mark.parametrize("path", ["/api/v1/drain", "/api/v1/undrain", "/api/v1/shutdown"])
 def test_serving_control_never_retries_into_a_replacement(serving, monkeypatch, path):
     import urllib.error
@@ -394,6 +413,8 @@ def test_serving_control_never_retries_into_a_replacement(serving, monkeypatch, 
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     with reconcile.observe_serving(root) as observed:
+        if path == "/api/v1/shutdown":
+            health["draining"] = True
         client = reconcile.guarded_client(
             observed, f"http://127.0.0.1:{row['port']}", "test-credential", 1,
         )
@@ -451,6 +472,8 @@ def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, 
     "cleanup-successor-unhealthy", "cleanup-changed-previous", "cleanup-race-previous",
     "initial-health-failed", "same-version-shadow", "successor-drained", "busy-successor",
     "busy-successor-owner-changed",
+    "predecessor-exits-during-successor-drain", "predecessor-exits-after-successor-stop",
+    "predecessor-drain-reopened", "clean-rollback-retry",
 ])
 def test_serving_reconcile_actual_cutover_requires_native_retirement(
     serving, monkeypatch, scenario,
@@ -574,6 +597,8 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
             if urlparse(client._base).port != row["port"]:
                 successor_drains.append(body)
                 state["successor_draining"] = True
+                if scenario == "predecessor-exits-during-successor-drain":
+                    state["retired"] = True
                 if scenario.startswith("busy-successor"):
                     return {
                         "drained": False, "clean": False, "forced": False,
@@ -589,8 +614,12 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
                 "rollback-owner-changed", "cleanup-changed-previous", "cleanup-race-previous",
                 "busy-successor",
                 "busy-successor-owner-changed",
+                "predecessor-exits-during-successor-drain", "predecessor-exits-after-successor-stop",
+                "clean-rollback-retry",
             ):
                 return {"drained": False, "clean": False, "forced": False, "busy_sessions": ["busy"]}
+            if scenario == "predecessor-drain-reopened":
+                state["draining"] = False
             return {"drained": True, "clean": True, "forced": False, "busy_sessions": []}
         if path == "/api/v1/undrain":
             state["draining"] = False
@@ -598,11 +627,13 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
         if path == "/api/v1/shutdown":
             if urlparse(client._base).port != row["port"]:
                 terminate()
+                if scenario == "predecessor-exits-after-successor-stop":
+                    state["retired"] = True
                 return {"shutting_down": True}
             old_shutdowns.append(path)
             pending = json.loads((root / "cutover.json").read_text())
             assert pending["requires_writer_reconciliation"] is True
-            assert pending["old"] == row
+            assert pending["old"] == routing.read_table(root)["previous"]
             if scenario == "shutdown-error":
                 raise RuntimeError("fixture control transport failed")
             state["retired"] = scenario == "success"
@@ -677,6 +708,8 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
         "cleanup-drain-refused", "cleanup-successor-unhealthy", "cleanup-changed-previous",
         "cleanup-race-previous", "busy-successor",
         "busy-successor-owner-changed",
+        "predecessor-exits-during-successor-drain", "predecessor-exits-after-successor-stop",
+        "clean-rollback-retry",
     )
     assert sum(path == "/api/v1/drain" for _, path, _ in calls) == (
         0 if never_published else 2 if rollback else 1
@@ -693,6 +726,7 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
     if scenario in (
         "drain-refused", "successor-unhealthy", "successor-drained",
         "cleanup-drain-refused", "cleanup-successor-unhealthy",
+        "clean-rollback-retry",
     ):
         assert result["rolled_back"] is True
         assert routing.read_table(root)["active"]["pid"] == row["pid"]
@@ -735,6 +769,33 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
         assert state["successor_stopped"] is False
         assert not any(path in ("/api/v1/undrain", "/api/v1/shutdown") for _, path, _ in calls)
         assert list(root.glob("serving-launch-*.json")), "busy worker lost recovery identity"
+    if scenario == "predecessor-exits-during-successor-drain":
+        assert result["rolled_back"] is False
+        assert routing.read_table(root)["active"]["pid"] == 2222
+        assert state["successor_stopped"] is False
+        assert not any(path in ("/api/v1/undrain", "/api/v1/shutdown") for _, path, _ in calls)
+        assert (root / "cutover.json").exists()
+    if scenario == "predecessor-exits-after-successor-stop":
+        assert result["rolled_back"] is False
+        assert routing.read_table(root)["active"]["pid"] == 2222, "republished an exited predecessor"
+        assert state["successor_stopped"] is True
+        assert not any(path == "/api/v1/undrain" for _, path, _ in calls)
+        assert (root / "cutover.json").exists()
+    if scenario == "predecessor-drain-reopened":
+        assert state["retired"] is False
+        assert state["successor_stopped"] is False
+        assert not any(path == "/api/v1/shutdown" for _, path, _ in calls)
+        assert (root / "cutover.json").exists()
+    if scenario == "clean-rollback-retry":
+        assert not (root / "cutover.json").exists(), "clean rollback blocked the next update"
+        launches = core._launch_bridge_daemon.call_count
+        state.update(retired=False, draining=False, successor_stopped=False, successor_draining=False)
+        scenario = "success"
+        with pytest.raises(SystemExit) as retried:
+            reconcile.reconcile_serving(args)
+        assert retried.value.code == 0
+        assert core._json_out.call_args.args[0]["ok"] is True
+        assert core._launch_bridge_daemon.call_count == launches + 1
     if scenario == "forward-race":
         core._launch_bridge_daemon.assert_not_called()
         assert routing.read_table(root)["active"]["forwarded"] is True

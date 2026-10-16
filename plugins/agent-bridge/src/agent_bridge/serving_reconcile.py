@@ -115,7 +115,7 @@ class ServingRuntime:
         ):
             raise ServingReconcileError("serving predecessor no longer owns its observed endpoint")
 
-    def verify_control(self, *, undrain: bool = False) -> None:
+    def verify_control(self, *, undrain: bool = False, shutdown: bool = False) -> None:
         """Recheck the captured process at its old port before authenticated control."""
         table = routing.read_table(self.root, strict=True) or {}
         active = table.get("active")
@@ -134,6 +134,8 @@ class ServingRuntime:
             raise ServingReconcileError("serving ownership changed before predecessor control")
         health = _core()._service_health_on_port(expected.port, host=expected.client_host)
         self.verify_health(health)
+        if shutdown and health.get("draining") is not True:
+            raise ServingReconcileError("serving predecessor drain gate reopened; shutdown refused")
         if restored and (
             health["slot"].get("role") != "active" or health["slot"].get("active") != active
         ):
@@ -222,7 +224,9 @@ def guarded_client(serving: ServingRuntime, base_url: str, token: str, timeout: 
             if method == "POST" and path in (
                 "/api/v1/drain", "/api/v1/undrain", "/api/v1/shutdown",
             ):
-                serving.verify_control(undrain=path == "/api/v1/undrain")
+                serving.verify_control(
+                    undrain=path == "/api/v1/undrain", shutdown=path == "/api/v1/shutdown",
+                )
             response = super()._request(
                 method, path, body, params=params, request_timeout=request_timeout,
             )

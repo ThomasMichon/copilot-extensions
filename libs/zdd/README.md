@@ -191,6 +191,10 @@ guarded successor endpoint before predecessor drain/retirement. An adopter can
 therefore retain the fact that its candidate may have served work even after
 routing changes, and require a non-forcing drain before rollback disposal.
 Callers without this callback retain their existing behavior.
+Guarded restoration re-probes predecessor health after confirmed successor exit,
+not a cached pre-cleanup liveness result. A confirmed clean rollback in the
+expected-predecessor transaction clears its breadcrumb before releasing custody;
+uncertain cleanup, restoration, undrain or retirement keeps its evidence.
 If the confirmed-exited successor retracted its own active route during
 shutdown, rollback can restore the predecessor only while `active` is absent
 and `previous` still exactly identifies that successor. Recheck that condition

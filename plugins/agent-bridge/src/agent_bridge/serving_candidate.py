@@ -40,6 +40,7 @@ class ServingCandidate:
         self, root: Path, port: int, version: str,
         health: Callable[[], dict | None], make_client: Callable[[], BridgeClient],
         *, drain_timeout: float = 10.0,
+        before_shutdown: Callable[[], None] | None = None,
     ) -> None:
         self.root, self.port, self.version = root, port, version
         self.launch_id = uuid.uuid4().hex
@@ -48,6 +49,7 @@ class ServingCandidate:
         self._health, self._make_client = health, make_client
         self._published = False
         self._drain_timeout = drain_timeout
+        self._before_shutdown = before_shutdown
 
     @property
     def pid(self) -> int | None:
@@ -129,6 +131,8 @@ class ServingCandidate:
             self.verify_health(health, ready=False)
             if not isinstance(health, dict) or health.get("draining") is not True:
                 raise ServingReconcileError("published successor drain gate changed; worker retained")
+            if self._before_shutdown is not None:
+                self._before_shutdown()
         client.shutdown()
 
     def close(self, *, completed: bool) -> None:

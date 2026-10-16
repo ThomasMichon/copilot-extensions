@@ -898,7 +898,9 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                     error=result.error,
                 )
-            elif result.ok or (conditional and result.rolled_back):
+            elif result.ok or (
+                (conditional or self.expected_old is not None) and result.rolled_back
+            ):
                 breadcrumb.clear_breadcrumb(self.config_dir)
             else:
                 state = "rolled_back" if result.rolled_back else phase
