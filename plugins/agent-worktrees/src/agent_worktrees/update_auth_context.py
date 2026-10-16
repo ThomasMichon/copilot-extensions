@@ -57,7 +57,13 @@ class Session:
 
     def prepare(self, context: Path | None, *, include_anchors: bool = False) -> auth.AuthReport:
         if context not in self.reports:
-            report, overlay = self._prepare_report(sources.marketplaces(context))
+            from .reconcile import MARKETPLACE
+
+            selected = [
+                item for item in sources.marketplaces(context)
+                if item.id == "marketplace:" + MARKETPLACE
+            ]
+            report, overlay = self._prepare_report(selected)
             self.reports[context], self.overlays[context] = report, overlay
         if include_anchors and not self.anchors_prepared:
             for source in sources.anchors():

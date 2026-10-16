@@ -87,7 +87,7 @@ def test_canonical_payload_acquisition_obeys_the_auth_session(
 ):
     from agent_worktrees import reconcile, update_acquisition
 
-    item = _source(cwd=tmp_path)
+    item = _source(id="marketplace:copilot-extensions", cwd=tmp_path)
     monkeypatch.setattr(sources, "marketplaces", lambda _: [item])
     monkeypatch.setattr(
         auth, "report",
@@ -108,7 +108,7 @@ def test_canonical_payload_acquisition_obeys_the_auth_session(
     monkeypatch.setattr(update_acquisition.subprocess, "run", run)
     with context.session():
         result = update_acquisition.acquire(
-            "tool", "example", "copilot-fixture", cwd=tmp_path, engine=engine
+            "tool", "copilot-extensions", "copilot-fixture", cwd=tmp_path, engine=engine
         )
     assert result == ("auth_required" if denied else "OK")
     if denied:
@@ -1041,29 +1041,111 @@ def test_success_sweeps_owned_posix_session_without_touching_inherited_sessions(
     assert captured == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="native POSIX session lifetime")
-def test_successful_posix_helper_cannot_leave_a_redirected_descendant(tmp_path, monkeypatch):
+def _assert_posix_descendant_exited(pid, started):
+    from agent_worktrees import installer_run
+    import signal
+    import time
+
+    assert started is not None, "helper did not capture its descendant's identity"
+    try:
+        until = time.monotonic() + 5
+        while installer_run._start_time(pid) == started and time.monotonic() < until:
+            time.sleep(0.05)
+        assert installer_run._start_time(pid) != started, "successful probe left a live helper"
+    finally:
+        if installer_run._start_time(pid) == started:
+            member = installer_run._bind(pid, started)
+            if member is not None:
+                try:
+                    installer_run._send(member, signal.SIGKILL)
+                finally:
+                    if member.pidfd is not None:
+                        os.close(member.pidfd)
+
+
+def test_posix_descendant_assertion_leaves_a_reused_pid_untouched(monkeypatch):
     from agent_worktrees import installer_run
     import time
 
+    monkeypatch.setattr(installer_run, "_start_time", lambda pid: "replacement")
+    ticks = iter([0, 6])
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(os, "kill", lambda *args: pytest.fail("signalled a reused PID"))
+    monkeypatch.setattr(
+        installer_run, "_bind",
+        lambda *args: pytest.fail("bound a process after its identity changed"),
+    )
+    _assert_posix_descendant_exited(456, "original")
+
+
+@pytest.mark.parametrize("binding", ["gone", "fallback", "pidfd"])
+def test_posix_descendant_assertion_cleans_up_only_a_bound_identity(monkeypatch, binding):
+    from agent_worktrees import installer_run
+    import signal
+    import time
+
+    member = installer_run._Member(456, "original", 42 if binding == "pidfd" else None)
+    sent, closed, bound = [], [], []
+    monkeypatch.setattr(installer_run, "_start_time", lambda pid: "original")
+    ticks = iter([0, 6])
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(os, "kill", lambda *args: pytest.fail("used an unbound PID"))
+    monkeypatch.setattr(os, "close", closed.append)
+    monkeypatch.setattr(installer_run, "_send", lambda *args: sent.append(args))
+
+    def bind(pid, started):
+        bound.append((pid, started))
+        return None if binding == "gone" else member
+
+    monkeypatch.setattr(installer_run, "_bind", bind)
+    with pytest.raises(AssertionError, match="successful probe left a live helper"):
+        _assert_posix_descendant_exited(456, "original")
+    assert bound == [(456, "original")]
+    assert sent == ([] if binding == "gone" else [(member, signal.SIGKILL)])
+    assert closed == ([42] if binding == "pidfd" else [])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX session lifetime")
+def test_successful_posix_helper_cannot_leave_a_redirected_descendant(tmp_path, monkeypatch):
+    from agent_worktrees import installer_run
+
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     child_code = (
-        "import subprocess,sys; "
+        "import json,subprocess,sys; "
+        f"sys.path.insert(0,{str(Path(installer_run.__file__).parents[1])!r}); "
+        "from agent_worktrees.installer_run import _start_time; "
         "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],"
         "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
-        "print(p.pid,flush=True)"
+        "print(json.dumps([p.pid,_start_time(p.pid)]),flush=True)"
     )
     result = process.run([sys.executable, "-c", child_code], env=os.environ)
-    pid = int(result.stdout.strip())
-    try:
-        assert result.status == 0
-        until = time.monotonic() + 5
-        while installer_run._start_time(pid) is not None and time.monotonic() < until:
-            time.sleep(0.05)
-        assert installer_run._start_time(pid) is None, "successful probe left a live helper"
-    finally:
-        if installer_run._start_time(pid) is not None:
-            os.kill(pid, 9)
+    pid, started = json.loads(result.stdout.strip())
+    _assert_posix_descendant_exited(pid, started)
+    assert result.status == 0
+
+
+@pytest.mark.parametrize("core_denied", [False, True])
+def test_normal_update_only_blocks_on_acquired_marketplaces(monkeypatch, core_denied):
+    core = _source(id="marketplace:copilot-extensions")
+    unrelated = _source("private", id="marketplace:private")
+    monkeypatch.setattr(sources, "marketplaces", lambda _: [core, unrelated])
+    monkeypatch.setattr(context, "_marketplace_context", lambda: None)
+
+    def report(items):
+        return auth.AuthReport([
+            auth.SourceAuth(
+                item, [],
+                status="auth_required" if item == unrelated or core_denied else "ok",
+            )
+            for item in items
+        ])
+
+    monkeypatch.setattr(auth, "report", report)
+    args = argparse.Namespace(no_anchor_sync=True)
+    assert context.run_update(args, lambda _: 0) == (4 if core_denied else 0)
+    standalone = argparse.Namespace(no_anchor_sync=True, json=True)
+    assert context.cmd_report(standalone) == 4
 
 
 def test_user_local_settings_override_marketplace_source_and_activation(tmp_path, monkeypatch):
@@ -1147,7 +1229,7 @@ def test_reachable_remote_with_unborn_head_is_not_an_auth_failure(tmp_path, monk
 def test_same_url_different_contexts_do_not_share_a_credential_overlay(
     tmp_path, monkeypatch, failed
 ):
-    market = _source(cwd=tmp_path / "market")
+    market = _source(id="marketplace:copilot-extensions", cwd=tmp_path / "market")
     anchor = auth.source("anchor:test", market.url, purpose="anchor", cwd=tmp_path / "anchor")
     monkeypatch.setattr(sources, "marketplaces", lambda _: [market])
     monkeypatch.setattr(sources, "anchors", lambda: [anchor])
