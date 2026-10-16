@@ -124,6 +124,16 @@ Historical-estimate policy selected by the operator: `best-effort-with-uncertain
 (report best-effort estimates with measured error ranges and explicit
 extrapolation warnings, rather than require a fixed held-out accuracy threshold).
 
+Follow-up, 2026-10-16: the operator selected `verified-all-targets-opt-in`
+from the reclamation-policy form:
+
+> Opt-in: also require verified ZIP publication to every configured target;
+> require an explicit retention age
+
+The form explicitly authorized source-code work only, not live deletion,
+configuration changes or rollout. The bounded implementation proposal and its
+validation gates are in [process-log reclamation](process-log-reclamation.md).
+
 ## Plan
 
 ### Phase 0 - Reviewed intent and contracts
@@ -141,7 +151,9 @@ extrapolation warnings, rather than require a fixed held-out accuracy threshold)
 - [x] Integrate the reserved `session-sync push --source-identity-file` interface
   with the merged canonical source-publication helper (#6027).
 - [ ] Add scheduled settled-log zip compaction, archive-transparent reads, and
-  safe handling of active, rotated, resumed, or truncated files.
+  safe handling of active, rotated, resumed, or truncated files; implement
+  source retirement only under the selected
+  [all-target verification contract](process-log-reclamation.md).
 - [ ] Unify discovery of machine roots, CodeSpace namespaces, host-merged rescue
   sessions, verified container captures, and existing cold session archives.
 
