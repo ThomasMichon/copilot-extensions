@@ -39,8 +39,11 @@ composition is proven at the supported Copilot CLI version floor.
 See [Configuration](docs/configuration.md) and
 [Architecture](docs/architecture.md).
 
-The [session quota reader](docs/session-quota.md) adds a bounded helper over an
-existing Copilot SDK session and a credential-filtered offline capture command.
+The [session quota reader](docs/session-quota.md) adds the on-demand
+`budget_guidance_session_quota` extension tool, a bounded helper over an
+existing Copilot SDK session, and a credential-filtered offline capture command.
+The tool joins only the foreground session and reports unsupported when that
+host lacks the public quota RPC. It never creates a fallback client.
 It preserves requesting-session attribution and labels cached compatibility
 freshness unknown. Optional credential-free account matching brackets the
 quota read with session authentication status without inspecting credentials

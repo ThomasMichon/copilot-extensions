@@ -281,6 +281,37 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Foreground-session integration implemented for review
+
+- Added the optional `budget_guidance_session_quota` extension entry under the
+  reviewed host contract. It joins the foreground session once, performs no
+  startup reads, and uses only the public quota and optional account-status
+  reads. Missing APIs return unavailable; no fallback client or internal
+  credential surface exists.
+- Isolated entry fixtures cover session/account changes, old SDK shapes,
+  shared deadlines, late uncancellable reads, selected provider projection,
+  redaction, and UTF-8 byte bounds. The entry-generated capture passes the
+  existing CLI while remaining unverified and unable to enable forecasting.
+- The bounded devcontainer suite passes (443 passed, 18 skips), with the
+  Node-required fixture separately passing in the bounded local runner.
+  The default Python image lacks Node, so no container qualification is
+  claimed for that fixture. Independent review found no blocker.
+- The adapter source, skill, manifest description, and related reference docs
+  are updated. Live host enablement, quota/raw-reset evidence, release, and
+  rollout remain separate gates; no runtime or account state was changed.
+
+### 2026-10-16 - Foreground-session integration plan reviewed
+
+- PR #7055 merged as `71b2d515fded40ef84601a5ec1b5a2628ec63ab0`
+  after exact-head Copilot approval with no findings and the aggregate PR gate,
+  source-attribution, and workflow-lockdown checks passing.
+- The [host integration contract](host-integration.md) is now reviewed intent.
+  Re-read the canonical Plan/Validation Plan and the focused contract after merge;
+  implementation may proceed without changing its no-rollout boundary.
+- No extension implementation or live host changes preceded this review.
+  Next: the bounded public-SDK adapter and isolated entry-point/capture tests.
+  Raw-reset acquisition, live capability proof, and rollout remain open.
+
 ### 2026-10-16 - Foreground-session host integration proposed
 
 - Implementation is authorized through normal review, with rollout explicitly

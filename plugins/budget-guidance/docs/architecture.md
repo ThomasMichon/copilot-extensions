@@ -75,3 +75,12 @@ same posture arithmetic. Rate provenance explicitly labels cycle averages as
 estimates; the advice block never grants worker-control or model-eligibility
 authority. See [provider evidence](provider-quota.md) and
 [provider pacing](provider-pacing.md) for the contracts.
+
+The optional `extensions/budget-guidance/extension.mjs` entry uses the host's
+`joinSession` API and registers only `budget_guidance_session_quota`.
+`session-quota.mjs` owns the on-demand public RPC deadline, single-flight slot,
+and observed session/account checks; `quota-projection.mjs` owns the bounded
+field allowlist. Neither module imports Python, launches processes, writes
+files, reads credentials, or calculates a budget. The serialized result remains
+an offline capture for the existing Python normalization path. Missing host
+capabilities are explicit, not synthesized through private RPCs.

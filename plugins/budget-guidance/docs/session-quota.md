@@ -6,6 +6,60 @@ It reads the existing requesting SDK session, not a newly created client or the
 machine's global account. It does not resume sessions, refresh provider state,
 consume pending warnings, change authentication, or stop a client.
 
+## Foreground extension tool
+
+When the host offers `budget_guidance_session_quota`, invoke it on demand with
+an empty object for the default `premium_interactions` category. Optional
+arguments are `category`, `providerId`, `quotaId`, `timeoutSeconds` (greater
+than zero, default 10, at most 30), and the paired `expectedLogin` and
+`expectedHost`. Provider evidence is copied only for an explicitly selected
+provider and optional quota ID. Unknown provider enums or malformed known
+fields fail closed rather than becoming optimistic defaults.
+
+The payload entry `extensions/budget-guidance/extension.mjs` uses the standard
+plugin `extensions/<name>/extension.mjs` discovery convention; it requires no
+new manifest extension key, dependency installation, client, or process.
+It calls `joinSession` once, registers one tool, and performs no startup
+account reads. The actual invocation ID must match the joined session before
+and after the public `session.rpc.quota.get()` call. Optional account matching
+uses `session.rpc.gitHubAuth.getStatus()` around that read and reports the same
+observed-not-atomic scope as the Python helper below.
+
+The tool returns structured text JSON with `status: captured`, an allowlisted
+`capture` using the existing version-1 schema below, and explicit freshness and
+raw-reset limits. `captured` describes transport acquisition, not a fresh or
+usable budget. Runtime version is honestly `unknown`: no documented version
+API is assumed. To inspect offline, save only the `capture` object through an
+explicit caller-owned workflow and use the existing CLI. The tool writes no
+file, and the CLI never upgrades it to authenticated live evidence.
+
+Failure returns `resultType: failure` with `status: unavailable` or `error`,
+a fixed diagnostic, and `capture: null`; no quota counters, raw auth responses,
+opaque SDK errors, upgrade links, or arbitrary provider metadata are returned.
+The entire quota input and entire rendered result are each bounded to 64 KiB
+UTF-8, including nested discarded metadata. A host without the public quota or
+requested auth-status API is unsupported. Never use a newer SDK declaration as
+proof that the current host implements it, or use a private connection or
+credential-bearing auth union as a fallback.
+
+One deadline covers the whole acquisition. Only one read can be in flight.
+After timeout, an uncancellable public SDK call retains that slot until it
+settles; late results are ignored and cannot start the next RPC in the chain.
+The adapter never aborts or disconnects the foreground conversation. A reload
+or host lifecycle change remains the host/operator's decision, not an automatic
+recovery action. Implementation and fixture qualification do not authorize live
+enablement, runtime update, or rollout.
+
+The isolated contract test `tests/test_host_quota.py` requires Node.js with
+`node:test` support alongside the ordinary Python test dependencies. It copies
+the real entry and tests into temporary storage with a fake SDK module; no
+live extension reload or account network request occurs. The default Python
+test-isolation image does not currently include Node.js: run this focused test
+through the bounded local plugin runner on a Node-equipped host, and run the
+remaining suite through the devcontainer runner with `-k 'not host_quota'`.
+The Node test remains required on the normal Node-equipped CI host; its absence
+is a visible missing-tool failure, not a silently skipped qualification.
+
 ## Incumbent SDK integration
 
 The experimental Copilot SDK surface is `session.rpc.quota.get()` in Python

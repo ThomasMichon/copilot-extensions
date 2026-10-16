@@ -15,7 +15,12 @@ description: |
    Never create a fresh client, resume a different conversation, read a global
    default account, or switch authentication to stand in for it.
 2. Read `docs/session-quota.md` beneath this skill's owning plugin root for the
-   SDK helper and bounded capture contract. Use `acquire_session_quota` with the
+   foreground extension, SDK helper, and bounded capture contract. Prefer the
+   `budget_guidance_session_quota` tool when the host actually offers it. The
+   invocation supplies the requesting session ID; optional `expectedLogin`
+   and `expectedHost` must be explicitly known, never guessed. A missing tool
+   is not permission to enable/reload an extension or update a running host.
+   Use `acquire_session_quota` with the
    exact expected session ID when the host exposes an existing SDK session.
    When the host also knows the expected GitHub login and HTTPS origin, use
    `acquire_verified_session_quota` to bracket the quota read with public,

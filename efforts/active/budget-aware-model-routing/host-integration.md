@@ -68,36 +68,61 @@ or prove the billing account of an arbitrary third-party provider.
 
 ## Plan
 
-- [ ] Land this contract through normal review before extension implementation.
-- [ ] Implement bounded foreground-session acquisition and an allowlisted
+- [x] Land this contract through normal review before extension implementation.
+- [x] Implement bounded foreground-session acquisition and an allowlisted
   existing-schema capture without a new client or process.
-- [ ] Register the plugin-owned extension tool and update its on-demand skill,
+- [x] Register the plugin-owned extension tool and update its on-demand skill,
   plugin entry, and canonical host integration reference.
-- [ ] Cover old and new SDK shapes, failures, session/account changes, bounds,
+- [x] Cover old and new SDK shapes, failures, session/account changes, bounds,
   and late results with isolated tests.
 - [ ] Publish the implementation through current-head review and required CI.
-- [ ] Leave live enablement, quota/reset verification, release, and rollout
+- [x] Leave live enablement, quota/reset verification, release, and rollout
   gated on their own explicit authorization and capabilities.
 
 ## Validation
 
-- [ ] An injected fixture session records only the intended public read RPCs;
+- [x] An injected fixture session records only the intended public read RPCs;
   refresh, warning-drain, client construction, account changes, and lifecycle
   mutations cannot be invoked by the adapter.
-- [ ] Wrong invocation/session IDs and absent APIs return no counters; old SDK
+- [x] Wrong invocation/session IDs and absent APIs return no counters; old SDK
   shapes remain supported as explicit unavailable states.
-- [ ] Login/origin mismatch or changes around the read withhold all values.
+- [x] Login/origin mismatch or changes around the read withhold all values.
   Identity output states its non-atomic scope.
-- [ ] Each whole result is within its declared byte bound. Oversize nested
+- [x] Each whole result is within its declared byte bound. Oversize nested
   evidence, opaque errors, and credential-shaped metadata cannot leak through
   either successful or failed responses.
-- [ ] A deadline covers all RPCs. A timed-out result cannot publish later,
+- [x] A deadline covers all RPCs. A timed-out result cannot publish later,
   trigger retries, or allow a second acquisition to overlap an unresolved first.
-- [ ] The generated capture is accepted by the existing Python CLI while
+- [x] The generated capture is accepted by the existing Python CLI while
   remaining unverified/cached and incapable of enabling live forecasting.
-- [ ] The actual extension entry point is tested with an isolated SDK module
+- [x] The actual extension entry point is tested with an isolated SDK module
   fixture. No live extension reload, session takeover, network account request,
   or production runtime update is required.
-- [ ] Existing budget, identity, guidance, and install/manifest contracts remain
+- [x] Existing budget, identity, guidance, and install/manifest contracts remain
   green; tests use bounded runners and preserve explicit platform skips.
-- [ ] Documented capability limits and no-rollout state match actual evidence.
+- [x] Documented capability limits and no-rollout state match actual evidence.
+
+## Implementation evidence
+
+The plugin now ships `extensions/budget-guidance/extension.mjs` and its bounded
+acquisition/projection modules. The entry fixture joins once without a startup
+read, records only public status/quota/status calls when account matching is
+requested, and feeds its actual generated capture to the Python CLI. Capture
+attribution remains caller-declared and cannot enable live arithmetic.
+
+The bounded Python devcontainer suite passes with the Node-required fixture
+explicitly deselected (443 passed, 18 platform/environment skips); that fixture
+passes separately through the bounded local runner on a Node-equipped host.
+The pinned Python image lacks Node.js, and its initial focused run correctly
+failed the explicit missing-tool assertion rather than silently skipping it.
+No image, installed runtime, or live extension was modified. Install-contract,
+documentation consistency, touched-Python lint, and the ordinary strict
+customization scan pass; an independent source review found no blocking defect.
+
+The settings-expanded customization scan separately detects a missing
+`customizing-copilot` inline guidance floor in this checkout's existing
+adoption state. The adapter does not change instruction adoption or installed
+payloads; the cross-version reconciliation objective remains tracked in
+[#6092](https://github.com/ThomasMichon/copilot-extensions/issues/6092),
+separate from the plugin's source scan.
+Publication/review remains pending below until this implementation PR merges.
