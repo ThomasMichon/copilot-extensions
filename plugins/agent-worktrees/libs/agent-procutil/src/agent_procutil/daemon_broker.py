@@ -255,6 +255,7 @@ def spawn_brokered_daemon(
 
     deadline = time.monotonic() + _TIMEOUT
     child = bootstrap = None
+    staging_started = False
     cookie = secrets.token_hex(32)
     stage = "activation"
     problems = []
@@ -284,6 +285,7 @@ def spawn_brokered_daemon(
                 if not _outside_job(bootstrap):
                     raise OSError("daemon broker bootstrap still belongs to a Job")
                 stage = "child-staging"
+                staging_started = True
                 _send(connection, {
                     "argv": command, "cwd": cwd, "env": env,
                     "creationflags": creationflags, "log_path": log_path,
@@ -305,7 +307,9 @@ def spawn_brokered_daemon(
                 raise OSError("daemon broker did not finish successfully")
     except (OSError, ValueError, subprocess.SubprocessError):
         problems.append(stage)
-    cleanup_confirmed = True
+    # Once staging is requested, bootstrap exit alone cannot prove that an
+    # unknown child was reaped (its own cleanup may have failed).
+    cleanup_confirmed = not (problems and staging_started and child is None)
     if bootstrap is not None:
         # Channel closure lets an uncommitted bootstrap reap its suspended
         # child. Killing the bootstrap first could orphan that child.

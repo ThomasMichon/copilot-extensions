@@ -10,9 +10,10 @@ import time
 from types import SimpleNamespace
 
 import pytest
+import agent_procutil as interpreter
 
 from agent_worktrees import status_monitor_cutover as cutover
-from agent_worktrees import status_monitor_python as interpreter
+from agent_worktrees import status_monitor_python
 from agent_worktrees import status_monitor_runtime as runtime
 
 
@@ -20,7 +21,7 @@ def _windows_venv(tmp_path, monkeypatch):
     scripts = tmp_path / "venv" / "Scripts"
     scripts.mkdir(parents=True)
     (scripts.parent / "pyvenv.cfg").write_text("home = synthetic-base\n", encoding="utf-8")
-    monkeypatch.setattr(interpreter, "os", SimpleNamespace(name="nt", path=os.path))
+    monkeypatch.setattr(interpreter, "_is_windows", lambda: True)
     return str(scripts / "python.exe")
 
 
@@ -42,7 +43,7 @@ def test_monitor_direct_interpreter_preserves_venv_and_console_root(tmp_path, mo
 
     monkeypatch.setattr(interpreter, "windowless_python", select)
     monkeypatch.setattr(interpreter, "windowless_python_env", environment)
-    assert interpreter.direct_monitor_python(executable) == (
+    assert interpreter.direct_python(executable) == (
         str(console), {"__PYVENV_LAUNCHER__": executable},
     )
     assert calls == [executable, executable]
@@ -59,24 +60,28 @@ def test_monitor_direct_interpreter_rejects_unavailable_bypass(tmp_path, monkeyp
         lambda _: {} if missing == "windowless" else {"__PYVENV_LAUNCHER__": executable},
     )
     with pytest.raises(RuntimeError, match="unavailable"):
-        interpreter.direct_monitor_python(executable)
+        interpreter.direct_python(executable)
 
 
 def test_monitor_direct_interpreter_preserves_nonvenv_windows_console(tmp_path, monkeypatch):
-    monkeypatch.setattr(interpreter, "os", SimpleNamespace(name="nt", path=os.path))
+    monkeypatch.setattr(interpreter, "_is_windows", lambda: True)
     executable = str(tmp_path / "python.exe")
     monkeypatch.setattr(interpreter, "windowless_python", lambda source: source)
     monkeypatch.setattr(interpreter, "windowless_python_env", lambda _: {})
-    assert interpreter.direct_monitor_python(executable) == (executable, {})
+    assert interpreter.direct_python(executable) == (executable, {})
 
 
 def test_monitor_direct_interpreter_preserves_posix(monkeypatch):
-    monkeypatch.setattr(interpreter, "os", SimpleNamespace(name="posix", path=os.path))
+    monkeypatch.setattr(interpreter, "_is_windows", lambda: False)
     monkeypatch.setattr(
         interpreter, "windowless_python",
         lambda _: pytest.fail("ordinary POSIX selection must not change"),
     )
-    assert interpreter.direct_monitor_python("synthetic-python") == ("synthetic-python", {})
+    assert interpreter.direct_python("synthetic-python") == ("synthetic-python", {})
+
+
+def test_monitor_uses_the_shared_direct_interpreter():
+    assert status_monitor_python.direct_monitor_python is interpreter.direct_python
 
 
 @pytest.mark.parametrize("passive", [False, True])
@@ -206,7 +211,11 @@ finally:
         deadline = time.monotonic() + 8
         while not result.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
-        assert result.exists(), f"bounded probe failed: exit={process.poll()}"
+        log_path = tmp_path / "logs" / "status-monitor.log"
+        assert result.exists(), (
+            f"bounded probe failed: exit={process.poll()}; "
+            + (log_path.read_text(encoding="utf-8") if log_path.exists() else "no log")
+        )
         data = json.loads(result.read_text(encoding="utf-8"))
         assert data["pid"] == process.pid
         assert os.path.normcase(data["prefix"]) == os.path.normcase(sys.prefix)

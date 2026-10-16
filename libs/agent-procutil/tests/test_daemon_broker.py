@@ -301,6 +301,32 @@ def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
     processes[200].terminate.assert_called_once()
 
 
+@pytest.mark.parametrize("failure", ["lost-pid", "adoption"])
+def test_unadopted_staged_child_cleanup_is_not_proven_by_bootstrap_exit(
+    monkeypatch, broker_channel, tmp_path, failure,
+):
+    processes, _ = broker_channel
+    original = broker.WindowsDaemonProcess
+
+    def process(pid, args):
+        if pid == 200:
+            raise OSError("cannot adopt child")
+        result = original(pid, args)
+        result.wait.return_value = 1
+        return result
+
+    monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
+    monkeypatch.setattr(broker, "_receive", Mock(side_effect=[
+        {"pid": 100, "cookie": "fixture-cookie"},
+        OSError("lost pid response") if failure == "lost-pid" else {"pid": 200},
+    ]))
+    with pytest.raises(pu.DaemonSpawnError) as caught:
+        _launch(tmp_path)
+    assert caught.value.cleanup_confirmed is False
+    assert set(processes) == {100}
+    processes[100].close.assert_called_once()
+
+
 @pytest.fixture()
 def bootstrap_channel(monkeypatch, tmp_path):
     monkeypatch.setenv(broker._BOOT_COOKIE, "fixture-cookie")

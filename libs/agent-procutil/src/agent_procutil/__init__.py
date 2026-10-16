@@ -24,6 +24,8 @@ exact creation flags) can't drift between copies:
   interpreter can allocate a second console.
 * :func:`windowless_python_env` -- preserve the original venv context when
   ``windowless_python`` targets a base install's ``pythonw.exe``.
+* :func:`direct_python` -- keep a console daemon's PID on the actual interpreter,
+  not a Windows venv redirector, while retaining its venv context.
 * :func:`spawn_daemon` -- the one launch primitive for a long-lived daemon:
   windowless, escapes the caller's Job object / session, runs from an
   explicit durable ``cwd``, and appends its stdout/stderr to a log file.
@@ -89,6 +91,7 @@ _ERROR_ACCESS_DENIED = 5
 log = logging.getLogger("agent-procutil")
 
 __all__ = [
+    "direct_python",
     "contained_test_mode",
     "no_window_flags",
     "no_window_kwargs",
@@ -628,6 +631,28 @@ def windowless_python_env(
     if _venv_home_pythonw(python):
         return {"__PYVENV_LAUNCHER__": python}
     return {}
+
+
+def direct_python(executable: str) -> tuple[str, dict[str, str]]:
+    """Bypass Windows venv redirectors without losing the selected venv."""
+    if not _is_windows():
+        return executable, {}
+    python = windowless_python(executable)
+    extra_env = windowless_python_env(executable)
+    config = os.path.join(os.path.dirname(os.path.dirname(executable)), "pyvenv.cfg")
+    if os.path.isfile(config) and not extra_env:
+        raise RuntimeError(
+            "Cannot start daemon directly: the Windows venv's base "
+            "pythonw.exe is unavailable; repair the Python installation."
+        )
+    if os.path.basename(python).lower() == "pythonw.exe":
+        python = os.path.join(os.path.dirname(python), "python.exe")
+        if not os.path.isfile(python):
+            raise RuntimeError(
+                "Cannot start daemon directly: the base python.exe "
+                "is unavailable; repair the Python installation."
+            )
+    return python, extra_env
 
 
 def detached_kwargs(*, breakaway: bool = False) -> dict:

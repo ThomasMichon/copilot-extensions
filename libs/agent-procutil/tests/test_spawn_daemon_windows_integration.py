@@ -53,12 +53,16 @@ _CYCLES = 2
 # Runs under a windowless pythonw.exe inside a kill-on-close Job: launches the
 # daemon through spawn_daemon, records its pid, and exits without waiting.
 _PARENT_SCRIPT = """
-import json, subprocess, sys, traceback
+import json, os, subprocess, sys, time, traceback
 spec = json.loads(sys.argv[1])
 try:
     import agent_procutil
     if spec.get("bootstrap_redirector"):
         agent_procutil.windowless_python = lambda _exe: spec["bootstrap_redirector"]
+    if spec.get("direct_venv"):
+        python, extra = agent_procutil.direct_python(spec["argv"][0])
+        spec["argv"] = [python, *spec["argv"][1:]]
+        spec["env_overrides"].update(extra)
     proc = agent_procutil.spawn_daemon(
         spec["argv"],
         cwd=spec["cwd"],
@@ -69,6 +73,16 @@ try:
         env_overrides=spec["env_overrides"],
     )
     result = {"pid": proc.pid}
+    if spec.get("direct_venv"):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                with open(spec["worker_status"], encoding="utf-8") as fh:
+                    result["worker"] = json.loads(fh.readlines()[-1])
+                break
+            except (OSError, ValueError, IndexError):
+                time.sleep(0.02)
+        assert result.get("worker", {}).get("pid") == proc.pid, "worker PID mismatch"
     if spec.get("terminate"):
         try:
             proc.wait(timeout=0)
@@ -89,7 +103,7 @@ with open(spec["result"], "w", encoding="utf-8") as fh:
 # its pid/cwd/tick count, optionally running a real console child per tick,
 # until the stop file appears (or a safety deadline passes).
 _DAEMON_SCRIPT = """
-import json, os, subprocess, sys, time
+import importlib.util, json, os, subprocess, sys, time
 state, console_children = sys.argv[1], sys.argv[2] == "1"
 status = os.path.join(state, "status.jsonl")
 stop = os.path.join(state, "stop")
@@ -105,6 +119,8 @@ while time.monotonic() < deadline and not os.path.exists(stop):
             "pid": os.getpid(), "cwd": os.getcwd(), "ticks": ticks,
             "argv": sys.argv[3:], "environment": os.environ.get("BROKER_ENV_FIXTURE"),
             "bootstrap_env": [key for key in os.environ if key.startswith("_CE_DAEMON_BROKER_")],
+            "prefix": sys.prefix,
+            "pytest": getattr(importlib.util.find_spec("pytest"), "origin", None),
         }) + "\\n")
     time.sleep(0.1)
 print("daemon stopped after", ticks, "ticks", flush=True)
@@ -241,6 +257,7 @@ def _console_python() -> str:
 def _run_cycle(
     tmp_path: Path, cycle: int, console_children: bool, kernel32,
     *, allow_breakaway: bool = True, terminate: bool = False, redirector: bool = False,
+    venv: bool = False,
 ) -> None:
     root = tmp_path / f"cycle-{cycle}"
     workdir = root / "home with spaces"
@@ -257,7 +274,7 @@ def _run_cycle(
     arguments = ["spaces & 'quotes'", "unicode-\u65e5", ""]
     environment = "quotes ' \" ; & = \n \u65e5"
     spec = {
-        "argv": [_console_python(), str(daemon_script), str(state),
+        "argv": [sys.executable if venv else _console_python(), str(daemon_script), str(state),
                  "1" if console_children else "0", *arguments],
         "cwd": str(workdir),
         "log_path": str(log_path),
@@ -266,6 +283,8 @@ def _run_cycle(
         "stderr_log_path": str(err_path),
         "env_overrides": {"BROKER_ENV_FIXTURE": environment},
         "terminate": terminate,
+        "direct_venv": venv,
+        "worker_status": str(state / "status.jsonl"),
         "bootstrap_redirector": str(Path(sys.executable).with_name("pythonw.exe"))
         if redirector else None,
     }
@@ -297,6 +316,11 @@ def _run_cycle(
                 "this runner's own Job forbids breakaway: " + result["daemon_spawn_error"]
             )
         assert "pid" in result, result.get("error")
+        if venv:
+            worker = result["worker"]
+            assert worker["pid"] == result["pid"]
+            assert os.path.samefile(worker["prefix"], sys.prefix)
+            assert os.path.samefile(worker["pytest"], pytest.__file__)
         if terminate:
             assert result["wait_timed_out"] is True
             assert result["returncode"] == result["poll"] == 1
@@ -406,6 +430,21 @@ def test_broker_outlives_job_when_windowless_selection_falls_back_to_venv_redire
         for cycle in range(_CYCLES):
             _run_cycle(
                 tmp_path, cycle, True, kernel32, allow_breakaway=False, redirector=True,
+            )
+    assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
+    assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
+
+
+@pytest.mark.parametrize("terminate", [False, True], ids=["survival", "termination"])
+def test_broker_direct_venv_controls_worker_pid_and_preserves_imports(tmp_path, terminate):
+    if sys.prefix == sys.base_prefix:
+        pytest.skip("requires a real Windows venv")
+    user32, kernel32, callback_type = _configure_win32()
+    with _WindowObserver(user32, kernel32, callback_type) as observer:
+        for cycle in range(_CYCLES):
+            _run_cycle(
+                tmp_path, cycle, True, kernel32, allow_breakaway=False,
+                terminate=terminate, venv=True,
             )
     assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
     assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"

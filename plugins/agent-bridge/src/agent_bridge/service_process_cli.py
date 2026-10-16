@@ -398,11 +398,21 @@ def _launch_bridge_daemon(argv: list[str], *, display: str, contained_last_resor
     core = _core()
     root = os.path.abspath(core._INSTALL_DIR)
     os.makedirs(root, exist_ok=True)
+    environment = _daemon_root_env()
+    if (
+        argv and os.name == "nt" and os.path.isabs(argv[0])
+        and os.path.basename(argv[0]).lower() in ("python.exe", "pythonw.exe")
+    ):
+        from agent_procutil import direct_python
+
+        python, extra_env = direct_python(argv[0])
+        argv = [python, *argv[1:]]
+        environment.update(extra_env)
     launch = {
         "cwd": root,
         "log_path": os.path.join(root, "agent-bridge.log"),
         "stderr_log_path": os.path.join(root, "agent-bridge-err.log"),
-        "env_overrides": _daemon_root_env(),
+        "env_overrides": environment,
         "console_children": True,
     }
     return core.spawn_daemon(

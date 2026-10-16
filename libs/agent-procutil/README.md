@@ -64,7 +64,11 @@ It composes the helpers above, so its flags never drift from them:
 
 - **Windowless.** `DETACHED_PROCESS` by default; `console_children=True` uses
   the `windowless_daemon_kwargs()` host for daemons that keep spawning
-  console-subsystem children.
+  console-subsystem children. For a Python host in this mode, use
+  `python, extra_env = direct_python(sys.executable)`, pass `python` in argv
+  and layer `extra_env` into the child environment. This bypasses Windows venv
+  redirectors so process control names the actual worker while retaining its
+  venv imports. Opaque executable commands are not rewritten by `spawn_daemon`.
 - **Escapes the caller.** `breakaway=True` (default) adds
   `CREATE_BREAKAWAY_FROM_JOB` on Windows so a kill-on-close Job around the
   caller (an installer or updater) does not kill the new daemon; POSIX gets a

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -133,6 +135,33 @@ def test_spawn_detached_happy_path_never_calls_broker(monkeypatch, tmp_path):
     launch.assert_not_called()
     assert popen.call_args.kwargs["creationflags"] == 0x08000000 | 0x01000000
     assert popen.call_args.kwargs["cwd"] == str(tmp_path)
+
+
+@pytest.mark.parametrize("passive", [False, True])
+def test_python_daemon_bypasses_redirector_and_preserves_venv(monkeypatch, tmp_path, passive):
+    from agent_bridge import service_process_cli
+
+    monkeypatch.setattr(
+        service_process_cli, "os",
+        SimpleNamespace(name="nt", path=os.path, makedirs=os.makedirs, environ=os.environ),
+    )
+    executable = str(tmp_path / "venv" / "Scripts" / "python.exe")
+    base = str(tmp_path / "base" / "python.exe")
+    select = Mock(return_value=(base, {"__PYVENV_LAUNCHER__": executable}))
+    monkeypatch.setattr(agent_procutil, "direct_python", select, raising=False)
+    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
+    launch = Mock()
+    monkeypatch.setattr(m, "spawn_daemon", launch)
+    argv = [executable, "-m", "agent_bridge", "start"]
+    if passive:
+        argv += ["--passive"]
+        m._launch_bridge_daemon(argv, display="passive", contained_last_resort=False)
+    else:
+        m._spawn_detached_argv(argv)
+    select.assert_called_once_with(executable)
+    assert launch.call_args.args[0] == [base, *argv[1:]]
+    assert launch.call_args.kwargs["env_overrides"]["__PYVENV_LAUNCHER__"] == executable
+    assert argv[0] == executable, "normalization must not mutate the caller's argv"
 
 
 def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):
