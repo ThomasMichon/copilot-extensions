@@ -1231,6 +1231,11 @@ integrity refusals still stop. A CLI exit code 124 alone is not proof of an
 owner deadline. Failed termination, accounting or output drain is an explicit
 cleanup failure and cannot license replay. Native spawn errors retain their
 codes and existing diagnostic/retry handling.
+The strict child receives the auth session's exact command-scoped environment,
+including an explicitly empty environment; it never substitutes global state
+for that snapshot. Auth usage is retained for a launched child even when
+cleanup fails, but a refused launch does not claim credential use. Post-launch
+I/O errors are cleanup failures, not retryable spawn contention.
 
 Install timeouts still stop because original-snapshot recovery custody is not
 durable across interruption. POSIX timeouts also stop: the current session

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import pytest
 
@@ -33,6 +34,7 @@ _STUB = textwrap.dedent("""
             marker, str(delay)])
         open(marker + ".pid", "w").write(str(grandchild.pid))
     print("stub installer running", flush=True)
+    open(marker + ".ready", "w").write("ready")
     time.sleep(sleep)
     sys.exit(code)
 """)
@@ -45,12 +47,32 @@ def stub(tmp_path, monkeypatch):
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     script = tmp_path / "installer.py"
     script.write_text(_STUB, encoding="utf-8")
+    original_spawn = installer_run._spawn
+
+    def spawn(command, *args, **kwargs):
+        if str(script) not in command:
+            return original_spawn(command, *args, **kwargs)
+        return _spawn_ready(
+            original_spawn, command, *args, ready=tmp_path / "slot.ready", **kwargs,
+        )
+
+    monkeypatch.setattr(installer_run, "_spawn", spawn)
 
     def argv(*, delay: float = -1, sleep: float = 0, code: int = 0) -> list[str]:
         return [sys.executable, str(script), str(tmp_path / "slot"), str(delay),
                 str(sleep), str(code)]
 
     return argv
+
+
+def _spawn_ready(spawn, command, *args, ready: Path, **kwargs):
+    """Bind the real child witness before exercising the unchanged command deadline."""
+    ready.unlink(missing_ok=True)
+    proc, job = spawn(command, *args, **kwargs)
+    if not _wait_for(ready.is_file, seconds=10):
+        installer_run._kill_tree(proc, job)
+        pytest.fail("synthetic process did not publish its bounded readiness witness")
+    return proc, job
 
 
 def _alive(pid: int) -> bool:
@@ -222,10 +244,17 @@ _REGROUPING_STUB = textwrap.dedent("""
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
-def test_posix_deadline_reaches_a_regrouped_child_but_not_a_daemon(tmp_path, stub):
+def test_posix_deadline_reaches_a_regrouped_child_but_not_a_daemon(tmp_path, stub, monkeypatch):
     script = tmp_path / "regroup.py"
     script.write_text(_REGROUPING_STUB, encoding="utf-8")
     pids = tmp_path / "pids"
+    original_spawn = installer_run._spawn
+    monkeypatch.setattr(
+        installer_run, "_spawn",
+        lambda command, *args, **kwargs: _spawn_ready(
+            original_spawn, command, *args, ready=pids, **kwargs,
+        ),
+    )
     run = installer_run.run_installer(
         [sys.executable, str(script), str(pids)], cwd=tmp_path, env=os.environ,
         deadline_s=3,
@@ -337,8 +366,10 @@ def test_real_payload_replay_follows_empty_job_confirmation(tmp_path, monkeypatc
             )
             (root / "child.pid").write_text(str(child.pid))
             print(sys.argv[3], flush=True)
+            (root / f"ready-{attempt}").touch()
             time.sleep(60)
         print("acquired", flush=True)
+        (root / f"ready-{attempt}").touch()
     """), encoding="utf-8")
     original_spawn, calls = installer_run._spawn, []
 
@@ -347,9 +378,10 @@ def test_real_payload_replay_follows_empty_job_confirmation(tmp_path, monkeypatc
         if len(calls) == 2:
             assert _wait_dead(int((tmp_path / "child.pid").read_text()))
             assert not (tmp_path / "late-write").exists()
-        return original_spawn(
+        return _spawn_ready(
+            original_spawn,
             [sys.executable, str(script), str(tmp_path), str(len(calls)), refusal],
-            cwd, env, capture, **kwargs,
+            cwd, env, capture, ready=tmp_path / f"ready-{len(calls)}", **kwargs,
         )
 
     monkeypatch.setattr(installer_run, "_spawn", spawn)

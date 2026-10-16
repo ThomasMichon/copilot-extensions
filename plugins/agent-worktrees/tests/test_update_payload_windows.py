@@ -13,7 +13,7 @@ pytestmark = pytest.mark.guard
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job process contract")
 @pytest.mark.real_installer_processes
-@pytest.mark.parametrize("failure", [None, "termination", "drain"])
+@pytest.mark.parametrize("failure", [None, "termination", "drain", "read"])
 def test_strict_job_return_requires_confirmation_and_reaping(monkeypatch, tmp_path, failure):
     seen, order = {}, []
 
@@ -22,6 +22,10 @@ def test_strict_job_return_requires_confirmation_and_reaping(monkeypatch, tmp_pa
 
         def communicate(self, timeout):
             order.append("communicate")
+            if failure == "read":
+                error = OSError("post-launch pipe sharing failure")
+                error.winerror = 32
+                raise error
             if failure == "drain" and order.count("communicate") == 2:
                 raise subprocess.TimeoutExpired("fixture", timeout)
             return "captured", None
@@ -52,8 +56,9 @@ def test_strict_job_return_requires_confirmation_and_reaping(monkeypatch, tmp_pa
     assert seen["require_job"] is True
     assert seen["allow_breakaway"] is False
     assert seen["creationflags"] & subprocess.CREATE_NO_WINDOW
-    assert order[:2] == ["communicate", "confirm"]
-    assert ("close" in order) is (failure == "termination")
+    assert order[:2] == (["communicate", "close"] if failure == "read" else
+                         ["communicate", "confirm"])
+    assert ("close" in order) is (failure in ("termination", "read"))
 
 
 def test_cleanup_failure_never_retries_the_payload(monkeypatch, tmp_path):
@@ -86,6 +91,36 @@ def test_strict_spawn_retains_the_native_error(monkeypatch, tmp_path, code):
             ["fixture"], cwd=tmp_path, env={}, deadline_s=1, require_tree_exit=True,
         )
     assert raised.value is error
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows strict launch refusal")
+@pytest.mark.real_installer_processes
+def test_containment_refusal_is_not_reported_as_an_executed_child(monkeypatch, tmp_path):
+    error = RuntimeError("Job assignment refused before child resume")
+
+    def fail(argv, **kwargs):
+        raise error
+
+    monkeypatch.setattr(installer_run, "spawn_sync_in_kill_on_close_job", fail)
+    with pytest.raises(installer_run.InstallerLaunchError) as raised:
+        installer_run.run_installer(
+            ["fixture"], cwd=tmp_path, env={}, deadline_s=1, require_tree_exit=True,
+        )
+    assert raised.value.__cause__ is error
+
+
+@pytest.mark.parametrize("environment", [{}, {"AUTH_CONTEXT_FIXTURE": "child-only"}])
+def test_windows_update_keeps_the_exact_supplied_environment(monkeypatch, tmp_path, environment):
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", True)
+
+    def run(argv, **kwargs):
+        assert kwargs["env"] is environment
+        return installer_run.InstallerRun("OK", 0, None, False, 0)
+
+    monkeypatch.setattr(installer_run, "run_installer", run)
+    assert update_acquisition._run_update(
+        ["fixture"], cwd=tmp_path, timeout=1, env=environment,
+    ).returncode == 0
 
 
 @pytest.mark.parametrize("refusal", ["", "HTTP 403 authentication required", "[WinError 5] localized"])

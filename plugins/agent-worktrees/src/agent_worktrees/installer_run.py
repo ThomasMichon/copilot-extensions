@@ -52,6 +52,10 @@ class InstallerCleanupError(RuntimeError):
     """The owned process tree could not be confirmed empty."""
 
 
+class InstallerLaunchError(RuntimeError):
+    """The strict launcher refused the child before execution."""
+
+
 def _spawn(
     argv: Sequence[str], cwd: Path | None, env: Mapping[str, str], capture: bool,
     output_fd: int | None = None, *, require_tree_exit: bool = False,
@@ -265,6 +269,7 @@ def run_installer(
     empty Job before returning any launched command's outcome. Cleanup failure
     raises ``InstallerCleanupError``, never a retry-licensing timeout outcome.
     Spawn OS errors propagate in this mode so the caller retains native codes.
+    A containment refusal raises ``InstallerLaunchError`` before execution.
     """
     started = time.monotonic()
     if log is not None and output_fd is not None:
@@ -278,8 +283,10 @@ def run_installer(
         else:
             proc, job = _spawn(argv, cwd, env, False, output_fd=output_fd, **strict)
     except (OSError, RuntimeError) as exc:
-        if require_tree_exit and isinstance(exc, OSError):
-            raise
+        if require_tree_exit:
+            if isinstance(exc, OSError):
+                raise
+            raise InstallerLaunchError(str(exc)) from exc
         return InstallerRun(str(exc)[:120], None, None, False, time.monotonic() - started)
     expired, out = False, ""
     try:
@@ -301,13 +308,15 @@ def run_installer(
                 out = proc.communicate(timeout=max(0, cleanup_deadline - time.monotonic()))[0] or ""
             except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
                 raise InstallerCleanupError(f"process-tree cleanup unverified: {exc}") from exc
-    except BaseException:
+    except BaseException as exc:
         if require_tree_exit:
             if job is not None:
                 job.close()
         else:
             _kill_tree(proc, job)
         job = None
+        if require_tree_exit and isinstance(exc, OSError):
+            raise InstallerCleanupError(f"process-tree cleanup unverified after launch: {exc}") from exc
         raise
     finally:
         if job is not None:

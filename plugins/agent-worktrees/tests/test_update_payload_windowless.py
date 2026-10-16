@@ -60,11 +60,23 @@ def test_two_windowless_parent_cycles_leave_no_windows_or_children(tmp_path):
     """), encoding="utf-8")
     parent = tmp_path / "windowless-parent.py"
     parent.write_text(textwrap.dedent("""
-        import json, os, sys
+        import json, os, sys, time
         from pathlib import Path
         sys.path[:] = json.loads(sys.argv[1])
         from agent_worktrees import installer_run
         root = Path(sys.argv[2])
+        original_spawn = installer_run._spawn
+        def spawn(*args, **kwargs):
+            process, job = original_spawn(*args, **kwargs)
+            ready = root / "witness-open"
+            deadline = time.monotonic() + 10
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            if not ready.exists():
+                installer_run._kill_tree(process, job)
+                raise AssertionError("native observer did not bind child handles before deadline")
+            return process, job
+        installer_run._spawn = spawn
         result = installer_run.run_installer(
             [sys.argv[3], sys.argv[4], sys.argv[1], str(root / "pids.json"),
              str(root / "late-write")],
@@ -103,6 +115,7 @@ def test_two_windowless_parent_cycles_leave_no_windows_or_children(tmp_path):
                         handle = kernel32.OpenProcess(0x00100000, False, pid)
                         assert handle, "child exited before the native containment witness"
                         handles.append(handle)
+                    (root / "witness-open").touch()
                     assert process.wait(timeout=15) == 0, (root / "parent.log").read_text()
                     result = json.loads((root / "result.json").read_text())
                     assert result["status"].startswith("timed out") and result["rc"] is None

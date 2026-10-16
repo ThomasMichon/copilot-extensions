@@ -836,3 +836,41 @@ achieved by rearranging today's combined installer invocations.
   with seven skips in 201.94 seconds, then 207 passed with one skip in 220.56
   seconds. Per-test, 300-second sub-suite and 900-second aggregate limits are
   unchanged; no assertion, case or required CI lane was dropped.
+
+### 2026-10-16 - Current-base authentication contract integration
+- Exact-head review 5544132183 Approved `2bc9efb9b2186316e1fa235c1989f1bf7abad44f`
+  with no open findings, but concurrent #6876 changed acquisition's auth
+  environment and actual-use observation contract, producing one real conflict.
+  Preserved an owned backup and reconciled both behaviors rather than dropping
+  the auth gate or the confirmed-cleanup boundary.
+- Windows updates now receive the auth session's exact child environment,
+  including an explicitly empty mapping, through its existing acquisition
+  wrapper. Install restoration retains the canonical injected-runner path.
+  Cleanup failures after launch retain actual credential-use evidence;
+  containment refusals before execution do not claim use.
+- Regression-first exposed a post-launch pipe error escaping as an OS spawn
+  error. It now becomes an explicit unverified-cleanup failure, so a sharing
+  code cannot authorize replay without proof. Actual spawn errors still retain
+  their original native codes and policy.
+- The complete auth/probe/usage/Windows-owner selection passes 169 cases with
+  two platform skips. Focused coverage preserves scoped routes, unchanged parent
+  environment, actual-use versus availability, empty environments, refusal
+  precedence and finite retry. Current-base consumer integration, fresh review
+  and required CI remain before merge; no deployed state was changed.
+- A cold native fixture timed out before publishing its grandchild witness.
+  Synthetic installers and acquisition children now establish bounded readiness
+  before exercising the same command deadlines; the desktop observer binds
+  native child handles before acknowledging readiness. The assertions, command
+  deadlines and harness limits remain unchanged.
+- Current-base runtime/acquisition/telemetry coverage passes 336 cases with
+  seven platform/desktop skips, in the runner's existing one-file sub-suites.
+  Together with the auth selection, all fourteen selected files pass 505 cases
+  with nine explicit skips. Every file stays below its 300-second limit and the
+  invocation retains its 900-second aggregate bound; the largest files took
+  174.49 and 207.44 seconds. No timeout was widened to hide a failure.
+- The externally stewarded #6867 is now confirmed merged into `main` at
+  `ad7376904b0e622f7f44abf516cbef560b322f36`, from head
+  `332c6fd5e4d89b0cb7b7cce5b0409ab3ebd034aa`; its source attribution names the
+  operator-selected recipient. This resolves the source bootstrap dependency,
+  not containing-release consumption, installed acceptance or retained local
+  worktree/claim cleanup. #6707 remains unchanged with its canonical owner.

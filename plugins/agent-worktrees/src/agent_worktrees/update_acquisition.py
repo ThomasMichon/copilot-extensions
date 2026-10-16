@@ -148,6 +148,10 @@ def acquire(
             status = f"payload cleanup failed: {update_events.bounded(str(error), 200)}"
             output.warn(f"{name}: {status}")
             return status
+        except installer_run.InstallerLaunchError as error:
+            status = f"payload launch failed: {update_events.bounded(str(error), 200)}"
+            output.warn(f"{name}: {status}")
+            return status
         except subprocess.TimeoutExpired as error:
             if verb != "update" or not isinstance(error, _QuiescentPayloadTimeout):
                 output.warn(

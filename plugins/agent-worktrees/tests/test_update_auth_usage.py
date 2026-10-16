@@ -14,6 +14,7 @@ import update_telemetry as ut
 
 from agent_worktrees import (
     git_ops,
+    installer_run,
     reconcile,
     update_acquisition,
     update_auth as auth,
@@ -146,6 +147,44 @@ def test_activation_state_errors_preserve_actual_usage_evidence(prepared, monkey
     assert _auth_status()["fallback_used"] == (
         [] if failure == "capture" else ["marketplace:copilot-extensions"]
     )
+
+
+@pytest.mark.parametrize("outcome", ["completed", "timeout", "cleanup", "launch", "missing"])
+def test_windows_payload_owner_preserves_scoped_auth_and_usage(prepared, monkeypatch, outcome):
+    import os
+
+    project, _ = prepared
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", True)
+    monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: project)
+    original_environment, calls = dict(os.environ), []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert json.loads(kwargs["env"]["CE_UPDATE_AUTH_ROUTES"])
+        assert kwargs["env"] is not os.environ
+        assert kwargs["require_tree_exit"] is True
+        if outcome == "timeout" and len(calls) == 1:
+            return installer_run.InstallerRun("timed out (deadline hit during build)", None,
+                                              None, False, 0)
+        if outcome == "cleanup":
+            raise installer_run.InstallerCleanupError("owned Job cleanup refused")
+        if outcome == "launch":
+            raise installer_run.InstallerLaunchError("owned Job assignment refused before resume")
+        if outcome == "missing":
+            raise FileNotFoundError("missing acquisition executable")
+        return installer_run.InstallerRun("OK", 0, None, False, 0)
+
+    monkeypatch.setattr(installer_run, "run_installer", run)
+    status = update_acquisition.acquire(
+        "fixture", "copilot-extensions", "fixture", cwd=project, engine=True,
+    )
+    assert status.startswith("OK") is (outcome in ("completed", "timeout"))
+    assert len(calls) == (2 if outcome == "timeout" else 1)
+    assert _auth_status()["fallback_used"] == (
+        [] if outcome in ("launch", "missing") else ["marketplace:copilot-extensions"]
+    )
+    assert dict(os.environ) == original_environment
 
 
 @pytest.mark.parametrize("outcome", ["completed", "timeout"])

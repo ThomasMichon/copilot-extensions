@@ -82,6 +82,7 @@ def test_working_setup_untouched_and_public_short_circuits():
 
 @pytest.mark.parametrize("engine", [False, True])
 @pytest.mark.parametrize("denied", [False, True])
+@pytest.mark.usefixtures("payload_subprocess_double")
 def test_canonical_payload_acquisition_obeys_the_auth_session(
     tmp_path, monkeypatch, engine, denied
 ):
