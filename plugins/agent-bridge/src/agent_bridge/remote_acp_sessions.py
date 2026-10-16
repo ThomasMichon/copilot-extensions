@@ -11,6 +11,7 @@ from .acp_client import AcpClient
 from .events import EventLog
 from .models import SessionStatus
 from .remote_acp_config import REMOTE_ACP_VERSION, RemoteAcpTarget
+from .remote_acp_transport import RemoteTransportError
 from .transport import SpawnTarget
 if TYPE_CHECKING:
     from .session_manager import Session, SessionManager
@@ -60,7 +61,9 @@ async def connect_remote_session(
     if previous is not None:
         await previous.shutdown()
     def on_event(kind: str, data: dict) -> None:
-        replay = getattr(session.client, "_loading_session", False)
+        if session.client is not client:
+            return
+        replay = client._loading_session
         if replay:
             data = {**data, "history_replay": True}
         session.event_log.append(kind, data)
@@ -73,8 +76,14 @@ async def connect_remote_session(
     client = AcpClient(on_event=on_event)
     session.client = client
     session.status = SessionStatus.STARTING
+
+    def require_current() -> None:
+        if session.client is not client or not client.is_running:
+            raise RemoteTransportError("Remote session startup was closed or superseded")
+
     try:
         await client.start_remote(spec, cookies=cookies)
+        require_current()
         session._remote_affinity_cookies = getattr(client._remote_transport, "cookies", None)
         session.target.remote_acp_capabilities = {
             "protocol_version": REMOTE_ACP_VERSION,
@@ -98,16 +107,23 @@ async def connect_remote_session(
             sid = await asyncio.wait_for(
                 client.new_session(cwd=cwd), spec.rpc_timeout_seconds,
             )
+        require_current()
         session.acp_session_id = sid
         manager._db.update_session_acp_id(session.session_id, sid)
         session.status = SessionStatus.IDLE
     except BaseException:
+        accepted_sid = client.acp_session_id
         await client.shutdown()
-        session.status = SessionStatus.STOPPED
+        if session.client is client:
+            if accepted_sid:
+                session.acp_session_id = accepted_sid
+                manager._db.update_session_acp_id(session.session_id, accepted_sid)
+            session.status = SessionStatus.STOPPED
         raise
     finally:
-        manager._db.update_session_status(
-            session.session_id, session.status.value, time.time(),
-        )
-        session.event_log.append("session_state_changed", {"status": session.status.value})
+        if session.client is client:
+            manager._db.update_session_status(
+                session.session_id, session.status.value, time.time(),
+            )
+            session.event_log.append("session_state_changed", {"status": session.status.value})
     return session

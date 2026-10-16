@@ -15,6 +15,7 @@ from agent_bridge.models import ServiceConfig, SessionStatus, StartSessionReques
 from agent_bridge.remote_acp_config import RemoteAcpTarget
 from agent_bridge.remote_acp_sessions import connect_remote_session
 from agent_bridge.remote_acp_transport import RemoteTransport
+from agent_bridge.remote_acp_transport import RemoteTransportError
 from agent_bridge.session_manager import session_manager_from_config
 from agent_bridge.routes.sessions import start_session
 from agent_bridge.client import BridgeClient, BridgeClientError
@@ -274,6 +275,48 @@ async def test_process_idle_reaper_preserves_non_loadable_remote_conversation(re
     assert await manager.sweep_idle_sessions(now=1000) == 0
     manager.stop_session.assert_not_awaited()
     assert session.client.is_running and session.status == SessionStatus.IDLE
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_stop_during_remote_startup_does_not_resurrect_the_session(remote_manager, monkeypatch):
+    manager, calls = remote_manager
+    original = AcpClient.start_remote
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed(client, *args, **kwargs):
+        await original(client, *args, **kwargs)
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(AcpClient, "start_remote", delayed)
+    pending = asyncio.create_task(connect_remote_session(manager, "example"))
+    await entered.wait()
+    session = next(iter(manager._sessions.values()))
+    await manager.stop_session(session.session_id)
+    release.set()
+    with pytest.raises(RemoteTransportError, match="closed or superseded"):
+        await pending
+    assert session.client is None and session.status == SessionStatus.STOPPED
+    assert manager.db.get_session(session.session_id)["status"] == "stopped"
+    assert "new" not in calls
+
+
+@pytest.mark.asyncio
+async def test_accepted_session_id_survives_stream_start_failure(remote_manager, monkeypatch):
+    manager, calls = remote_manager
+
+    async def accepted_then_failed(client, **kwargs):
+        client._acp_session_id = "accepted-server-session"
+        raise RemoteTransportError("Synthetic session stream failed")
+
+    monkeypatch.setattr(AcpClient, "new_session", accepted_then_failed)
+    with pytest.raises(RemoteTransportError, match="stream failed"):
+        await connect_remote_session(manager, "example")
+    session = next(iter(manager._sessions.values()))
+    assert manager.db.get_session(session.session_id)["acp_session_id"] == "accepted-server-session"
+    await manager.resume_session(session.session_id)
+    assert calls[-1] == ("load", "accepted-server-session")
     await manager.stop_session(session.session_id)
 
 
