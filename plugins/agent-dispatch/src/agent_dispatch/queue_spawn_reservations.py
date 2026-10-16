@@ -30,6 +30,9 @@ ordinary top-level names -- no circular import, and
 :class:`SpawnReservationMixin` is composed into
 :class:`agent_dispatch.queue.TaskQueue`; it relies on ``self._connect()``
 and ``self._now()`` from that class and is not usable standalone.
+Deferral lives in :mod:`agent_dispatch.queue_spawn_deferral`, inherited
+here so the historical ``SpawnReservationMixin.defer_spawn`` surface stays
+available.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ from collections.abc import Callable
 
 from .queue_allocation_revisions import revision_disposed
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
+from .queue_spawn_deferral import SpawnDeferralMixin
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -100,7 +104,7 @@ def _newer_worktree_reservation(
     ).fetchone()
 
 
-class SpawnReservationMixin:
+class SpawnReservationMixin(SpawnDeferralMixin):
     """Spawn-reservation lifecycle methods for :class:`TaskQueue`."""
 
     # -- spawn reservations --------------------------------------------------

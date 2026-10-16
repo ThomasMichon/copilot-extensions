@@ -91,6 +91,9 @@ transition can free the lane only while the same generation remains unclaimed
 and the reservation has no delivery receipt, workspace or body. Capability or
 target mismatches therefore do not consume the lane's only slot. A raced claim,
 unknown response or any prepared startup retains its identity instead.
+An empty historical deferral does not bind a later capable ordinary worker;
+its start follows the normal acquisition checks. Admitted restricted deliveries
+continue to require their exact retained native identity.
 
 Nonsecret, monotonic startup receipts stay on the existing spawn reservation
 behind a control-only journal endpoint. They contain no shared/control/task

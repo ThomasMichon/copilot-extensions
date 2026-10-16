@@ -228,6 +228,44 @@ def test_lost_claim_ack_is_retained_and_recovered_without_deferral(rig, monkeypa
     assert sum("create" in argv for argv, _ in rig.calls) == 1
 
 
+@pytest.mark.parametrize("owner", ["ordinary-worker", "acquired-without-receipt"])
+def test_empty_deferral_does_not_replace_ordinary_acquisition_checks(rig, owner):
+    blocked = rig.queue.create(
+        "ordinary worker can claim later", repo=TEST_REPO, labels=["restricted"],
+        requires=["ordinary-capability"], now=rig.task.created_at - 1,
+    )
+    assert rig.supervisor.poll_once() == [rig.task.id]
+    held = rig.queue.claim_one(
+        owner, capabilities=["ordinary-capability"], task_id=blocked.id, repo=TEST_REPO,
+    )
+    assert held is not None
+    response = rig.api.post(
+        f"/tasks/{blocked.id}/start", headers=rig.control,
+        json={"worker_id": owner, "owner_session_id": "ordinary-native"},
+    )
+    if owner.startswith("acquired-"):
+        assert response.status_code == 409, response.text
+        assert "requires a bridge acquisition receipt" in response.text
+    else:
+        assert response.status_code == 200, response.text
+        assert rig.queue.get(blocked.id).owner_session_id == "ordinary-native"
+
+
+def test_admitted_restricted_delivery_still_fences_an_ordinary_reclaimer(rig):
+    rig.supervisor.poll_once()
+    before = rig.queue.get(rig.task.id)
+    rig.queue.yield_task(before.id, before.owner)
+    assert rig.queue.claim_one(
+        "ordinary-worker", task_id=before.id, repo=TEST_REPO,
+    ) is not None
+    response = rig.api.post(
+        f"/tasks/{before.id}/start", headers=rig.control,
+        json={"worker_id": "ordinary-worker", "owner_session_id": "ordinary-native"},
+    )
+    assert response.status_code == 409, response.text
+    assert "restricted start" in response.text
+
+
 def test_projected_worker_starts_and_completes_without_fleet_authority(rig):
     rig.supervisor.poll_once()
     headers = {TASK_SCOPE_HEADER: rig.grants[-1]}
