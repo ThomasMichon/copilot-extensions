@@ -9,6 +9,7 @@ These tests run real child processes.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -437,12 +438,16 @@ def test_plan_step_applies_the_step_environment(tmp_path, monkeypatch):
     assert "    value None" in logged
 
 
-def test_plan_step_uses_the_service_manifest_deadline(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cutover", [None, 11])
+def test_plan_step_uses_the_service_manifest_deadline(tmp_path, monkeypatch, cutover):
     for var in ("AGENT_X_INSTALL_DEADLINE_SEC", "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"):
         monkeypatch.delenv(var, raising=False)
     payload = tmp_path / "payload"
     payload.mkdir()
-    (payload / "plugin.json").write_text('{"installerDeadlineSeconds": 7}', encoding="utf-8")
+    manifest = {"installerDeadlineSeconds": 7}
+    if cutover is not None:
+        manifest["cutoverDeadlineSeconds"] = cutover
+    (payload / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr(reconcile, "core_installed_payload_dir",
                         lambda name: payload if name == "agent-x" else None)
     seen = {}
@@ -453,7 +458,7 @@ def test_plan_step_uses_the_service_manifest_deadline(tmp_path, monkeypatch):
 
     monkeypatch.setattr(installer_run, "run_installer", fake_run)
     assert reconcile._run_plan_step(["installer"], {"service": "agent-x"}, lambda _l: None) == 0
-    assert seen["deadline_s"] == 7 + 30
+    assert seen["deadline_s"] == 7 + (cutover if cutover is not None else 300) + 30
 
     # An unreadable manifest fails the step instead of escaping the sweep.
     (payload / "plugin.json").unlink()

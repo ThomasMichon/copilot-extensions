@@ -487,7 +487,7 @@ if [[ "$ACTION" == "slot-provision" ||
     fi
 fi
 
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/installer-watchdog.sh"
+. "$SCRIPT_DIR/installer-watchdog.sh"
 
 # === install-contract:v5 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
