@@ -1,7 +1,7 @@
 """Single-target worktree existence/ownership resolution (#3015, #6744).
 
 Fan-out probes used when the fleet-wide ``WorktreeDiscoveryCache`` doesn't
-(yet) know about a worktree -- a targeted, live ``list --worktree-id`` query
+(yet) know about a worktree -- targeted owner record queries
 across every eligible agent, returning on first match rather than waiting on
 a slow/unreachable one. Two flavors:
 
@@ -239,19 +239,11 @@ def worktree_id_in_payload(raw: str | None, worktree_id: str) -> bool:
 async def probe_live_worktree(
     worktree_id: str, resolver: AgentResolver,
 ) -> "tuple[str, _WorktreeEntry] | None":
-    """Fan a targeted, single-worktree ``list --worktree-id`` probe across
-    every eligible agent, returning the first match's owner + entry (#6744).
+    """Locate one exact owner record without requiring a published roster.
 
-    Mirrors :func:`probe_archived_owner`'s fan-out (returning on first match
-    instead of waiting on a slow/unreachable agent), but resolves a fresh,
-    genuinely-live worktree the crawl cache simply hasn't seen yet
-    (cache-blind or stale-cache), not a tombstoned one -- deliberately
-    **without** ``--all``/``--tracking-status archived``, so a reaped record
-    whose on-disk directory is gone never matches here (a resumed worktree
-    must have a real checkout to spawn a fresh session into, review #3121).
-    Returns the full ``_WorktreeEntry`` (needed for the worktree's on-disk
-    path), not just the owning agent. Only ever called single-flight via
-    :meth:`WorktreeDiscoveryCache.probe_live`.
+    This returns identity metadata, not execution admission or liveness.
+    Resume separately revalidates the native head and owner launch fence.
+    Single-flight callers share this fan-out without warming inventory.
     """
     from . import worktrees as wt
 
@@ -261,7 +253,7 @@ async def probe_live_worktree(
     ]
     if not eligible:
         return None
-    args = ["list", "--json", "--worktree-id", worktree_id]
+    args = ["record", "--worktree-id", worktree_id, "--json"]
     tasks = {
         asyncio.create_task(wt._run_for_agent(name, cfg, resolver, args)): name
         for name, cfg in eligible
@@ -278,8 +270,26 @@ async def probe_live_worktree(
                 if raw is None:
                     continue
                 agent_name = tasks[task]
+                try:
+                    payload = json.loads(raw)
+                except (TypeError, ValueError):
+                    log.warning("Invalid exact worktree record response from %s", agent_name)
+                    continue
+                if not isinstance(payload, dict) or payload.get("ok") is not True:
+                    continue
+                record = payload.get("worktree")
+                if (
+                    not isinstance(record, dict) or record.get("id") != worktree_id
+                    or not isinstance(record.get("path"), str) or not record["path"].strip()
+                    or not isinstance(record.get("branch"), str) or not record["branch"].strip()
+                    or not isinstance(record.get("status"), str) or not record["status"].strip()
+                ):
+                    log.warning("Exact record from %s did not confirm worktree %s", agent_name, worktree_id)
+                    continue
                 found = next(
-                    (e for e in wt._parse_worktree_list(raw, agent_name)
+                    (e for e in wt._parse_worktree_list(
+                        json.dumps({"worktrees": [record]}), agent_name,
+                    )
                      if e.id == worktree_id),
                     None,
                 )
@@ -305,7 +315,6 @@ async def find_worktree_entry(
     from . import worktrees as wt
 
     cache = wt.get_cache()
-    await cache.crawl_if_empty()
     for agent_name, worktrees in cache.get_all().items():
         match = next((entry for entry in worktrees if entry.id == worktree_id), None)
         if match is not None:

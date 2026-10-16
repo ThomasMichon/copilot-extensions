@@ -660,8 +660,12 @@ def native_owner(monkeypatch, tmp_path):
     root = tmp_path / "owner"
     anchor = root / "anchor"
     anchor.mkdir(parents=True)
+    owner_config = anchor / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    owner_config.parent.mkdir(parents=True)
+    owner_config.write_text("default_branch: main\n", encoding="utf-8")
     for args in (
         ["init", "-q", "--initial-branch=main"],
+        ["add", ".copilot-extensions/agent-worktrees/config.yaml"],
         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
          "commit", "--allow-empty", "-qm", "fixture"],
         ["remote", "add", "origin", str(anchor)],

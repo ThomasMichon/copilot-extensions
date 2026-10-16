@@ -837,6 +837,26 @@ tests plus real cross-process exclusion coverage, not live native conversation
 acceptance. Native process-exit continuity, hosted Linux execution, dependency
 integration, PR review/merge, and the remaining Phase 6 gates stay open.
 
+### 2026-10-16 - Managed native continuity acceptance
+
+The ordinary owner lookup now reads an exact record without warming a resident
+roster. Real owner/HTTP acceptance passed on Windows for both ACP and muxed CLI:
+the predecessor exited, a previously empty Bridge imported the owner's exact
+native conversation, a Bridge-controlled turn recalled a fresh marker, and the
+turn reached actual idle without replacement history. The isolated owner uses
+normal creation trust, unchanged source launch assets and vendor-managed login;
+no shared daemon or installed runtime was changed.
+
+Acceptance exposed a parser bug that made the native-admission modifier
+mutually exclusive with its launch intent, and a post-launch confirmation
+inconsistency: an exact fresh Bridge registration was accepted before launch
+but ignored afterward. Both are corrected, with foreign/stale/absent-runtime
+refusal controls. Bounded native/HTTP regressions passed 210 tests; owner/parser
+and launch-fixture coverage passed 18. The HTTP unit fixture no longer starts
+an unrelated credential relay. Python 3.10 timeout compatibility is retained.
+PR #7002 still requires current review, required CI and merge. Hosted Linux
+execution and the broader Phase 6 acquisition matrix remain open.
+
 ### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
 
 Moved native receipt binding into the final locked delivery section, after

@@ -254,7 +254,12 @@ async def _resume(
         "--bridge-acquisition", native, "--require-native-admission", "--ensure-mux",
         "--driver", delivery, "--verify-timeout", "30",
     ], launch=True)
-    if launched.get("ok") is not True or launched.get("worktree_id") != worktree_id:
+    if (
+        launched.get("ok") is not True or launched.get("worktree_id") != worktree_id
+        or launched.get("work_dir") != entry.path
+        or launched.get("resume_session") != native
+        or launched.get("mux_verified") is not True
+    ):
         raise _refuse("cli_launch_unconfirmed", "Owner did not confirm the native CLI launch")
     deadline = time.monotonic() + 30
     while True:
@@ -266,9 +271,17 @@ async def _resume(
         ]
         if actual["head_session"] != native or listed.get("head_session") != native:
             raise _refuse("native_identity_changed", "CLI launch changed the native conversation")
-        if len(matches) == 1:
-            represented = db.list_fresh_live_sessions(worktree_id, now=time.time())
-            registration = next((row for row in represented if row["session_id"] == native), None)
+        represented = db.list_fresh_live_sessions(worktree_id, now=time.time())
+        registration = next((row for row in represented if row["session_id"] == native), None)
+        if (
+            any(row.get("live") is True and row.get("id") != native
+                for row in listed.get("sessions", []) if isinstance(row, dict))
+            or any(row["session_id"] != native for row in represented)
+        ):
+            raise _refuse("live_holder", "Another execution leg appeared during CLI launch")
+        # Reuse the same fresh represented-session evidence accepted before
+        # launch; a display-only owner liveness flag must not veto its runtime.
+        if len(matches) == 1 or (len(represented) == 1 and registration is not None):
             store.release_workspace_gate(worktree_id, delivery)
             return _cli_info(native, owner, entry, config, registration)
         if time.monotonic() >= deadline:

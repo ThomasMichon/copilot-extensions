@@ -383,6 +383,11 @@ Native resume returns the durable
 conversation ID and selected mode; a CLI whose process is live but not yet
 represented reports `starting`, not invented idle readiness. Uncertain owner
 launches retain their process and exact native fence for reconciliation.
+Known-ID owner lookup uses the exact record RPC without waiting for roster
+publication. After a verified exact-head mux launch, either the owner's live
+session observation or the exact session's fresh Bridge registration confirms
+execution. An advisory display flag cannot veto that registered runtime;
+foreign executions and a changed native head still refuse.
 An owner-observed CLI that is not represented in the requesting daemon is
 read-only there; its owning bridge and mux remain the control/attachment
 boundary. ACP native launch also requires the paired Worktrees owner's

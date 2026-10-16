@@ -14,8 +14,23 @@ from agent_bridge.transport import SpawnTarget
 
 
 @pytest.mark.asyncio
-async def test_owner_launch_timeout_preserves_capture_and_process(monkeypatch):
+@pytest.mark.parametrize("legacy_timeout", [False, True])
+async def test_owner_launch_timeout_preserves_capture_and_process(monkeypatch, legacy_timeout):
     finished = asyncio.Event()
+    if legacy_timeout:
+        class LegacyAsyncioTimeoutError(Exception):
+            pass
+
+        wait_for = asyncio.wait_for
+
+        async def legacy_wait_for(awaitable, timeout):
+            try:
+                return await wait_for(awaitable, timeout)
+            except TimeoutError as exc:
+                raise LegacyAsyncioTimeoutError() from exc
+
+        monkeypatch.setattr(operation.asyncio, "TimeoutError", LegacyAsyncioTimeoutError)
+        monkeypatch.setattr(operation.asyncio, "wait_for", legacy_wait_for)
 
     async def communicate():
         await finished.wait()

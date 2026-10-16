@@ -77,6 +77,7 @@ def app(tmp_path):
         port=0,
         bind="127.0.0.1",
         db_path=str(tmp_path / "test.db"),
+        enable_credential_relay=False,
     )
     return create_app(config=cfg, token="test-token")
 
@@ -2613,6 +2614,7 @@ def http_native_resume(app, tmp_path, monkeypatch):
         },
         workspace={
             "id": entry.id, "path": entry.path, "repo": target.project, "status": "active",
+            "branch": entry.branch,
             "last_session_id": "native-original",
             "execution_leg_opaque": False, "session_backend_opaque": False,
             "bound_agent": None,
@@ -2967,7 +2969,8 @@ class TestHttpNativeResume:
         assert response.status_code == 200, response.text
         assert response.json()["acp_session_id"] == "native-original"
         assert response.json()["target_dir"] == b.entry.path
-        assert ["list", "--json", "--worktree-id", b.entry.id] in b.calls
+        assert ["record", "--worktree-id", b.entry.id, "--json"] in b.calls
+        assert not any(args[0] == "list" for args in b.calls)
         b.load.assert_awaited_once()
 
     @pytest.mark.parametrize("missing_path", [False, True])

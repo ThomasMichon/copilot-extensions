@@ -76,7 +76,7 @@ async def run_owner_operation(
     capture = asyncio.create_task(proc.communicate())
     try:
         stdout, stderr = await asyncio.wait_for(asyncio.shield(capture), timeout)
-    except (TimeoutError, asyncio.CancelledError) as exc:
+    except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError) as exc:
         _retain(capture)
         log.warning("Owner operation remains unconfirmed; preserving its process and native identity")
         if isinstance(exc, asyncio.CancelledError):

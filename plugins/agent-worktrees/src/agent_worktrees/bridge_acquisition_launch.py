@@ -10,8 +10,10 @@ from . import finalize, launch_admission, sessions
 from .session_liveness import session_liveness
 
 
-def add_arguments(parser: argparse._ActionsContainer) -> None:
-    parser.add_argument(
+def add_arguments(
+    parser: argparse.ArgumentParser, intent_group: argparse._ActionsContainer,
+) -> None:
+    intent_group.add_argument(
         "--bridge-acquisition", metavar="NATIVE-ID|fresh",
         help="Bridge-owned unseeded launch; exact native resume or explicit fresh. "
         "Refuses a live mux and does not consume pending worktree seeds.",

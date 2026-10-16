@@ -57,6 +57,9 @@ def boundary(tmp_path, monkeypatch):
         "last_session_id": "native-original",
         "execution_leg_opaque": False, "session_backend_opaque": False,
         "bound_agent": None,
+    }, "launch": {
+        "ok": True, "worktree_id": entry.id, "work_dir": entry.path,
+        "resume_session": "native-original", "mux_verified": True,
     }}
 
     async def owner(_owner, _config, _resolver, args):
@@ -79,7 +82,7 @@ def boundary(tmp_path, monkeypatch):
     async def launch(_owner, _config, _resolver, args):
         calls.append(args)
         state["launched"] = True
-        return json.dumps({"ok": True, "worktree_id": entry.id})
+        return json.dumps(state["launch"])
 
     async def load(session_id, *, drain, allow_recreate, owner_native_resume):
         assert drain is False and allow_recreate is False
@@ -292,6 +295,67 @@ async def test_cold_cli_uses_exact_native_owner_admission_and_mux(boundary):
     boundary.manager.start_session.assert_not_called()
     boundary.manager.resume_session.assert_not_called()
     assert result.status == SessionStatus.STARTING
+
+
+@pytest.mark.asyncio
+async def test_cli_launch_accepts_exact_fresh_runtime_despite_owner_display_flag(boundary, monkeypatch):
+    async def launch(*_args):
+        assert boundary.db.register_live_session(
+            "native-original", machine="example", cwd=boundary.entry.path,
+            worktree_id="wt-example", repo="example-project", branch="worktree/example",
+            pid=123, role=None, now=time.time(),
+        ) == "live"
+        return json.dumps(boundary.state["launch"])
+
+    launched = AsyncMock(side_effect=launch)
+    monkeypatch.setattr(native_resume, "run_owner_operation", launched)
+    for _ in range(2):
+        result = await native_resume.resume_native_worktree("wt-example", boundary.request, "cli")
+        assert result.session_id == result.durable_session_id == "native-original"
+        assert result.read_only is False and result.pid == 123
+    launched.assert_awaited_once()
+    assert boundary.state["launched"] is False
+    assert not boundary.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    boundary.manager.start_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registration", ["absent", "stale", "foreign-worktree", "foreign-native"])
+async def test_cli_launch_does_not_accept_unproven_runtime(boundary, monkeypatch, registration):
+    async def launch(*_args):
+        if registration != "absent":
+            boundary.db.register_live_session(
+                "other-native" if registration == "foreign-native" else "native-original",
+                machine="example", cwd=boundary.entry.path,
+                worktree_id="other-worktree" if registration == "foreign-worktree" else "wt-example",
+                repo="example-project", branch="worktree/example", pid=123, role=None,
+                now=time.time() - (1000 if registration == "stale" else 0),
+            )
+        return json.dumps(boundary.state["launch"])
+
+    ticks = iter([0, 31])
+    monkeypatch.setattr(native_resume, "time", SimpleNamespace(
+        monotonic=lambda: next(ticks), time=time.time,
+    ))
+    monkeypatch.setattr(native_resume, "run_owner_operation", AsyncMock(side_effect=launch))
+    with pytest.raises(HTTPException) as refused:
+        await native_resume.resume_native_worktree("wt-example", boundary.request, "cli")
+    expected = "launch_gate_held" if registration == "foreign-native" else "cli_launch_unconfirmed"
+    assert refused.value.detail["reason"] == expected
+    assert boundary.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    boundary.manager.start_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", [
+    {"work_dir": "other"}, {"resume_session": "other-native"}, {"mux_verified": False},
+])
+async def test_cli_launch_requires_exact_owner_receipt(boundary, change):
+    boundary.state["launch"].update(change)
+    with pytest.raises(HTTPException) as refused:
+        await native_resume.resume_native_worktree("wt-example", boundary.request, "cli")
+    assert refused.value.detail["reason"] == "cli_launch_unconfirmed"
+    assert boundary.db.execute_read("SELECT * FROM acquisition_launch_gates")
 
 
 def test_import_is_atomic_and_not_automatically_recoverable(boundary):
