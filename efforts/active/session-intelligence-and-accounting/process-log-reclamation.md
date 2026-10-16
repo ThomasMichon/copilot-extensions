@@ -121,12 +121,13 @@ cloud acknowledgement.
   POSIX explicitly refuses retirement and has no demonstrated deletion boundary.
 - [ ] Add validated machine-local settings and an explicit required-target set
   without changing existing collection, snapshots or retention defaults.
-  Strict policy parsing and explicit target resolution are in the next source
-  slice; enabled runtime settings remain refused until orchestration exists.
-- [ ] Add typed per-revision readback results through the target abstraction;
+  Strict policy parsing and explicit target resolution landed in #7026;
+  enabled runtime settings remain refused until orchestration exists.
+- [x] Add typed per-revision readback results through the target abstraction;
   implement bounded supported transports and reject the rest explicitly.
-  The same slice adds full filesystem ZIP readback for local/OneDrive targets,
-  with unsupported results for SSH/SSH-tunnel/ingest and no cached authority.
+  #7026 supplies full filesystem ZIP readback for local/OneDrive targets,
+  unsupported results for SSH/SSH-tunnel/ingest and no cached authority.
+  Complete final-head CI and actual native Windows execution passed.
 - [ ] Wire post-publication all-target verification and policy-gated retirement
   under the existing lock, keeping dry-run and manual additive behavior intact.
 - [ ] Document actual supported behavior and land a plugin changefile with the

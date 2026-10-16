@@ -294,6 +294,32 @@ gates, revision revalidation and the retirement policy are not wired yet.
 Disabled defaults and existing additive snapshot/manual behavior are unchanged.
 Do not enable this reserved setting as an operational feature.
 
+### Exact-ZIP publication preparation
+
+`sync.log_archive_publication` supplies an internal publisher for one
+`LogArchiveRevision` to the already-resolved filesystem destinations. It copies
+only that revision's ZIP, never neighboring raw/gzip logs, other archives or
+session-state. Bounded streaming verifies both the complete compressed-byte copy
+and its single member. Source identity is rechecked around copying and
+publication; a protected source handle and pinned lexical ancestry remain held
+through the operation.
+
+Publication uses a kernel-owned no-replace claim. An existing ZIP is fully
+verified, not overwritten. The claim closes before independent fresh readback,
+so native Windows sharing restrictions cannot turn the publisher's own handle
+into a readback failure. Missing, offline, corrupt or unsupported destinations
+produce separate failure results without skipping later targets. POSIX source
+or target ancestor replacement cannot produce a successful verification for
+the replacement path. A failure after publication may leave additive ZIP
+evidence; the helper never deletes that copy to simulate rollback.
+
+Dry run performs source and existing-target verification without creating
+directories, claims or archives, or issuing durability writes. Missing evidence
+remains unverified. This helper is not called by scheduled sync or manual
+snapshotting yet and does not enable reclamation. The orchestration and
+retirement gates in the [reclamation contract](../../../efforts/active/session-intelligence-and-accounting/process-log-reclamation.md)
+remain open.
+
 ### Combined transfer health
 
 Filesystem `sync-meta.json` retains independently recoverable `sync_legs`

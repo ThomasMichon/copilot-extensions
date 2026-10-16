@@ -238,6 +238,50 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-16 - Exact-ZIP additional-target publication preparation
+- Added a bounded internal publisher for one content-addressed ZIP revision to
+  explicitly resolved filesystem targets. It reuses the pinned directory,
+  kernel-owned claim and full ZIP verifier; no mixed process-log or session-state
+  transfer is invoked. Existing archives are verified without replacement.
+- The publisher holds and revalidates the exact source ZIP, checks copied
+  compressed bytes and member content, closes its publication claim and then
+  requires fresh configured-target readback. Per-target failures remain visible;
+  later targets are still attempted. Dry run has no publication effects.
+- Synthetic coverage exercises two-target exact-only copying, idempotence,
+  missing/offline/unsupported/corrupt destinations, source mutation, entry and
+  ancestor swaps, no-replace races, post-publication corruption and durability
+  failures. Native Windows sharing and handle-release proof remains a required
+  CI execution gate, not a claim based on Linux skips.
+- This closes another preservation implementation seam, not the reclamation or
+  parent completion gate. Runtime-enabled reclamation remains refused.
+  Post-publication orchestration, final policy/root/producer revalidation and
+  separately authorized release-backed adoption remain outstanding.
+
+### 2026-10-16 - Target-set and full ZIP readback preparation merged
+- #7026 merged at `2026-10-16T21:13:41Z` as
+  `883623d68b5813ed8d6fa08c26cfd8f02fe9628f`, from final head
+  `e51f946af997413f92ed6a37f1951d657a2be95f`. Fresh Copilot approval
+  `5553659288` accepted the corrected implementation. The addressed ancestry
+  thread is resolved. Complete same-head CI `38965506680` and workflow guard
+  `38965507387` passed before the normal submitter merge.
+- Native archive job `117192789324` checked out a merge candidate containing
+  that exact head and executed the existing `source_roots` selection: 491
+  passed, 22 skipped. The complete bounded isolated Linux plugin suite at the
+  final head passed 1,393 tests with 85 skips; cleanup was verified.
+- Review caught two real readback defects. POSIX read-only verification now
+  revalidates every lexical ancestor edge against its held directory identity,
+  rather than accepting an archive in a renamed-away root. Real opened-member
+  truncation now yields a per-target EOF failure and still checks later targets;
+  the same classification preserves additive snapshot failure reporting.
+  Ordinary publication's pinned-original behavior is unchanged.
+- CI also caught target-module growth past its shrink-only ceiling. Resolution
+  moved into the focused readback module; no baseline was widened.
+- This completes the bounded typed-readback slice, not source reclamation.
+  Runtime enabled settings still fail explicitly. Exact-ZIP-only publication
+  to additional required targets, post-publication policy/revision checks and
+  scheduler integration are next. Both parent Plan and Validation Plan remain
+  open; no source retirement, configuration change or rollout occurred.
+
 ### 2026-10-16 - Explicit target-set and ZIP readback preparation
 - Added strict internal policy parsing with no implicit retention age or target
   inference. Complete target resolution reuses existing options and rejects
