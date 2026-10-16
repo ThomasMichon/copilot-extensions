@@ -74,6 +74,9 @@ redirects, malformed/oversized/truncated responses, daemon mismatch and expired
 absolute operation deadlines raise `VerificationError`; none means absence.
 The limited HTTP parser validates every chunk delimiter and the complete
 trailer terminator. Chunk extensions are unsupported and refuse explicitly.
+A single buffered reader preserves all unread bytes between requests; padding
+or unsolicited bytes cannot be discarded to reveal a later apparent response.
+The absolute deadline is rechecked after decoding and before an operation returns.
 This adapter spawns no child processes and requires no background daemon.
 
 `LocalDaemonAdmission` is a provider-trusted **configuration capability**, never

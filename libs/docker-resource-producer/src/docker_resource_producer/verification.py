@@ -71,17 +71,21 @@ class LocalDockerVerifier:
     def probe(self, identity: Identity) -> bool:
         """Prove current existence against the same admitted daemon connection."""
         with LocalDaemonSession(self.endpoint, self.admission, timeout=self.timeout) as session:
-            return self._probe(session, identity)
+            exists = self._probe(session, identity)
+            session._set_deadline()
+            return exists
 
     def find_reservation(self, token: str, creator: str) -> list[Identity]:
         """Inventory both resource kinds on one daemon; never attest quiescence."""
         birth_labels(token, creator, 1)
         with LocalDaemonSession(self.endpoint, self.admission, timeout=self.timeout) as session:
-            return [
+            identities = [
                 self._identity(session, kind, identifier, token, creator)
                 for kind in ("container", "volume")
                 for identifier in self._inventory(session, kind, token)
             ]
+            session._set_deadline()
+            return identities
 
     def remove(self, identity: Identity, *, authorized: bool = False) -> bool:
         """Remove an authorized exact container ID, then prove absence in-session."""
@@ -91,8 +95,10 @@ class LocalDockerVerifier:
             raise VerificationError("Docker has no birth-conditional volume deletion; automatic cleanup remains blocked")
         with LocalDaemonSession(self.endpoint, self.admission, timeout=self.timeout) as session:
             if not self._probe(session, identity):
+                session._set_deadline()
                 return False
             session.request("DELETE", f"/containers/{identity.resource_id}?force=1")
             if self._probe(session, identity):
                 raise VerificationError("Container removal did not establish absence")
+            session._set_deadline()
             return True

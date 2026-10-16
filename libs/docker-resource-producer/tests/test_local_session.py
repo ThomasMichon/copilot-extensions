@@ -80,6 +80,11 @@ class FixtureDaemon:
                         else:
                             result = self.resources[IDENTIFIER]
                         payload = json.dumps(result).encode()
+                        if self.behavior == "padding" and route == "/info":
+                            first = f"HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\n\r\n".encode() + payload
+                            connection.sendall(first + b"X" * (8192 - len(first))
+                                               + b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]")
+                            continue
                         if self.behavior == "mismatch" and route == "/info":
                             payload = b'{"ID":"daemon-b"}'
                         if route != "/info" and self.behavior in {
@@ -112,7 +117,10 @@ class FixtureDaemon:
                         else:
                             connection.sendall(f"HTTP/1.1 200 OK\r\nContent-Length: {len(payload)}\r\n\r\n".encode() + payload)
         except (OSError, KeyError, ValueError) as error:
-            if not self.stopping.is_set():
+            expected_rejection = self.behavior == "padding" and isinstance(
+                error, (BrokenPipeError, ConnectionResetError),
+            )
+            if not self.stopping.is_set() and not expected_rejection:
                 self.error = error
 
     def close(self) -> None:
@@ -182,6 +190,57 @@ def test_chunk_framing_failure_cannot_prove_absence(daemon: FixtureDaemon, behav
         verifier(daemon).probe(identity())
     assert daemon.accepts == 1
     assert IDENTIFIER in daemon.resources
+
+
+def test_read_ahead_padding_cannot_be_discarded_to_expose_fake_absence(daemon: FixtureDaemon) -> None:
+    daemon.behavior = "padding"
+    with pytest.raises(VerificationError):
+        verifier(daemon).probe(identity())
+    assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
+
+
+def test_expiry_during_json_decode_closes_before_return(daemon: FixtureDaemon, monkeypatch) -> None:
+    from docker_resource_producer import local_session
+    decode = local_session._json
+    host = "unix://" + str(daemon.path)
+    with LocalDaemonSession(Endpoint(host, "daemon-a"), LocalDaemonAdmission(host)) as session:
+        def expired_decode(raw: str):
+            result = decode(raw)
+            session.deadline = time.monotonic() - 1
+            return result
+        monkeypatch.setattr(local_session, "_json", expired_decode)
+        with pytest.raises(VerificationError):
+            session.request("GET", "/containers/json?all=1")
+        assert session.connection is None and session.reader is None
+    assert daemon.accepts == 1
+
+
+def test_expiry_after_delete_response_refuses_success(daemon: FixtureDaemon, monkeypatch) -> None:
+    from docker_resource_producer import local_session
+    read = local_session.read_response
+    host = "unix://" + str(daemon.path)
+    with LocalDaemonSession(Endpoint(host, "daemon-a"), LocalDaemonAdmission(host)) as session:
+        def expire_delete(source):
+            result = read(source)
+            if result[0] == 204:
+                session.deadline = time.monotonic() - 1
+            return result
+        monkeypatch.setattr(local_session, "read_response", expire_delete)
+        with pytest.raises(VerificationError):
+            session.request("DELETE", f"/containers/{IDENTIFIER}?force=1")
+        assert session.connection is None
+    assert daemon.accepts == 1
+
+
+def test_expiry_during_inventory_projection_cannot_return_absence(daemon: FixtureDaemon, monkeypatch) -> None:
+    client = verifier(daemon)
+    def expired_inventory(session, _kind):
+        session.deadline = time.monotonic() - 1
+        return []
+    monkeypatch.setattr(client, "_inventory", expired_inventory)
+    with pytest.raises(VerificationError):
+        client.probe(identity())
+    assert daemon.accepts == 1 and IDENTIFIER in daemon.resources
 
 
 def test_volume_search_warning_is_not_complete_absence(daemon: FixtureDaemon) -> None:

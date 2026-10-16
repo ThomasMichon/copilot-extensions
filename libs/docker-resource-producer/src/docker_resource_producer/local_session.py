@@ -69,6 +69,8 @@ class LocalDaemonSession:
         self.path = Path(urlsplit(admission.host).path)
         self.deadline = time.monotonic() + timeout
         self.connection: socket.socket | None = None
+        self.reader: io.BufferedReader | None = None
+        self.raw_reader: _DeadlineReader | None = None
         self.used = False
 
     def __enter__(self) -> LocalDaemonSession:
@@ -85,6 +87,8 @@ class LocalDaemonSession:
             connection.connect(str(self.path))
             if self._socket_identity() != before:
                 raise VerificationError("Daemon socket changed during connection admission")
+            self.raw_reader = _DeadlineReader(connection, self.deadline)
+            self.reader = io.BufferedReader(self.raw_reader)
             info = self.request("GET", "/info")
             if not isinstance(info, dict) or info.get("ID") != self.endpoint.daemon_id:
                 raise VerificationError("Connected daemon identity does not match the claim")
@@ -127,21 +131,30 @@ class LocalDaemonSession:
             assert self.connection is not None
             wire = f"{method} {target} HTTP/1.1\r\nHost: docker\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
             self.connection.sendall(wire.encode("ascii"))
-            with io.BufferedReader(_DeadlineReader(self.connection, self.deadline)) as reader:
-                status, body = read_response(reader)
+            if self.reader is None or self.raw_reader is None:
+                raise VerificationError("Daemon response stream is unavailable")
+            self.raw_reader.remaining = _MAX_WIRE
+            status, body = read_response(self.reader)
             if status not in {200, 204}:
                 raise VerificationError(f"Daemon request refused (HTTP {status})")
             if status == 204:
+                self._set_deadline()
                 return None
-            return _json(body.decode("utf-8", errors="strict"))
+            decoded = _json(body.decode("utf-8", errors="strict"))
+            self._set_deadline()
+            return decoded
         except (OSError, ValueError, UnicodeError, VerificationError) as error:
             self.close()
             raise VerificationError("Daemon session failed; no reconnect or absence verdict") from error
 
     def close(self) -> None:
         connection, self.connection = self.connection, None
+        reader, self.reader = self.reader, None
+        self.raw_reader = None
         if connection is not None:
             connection.close()
+        if reader is not None:
+            reader.close()
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
