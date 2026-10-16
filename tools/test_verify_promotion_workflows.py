@@ -291,10 +291,10 @@ def workflows():
     }
 
 
-def test_index_smoke_budget_covers_setup_and_cleanup_without_widening_other_plugins():
+def test_native_consumer_smoke_budgets_preserve_other_plugin_limits():
     smoke = workflows()["ci.yml"]["jobs"]["smoke"]
     assert smoke["timeout-minutes"] == (
-        "${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index') && 12 || 8 }}"
+        "${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}"
     )
     assert smoke["strategy"]["fail-fast"] is False
 

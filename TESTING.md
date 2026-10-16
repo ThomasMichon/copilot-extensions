@@ -42,6 +42,12 @@ prove deployment readiness. Existing ACP/client/API tests retain local/provider
 regression coverage; the new lane is bounded rather than an exhaustive fleet
 matrix.
 
+Bridge's CI smoke job retains the full contained suite and fresh independent
+peer processes. Its bounded job budget is 12 minutes (the same native-consumer
+exception as dispatch/index): an observed complete run exceeded the former
+eight-minute job limit during cleanup despite passing test steps. Other plugin
+budgets and the required aggregate gate are unchanged.
+
 Bridge's tolerant-wire-reader guard continues to cover every discovered peer
 model. Its only explicit local-configuration classifications are the immutable
 `RemoteAuth` and `RemoteAcpTarget` settings: unknown auth/transport configuration

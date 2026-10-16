@@ -45,11 +45,11 @@
     "ordinary_provider_instance_default": false
   },
   "captured_from": {
-    "commit": "5732b1ae4f7020fe87a351360c5fb1d7f5f34940",
+    "commit": "5456a1f8641ec691441b681c096e634ee40842c0",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 38,
     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-    "source_git_blob": "4aea88c2f6d9ba72c28d52854c263234f9e8c92a",
-    "source_sha256": "181c1d1e3202c824f71b56d1da37da328da947de43e3cb10194bc198d0465733"
+    "source_git_blob": "cbc8f6696694688c501c8fd0200d7321b6fd5ea5",
+    "source_sha256": "aee180c73f07ba573a74d52a1e6a926e182ac36e06d936a55b3b87c02b2ad24f"
   }
 }

@@ -132,7 +132,10 @@ opaque `decisionId`. Unassociated or historical request scope has no live answer
 authority.
 
 Every remote permission is manual, even when ordinary local tools use
-autoapproval. Answer permissions through the existing correlated permission
+autoapproval. Its event retains the native `tool_call` payload, including
+`rawInput`, content and locations, so an answer can inspect the exact action
+even when the server supplied no separate tool update. Answer permissions
+through the existing correlated permission
 path with the offered `request_id` and `option_id`:
 
 ```text
@@ -196,6 +199,8 @@ is permitted after an explicit pre-admission 401. Timeouts, disconnects, server
 errors and ambiguous acceptance are **not** retried. Redirects are disabled
 before credentials can reach a different destination. Remote RPC error text is
 sanitized, not incorporated into bridge errors/logs.
+Provider exceptions during 401 invalidation are bounded and sanitized as well;
+their messages and formatted traceback context are not exposed to callers.
 Malformed successful SDK results are likewise replaced by a sanitized typed
 failure before caller errors, event logs or turn-failure persistence.
 Asynchronous SDK notification diagnostics are also redacted inside the remote

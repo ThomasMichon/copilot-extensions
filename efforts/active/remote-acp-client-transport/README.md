@@ -177,6 +177,29 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Refresh privacy, actionable permissions and telemetry identity
+
+- Current review found a provider invalidation exception escaping the WS 401
+  handler, permission events omitting callback-only native action details and
+  learned ACP identity missing from telemetry.
+- Shared bounded refresh now sanitizes provider failures on HTTP and WS.
+  Permission events preserve the native tool payload (input, content and
+  locations); telemetry binds the validated remote ID before live/state events
+  on success and accepted-ID recovery.
+- Five focused regressions pass, including actual HTTP2/WSS provider-failure
+  traceback privacy and callback-only action details. Historical fixture
+  generations stay immutable; current-candidate provenance follows the commit.
+- Repeated CI cancellations are not accepted results. The actual latest
+  cancelled bridge job's steps completed without a failed step; required CI
+  still needs a complete successful run before any merge.
+- The provider annotation confirms the concrete cause: the job exceeded its
+  eight-minute maximum, including cleanup. Keep fresh independent peer
+  processes and full coverage; add bridge to the existing bounded 12-minute
+  native-consumer budget exception, without changing other plugin limits or
+  the required aggregate gate.
+- Complete focused remote/logging/ledger/independent-peer/legacy ACP selection:
+  134 passed. Contained CI/promotion workflow contracts: 62 passed.
+
 ### 2026-10-16 — Independent approval expiry and interrupted SSE readiness
 
 - A delayed review identified idle/background approval waits lacking their

@@ -1448,9 +1448,10 @@ jobs:
     needs: discover
     if: needs.discover.outputs.smoke != '[]' && needs.discover.outputs.smoke != ''
     runs-on: ubuntu-latest
-    # Index setup plus its passing split suites exceeded eight minutes;
-    # retain the ordinary bound for every other plugin.
-    timeout-minutes: ${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index') && 12 || 8 }}
+    # These consumers include setup and independent native/integration lanes.
+    # Bridge's real TLS HTTP2/WSS lane exceeded eight minutes including cleanup
+    # despite passing steps; retain fresh peer processes and a bounded 12m job.
+    timeout-minutes: ${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}
     strategy:
       fail-fast: false
       matrix:
