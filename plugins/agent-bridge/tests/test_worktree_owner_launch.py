@@ -23,10 +23,13 @@ from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionReq
 
 pytestmark = pytest.mark.contract("agent_bridge.acquisition.worktree_owner")
 PLUGIN = Path(__file__).resolve().parents[1]
+_NATIVE_WINDOWS = os.name == "nt"
 
 
 def deploy_installed_layout(own: Path, shell: str) -> None:
     """Run the installer's real deployment boundary, without service actions."""
+    if shell == "bash" and _NATIVE_WINDOWS:
+        pytest.skip("Bash installer requires a native POSIX test host")
     scripts = PLUGIN / "scripts"
     if shell == "bash":
         text = (scripts / "install.sh").read_text(encoding="utf-8")
@@ -63,6 +66,15 @@ def deploy_installed_layout(own: Path, shell: str) -> None:
         **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_NATIVE_WINDOWS", True)
+    launch = Mock()
+    monkeypatch.setattr(subprocess, "run", launch)
+    with pytest.raises(pytest.skip.Exception, match="native POSIX test host"):
+        deploy_installed_layout(tmp_path / "bridge", "bash")
+    launch.assert_not_called()
 
 
 @pytest.fixture(params=["bash", "powershell"])
