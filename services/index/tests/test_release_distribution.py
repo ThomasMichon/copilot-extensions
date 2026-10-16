@@ -50,10 +50,11 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
         )
         if source.name == "agent-index":
             core_build = build
-        if source.name == "agent-procutil":
+        if source.name in {"agent-index", "agent-procutil"}:
+            version = "0.10.11-dev1" if source.name == "agent-index" else "0.1.0-dev8"
             metadata = build / "pyproject.toml"
             metadata.write_text(re.sub(
-                r'^version\s*=\s*"[^"]+"', 'version = "0.1.0-dev8"',
+                r'^version\s*=\s*"[^"]+"', f'version = "{version}"',
                 metadata.read_text(encoding="utf-8"), count=1, flags=re.MULTILINE,
             ), encoding="utf-8")
         result = subprocess.run(
@@ -63,14 +64,13 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
         )
         assert result.returncode == 0, result.stdout + result.stderr
     commit = "a" * 40
-    with pytest.raises(ReleaseError, match="incompatible bundled requirement"):
+    with pytest.raises(ReleaseError, match="incompatible bundled requirement: agent-index"):
         build_descriptor(bundle, source_commit=commit)
     assert core_build is not None
     old_core = next(bundle.glob("agent_index-*.whl"))
     old_core.unlink()
     metadata = core_build / "pyproject.toml"
-    # dev deliberately freezes source versions; this temporary fixture models
-    # the release pipeline's core bump without editing any repository version.
+    # Pin both sides of the seam independently of dev or promoted source versions.
     metadata.write_text(re.sub(
         r'^version\s*=\s*"[^"]+"', 'version = "0.10.12-dev1"',
         metadata.read_text(encoding="utf-8"), count=1, flags=re.MULTILINE,
@@ -82,6 +82,7 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     descriptor = build_descriptor(bundle, source_commit=commit)
+    assert descriptor["core_version"] == "0.10.12.dev1"
     path = bundle / "release.json"
     path.write_text(json.dumps(descriptor), encoding="utf-8")
     assert verify_descriptor(path, expected_source_commit=commit) == descriptor

@@ -385,6 +385,28 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 
 ## Journal
 
+### 2026-10-16 - Immutable-release index fixture repair prepared
+- Normal promotion #6938 merged `6b2fa0ac2887a8fda669dfb8356e5c6083f6729d`
+  and published artifacts, but final immutable-main CI failed. This is not
+  qualified rollout readiness; no runtime update or deployment followed.
+- Under #6237/#6383, reserved only the real-wheel index-service fixture.
+  Both hosted platforms failed its implicit assumption that the repository Core
+  version is pre-seam. Promoted Core `0.10.33.dev1` is correctly compatible.
+- The fixture now explicitly builds temporary negative Core `0.10.11.dev1`
+  and positive `0.10.12.dev1` wheels, requires rejection specifically of the Core
+  dependency, and retains real native/fleet bundle verification. No repository
+  version, dependency floor, verifier, admission policy or deadline changes.
+- Native contained smoke: 479 passed, 3 reported skips. A second canonical
+  contained real-wheel execution supplied exact immutable-release metadata for
+  all six projects, observed Core `0.10.33-dev1` and service `0.1.2-dev1` before
+  fixture construction, and passed the actual negative/positive native/fleet
+  contract. It did not mutate source inputs, wheels after verification or a
+  deployed runtime. This adds no repeated native matrix to required CI.
+- Full first-machine clean-room and live deployment are not exercised by this
+  test-only repair; current-head hosted review/CI and the next actual materialized
+  candidate remain gates. Shared control, authority-corpus and other consumer
+  repairs retain their existing owners. The full Plan remains open.
+
 ### 2026-10-15 - Explicit fleet index image closure landed
 - #6871 merged at `9e0b58c9153fbf7c21d2c45fac243ef65635a5f0`,
   `2026-10-15T20:04:18Z`, after exact-head Copilot APPROVED with zero findings
