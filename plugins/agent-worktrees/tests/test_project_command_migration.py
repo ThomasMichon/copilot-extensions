@@ -1446,9 +1446,15 @@ def test_native_cmd_project_binstub_returns_installed_command_exit(
     assert inst.reconcile_binstubs()["blocked"] == []
     command = inst.local_bin() / "agent-worktrees.cmd"
     command.write_text(f"@echo off\n@echo installed:%*\n@exit /b {exit_code}\n", encoding="utf-8")
+    caller = inst.local_bin() / "caller.cmd"
+    caller.write_text(
+        '@echo off\nset "EXPAND_ME=must-not-expand"\nset "INPUT=%%EXPAND_ME%%"\n'
+        f'"{inst.local_bin() / "demo.cmd"}" status "two words" "%INPUT%"\n',
+        encoding="utf-8",
+    )
     result = subprocess.run(
-        [os.environ["ComSpec"], "/d", "/c", str(inst.local_bin() / "demo.cmd"), "status", "two words"],
+        [os.environ["ComSpec"], "/d", "/c", str(caller)],
         capture_output=True, text=True, timeout=15, **inst.no_window_kwargs(),
     )
     assert result.returncode == exit_code
-    assert result.stdout.strip() == 'installed:--project demo status "two words"'
+    assert result.stdout.strip() == 'installed:--project demo status "two words" "%EXPAND_ME%"'

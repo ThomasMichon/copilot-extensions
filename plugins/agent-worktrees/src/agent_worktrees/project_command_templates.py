@@ -73,7 +73,7 @@ def render(
                         "    exit $LASTEXITCODE"]
             ps1.append("}")
         cmd += [f"rem {comment}",
-                f'{"call " if installed else ""}"{cmd_path}" --project {project} %*', "exit /b %ERRORLEVEL%"]
+                f'"{cmd_path}" --project {project} %*', "exit /b %ERRORLEVEL%"]
         ps1 += [f"# {comment}",
                 f"& '{ps1_path}' --project '{p}' @args", "exit $LASTEXITCODE"]
         return {f"{project}.ps1": "\r\n".join(ps1), f"{project}.cmd": "\r\n".join(cmd)}

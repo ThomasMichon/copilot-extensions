@@ -2692,7 +2692,7 @@ function Deploy-Binstub {
 rem agent-worktrees project binstub
 set "PYTHONUTF8=1"
 set "AGENT_WORKTREES_LAUNCH_ID=$ProjectName-%RANDOM%-%RANDOM%"
-call "$userCmd" --project $ProjectName %*
+"$userCmd" --project $ProjectName %*
 exit /b %ERRORLEVEL%
 "@
     $dst = Join-Path $LocalBin "$ProjectName.cmd"
