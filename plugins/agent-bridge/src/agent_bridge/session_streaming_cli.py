@@ -425,7 +425,7 @@ def _cmd_read(args: argparse.Namespace) -> None:
             sys.exit(2)
         tail = getattr(args, "tail", None)
         payload = client.get_live_result_snapshot(
-            target, max_items=tail if tail is not None else getattr(args, "max_items", None),
+            represented["session_id"], max_items=tail if tail is not None else getattr(args, "max_items", None),
             max_text_chars=getattr(args, "max_text_chars", None),
         )
         message_id = getattr(args, "message_id", None)

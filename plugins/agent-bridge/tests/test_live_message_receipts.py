@@ -666,6 +666,7 @@ def test_live_read_uses_bounded_result_not_acp_cursor(monkeypatch, capsys, tail)
             return {"session_id": "live-1"}
 
         def get_live_result_snapshot(self, target, **kwargs):
+            assert target == "live-1"
             self.bounds = kwargs
             return {"identity": {"snapshot_session_id": "live-1"}, "state": {"liveness": "active"}}
 
@@ -686,6 +687,49 @@ def test_live_read_uses_bounded_result_not_acp_cursor(monkeypatch, capsys, tail)
     assert result["state"]["liveness"] == "active"
     assert result["message_receipt"]["stage"] == "sdk_accepted"
     assert client.bounds == {"max_items": tail, "max_text_chars": 256}
+
+
+@pytest.mark.parametrize("with_receipt", [False, True])
+def test_live_read_pins_snapshot_and_receipt_across_worktree_rollover(
+    api: TestClient, tmp_db: Database, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], with_receipt: bool,
+) -> None:
+    mid = _send(api)["message_id"]
+    client = BridgeClient("http://127.0.0.1:1", "test")
+    monkeypatch.setattr(client, "daemon_supports", lambda _version, **_kwargs: True)
+
+    def request(
+        method: str, path: str, *, params: dict[str, object] | None = None,
+        allow_retry: bool = True,
+    ) -> dict[str, object]:
+        assert not allow_retry
+        if path == "/health":
+            return {"protocol_version": LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION}
+        response = api.request(method, path, params=params)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        if path == "/api/v1/live-sessions/result-target":
+            assert payload["session_id"] == "live-1"
+            tmp_db.register_live_session(
+                "live-successor", machine=None, cwd=None, worktree_id="wt-1", repo=None,
+                branch=None, pid=None, role=None, now=time.time() + 1,
+            )
+            resolved = api.get("/api/v1/live-sessions/result-target", params={"handle": "wt-1"})
+            assert resolved.json()["session_id"] == "live-successor"
+        return payload
+
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
+    cli._cmd_read(argparse.Namespace(
+        session_id="wt-1", caller=None, json=True, message_id=mid if with_receipt else None,
+    ))
+    result = json.loads(capsys.readouterr().out)
+    assert result["identity"]["snapshot_session_id"] == "live-1"
+    if with_receipt:
+        assert result["message_receipt"]["session_id"] == "live-1"
+        assert result["message_receipt"]["message_id"] == mid
+    else:
+        assert "message_receipt" not in result
 
 
 @pytest.mark.parametrize("message_id", [None, 7])
