@@ -11,12 +11,13 @@ import time
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from docker_resource_producer import Endpoint, Identity, VerificationError, birth_labels
 from docker_resource_producer.local_session import LocalDaemonAdmission, LocalDaemonSession
+from docker_resource_producer.models import LABEL_TOKEN
 from docker_resource_producer.verification import LocalDockerVerifier
 
 TOKEN = "r" * 43
@@ -33,6 +34,8 @@ class FixtureDaemon:
         self.resources = {IDENTIFIER: {
             "Id": IDENTIFIER, "Created": CREATED, "Config": {"Labels": birth_labels(TOKEN, CREATOR, 1)},
         }}
+        self.volumes: dict[str, dict] = {}
+        self.failure_route: str | None = None
         self.behavior = ""
         self.warning: object = None
         self.connection: socket.socket | None = None
@@ -66,6 +69,9 @@ class FixtureDaemon:
                             pass
                         self.calls.append((method, target))
                         route = urlsplit(target).path
+                        if route == self.failure_route:
+                            connection.sendall(b"HTTP/1.1 500 Error\r\nContent-Length: 0\r\n\r\n")
+                            continue
                         if self.behavior == "stall" and route != "/info":
                             self.stopping.wait(0.2)
                             break
@@ -74,9 +80,9 @@ class FixtureDaemon:
                         if route == "/info":
                             result = {"ID": "daemon-a" if self.accepts == 1 else "daemon-b"}
                         elif route == "/containers/json":
-                            result = list(self.resources.values())
+                            result = self.inventory(target, "container")
                         elif route == "/volumes":
-                            result = {"Volumes": [], "Warnings": []}
+                            result = {"Volumes": self.inventory(target, "volume"), "Warnings": []}
                             if self.behavior == "custom-warning":
                                 result["Warnings"] = self.warning
                             elif self.behavior == "warning":
@@ -92,7 +98,10 @@ class FixtureDaemon:
                             connection.sendall(b"HTTP/1.1 204 No Content\r\n\r\n")
                             continue
                         else:
-                            result = self.resources[IDENTIFIER]
+                            result = (
+                                self.volumes[route.removeprefix("/volumes/")]
+                                if route.startswith("/volumes/") else self.resources[route.split("/")[2]]
+                            )
                             if self.behavior == "name-collision":
                                 self.resources.pop(IDENTIFIER)
                         payload = json.dumps(result).encode()
@@ -143,6 +152,18 @@ class FixtureDaemon:
             )
             if not self.stopping.is_set() and not expected_rejection:
                 self.error = error
+
+    def inventory(self, target: str, kind: str) -> list[dict]:
+        filters = json.loads(parse_qs(urlsplit(target).query).get("filters", ["{}"])[0])
+        records = self.resources if kind == "container" else self.volumes
+        result = []
+        for record in records.values():
+            labels = record.get("Config", {}).get("Labels", {}) if kind == "container" else record.get("Labels", {})
+            if all(labels.get(key) == value for key, value in (
+                expression.split("=", 1) for expression in filters.get("label", [])
+            )):
+                result.append(record)
+        return result
 
     def close(self) -> None:
         self.stopping.set()
@@ -211,6 +232,61 @@ def test_complete_empty_inventory_proves_absence_without_inspection(daemon: Fixt
     assert verifier(daemon).probe(identity()) is False
     assert daemon.accepts == 1
     assert daemon.calls == [("GET", "/info"), ("GET", "/containers/json?all=1")]
+
+
+def reservation_resources(daemon: FixtureDaemon) -> list[Identity]:
+    expected = [identity()]
+    for identifier, token, epoch in [("b" * 64, TOKEN, 2), ("c" * 64, "x" * 43, 1)]:
+        daemon.resources[identifier] = {
+            "Id": identifier, "Created": CREATED, "Config": {"Labels": birth_labels(token, CREATOR, epoch)},
+        }
+        if token == TOKEN:
+            expected.append(replace(identity(), resource_id=identifier, generation=epoch))
+    for name, token, epoch in [("volume-one", TOKEN, 3), ("volume-two", TOKEN, 4), ("other", "x" * 43, 1)]:
+        daemon.volumes[name] = {"Name": name, "CreatedAt": CREATED, "Labels": birth_labels(token, CREATOR, epoch)}
+        if token == TOKEN:
+            expected.append(Identity("volume", name, CREATED, "daemon-a", token, CREATOR, epoch))
+    return expected
+
+
+def test_reservation_recovery_filters_both_kinds_and_preserves_all_generations(daemon: FixtureDaemon) -> None:
+    expected = reservation_resources(daemon)
+    assert verifier(daemon).find_reservation(TOKEN, CREATOR) == expected
+    assert daemon.accepts == 1
+    inventories = [target for _method, target in daemon.calls if urlsplit(target).path in {
+        "/containers/json", "/volumes",
+    }]
+    assert len(inventories) == 2
+    for target in inventories:
+        assert json.loads(parse_qs(urlsplit(target).query)["filters"][0]) == {
+            "label": [f"{LABEL_TOKEN}={TOKEN}"],
+        }
+    assert len(daemon.calls) == 7
+
+
+def test_reservation_recovery_returns_empty_only_after_both_filtered_inventories(daemon: FixtureDaemon) -> None:
+    reservation_resources(daemon)
+    assert verifier(daemon).find_reservation("z" * 43, CREATOR) == []
+    assert daemon.accepts == 1
+    assert [urlsplit(target).path for _method, target in daemon.calls] == [
+        "/info", "/containers/json", "/volumes",
+    ]
+
+
+@pytest.mark.parametrize("failure_route", [f"/containers/{'b' * 64}/json", "/volumes", "/volumes/volume-two"])
+def test_reservation_recovery_never_returns_partial_coverage(
+    daemon: FixtureDaemon, failure_route: str,
+) -> None:
+    expected = reservation_resources(daemon)
+    daemon.failure_route = failure_route
+    with pytest.raises(VerificationError):
+        verifier(daemon).find_reservation(TOKEN, CREATOR)
+    assert daemon.accepts == 1
+    paths = [urlsplit(target).path for _method, target in daemon.calls]
+    assert f"/containers/{IDENTIFIER}/json" in paths
+    assert paths[-1] == failure_route
+    assert all(method == "GET" for method, _target in daemon.calls)
+    assert len(daemon.resources) == 3 and len(daemon.volumes) == 3 and len(expected) == 4
 
 
 def test_id_name_fallback_race_refuses_without_any_mutation(daemon: FixtureDaemon) -> None:
