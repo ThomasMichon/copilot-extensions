@@ -6,12 +6,14 @@ import json
 import os
 import shutil
 import sys
+from pathlib import Path
 
 import pytest
 
 from .test_installer_engine_adoption import (
     PLUGIN,
     PWSH,
+    _fake_uv,
     _function,
     _prelude,
     _run,
@@ -19,6 +21,16 @@ from .test_installer_engine_adoption import (
 )
 
 pytestmark = pytest.mark.timeout(60)
+
+
+def _powershell_functions(tmp_path):
+    for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
+                 "versioned_runtime_construction.py"):
+        shutil.copyfile(PLUGIN / "scripts" / name, tmp_path / name)
+    return _prelude("ps1") + "".join(_function("ps1", name) for name in (
+        "Test-CodespacesRuntime", "Invoke-VersionedSlotClean", "Assert-Uv",
+        "Deploy-Venv", "Deploy-Package",
+    ))
 
 
 @pytest.mark.parametrize("ext", [
@@ -79,15 +91,10 @@ _runtime_construction_finish
 """
         )
     else:
-        for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
-                     "versioned_runtime_construction.py"):
-            shutil.copyfile(PLUGIN / "scripts" / name, tmp_path / name)
+        uv = _fake_uv(tmp_path)
+        env["PATH"] = str(uv.parent) + os.pathsep + env["PATH"]
         script = (
-            _prelude(ext)
-            + "".join(_function(ext, name) for name in (
-                "Test-CodespacesRuntime", "Invoke-VersionedSlotClean",
-                "Deploy-Venv", "Deploy-Package",
-            ))
+            _powershell_functions(tmp_path)
             + f"""
 $InstallDir='{root}'
 $SrcVersion='1.2.3'
@@ -96,9 +103,12 @@ $VenvDir='{slot}'
 $VenvPython='{python}'
 $LinkDir=Join-Path $InstallDir '.venv'
 $env:OS='Test'
+$fixtureUv=Get-Command uv -CommandType Application | Select-Object -First 1
+if ($fixtureUv.Source -ne '{uv}') {{
+    throw "Fixture UV selection resolved $($fixtureUv.Source), expected private command {uv}"
+}}
 function Get-BootstrapPython {{ '{sys._base_executable}' }}
 function Get-PayloadHash {{ '{requested_hash}' }}
-function Assert-Uv {{ [Console]::Error.WriteLine('UV_ACQUISITION') }}
 function Invoke-UvVenvResilient {{ throw 'UNEXPECTED_VENV_CONSTRUCTION' }}
 function Install-PackageInto {{ throw 'UNEXPECTED_PACKAGE_INSTALL' }}
 function Stamp-BuildInfo {{ throw 'UNEXPECTED_BUILD_STAMP' }}
@@ -125,7 +135,54 @@ try {{
     assert "UNEXPECTED_VENV_CONSTRUCTION" not in output
     assert "UNEXPECTED_PACKAGE_INSTALL" not in output
     assert "UNEXPECTED_BUILD_STAMP" not in output
-    assert output.count("UV_ACQUISITION") == (
-        1 if ext == "ps1" and state != "unhealthy" else 0
-    ), output
+    assert "UV_ACQUISITION" not in output
+    assert not Path(env["TEST_UV_LOG"]).exists()
     assert [(path.read_bytes(), path.stat().st_mtime_ns) for path in protected] == before
+
+
+@pytest.mark.skipif(PWSH is None, reason="pwsh unavailable")
+def test_first_touch_requires_uv_after_live_construction_admission(tmp_path):
+    from .test_installer_engine_adoption import _env
+
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "1.2.3"
+    script = _powershell_functions(tmp_path) + f"""
+$InstallDir='{root}'
+$SrcVersion='1.2.3'
+$VersionedRuntime=$true
+$VenvDir='{slot}'
+$VenvPython=Join-Path $VenvDir 'Scripts/python.exe'
+$LinkDir=Join-Path $InstallDir '.venv'
+$env:OS='Test'
+function Get-BootstrapPython {{ '{sys._base_executable}' }}
+function Get-PayloadHash {{ '{'a' * 64}' }}
+function Assert-Uv {{
+    $owner=$script:RuntimeConstructionSession
+    if (-not $owner -or $owner.Reuse -or $owner.Process.HasExited) {{
+        throw 'UV acquisition preceded live construction admission'
+    }}
+    [Console]::Error.WriteLine('UV_ACQUISITION')
+    throw 'fixture UV acquisition failure'
+}}
+$expectedFailure=$false
+try {{
+    [void](Deploy-Venv)
+}} catch {{
+    if ($_.Exception.Message -ne 'fixture UV acquisition failure') {{ throw }}
+    $expectedFailure=$true
+}} finally {{
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {{
+        try {{ Stop-RuntimeConstruction }} catch {{
+            if ($_.Exception.Message -ne 'Runtime construction aborted; the owned incomplete candidate was reclaimed') {{
+                throw
+            }}
+        }}
+    }}
+}}
+if (-not $expectedFailure) {{ throw 'Missing required UV acquisition failure' }}
+"""
+    result = _run("ps1", script, tmp_path, _env(tmp_path))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (result.stdout + result.stderr).count("UV_ACQUISITION") == 1
+    assert not slot.exists()
+    assert not (root / "current-version").exists()

@@ -870,9 +870,9 @@ function Deploy-Venv {
         Write-ServiceErr "Completed runtime slot failed its module launch health gate (versions/$SrcVersion). Refusing an in-place rebuild; use distinct-generation repair or a new released version."
         return $false
     }
-    Assert-Uv
     [void](Invoke-VersionedSlotClean)
     if ($script:RuntimeConstructionReuse) { return $true }
+    Assert-Uv
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     # Prefer a SAC-trusted signed base Python via `--copies` so the venv

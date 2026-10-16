@@ -455,3 +455,26 @@ test-item and suite bounds remain in force.
 This verifies #6598's source-level reuse path without reimplementing it.
 Promoted-payload identity, full clean-room provisioning, live installed
 behavior and equivalent before/after update durations are still open.
+
+### Remove the measured PowerShell UV acquisition
+
+The follow-up moves only `Assert-Uv` below canonical slot admission and the
+admitted-reuse return in Codespaces `Deploy-Venv`. The preceding four-state
+baseline remains historical evidence: PowerShell's acquisition helper count
+changes from one to zero for healthy reuse, while Bash remains zero. Venv,
+package and stamp counts remain zero, and health/content/schema refusals
+retain their exact reasons and unchanged protected bytes/timestamps.
+
+The strengthened Windows fixture uses the actual `Assert-Uv`/`Ensure-Uv`
+functions with a private, explicitly selected fake UV executable. Its log
+must remain absent: even the otherwise-required `uv --version` process is
+avoided. A new first-touch fixture witnesses the real, live construction
+owner before UV acquisition, injects an acquisition failure, and verifies
+canonical abort plus candidate reclamation. It failed before the line move
+because acquisition preceded admission, then passed afterward.
+
+The final Windows selection passed 11 cases (10 opposite-shell skips),
+including all five existing construction retry/fallback modes. Native Linux
+parity passed 10 cases (11 unavailable-shell skips). No deadlines were raised.
+These establish work avoided and failure ordering, not a measured end-to-end
+time improvement or promoted installed proof.

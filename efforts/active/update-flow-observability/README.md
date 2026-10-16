@@ -132,6 +132,8 @@ matrix below are _(agent-recommended)_ implementation details.
 
 - [x] Verify existing final-integration deferral with native invocation counts
   and current/changed/first-touch aggregate ordering (#6933).
+- [x] Verify Codespaces source-level admitted reuse and health/content/schema
+  refusals through real native construction adapters (#6940).
 - [ ] Reconcile Bridge serving-version drift through the admitted runtime's
   existing cutover path rather than returning a misleading local-content
   no-op or rebuilding an already current slot (#6826).
@@ -221,8 +223,28 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-16 - Remove unnecessary UV acquisition on admitted reuse
+
+- Moved Codespaces PowerShell UV acquisition after canonical admission and
+  its healthy-reuse return, matching Bash without changing either safety gate.
+  The real acquisition helper now performs zero UV subprocesses on reuse.
+- Added a real first-touch construction-owner witness, required acquisition
+  failure and canonical abort/reclamation regression. It failed before the
+  fix and passes afterward. Current/refused runtime bytes remain unchanged.
+- Final native Windows selection: 11 passed, 10 platform skips; native Linux
+  parity: 10 passed, 11 platform skips. Original bounds remain unchanged.
+  Regenerated only the owning native encoding digest; install-contract,
+  synchronization, lint and diff checks pass.
+- Independently confirmed the cooperating Bridge source slice #6877 merged
+  as `62b5c976a385a904e53b53d55f78ea8b62c14450`. Its rollout and receiving
+  coherence remain separate from source completion. No installed update ran.
+
 ### 2026-10-15 - Exercise Codespaces reuse through canonical admission
 
+- Landed #6940 as `298fbd475b2a265e91b3e0d3ff31aedf2da2343e` after
+  current-head approval with no open findings and successful CI. Addressed
+  review by qualifying fresh-venv abort evidence as Bash-only and recording
+  the required documentation-impact statement.
 - Added isolated native coverage of the existing #6598 venv/package reuse
   path using a real Python venv, real module-launch health and the actual
   attached canonical construction/retention adapter. Healthy reuse avoids

@@ -132,6 +132,14 @@ relay-minted Azure bearer tokens into named env vars, and
 tokens represent. Ordinary user principals export the short alias (UPN local
 part); other principal types keep the reported identity string.
 
+### Installer reuse
+
+On both platforms, a healthy completed runtime with matching canonical payload
+admission skips venv construction, package installation and UV acquisition.
+Health failures, conflicting payloads and malformed completion evidence still
+refuse reuse. Fresh construction acquires UV only after canonical admission;
+an acquisition failure remains an error and the incomplete candidate is reclaimed.
+
 ### Repo provenance & the active-plugin config seam
 
 A repo's venue policy does **not** have to live in an adopted control-plane repo.
