@@ -1647,7 +1647,9 @@ a selected project; ordinary updates still require their normal project context.
 Repository-isolated engine Git calls continue to discard arbitrary
 inherited Git selectors, including inherited updater snapshots, and receive only
 the updater's explicitly scoped auth overlay. Anchor preflight uses that same
-isolation. Auth-managed anchors suppress legacy injected headers even when
+isolation. Every anchor operation is isolated even for local/SSH sources or when
+auth preflight is disabled; isolation alone does not suppress the legacy account
+policy. Auth-managed anchors suppress legacy injected headers even when
 configured credentials passed, so acquisition cannot override the report's
 credential authority.
 The Manager's own updater remains independently usable: a missing/older engine

@@ -74,7 +74,9 @@ def _symlink_to_or_skip(link, target, *, target_is_directory: bool = False) -> N
         pytest.skip(f"symlink creation unavailable: {exc}")
 
 
-def _run_update(rest, monkeypatch, *, su_action="already-current", su_kwargs=None):
+def _run_update(
+    rest, monkeypatch, *, su_action="already-current", su_kwargs=None, engine_rc=0,
+):
     from worktree_manager.self_install import SelfUpdateResult
     calls = {}
     monkeypatch.setattr(
@@ -89,7 +91,7 @@ def _run_update(rest, monkeypatch, *, su_action="already-current", su_kwargs=Non
 
     def fake_passthrough(project, args, **kw):
         calls["passthrough"] = {"project": project, "args": args}
-        return 0
+        return engine_rc
 
     monkeypatch.setattr(ec, "run_engine_passthrough", fake_passthrough)
     buf = io.StringIO()
@@ -132,6 +134,20 @@ def test_update_reports_self_update_and_continues(monkeypatch):
 def test_update_auth_required_is_required_and_keeps_exit_four(monkeypatch):
     rc, calls, _ = _run_update([], monkeypatch, su_action="auth_required")
     assert rc == 4
+    assert "passthrough" in calls
+
+
+@pytest.mark.parametrize(("engine_rc", "expected"), [
+    (0, 4), (1, 1), (2, 2), (3, 4), (4, 4), (5, 4), (6, 6), (130, 130),
+])
+def test_update_auth_exit_precedence_without_telemetry(monkeypatch, engine_rc, expected):
+    from worktree_manager import update_events
+
+    monkeypatch.setattr(update_events, "_ut", None)
+    rc, calls, _ = _run_update(
+        [], monkeypatch, su_action="auth_required", engine_rc=engine_rc,
+    )
+    assert rc == expected
     assert "passthrough" in calls
 
 

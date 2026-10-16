@@ -84,6 +84,58 @@ def test_clean_behind_anchor_is_fast_forwarded(anchor_repo, monkeypatch):
     assert (anchor / "next.txt").exists()
 
 
+@pytest.mark.parametrize("auth_mode", ["on", "off"])
+def test_non_https_anchor_sync_never_uses_callers_repository(
+    anchor_repo, monkeypatch, auth_mode,
+):
+    from agent_worktrees import update_auth_context as auth_context
+    from agent_worktrees import update_auth_sources
+
+    seed, anchor = anchor_repo
+    caller = anchor.parent / "caller"
+    _git("clone", str(anchor.parent / "origin.git"), str(caller), cwd=anchor.parent)
+    _git("checkout", "-b", "feature", cwd=caller)
+    caller_head = git_ops.git("rev-parse", "HEAD", cwd=caller, isolated_repository=True).stdout
+    _advance_origin(seed)
+    _install_config(monkeypatch, anchor)
+    monkeypatch.setattr(cfg, "active_project", lambda: "anchor")
+    monkeypatch.setattr(update_auth_sources, "marketplaces", lambda _: [])
+    monkeypatch.setenv("CE_UPDATE_AUTH", auth_mode)
+    monkeypatch.setenv("GIT_DIR", str(caller / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(caller))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(caller / ".git" / "index"))
+
+    with auth_context.session() as session:
+        if session is not None:
+            session.prepare(None, include_anchors=True)
+            assert session.anchor_reports == {}, "local remotes have no HTTPS auth report"
+        m._fast_forward_project_anchors()
+
+    assert git_ops.git("rev-parse", "HEAD", cwd=caller, isolated_repository=True).stdout == caller_head
+    assert git_ops.git(
+        "branch", "--show-current", cwd=caller, isolated_repository=True,
+    ).stdout.strip() == "feature"
+    assert not (caller / "next.txt").exists()
+    assert (anchor / "next.txt").exists(), "the intended anchor must still be fast-forwarded"
+
+
+def test_repository_scope_without_auth_preserves_legacy_account_policy(monkeypatch, tmp_path):
+    from agent_worktrees import update_auth_context as auth_context
+
+    monkeypatch.setenv("CE_UPDATE_AUTH", "off")
+    monkeypatch.setattr(git_ops, "_remote_url", lambda *a, **k: "https://example.test/team/repo")
+    seen = []
+    monkeypatch.setattr(
+        git_ops, "_auth_config_args_for_url",
+        lambda url: seen.append(url) or ["legacy-auth-policy-fixture"],
+    )
+    with auth_context.session():
+        with auth_context.repository_scope(tmp_path):
+            assert not auth_context.managed_repository()
+            assert git_ops._auth_config_args("origin", cwd=tmp_path) == ["legacy-auth-policy-fixture"]
+    assert seen == ["https://example.test/team/repo"]
+
+
 def test_up_to_date_anchor_is_left_alone(anchor_repo, monkeypatch):
     _seed, anchor = anchor_repo
     _install_config(monkeypatch, anchor)

@@ -22,6 +22,9 @@ _repository: contextvars.ContextVar[auth.RunOverlay | None] = contextvars.Contex
 _managed: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "update_auth_managed", default=False
 )
+_repository_scoped: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "update_repository_scoped", default=False
+)
 
 
 def mode() -> str:
@@ -156,6 +159,7 @@ def anchor_failure(anchor: str, error: str) -> None:
 
 @contextlib.contextmanager
 def repository_scope(anchor: Path):
+    """Isolate anchor operations independently of HTTPS auth management."""
     value = _current.get()
     overlay = None
     managed = False
@@ -164,11 +168,13 @@ def repository_scope(anchor: Path):
         managed = anchor in value.anchor_reports
     token = _repository.set(overlay)
     managed_token = _managed.set(managed)
+    scope_token = _repository_scoped.set(True)
     try:
         yield
     finally:
         _repository.reset(token)
         _managed.reset(managed_token)
+        _repository_scoped.reset(scope_token)
 
 
 def managed_repository() -> bool:
@@ -179,7 +185,7 @@ def repository_environment(env: Mapping[str, str]) -> dict[str, str]:
     from . import git_ops
 
     overlay = _repository.get()
-    if managed_repository():
+    if _repository_scoped.get() or managed_repository():
         env = git_ops.repository_identity_env(dict(env))
         # An inherited snapshot is untrusted command configuration too; restoring
         # it would undo the isolation that just removed its counted entries.
