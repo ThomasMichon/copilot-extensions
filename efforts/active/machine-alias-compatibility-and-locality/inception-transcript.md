@@ -83,6 +83,25 @@ Blank attribution-only update comments are tracked separately by #6815.
 The operator explicitly retained worktree deployment as the first priority.
 That separate request does not expand this effort's completion gate.
 
+## 2026-10-16 - Installed launch and guest naming
+
+> Launch worked. Looks into those issues you filed and help drive fixes
+
+> We need there to be a "default" WSL and have the distro which contains our
+> worktrees be that default one. But I guess sure, we can qualify WSL with a
+> distro. I just don't want to have to make yet-another suffix.
+>
+> Come to think of it: if we needed to, we could name the distro "WSL" and
+> follow a clear `<host>-<guest>` naming convention. So if we had a permanent
+> VM named "foo" on [the host], we'd address as "[host]-foo". Does that seem
+> reasonable?
+
+The coordinator recommended retaining a stable logical guest address while
+mapping it explicitly to the actual distribution. A distribution rename is
+optional; no rename or host-default change was performed. The recommendation
+that default changes must not silently retarget existing worktrees is
+agent-originated and is separately identified in the proposal.
+
 ## See also
 
 - [Canonical effort](README.md)

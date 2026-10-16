@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees/README.md` (durable repository/worktree identity); `visions/agent-fabric/README.md` (shared identity authority)
 - **Umbrella issue:** #5674
-- **Related issues:** #5972 · #6170 · #6692 · #6739
+- **Related issues:** #5972 · #6170 · #6692 · #6739 · #6945
 
 ## Guiding Intent
 
@@ -30,6 +30,7 @@ example, a source commit, or a merged individual pull request.
 | Windows validation | Native configuration, payload execution and installed launch/resume proof | Adopting host's configured native transport |
 | WSL validation | Guest configuration, historical records and installed launch/resume proof | Adopting host's configured guest transport |
 | Runtime readiness owner | Empty-mux current-roster and liveness prerequisite | Managed source `grimy-cylinder` |
+| Guest installation identity repair | Bounded #6945 proposal, shared identity repair and entry-path acceptance | Managed source `tinkling-toolbox` |
 
 ## Coordination
 
@@ -45,6 +46,10 @@ example, a source commit, or a merged individual pull request.
   prerequisite, not its Dispatch, SSH, Index or Logger slices.
 - **Separate work:** Attribution-only blank update comments are tracked by
   #6815 and explicitly deferred until this repair is deployed.
+- **Containing rollout follow-up:** The #6945 owner takes only the declared
+  Phase 3b slice; the original repair, release qualification and wider
+  transport-convergence owners retain their responsibilities. The independent
+  #6947 installer and #6948 preview repairs do not become new ownership here.
 
 ## Context
 
@@ -76,6 +81,14 @@ preferred name differ.
 The operator explicitly requested the effort retroactively and approved this
 slug. Public-safe request excerpts, with identifiers redacted but technical
 constraints retained, are in [inception-transcript.md](inception-transcript.md).
+
+**2026-10-16 continuation:** the operator confirmed a real launch after the
+released compatibility repair, then requested fixes for the discovered
+follow-ups. The designated worktree distro should be the host's default WSL.
+Guest addresses should follow a compact host/guest convention without another
+distribution suffix. Renaming the actual distro to match a logical guest name
+was suggested as an option, not ordered. The exact public-safe request is
+preserved in the request record.
 
 ## Plan
 
@@ -129,6 +142,19 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
 - [ ] Install the released repair through the unified update flow in both
   adopting environments; verify the selected running versions.
 
+### Phase 3b - Entry-path-independent guest installation identity
+- [ ] Review the [#6945 guest-identity proposal](guest-execution-identity.md)
+  before introducing new registration or ownership behavior.
+- [ ] Establish one authoritative guest identity across direct, SSH and
+  supervised entry paths, preserving independent installation and execution
+  spaces; do not derive the caller from an incumbent ownership record.
+- [ ] Represent the designated/default WSL selection and compact host/guest
+  addressing through existing identity owners, without adding suffix chains
+  or a competing topology registry.
+- [ ] Pass the proposal's same-guest, foreign-guest, default-drift and
+  cross-runner validation, then land, qualify, release and perform only
+  authorized installation/default-selection changes.
+
 ### Phase 4 - Installed acceptance and closure
 - [ ] Enumerate all registered projects and existing Windows/WSL worktrees;
   report removed checkouts separately from identity-resolution failures.
@@ -158,6 +184,8 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
   safety, documentation-impact review and required provider checks.
 - [ ] Verify released and installed behavior in both environments, preserving
   queued prompts, live sessions, historical strings and unrelated records.
+- [ ] Satisfy the [guest-identity validation matrix](guest-execution-identity.md#validation-plan)
+  before declaring the #6945 containing rollout gap closed.
 
 ## Proposal
 
@@ -172,6 +200,26 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-16 - Installed compatibility succeeds; guest identity follow-up proposed
+- The operator confirmed a successful real launch after the authorized
+  Worktrees 1.24.68-dev1 and Manager 0.6.33-dev1 rollout. The historical
+  record's machine label was preserved while the launch selected its guest
+  execution environment.
+- The supported doctor report/apply/re-report flow covered eight adopted
+  project/environment registries. It repaired stale lifecycle and reciprocal
+  metadata without session garbage collection or checkout removal.
+- The updater exposed #6945: the same guest has a distribution identity
+  through a direct WSL entry but lacks it through SSH. The installation
+  primitive reads the missing variable as ordinary POSIX, then rejects the
+  incumbent completed lifecycle owner. The canonical source fingerprint,
+  profile and runtime namespace agree; no owner was reset or copied.
+- This amendment captures the default-WSL and compact host/guest direction
+  for reviewed implementation. The explicit registration mechanism and
+  default-drift safeguards in the linked proposal are agent recommendations,
+  not a claim that code or OS settings already changed.
+- Existing materialized-main qualification gates and original source owners
+  remain intact. #6947 and #6948 retain separate bounded repairs.
 
 ### 2026-10-16 - Authorized bootstrap merged; containing release remains open
 - The retained recovery owner landed workflow-only #6867 as
