@@ -164,7 +164,7 @@ timestamp is not proof that the provider metadata was refreshed.
 
 ### Phase 5 - Validation, publication, and adoption
 
-- [ ] Add focused tests for arithmetic, source precedence, stale/unavailable
+- [x] Add focused tests for arithmetic, source precedence, stale/unavailable
   adapters, empty provider reports, reset boundaries, config precedence,
   injection size, and routing composition.
 - [ ] Validate Bash and PowerShell paths plus clean-room installation when
@@ -268,6 +268,33 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-14 - Personal provider-report acquisition merged
+
+- PR #6678 merged as `6e319fbb5a4b0c40a35cb441004b2e51df7e159e`
+  after exact-head Copilot approval with zero findings and all three named
+  required checks passing. Closed Phase 2's personal report acquisition slice.
+- The adapter uses a caller-owned authenticated transport, verifies the
+  selected login before the report read, and requires an explicit reporting
+  month. Response, row, quantity, precision, and total-deadline bounds preserve
+  explicit failures without credential acquisition or automatic retries.
+- Report quantities remain distinct from billed currency and current budget
+  entitlement. Personal billing excludes organization-managed licenses; no
+  observation time or authoritative reset is invented. The inert budget
+  reading withholds all numeric values even when report facts are available.
+- The full bounded Linux suite passed 372 cases with eleven explicit skips.
+  Final review-correction coverage passed all 65 report cases with verified
+  cleanup. Corrections enforce size bounds before every status branch, preserve
+  the ambiguity of rate-limited/forbidden 403 responses, and reject unsupported
+  year syntax before network access.
+- Re-read the Plan and Validation Plan after merge. The effort remains Active:
+  requesting-account proof, legacy raw-reset reconciliation, remaining
+  cross-platform validation, release, and authorized rollout are still open.
+- Next: Phase 6's identity/reset boundary. The public SDK offers credential-free
+  session authentication status, but its public quota projection does not expose
+  raw legacy account reset metadata. Do not obtain that metadata by reading an
+  internal credential-bearing authentication union; a safe host projection or
+  an explicitly tracked unsupported boundary is required.
 
 ### 2026-10-14 - Optional routing composition merged; acquisition next
 

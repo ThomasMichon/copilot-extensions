@@ -42,7 +42,10 @@ See [Configuration](docs/configuration.md) and
 The [session quota reader](docs/session-quota.md) adds a bounded helper over an
 existing Copilot SDK session and a credential-filtered offline capture command.
 It preserves requesting-session attribution and labels cached compatibility
-freshness unknown. Opt-in [provider evidence](docs/provider-quota.md) evaluates
+freshness unknown. Optional credential-free account matching brackets the
+quota read with session authentication status without inspecting credentials
+or claiming an atomic account/quota binding.
+Opt-in [provider evidence](docs/provider-quota.md) evaluates
 one provider's observation, units, business state, and raw reset separately.
 Qualified incumbent readings reuse posture arithmetic for sustainable pace.
 Compatible monthly usage adds a labeled
