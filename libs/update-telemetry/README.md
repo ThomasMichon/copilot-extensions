@@ -116,6 +116,27 @@ After that command returns, the relay drains bytes already written without
 waiting for EOF from detached service descendants. Parsed JSON commands,
 binary/private protocols and interactive passthroughs must not use this adapter.
 
+### Shell maintenance adapter
+
+`python -m update_telemetry.shell` reuses `HumanOperation` for a native shell
+that cannot provide portable UTC and monotonic clocks itself (notably Bash
+3.2). It is one bounded child per maintenance phase, not a service or updater.
+The shell retains command execution, environment, stdin, exit handling and
+fresh planning. It sends NUL-delimited record triples through a private
+temporary spool; records are not JSON/protocol stdout or durable update events.
+The renderer acknowledges startup and each action's live clock before native
+execution, streams diagnostics only to the setup log, and echoes selected
+status/completion records to stderr only for an interactive launch.
+
+`HumanLineBuffer` shares the existing native relay's credential-continuation
+handling; ordinary lines remain live while credential prefixes wait for their
+continuation. An end record completes the corresponding action, and a finish
+record drains the phase without waiting for inherited descriptors in detached
+descendants. A known warning/failure prevents a misleading clean phase summary.
+The shell owns bounded startup/shutdown and cleanup; the renderer also exits
+when its launch parent disappears. Renderer failures report an explicit error
+and never replace the native command's exit or launch-continuation policy.
+
 ### Native producer admission
 
 Captured PowerShell installers opt in through generated

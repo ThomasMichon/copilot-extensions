@@ -41,6 +41,116 @@ FIXTURES = LIB / "fixtures"
 ENV_KEYS = (ut.ENV_RUN_ID, ut.ENV_EVENTS, ut.ENV_OWNER)
 
 
+@pytest.mark.parametrize("interactive", [False, True])
+def test_shell_progress_shares_clocks_sinks_and_continuation_redaction(interactive):
+    import io
+    from datetime import datetime, timezone
+
+    from update_telemetry.shell import ShellProgress
+
+    log = io.StringIO()
+    terminal = io.StringIO()
+    wall = [datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)]
+    clock = [10.0]
+    flow = ShellProgress(
+        log, terminal, interactive=interactive,
+        wall=lambda: wall[0], monotonic=lambda: clock[0],
+    )
+    secret = "-".join(("synthetic", "shell", "credential"))
+    with flow.root:
+        flow.record("status", "INFO", "planning")
+        flow.record("begin", "1", "reconcile/pass-1/example")
+        clock[0] = 12.0
+        wall[0] = wall[0].replace(hour=11)
+        flow.record("log", "INFO", "".join(("Bea", "rer")))
+        assert secret not in log.getvalue()
+        flow.record("log", "INFO", secret)
+        flow.record("log", "INFO", "first\n\nlast")
+        canonical = "[01:02:03.004Z] child done ready [duration 1.0s]"
+        flow.record("log", "INFO", canonical)
+        clock[0] = 13.5
+        flow.record("end", "failed", "exit 7; continuing")
+        assert flow.record("finish", "", "") is False
+    lines = log.getvalue().splitlines()
+    assert secret not in log.getvalue() + terminal.getvalue()
+    assert canonical in lines
+    assert lines.count(canonical) == 1
+    assert "[11:00:00.000Z] launch/reconcile/pass-1/example failed exit 7; continuing [duration 3.5s]" in lines
+    assert lines[-1] == (
+        "[11:00:00.000Z] launch warning maintenance finished with warnings; launch continues [duration 3.5s]"
+    )
+    assert all(line.count("[elapsed ") + line.count("[duration ") == 1 for line in lines)
+    if interactive:
+        assert terminal.getvalue()
+        assert all(line in lines for line in terminal.getvalue().splitlines())
+        assert "first" not in terminal.getvalue(), "child diagnostics stay in the setup log"
+    else:
+        assert terminal.getvalue() == ""
+
+
+@pytest.mark.parametrize("records", [
+    [("unknown", "", "")],
+    [("end", "done", "")],
+    [("begin", "1", "one"), ("begin", "2", "two")],
+    [("begin", "1", "one"), ("finish", "", "")],
+])
+def test_shell_progress_rejects_invalid_phase_transitions(records):
+    import io
+
+    from update_telemetry.shell import ShellProgress
+
+    flow = ShellProgress(io.StringIO(), io.StringIO())
+    with flow.root:
+        try:
+            with pytest.raises(ValueError):
+                for record in records:
+                    flow.record(*record)
+        finally:
+            if flow.action is not None:
+                error = ValueError("synthetic invalid phase")
+                flow.action.__exit__(ValueError, error, None)
+
+
+def test_shell_progress_cli_uses_one_process_and_rejects_parent_loss(tmp_path):
+    events = tmp_path / "events"
+    ready = tmp_path / "ready"
+    log = tmp_path / "setup.log"
+    records = [
+        ("status", "INFO", "preparing"),
+        ("begin", "1", "reconcile/example"),
+        ("log", "INFO", "x" * 70000),
+        ("log", "INFO", "non-ascii " + "".join(map(chr, (0xe9, 0x3bb, 0x4e2d)))),
+        ("end", "done", "exit 0"),
+        ("finish", "", ""),
+    ]
+    events.write_bytes(b"".join(
+        field.encode("utf-8") + b"\0" for record in records for field in record
+    ))
+    command = [
+        getattr(sys, "_base_executable", sys.executable), "-m", "update_telemetry.shell",
+        "--events", str(events), "--ready", str(ready),
+        "--log", str(log), "--parent", str(os.getpid()), "--interactive", "0",
+    ]
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    environment = dict(os.environ, PYTHONPATH=str(LIB / "src"))
+    result = subprocess.run(command, env=environment, capture_output=True, timeout=10, **flags)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == result.stderr == b""
+    assert ready.read_text() == "1\n"
+    rendered = log.read_text(encoding="utf-8")
+    assert "x" * 70000 in rendered
+    assert records[3][2] in rendered
+    assert "done exit 0 [duration " in rendered
+
+    log.unlink()
+    command[command.index("--parent") + 1] = "-1"
+    lost = subprocess.run(command, env=environment, capture_output=True, timeout=10, **flags)
+    assert lost.returncode == 1
+    assert lost.stdout == b""
+    assert b"parent exited" in lost.stderr
+    assert "failed RuntimeError:" in log.read_text(encoding="utf-8")
+
+
 @pytest.mark.guard
 def test_human_operation_clocks_nesting_and_outcomes():
     import io

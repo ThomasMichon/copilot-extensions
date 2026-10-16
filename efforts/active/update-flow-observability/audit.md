@@ -273,6 +273,32 @@ input and retained diagnostics.
 
 ## Existing output contracts
 
+### Native maintenance renderer cost (isolated source fixture)
+
+The native presentation slice compares the old `setup_log` from the
+pre-slice source with its bounded shared-renderer replacement. Each trial
+logs the same 256 synthetic messages from Bash into an isolated local log,
+on the same checkout and environment. There is no installer, network,
+package reconstruction or service activity in this fixture. Three
+alternating before/after trials include renderer startup and shutdown:
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Diagnostic messages preserved | 256 | 256 |
+| Added phase-boundary lines | 0 | 2 |
+| Per-message `date` processes | 256 | 0 |
+| Phase formatter processes | 0 | 1 |
+| Median fixture duration | 3.784 s | 1.252 s |
+
+The individual before durations were 3.647, 3.946 and 3.784 seconds;
+after durations were 1.672, 1.059 and 1.252 seconds. This proves removal
+of repeated formatting subprocesses and a lower cost in this fixture,
+not an end-to-end updater speedup. The remaining phase startup, clock-start
+acknowledgments, private spool and shutdown have a real cost; do not
+extrapolate these measurements to a quiet or network-bound update.
+Runtime rebuild/cutover operation counts and promoted installed behavior
+still need their separate scenario proofs.
+
 - `libs/update-telemetry/src/update_telemetry/run.py` already separates UTC
   event timestamps and monotonic run durations, redacts sensitive fields and
   owns the update event lifecycle. Its event/status JSON is not a terminal

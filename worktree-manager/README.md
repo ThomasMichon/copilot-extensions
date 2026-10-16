@@ -71,14 +71,32 @@ treated as confirmed drift.
 Normal shell launch maintenance reports each reconciliation action's start,
 process exit code and completed duration. Failures (including commands that
 cannot start) are explicitly reported as continuing: maintenance remains
-best-effort, not a launch-wide abort policy. PowerShell uses a Stopwatch;
-Bash uses its native elapsed-seconds counter with whole-second resolution,
-including on Bash 3.2. These durations measure the containing action, not
-individual child lines or a verified serving-state postcondition. Child output
+best-effort, not a launch-wide abort policy. PowerShell uses a Stopwatch and
+native UTC formatting. Bash, including Bash 3.2, uses one launch-owned
+`update_telemetry.shell` renderer during maintenance, not the wall-derived
+`SECONDS` variable. It acknowledges each reconciliation scope before its
+command starts, providing the shared formatter's UTC and monotonic clocks
+without a Python or `date` process per line. These durations measure the
+containing action, not individual child lines or a verified serving-state
+postcondition. Child output
 continues streaming to the setup log; interactive action summaries use the
 existing launch-status gate, leaving quiet/protocol stdout unchanged.
 Each pass still obtains a fresh plan and re-resolves the runtime afterward;
 an exit of zero does not replace the second reconciliation pass.
+
+The native maintenance sinks share one physical-line envelope with the
+Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a
+completed action's `[duration Ns]`. Canonical nested envelopes are retained,
+not wrapped in another timestamp. The Bash renderer reads a private temporary
+spool using shell-built-in record writes; it has no update, service or process
+retirement authority. Normal completion drains and waits for it, then removes
+the spool before Copilot starts. Startup and shutdown waits are bounded;
+parent loss ends the renderer. A missing/failed renderer warns explicitly and
+uses unavailable timing labels rather than invented durations. Failure
+diagnostics remain in the named private spool instead of being discarded.
+Early/late Bash launcher diagnostics outside maintenance, inherited bootstrap
+child streams and detached installer output retain their existing behavior;
+these are not evidence of standalone installer presentation convergence.
 
 New and Resume wait for the engine to finish repository synchronization,
 prompt staging and instruction projection rather than imposing a fixed
