@@ -3353,7 +3353,7 @@ def test_worktree_discovery_crawl_is_single_flight() -> None:
 
     calls = {"n": 0}
 
-    async def _slow_crawl_agent(name, config, res, *, classify=True):
+    async def _slow_crawl_agent(name, config, res, *, epoch=None, classify=True):
         calls["n"] += 1
         await asyncio.sleep(0.2)  # simulate a slow / stuck `list`
         return []
@@ -3390,7 +3390,7 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
     resolver.agents = {"local": agent_cfg}
     cache._resolver = resolver
 
-    async def _crawl_agent(name, config, res, *, classify=True):
+    async def _crawl_agent(name, config, res, *, epoch=None, classify=True):
         return []
 
     async def _run() -> None:
@@ -3423,7 +3423,7 @@ def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
 
     seen_classify: list[bool] = []
 
-    async def _fake_crawl_agent(name, config, res, *, classify=True):
+    async def _fake_crawl_agent(name, config, res, *, epoch=None, classify=True):
         seen_classify.append(classify)
         return []
 
@@ -3456,7 +3456,7 @@ def test_stop_cancels_classify_wrapper_but_retains_its_refresh_holder() -> None:
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def _hanging_crawl_agent(name, config, res, *, classify=True):
+    async def _hanging_crawl_agent(name, config, res, *, epoch=None, classify=True):
         if classify:
             started.set()
             await release.wait()

@@ -234,7 +234,7 @@ The token is generated on first run and stored in `~/.agent-bridge/auth.yaml`.
 
 ### Worktree discovery
 
-`GET /api/v1/worktrees?render=true` (HTTP protocol 36) reads Agent Bridge's
+`GET /api/v1/worktrees?render=true` (HTTP protocol 37) reads Agent Bridge's
 published in-memory projection of Worktree Manager's existing list/DB/cache
 owner. It does not run a foreground fleet crawl, SSH, Git, session-history
 scan, or mux probe. Cold and stale reads schedule one owned refresh and return
@@ -275,9 +275,13 @@ becomes mandatory and no new registry, persistent store or resident is added.
 
 `BridgeClient.list_worktrees_for_render()` and `refresh_worktrees()` gate the
 controls on `daemon_supports(WORKTREE_RENDER_CACHE_PROTOCOL_VERSION)`. Against
-an older daemon they send only the prior plain request, label missing
-freshness/completeness unknown and do not promise prompt rendering or live
-refresh. External rendering consumers must adopt this versioned opt-in;
+an older daemon, including protocol 36's provider-creation-only capability,
+they send only the prior plain request, label missing freshness/completeness
+unknown and do not promise prompt rendering or live refresh.
+Each native read carries its holder's
+captured source epoch into capability-verdict fences; a resolver replacement
+before a child starts cannot cache a retired source's option rejection.
+External rendering consumers must adopt this versioned opt-in;
 their deployment is not implied by the server capability.
 
 ### Session Management

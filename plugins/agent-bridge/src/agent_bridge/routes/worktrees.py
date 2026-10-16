@@ -289,7 +289,7 @@ class WorktreeDiscoveryCache:
             if cfg.project and cfg.worktree_discovery
         ]
         results = await asyncio.gather(
-            *(self._crawl_agent(name, cfg, resolver, classify=classify, **({"fresh": True} if fresh else {}))
+            *(self._crawl_agent(name, cfg, resolver, epoch=epoch, classify=classify, **({"fresh": True} if fresh else {}))
               for name, cfg in eligible),
             return_exceptions=True,
         )
@@ -323,6 +323,7 @@ class WorktreeDiscoveryCache:
         config: AgentConfig,
         resolver: AgentResolver,
         *,
+        epoch: int | None = None,
         classify: bool = True,
         fresh: bool = False,
     ) -> list[_WorktreeEntry]:
@@ -334,7 +335,8 @@ class WorktreeDiscoveryCache:
         longer classify budget.
         """
         project = config.project
-        epoch = self._refresh.epoch
+        if epoch is None:
+            epoch = self._refresh.epoch
         if not project:
             return []
         if fresh and agent_name in self._fresh_unsupported:

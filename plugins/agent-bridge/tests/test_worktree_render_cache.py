@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Coroutine
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
@@ -61,7 +63,7 @@ async def test_real_route_cold_render_under_two_seconds(monkeypatch):
     started = asyncio.Event()
     calls = []
 
-    async def read(name, cfg, res, *, classify=True, fresh=False):
+    async def read(name, cfg, res, *, epoch=None, classify=True, fresh=False):
         calls.append(classify)
         started.set()
         await blocked.wait()
@@ -227,7 +229,7 @@ async def test_provider_swap_before_scheduled_holder_starts_warms_replacement(mo
     cache._resolver = resolver("old")
     calls = []
 
-    async def read(name, cfg, res, *, classify=True, fresh=False):
+    async def read(name, cfg, res, *, epoch=None, classify=True, fresh=False):
         calls.append(name)
         return [entry(name, name)]
 
@@ -292,7 +294,7 @@ async def test_single_replacement_render_warms_after_retired_holder_without_over
     calls = []
     active = 0
 
-    async def read(name, cfg, res, *, classify=True, fresh=False):
+    async def read(name, cfg, res, *, epoch=None, classify=True, fresh=False):
         nonlocal active
         active += 1
         assert active == 1
@@ -501,21 +503,21 @@ async def test_native_source_budgets_and_optional_classify_fallback_unchanged(mo
 
 
 @pytest.mark.guard
-@pytest.mark.parametrize("version", [0, 35, 36])
+@pytest.mark.parametrize("version", [0, 35, 36, 37])
 @pytest.mark.parametrize("live", [False, True])
 def test_client_version_gate_and_unknown_legacy_metadata(version, live):
     client = BridgeClient(base_url="http://test", token="example")
     client._daemon_proto = (version, 1)
     request = MagicMock(return_value={
         "groups": {"local": []},
-        **({"discovery": {"version": 1, "completeness": "complete"}} if version >= 36 else {}),
+        **({"discovery": {"version": 1, "completeness": "complete"}} if version >= 37 else {}),
     })
     client._request = request
     result = client.refresh_worktrees() if live else client.list_worktrees_for_render()
     assert request.call_args.kwargs["params"] == (
-        {"refresh" if live else "render": "true"} if version >= 36 else None
+        {"refresh" if live else "render": "true"} if version >= 37 else None
     )
-    if version < 36:
+    if version < 37:
         assert result["discovery"]["freshness"] == "unknown"
         assert result["discovery"]["completeness"] == "unknown"
         assert result["discovery"]["render_latency_contract"] is False
@@ -530,7 +532,7 @@ def test_client_version_gate_and_unknown_legacy_metadata(version, live):
 ])
 def test_client_unknown_metadata_generation_is_not_current_evidence(metadata):
     client = BridgeClient(base_url="http://test", token="example")
-    client._daemon_proto = (36, 1)
+    client._daemon_proto = (37, 1)
     client._request = MagicMock(return_value={"groups": {}, "discovery": metadata})
     result = client.list_worktrees_for_render()
     assert result["discovery"]["freshness"] == "unknown"
@@ -566,7 +568,7 @@ async def test_live_refresh_queues_once_behind_cached_holder_without_overlap(mon
     calls = []
     active = 0
 
-    async def source(name, cfg, res, *, classify=True, fresh=False):
+    async def source(name, cfg, res, *, epoch=None, classify=True, fresh=False):
         nonlocal active
         active += 1
         assert active == 1
@@ -632,7 +634,7 @@ async def test_shutdown_retains_cache_holder_and_queued_live_wait_until_completi
     started = asyncio.Event()
     calls = []
 
-    async def source(name, cfg, res, *, classify=True, fresh=False):
+    async def source(name, cfg, res, *, epoch=None, classify=True, fresh=False):
         calls.append(fresh)
         started.set()
         await release.wait()
@@ -685,3 +687,44 @@ async def test_retired_source_option_verdict_cannot_poison_replacement(monkeypat
     assert calls == (["old", "old"] if rejected == "--classify" else ["old"])
     assert (await cache.refresh_live())["outcome"] == "complete"
     assert cache.get_all()["local"][0].id == "new"
+
+
+@pytest.mark.guard
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rejected", ["--fresh", "--classify"])
+async def test_resolver_swap_before_child_start_preserves_holder_epoch(
+    monkeypatch: pytest.MonkeyPatch, rejected: str,
+) -> None:
+    cache = wt.WorktreeDiscoveryCache()
+    cache._resolver = resolver("local")
+    cache._resolver.agents["local"].project = "old"
+    replacement = resolver("local")
+    replacement.agents["local"].project = "new"
+    original = cache._crawl_agent
+    calls: list[str] = []
+
+    async def source(
+        project: str, args: list[str], *, timeout: float | None = None,
+    ) -> tuple[str | None, str]:
+        calls.append(project)
+        if project == "old" and len(calls) == 1:
+            return None, f"unrecognized arguments: {rejected}"
+        return json.dumps({"worktrees": [{"id": project}]}), ""
+
+    def swap_before_start(
+        *args: Any, **kwargs: Any,
+    ) -> Coroutine[Any, Any, list[wt._WorktreeEntry]]:
+        read = original(*args, **kwargs)
+        cache._resolver = replacement
+        cache._sync_sources(replacement)
+        return read
+
+    monkeypatch.setattr(wt, "_run_local_ex", source)
+    monkeypatch.setattr(cache, "_crawl_agent", swap_before_start)
+    assert (await cache.refresh_live())["outcome"] == "superseded"
+    assert "local" not in cache._fresh_unsupported
+    assert "local" not in cache._classify_unsupported
+    assert calls == (["old", "old"] if rejected == "--classify" else ["old"])
+    assert (await cache.refresh_live())["outcome"] == "complete"
+    assert cache.get_all()["local"][0].id == "new"
+    await cache.stop()
