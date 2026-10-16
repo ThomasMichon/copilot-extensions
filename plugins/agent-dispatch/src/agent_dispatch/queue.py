@@ -105,6 +105,7 @@ from .queue_routing_assignments import RoutingAssignmentMixin
 from .queue_schema_migrations import run_queue_schema_migrations
 from .queue_schedule_registry import ScheduleRegistrationMixin
 from .queue_spawn_rearm import SpawnRearmMixin
+from .queue_spawn_deferral import SpawnDeferralMixin
 from .queue_spawn_conclusion import SpawnConclusionMixin
 from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existing call sites/tests
     SpawnReservationMixin,
@@ -141,6 +142,7 @@ class TaskQueue(
     ScheduleRegistrationMixin,
     RoutingAssignmentMixin,
     SpawnReservationMixin,
+    SpawnDeferralMixin,
     SpawnConclusionMixin,
     SpawnRearmMixin,
     ProducerFenceMixin,

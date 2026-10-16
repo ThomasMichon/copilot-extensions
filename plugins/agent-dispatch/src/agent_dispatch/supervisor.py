@@ -122,6 +122,7 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
     _conclusion_state,
     _hold_pending_cleanup,
 )
+from .supervisor_identity import RestrictedStartupMixin
 
 log = logging.getLogger("agent-dispatch.supervisor")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
@@ -145,7 +146,7 @@ _MIN_RESERVING_TIMEOUT_SECONDS = 600
 class _ReservationsUnavailable(Exception):
     """The coordinator couldn't be reached to list reservations."""
 
-class Supervisor:
+class Supervisor(RestrictedStartupMixin):
     """Reserve -> spawn -> record, with terminal-state reconciliation.
 
     ``max_concurrent`` caps in-flight spawns. ``max_attempts`` bounds failed spawn
@@ -3001,36 +3002,6 @@ class Supervisor:
             except DispatchError:
                 pass
         return held
-
-    def _reconcile_restricted_start(self, reservation: dict, task: dict) -> int:
-        selected = getattr(self.spawn_fn, "restricted_bridge_for", None)
-        if (
-            reservation.get("reserved_by") != self.supervisor_id
-            or reservation.get("release_requested")
-            or not callable(selected) or not selected(task)
-        ):
-            return 0
-        prepared = self._prepare_spawn_task(task, reservation)
-        ok, handle = self.spawn_fn(prepared)
-        if not ok:
-            if handle.get("deferred"):
-                try:
-                    self.client.defer_spawn(
-                        reservation["key"], detail=handle.get("error"),
-                        expected_generation=handle.get("expected_generation"),
-                    )
-                except DispatchError:
-                    log.exception("could not defer unclaimed restricted startup %s", reservation["key"])
-                    return 0
-                return 1
-            log.error("restricted startup %s retained: %s", reservation["key"], handle.get("error"))
-            return 0
-        try:
-            self.client.record_spawn(reservation["key"], session_handle=handle["session"])
-        except DispatchError:
-            log.exception("could not publish retained restricted startup %s", reservation["key"])
-            return 0
-        return 1
 
     def renew_restricted_grants(self) -> int:
         from .supervisor_identity import renew_restricted_grants
