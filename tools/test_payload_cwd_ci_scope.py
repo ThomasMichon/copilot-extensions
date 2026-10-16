@@ -75,6 +75,7 @@ def test_existing_native_selector_collects_phase_watchdog_contracts(tmp_path, in
         "cutover_cannot_extend_past_the_hard_cap",
         "native_phase_writer_publishes_an_atomic_receipt",
         "powershell_smoke_phase_failure_cannot_report_success",
+        "index_engine_actions_extend_for_startup",
     ):
         assert contract in result.stdout, f"native selector omitted {contract}\n{result.stdout}"
 

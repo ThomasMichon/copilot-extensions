@@ -2032,6 +2032,7 @@ function Restart-EngineDaemon {
     # is the ONE place a restart is intended -- the explicit engine-runtime update
     # path, decoupled from the service `update` (which must never bounce the engine).
     if ($NoService) { Write-Skip 'Engine daemon restart skipped (-NoService)'; return }
+    Enter-InstallPhase -Name cutover
     # If the operator opted into the advanced task tier, bounce the task; otherwise
     # restart the detached engine user-mode (NO scheduled task, NO elevation).
     if (Get-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue) {
@@ -2501,6 +2502,7 @@ function Ensure-EngineRunning {
     # engine with the preserved engine interpreter (resolved from the home).
     $managePy = Get-ActiveSlotPython
     if (-not (Test-Path $managePy)) { Write-Warn 'Index runtime not installed -- the engine is not started'; return }
+    Enter-InstallPhase -Name cutover
     Write-EngineFiles
     # As in Ensure-ServiceRunning, 'Continue' is scoped to the body.
     $code = Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{ AGENT_INDEX_ENGINE_HOME = $EngineHome } -Body {
