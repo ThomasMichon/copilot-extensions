@@ -100,6 +100,28 @@ function Get-InstallWatchdogDeadline {
     return [pscustomobject]@{ Deadline = [long]$deadline; Phase = $phase }
 }
 
+function Stop-InstallWatchdogTree {
+    param([Diagnostics.Process]$Child, [long]$ExpectedStartTimeTicks)
+
+    if ($Child.HasExited) { return $false }
+    # Retain the native process object through PID-based tree termination.
+    [void]$Child.Handle
+    if ($Child.StartTime.ToUniversalTime().Ticks -ne $ExpectedStartTimeTicks) {
+        throw 'Watchdog target identity mismatch; refusing tree termination.'
+    }
+    if ($Child.HasExited) { return $false }
+    try { & taskkill.exe /PID $Child.Id /T /F 2>&1 | Out-Null } catch {
+        [Console]::Error.WriteLine("Watchdog tree termination failed: $_")
+    }
+    if (-not $Child.HasExited) {
+        # The retained Process instance, not an unbound PID, owns this fallback.
+        try { $Child.Kill() } catch [InvalidOperationException] {
+            if (-not $Child.HasExited) { throw }
+        }
+    }
+    return $true
+}
+
 function Wait-InstallWatchdog {
     param(
         [Diagnostics.Process]$Child, $Budget, [long]$StartedAt,
@@ -110,6 +132,9 @@ function Wait-InstallWatchdog {
         $Child.WaitForExit()
         return $Child.ExitCode
     }
+    if ($Child.HasExited) { return $Child.ExitCode }
+    [void]$Child.Handle
+    $expectedStartTimeTicks = $Child.StartTime.ToUniversalTime().Ticks
     $invalidReported = $false
     while (-not $Child.HasExited) {
         $state = Get-InstallWatchdogDeadline -BuildSec $Budget.BuildSec `
@@ -120,15 +145,21 @@ function Wait-InstallWatchdog {
         }
         $remaining = $state.Deadline - [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         if ($remaining -le 0) {
-            try { & taskkill.exe /PID $Child.Id /T /F 2>&1 | Out-Null } catch {
-                [Console]::Error.WriteLine("Watchdog tree termination failed: $_")
+            $termination = 'requested'
+            try {
+                if (-not (Stop-InstallWatchdogTree -Child $Child `
+                    -ExpectedStartTimeTicks $expectedStartTimeTicks)) {
+                    return $Child.ExitCode
+                }
+            } catch {
+                [Console]::Error.WriteLine("Watchdog tree termination refused or failed: $_")
+                $termination = 'failed'
             }
-            Stop-Process -Id $Child.Id -Force -ErrorAction SilentlyContinue
             $message = (
                 '[{0}] WATCHDOG-KILL {1}: phase={2}, build={3}s, cutover={4}s ' +
-                '(child pid {5}); terminating tree. Stage: {6}'
+                '(child pid {5}); tree termination={7}. Stage: {6}'
             ) -f ([DateTimeOffset]::UtcNow.ToString('s') + 'Z'), $Name, $state.Phase,
-                $Budget.BuildSec, $Budget.CutoverSec, $Child.Id, $Stage
+                $Budget.BuildSec, $Budget.CutoverSec, $Child.Id, $Stage, $termination
             [Console]::Error.WriteLine($message)
             try {
                 [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($LogPath))
