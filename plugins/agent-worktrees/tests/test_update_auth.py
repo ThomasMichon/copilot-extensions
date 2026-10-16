@@ -831,6 +831,35 @@ def test_registered_siblings_keep_their_own_account_overrides(monkeypatch):
     assert [item.expected_account for item in report.results] == ["account-one", "account-two"]
 
 
+@pytest.mark.parametrize("remote_form", ["https", "ssh", "scp"])
+def test_same_slug_on_different_hosts_uses_its_own_registered_account(monkeypatch, remote_form):
+    from agent_worktrees import repos
+
+    enterprise = {
+        "https": "https://enterprise.test/team/repo.git",
+        "ssh": "ssh://git@enterprise.test/team/repo.git",
+        "scp": "git@enterprise.test:team/repo.git",
+    }[remote_form]
+    registry = repos.ReposRegistry(repos={
+        "public": repos.RepoEntry(
+            name="public", remote="https://github.com/team/repo.git", account="public-account",
+        ),
+        "enterprise": repos.RepoEntry(
+            name="enterprise", remote=enterprise, account="enterprise-account",
+        ),
+    })
+    monkeypatch.setattr(repos, "read_registry", lambda: registry)
+    selected = [
+        auth.source("public", "https://github.com/team/repo"),
+        auth.source("enterprise", "https://enterprise.test/team/repo"),
+        auth.source("unregistered", "https://unrelated.test/team/repo"),
+    ]
+    report = auth.report(selected, env={}, runner=Probe(gh=False))
+    assert [item.expected_account for item in report.results] == [
+        "public-account", "enterprise-account", None,
+    ]
+
+
 def test_managed_anchor_does_not_inject_legacy_header_even_without_fallback(monkeypatch, tmp_path):
     item = auth.source(
         "anchor:test", "https://github.com/team/repo", purpose="anchor", cwd=tmp_path

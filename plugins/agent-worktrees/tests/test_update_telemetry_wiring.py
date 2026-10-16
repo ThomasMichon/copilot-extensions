@@ -534,6 +534,42 @@ def test_failed_step_keeps_legacy_failure_exit(wired, monkeypatch, _update_home,
     assert "update/engine done exit 0" not in captured.err
 
 
+@pytest.mark.parametrize("mixed", [False, True])
+def test_required_auth_exit_does_not_depend_on_optional_telemetry(wired, monkeypatch, mixed):
+    from agent_worktrees import update_auth as auth, update_auth_sources as sources
+
+    monkeypatch.setattr(update_events, "_ut", None)
+    engine = auth.source(
+        "marketplace:copilot-extensions", "https://github.com/team/engine",
+    )
+    private = auth.source("marketplace:private", "https://github.com/team/private")
+    monkeypatch.setattr(sources, "marketplaces", lambda _: [engine, private])
+
+    def report(items):
+        return auth.AuthReport([
+            auth.SourceAuth(
+                item, [], status="anonymous" if mixed and item.id == engine.id else "auth_required",
+            )
+            for item in items
+        ])
+
+    def registered(targets):
+        update_events.record("payload_refresh", "required-other", "plugin update failed")
+        return False
+
+    monkeypatch.setattr(auth, "report", report)
+    monkeypatch.setattr(m, "_update_registered_plugins", registered)
+    assert m.cmd_update(_args()) == (1 if mixed else 4)
+    assert update_events._run is None
+    monkeypatch.setattr(
+        auth, "report",
+        lambda items: auth.AuthReport([
+            auth.SourceAuth(item, [], status="anonymous") for item in items
+        ]),
+    )
+    assert m.cmd_update(_args()) == 1
+
+
 @pytest.mark.parametrize("failure", ["engine-exit", "engine-timeout", "engine-os", "registered"])
 def test_required_acquisition_failure_precedes_all_runtime_mutation(
     wired, monkeypatch, _update_home, failure,

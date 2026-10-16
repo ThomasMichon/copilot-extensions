@@ -322,7 +322,6 @@ def report(
     from . import git_ops, repos
 
     environment = original_environment(os.environ if env is None else env)
-    account_for = account_for or repos.account_for_github_slug
     results = []
     for src in sources:
         started = time.monotonic()
@@ -341,7 +340,10 @@ def report(
         if _probe(item, probe_env, True, runner) == "ok":
             item.visibility, item.status = "public", "anonymous"
         else:
-            item.expected_account = account_for(f"{src.owner}/{src.repo}")
+            item.expected_account = (
+                account_for(f"{src.owner}/{src.repo}") if account_for is not None
+                else repos.account_for_remote(src.url)
+            )
             item.as_configured = _probe(item, probe_env, False, runner)
             if item.as_configured == "ok":
                 item.visibility, item.status = "private", "ok"

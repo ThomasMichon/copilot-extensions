@@ -41,6 +41,7 @@ import yaml
 from agent_procutil import no_window_kwargs
 
 from . import bare_anchor_sync, git_ops, output, registry_paths
+from .repo_accounts import account_for_remote as account_for_remote
 from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
 # ---------------------------------------------------------------------------

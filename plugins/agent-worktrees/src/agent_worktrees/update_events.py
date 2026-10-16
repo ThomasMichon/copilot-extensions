@@ -4,7 +4,7 @@ The update keeps its own status strings; this module classifies them into the
 shared outcome vocabulary, records them as target events, and maps the final
 result onto the shared exit-code table. Without the library (or on any
 telemetry error) every function degrades to a no-op that preserves the legacy
-return value.
+return value, except that auth-only required failures retain their defined exit 4.
 """
 
 from __future__ import annotations
@@ -22,11 +22,13 @@ except ImportError:  # pragma: no cover - a runtime built before the library exi
 _run = None
 _human_phase = None
 _human_phase_failed = False
+_required_failures: set[str] = set()
 
 
 def start(proc: str = "engine") -> None:
     """Create (owner) or join (participant) the update run for this process."""
     global _run
+    _required_failures.clear()
     if _ut is not None:
         _run = _ut.Run.from_env_or_new(proc)
 
@@ -156,6 +158,7 @@ def record(phase: str, component: str, status: str, *, required: bool = True,
         text.startswith(("OK", "SKIPPED")) or text == "payload-only"
     ):
         _human_phase_failed = True
+        _required_failures.add("auth" if text == "auth_required" else "other")
     if _run is None:
         return
     try:
@@ -179,6 +182,9 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
     global _run
     _close_human_phase(exc)
     run, _run = _run, None
+    if exc is None and rc == 1 and _required_failures == {"auth"}:
+        rc = 4
+    _required_failures.clear()
     if run is None:
         return rc
     try:
