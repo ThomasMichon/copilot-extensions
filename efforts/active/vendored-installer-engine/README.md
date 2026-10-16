@@ -578,6 +578,24 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-16 — Diagnostic foundation and ownership/session proposal merged
+
+- PR #6625 merged to `dev` as
+  `fd07892b8f23e5f5263cac1538347922eff76c54` at 01:06 Pacific.
+  The final head `f0de56d529f3a66d5b582b3283990b294a061cec` received a
+  current Balanced approval with no open findings. The source workspace is
+  reconciled to that squash; the implementation remains diagnostic-only.
+- The merged proposal preserves one authoritative claims ledger and retained
+  named volumes, with explicit admitted-session and derived ownership-view
+  implementation gates. No separate registry, generic settlement bypass or
+  automatic name-based volume deletion was introduced.
+- **Next source slice:** implement the direct-local session adapter without
+  reconnect or subprocess ownership, then the provider and read-only ownership
+  views before integrated producer enablement. Unsupported transport/platform
+  routes remain unavailable rather than inheriting CLI snapshot authority.
+  Docker lifecycle, live authorization and the parent Plan/Validation gates
+  remain open. No resource, service or runtime rollout occurred.
+
 ### 2026-10-14 — Registry-rooted Docker ownership continuation
 
 - Operator direction, verbatim:

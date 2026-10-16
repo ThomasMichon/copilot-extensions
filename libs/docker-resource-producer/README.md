@@ -1,9 +1,10 @@
-# Disposable Docker identity and diagnostic foundation
+# Disposable Docker identity and local verification
 
 This dependency-free source library records explicit Docker transport and
-expected birth identity and provides clearly non-authoritative CLI diagnostics.
+expected birth identity, provides non-authoritative CLI diagnostics, and supports
+separately admitted direct-local daemon verification.
 It does not install plugins, bootstrap authentication, allocate resources, keep
-an ownership ledger, assert allocation quiescence, or authorize cleanup.
+an ownership ledger, assert allocation quiescence, or grant cleanup permission.
 The existing worktree claims ledger remains the sole ownership authority.
 
 `DockerClient.pin()` resolves CLI context/host/TLS settings once. Subsequent
@@ -43,7 +44,7 @@ generations. Both return `DiagnosticObservation` values with
 Calendar validation normalizes fractional precision for Python 3.10 without
 changing the original nanosecond birth-identity string.
 
-**Authoritative proof and all automatic removal are unavailable.** Separate CLI
+**CLI snapshots cannot authorize proof or removal.** Separate CLI
 connections can observe daemon A, inventory on B and A again, reporting an
 observational absence even though A still owns the resource. Before/after checks
 do not bind those reads to one daemon. `probe()`, `find_reservation()` and
@@ -61,9 +62,40 @@ owns provider/ledger integration, producer allocation, lost-fence quiescence,
 cleanup strategy and live acceptance. Its
 [daemon-session refinement](../../efforts/active/vendored-installer-engine/temporary-container-obligations.md#registry-rooted-ownership-and-daemon-session-proof)
 requires admitted, non-reconnecting single-daemon operation sessions before
-authoritative provider or producer enablement. That adapter is not implemented
-by this diagnostic foundation. Ownership views derive from the existing ledger,
+authoritative provider or producer enablement. Ownership views derive from the existing ledger,
 not a second resource registry.
+
+## Direct-local operation sessions
+
+`LocalDockerVerifier(endpoint, admission)` uses a single socket for `/info`,
+complete inventory, birth inspection, exact-ID container deletion and post-delete
+absence. It never opens a second connection inside an operation. Broken streams,
+redirects, malformed/oversized/truncated responses, daemon mismatch and expired
+absolute operation deadlines raise `VerificationError`; none means absence.
+This adapter spawns no child processes and requires no background daemon.
+
+`LocalDaemonAdmission` is a provider-trusted **configuration capability**, never
+claim JSON or an owner-supplied flag. The trusted provider must explicitly assert
+that the configured Unix socket terminates at one Docker daemon, not a
+request-routing proxy. Filesystem permissions or successful `/info` cannot prove
+that semantic property. The adapter additionally pins and rechecks the local
+path's inode chain, refusing symlinks, foreign owners and writable routes/sockets
+(except root-owned sticky ancestors such as the OS temp root). Group-writable
+Docker sockets are not admitted by this initial strict adapter.
+
+Only POSIX direct Unix sockets are implemented. TCP, SSH, named pipes, Windows
+and unknown/intermediary routes remain unavailable for authoritative operations;
+there is no CLI or remote fallback. Native Windows tests cover diagnostic
+behavior and unsupported-route refusal, not an implemented Windows Docker
+adapter. The next provider slice must load admission from its trusted
+configuration independently of the claim's endpoint before enabling callbacks.
+
+`remove(identity, authorized=True)` requires separate cleanup authority, verifies
+birth evidence, deletes the full container ID and confirms absence on that same
+connection. Named-volume deletion always refuses before connecting. Reservation
+search covers both kinds/epochs but never attests `allocation_finished`; the
+generic ledger's epoch/quiescence rules remain required. Source fixtures are not
+live engine or producer integration acceptance.
 
 ## Validation
 
