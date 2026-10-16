@@ -1154,15 +1154,25 @@ def test_unsupported_explicit_source_reports_a_structured_decline(capsys):
 
 
 @pytest.mark.parametrize("suffix", ["", ".git"])
-def test_fill_discovery_and_replay_keep_the_actual_source_path(tmp_path, monkeypatch, suffix):
+@pytest.mark.parametrize("account", [None, "mapped"])
+def test_fill_discovery_and_replay_keep_the_actual_source_path(
+    tmp_path, monkeypatch, suffix, account,
+):
     config = _clean_git_env(monkeypatch, tmp_path)
     path = "team/repo" + suffix
+    username_guard = (
+        'case "$line" in username=*) exit 0 ;; esac; '
+        if account is None else ""
+    )
     helper = (
-        '!f() { while IFS= read -r line; do if test "$line" = path='
+        '!f() { matched=; while IFS= read -r line; do '
+        + username_guard
+        + 'if test "$line" = path='
         + path
-        + "; then printf '%s\\n' username=mapped "
+        + '; then matched=1; fi; done; if test "$matched" = 1; '
+        + "then printf '%s\\n' username=mapped "
         + router.SECRET_KEY
-        + "=fixture; fi; done; }; f"
+        + "=fixture; fi; }; f"
     )
     subprocess.run(
         ["git", "config", "--file", str(config), "credential.helper", helper],
@@ -1184,7 +1194,7 @@ def test_fill_discovery_and_replay_keep_the_actual_source_path(tmp_path, monkeyp
 
     item = auth.source("source", "https://example.test/" + path, cwd=tmp_path)
     report = auth.report(
-        [item], env=dict(os.environ), runner=run, account_for=lambda _: "mapped"
+        [item], env=dict(os.environ), runner=run, account_for=lambda _: account
     )
     assert report.results[0].status == "fixable_by_fallback"
     assert report.results[0].alternative["method"] == "fill"

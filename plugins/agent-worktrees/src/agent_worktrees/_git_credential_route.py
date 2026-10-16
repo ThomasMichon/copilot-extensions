@@ -98,11 +98,12 @@ def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
     if selected is not None:
         if operation != "get" or selected["method"] == "deny":
             return ""
-        account = selected.get("account") or "x-access-token"
         if selected["method"] == "fill":
-            request = stdin.rstrip("\n") + f"\nusername={account}\n\n"
+            account = selected.get("account")
+            request = stdin.rstrip("\n") + f"\nusername={account}\n\n" if account else stdin
             filled = run_chain("get", request, env)
             return filled if _has_credentials(parse_attributes(filled)) else ""
+        account = selected.get("account") or "x-access-token"
         if selected["method"] == "env":
             secret = env_token(owner, env, host)
         elif selected["method"] == "gh":
