@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      is_dev: ${{ steps.check.outputs.is_dev }}
+      is_dev: ${{ steps.pause.outputs.normal_paused == 'true' && 'false' || steps.check.outputs.is_dev }}
       sha: ${{ steps.check.outputs.sha }}
       qualification_only: ${{ steps.mode.outputs.qualification_only }}
     steps:
@@ -168,7 +168,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - id: check
+      - name: Respect paused Main before expensive source validation
+        id: pause
+        env:
+          QUALIFICATION_ONLY: ${{ steps.mode.outputs.qualification_only }}
+        run: |
+          git fetch --no-tags origin main
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          result = subprocess.run(
+              ["git", "show", "refs/remotes/origin/main:.github/release-pipeline-state.json"],
+              check=True, capture_output=True, text=True, timeout=30,
+          )
+          state = json.loads(result.stdout)
+          if (
+              not isinstance(state, dict)
+              or state.get("schema") != "copilot-extensions.release-pipeline-state"
+              or type(state.get("version")) is not int or state["version"] != 1
+              or type(state.get("paused")) is not bool
+          ):
+              raise RuntimeError("invalid trusted Main pause state")
+          qualification_only = os.environ["QUALIFICATION_ONLY"]
+          if qualification_only not in ("true", "false"):
+              raise RuntimeError("invalid qualification-only admission")
+          normal_paused = state["paused"] and qualification_only == "false"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"normal_paused={str(normal_paused).lower()}\n")
+          if normal_paused:
+              print("::notice::Main is paused; automatic source validation and promotion are deferred.")
+          PY
+      - name: Confirm the admitted source belongs to Dev
+        id: check
+        if: steps.pause.outputs.normal_paused != 'true'
         env:
           DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
         run: |
