@@ -589,6 +589,10 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
                 output.err("Requested machine is unavailable.")
                 return 1
 
+        if state.use_base and getattr(args, "dry_run", False):
+            config = state.load_config()
+            return _resolve_base_repo(config, args, profile=_resolve_profile(config, args))
+
         if state.worktree_id:
             return _resolve_noninteractive_worktree(state)
 

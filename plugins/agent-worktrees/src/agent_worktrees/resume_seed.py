@@ -28,7 +28,8 @@ def seed_for_attempt(
     )
     if getattr(record, "pending_seed", None):
         if getattr(args, "dry_run", False):
-            seed = launch_seed_state.LaunchSeed("preview", "new", record.pending_seed, 0)
+            if seed is None:
+                seed = launch_seed_state.LaunchSeed("preview", "new", record.pending_seed, 0)
         else:
             seed = launch_seed_state.stage(path)
     if expected_id and (seed is None or seed.seed_id != expected_id):

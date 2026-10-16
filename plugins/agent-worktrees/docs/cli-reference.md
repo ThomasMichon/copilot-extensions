@@ -774,6 +774,8 @@ instructions, restore/reclaim a process, or append launch activity/trace logs.
 Existing record/session/seed state is inspected without creating writer lock
 sidecars. Execution-space authority, configuration preflight and seed
 revision/cold-start checks still apply; refusal does not change durable state.
+A current typed launch seed takes precedence over leftover legacy prompt text;
+a newer legacy revision still supersedes the typed seed.
 
 JSON existing-worktree previews retain the normal launch-plan shape and set
 `launch.preview` to `true`; the returned worktree retains its current resume

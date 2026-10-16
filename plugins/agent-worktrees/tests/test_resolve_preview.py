@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -181,14 +182,37 @@ def test_preview_refusals_do_not_write(
     monkeypatch.setattr(main, "_restore_before_resume", forbid_restore)
     before = _snapshot(case.root)
     for _ in range(2):
-        assert _resolve(case, json_mode=json_mode, restore=True) == 3
-        assert "restore preview is unsupported" in json.loads(capfd.readouterr().out)["error"]
+        platform_refusal = json_mode and platform.system() != "Windows"
+        assert _resolve(case, json_mode=json_mode, restore=True) == (1 if platform_refusal else 3)
+        error = json.loads(capfd.readouterr().out)["error"]
+        if platform_refusal:
+            assert "--restore with --json is unsupported on Linux/WSL" in error
+        else:
+            assert "restore preview is unsupported" in error
         assert _snapshot(case.root) == before
 
     repo = case.config.default_repo
     case.config = dataclasses.replace(case.config, repos={"demo": dataclasses.replace(
-        repo, launch={}, setup_hook={case.config.platform: "setup.ps1"}, stateless=True,
+        repo, launch={}, setup_hook={"windows": "setup.ps1", "linux": "setup.sh"}, stateless=True,
     )})
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: Path(repo.anchor) / "unsafe-config")
+    before = _snapshot(case.root)
+    for _ in range(2):
+        assert _resolve(case, json_mode=json_mode) == 3
+        assert "stateless checkout" in json.loads(capfd.readouterr().out)["error"]
+        assert _snapshot(case.root) == before
+
+
+@pytest.mark.parametrize("json_mode", [True, False])
+def test_wsl_preview_runs_linux_setup_preflight_without_writes(
+    case: PreviewCase, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], json_mode: bool,
+) -> None:
+    repo = case.config.default_repo
+    case.config = dataclasses.replace(case.config, platform="wsl", repos={"demo": dataclasses.replace(
+        repo, launch={}, setup_hook={"windows": "setup.ps1", "linux": "setup.sh"}, stateless=True,
+    )})
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: Path(repo.anchor) / "unsafe-config")
     before = _snapshot(case.root)
     for _ in range(2):
@@ -307,6 +331,38 @@ def test_seed_snapshot_preserves_revision_fence_without_a_writer_lock(
     assert case.record.yaml_path.with_suffix(".lock").exists()
 
 
+@pytest.mark.parametrize("json_mode", [True, False])
+def test_typed_seed_preview_survives_interrupted_legacy_migration(
+    case: PreviewCase, capfd: pytest.CaptureFixture[str], json_mode: bool,
+) -> None:
+    seed_path = launch_seed_state.state_path(case.record.yaml_path)
+    seed_path.parent.mkdir()
+    seed_path.write_text(json.dumps({
+        "version": 1, "seed_id": "typed-current", "kind": "resume",
+        "text": "current typed intent", "revision": 2,
+    }), encoding="utf-8")
+    data = yaml.safe_load(case.record.yaml_path.read_text(encoding="utf-8"))
+    data["pending_seed"] = "older legacy intent"
+    for revision in (0, 2):
+        data["pending_seed_revision"] = revision
+        case.record.yaml_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        before = _snapshot(case.root)
+        for _ in range(2):
+            assert _resolve(case, json_mode=json_mode, seed_id="typed-current") == 0
+            payload = json.loads(capfd.readouterr().out)
+            if json_mode:
+                assert payload["launch"]["seed_id"] == "typed-current"
+                assert payload["launch"]["seed_kind"] == "resume"
+            else:
+                assert payload["action"] == "none"
+            assert _snapshot(case.root) == before
+    result = launch_seed_state._apply_stage({
+        "yaml_path": str(case.record.yaml_path), "worktree_id": case.record.worktree_id,
+    })
+    assert result["seed"]["seed_id"] == "typed-current"
+    assert tracking.load_record(case.record.yaml_path).pending_seed is None
+
+
 def test_new_preview_and_unselected_picker_refuse_without_writing(
     case: PreviewCase, capfd: pytest.CaptureFixture[str],
 ) -> None:
@@ -331,6 +387,20 @@ def test_base_json_preview_keeps_flat_launch_shape_without_writes(
         assert plan["preview"] is True
         assert plan["work_dir"] == case.config.default_repo.anchor
         assert plan["post_exit"] is False and "launch" not in plan
+        assert _snapshot(case.root) == before
+
+
+def test_explicit_base_interactive_preview_does_not_open_the_picker(
+    case: PreviewCase, capfd: pytest.CaptureFixture[str],
+) -> None:
+    assert not case.config.default_repo.base_repo
+    before = _snapshot(case.root)
+    for _ in range(2):
+        args = main.build_parser().parse_args(["resolve", "--base", "--dry-run"])
+        assert resolve_cli.cmd_resolve(args) == 0
+        captured = capfd.readouterr()
+        assert json.loads(captured.out)["action"] == "none"
+        assert case.config.default_repo.anchor in captured.err
         assert _snapshot(case.root) == before
 
 
