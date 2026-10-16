@@ -177,7 +177,8 @@ def test_old_acquisition_marker_requires_explicit_migration(startup):
             queue, task["spawn_reservation_key"], task_generation=task["generation"],
             agent_info={"session_id": "bridge-a", "status": "awaiting_first_prompt",
                         "ready": True, "connection": {"worktree_id": "worktree-a",
-                        "repo": "example", "native_session_id": "native-a"}},
+                        "repo": "example", "native_session_id": "native-a",
+                        "target_dir": "synthetic-worktree-a"}},
         )
     assert not calls
 

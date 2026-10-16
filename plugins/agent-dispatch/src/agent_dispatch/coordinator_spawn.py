@@ -553,4 +553,9 @@ def register_spawn_routes(
         if reservation is None:
             raise HTTPException(status_code=404, detail="no such reservation")
         from .ordinary_bridge import legacy_bound
-        return {**_reservation_dict(reservation), "legacy_acquisition": legacy_bound(queue, reservation.task_id, reservation.worktree)}
+        from .ordinary_agent_storage import reservation_native_facts
+        return {
+            **_reservation_dict(reservation),
+            "legacy_acquisition": legacy_bound(queue, reservation.task_id, reservation.worktree),
+            **reservation_native_facts(queue, key),
+        }
