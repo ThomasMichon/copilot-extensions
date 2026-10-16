@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Source-Managed Runtime Installs](active/source-managed-runtime-installs/README.md) | Draft; clean-room merged-dev proof before native Windows runtime-only pilot | #7028; #3905, #7029, #7030; future plugin-source switch #7031 |
+| [PR Lifecycle Conformance](active/pr-lifecycle-conformance/README.md) | Draft; provider contract and multi-round acceptance, planning only | #7051; existing #2357 lifecycle ownership retained |
 | [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; alias/locality repair, empty-mux readiness and installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
 | [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Draft; follow-up gated on primary repairs and hosted publication | #6639; #6535/#6632 owners retained |
