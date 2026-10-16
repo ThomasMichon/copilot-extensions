@@ -19,12 +19,12 @@ pytestmark = pytest.mark.guard
 @pytest.mark.parametrize(
     ("environment", "expected"),
     [
-        ({}, 1980),
-        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 1830),
+        ({}, 2580),
+        ({"COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 2430),
         ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "600",
-          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 1530),
-        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "0"}, 1410),
-        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "-1"}, 1410),
+          "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "900"}, 2130),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "0"}, 2010),
+        ({"AGENT_DISPATCH_INSTALL_DEADLINE_SEC": "-1"}, 2010),
     ],
 )
 def test_dispatch_effective_default_and_overrides(environment, expected):
@@ -41,7 +41,7 @@ def test_dispatch_effective_default_and_overrides(environment, expected):
 
 
 @pytest.mark.parametrize("name,minimum", [
-    ("agent-dispatch", 420 + 60 + 300),
+    ("agent-dispatch", 450 + 420 + 60 + 300),
     ("agent-index", 420 + 60 + 300),
     ("agent-mcp", 420 + 60 + 300),
     ("agent-worktrees", 300 + 420 + 60 + 300),

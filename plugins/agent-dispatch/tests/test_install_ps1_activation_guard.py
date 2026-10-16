@@ -518,7 +518,7 @@ def test_install_runtime_rechecks_stamped_version_before_publishing() -> None:
     ("Update", 0), ("Update", 1), ("Update", 2),
 ])
 @pytest.mark.parametrize("healthy", [False, True])
-def test_service_reconciliation_enters_cutover_after_live_guards(
+def test_service_reconciliation_phase_covers_lock_wait_and_preserves_live_guards(
     tmp_path, action, superseded_check, healthy,
 ):
     script = (
@@ -573,7 +573,9 @@ def test_service_reconciliation_enters_cutover_after_live_guards(
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    expected = "cutover,coordinator,supervisor" if not superseded_check else ""
+    expected = "cutover,coordinator,supervisor" if not superseded_check else (
+        "cutover" if action == "Update" and superseded_check == 2 else ""
+    )
     assert f"EVENTS:{expected}\n" in result.stdout
 
 

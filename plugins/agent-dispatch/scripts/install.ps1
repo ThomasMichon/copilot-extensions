@@ -4229,13 +4229,13 @@ function Invoke-Update {
         # identical mutex must honor (see $script:GlobalActivationLockTimeoutSeconds's
         # own docstring): a real Invoke-CoordinatorCutover call can legitimately
         # hold it for up to ~420s.
+        Enter-InstallPhase -Name cutover
         $cutoverMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
         try {
             if (Test-ActivationSupersededNow) {
                 Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
                 return
             }
-            Enter-InstallPhase -Name cutover
             if (Test-CoordinatorHealthy) {
                 if (Test-CoordinatorRouted) {
                     # A Thread-B coordinator (routed, /drain seam) -> graceful cutover.

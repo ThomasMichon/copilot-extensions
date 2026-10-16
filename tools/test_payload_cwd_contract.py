@@ -526,6 +526,88 @@ def test_watchdog_index_engine_actions_extend_for_startup(
     assert time.monotonic() - started >= 9, "engine startup did not outlive the build budget"
 
 
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("superseded_after_lock", [False, True])
+def test_watchdog_dispatch_cutover_lock_wait_extends_build_deadline(
+    tmp_path: Path, extension: str, superseded_after_lock: bool,
+) -> None:
+    if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
+        pytest.skip(f"{extension} interpreter unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    payload, entry = _entry(tmp_path, extension)
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-example","cutoverDeadlineSeconds":15}\n', encoding="utf-8",
+    )
+    source = (ROOT / "plugins/agent-dispatch/scripts" / f"install.{extension}").read_text(
+        encoding="utf-8",
+    )
+    if extension == "ps1":
+        function = "function Invoke-Update" + source.split("function Invoke-Update", 1)[1].split(
+            "\nfunction Invoke-Start", 1,
+        )[0]
+        fixture = (
+            "$ErrorActionPreference = 'Stop'\n$NoService = $false\n"
+            "$script:GlobalActivationLockTimeoutSeconds = 450\n$script:checks = 0\n"
+            "function Install-Runtime { Start-Sleep -Seconds 2 }\n"
+            "function Invoke-DowngradeGuard { }; function Write-UpdateMarker { }\n"
+            "function Clear-UpdateMarker { }; function Write-Skip { param($m) }\n"
+            "function Test-ActivationSupersededNow {\n"
+            "  $script:checks++\n"
+            f"  return (${str(superseded_after_lock).lower()} -and $script:checks -eq 2)\n"
+            "}\n"
+            "function Enter-PluginSnapshotLock {\n"
+            "  param($InstallDir, $TimeoutSeconds)\n"
+            "  Start-Sleep -Seconds 7\n"
+            "  [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'lock-complete'), 'done')\n"
+            "  return [System.Threading.Mutex]::new($true)\n"
+            "}\n"
+            "function Test-CoordinatorHealthy { return $false }\n"
+            "function Install-CoordinatorTask {\n"
+            "  param([switch]$NoStart)\n"
+            "  [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'reconciled'), 'done')\n"
+            "}\n"
+            "function Remove-CoordinatorFirewallRule { }; function Install-SupervisorTask { }\n"
+            "function Confirm-CoordinatorRunning { }; function Invoke-SupervisorAudit { }\n"
+            + function + "\nInvoke-Update\n"
+        )
+    else:
+        function = "do_update() {" + source.split("do_update() {", 1)[1].split(
+            "\ndo_start()", 1,
+        )[0]
+        fixture = (
+            'INSTALL_DIR="$HOME/runtime"\nmkdir -p "$INSTALL_DIR"\n'
+            'SUPERVISOR_UNIT=fixture\nSUPERVISOR_ENV_FILE=fixture.env\nchecks=0\n'
+            '_ensure_runtime() { sleep 2; }\n'
+            '_downgrade_guard() { :; }; _write_update_marker() { :; }; _clear_update_marker() { :; }\n'
+            '_skip() { :; }; _supervisor_audit() { :; }; _install_supervisor_service() { :; }\n'
+            '_activation_superseded_now() {\n'
+            '  checks=$((checks + 1))\n'
+            f'  [[ "{int(superseded_after_lock)}" == 1 && "$checks" == 2 ]]\n'
+            '}\n'
+            'flock() { if [[ "$1" != -u ]]; then sleep 7; touch "$HOME/lock-complete"; fi; }\n'
+            '_coordinator_cutover() { enter_install_phase cutover; return 1; }\n'
+            '_install_service() { touch "$HOME/reconciled"; }\n'
+            + function + "\ndo_update\n"
+        )
+    with entry.open("a", encoding="utf-8") as stream:
+        stream.write(fixture)
+    environment = _env(home)
+    environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE")
+    environment["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = "6"
+    environment.pop("COPILOT_EXT_NO_FLOCK", None)
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    started = time.monotonic()
+    result = subprocess.run(
+        _command(entry, extension), cwd=home, env=environment,
+        capture_output=True, text=True, timeout=30, **flags,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert time.monotonic() - started >= 9, "the actual lock wait never exceeded the build budget"
+    assert (home / "lock-complete").is_file()
+    assert (home / "reconciled").exists() is not superseded_after_lock
+
+
 def _native_watchdog(
     tmp_path: Path, extension: str, bodies: dict[str, str], arguments: list[str],
     env: dict[str, str] | None = None,
@@ -580,7 +662,7 @@ def test_native_watchdog_budget(
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 @pytest.mark.parametrize("name,minimum", [
-    ("agent-dispatch", 420 + 60 + 300),
+    ("agent-dispatch", 450 + 420 + 60 + 300),
     ("agent-index", 420 + 60 + 300),
     ("agent-mcp", 420 + 60 + 300),
     ("agent-worktrees", 300 + 420 + 60 + 300),

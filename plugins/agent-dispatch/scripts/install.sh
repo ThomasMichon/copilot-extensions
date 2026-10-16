@@ -2326,6 +2326,7 @@ do_update() {
     # lock) cannot even START publishing its activation until this
     # invocation's cutover attempt has fully finished and released it --
     # closing the window rather than merely narrowing it.
+    enter_install_phase cutover
     local _cutover_lock_link=""
     _unlock_cutover() {
         if [[ -n "$_cutover_lock_link" ]]; then

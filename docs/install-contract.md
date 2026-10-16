@@ -2227,17 +2227,22 @@ match the plugin's own cross-platform installer defaults. Agent-dispatch declare
 1050 seconds for its longer activation lifecycle.
 
 The daemon adopters declare longer cutover budgets rather than inheriting the
-generic 300 seconds: Dispatch, Index and MCP use 900 seconds; Bridge and
-Worktrees use 1200 seconds. The former cover a 420-second cutover-lease wait
+generic 300 seconds: Index and MCP use 900 seconds; Bridge and
+Worktrees use 1200 seconds; Dispatch uses 1500 seconds. Index and MCP cover a 420-second cutover-lease wait
 followed by 60-second health and 300-second drain windows, with 120 seconds
 for surrounding lifecycle work. Bridge covers its Windows 180-second health
 window, 300-second drain and resulting 540-second lease wait. Worktrees also
 covers its separate 300-second installer-cutover lock before the standard
-lease/health/drain sequence. The generic default remains unchanged.
+lease/health/drain sequence. Dispatch publishes its receipt before waiting
+for the additional 450-second activation lock, while retaining the live
+supersession check inside that lock. Its cutover budget includes both lock
+windows, health, drain and surrounding lifecycle work. Discovery of
+supersession after waiting can leave a cutover receipt but still skips all
+service work. The generic default remains unchanged.
 
-Dispatch's actual default outer budget is therefore 1980 seconds
-(1050 build + 900 cutover + 30 cleanup). Disabling its inner watchdog leaves
-1410 seconds (480 + 900 + 30), not the generic 810-second fallback.
+Dispatch's actual default outer budget is therefore 2580 seconds
+(1050 build + 1500 cutover + 30 cleanup). Disabling its inner watchdog leaves
+2010 seconds (480 + 1500 + 30), not the generic 810-second fallback.
 Invalid declarations fail before installer launch. Operator-increased service
 windows beyond these declared bounds are not an unbounded watchdog extension.
 
