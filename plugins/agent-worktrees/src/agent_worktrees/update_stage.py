@@ -347,6 +347,7 @@ def stage(
 
     try:
         prior = read_status(status)
+        _write_status(status, result)
         plugin_dir, layout = discover_plugin_dir(home)
         if plugin_dir is None:
             result.update(

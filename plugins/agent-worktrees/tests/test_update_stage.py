@@ -14,7 +14,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
 from types import SimpleNamespace
 
 import pytest
@@ -470,6 +470,56 @@ def test_stage_detects_change(tmp_path: Path, monkeypatch):
     assert result["stage_done"] is True
     assert result["plugin_changed"] is True
     assert result["prelaunch"] == {"action": "continue"}
+
+
+@pytest.mark.parametrize("pause_at", ["discovery", "download"])
+def test_new_stage_invalidates_prior_completion_before_payload_work(
+    tmp_path: Path, monkeypatch, pause_at
+):
+    home = tmp_path / "home"
+    payload = _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    prior = {
+        "stage_done": True, "plugin_changed": True, "plugin_dir": str(payload),
+        "fingerprint": us.fingerprint(payload),
+    }
+    status.write_text(json.dumps(prior), encoding="utf-8")
+    entered, resume = Event(), Event()
+    discover = us.discover_plugin_dir
+
+    def pause():
+        entered.set()
+        assert resume.wait(timeout=10), "stage was not resumed"
+
+    def discover_payload(home):
+        if pause_at == "discovery":
+            pause()
+        return discover(home)
+
+    def download():
+        if pause_at == "download":
+            pause()
+        return True, "already at latest"
+
+    monkeypatch.setattr(us, "discover_plugin_dir", discover_payload)
+    monkeypatch.setattr(us, "_run_copilot_update", download)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        owner = pool.submit(us.stage, status=status, lock=lock, home=home)
+        try:
+            assert entered.wait(timeout=10), "stage did not reach payload work"
+            in_progress = us.read_status(status)
+            assert in_progress["stage_done"] is False
+            assert not in_progress.get("plugin_changed")
+            assert us.stage(status=status, lock=lock, home=home)["skipped"] == "locked"
+            assert us.read_status(status) == in_progress
+        finally:
+            resume.set()
+        result = owner.result(timeout=10)
+    assert result["stage_done"] is True
+    assert result["before_fingerprint_source"] == "cached"
+    assert result["plugin_changed"] is False
+    assert us.read_status(status) == result
 
 
 def test_stage_no_change_when_download_noop(tmp_path: Path, monkeypatch):

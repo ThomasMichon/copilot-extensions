@@ -14,7 +14,7 @@ import pytest
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
-@pytest.mark.parametrize("state", ["missing", "error", "legacy-locked", "completed"])
+@pytest.mark.parametrize("state", ["missing", "error", "legacy-locked", "in-progress", "completed"])
 def test_launcher_join_retries_unusable_stage_once(tmp_path, shell, state):
     if shell == "bash" and os.name != "posix":
         pytest.skip("Native POSIX launcher contract")
@@ -28,6 +28,7 @@ def test_launcher_join_retries_unusable_stage_once(tmp_path, shell, state):
     initial = {
         "error": {"stage_done": False, "stage_error": "Update-stage lock unavailable"},
         "legacy-locked": {"stage_done": True, "skipped": "locked"},
+        "in-progress": {"stage_done": False, "ts": 1.0},
         "completed": {"stage_done": True, "plugin_changed": True},
     }.get(state)
     if initial is not None:
@@ -60,7 +61,11 @@ def test_launcher_join_retries_unusable_stage_once(tmp_path, shell, state):
             "setup_status() { :; }; setup_log() { :; }; _start_setup_progress() { :; }\n"
             f"PYTHON={shlex.quote(python)}\n"
             "_NO_UPDATE=0; _UPDATE_APPLIED=''; _STAGE_PID=''\n"
-            + source[start:end] + "    fi\n}\n"
+            + source[start:end]
+            + (
+                '        [[ "$plugin_changed" != "True" ]] || exit 99\n'
+                if state == "in-progress" else ""
+            ) + "    fi\n}\n"
             "invoke_update_apply 0\ninvoke_update_apply 0\n",
             encoding="utf-8",
         )
@@ -74,7 +79,11 @@ def test_launcher_join_retries_unusable_stage_once(tmp_path, shell, state):
             "$ErrorActionPreference='Stop'\n"
             "function Write-SetupStatus {}\n"
             f"$VenvPython='{python}'; $noUpdate=$false; $script:UpdateApplied=$false\n"
-            + source[start:end] + "    }\n}\n"
+            + source[start:end]
+            + (
+                "        if ($status.plugin_changed) { throw 'Applied stale completion' }\n"
+                if state == "in-progress" else ""
+            ) + "    }\n}\n"
             "Invoke-UpdateApply\nInvoke-UpdateApply\n",
             encoding="utf-8-sig",
         )
