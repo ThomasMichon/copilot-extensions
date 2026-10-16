@@ -55,7 +55,7 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/worktree-render-generation-37.json")
+    fixture = _fixture("fixtures/http/current/remote-acp-models-generation-38.json")
     body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
@@ -115,7 +115,7 @@ def test_live_registration_fixture_preserves_opt_in_wire_shape_and_default() -> 
     assert fixture["compatibility"]["ordinary_null_heartbeat_retains_metadata"] is True
 
 
-@pytest.mark.parametrize("generation", [35, 36, 37])
+@pytest.mark.parametrize("generation", [35, 36, 37, 38])
 @pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
 def test_native_bound_wire_is_preserved_at_later_generations(owner, generation) -> None:
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
@@ -144,6 +144,62 @@ def test_worktree_render_contract_declares_versioned_opt_in_and_retained_holder(
     assert capability["live_wall_wait_seconds"] == LIVE_WAIT_SECONDS
     assert capability["caller_expiry_releases_holder"] is False
     assert capability["legacy_cold_request_blocks"] is True
+
+
+@pytest.mark.asyncio
+async def test_generation_38_remote_route_matches_independent_expected_wire(monkeypatch):
+    from agent_bridge import remote_acp_sessions
+    from agent_bridge.models import SessionStatus
+
+    fixture = _fixture("fixtures/http/current/remote-acp-models-generation-38.json")
+    observed = []
+
+    async def connect(manager, name, **kwargs):
+        observed.append((name, kwargs))
+        return SimpleNamespace(
+            session_id="bridge-example", name="example-agent",
+            status=SessionStatus.IDLE, caller_session_id=None,
+        )
+
+    monkeypatch.setattr(remote_acp_sessions, "connect_remote_session", connect)
+    manager = SimpleNamespace(is_draining=False)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        session_manager=manager, resolver=None, ready=True,
+    )))
+    response = await start_session(
+        StartSessionRequest.model_validate(fixture["request"]["json"]), request,
+    )
+    assert response.model_dump(mode="json", exclude_none=True) == fixture["response"]
+    assert observed == [("example-agent", {
+        "cwd": "/workspace", "caller_id": None, "caller_session_id": None,
+        "remote_session_id": "saved-example",
+    })]
+
+
+def test_generation_38_remote_clients_retain_native_request_identity():
+    from agent_bridge.client import BridgeClient, BridgeClientError
+
+    fixture = _fixture("fixtures/http/current/remote-acp-models-generation-38.json")
+    assert fixture["capability"]["remote_acp"] == bridge_protocol.REMOTE_ACP_PROTOCOL_VERSION
+    client = BridgeClient.__new__(BridgeClient)
+    client._daemon_proto = (38, 1)
+    calls = []
+    client._request = lambda *args, **kwargs: calls.append((args, kwargs)) or {}
+    client.start_session(**fixture["request"]["json"])
+    assert calls[-1][0][2] == fixture["client_requests"]["start"]
+    client.answer_ask_user("bridge-example", **fixture["client_requests"]["form"])
+    assert calls[-1][1]["body"] == fixture["client_requests"]["form"]
+    client.answer_permission("bridge-example", **fixture["client_requests"]["permission"])
+    assert calls[-1][1]["body"] == fixture["client_requests"]["permission"]
+    calls.clear()
+    client._daemon_proto = (37, 1)
+    with pytest.raises(BridgeClientError) as refused:
+        client.start_session(**fixture["request"]["json"])
+    assert refused.value.status == fixture["capability"]["unsupported_status"]
+    with pytest.raises(BridgeClientError) as refused:
+        client.answer_ask_user("bridge-example", **fixture["client_requests"]["form"])
+    assert refused.value.status == fixture["capability"]["unsupported_status"]
+    assert calls == []
 
 
 def test_retirement_recovery_capability_matches_current_fixture() -> None:
@@ -290,7 +346,7 @@ def test_session_create_request_fixture_proves_unknown_field_tolerance() -> None
     request = StartSessionRequest.model_validate(fixture["request"])
     assert request.model_dump(mode="json") == {
         **fixture["accepted_model"], "creation_key": None, "creation_prompt": None,
-        "provider_instance": False,
+        "provider_instance": False, "remote_session_id": None,
     }
     assert "future_option" not in request.model_fields_set
 

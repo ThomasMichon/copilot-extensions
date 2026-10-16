@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 37,
+        "current": 38,
         "minimum": 1,
-        "previous_generation": 36,
+        "previous_generation": 37,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -43,7 +43,8 @@
           34,
           35,
           36,
-          37
+          37,
+          38
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -98,21 +99,22 @@
         "workspace_creation": 34,
         "qualified_live_peer": 35,
         "provider_creation": 36,
-        "worktree_render_cache": 37
+        "worktree_render_cache": 37,
+        "remote_acp": 38
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "1a62163bbfc060bdc7bae0a2c901a520317485f3d2b65dc4a9ed1f322f3e30bd",
+          "sha256": "72719d714e157e2c6b956ce375b4d5ef5bbdf93913ba0dcde2bf54c8ec6ff2dd",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "122e62540a0c83dce0b72836414e1e4f5ac0f93b11ba6de93d377f80e28b9576",
-          "semantic": false,
-          "non_semantic_reason": "Preserves public model imports through re-exports; session start schemas now live in the registered session_start_models.py owner."
+          "sha256": "1a26085ec890a59a2457d36e584ea3e371668f130eb379718732cc825a5ee169",
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -122,7 +124,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "ffb8a0624abedc810559a34bee124fa43e07240dc9be28be5d8e54093035da39",
+          "sha256": "e37027daeea2923f57d5f34827a084580551b12c0a02d89b620162cfd75fe8c0",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -158,7 +160,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
-          "sha256": "c57f924cecdf5be29f792511d7e53db4609a2ed850a2c2f4518868e5a0b6b009",
+          "sha256": "6fd92672388d225e31b307235b383465c3f4608cf475a6272331b57cc3f3dfb1",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -188,13 +190,13 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-          "sha256": "42244351a7410e153e87077d9e25f04b7521fa2de4ebbb58dce376312fc669c8",
+          "sha256": "39a8ed46121e1fc543f4e6b06942858704ff6cbb61cb4ecaaf5a36fe956daae8",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-          "sha256": "df76e1cf1f4e7d13ef937f939b1008f0c443abb9f567bb75be88387fd5bd35bb",
+          "sha256": "a07ac679fe72d0db78c0db2831eb6159c51616c98a02c28c873ae287ae406b17",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -219,6 +221,30 @@
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
           "sha256": "8c07a9783129cccd9ba2e19d7de84e89b4c4b9e49f8d0f4febb84be5bea5a68e",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "sha256": "94711e727ebb19c0e090f4a4c5611bb5c44bed31058e9af802afd504c37a7751",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "sha256": "a0de77c3f1ef2119cdd16b67d0291dc367ec68c9931d0e80e04bf07ce1ef3b46",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "sha256": "214fe3f869274504b0a2c1d51d33df38dc182bd128cb56fc8e7e9478c3b03b4d",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "sha256": "de79c6d10e16d24466f08540a1e2a0ede73fa2ce51a24aafccff8333f3e0b891",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -763,6 +789,144 @@
           "sha256": "1e0cf0f8374bdeda86d35d4cc97bcd52345f5041385a4c511638ad487b4b99b1",
           "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
           "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-38.json",
+          "sha256": "1ae87047489c232d50b41b92e61f6ba4d971b0ac87ecb99dc60658a3a2003ec6",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-38.json",
+          "sha256": "7ed884f4cb0c0f23ec894a3c30928756063e97c41abaf960507bcb04cf5ce835",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-38.json",
+          "sha256": "7aadb18bdfb16d7422c590f5684d689ebd8d0282e31c20f0c0f16b3fecfdddf9",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-38.json",
+          "sha256": "74734b5a9219a1ecbd1a9dcd87262e16623e49c785fe0ac3feeddae0ad0ab536",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-38.json",
+          "sha256": "2e844756ff80a4b3a25c0dee1988e98db41f80910b77b12ed61855fb017348bd",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-38.json",
+          "sha256": "b690d8ef2b603b699c9e664716d815600b534e50253590d0ec153742cea61457",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-38.json",
+          "sha256": "1a617f78b4e53409400bfdecdc6be706dc606d8d8391310fa13d7d749e9b5995",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-38.json",
+          "sha256": "204cbe2de0aad35f2e848d165fd1a936d2ff0a96d13994fc6a1ce4dda18134b7",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-38.json",
+          "sha256": "5047b8d2869d89c51d8924820f0c2e53a6c10f486d1815531d22af3653020cb2",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-38.json",
+          "sha256": "680a965be9ce8990adeea2529ee4597b0955f6c229f2a0dfbaec5e602148c90e",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-38.json",
+          "sha256": "ab375ccf530a0f9d49445751520554ea57ccdbad0077ad4b7dcbd0d0054e2e6b",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-38.json",
+          "sha256": "19fbd125186a95e09601eccf3b568bd7c6a993f844a08bbf74543cac37e57eba",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-38.json",
+          "sha256": "ce5ba86dc3ba29cc6290bfc8bf6a4587aafadaf668cde71d76b925a03a06c98c",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-38.json",
+          "sha256": "ae4c0775fa9481a454ea0b26b371a358d97c82576ff8b6cc88801fb79b9cb516",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-38.json",
+          "sha256": "6a1335ad6fde11e47f13c28e5917b62fa66e1600ae5a0f95796ff71374b4ada8",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-38.json",
+          "sha256": "cbb123a01be06c4fdc56b64946e9e20711ec0f608b07c1c0c7b9174955aeeb6f",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-38.json",
+          "sha256": "266356314455f454f576e87267ffa1914b63ccfd8768f455a879e7847f219f7a",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-38.json",
+          "sha256": "df00d2147ba47e16988334cb38ea90341b7bde127e1e4bfc2b0bc361d1c79cb7",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-38.json",
+          "sha256": "d598ccc81e9488ad3cb0fc6666f32bd52ed80679188303972f6ea79d44dea02d",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-38.json",
+          "sha256": "af0cb34190af71d24c20844d1acf305007948e845ea653bf1a294493d68397b4",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-38.json",
+          "sha256": "98c439c4c002bee1735e394e730e09afe9268e9670ef4afd899652a24e657a6d",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-38.json",
+          "sha256": "793eefdcd3becd43390be234ffd6f8511de7cd3c9349435dd191c030c5b42330",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-38.json",
+          "sha256": "ceea7fee88743057d8b8e2d88164d91bd23cf4a3a6c382e938fe77cac10f383e",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
         }
       ],
       "provenance": [
@@ -2325,9 +2489,177 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
           "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
           "capture_method": "Re-attest committed roster-contract and legacy-source observation corrections; regress unsupported version types, missing projections and mixed-speed source freshness without changing historical evidence."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "eecdc1270435a31537d8325ea6219fd0cb000a49",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "73a077eaaf14ae64365268b0a857b2b912594998",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "00fad21adb39873dd52f44123a0e11daf75e5a74",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "00716efcae35c09044ec17727664b26ddadbaf95",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "942bb51fe709a761b4c763ff38578920b20a5966",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "e1e9bf456c33f1cf5f5ba58cda0cfc198c23c93f",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "ff9b0f6b3dc5a7e6e9b939d916d9564487943eb8",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "edc5262243bdecd2a5ea28a26432a677b1ab3e37",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
+      "support_window": "The daemon declares HTTP generations 1 through 38 supported; retained evidence exercises generations 9 through 38, with generations 16 through 18 represented by their historical health fixtures rather than the current producer. Generation 38 adds opt-in remote ACP client controls; all prior generations and capability floors remain supported.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",

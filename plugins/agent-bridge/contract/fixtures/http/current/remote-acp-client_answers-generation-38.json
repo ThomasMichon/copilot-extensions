@@ -1,0 +1,55 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions",
+    "json": {
+      "agent": "remote-acp:example-agent",
+      "target_dir": "/workspace",
+      "remote_session_id": "saved-example"
+    }
+  },
+  "response": {
+    "preference_source": "caller-settings",
+    "session_id": "bridge-example",
+    "name": "example-agent",
+    "status": "idle",
+    "protocol_version": 38,
+    "min_protocol_version": 1
+  },
+  "client_requests": {
+    "start": {
+      "agent": "remote-acp:example-agent",
+      "target_dir": "/workspace",
+      "remote_session_id": "saved-example",
+      "protocol_version": 38
+    },
+    "form": {
+      "tool_call_id": "opaque-tool",
+      "request_id": "live-token",
+      "content": {
+        "choice": "explicit"
+      },
+      "action": "accept"
+    },
+    "permission": {
+      "request_id": "live-token",
+      "option_id": "opaque-option"
+    }
+  },
+  "capability": {
+    "remote_acp": 38,
+    "existing_permission_answer_floor": 10,
+    "unsupported_status": 426,
+    "profile": "acp-http-ws-durable-v1alpha1",
+    "experimental_namespace": "remote-acp/explicit-approvals",
+    "ordinary_provider_instance_default": false
+  },
+  "captured_from": {
+    "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 38,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+    "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+    "source_sha256": "a0de77c3f1ef2119cdd16b67d0291dc367ec68c9931d0e80e04bf07ce1ef3b46"
+  }
+}

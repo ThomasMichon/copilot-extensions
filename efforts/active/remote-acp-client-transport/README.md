@@ -177,6 +177,31 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Runtime review corrections and immutable contract evidence
+
+- Runtime PR #6997 remains open while required review and CI are completed.
+- Corrected all seven initial review findings: token-qualified request-scoped
+  form attention, independent SSE idle budgets, volatile affinity retention
+  across manager stop/resume, exclusion from process auto-handoff, terminal
+  callback routing during cancellation, token-only CLI hints and draining
+  previously unsent durable queued work after resume.
+- Preserved opaque permission option identity in attention references rather
+  than truncating identifiers. No interrupted prompt is automatically replayed.
+- Focused remote/attention selection: 102 passed. Independent synthetic TLS
+  HTTP/2/SSE and WSS now require the original per-session sticky affinity;
+  manager resume drains one queued unsent prompt without replaying the failed
+  prompt. An explicit-answer/cancel race preserves terminal callback routing
+  and leaves the connection usable without an application write.
+- Existing ACP/client/handoff/resume selection: 135 passed. Bridge guard lane:
+  164 passed, 8 platform/environment skips. Contract-checker regressions:
+  29 passed in the existing contained runner.
+- Registered bridge control-plane generation 38 with 23 new fixture
+  attestations; retained every historical fixture byte. External ACP remains
+  version 1. Source capture hashes are refreshed from the committed corrected
+  runtime, not fabricated from a passing mock.
+- Install contract, source module caps, headless-launch and scoped Ruff F/E9
+  checks passed. No installed payload, deployment or rollout was changed.
+
 ### 2026-10-16 — Neutral contract merged and client validation
 
 - Neutral contract PR #6942 merged as

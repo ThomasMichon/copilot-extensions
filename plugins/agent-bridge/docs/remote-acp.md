@@ -146,8 +146,13 @@ Remote form events/status
 also expose a fresh `request_id`. Human relay or an authorized agent can use:
 
 ```text
-agent-bridge answer <bridge-session> --tool-call-id <opaque-tool-id> --request-id <live-token> --json '{"choice":"explicit"}'
+agent-bridge answer <bridge-session> --request-id <live-token> --json '{"choice":"explicit"}'
 ```
+
+The live token selects the exact pending form, including a request-scoped form
+with no native tool-call ID. An optional `--tool-call-id <opaque-tool-id>` must
+match when supplied. Current attention and attention-wait references retain
+the live token separately from native request and durable decision identities.
 
 The authenticated `/api/v1/sessions/<id>/ask-user` body accepts `tool_call_id`,
 `request_id`, `action` (`accept`, `decline`, `cancel`) and structured `content`.
