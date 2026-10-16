@@ -288,10 +288,11 @@ async def test_actual_sessionless_form_before_new_has_no_invented_session(peer, 
 
 
 @pytest.mark.asyncio
-async def test_actual_service_resume_retains_history_as_replay_without_spawn(peer, tmp_db, monkeypatch):
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+async def test_actual_service_resume_retains_history_as_replay_without_spawn(peer, tmp_db, monkeypatch, mode):
     url, context, proc = peer
     spec = RemoteAcpTarget(
-        endpoint=url + "/acp", transport="streamable-http", allow_loopback_test=True,
+        endpoint=url + "/acp", transport=mode, allow_loopback_test=True,
         auth={"source": "injected", "identity": "synthetic"},
         max_queue_messages=2,
     )
@@ -308,7 +309,7 @@ async def test_actual_service_resume_retains_history_as_replay_without_spawn(pee
         wire = HttpAcpTransport(target, client=httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
             cookies=cookies,
-        ))
+        )) if mode == "streamable-http" else WsAcpTransport(target, ssl=context, cookies=cookies)
         wire.auth = SourceHttpAuth(Source(), wire.context, target.endpoint)
         await original(client, target, transport=wire)
 
@@ -322,10 +323,18 @@ async def test_actual_service_resume_retains_history_as_replay_without_spawn(pee
         await asyncio.wait_for(session._prompt_task, 5)
         sid = session.acp_session_id
         await manager.stop_session(session.session_id)
+        assert session.client is None
+        assert session._remote_affinity_cookies is not None
+        manager.db.enqueue_prompt(session.session_id, "queued-unsent", time.time())
         await manager.resume_session(session.session_id)
+        await asyncio.wait_for(session._prompt_task, 5)
         assert session.acp_session_id == sid and session.pid is None
         persisted = str(manager.db.get_session(session.session_id))
-        assert "synthetic-credential" not in persisted and "affinity=synthetic" not in persisted
+        assert "synthetic-credential" not in persisted and "affinity=" not in persisted
+        assert manager.db.count_pending_prompts(session.session_id) == 0
+        async with httpx.AsyncClient(verify=context, trust_env=False) as probe:
+            data = (await probe.get(url + "/evidence")).json()
+        assert data["prompts"] == 3
         replay = [
             event for event in session.event_log.get_events()
             if event.data.get("history_replay")
@@ -363,4 +372,63 @@ async def test_actual_remote_redirect_refused_without_forwarding(peer, mode):
         data = (await probe.get(url + "/evidence")).json()
     assert data["redirect_followed"] == 0
     assert data["prompts"] == 0
+    assert proc.poll() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+async def test_answer_admitted_before_cancel_still_has_terminal_route(peer, mode):
+    url, context, proc = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/acp", transport=mode, allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"},
+    )
+    wire = (
+        HttpAcpTransport(spec, client=httpx.AsyncClient(
+            http2=True, verify=context, trust_env=False, follow_redirects=False,
+        )) if mode == "streamable-http" else WsAcpTransport(spec, ssl=context)
+    )
+
+    class Source:
+        def supports(self, action, fields):
+            return action == "get"
+
+        async def resolve(self, action, fields, *, timeout):
+            return "\n".join(("username=synthetic", "password=synthetic-credential", ""))
+
+    wire.auth = SourceHttpAuth(Source(), wire.context, spec.endpoint)
+    events = []
+    client = AcpClient(on_event=lambda kind, data: events.append((kind, data)))
+    admitted, release = asyncio.Event(), asyncio.Event()
+    send = wire.send
+
+    async def gated_send(message):
+        if "method" not in message and message.get("id") == "rpc/opaque":
+            admitted.set()
+            await release.wait()
+        await send(message)
+
+    wire.send = gated_send
+    pending = None
+    try:
+        await client.start_remote(spec, transport=wire)
+        await client.new_session(cwd="/workspace")
+        pending = asyncio.create_task(client.send_prompt("permission"))
+        question = await wait_event(events, "permission_request")
+        assert client.resolve_permission(question["request_id"], "allow/opaque")
+        await asyncio.wait_for(admitted.wait(), 5)
+        await client.cancel_prompt()
+        await asyncio.wait_for(pending, 5)
+        release.set()
+        assert await asyncio.wait_for(client.send_prompt("fresh"), 5)
+        assert wire._failure is None and client.is_running
+    finally:
+        release.set()
+        if pending is not None and not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await client.shutdown()
+    async with httpx.AsyncClient(verify=context, trust_env=False) as probe:
+        data = (await probe.get(url + "/evidence")).json()
+    assert data["prompts"] == 2 and data["accepted_actions"] == 0
     assert proc.poll() is None

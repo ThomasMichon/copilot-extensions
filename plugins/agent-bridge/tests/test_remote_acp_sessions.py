@@ -22,6 +22,8 @@ from agent_bridge.models import AnswerPermissionRequest
 from agent_bridge.routes.sessions import answer_permission
 from acp.schema import PermissionOption, ToolCallUpdate
 from agent_bridge.transport import SpawnTarget, spawn
+from agent_bridge.attention_current import current_owned_attention
+from agent_bridge.attention_wait import evaluate_owned_attention
 
 
 @pytest.fixture
@@ -203,3 +205,82 @@ def test_headless_cli_permission_answer_requires_explicit_correlation(monkeypatc
         session_lifecycle_cli._cmd_answer(args)
     assert refused.value.code == 2
     assert client.answer_permission.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_form_attention_retains_live_token_and_empty_native_id(remote_manager):
+    manager, _ = remote_manager
+    session = await connect_remote_session(manager, "example")
+    wire = session.client._remote_transport
+    wire.sessions.add(session.acp_session_id)
+    wire.outgoing_session({
+        "jsonrpc": "2.0", "id": 7, "method": "session/prompt",
+        "params": {"sessionId": session.acp_session_id},
+    })
+    pending = asyncio.create_task(session.client._remote_elicitation(
+        "Choose", SimpleNamespace(request_id=7, requested_schema={}), {},
+    ))
+    await asyncio.sleep(0)
+    try:
+        current = current_owned_attention(session, session.session_id)
+        assert current.reason.value == "input_required" and current.availability == "available"
+        attention = evaluate_owned_attention(
+            db=manager.db, session=session, requested_ref=session.session_id,
+            reasons=["input_required"],
+        )
+        value = attention.reference.value
+        assert attention.reference.availability == "available"
+        assert value["tool_call_id"] == "" and value["native_request_id"] == 7
+        assert session.client.resolve_elicitation(
+            "", {"choice": "explicit"}, request_id=value["request_id"],
+        )
+        await pending
+        assert current_owned_attention(session, session.session_id).reason is None
+    finally:
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_remote_usage_reports_pressure_without_process_handoff(remote_manager):
+    manager, _ = remote_manager
+    manager._auto_handoff.enabled = True
+    session = await connect_remote_session(manager, "example")
+    manager.handoff_session = AsyncMock(side_effect=AssertionError("unsupported successor"))
+    session.client.send_prompt = AsyncMock(return_value={
+        "response_text": "reply", "thought_text": "", "tool_calls": [],
+        "stop_reason": "end_turn", "error": None,
+    })
+    manager._handle_usage_update(session, {"context_size": 100, "context_used": 99})
+    assert session.context_pct == 99 and not manager._auto_handoff_eligible(session)
+    await manager.submit_prompt(session.session_id, "fresh")
+    await asyncio.wait_for(session._prompt_task, 5)
+    manager.handoff_session.assert_not_called()
+    session.client.send_prompt.assert_awaited_once_with("fresh")
+    await manager.stop_session(session.session_id)
+
+
+def test_cli_status_request_scoped_form_has_token_without_empty_tool_flag(monkeypatch, capsys):
+    from agent_bridge import service_start_cli
+
+    client = Mock()
+    client.get_session_status.return_value = {
+        "pending_ask_user": [
+            {"tool_call_id": "", "request_id": token, "message": "Explicit choice"}
+            for token in ("live-one", "live-two")
+        ],
+    }
+    monkeypatch.setattr(service_start_cli, "_core", lambda: SimpleNamespace(
+        _get_client=lambda **kwargs: client,
+        _caller_id_for=lambda args: None,
+        _short_dt=lambda value: "",
+        _liveness_line=lambda value: "",
+    ))
+    service_start_cli._cmd_session_status(argparse.Namespace(
+        session_id="bridge-session", caller_id=None, json=False, steps=0,
+    ))
+    output = capsys.readouterr().out
+    assert "--request-id live-one`" in output and "--request-id live-two`" in output
+    assert "--tool-call-id" not in output

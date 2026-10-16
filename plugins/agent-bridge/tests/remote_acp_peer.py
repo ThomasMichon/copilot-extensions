@@ -6,6 +6,7 @@ import asyncio
 import json
 import sys
 import uuid
+from http.cookies import SimpleCookie
 
 from hypercorn.asyncio import serve
 from hypercorn.config import Config
@@ -41,11 +42,20 @@ def initialize(request, *, supported=True):
     })
 
 
+def affinity_cookie(headers):
+    cookies = SimpleCookie()
+    cookies.load(headers.get(b"cookie", b"").decode("ascii"))
+    value = cookies.get("affinity")
+    return value.value if value else None
+
+
 class Connection:
-    def __init__(self, ws_send=None, *, supported=True, creation_question=False):
+    def __init__(self, ws_send=None, *, supported=True, creation_question=False, affinity=None):
         self.id = uuid.uuid4().hex
+        self.affinity = affinity or uuid.uuid4().hex
         self.queues = {None: asyncio.Queue(32)}
         self.pending = {}
+        self.retired_callbacks = {}
         self.ws_send = ws_send
         self.supported = supported
         self.creation_question = creation_question
@@ -63,9 +73,16 @@ class Connection:
         params = message.get("params") or {}
         sid = params.get("sessionId")
         if method is None:
+            if message["id"] in self.retired_callbacks:
+                expected_sid = self.retired_callbacks.pop(message["id"])
+                assert self.ws_send or header_sid == expected_sid
+                return
             pending, expected_sid = self.pending.pop(message["id"])
             assert self.ws_send or header_sid == expected_sid
             answer = message["result"]
+            if answer.get("action") == "cancel" or answer.get("outcome", {}).get("outcome") == "cancelled":
+                await self.emit(rpc(pending, {"stopReason": "cancelled"}), expected_sid)
+                return
             if pending["method"] == "session/new":
                 assert answer["_meta"][NS]["applicationApproval"]["decisionId"] == "creation/decision"
                 assert answer["action"] == "accept" and answer["content"] == {"choice": "explicit"}
@@ -107,6 +124,7 @@ class Connection:
         elif method == "session/load":
             assert not params.get("_meta")
             assert sid in sessions
+            assert self.affinity == sessions[sid]["affinity"], "Missing original backend affinity"
             assert self.ws_send or header_sid == sid
             for update in sessions[sid]["history"]:
                 await self.emit(update)
@@ -169,7 +187,11 @@ class Connection:
             else:
                 await self.finish(message, sid)
         elif method == "session/cancel":
-            pending = self.pending.pop("cancel", None) or self.pending.pop("rpc/opaque", None)
+            pending = self.pending.pop("cancel", None)
+            if pending is None:
+                pending = self.pending.pop("rpc/opaque", None)
+                if pending is not None:
+                    self.retired_callbacks["rpc/opaque"] = pending[1]
             if pending:
                 await self.emit(rpc(pending[0], {"stopReason": "cancelled"}), sid)
         elif method and "id" in message:
@@ -180,7 +202,7 @@ class Connection:
 
     async def new_session(self, request):
         sid = uuid.uuid4().hex
-        sessions[sid] = {"history": []}
+        sessions[sid] = {"history": [], "affinity": self.affinity}
         self.queues[sid] = asyncio.Queue(32)
         evidence["created_sessions"] += 1
         await self.emit(rpc(request, {"sessionId": sid}))
@@ -239,13 +261,14 @@ async def app(scope, receive, send):
         conn = Connection(
             send, supported=scope["path"] != "/unsupported",
             creation_question=scope["path"] == "/creation-question",
+            affinity=affinity_cookie(headers),
         )
-        if b"affinity=synthetic" in headers.get(b"cookie", b""):
+        if affinity_cookie(headers):
             evidence["ws_cookies"] += 1
         await send({
             "type": "websocket.accept",
             "headers": [(b"acp-connection-id", conn.id.encode()),
-                        (b"set-cookie", b"affinity=synthetic; Path=/; Secure")],
+                        (b"set-cookie", f"affinity={conn.affinity}; Path=/; Secure".encode())],
         })
         await send({"type": "websocket.send", "bytes": b"synthetic-binary-frame"})
         while True:
@@ -271,17 +294,20 @@ async def app(scope, receive, send):
                     break
             message = json.loads(body)
             if message.get("method") == "initialize":
-                conn = Connection(creation_question=scope["path"] == "/creation-question")
+                conn = Connection(
+                    creation_question=scope["path"] == "/creation-question",
+                    affinity=affinity_cookie(headers),
+                )
                 connections[conn.id] = conn
                 await respond(send, 200, json.dumps(initialize(
                     message, supported=scope["path"] != "/unsupported",
                 )).encode(), [
                     (b"acp-connection-id", conn.id.encode()),
-                    (b"set-cookie", b"affinity=synthetic; Path=/; Secure; HttpOnly"),
+                    (b"set-cookie", f"affinity={conn.affinity}; Path=/; Secure; HttpOnly".encode()),
                 ])
             else:
-                assert b"affinity=synthetic" in headers.get(b"cookie", b"")
                 conn = connections[headers[b"acp-connection-id"].decode()]
+                assert affinity_cookie(headers) == conn.affinity
                 sid = headers.get(b"acp-session-id", b"").decode() or None
                 await conn.handle(message, sid)
                 await respond(send, 202)

@@ -45,6 +45,10 @@ class HttpAcpTransport(RemoteTransport):
                 method, self.target.endpoint,
                 headers={"Accept-Encoding": "identity", **version_header, **headers, **auth},
                 content=content,
+                timeout=httpx.Timeout(
+                    self.target.timeout_seconds,
+                    read=self.target.idle_seconds if method == "GET" else self.target.timeout_seconds,
+                ),
             )
             try:
                 response = await asyncio.wait_for(

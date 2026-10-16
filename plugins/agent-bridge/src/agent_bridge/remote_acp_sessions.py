@@ -54,7 +54,9 @@ async def connect_remote_session(
     manager._set_background_recovery_enabled(session, False)
     previous = session.client
     transport = getattr(previous, "_remote_transport", None)
-    cookies = getattr(transport, "cookies", None)
+    cookies = session._remote_affinity_cookies
+    if cookies is None:
+        cookies = getattr(transport, "cookies", None)
     if previous is not None:
         await previous.shutdown()
     def on_event(kind: str, data: dict) -> None:
@@ -73,6 +75,7 @@ async def connect_remote_session(
     session.status = SessionStatus.STARTING
     try:
         await client.start_remote(spec, cookies=cookies)
+        session._remote_affinity_cookies = getattr(client._remote_transport, "cookies", None)
         session.target.remote_acp_capabilities = {
             "protocol_version": REMOTE_ACP_VERSION,
             "profile": spec.profile,

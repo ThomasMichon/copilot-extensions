@@ -155,12 +155,42 @@ async def test_callback_response_preserves_session_routing():
         "jsonrpc": "2.0", "id": "opaque", "method": "session/request_permission",
         "params": {"sessionId": "two"},
     }, "two")
+    transport.outgoing_session({
+        "jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "two"},
+    })
     assert transport.outgoing_session({
         "jsonrpc": "2.0", "id": "opaque", "result": {},
     }) == "two"
     with pytest.raises(RemoteTransportError):
         transport.outgoing_session({"jsonrpc": "2.0", "id": "opaque", "result": {}})
     await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_sse_request_uses_idle_budget_even_with_injected_client_timeout():
+    requests = []
+
+    async def respond(request):
+        requests.append(request)
+        return httpx.Response(200, extensions={"http_version": b"HTTP/2"}, content=b"")
+
+    spec = RemoteAcpTarget(
+        endpoint="https://localhost/acp", transport="streamable-http",
+        auth={"source": "none", "identity": "synthetic"}, allow_loopback_test=True,
+        timeout_seconds=1, idle_seconds=5,
+    )
+    client = httpx.AsyncClient(transport=httpx.MockTransport(respond), timeout=0.1)
+    wire = HttpAcpTransport(spec, client=client)
+    try:
+        for method in ("GET", "POST"):
+            response = await wire._request(method, {})
+            await response.aclose()
+        assert requests[0].extensions["timeout"] == {
+            "connect": 1, "read": 5, "write": 1, "pool": 1,
+        }
+        assert requests[1].extensions["timeout"]["read"] == 1
+    finally:
+        await wire.close()
 
 
 def live_client():

@@ -23,7 +23,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from .attention_wait import _event_reason
+from .attention_wait import _event_reason, _input_correlation, _input_is_live
 from .models import AttentionReason, SessionStatus
 
 #: Request events: ``(family, correlation key, reason)``.
@@ -79,8 +79,12 @@ def _request_detail(event_type: str, data: dict[str, Any]) -> str | None:
     return _one_line(data.get("message") or data.get("reason"))
 
 
-def _request_is_live(session: Any, family: str, correlation_id: str) -> bool:
+def _request_is_live(
+    session: Any, family: str, correlation_id: str, correlation_key: str,
+) -> bool:
     client = getattr(session, "client", None)
+    if family == "input":
+        return _input_is_live(client, correlation_key, correlation_id)
     reader = {
         "input": getattr(client, "has_pending_elicitation", None),
         "permission": getattr(client, "has_pending_permission", None),
@@ -94,20 +98,27 @@ def _request_is_live(session: Any, family: str, correlation_id: str) -> bool:
 def current_owned_attention(session: Any, requested_ref: str) -> CurrentAttention:
     """The current reason of an owned session (see the module docstring)."""
     _continuity, events = session.event_log.snapshot_history(durable=True)
-    open_requests: dict[tuple[str, str], tuple[AttentionReason, str | None]] = {}
+    open_requests: dict[tuple[str, str, str], tuple[AttentionReason, str | None]] = {}
     settled: AttentionReason | None = None
     for event in events:
         kind, data = event.event, event.data if isinstance(event.data, dict) else {}
         if kind in _REQUESTS:
             family, key, reason = _REQUESTS[kind]
-            correlation_id = str(data.get(key) or "")
+            if family == "input":
+                key, correlation_id = _input_correlation(data)
+            else:
+                correlation_id = str(data.get(key) or "")
             if correlation_id:
-                open_requests.pop((family, correlation_id), None)  # newest last
-                open_requests[(family, correlation_id)] = (reason, _request_detail(kind, data))
+                open_requests.pop((family, key, correlation_id), None)  # newest last
+                open_requests[(family, key, correlation_id)] = (reason, _request_detail(kind, data))
             continue
         if kind in _RESOLUTIONS:
             family, key = _RESOLUTIONS[kind]
-            open_requests.pop((family, str(data.get(key) or "")), None)
+            if family == "input":
+                key, correlation_id = _input_correlation(data)
+            else:
+                correlation_id = str(data.get(key) or "")
+            open_requests.pop((family, key, correlation_id), None)
             continue
         if kind == "user_message":
             settled = None  # a new turn: the last one's boundary is no longer current
@@ -131,8 +142,8 @@ def current_owned_attention(session: Any, requested_ref: str) -> CurrentAttentio
     if status in _TERMINAL:
         return CurrentAttention(**base, reason=_TERMINAL[status], availability="available")
     if open_requests:
-        (family, correlation_id), (reason, detail) = list(open_requests.items())[-1]
-        live = _request_is_live(session, family, correlation_id)
+        (family, key, correlation_id), (reason, detail) = list(open_requests.items())[-1]
+        live = _request_is_live(session, family, correlation_id, key)
         return CurrentAttention(
             **base, reason=reason, detail=detail,
             availability="available" if live else "unknown_after_restart",

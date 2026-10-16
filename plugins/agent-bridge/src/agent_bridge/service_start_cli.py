@@ -351,9 +351,12 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
             print(f"             fields: {fields}")
         tcid = q.get("tool_call_id") or ""
         print(
-            f"             answer: `agent-bridge answer {sid} --field <key>=<value> …`"
-            + (f" (--tool-call-id {tcid})" if len(pending) > 1 else "")
-            + (f" --tool-call-id {tcid} --request-id {q['request_id']}" if q.get("request_id") else "")
+            f"             answer: `agent-bridge answer {sid} --field <key>=<value> …"
+            + (
+                f" --request-id {q['request_id']}" if q.get("request_id")
+                else (f" (--tool-call-id {tcid})" if len(pending) > 1 else "")
+            )
+            + "`"
         )
 
     k = getattr(args, "steps", 0) or 0

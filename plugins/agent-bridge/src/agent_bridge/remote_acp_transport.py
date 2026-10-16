@@ -111,8 +111,6 @@ class RemoteTransport:
                 raise RemoteTransportError("Missing remote session identity")
             if method != "session/load" and sid not in self.sessions:
                 raise RemoteTransportError("Unknown remote session")
-        if method == "session/cancel":
-            self._callbacks = {key: value for key, value in self._callbacks.items() if value != sid}
         if "id" in message:
             key = rpc_key(message["id"])
             if key in self._pending or len(self._pending) >= self.target.max_queue_messages:

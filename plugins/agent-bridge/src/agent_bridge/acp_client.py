@@ -741,7 +741,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
     async def cancel_prompt(self) -> None:
         """Cancel the current prompt via ACP session/cancel."""
         if self._remote_transport is not None:
-            self._remote_cancel_answers()
+            self._remote_cancel_answers(deliver_cancel=True)
         if self._connection and self._acp_session_id and not self._prompt_complete:
             await self._connection.cancel(session_id=self._acp_session_id)
 

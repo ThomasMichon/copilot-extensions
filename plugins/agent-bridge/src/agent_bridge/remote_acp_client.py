@@ -91,10 +91,19 @@ class RemoteAcpClientMixin:
         self.mark_transport_lost()
         self._remote_cancel_answers()
 
-    def _remote_cancel_answers(self):
+    def _remote_cancel_answers(self, *, deliver_cancel: bool = False):
         for entry in getattr(self, "_remote_answers", {}).values():
             if not entry["future"].done():
-                entry["future"].cancel()
+                if deliver_cancel:
+                    response = (
+                        RequestPermissionResponse(
+                            outcome={"outcome": "cancelled"}, field_meta=entry["meta"],
+                        ) if entry["kind"] == "permission"
+                        else CancelElicitationResponse(action="cancel", field_meta=entry["meta"])
+                    )
+                    entry["future"].set_result(response)
+                else:
+                    entry["future"].cancel()
         getattr(self, "_remote_answers", {}).clear()
 
     def _remote_metadata(self, kwargs, tool_call_id):
@@ -221,6 +230,13 @@ class RemoteAcpClientMixin:
             "decision_id": entry["decision_id"], "action": action,
         })
         return True
+
+    def has_pending_elicitation_request(self, request_id: str) -> bool:
+        entry = getattr(self, "_remote_answers", {}).get(request_id)
+        return bool(
+            self._remote_transport is not None and self.is_running and entry
+            and entry["kind"] == "form" and not entry["future"].done()
+        )
 
     def _remote_withdraw(self, elicitation_id, kwargs):
         # Native elicitation IDs, tool-call IDs and application decision IDs
