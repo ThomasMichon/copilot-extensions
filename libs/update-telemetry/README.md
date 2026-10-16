@@ -170,13 +170,11 @@ UTF-8 capture. Direct POSIX `.sh` installer calls retain the existing Python
 stream owner's UTF-8 human adapter. This is not a claim that an arbitrary
 private protocol or every standalone installer has the same encoding.
 
-This does **not** yet frame every standalone native bootstrap or shell launch
-maintenance line. In particular, the native launchers' bootstrap/self-update
-and two-pass reconcile blocks still own their existing setup-log/status
-adapters; Bash's `SECONDS` timing there is not a monotonic-clock guarantee.
-Before adding a streaming interpreter at that boundary, its admission and
-lifetime must be independent of any runtime the same operation updates or
-collects. A first bootstrap before an interpreter is admitted retains native
-diagnostics rather than claiming fabricated monotonic timing. The Python-owned
-native-child adapter needs no such extra interpreter and does not alter
-runtime-slot retention or activation.
+This does **not** yet frame every standalone native bootstrap line. The
+native launchers' setup-log/status adapters now use the maintenance clocks
+described above, but inherited bootstrap child streams, detached installer
+output and early/late Bash diagnostics remain outside that boundary.
+A first bootstrap before an interpreter is admitted retains native diagnostics
+rather than claiming fabricated monotonic timing. The Python-owned native-child
+adapter needs no extra interpreter and does not alter runtime-slot retention
+or activation.
