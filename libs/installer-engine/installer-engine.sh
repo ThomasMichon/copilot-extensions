@@ -16,18 +16,24 @@ INSTALLER_ENGINE_DEPENDENCY_POLICY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 
 remove_install_runtime_content() {
     # The caller holds the transaction lock; retain its inode and staged owners.
     local root="${1:-}" entry name home
-    while [[ "$root" == */ && "$root" != "/" ]]; do root="${root%/}"; done
+    while [[ "$root" != "/" ]]; do
+        case "$root" in
+            */) root="${root%/}" ;;
+            */.) root="${root%.}" ;;
+            *) break ;;
+        esac
+    done
     if [[ -z "$root" || ! -d "$root" || -L "$root" ]]; then
         printf '%s\n' 'Runtime purge requires a real install directory, not a link' >&2
         return 1
     fi
-    root="$(cd -- "$root" && pwd -P)" || return 1
+    root="$(cd -P -- "$root" && pwd -P)" || return 1
     if [[ "$root" == "/" ]]; then
         printf '%s\n' 'Refusing to purge a filesystem root' >&2
         return 1
     fi
     if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
-        home="$(cd -- "$HOME" && pwd -P)" || return 1
+        home="$(cd -P -- "$HOME" && pwd -P)" || return 1
         if [[ "$root" == "$home" ]]; then
             printf '%s\n' 'Refusing to purge a user home' >&2
             return 1

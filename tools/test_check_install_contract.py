@@ -15,6 +15,7 @@ from test_installer_finalizers import (
     test_posix_purge_keeps_the_live_pid_fallback as test_posix_purge_keeps_the_live_pid_fallback,
     test_posix_purge_propagates_removal_failure as test_posix_purge_propagates_removal_failure,
     test_posix_purge_refuses_home_and_link_roots as test_posix_purge_refuses_home_and_link_roots,
+    test_posix_purge_uses_the_physical_directory_holding_the_lock as test_posix_purge_uses_the_physical_directory_holding_the_lock,
 )
 
 

@@ -98,7 +98,9 @@ contract does not substitute for native installer or installed-update proof.
 Runtime purge contracts retain the original install-lock identity and active
 staged sources while removing runtime/config contents. The existing tool guard
 suite collects native POSIX flock, live PID-fallback, link-target and failure
-cases. Vault's transaction suite runs the real shared helper under both Windows
+cases. Linked roots with terminal slash/dot components must be refused, and a
+symlink followed by `..` must purge only the physical directory holding the lock.
+Vault's transaction suite runs the real shared helper under both Windows
 PowerShell 5.1 and PowerShell 7, with a held lock, open staged source and outside
 junction target. Native consumer cases exercise supported uninstall entrypoints
 and read-only previews in fresh roots; service APIs are isolated, never live.

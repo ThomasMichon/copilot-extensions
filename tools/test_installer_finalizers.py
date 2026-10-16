@@ -171,10 +171,36 @@ def test_posix_purge_refuses_home_and_link_roots(tmp_path):
     result = _purge_bash(tmp_path, root, r"""
 ln -s "$OUTSIDE" "$OUTSIDE-link"
 if remove_install_runtime_content "$HOME"; then exit 1; fi
-if remove_install_runtime_content "$OUTSIDE-link/"; then exit 1; fi
+for suffix in '' / /. /./ /.//./; do
+    if remove_install_runtime_content "$OUTSIDE-link$suffix"; then exit 1; fi
+done
 """)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (outside / "sentinel").read_text(encoding="utf-8") == "outside"
+
+
+def test_posix_purge_uses_the_physical_directory_holding_the_lock(tmp_path):
+    if shutil.which("flock") is None:
+        pytest.skip("native flock unavailable")
+    root, outside = _purge_fixture(tmp_path)
+    result = _purge_bash(tmp_path, root, r"""
+mkdir "$OUTSIDE/child" "$OUTSIDE/runtime"
+printf requested >"$OUTSIDE/runtime/sentinel"
+ln -s "$OUTSIDE/child" "$ROOT/link"
+mkdir "$ROOT/runtime"
+printf unrelated >"$ROOT/runtime/sentinel"
+requested="$ROOT/link/../runtime"
+exec 8>>"$requested/.install.lock"; flock -n 8
+remove_install_runtime_content "$requested"
+test -f "$OUTSIDE/runtime/.install.lock"
+exec 9>>"$OUTSIDE/runtime/.install.lock"
+if flock -n 9; then echo 'purge replaced the held inode' >&2; exit 1; fi
+test ! -e "$OUTSIDE/runtime/sentinel"
+test "$(cat "$ROOT/runtime/sentinel")" = unrelated
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "runtime" / "sentinel").read_text(encoding="utf-8") == "unrelated"
+    assert sorted(path.name for path in (outside / "runtime").iterdir()) == [".install.lock"]
 
 
 def _uninstall_ps(tmp_path, name, *, preview=False, hold=False):
