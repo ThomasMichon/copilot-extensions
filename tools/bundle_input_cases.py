@@ -54,7 +54,13 @@ class TestBundleInputs:
         monkeypatch.setattr(bundle, "manifests", lambda _: list(reversed(inventory)))
         assert bundle.render(source) == first
         data = tomllib.loads(first)
-        assert data["tool"]["uv"] == {"package": False}
+        assert data["tool"]["uv"] == {
+            "package": False, "exclude-newer": f"{bundle.DEFAULT_MIN_AGE_DAYS} days",
+        }
+        from datetime import datetime, timezone
+        from dependency_age import check_uv_policy
+
+        check_uv_policy(data, datetime(2026, 10, 16, tzinfo=timezone.utc))
         assert data["dependency-groups"] == {
             "core": ["pyyaml>=6"],
             "index-service": ["numpy>=2", "pyyaml>=6"],
@@ -132,6 +138,45 @@ class TestBundleInputs:
     def test_dynamic_runtime_metadata_refuses(self, source, dynamic):
         project(source, "plugins/client", "client", [], dynamic=[dynamic])
         with pytest.raises(bundle.InputError, match="dynamic runtime"):
+            bundle.render(source)
+
+
+    @pytest.mark.parametrize("malformed", ["missing-name", "invalid-name", "dynamic-string"])
+    def test_malformed_metadata_cannot_turn_first_party_into_registry_dependencies(
+        self, source, malformed,
+    ):
+        project(source, "plugins/other", "other")
+        path = source / "plugins/client/pyproject.toml"
+        text = path.read_text(encoding="utf-8")
+        if malformed == "missing-name":
+            text = text.replace('name = "client"\n', "")
+        elif malformed == "invalid-name":
+            text = text.replace('name = "client"', 'name = "client-"')
+        else:
+            text = text.replace("dynamic = []", 'dynamic = "dependencies"')
+        path.write_text(text, encoding="utf-8")
+        with pytest.raises(bundle.InputError):
+            bundle.render(source)
+
+
+    def test_malformed_editable_flag_is_not_silently_stripped(self, source):
+        project(source, "libs/shared", "shared")
+        project(
+            source, "plugins/client", "client", ["shared"], {"store": []},
+            {"shared": {"path": "../../libs/shared", "editable": "true"}},
+        )
+        with pytest.raises(bundle.InputError):
+            bundle.render(source)
+
+
+    def test_selected_vendored_metadata_must_match_canonical_before_stripping(self, source):
+        project(source, "libs/shared", "shared", ["attrs>=1"])
+        project(source, "plugins/client/libs/shared", "shared", ["attrs>=2"])
+        project(
+            source, "plugins/client", "client", ["shared"], {"store": []},
+            {"shared": {"path": "libs/shared"}},
+        )
+        with pytest.raises(bundle.InputError, match="runtime metadata differs"):
             bundle.render(source)
 
 

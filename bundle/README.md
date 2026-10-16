@@ -20,6 +20,10 @@ consumer registry. It excludes vendored duplicates and follows first-party
 runtime dependencies and explicitly selected extras to their third-party
 declarations. It preserves target markers and version constraints; it neither
 evaluates them against the generating machine nor chooses dependency versions.
+The virtual project retains the existing shared minimum-age cutoff. Selected
+local-source runtime metadata must match its canonical counterpart before
+the first-party dependency is stripped; a divergent copy is not silently
+replaced by a different closure.
 
 | Group | Candidate roots |
 |-------|-----------------|

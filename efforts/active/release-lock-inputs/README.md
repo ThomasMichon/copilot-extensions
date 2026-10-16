@@ -61,7 +61,7 @@ unowned input-generation foundation.
 
 ## Validation Plan
 
-- [x] Unit/contract: all 127 cases in the existing install-contract suite pass,
+- [x] Unit/contract: all 132 cases in the existing install-contract suite pass,
   including input graph, extras, cycles, target markers, refusals and drift.
 - [x] Simple end-to-end: a real CLI subprocess generates a fresh virtual
   project, checks it, detects changed source constraints without rewriting
@@ -88,3 +88,9 @@ second installation/provenance path.
   platform/Python conditions without evaluating them on the host.
 - Generated the real-tree virtual project; all 127 wired guard cases and
   targeted F/E9 checks pass. Review, hosted CI and merge remain open.
+- CI found a missing native UV cutoff on the generated virtual project.
+  Generation now inherits the shared seasoning constant; the real policy
+  validator checks the generated data. Five additional cases first
+  reproduced malformed-name/dynamic/flag acceptance and silently substituted
+  vendored runtime metadata. Those now refuse explicitly; all 132 wired
+  cases pass, and the actual repository regenerates/checks successfully.
