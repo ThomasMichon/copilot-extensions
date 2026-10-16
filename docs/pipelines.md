@@ -11,6 +11,11 @@ of — link here rather than restating any of it.
 
 ## Python artifact-builder toolchain policy
 
+Candidate **runtime** dependency inputs are generated separately by
+`tools/bundle_lock.py`; see [candidate release-lock inputs](../bundle/README.md).
+They are inert constraints, not an approved runtime lock or the builder's
+toolchain lock. Generation does not resolve, publish or install dependencies.
+
 `tools/build_python_artifacts.py` can run standalone and is also invoked by
 promotion's credential-separated `build-python-artifacts` job. Its default
 `--toolchain-source governed` requires an

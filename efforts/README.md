@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Third-Party Release Lock Inputs](active/release-lock-inputs/README.md) | Active; deterministic candidate inputs, review/CI open | #6937; approval/selection/admission remain with #4876/#6234/#6707 |
 | [Remote ACP Client Transport](active/remote-acp-client-transport/README.md) | Blocked; pinned draft lifecycle clarification required before implementation | #6908 |
 | [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; alias/locality repair, empty-mux readiness and installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
 | [Bridge Workspace Owner Boundary](active/bridge-workspace-owner-boundary/README.md) | Active; local repair, coordinator review/publication and released-source proof pending | #6757 |

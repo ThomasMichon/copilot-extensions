@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 import pytest
+from bundle_input_cases import TestBundleInputs as TestBundleInputs
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -19,6 +20,15 @@ _SPEC = importlib.util.spec_from_file_location("check_install_contract", MODULE_
 assert _SPEC is not None and _SPEC.loader is not None
 checker = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(checker)
+
+
+def test_bundle_candidate_inputs_match_the_real_repository() -> None:
+    import sys
+
+    sys.path.insert(0, str(REPO / "tools"))
+    import bundle_lock
+
+    bundle_lock.check(REPO)
 
 
 def test_agent_pull_requests_wrapper_counts_as_real_engine_usage() -> None:
