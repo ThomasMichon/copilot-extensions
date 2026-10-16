@@ -189,8 +189,9 @@ def test_source_roots_publication_source_changes_cancel_publication(
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permits pinned ancestor replacement")
 @pytest.mark.parametrize("which", ["source", "target"])
+@pytest.mark.parametrize("valid_replacement", [False, True])
 def test_source_roots_publication_ancestor_swap_is_not_success(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, which: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, which: str, valid_replacement: bool,
 ) -> None:
     source, destination = tmp_path / "source", tmp_path / "target"
     _zip(source)
@@ -201,6 +202,8 @@ def test_source_roots_publication_ancestor_swap_is_not_success(
     def swapped(self: LinuxClaimFile, path: Path) -> None:
         changed.rename(parked)
         changed.mkdir()
+        if valid_replacement:
+            _zip(changed)
         original(self, path)
 
     monkeypatch.setattr(LinuxClaimFile, "publish", swapped)
@@ -209,7 +212,38 @@ def test_source_roots_publication_ancestor_swap_is_not_success(
     )
     assert not result.verified
     assert (parked / REVISION.archive_name).is_file()
-    assert list(changed.iterdir()) == []
+    assert sorted(path.name for path in changed.iterdir()) == (
+        [REVISION.archive_name] if valid_replacement else []
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permits replacement between directory pins")
+def test_source_roots_publication_binds_readback_guard_to_original_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, destination, parked = (
+        tmp_path / "source", tmp_path / "target", tmp_path / "parked",
+    )
+    _zip(source)
+    original = publication.publication_directory
+
+    @contextmanager
+    def swapped(
+        path: Path, *, create: bool = True,
+    ) -> Iterator[PublicationDirectory]:
+        if path == destination and not create:
+            destination.rename(parked)
+            _zip(destination)
+        with original(path, create=create) as root:
+            yield root
+
+    monkeypatch.setattr(publication, "publication_directory", swapped)
+    result = publication.publish_log_archive(
+        source, ProcessLogReadback("target", destination), REVISION,
+    )
+    assert not result.verified and not result.published
+    assert list(parked.iterdir()) == []
+    assert (destination / REVISION.archive_name).is_file()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink rejection")

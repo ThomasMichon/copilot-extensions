@@ -6,6 +6,7 @@ import os
 import stat
 import zipfile
 import zlib
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -115,18 +116,28 @@ def publish_log_archive(
             if not stat.S_ISREG(selected.st_mode):
                 raise ValueError("process-log source ZIP is not a regular file")
             with root.open(revision.archive_name, protected=True) as raw:
-                _validate_source(root, raw, revision.archive_name, selected)
-                if dry_run:
-                    _verify_zip_stream(
-                        raw, revision.logical_name, revision.sha256, revision.size,
-                    )
-                else:
-                    with publication_directory(destination) as output:
+                with ExitStack() as stack:
+                    _validate_source(root, raw, revision.archive_name, selected)
+                    if dry_run:
+                        _verify_zip_stream(
+                            raw, revision.logical_name, revision.sha256, revision.size,
+                        )
+                    else:
+                        output = stack.enter_context(publication_directory(destination))
+                        guard = stack.enter_context(
+                            publication_directory(destination, create=False),
+                        )
+                        if output.fd is not None and guard.fd is not None:
+                            created, guarded = os.fstat(output.fd), os.fstat(guard.fd)
+                            if (created.st_dev, created.st_ino) != (
+                                guarded.st_dev, guarded.st_ino,
+                            ):
+                                raise ValueError("process-log destination changed while pinning")
                         published = _publish_opened(root, raw, selected, output, revision)
-                # The publication claim must close before protected Windows readback:
-                # its DELETE access intentionally conflicts with that reader's sharing.
-                readback = target.verify(revision)
-                _validate_source(root, raw, revision.archive_name, selected)
+                    # Close the claim before protected Windows readback, but hold
+                    # the original destination ancestry through fresh verification.
+                    readback = target.verify(revision)
+                    _validate_source(root, raw, revision.archive_name, selected)
     except (OSError, ValueError, EOFError, zipfile.BadZipFile, zlib.error, RuntimeError) as exc:
         operation = "dry-run verification" if dry_run else "publication/readback"
         return LogArchivePublicationResult(

@@ -307,7 +307,10 @@ through the operation.
 Publication uses a kernel-owned no-replace claim. An existing ZIP is fully
 verified, not overwritten. The claim closes before independent fresh readback,
 so native Windows sharing restrictions cannot turn the publisher's own handle
-into a readback failure. Missing, offline, corrupt or unsupported destinations
+into a readback failure. An additional read-only directory guard must identify
+the original publication root and hold its lexical ancestry through readback;
+even a replacement directory containing a valid ZIP cannot stand in for it.
+Missing, offline, corrupt or unsupported destinations
 produce separate failure results without skipping later targets. POSIX source
 or target ancestor replacement cannot produce a successful verification for
 the replacement path. A failure after publication may leave additive ZIP
