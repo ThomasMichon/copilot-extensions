@@ -2470,6 +2470,16 @@ configured resolver, including index order/authentication, TLS, workspace
 constraints and stricter package cutoffs; an unsupported merge or mismatch
 refuses installation. `prepare_uv_install` is only a preflight API, not an
 installation boundary.
+
+Absolute, non-editable source-only installations retain the common source/resource
+layout without reproducing unrelated caller-directory or staging ancestry.
+An unrelated caller uses a separate private working directory; its effective
+configuration and target interpreter are still captured before relocation.
+Relative operands, requirement files, dependency groups, explicit project
+contexts and editable installations retain their existing relative layout.
+This reduces backend build-path depth without relocating the checkout or
+weakening source attribution, seasoning or resolver-equivalence checks.
+
 Agent SSH's deferred-runtime snapshots materialize development source pointers
 to the libraries copied inside the snapshot before publication. Both stamp
 implementations keep this metadata transformation runtime-free; first use must

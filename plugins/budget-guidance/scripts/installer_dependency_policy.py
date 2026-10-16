@@ -778,7 +778,21 @@ def run_uv_install(
         if any(root.is_relative_to(path) for path in (*projects, *resources)):
             raise DependencyPolicyError("retained snapshot must be outside copied inputs")
         context_project = dict(_argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
-        paths = [base, *projects, *files, *resources]
+        pairs = list(_argument_pairs(arguments))
+        operands = [value for option, value in pairs if not option]
+        compact_sources = (
+            projects and operands and not files and not editables and not context_project
+            and not any(option in _FILE_OPTIONS | {"--group"} for option, _ in pairs)
+            and not any(environment.get(key) for key in (
+                "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE",
+            ))
+            and all(Path(value).is_absolute() for value in operands)
+        )
+        # An unrelated caller cwd must not force absolute build inputs to retain
+        # their entire checkout/staging ancestry. Relative-input layouts stay intact.
+        paths = [*projects, *files, *resources]
+        if not compact_sources:
+            paths.append(base)
         if context_project:
             paths.append((base / context_project).resolve())
         anchors = {}
@@ -891,7 +905,11 @@ def run_uv_install(
                 retained_environment[variable] = " ".join(
                     str(mirror(base / path)) for path in environment[variable].split()
                 )
-        retained_base = mirror(base)
+        base_anchor = anchors.get(base.anchor.lower())
+        retained_base = (
+            mirror(base) if base_anchor is not None and base.is_relative_to(base_anchor)
+            else root / "cwd"
+        )
         Path(_native_retained_path(retained_base)).mkdir(parents=True, exist_ok=True)
         retained_environment.pop("UV_WORKING_DIR", None)
         retained_environment.pop("UV_PROJECT", None)

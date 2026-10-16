@@ -941,6 +941,135 @@ def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypat
         )
 
 
+def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch):
+    source = source_project(
+        tmp_path / "runtime" / ".install-stage" / ("stage-" + "x" * 40)
+        / "plugin" / "libs" / "fixture-source",
+    )
+    backend = source / "fixture_backend.py"
+    body = backend.read_text(encoding="utf-8")
+    suffix = "build/bdist.win-amd64/wheel/fixture_source/deep_package/generated_metadata.py"
+    body = body.replace(
+        "    name = ",
+        f"    output = pathlib.Path({suffix!r})\n"
+        "    output.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    output.write_text('retained build')\n"
+        "    name = ",
+    )
+    backend.write_text(body, encoding="utf-8")
+    cwd = tmp_path / "unrelated-caller"
+    cwd.mkdir()
+    (cwd / "uv.toml").write_text('exclude-newer="2026-09-01T00:00:00Z"\n', encoding="utf-8")
+    actual = policy.subprocess.run
+    retained = []
+
+    def run(command, **kwargs):
+        if "--show-settings" not in command:
+            copied = next(Path(value) for value in command if Path(value).is_dir()
+                          and (Path(value) / "fixture_backend.py").is_file())
+            retained.append(copied)
+            assert len(str(copied / suffix)) < 260
+            assert len(str(source)) - len(str(copied)) >= 60
+            assert ".install-stage" not in copied.parts
+            assert Path(kwargs["cwd"]).name == "cwd"
+            assert command[command.index("--exclude-newer") + 1] == "2026-09-01T00:00:00Z"
+            assert (copied / "fixture_backend.py").read_text(encoding="utf-8") == body
+            backend.write_text("raise RuntimeError('mutable source reopened')\n", encoding="utf-8")
+        result = actual(command, **kwargs)
+        if "--show-settings" not in command:
+            assert (retained[-1] / suffix).read_text(encoding="utf-8") == "retained build"
+        return result
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    target = tmp_path / "installed"
+    installed = policy.run_uv_install(
+        shutil.which("uv"), ["--no-index", "--target", str(target), "--python", sys.executable, str(source)],
+        cwd=cwd, env=offline_environment(tmp_path), trusted_source_roots=(source,),
+        capture_output=True, text=True, timeout=30, now=NOW,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert (target / "fixture_source-1.0.dist-info" / "METADATA").is_file()
+    assert len(retained) == 1 and not retained[0].exists()
+
+
+@pytest.mark.parametrize("resource_parent", [False, True])
+def test_compact_absolute_sources_preserve_dependency_and_resource_layout(tmp_path, monkeypatch, resource_parent):
+    stage = tmp_path / "deep" / "staging" / "plugin"
+    source = source_project(stage / "libs" / "root", sources='fixture-child={path="../child"}')
+    child = source_project(stage / "libs" / "child", "fixture-child")
+    (stage / "resources").mkdir()
+    (stage / "resources" / "data.txt").write_text("resource", encoding="utf-8")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if "--show-settings" not in command:
+            retained_source = Path(kwargs["cwd"])
+            assert (retained_source / "fixture_backend.py").is_file()
+            assert (retained_source.parent / child.name / "pyproject.toml").is_file()
+            assert policy._toml(retained_source / "pyproject.toml")["tool"]["uv"]["sources"] == {
+                "fixture-child": {"path": "../child"},
+            }
+            if resource_parent:
+                assert (retained_source.parent.parent / "resources" / "data.txt").read_text() == "resource"
+        return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    policy.run_uv_install(
+        "uv", ["--no-config", str(source)], cwd=source, env=offline_environment(tmp_path),
+        trusted_source_roots=(stage,), retained_resource_roots=(stage,) if resource_parent else (),
+    )
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("selection", [
+    "relative", "requirements", "toml", "group", "project", "environment", "editable",
+])
+def test_context_sensitive_sources_keep_relative_retention_layout(tmp_path, monkeypatch, selection):
+    cwd = tmp_path / "caller"
+    cwd.mkdir()
+    source = source_project(cwd / "nested" / "source")
+    arguments = ["--no-config", str(source)]
+    environment = offline_environment(tmp_path)
+    if selection == "relative":
+        arguments[-1] = str(source.relative_to(cwd))
+    elif selection == "requirements":
+        requirement = cwd / "requirements.txt"
+        requirement.write_text(str(source) + "\n", encoding="utf-8")
+        arguments = ["--no-config", "-r", str(requirement)]
+    elif selection == "toml":
+        arguments = ["--no-config", "-r", str(source / "pyproject.toml")]
+    elif selection == "group":
+        arguments.extend(["--group", str(source) + ":dev"])
+    elif selection == "project":
+        arguments.extend(["--project", str(source)])
+    elif selection == "environment":
+        environment["UV_PROJECT"] = str(source)
+    else:
+        manifest = source / "pyproject.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
+            + '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+            encoding="utf-8",
+        )
+        (source / "src").mkdir()
+        arguments.insert(-1, "-e")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if "--show-settings" not in command:
+            retained_base = Path(kwargs["cwd"])
+            assert (retained_base / "nested" / "source" / "pyproject.toml").is_file()
+        return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    policy.run_uv_install(
+        "uv", arguments, cwd=cwd, env=environment, trusted_source_roots=(source,),
+    )
+    assert len(calls) == 3
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows editable snapshot placement")
 def test_windows_volume_root_input_has_no_outside_retention_location(tmp_path, monkeypatch):
     anchor = Path(tmp_path.anchor)
