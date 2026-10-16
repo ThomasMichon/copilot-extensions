@@ -21,15 +21,20 @@ runtime dependencies and explicitly selected extras to their third-party
 declarations. It preserves target markers and version constraints; it neither
 evaluates them against the generating machine nor chooses dependency versions.
 The virtual project retains the existing shared minimum-age cutoff. Selected
-local-source runtime metadata must match its canonical counterpart before
-the first-party dependency is stripped; a divergent copy is not silently
-replaced by a different closure.
+local-source runtime metadata must match its canonical counterpart throughout
+the selected dependency graph, including nested mappings and cycles. A
+divergent copy is not silently replaced by a different closure.
 
 | Group | Candidate roots |
 |-------|-----------------|
 | `core` | Runtime plugins and registered standalone distributions, except Index host/engine roots |
 | `index-service` | The standalone Index service's `native` extra, including its declared store/server closure |
 | `index-engine` | The existing separate embedding-engine project |
+
+Python 3.11 is the **tooling** prerequisite, not an imposed runtime floor.
+The generated project covers the declared group ranges, with each group's
+first-party Python constraints retained in UV's dependency-group metadata.
+The existing Index service and engine Python 3.10 target remains covered.
 
 The candidate core includes Dispatch's MCP and Containers' provider-exec extras
 outside Windows ARM64. Other optional capabilities remain opt-in. Unknown

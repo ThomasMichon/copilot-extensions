@@ -15,11 +15,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle_lock as bundle
 
 
-def project(root, relative, name, dependencies=(), extras=None, sources=None, dynamic=()):
+def project(
+    root, relative, name, dependencies=(), extras=None, sources=None, dynamic=(),
+    requires_python=">=3.10",
+):
     path = root / relative / "pyproject.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "[project]", f"name = {json.dumps(name)}", 'version = "1.0.0"',
+        f"requires-python = {json.dumps(requires_python)}",
         f"dependencies = {json.dumps(list(dependencies))}",
         f"dynamic = {json.dumps(list(dynamic))}",
     ]
@@ -54,9 +58,8 @@ class TestBundleInputs:
         monkeypatch.setattr(bundle, "manifests", lambda _: list(reversed(inventory)))
         assert bundle.render(source) == first
         data = tomllib.loads(first)
-        assert data["tool"]["uv"] == {
-            "package": False, "exclude-newer": f"{bundle.DEFAULT_MIN_AGE_DAYS} days",
-        }
+        assert data["tool"]["uv"]["package"] is False
+        assert data["tool"]["uv"]["exclude-newer"] == f"{bundle.DEFAULT_MIN_AGE_DAYS} days"
         from datetime import datetime, timezone
         from dependency_age import check_uv_policy
 
@@ -83,7 +86,7 @@ class TestBundleInputs:
             source, "libs/shared", "shared", ['attrs>=20; python_version < "3.12"'],
             {"http": ["httpx[http2]>=0.27", "shared[http]"]},
         )
-        requirements = [Requirement(value) for value in bundle.dependency_groups(source)["core"]]
+        requirements = [Requirement(value) for value in bundle.collect_inputs(source)[0]["core"]]
         assert {requirement.name for requirement in requirements} == {"attrs", "httpx"}
         for requirement in requirements:
             assert requirement.marker is not None
@@ -100,7 +103,7 @@ class TestBundleInputs:
             {"provider-exec": ["paramiko>=4"]},
         )
         project(source, "plugins/agent-dispatch", "agent-dispatch", [], {"mcp": ["mcp>=2,<3"]})
-        requirements = [Requirement(value) for value in bundle.dependency_groups(source)["core"]]
+        requirements = [Requirement(value) for value in bundle.collect_inputs(source)[0]["core"]]
         for requirement in requirements:
             if requirement.name not in {"mcp", "paramiko"}:
                 continue
@@ -172,6 +175,64 @@ class TestBundleInputs:
     def test_selected_vendored_metadata_must_match_canonical_before_stripping(self, source):
         project(source, "libs/shared", "shared", ["attrs>=1"])
         project(source, "plugins/client/libs/shared", "shared", ["attrs>=2"])
+        project(
+            source, "plugins/client", "client", ["shared"], {"store": []},
+            {"shared": {"path": "libs/shared"}},
+        )
+        with pytest.raises(bundle.InputError, match="runtime metadata differs"):
+            bundle.render(source)
+
+
+    @pytest.mark.parametrize("nested", ["different-leaf", "remote-source"])
+    def test_selected_nested_source_graph_is_validated(self, source, nested):
+        project(source, "libs/shared", "shared", ["leaf"])
+        project(source, "libs/leaf", "leaf", ["attrs>=1"])
+        mapping = (
+            {"leaf": {"path": "../leaf"}} if nested == "different-leaf"
+            else {"leaf": {"url": "https://example.test/leaf.whl"}}
+        )
+        project(source, "plugins/client/libs/shared", "shared", ["leaf"], sources=mapping)
+        project(source, "plugins/client/libs/leaf", "leaf", ["attrs>=2"])
+        project(
+            source, "plugins/client", "client", ["shared"], {"store": []},
+            {"shared": {"path": "libs/shared"}},
+        )
+        with pytest.raises(bundle.InputError):
+            bundle.render(source)
+
+
+    def test_selected_source_cycles_terminate_without_losing_dependencies(self, source):
+        for prefix in ("libs", "plugins/client/libs"):
+            project(
+                source, f"{prefix}/shared", "shared", ["leaf"],
+                sources={"leaf": {"path": "../leaf"}},
+            )
+            project(
+                source, f"{prefix}/leaf", "leaf", ["shared", "attrs>=1"],
+                sources={"shared": {"path": "../shared"}},
+            )
+        project(
+            source, "plugins/client", "client", ["shared"], {"store": []},
+            {"shared": {"path": "libs/shared"}},
+        )
+        assert bundle.collect_inputs(source)[0]["core"] == ["attrs>=1"]
+
+
+    def test_runtime_target_ranges_are_separate_from_the_tooling_floor(self, source):
+        project(source, "plugins/new-core", "new-core", requires_python=">=3.11")
+        data = tomllib.loads(bundle.render(source))
+        from packaging.specifiers import SpecifierSet
+
+        assert SpecifierSet(data["project"]["requires-python"]).contains("3.10")
+        groups = data["tool"]["uv"]["dependency-groups"]
+        assert not SpecifierSet(groups["core"]["requires-python"]).contains("3.10")
+        assert SpecifierSet(groups["index-service"]["requires-python"]).contains("3.10")
+        assert SpecifierSet(groups["index-engine"]["requires-python"]).contains("3.10")
+
+
+    def test_selected_source_python_range_cannot_be_replaced_silently(self, source):
+        project(source, "libs/shared", "shared", ["attrs>=1"], requires_python=">=3.11")
+        project(source, "plugins/client/libs/shared", "shared", ["attrs>=1"])
         project(
             source, "plugins/client", "client", ["shared"], {"store": []},
             {"shared": {"path": "libs/shared"}},

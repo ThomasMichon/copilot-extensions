@@ -11,7 +11,9 @@ from collections import deque
 from pathlib import Path
 
 from packaging.requirements import Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.utils import canonicalize_name
+from packaging.version import Version
 
 from dependency_age import contained_path, manifests
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS
@@ -72,7 +74,7 @@ def _requirements(project: dict, extra: str, name: str) -> list[str]:
     return requirements
 
 
-def _runtime_metadata(project: dict, name: str) -> dict[str, frozenset[str]]:
+def _runtime_metadata(project: dict, name: str) -> tuple[str, dict[str, frozenset[str]]]:
     dynamic = project.get("dynamic", [])
     if not isinstance(dynamic, list) or any(not isinstance(value, str) for value in dynamic):
         raise InputError(f"{name}: dynamic fields must be a list of names")
@@ -87,10 +89,16 @@ def _runtime_metadata(project: dict, name: str) -> dict[str, frozenset[str]]:
             raise InputError(f"{name}: invalid extra name")
         normalized = canonicalize_name(extra)
         result[normalized] = frozenset(_requirements(project, normalized, name))
-    return result
+    python = project.get("requires-python", "")
+    if not isinstance(python, str):
+        raise InputError(f"{name}: requires-python must be a string")
+    try:
+        return str(SpecifierSet(python)), result
+    except InvalidSpecifier as exc:
+        raise InputError(f"{name}: invalid requires-python") from exc
 
 
-def _source_mapping(root: Path, manifest: Path, data: dict, name: str, catalog: dict) -> None:
+def _source_mapping(root: Path, manifest: Path, data: dict, name: str) -> Path | None:
     sources = data.get("tool", {}).get("uv", {}).get("sources", {})
     if not isinstance(sources, dict):
         raise InputError(f"{manifest.relative_to(root)}: sources must be a table")
@@ -108,10 +116,7 @@ def _source_mapping(root: Path, manifest: Path, data: dict, name: str, catalog: 
     selected = _read(target)["project"]
     if canonicalize_name(selected["name"]) != name:
         raise InputError(f"{name}: local source distribution identity differs")
-    if name in catalog and _runtime_metadata(selected, name) != _runtime_metadata(
-        catalog[name][1]["project"], name,
-    ):
-        raise InputError(f"{name}: selected source runtime metadata differs from canonical")
+    return target
 
 
 def _roots(root: Path, catalog: dict) -> dict[str, list[tuple[str, str, frozenset[str]]]]:
@@ -139,21 +144,31 @@ def _roots(root: Path, catalog: dict) -> dict[str, list[tuple[str, str, frozense
     return groups
 
 
-def dependency_groups(root: Path) -> dict[str, list[str]]:
+def collect_inputs(root: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
     root = root.resolve()
     catalog = _catalog(root)
-    groups = {}
+    documents = {manifest: data for manifest, data in catalog.values()}
+    groups, python_ranges = {}, {}
     for group, roots in _roots(root, catalog).items():
-        pending = deque(roots)
+        pending = deque((name, extra, inherited, catalog[name][0]) for name, extra, inherited in roots)
         seen = set()
         external = set()
+        python = set()
         while pending:
-            name, extra, inherited = pending.popleft()
-            key = (name, extra, inherited)
+            name, extra, inherited, manifest = pending.popleft()
+            key = (name, extra, inherited, manifest)
             if key in seen:
                 continue
             seen.add(key)
-            manifest, data = catalog[name]
+            if manifest not in documents:
+                documents[manifest] = _read(manifest)
+            data = documents[manifest]
+            if canonicalize_name(data["project"]["name"]) != name:
+                raise InputError(f"{name}: local source distribution identity differs")
+            metadata = _runtime_metadata(data["project"], name)
+            if metadata != _runtime_metadata(catalog[name][1]["project"], name):
+                raise InputError(f"{name}: selected source runtime metadata differs from canonical")
+            python.add(metadata[0])
             for value in _requirements(data["project"], extra, name):
                 requirement = Requirement(value)
                 dependency = canonicalize_name(requirement.name)
@@ -165,16 +180,16 @@ def dependency_groups(root: Path) -> dict[str, list[str]]:
                     if re.search(r"\b(extra|extras|dependency_groups)\b", marker):
                         raise InputError(f"{name}: context-dependent extra/group marker is unsupported")
                     conditions = conditions | {marker}
-                _source_mapping(root, manifest, data, dependency, catalog)
+                selected = _source_mapping(root, manifest, data, dependency)
                 if dependency in catalog:
-                    pending.append((dependency, "", conditions))
+                    selected = selected or catalog[dependency][0]
+                    pending.append((dependency, "", conditions, selected))
                     pending.extend(
-                        (dependency, canonicalize_name(selected), conditions)
-                        for selected in sorted(requirement.extras)
+                        (dependency, canonicalize_name(extra_name), conditions, selected)
+                        for extra_name in sorted(requirement.extras)
                     )
                     continue
-                sources = data.get("tool", {}).get("uv", {}).get("sources", {})
-                if any(canonicalize_name(key) == dependency for key in sources):
+                if selected is not None:
                     raise InputError(f"{dependency}: local dependency is absent from canonical inventory")
                 requirement.name = dependency
                 requirement.marker = None
@@ -183,16 +198,35 @@ def dependency_groups(root: Path) -> dict[str, list[str]]:
                     rendered += "; " + " and ".join(f"({condition})" for condition in sorted(conditions))
                 external.add(rendered)
         groups[group] = sorted(external)
-    return groups
+        python_ranges[group] = str(SpecifierSet(",".join(sorted(python))))
+    return groups, python_ranges
+
+
+def _python_floor(value: str) -> Version:
+    floors = [
+        Version(specifier.version.removesuffix(".*"))
+        for specifier in SpecifierSet(value)
+        if specifier.operator in (">=", ">", "==", "~=", "===")
+    ]
+    if not floors:
+        raise InputError("runtime Python range needs an attributable lower bound")
+    return max(floors)
 
 
 def render(root: Path) -> str:
-    groups = dependency_groups(root)
+    groups, python_ranges = collect_inputs(root)
+    python_floor = min(_python_floor(value) for value in python_ranges.values())
     lines = [
         "# Generated by tools/bundle_lock.py generate; candidate inputs, not an approved lock.",
         "[project]", 'name = "copilot-extensions-bundle-inputs"', 'version = "0.0.0"',
-        'requires-python = ">=3.11"', "", "[tool.uv]", "package = false",
+        f'requires-python = ">={python_floor}"', "", "[tool.uv]", "package = false",
         f'exclude-newer = "{DEFAULT_MIN_AGE_DAYS} days"', "",
+        "[tool.uv.dependency-groups]",
+        *[
+            f"{group} = {{ requires-python = {json.dumps(value)} }}"
+            for group, value in python_ranges.items()
+        ],
+        "",
         "[dependency-groups]",
     ]
     for group, requirements in groups.items():

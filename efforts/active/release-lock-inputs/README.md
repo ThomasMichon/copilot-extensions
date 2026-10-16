@@ -61,7 +61,7 @@ unowned input-generation foundation.
 
 ## Validation Plan
 
-- [x] Unit/contract: all 132 cases in the existing install-contract suite pass,
+- [x] Unit/contract: all 137 cases in the existing install-contract suite pass,
   including input graph, extras, cycles, target markers, refusals and drift.
 - [x] Simple end-to-end: a real CLI subprocess generates a fresh virtual
   project, checks it, detects changed source constraints without rewriting
@@ -94,3 +94,11 @@ second installation/provenance path.
   reproduced malformed-name/dynamic/flag acceptance and silently substituted
   vendored runtime metadata. Those now refuse explicitly; all 132 wired
   cases pass, and the actual repository regenerates/checks successfully.
+- Review found that direct metadata equality did not validate the selected
+  copy's nested source graph, and that the tooling's 3.11 floor had leaked
+  into generated runtime targets. Four new cases failed first. The same
+  traversal now retains selected manifest identity through nested mappings
+  and cycles; it does not substitute a canonical child graph. Runtime
+  Python ranges derive from the first-party closure separately from the
+  tooling prerequisite. All 137 wired cases pass; real-tree output retains
+  Python 3.10. Current-head review/CI and merge remain open.
