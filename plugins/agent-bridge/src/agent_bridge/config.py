@@ -151,6 +151,10 @@ def load_config() -> ServiceConfig:
                 "refusing caller-settings fallback"
             ) from exc
         except Exception as exc:
+            if isinstance(data, dict) and "remote_acp" in data:
+                raise ValueError(
+                    "Invalid remote ACP configuration; refusing configuration fallback",
+                ) from None
             if (
                 not isinstance(data, dict)
                 or ("preference_source" in data and data["preference_source"] != "caller-settings")

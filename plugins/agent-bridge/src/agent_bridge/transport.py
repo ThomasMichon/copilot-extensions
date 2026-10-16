@@ -143,10 +143,15 @@ class SpawnTarget:
     #   Copied from the resolved AgentConfig.mcp_servers (see agent_registry.py)
     #   at resolve time. A per-session request-level ``mcp_servers`` still
     #   overrides this -- see routes/sessions.py's ``start_session``.
+    remote_acp: dict[str, Any] | None = None
+    remote_acp_capabilities: dict[str, Any] | None = None
 
     def to_json(self) -> str:
         """Serialize for DB persistence."""
-        return json.dumps({key: value for key, value in asdict(self).items() if key != "execution_space_key" or value is not None})
+        return json.dumps({
+            key: value for key, value in asdict(self).items()
+            if key not in {"execution_space_key", "remote_acp", "remote_acp_capabilities"} or value is not None
+        })
 
     @classmethod
     def from_json(cls, raw: str) -> SpawnTarget:
@@ -1104,6 +1109,8 @@ async def spawn(
     session_id: str = "",
 ) -> AgentProcess:
     """Spawn an ACP agent process (local, SSH, or command)."""
+    if target.type == "remote-acp":
+        raise ValueError("Remote ACP endpoints are connections, not spawn targets")
     from .venue_launch_policy import gate_raw_codespace_spawn  # a resync / host-less resume asks too
 
     await gate_raw_codespace_spawn(target)

@@ -32,6 +32,7 @@ class SessionStartClientMixin(_Base):
         creation_key: str | None = None,
         creation_prompt: str | None = None,
         provider_instance: bool = False,
+        remote_session_id: str | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
@@ -50,6 +51,14 @@ class SessionStartClientMixin(_Base):
         from .client import BridgeClientError
 
         body: dict[str, Any] = {}
+        if (agent or "").startswith("remote-acp:") or remote_session_id is not None:
+            from .protocol import REMOTE_ACP_PROTOCOL_VERSION
+            if not self.daemon_supports(REMOTE_ACP_PROTOCOL_VERSION):
+                raise BridgeClientError(426, "daemon does not support qualified remote ACP")
+            if remote_session_id is not None:
+                if not (agent or "").startswith("remote-acp:"):
+                    raise ValueError("remote_session_id requires remote-acp target")
+                body["remote_session_id"] = remote_session_id
         if provider_instance:
             from .protocol import PROVIDER_CREATION_PROTOCOL_VERSION
 

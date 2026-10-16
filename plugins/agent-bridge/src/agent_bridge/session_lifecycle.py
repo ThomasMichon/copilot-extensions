@@ -134,6 +134,7 @@ class _SessionLifecycleMixin:
         content: dict[str, Any] | None,
         *,
         action: str = "accept",
+        request_id: str | None = None,
     ) -> bool:
         """Answer a parked ``ask_user`` elicitation on a live session.
 
@@ -152,6 +153,7 @@ class _SessionLifecycleMixin:
             raise ValueError(f"Session {session_id} has no live ACP client")
         return session.client.resolve_elicitation(
             tool_call_id, content, action=action,
+            **({"request_id": request_id} if request_id is not None else {}),
         )
 
     async def answer_permission(
@@ -498,4 +500,3 @@ class _SessionLifecycleMixin:
         log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
 
     # -- Context-aware in-place handoff --------------------------------------
-

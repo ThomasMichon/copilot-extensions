@@ -20,6 +20,7 @@ from .preference_models import PreferencePolicyFields
 from .session_start_models import StartSessionRequest  # noqa: F401 -- public model re-export
 from .execution_identity_models import ExecutionSpaceConfigFields
 from .session_status import SessionStatus
+from .remote_acp_config import RemoteAcpTarget
 from .prompt_models import (  # noqa: F401 -- preserved public model imports
     PendingPrompt,
     PendingQueueResponse,
@@ -70,7 +71,7 @@ class AgentProfile(BaseModel):
 
     name: str
     description: str = ""
-    target_type: Literal["local", "ssh", "command"] = "local"
+    target_type: Literal["local", "ssh", "command", "remote-acp"] = "local"
     cwd: str | None = None
     host: str | None = None
     user: str | None = None
@@ -110,7 +111,7 @@ class SessionInfo(BaseModel):
     acp_session_id: str | None = None  # ACP-sourced session id (durable identity)
     durable_session_id: str | None = None  # acp_session_id, or session_id if that's all there is
     target_dir: str | None = None
-    target_type: Literal["local", "ssh", "command"] = "local"
+    target_type: Literal["local", "ssh", "command", "remote-acp"] = "local"
     target_host: str | None = None
     project: str | None = None  # resolved repo/binstub (agent-worktrees project)
     worktree_id: str | None = None  # agent-worktrees worktree ID
@@ -208,6 +209,7 @@ class AnswerAskUserRequest(BaseModel):
     """
 
     tool_call_id: str
+    request_id: str | None = None
     content: dict[str, Any] = Field(default_factory=dict)
     action: str = "accept"
 
@@ -767,12 +769,13 @@ class ServiceConfig(ExecutionSpaceConfigFields):
     # written by an OLDER build carrying a since-removed field -- notably the
     # retired ``session_host_enabled`` toggle (dotfiles#1478) -- loads cleanly as
     # the current always-on shape and the stale key is dropped on the next write.
-    model_config = {"extra": "ignore"}
+    model_config = {"extra": "ignore", "hide_input_in_errors": True}
 
     # Schema version marker for the config-migrate framework. A real field (not
     # an ignored extra) so it round-trips through model_dump / save_config. Keep
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
     schema_version: int = 2
+    remote_acp: dict[str, RemoteAcpTarget] = Field(default_factory=dict)
 
     # Port 0 is the "unset" sentinel: the daemon binds an OS-assigned ephemeral
     # port and advertises it via active.json (dotfiles #694 -- no fixed 9280/9281

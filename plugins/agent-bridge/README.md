@@ -5,6 +5,11 @@ machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
 container venues.
 
+An explicitly configured, already-running remote ACP server is also a client
+target: see [experimental remote ACP](docs/remote-acp.md) for the neutral
+qualified HTTP/2/SSE + WebSocket profile, scoped authentication, headless
+approval contract, and connection-only ownership boundary.
+
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
 Both installers co-deploy the canonical Python runtime resolver and its lease

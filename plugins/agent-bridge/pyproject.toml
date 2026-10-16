@@ -24,11 +24,11 @@ dependencies = [
     # wheel and would build from source (MSVC) on headless ARM64 hosts. h11 is
     # a core uvicorn dependency and uvicorn.run() falls back to it by default.
     "uvicorn>=0.52.1",
-    # Pure-Python WebSocket support for uvicorn (ACP-over-WS transport in
-    # routes/acp_ws.py). wsproto is sans-I/O and depends only on h11 (already a
-    # uvicorn core dep), so it adds no native build -- unlike the `websockets`
-    # speedup in uvicorn[standard]. Keeps the win-arm64 / pure-h11 guarantee.
+    # The incoming server face remains on wsproto/h11; the independent remote
+    # client uses the explicitly bounded HTTP/2 and WebSocket libraries below.
     "wsproto>=1.2",
+    "httpx[http2]>=0.28.1,<1",
+    "websockets>=15,<16",
     "pyyaml>=6.0",
     "packaging>=25.0",
     "pydantic>=2.0",
@@ -125,6 +125,8 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=0.24",
     "httpx>=0.27",
+    "hypercorn>=0.17.3,<1",
+    "cryptography>=44",
 ]
 
 [tool.pytest.ini_options]

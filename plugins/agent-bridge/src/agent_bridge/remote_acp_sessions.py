@@ -1,0 +1,110 @@
+"""Remote sessions enter the existing ledger without a workspace or subprocess."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+import uuid
+from typing import TYPE_CHECKING
+
+from .acp_client import AcpClient
+from .events import EventLog
+from .models import SessionStatus
+from .remote_acp_config import REMOTE_ACP_VERSION, RemoteAcpTarget
+from .transport import SpawnTarget
+if TYPE_CHECKING:
+    from .session_manager import Session, SessionManager
+
+
+async def connect_remote_session(
+    manager: SessionManager, name: str, *, cwd: str = "/", caller_id: str | None = None,
+    caller_session_id: str | None = None, remote_session_id: str | None = None,
+    session: Session | None = None,
+) -> Session:
+    from .session_manager import Session
+
+    if manager.is_draining:
+        raise ValueError("Bridge is draining")
+    spec = getattr(manager, "_remote_acp_targets", {}).get(name)
+    if spec is None:
+        raise ValueError("Unknown configured remote ACP target")
+    spec = RemoteAcpTarget.model_validate(spec)
+    snapshot = spec.model_dump(mode="json")
+    if session is not None and session.target.remote_acp != snapshot:
+        raise ValueError("Remote endpoint/profile/identity changed; explicit new attachment required")
+    if session is None:
+        if len(manager._sessions) >= manager.MAX_SESSIONS:
+            raise ValueError("Bridge session limit exceeded")
+        target = SpawnTarget(
+            type="remote-acp", cwd=cwd, remote_acp=snapshot,
+        )
+        session = Session(
+            uuid.uuid4().hex[:12], name, target, agent_name="remote-acp:" + name,
+            caller_id=caller_id, caller_session_id=caller_session_id,
+        )
+        session.event_log = EventLog(db=manager._db, session_id=session.session_id)
+        manager._db.create_session(
+            session_id=session.session_id, name=name, agent_name=session.agent_name,
+            caller_id=caller_id, caller_session_id=caller_session_id,
+            target_dir=cwd, target_type="remote-acp",
+            status=SessionStatus.STARTING.value, now=time.time(),
+            target_json=target.to_json(),
+        )
+        manager._sessions[session.session_id] = session
+    manager._set_background_recovery_enabled(session, False)
+    previous = session.client
+    transport = getattr(previous, "_remote_transport", None)
+    cookies = getattr(transport, "cookies", None)
+    if previous is not None:
+        await previous.shutdown()
+    def on_event(kind: str, data: dict) -> None:
+        replay = getattr(session.client, "_loading_session", False)
+        if replay:
+            data = {**data, "history_replay": True}
+        session.event_log.append(kind, data)
+        if replay:
+            return
+        manager._capture_progress(session, kind, data)
+        if kind == "usage_update":
+            manager._handle_usage_update(session, data)
+
+    client = AcpClient(on_event=on_event)
+    session.client = client
+    session.status = SessionStatus.STARTING
+    try:
+        await client.start_remote(spec, cookies=cookies)
+        session.target.remote_acp_capabilities = {
+            "protocol_version": REMOTE_ACP_VERSION,
+            "profile": spec.profile,
+            "load_session": client._remote_can_load,
+            "application_approvals_version": 1,
+            "server_requires_explicit_approvals": True,
+        }
+        manager._db.update_session_target(
+            session.session_id, session.target.to_json(), session.target.cwd,
+        )
+        if remote_session_id:
+            await asyncio.wait_for(
+                client.load_session(
+                    cwd=cwd, session_id=remote_session_id, suppress_replay=False,
+                ),
+                spec.rpc_timeout_seconds,
+            )
+            sid = remote_session_id
+        else:
+            sid = await asyncio.wait_for(
+                client.new_session(cwd=cwd), spec.rpc_timeout_seconds,
+            )
+        session.acp_session_id = sid
+        manager._db.update_session_acp_id(session.session_id, sid)
+        session.status = SessionStatus.IDLE
+    except BaseException:
+        await client.shutdown()
+        session.status = SessionStatus.STOPPED
+        raise
+    finally:
+        manager._db.update_session_status(
+            session.session_id, session.status.value, time.time(),
+        )
+        session.event_log.append("session_state_changed", {"status": session.status.value})
+    return session

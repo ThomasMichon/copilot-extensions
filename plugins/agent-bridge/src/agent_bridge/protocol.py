@@ -198,7 +198,9 @@ QUALIFIED_LIVE_PEER_PROTOCOL_VERSION = 35
 # Explicit no-worktree native creation for an exact provider-exec instance.
 PROVIDER_CREATION_PROTOCOL_VERSION = 36
 WORKTREE_RENDER_CACHE_PROTOCOL_VERSION = 37
-HTTP_PROTOCOL_VERSION = 37
+# Configured remote ACP targets and live-token-qualified structured answers.
+REMOTE_ACP_PROTOCOL_VERSION = 38
+HTTP_PROTOCOL_VERSION = 38
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

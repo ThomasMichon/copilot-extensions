@@ -978,6 +978,7 @@ def session_manager_from_config(db: Database, cfg: ServiceConfig) -> SessionMana
         auto_handoff=cfg.auto_handoff,
         timeouts=cfg.timeouts,
         retention=cfg.retention,
+        remote_acp_targets=cfg.remote_acp,
         session_host_stale_reap_seconds=cfg.session_host_stale_reap_seconds,
         graceful_cancel_settle_seconds=cfg.graceful_cancel_settle_seconds,
         cancel_turns_on_redeploy=cfg.cancel_turns_on_redeploy,

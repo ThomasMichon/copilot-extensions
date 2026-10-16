@@ -25,6 +25,23 @@ real lock entry, using the native atomic writer. Every runner must revalidate
 the newly visible identity, refuse a conflicting name and retain canonical
 case for an idempotent enrollment; lock ownership and cleanup are not mocked.
 
+Remote ACP's focused contract/ledger tests and independent synthetic-process
+consumer lane run together:
+
+```text
+python tools/run-plugin-tests.py agent-bridge --test-file tests/test_remote_acp_transport.py --test-file tests/test_remote_acp_sessions.py --test-file tests/test_remote_acp_peer.py
+```
+
+The peer uses a disposable locally trusted synthetic certificate and Hypercorn:
+actual negotiated TLS HTTP/2 with connection/session SSE, and actual WSS
+upgrade. It checks explicit structured permission/form roundtrips, cancellation,
+auth refusal/refresh, cookie affinity, redirects-off, disconnect/load without
+prompt replay, capability mismatch without a write and independent server
+survival after client close. It does not contact a deployed remote agent or
+prove deployment readiness. Existing ACP/client/API tests retain local/provider
+regression coverage; the new lane is bounded rather than an exhaustive fleet
+matrix.
+
 The shared `agent-procutil` daemon-broker unit suite covers authenticated frame
 bounds, WMI's JSON-stdin environment boundary, containment opt-out, partial-start
 cleanup and adoption failures. Its Windows-only native regression launches from

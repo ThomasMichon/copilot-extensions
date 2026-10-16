@@ -13,6 +13,7 @@ class StartSessionRequest(PreferenceRequestFields):
     """Request to start a new agent session."""
 
     agent: str | None = None
+    remote_session_id: str | None = Field(default=None, min_length=1, max_length=1024)
     target_dir: str | None = None
     topology: str | None = None
     worktree_id: str | None = None  # agent-worktrees worktree ID for session roll

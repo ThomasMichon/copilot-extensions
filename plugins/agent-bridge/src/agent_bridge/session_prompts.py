@@ -104,7 +104,7 @@ class _SessionPromptMixin:
             # recreate a fresh ACP session in place rather than failing the send
             # (#1468).
             await self.resume_session(
-                session_id, drain=False, allow_recreate=True
+                session_id, drain=False, allow_recreate=session.target.type != "remote-acp"
             )
             # resume_session sets status to IDLE and attaches a new client
 

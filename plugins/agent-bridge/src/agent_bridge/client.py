@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Iterator
 import yaml
 
 from .client_session_start import SessionStartClientMixin
+from .client_answers import AnswerClientMixin
 from .client_cli_mode import CliModeClientMixin
 from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
@@ -146,7 +147,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin):
+class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -926,32 +927,6 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
             f"/api/v1/live-sessions/{session_ref}/result/detail",
             params={"ref": ref},
         ) or {}
-
-    def answer_ask_user(
-        self,
-        session_id: str,
-        tool_call_id: str,
-        content: dict[str, Any] | None = None,
-        *,
-        action: str = "accept",
-    ) -> dict[str, Any]:
-        """POST /api/v1/sessions/{id}/ask-user -- answer a parked ask_user.
-
-        Resolves the dispatched agent's blocked ``ask_user`` elicitation so its
-        turn continues (the host acting as the human the agent reached for;
-        dotfiles#1275). ``action`` is ``accept`` (with ``content``), ``decline``,
-        or ``cancel``. Raises ``BridgeClientError`` (409) when no matching
-        question is outstanding.
-        """
-        return self._request(
-            "POST", f"/api/v1/sessions/{session_id}/ask-user",
-            body={
-                "tool_call_id": tool_call_id,
-                "content": content or {},
-                "action": action,
-            },
-        ) or {}
-
 
     def submit_prompt(
         self,

@@ -106,29 +106,29 @@ extension metadata is authorized, not represented as a standard ACP field.
 
 ### Phase 2 — Scoped client implementation
 
-- [ ] Recheck active contributions and dependency admission; qualify reusable
+- [x] Recheck active contributions and dependency admission; qualify reusable
   SDK transport behavior against the selected profile and extend the existing
   ACP connection seam rather than copying a protocol stack.
-- [ ] Add typed configured remote targets without worktree allocation,
+- [x] Add typed configured remote targets without worktree allocation,
   subprocess launch, process ownership or server termination.
-- [ ] Extend the shared credential/auth-injection owner seam; keep host token
+- [x] Extend the shared credential/auth-injection owner seam; keep host token
   acquisition, source scope gates and expiry handling in their existing owners.
-- [ ] Implement both explicitly selected HTTP/2/SSE and WebSocket modes,
+- [x] Implement both explicitly selected HTTP/2/SSE and WebSocket modes,
   cookies, capability negotiation, new/load, prompt, streamed updates, cancel,
   bounded transport resources and explicit connection close.
-- [ ] Preserve live request/option identity across agent and operator answers;
+- [x] Preserve live request/option identity across agent and operator answers;
   reject wrong-session, stale and replayed answers; keep application approvals
   outside blanket local-tool autoapproval.
-- [ ] Persist only non-secret endpoint/profile/remote-session and negotiated
+- [x] Persist only non-secret endpoint/profile/remote-session and negotiated
   capability evidence. Reconcile reconnect explicitly without prompt replay.
 
 ### Phase 3 — Validation, publication and completion
 
-- [ ] Stage new tests before the contained runner; execute the focused matrix
+- [x] Stage new tests before the contained runner; execute the focused matrix
   in [design.md](design.md), then local/SSH/provider regressions.
-- [ ] Document configuration, experimental pin, auth setup, explicit reconnect
+- [x] Document configuration, experimental pin, auth setup, explicit reconnect
   and close semantics, resource limits and unsupported features.
-- [ ] Add required plugin changefiles and run touched lint, install-contract
+- [x] Add required plugin changefiles and run touched lint, install-contract
   and repository gates; complete documentation/cutover-impact review.
 - [ ] Drive implementation PR review and required checks through actual merge.
 - [ ] Record merged/pending-release or released/pending-rollout accurately;
@@ -139,22 +139,22 @@ extension metadata is authorized, not represented as a standard ACP field.
 ## Validation Plan
 
 - [x] Effort/vision schema and changed-document links pass for this plan.
-- [ ] D1 has a recorded explicit decision and any profile qualifications are
+- [x] D1 has a recorded explicit decision and any profile qualifications are
   reflected consistently in code, configuration, docs and synthetic peers.
-- [ ] Unit coverage validates target admission, origin/identity-qualified auth,
+- [x] Unit coverage validates target admission, origin/identity-qualified auth,
   real header construction, bounds, protocol errors and callback identity.
-- [ ] Independent synthetic remote process exercises actual HTTP/2 with
+- [x] Independent synthetic remote process exercises actual HTTP/2 with
   connection/per-session SSE plus actual WebSocket upgrade and text frames.
-- [ ] Both transports prove new/load, streaming, cancellation, explicit close
+- [x] Both transports prove new/load, streaming, cancellation, explicit close
   and disconnect survival; unsupported load is an explicit refusal.
-- [ ] Explicit agent answers, operator-relayed answers, rejection, stale/replayed
+- [x] Explicit agent answers, operator-relayed answers, rejection, stale/replayed
   answers, withdrawal, cancellation and cross-session isolation pass.
-- [ ] Auth refusal/refresh, TLS refusal, redirects, cookie affinity, malformed
+- [x] Auth refusal/refresh, TLS refusal, redirects, cookie affinity, malformed
   frames, stalled streams and unknown outcome recovery pass without secrets
   entering output, persistent records or error messages.
-- [ ] Local/SSH/provider behavior and changed shared-auth consumers retain
+- [x] Local/SSH/provider behavior and changed shared-auth consumers retain
   their focused regressions; install/lint/contract gates pass.
-- [ ] Every unexercised clean-room or external-venue lane has an exact recorded
+- [x] Every unexercised clean-room or external-venue lane has an exact recorded
   gap; synthetic or mocked coverage is never called live deployment evidence.
 
 ## Proposal
@@ -176,6 +176,37 @@ express; a separate durable decision ID is optional when the native tool-call
 ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
+
+### 2026-10-16 — Neutral contract merged and client validation
+
+- Neutral contract PR #6942 merged as
+  `ba14c40e975b3888406a98aedb38b372c457a0a0` after fresh approval, no
+  unresolved findings and successful required CI. Runtime publication is
+  separate; the contract is not a released client implementation claim.
+- Focused contained remote/client suite: 109 passed. Existing API
+  answer/resume/start/stop selectors: 41 passed. Existing local/SSH/CodeSpace
+  transport suites: 105 passed. Shared agent-mcp auth consumer: 46 passed;
+  two existing POSIX process-group cases are intentionally skipped on Windows.
+- Independent synthetic peers proved real TLS HTTP/2/SSE and WSS, header
+  construction/refusal/refresh, explicit decisions and rejection, sessionless
+  forms, cancellation, affinity, no redirects, no prompt replay, history-only
+  recovery and server-process survival. No remote application deployment was
+  exercised.
+- Fresh managed test environments resolved the declared dependencies through
+  the existing governed/seasoned runner. Full clean-room machine
+  installation was not run: installers, launchers and provisioning were not
+  changed; first-touch behavior is covered by fresh synthetic clients/servers
+  and new ledger sessions. No authorized external endpoint/deployment lane is
+  available within this client-only scope.
+- Install-contract, headless-launch, changefile presence, touched Python lint
+  and shrink-only module-size gates pass. The callback/answer seams were
+  extracted rather than widening existing module caps.
+- Pulled forward without dropping the independently merged inventory/cache
+  capability; remote bridge-control negotiation now uses the next available
+  HTTP contract version. The external ACP wire profile remains version 1.
+- No installed payload, runtime restart, rollout or server-side business
+  validation change was made. Implementation review/CI/merge and final effort
+  closure remain open.
 
 ### 2026-10-15 — Bounded implementation and neutral contract correction
 

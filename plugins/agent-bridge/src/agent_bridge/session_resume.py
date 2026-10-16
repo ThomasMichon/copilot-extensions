@@ -73,6 +73,17 @@ class _SessionResumeMixin:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
+        if session.target.type == "remote-acp":
+            from .remote_acp_sessions import connect_remote_session
+            async with session._lifecycle_lock:
+                if session.status != SessionStatus.STOPPED or not session.acp_session_id:
+                    raise ValueError("Remote resume requires a stopped durable session")
+                return await connect_remote_session(
+                    self, session.agent_name.removeprefix("remote-acp:"),
+                    cwd=session.target.cwd or "/",
+                    remote_session_id=session.acp_session_id, session=session,
+                )
+
         async with session._lifecycle_lock:
             from .acquisition_gates import assert_resume_allowed
             assert_resume_allowed(self._db, session)
@@ -450,6 +461,8 @@ class _SessionResumeMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        if session.target.type == "remote-acp":
+            raise ValueError("Remote ACP history is loaded through explicit stop/resume, not process resync")
         if not session.acp_session_id:
             raise RuntimeError(
                 f"Session {session_id} has no ACP session ID -- cannot resync"
