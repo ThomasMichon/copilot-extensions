@@ -90,6 +90,7 @@ def run_action(
     overflow = threading.Event()
     chunks: list[bytes] = []
     readers: list[threading.Thread] = []
+    started_streams = []
     terminated = False
 
     def drain(stream, *, retain: bool):
@@ -131,6 +132,7 @@ def run_action(
                                       daemon=True)
             reader.start()
             readers.append(reader)
+            started_streams.append(stream)
         deadline = time.monotonic() + timeout
         while process.poll() is None or any(reader.is_alive() for reader in readers):
             if overflow.is_set():
@@ -144,9 +146,17 @@ def run_action(
             return ActionResult("output-limit", process.returncode)
         return ActionResult("exited", process.returncode, b"".join(chunks))
     finally:
-        terminate()
-        for reader in readers:
-            reader.join(timeout=5)
-        for stream in (process.stdout, process.stderr):
-            if stream is not None:
-                stream.close()
+        _termination.deferring = True
+        try:
+            terminate()
+            for reader in readers:
+                reader.join(timeout=5)
+            # Started drainers own their streams; closing a still-reading buffer can block.
+            for stream in (process.stdout, process.stderr):
+                if stream is not None and stream not in started_streams:
+                    stream.close()
+        finally:
+            _termination.deferring = False
+        if getattr(_termination, "pending", False):
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            raise KeyboardInterrupt

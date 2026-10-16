@@ -113,6 +113,7 @@ class OwnerBinding:
     environment: Mapping[str, str] = field(repr=False, compare=False)
     legacy_root: Path | None = field(default=None, repr=False)
     refusal: str | None = None
+    execution_bindings: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def evidence(self) -> dict[str, object]:
         return {

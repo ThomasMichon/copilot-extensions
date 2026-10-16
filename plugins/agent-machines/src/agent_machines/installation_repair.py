@@ -10,7 +10,7 @@ import re
 import shutil
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from installer_readiness import build_plan, parse_readiness
@@ -128,14 +128,38 @@ def _environment(owner: OwnerBinding, *, readonly: bool) -> dict[str, str]:
     return result
 
 
+def _admit_invocation(
+    invocation: Invocation, platform: Platform,
+) -> tuple[list[str], Path, str]:
+    argv = _argv(invocation, platform)
+    executable = Path(argv[0]).resolve(strict=True)
+    ordinary(executable)
+    if executable.stat().st_size > 64 * 1024 * 1024:
+        raise RepairAdmissionError("repair interpreter exceeds its content bound")
+    content = hashlib.sha256()
+    with executable.open("rb") as stream:
+        remaining = 64 * 1024 * 1024 + 1
+        while block := stream.read(min(1024 * 1024, remaining)):
+            remaining -= len(block)
+            if remaining <= 0:
+                raise RepairAdmissionError("repair interpreter exceeds its content bound")
+            content.update(block)
+    return argv, executable, content.hexdigest()
+
+
 def _invoke(
     module: Module, owner: OwnerBinding, platform: Platform, *, readonly: bool,
     timeout: float,
 ) -> ActionResult:
     invocation = (module.readiness if readonly else module.installer)[platform]
     try:
-        argv = _argv(invocation, platform)
-    except RepairAdmissionError:
+        argv, executable, content_digest = _admit_invocation(invocation, platform)
+    except (RepairAdmissionError, OSError):
+        return ActionResult("invocation-refused", None)
+    purpose = "readiness" if readonly else "installer"
+    if owner.execution_bindings.get(module.qualified_id + ":" + purpose) != digest({
+        "argv": argv, "executable": str(executable), "sha256": content_digest,
+    }):
         return ActionResult("invocation-refused", None)
     return run_action(
         argv, cwd=owner.installation.payload_root, environment=_environment(owner, readonly=readonly),
@@ -217,31 +241,26 @@ def _closure(host: HostAdmission, requested: Sequence[str], platform: Platform) 
 
 def _binding_inputs(
     host: HostAdmission, modules: Sequence[Module], platform: Platform,
-) -> dict[str, object]:
-    execution: dict[str, object] = {}
+) -> tuple[dict[str, object], dict[str, OwnerBinding]]:
+    execution: dict[str, dict[str, object]] = {}
     for module in modules:
         if platform not in module.platforms:
             continue
         for purpose, actions in (("readiness", module.readiness), ("installer", module.installer)):
             try:
-                argv = _argv(actions[platform], platform)
-                executable = Path(argv[0]).resolve(strict=True)
-                ordinary(executable)
-                if executable.stat().st_size > 64 * 1024 * 1024:
-                    raise RepairAdmissionError("repair interpreter exceeds its content bound")
-                content = hashlib.sha256()
-                with executable.open("rb") as stream:
-                    remaining = 64 * 1024 * 1024 + 1
-                    while block := stream.read(min(1024 * 1024, remaining)):
-                        remaining -= len(block)
-                        if remaining <= 0:
-                            raise RepairAdmissionError("repair interpreter exceeds its content bound")
-                        content.update(block)
+                argv, executable, content_digest = _admit_invocation(actions[platform], platform)
                 execution[module.qualified_id + ":" + purpose] = {
-                    "argv": argv, "executable": str(executable), "sha256": content.hexdigest(),
+                    "argv": argv, "executable": str(executable), "sha256": content_digest,
                 }
             except (RepairAdmissionError, OSError):
                 execution[module.qualified_id + ":" + purpose] = {"status": "invocation-unavailable"}
+    owners = {
+        owner_id: replace(owner, execution_bindings={
+            key: digest(value) for key, value in execution.items()
+            if key.startswith(owner_id + "/")
+        })
+        for owner_id, owner in host.bindings.items()
+    }
     return {
         "platform": platform.value,
         "execution": execution,
@@ -269,7 +288,7 @@ def _binding_inputs(
                 for item, action in module.readiness.items()
             },
         } for module in modules],
-    }
+    }, owners
 
 
 def _readmit_owner(
@@ -278,9 +297,10 @@ def _readmit_owner(
 ) -> OwnerBinding:
     fresh = admit_host(project_root, home=home)
     fresh_selected = _closure(fresh, modules, platform)
-    if digest(_binding_inputs(fresh, fresh_selected, platform)) != plan_digest:
+    fresh_inputs, owners = _binding_inputs(fresh, fresh_selected, platform)
+    if digest(fresh_inputs) != plan_digest:
         raise RepairAdmissionError("repair owner binding changed")
-    return fresh.bindings[owner_id]
+    return owners[owner_id]
 
 
 @cancel_on_sigterm()
@@ -342,7 +362,7 @@ def _repair(
     platform = current_platform()
     host = admit_host(project_root, home=home)
     selected = _closure(host, modules, platform)
-    bound = _binding_inputs(host, selected, platform)
+    bound, owners = _binding_inputs(host, selected, platform)
     plan_digest = digest(bound)
     if apply and expected_plan_digest != plan_digest:
         raise RepairAdmissionError("repair plan inputs changed; no installer was invoked")
@@ -355,7 +375,7 @@ def _repair(
     }
     interrupted = False
     for module in selected:
-        owner = host.bindings.get(module.owner.owner_id)
+        owner = owners.get(module.owner.owner_id)
         observation = (
             _observe(module, owner, platform, readiness_timeout)
             if owner else Observation("unknown", "owner-not-admitted")
@@ -383,16 +403,16 @@ def _repair(
         outcome.blocked_by = tuple(blockers)
         if not apply or interrupted or blockers or outcome.restart_required:
             continue
-        owner = host.bindings.get(module.owner.owner_id)
+        owner = owners.get(module.owner.owner_id)
         if not owner or owner.refusal or platform not in module.platforms:
             continue
         refresh_readiness = any(item.attempted for item in outcomes.values())
-        if not refresh_readiness and _satisfies(module, observation):
-            continue
         try:
             fresh_owner = _readmit_owner(
                 project_root, modules, platform, plan_digest, module.owner.owner_id, home,
             )
+            if not refresh_readiness and _satisfies(module, observation):
+                continue
             if refresh_readiness:
                 observation = _observe(module, fresh_owner, platform, readiness_timeout)
                 outcome.after = observation

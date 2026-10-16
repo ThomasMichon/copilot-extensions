@@ -156,6 +156,7 @@ def test_installation_repair_discovery_and_plan_never_install(repair_fixture):
     assert "fixture-private-detail" not in json.dumps(plan)
 
 
+@pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_installation_repair_native_apply_freshly_probes_dependencies(repair_fixture):
     plan = invoke(repair_fixture)
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])

@@ -42,6 +42,92 @@ def test_transitive_identity_bound_refuses_before_probe_or_restart_state(repair_
     RestartJournal(home).load()
 
 
+@pytest.mark.parametrize("failure", ["oversized", "unreadable"])
+def test_unavailable_executable_never_launches_a_probe_or_installer(
+    repair_fixture, tmp_path, monkeypatch, failure,
+):
+    executable = tmp_path / "unavailable-interpreter"
+    if failure == "oversized":
+        with executable.open("wb") as stream:
+            stream.truncate(64 * 1024 * 1024 + 1)
+    else:
+        executable.write_bytes(b"unreadable")
+        original_open = Path.open
+
+        def unreadable(path, *args, **kwargs):
+            if path == executable:
+                raise PermissionError("synthetic denied executable read")
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", unreadable)
+    original_which = repair_api.shutil.which
+    monkeypatch.setattr(
+        repair_api.shutil, "which",
+        lambda name: str(executable) if name in {"bash", "pwsh", "powershell"}
+        else original_which(name),
+    )
+    monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("executed"))
+    plan = invoke(repair_fixture)
+    assert plan["outcomes"][0]["observedBefore"]["reason"] == "readiness-invocation-refused"
+    if failure == "oversized":
+        with executable.open("wb") as stream:
+            stream.truncate(64 * 1024 * 1024 + 2)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "incomplete" and not result["requiredSatisfied"]
+    assert result["outcomes"][0]["installer"]["status"] == "invocation-refused"
+
+
+def test_initially_ready_probe_cannot_skip_changed_owner_binding(repair_fixture, monkeypatch):
+    from agent_machines.installation_repair_process import ActionResult
+
+    _, _, payload, _, _ = repair_fixture
+    plan = invoke(repair_fixture)
+
+    def changed(module, owner, platform, *, readonly, timeout):
+        assert readonly, "installer executed"
+        (payload / "changed-during-ready-probe").write_text("changed", encoding="utf-8")
+        return ActionResult("exited", 0, json.dumps({
+            "schema": "copilot-extensions.module-readiness", "version": 1,
+            "module": module.module_id, "state": "ready",
+        }).encode())
+
+    monkeypatch.setattr(repair_api, "_invoke", changed)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "incomplete" and not result["requiredSatisfied"]
+    assert result["outcomes"][0]["observedBefore"]["state"] == "ready"
+    assert result["outcomes"][0]["installer"]["reason"] == "owner-binding-changed"
+    assert not any(row["attempted"] for row in result["outcomes"])
+
+
+@pytest.mark.parametrize("initially_unavailable", [False, True])
+def test_executable_changed_after_binding_cannot_run_a_probe(
+    repair_fixture, tmp_path, monkeypatch, initially_unavailable,
+):
+    executable = tmp_path / "changed-interpreter"
+    executable.write_bytes(b"first")
+    if initially_unavailable:
+        with executable.open("wb") as stream:
+            stream.truncate(64 * 1024 * 1024 + 1)
+    original_which = repair_api.shutil.which
+    monkeypatch.setattr(
+        repair_api.shutil, "which",
+        lambda name: str(executable) if name in {"bash", "pwsh", "powershell"}
+        else original_which(name),
+    )
+    original_binding = repair_api._binding_inputs
+
+    def changed(*args, **kwargs):
+        bound = original_binding(*args, **kwargs)
+        executable.write_bytes(b"second")
+        return bound
+
+    monkeypatch.setattr(repair_api, "_binding_inputs", changed)
+    monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("executed"))
+    plan = invoke(repair_fixture)
+    assert all(row["observedBefore"]["reason"] == "readiness-invocation-refused"
+               for row in plan["outcomes"])
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows CMD contract")
 @pytest.mark.parametrize("readonly", [True, False])
 def test_native_cmd_preserves_payload_path_and_argument_spaces(tmp_path, readonly):
@@ -119,7 +205,10 @@ def test_sigterm_during_spawn_defers_until_process_ownership_is_available(tmp_pa
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX SIGTERM cleanup and lock ordering")
-def test_terminated_conductor_reaps_installer_before_unlocking(repair_fixture, tmp_path):
+@pytest.mark.parametrize("first_during_cleanup", [False, True])
+def test_terminated_conductor_reaps_installer_before_unlocking(
+    repair_fixture, tmp_path, first_during_cleanup,
+):
     home, project, payload, _, identity = repair_fixture
     descendant = tmp_path / "descendant.pid"
     cleanup = tmp_path / "cleanup.started"
@@ -131,9 +220,14 @@ def test_terminated_conductor_reaps_installer_before_unlocking(repair_fixture, t
         "time.sleep(60)\n", encoding="utf-8",
     )
     script = payload / "scripts" / "action.sh"
+    installer = (
+        f"  '{sys.executable}' '{sleeper}' </dev/null >/dev/null 2>&1 &\n"
+        f"  while [ ! -f '{descendant}' ]; do sleep .01; done\n  exit 0"
+        if first_during_cleanup else
+        f"  '{sys.executable}' '{sleeper}' &\n  wait\n  exit 0"
+    )
     script.write_text(script.read_text().replace(
-        '  printf ready > "$state"; exit 0',
-        f"  '{sys.executable}' '{sleeper}' &\n  wait\n  exit 0",
+        '  printf ready > "$state"; exit 0', installer,
     ), encoding="utf-8")
     plan = invoke(repair_fixture, selection=("base",))
     conductor = tmp_path / "conductor.py"
@@ -162,8 +256,11 @@ def test_terminated_conductor_reaps_installer_before_unlocking(repair_fixture, t
     )
     try:
         _wait_for(descendant, process)
-        os.kill(process.pid, signal.SIGTERM)
+        if not first_during_cleanup:
+            os.kill(process.pid, signal.SIGTERM)
         _wait_for(cleanup, process)
+        if first_during_cleanup:
+            os.kill(process.pid, signal.SIGTERM)
         with pytest.raises(RepairAdmissionError, match="already active"):
             with RestartJournal(home).locked():
                 pytest.fail("lock released while the installer was still alive")

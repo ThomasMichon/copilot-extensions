@@ -98,6 +98,11 @@ On POSIX, CLI `SIGTERM` follows the cancellation cleanup path: transient
 installer descendants exit before the apply lock is released, and the caller's
 previous signal handler is restored. Every selected identity, including
 transitive prerequisites, must fit the 256-character bound before any probe.
+Unreadable or oversized executables remain unavailable outcomes and cannot run
+probes or installers. Each invocation must match its admitted argv, executable
+and content digest, even if a previously unavailable executable becomes usable.
+Apply re-admits initially-ready outcomes too; readiness
+observed while ownership or payload inputs change cannot satisfy a stale plan.
 `--readiness-timeout` and `--installer-timeout` are seconds (positive, at most
 3600); defaults are 15 and 300.
 
