@@ -186,6 +186,11 @@ provided) before guarded publication. The adopter must retain and validate the
 actual worker's native reference separately from any launch handle. A startup
 failure before publication or drain admission cleans up only that owned
 candidate, without rewriting or undraining an untouched predecessor.
+An `on_published` callback may accompany `expected_old`; it receives the exact
+guarded successor endpoint before predecessor drain/retirement. An adopter can
+therefore retain the fact that its candidate may have served work even after
+routing changes, and require a non-forcing drain before rollback disposal.
+Callers without this callback retain their existing behavior.
 If the confirmed-exited successor retracted its own active route during
 shutdown, rollback can restore the predecessor only while `active` is absent
 and `previous` still exactly identifies that successor. Recheck that condition

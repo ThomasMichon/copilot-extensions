@@ -93,6 +93,7 @@ def test_candidate_cleanup_does_not_require_readiness(candidate):
     body["draining"] = True
     value.terminate()
     client.shutdown.assert_called_once()
+    client.drain.assert_not_called()
     value.launcher.terminate.assert_not_called()
     value.close(completed=False)
     assert receipt_path(value.root, value.launch_id).exists()
@@ -122,6 +123,45 @@ def test_candidate_native_birth_mismatch_is_not_a_pid_fallback(candidate, monkey
     assert value.process is None
     client.shutdown.assert_not_called()
     value.launcher.terminate.assert_not_called()
+
+
+@pytest.mark.parametrize("drained", [
+    {"drained": True, "clean": True, "forced": False},
+    {"drained": False, "clean": False, "forced": False},
+    {"drained": True, "clean": True, "forced": True},
+    {"drained": True}, None,
+])
+def test_published_candidate_requires_nonforcing_clean_drain(candidate, drained):
+    from zdd.routing import Endpoint
+
+    value, body, _, client = candidate
+    body["draining"] = True
+    value.mark_published(Endpoint("127.0.0.1", 9012, 2222, "1.2.3", 8, "123456"))
+    client.drain.return_value = drained
+    if drained == {"drained": True, "clean": True, "forced": False}:
+        value.terminate()
+        assert [call[0] for call in client.method_calls] == ["drain", "shutdown"]
+    else:
+        with pytest.raises(ServingReconcileError, match="did not drain"):
+            value.terminate()
+        client.shutdown.assert_not_called()
+    client.drain.assert_called_once_with(timeout=10.0, poll=1.0, force=False)
+    value.launcher.terminate.assert_not_called()
+    value.close(completed=False)
+    assert receipt_path(value.root, value.launch_id).exists()
+
+
+def test_published_candidate_retains_worker_if_drain_gate_reopens(candidate):
+    from zdd.routing import Endpoint
+
+    value, body, _, client = candidate
+    value.mark_published(Endpoint("127.0.0.1", 9012, 2222, "1.2.3", 8, "123456"))
+    client.drain.return_value = {"drained": True, "clean": True, "forced": False}
+    body["draining"] = False
+    with pytest.raises(ServingReconcileError, match="drain gate changed"):
+        value.terminate()
+    client.shutdown.assert_not_called()
+    value.close(completed=False)
 
 
 def test_worker_receipt_records_actual_self_and_is_not_overwritten(tmp_path, monkeypatch):

@@ -61,6 +61,11 @@ replaying a receipt identity into a replacement process.
 The passive serving worker also reads only the existing credential: a missing,
 empty or malformed file after the parent's check fails without regeneration.
 Ordinary daemon startup retains its create-capable credential loader.
+Publication is recorded separately from the current route. Rollback must
+non-forcingly drain a successor that may have accepted work before requesting
+its shutdown, even if another owner has since replaced its route. A busy or
+unverified successor is retained with reconciliation evidence; never-published
+passive cleanup does not acquire a drain gate.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`

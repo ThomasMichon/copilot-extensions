@@ -39,12 +39,15 @@ class ServingCandidate:
     def __init__(
         self, root: Path, port: int, version: str,
         health: Callable[[], dict | None], make_client: Callable[[], BridgeClient],
+        *, drain_timeout: float = 10.0,
     ) -> None:
         self.root, self.port, self.version = root, port, version
         self.launch_id = uuid.uuid4().hex
         self.launcher: object | None = None
         self.process: process_exit.ProcessExitReference | None = None
         self._health, self._make_client = health, make_client
+        self._published = False
+        self._drain_timeout = drain_timeout
 
     @property
     def pid(self) -> int | None:
@@ -98,13 +101,35 @@ class ServingCandidate:
     def process_start_time(self) -> str | None:
         return self.process.start_time if self.process is not None else None
 
+    def mark_published(self, endpoint: routing.Endpoint) -> None:
+        self._published = True
+        if (
+            endpoint.pid != self.pid or endpoint.port != self.port
+            or endpoint.process_start_time != self.process_start_time
+        ):
+            raise ServingReconcileError("published successor differs from the launched worker")
+
     def terminate(self) -> None:
         if self.poll() == 0:
             return
         self.verify_health(self._health(), ready=False)
         # No broker/tree signal: graceful control is admitted only after the
         # endpoint proves this launch's retained native worker identity.
-        self._make_client().shutdown()
+        client = self._make_client()
+        if self._published:
+            drained = client.drain(timeout=self._drain_timeout, poll=1.0, force=False)
+            if (
+                not isinstance(drained, dict) or drained.get("drained") is not True
+                or drained.get("clean") is not True or drained.get("forced") is not False
+            ):
+                raise ServingReconcileError(
+                    "published successor did not drain; worker and reconciliation evidence retained"
+                )
+            health = self._health()
+            self.verify_health(health, ready=False)
+            if not isinstance(health, dict) or health.get("draining") is not True:
+                raise ServingReconcileError("published successor drain gate changed; worker retained")
+        client.shutdown()
 
     def close(self, *, completed: bool) -> None:
         if self.process is not None:

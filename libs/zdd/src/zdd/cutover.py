@@ -151,9 +151,12 @@ class CutoverOrchestrator:
         routing_mod: Any = routing,
         drain_before_publish: bool = False,
         expected_old: Endpoint | None = None,
+        on_published: Callable[[Endpoint], None] | None = None,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
+        if on_published is not None and expected_old is None:
+            raise ValueError("publication notification requires an observed predecessor")
         self.config_dir = Path(config_dir)
         self.bind = bind
         self.version = version
@@ -167,6 +170,7 @@ class CutoverOrchestrator:
         self.routing = routing_mod
         self.drain_before_publish = drain_before_publish
         self.expected_old = expected_old
+        self.on_published = on_published
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
@@ -709,6 +713,10 @@ class CutoverOrchestrator:
                 return result
             flipped = True
             phase = "flipped"
+            if self.on_published is not None:
+                if not isinstance(new_for_cas, Endpoint):
+                    raise CutoverError("successor publication notification lacks an exact endpoint")
+                self.on_published(new_for_cas)
             if self.drain_before_publish and not isinstance(new_for_cas, Endpoint):
                 raise CutoverError("guarded publication did not return the exact successor endpoint")
             result.steps.append("routing table flipped -> new active")

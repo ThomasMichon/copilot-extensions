@@ -449,7 +449,8 @@ def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, 
     "success", "retirement-pending", "shutdown-error", "drain-refused", "successor-unhealthy",
     "rollback-owner-changed", "forward-race", "cleanup-drain-refused",
     "cleanup-successor-unhealthy", "cleanup-changed-previous", "cleanup-race-previous",
-    "initial-health-failed", "same-version-shadow", "successor-drained",
+    "initial-health-failed", "same-version-shadow", "successor-drained", "busy-successor",
+    "busy-successor-owner-changed",
 ])
 def test_serving_reconcile_actual_cutover_requires_native_retirement(
     serving, monkeypatch, scenario,
@@ -461,7 +462,10 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
     from zdd import cutover, routing
 
     root, row, _, old_reference, core = serving
-    state = {"retired": False, "draining": False, "successor_stopped": False}
+    state = {
+        "retired": False, "draining": False, "successor_stopped": False,
+        "successor_draining": False,
+    }
     old_reference.wait.side_effect = lambda _: state["retired"]
     new_reference = MagicMock(pid=2222, start_time="123456")
     new_reference.wait.side_effect = lambda _: state["successor_stopped"]
@@ -533,8 +537,11 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
             "service": "agent-bridge",
             "ready": not (pid == 2222 and scenario == "initial-health-failed"),
             "version": row["version"] if pid == row["pid"] else "1.2.3",
-            "draining": state["draining"] and (
-                pid == row["pid"] or scenario == "successor-drained"
+            "draining": (
+                state["draining"] if pid == row["pid"] else
+                state["successor_draining"] or (
+                    state["draining"] and scenario == "successor-drained"
+                )
             ),
             "slot": {"pid": 3333 if pid == 2222 and scenario == "same-version-shadow" else pid,
                      "role": "active" if active and active["pid"] == pid else "passive",
@@ -558,18 +565,30 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
     monkeypatch.setattr(routing, "_pid_alive", lambda _: True)
     calls = []
     old_shutdowns = []
+    successor_drains = []
 
     def request(client, method, path, body=None, **_kwargs):
         calls.append((method, path, body))
         if path == "/api/v1/drain":
             assert body["force"] is False
+            if urlparse(client._base).port != row["port"]:
+                successor_drains.append(body)
+                state["successor_draining"] = True
+                if scenario.startswith("busy-successor"):
+                    return {
+                        "drained": False, "clean": False, "forced": False,
+                        "busy_sessions": ["non-preservable-command-turn"],
+                    }
+                return {"drained": True, "clean": True, "forced": False, "busy_sessions": []}
             state["draining"] = True
-            if scenario == "rollback-owner-changed":
+            if scenario in ("rollback-owner-changed", "busy-successor-owner-changed"):
                 (root / "active.json").write_text(json.dumps({"active": {
                     **row, "pid": 3333, "generation": 20, "process_start_time": "999999",
                 }}))
             if scenario.endswith("drain-refused") or scenario in (
                 "rollback-owner-changed", "cleanup-changed-previous", "cleanup-race-previous",
+                "busy-successor",
+                "busy-successor-owner-changed",
             ):
                 return {"drained": False, "clean": False, "forced": False, "busy_sessions": ["busy"]}
             return {"drained": True, "clean": True, "forced": False, "busy_sessions": []}
@@ -652,9 +671,17 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
     if scenario != "forward-race":
         assert "spawned passive pid=? " in result["steps"][0]
     assert core._launch_bridge_daemon.call_count == (0 if scenario == "forward-race" else 1)
-    assert sum(path == "/api/v1/drain" for _, path, _ in calls) == (
-        0 if scenario in ("forward-race", "initial-health-failed", "same-version-shadow") else 1
+    never_published = scenario in ("forward-race", "initial-health-failed", "same-version-shadow")
+    rollback = scenario in (
+        "drain-refused", "successor-unhealthy", "successor-drained", "rollback-owner-changed",
+        "cleanup-drain-refused", "cleanup-successor-unhealthy", "cleanup-changed-previous",
+        "cleanup-race-previous", "busy-successor",
+        "busy-successor-owner-changed",
     )
+    assert sum(path == "/api/v1/drain" for _, path, _ in calls) == (
+        0 if never_published else 2 if rollback else 1
+    )
+    assert bool(successor_drains) is rollback
     assert sum(call.args == (15.0,) for call in old_reference.wait.call_args_list) == (
         1 if scenario in ("success", "retirement-pending") else 0
     )
@@ -699,6 +726,15 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
         assert routing.read_table(root) == {"active": row}
         assert (root / "cutover.json").exists()
         assert state["successor_stopped"] is False
+    if scenario.startswith("busy-successor"):
+        assert result["rolled_back"] is False
+        assert routing.read_table(root)["active"]["pid"] == (
+            3333 if scenario.endswith("owner-changed") else 2222
+        )
+        assert (root / "cutover.json").exists()
+        assert state["successor_stopped"] is False
+        assert not any(path in ("/api/v1/undrain", "/api/v1/shutdown") for _, path, _ in calls)
+        assert list(root.glob("serving-launch-*.json")), "busy worker lost recovery identity"
     if scenario == "forward-race":
         core._launch_bridge_daemon.assert_not_called()
         assert routing.read_table(root)["active"]["forwarded"] is True

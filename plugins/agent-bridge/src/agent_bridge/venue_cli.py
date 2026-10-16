@@ -276,6 +276,7 @@ def _cmd_deploy(
                     f"http://{routing.format_authority(host, port)}", token,
                     timeout=2, connect_grace=0,
                 ),
+                drain_timeout=args.drain_timeout,
             )
             cmd.extend(["--serving-launch-id", candidate.launch_id])
         # A passive generation inside the deploy's Job would die with it once
@@ -367,6 +368,13 @@ def _cmd_deploy(
             return f"successor identity changed before publication ({type(exc).__name__})"
         return None
 
+    def record_successor_publication(endpoint: routing.Endpoint) -> None:
+        if candidate is None:
+            from .serving_reconcile import ServingReconcileError
+
+            raise ServingReconcileError("successor publication has no launch owner")
+        candidate.mark_published(endpoint)
+
     orch = CutoverOrchestrator(
         config_dir(),
         bind=cfg.bind,
@@ -380,6 +388,7 @@ def _cmd_deploy(
             lambda active: forwarded_skip if active_route_is_forward(active) else None
         ),
         expected_old=routing.Endpoint.from_dict(serving.route) if serving is not None else None,
+        on_published=record_successor_publication if serving is not None else None,
     )
     res = None
     try:

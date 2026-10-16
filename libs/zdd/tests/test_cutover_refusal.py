@@ -98,6 +98,16 @@ def test_expected_predecessor_requires_publication_guard(tmp_path):
         )
 
 
+def test_publication_notification_requires_an_observed_predecessor(tmp_path):
+    with pytest.raises(ValueError, match="publication notification requires"):
+        CutoverOrchestrator(
+            tmp_path, bind="127.0.0.1", version="new",
+            spawn_passive=lambda _: None, health_check=lambda *_: True,
+            make_client=lambda _: None, pick_free_port=lambda: 61002,
+            on_published=lambda _: None,
+        )
+
+
 def test_cutover_refuses_forward_published_during_health_wait(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(

@@ -164,7 +164,8 @@ def test_native_fixture_early_failure_stops_broker_and_worker_before_receipt(tmp
 
 
 @pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
-def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path):
+@pytest.mark.parametrize("published", [False, True])
+def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path, published):
     import agent_bridge
     from agent_bridge.serving_candidate import ServingCandidate
     from agent_bridge.service_process_state import _service_health_on_port
@@ -235,6 +236,13 @@ def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path):
         assert not (root / "active.json").exists()
         with pytest.raises(ServingReconcileError):
             candidate.verify_health({**body, "slot": {**body["slot"], "pid": launcher.pid}})
+        if published:
+            endpoint = routing.publish_active(
+                root, bind="127.0.0.1", port=port, pid=candidate.pid,
+                version=agent_bridge.__version__, process_start_time=candidate.process.start_time,
+            )
+            candidate.mark_published(endpoint)
+            candidate.verify_health(health())
         candidate.terminate()
         assert candidate.process.wait(2), "owned actual worker did not gracefully exit"
         launcher.wait(timeout=2)
