@@ -7,6 +7,16 @@ container venues.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+Both installers co-deploy the canonical Python runtime resolver and its lease
+and construction companions into the Bridge installation's `scripts/` directory,
+alongside the existing native-shell resolver deployment in `bin/`. Native
+service worktree-owner launches therefore do not require an interactive `PATH`
+or a helper inside the Worktrees installation. Legacy owner selection still
+requires a completed runtime slot and refuses retired installation ownership;
+installation-cell launches retain same-cell provenance validation. This does
+not change runtime selection, provision a missing owner, or adopt another
+marketplace's runtime.
+
 Internal owner-driven deployment and service restart accept optional
 `conditional`/`routing_dir` keyword arguments using the shared
 [conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).

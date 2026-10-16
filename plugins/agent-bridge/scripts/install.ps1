@@ -2026,6 +2026,12 @@ function Write-Binstubs {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
+    # Native service callers use the Python resolver without a payload or PATH.
+    $scriptsDir = Join-Path $InstallDir 'scripts'
+    New-Item -ItemType Directory -Path $scriptsDir -Force -ErrorAction Stop | Out-Null
+    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $r) -Destination (Join-Path $scriptsDir $r) -Force -ErrorAction Stop
+    }
     if (-not $publishGlobalBinstubs) {
         Write-Ok 'Scoped install keeps the global compatibility binstub unchanged'
         return

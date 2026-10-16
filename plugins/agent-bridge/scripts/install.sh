@@ -1419,6 +1419,11 @@ deploy_binstub() {
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
     done
+    # Native service callers use the Python resolver without a payload or PATH.
+    mkdir -p "$INSTALL_DIR/scripts"
+    for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py; do
+        cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/scripts/$r" || return 1
+    done
     if ! $PUBLISH_GLOBAL_BINSTUBS; then
         _ok "Scoped install keeps the global compatibility binstub unchanged"
         return 0
