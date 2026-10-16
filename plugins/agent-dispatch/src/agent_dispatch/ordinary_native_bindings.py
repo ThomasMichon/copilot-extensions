@@ -17,8 +17,13 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
     histories = conn.execute(
         "SELECT s.*,a.native_session_id FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON a.reservation_key=s.key "
-        "WHERE s.worktree=? AND (s.task_id=? OR s.creation_key=?)",
-        (row["worktree"], task.id, row["creation_key"]),
+        "WHERE s.worktree=? AND (s.task_id=? OR s.creation_key=? OR ("
+        "s.exclusive_key=? AND s.session_handle IS NOT NULL AND EXISTS ("
+        "SELECT 1 FROM spawn_reservations carried WHERE carried.worktree=s.worktree "
+        "AND (carried.task_id=? OR carried.creation_key=?) "
+        "AND carried.session_handle=s.session_handle)))",
+        (row["worktree"], task.id, row["creation_key"], row["exclusive_key"],
+         task.id, row["creation_key"]),
     ).fetchall() if row["worktree"] else [row]
     evidence: list[tuple[Any, str | None]] = []
     for history in histories:

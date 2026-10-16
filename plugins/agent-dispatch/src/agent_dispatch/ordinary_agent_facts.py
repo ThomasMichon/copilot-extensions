@@ -80,6 +80,15 @@ def identity(info: dict) -> AgentIdentity:
 
 def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
     """Require the exact active owner record in the stored execution repository."""
+    allocation_task = task_id
+    if reservation.get("allocation_reservation_key") is not None:
+        from .spawn_factories import SpawnPreparationRetained
+        from .workspace_binding import allocation_provenance
+
+        try:
+            allocation_task, _, _ = allocation_provenance(task_id, reservation)
+        except (SpawnPreparationRetained, KeyError, TypeError, ValueError) as exc:
+            raise TaskError(f"ground allocation provenance is unproven: {exc}") from exc
     record = data
     if (
         not isinstance(record, dict)
@@ -126,7 +135,7 @@ def owner_record(data: dict, reservation: dict, task_id: str) -> dict:
         or reservation.get("worktree_path") is not None
         and record["path"] != reservation["worktree_path"]
         or record.get("status") not in {"active", "pushed"}
-        or foreign_task_id(record, task_id)
+        or foreign_task_id(record, allocation_task)
         or record.get("session_live") is True
         or record.get("native_liveness") not in (None, "stopped", "gone")
         or record.get("session_retired") is True

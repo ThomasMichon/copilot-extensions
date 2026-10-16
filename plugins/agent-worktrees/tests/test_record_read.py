@@ -166,7 +166,8 @@ def test_record_read_preserves_canonical_dispatch_attribution(record_fixture, ta
     from agent_dispatch.ordinary_agent_facts import owner_record
     from agent_dispatch.queue_records import TaskError
     reservation = {"worktree": data["worktree_id"], "allocation_project": data["repo"],
-                   "worktree_path": data["worktree_path"]}
+                   "worktree_path": data["worktree_path"],
+                   "key": "dispatch-task:assigned-task:1", "attempt": 1}
     if task_id == "foreign-task":
         with pytest.raises(TaskError, match="identity, holder"):
             owner_record(result["worktree"], reservation, "assigned-task")

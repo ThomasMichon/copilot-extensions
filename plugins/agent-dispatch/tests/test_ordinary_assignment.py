@@ -22,9 +22,10 @@ pytestmark = pytest.mark.contract("agent_dispatch.ordinary_bridge")
 
 
 @pytest.fixture
-def assigned(tmp_path, monkeypatch):
+def assigned(tmp_path, monkeypatch, request):
     queue = TaskQueue(tmp_path / "tasks.db")
-    task = queue.create("review", repo="queue-lane", exclusive_key="review-slot")
+    task = queue.create("review", repo="queue-lane", exclusive_key="review-slot",
+                        **getattr(request, "param", {}))
     reservation, _ = queue.reserve_spawn(task.id, reserved_by="supervisor", driver="ordinary-bridge")
     queue.record_spawn_allocation(reservation.key, "execution-project")
     worktree_path = str(tmp_path / "worktree-a")

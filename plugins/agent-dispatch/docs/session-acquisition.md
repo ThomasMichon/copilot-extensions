@@ -16,6 +16,9 @@ project/path bindings cannot change. When legacy metadata is absent, a
 successful exact owner read must establish the candidate namespace and path
 before they are bound; a failed lookup cannot make a mutable routing hint
 permanent.
+Owner attribution is compared with the original allocation task from retained
+allocation provenance, not a dedup re-emission's new task ID. Admission still
+belongs to the current task and generation.
 
 A recorded native head selects strict worktree-scoped Bridge resume. Dispatch
 stores the actual resumed `SessionInfo`, including its exact native, workspace,
@@ -33,6 +36,8 @@ Explicitly retired IDs remain forbidden, but do not veto a different current,
 unretired native head; unknown unretired historical identities still conflict.
 Bare historical CLI handles are native IDs under their original producing
 driver, even after an ordinary-bridge retry; unclassifiable bare handles refuse.
+An inherited handle also retains its exact originating evidence across tasks
+sharing an exclusive lane; unrelated worktree history is not imported.
 A handleless inherited retirement marker permits only current-head inspection
 when all known retired identities are attributable. Exact resumed-agent storage
 can atomically clear that current derived marker for a different unretired

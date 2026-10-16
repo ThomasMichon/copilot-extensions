@@ -1,5 +1,7 @@
 """Producer compatibility and historical reservation boundaries."""
 
+from dataclasses import asdict
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -222,4 +224,59 @@ def test_ordinary_assignment_retirement_resolves_carried_cli_producer_first(assi
         with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
             _start(assigned)
         assert calls == ["record"]
+    assert "create" not in calls
+
+
+@pytest.mark.parametrize("head", ["native-a", "native-b"])
+def test_ordinary_assignment_exclusive_carry_keeps_original_handle_native(assigned, head):
+    queue, task, _, record, _, calls = assigned
+    _legacy(queue, task)
+    first = queue.get_reservation(task["spawn_reservation_key"])
+    queue.defer_spawn(first.key, detail="retained exclusive lane")
+    next_task = queue.create("different logical task", repo="queue-lane", exclusive_key="review-slot")
+    current, admitted = queue.reserve_spawn(next_task.id, driver="ordinary-bridge")
+    assert admitted and current.creation_key != first.creation_key
+    assert current.worktree == first.worktree and current.session_handle == first.session_handle
+    task.clear()
+    task.update(asdict(next_task), spawn_reservation_key=current.key)
+    record.update(last_session_id=head, dispatch_attempt=None)
+    facts = reservation_native_facts(queue, current.key)
+    assert facts["known_native_session_ids"] == ["native-a"]
+    if head == "native-a":
+        _start(assigned)
+        assert calls.count("resume") == calls.count("send") == 1
+    else:
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
+            _start(assigned)
+        assert calls == ["record"]
+    assert "create" not in calls
+
+
+@pytest.mark.parametrize("assigned", [{"dedup_key": "logical-work"}], indirect=True)
+@pytest.mark.parametrize("foreign", [False, True])
+def test_ordinary_assignment_dedup_reemission_preserves_original_owner(assigned, foreign):
+    queue, task, _, record, _, calls = assigned
+    first = queue.get_reservation(task["spawn_reservation_key"])
+    queue.defer_spawn(first.key, detail="retained ground allocation")
+    queue.claim_one("first-worker", task_id=task["id"])
+    queue.start(task["id"], "first-worker", owner_session_id="native-a")
+    queue.complete(task["id"], "first-worker")
+    _legacy(queue, task)
+    next_task = queue.create("re-emitted work", repo="queue-lane",
+                             exclusive_key="review-slot", dedup_key="logical-work")
+    current, admitted = queue.reserve_spawn(next_task.id, driver="ordinary-bridge")
+    assert admitted and next_task.id != first.task_id
+    assert current.creation_key == first.creation_key
+    assert current.allocation_reservation_key == first.key
+    task.clear()
+    task.update(asdict(next_task), spawn_reservation_key=current.key)
+    if foreign:
+        record["dispatch_attempt"]["task_id"] = "unrelated-allocation"
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="identity, holder"):
+            _start(assigned)
+        assert calls == ["record"]
+    else:
+        _start(assigned)
+        assert calls.count("resume") == calls.count("send") == 1
+        assert queue.get(next_task.id).status == "queued"
     assert "create" not in calls
