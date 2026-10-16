@@ -1215,6 +1215,12 @@ failures stop without automatic retry. Numeric OS errors use the same
 host-aware matchers as update outcome classification, including localized
 permission refusals. An install wrapper's OS error is terminal because it may
 be activation restoration failing, not a retryable spawn failure.
+The canonical activation-state owner first retries restoration itself once
+after one second for an explicit Windows sharing/lock error (32/33), including
+a wrapped state-read error. It reuses the original activation snapshot, not the
+post-install state, and never replays the command. Partial settings restoration
+is retained while inventory restoration is retried. Permission errors, malformed
+state and exhausted restoration still propagate as failures.
 A command timeout also stops: the
 payload subprocess path does not prove descendant cleanup, so starting another
 writer would be unsafe. Retried failures remain advisory attempt history;

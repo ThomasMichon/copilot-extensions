@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 from typing import Any
 
 
@@ -415,6 +417,24 @@ def capture(identity: str, home: Path | None = None) -> ActivationSnapshot:
 
 def restore(snapshot: ActivationSnapshot, home: Path | None = None) -> None:
     """Restore activation fields without rolling back refreshed inventory."""
+    for attempt in range(2):
+        try:
+            _restore_once(snapshot, home)
+            return
+        except (OSError, PluginStateError) as error:
+            cause = error.__cause__ if isinstance(error, PluginStateError) else error
+            code = getattr(cause, "winerror", None)
+            if attempt or code not in (32, 33):
+                raise
+            logging.getLogger(__name__).warning(
+                "Activation restoration for %s hit Windows lock error %s; "
+                "retrying the original snapshot once",
+                snapshot.identity, code,
+            )
+            sleep(1.0)
+
+
+def _restore_once(snapshot: ActivationSnapshot, home: Path | None) -> None:
     home = home or copilot_home()
     settings_path = home / "settings.json"
     _, settings = read_json_object(settings_path)

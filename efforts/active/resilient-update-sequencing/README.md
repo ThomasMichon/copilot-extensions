@@ -118,9 +118,13 @@ fulfilling that direction, not additional operator requirements.
 - [ ] Introduce a readiness barrier and dependency-aware recoverable activation
   for supported adapters, retaining prior healthy generations and explicit
   unsupported-adapter behavior.
-- [ ] Preserve verified target progress and retry transient failures with
-  backoff and fresh inspection; keep authority/policy/integrity blockers
-  durable and actionable without inventing another scheduler.
+- [x] Retry explicitly transient payload failures within bounded in-run
+  backoff, re-inspect the failed target, retain successful peers and failure
+  history, and stop authority/policy/integrity refusals.
+- [ ] Preserve verified prepared-candidate progress across retries and resume
+  incomplete runtime/local-finishing work through canonical contracts.
+- [ ] Establish payload process-tree and activation-restoration recovery
+  custody before automatically retrying timeouts or restoration failures.
 - [ ] Adopt reuse and bounded independent preparation only where measured
   benefit and existing isolation/resource contracts justify them.
 
@@ -143,9 +147,10 @@ fulfilling that direction, not additional operator requirements.
 - [x] Profile integration crosses the real Manager command boundary without
   installer/self-stage invocation; unchanged inputs preserve output bytes and
   timestamps, and changed selections retain stable GUID and shortcut behavior.
-- [ ] Update failure propagation distinguishes intentional exclusions from
-  unresolved required targets; a retry does not hide failure history or rebuild
-  already-verified candidates.
+- [x] Update failure propagation distinguishes intentional exclusions from
+  unresolved required targets; bounded payload retry retains attempt history
+  without repeating successfully acquired peers.
+- [ ] Candidate/checkpoint retry does not rebuild already-verified candidates.
 - [ ] Preparation, readiness and activation fault injection proves incomplete
   slots are never selected, prior runtimes remain usable and input drift causes
   revalidation rather than stale publication.
@@ -685,3 +690,60 @@ achieved by rearranging today's combined installer invocations.
   This does not claim that an inaccessible restoration destination was repaired.
 - The complete five-file native portfolio passes 245 cases with one platform
   skip. Fresh current-head review and hosted CI remain required before merge.
+
+### 2026-10-15 - Bounded payload recovery source merge
+- #6906 squash-merged into `dev` at
+  `8c87da4684822ad0810b57be344e49bb97b165c0`. Exact-head review 5541951939
+  Approved `7dfccb5cbe1e596f3f35f77f7c0a678e0f336ef5`, resolving all three
+  earlier medium findings with zero open issues. Current-head CI 38835222486
+  succeeded, including hosted lint and required POSIX/native Windows lanes.
+- Re-read the full Plan and Validation Plan. Marked only bounded in-run
+  payload recovery, failure propagation and peer retention complete.
+  Prepared-candidate checkpoints, timeout/activation-restoration custody,
+  readiness/recoverable activation, reuse and installed acceptance remain open.
+- Keep #6707 with its current canonical owner, per the operator's explicit
+  decision; no alternate constructor is authorized by its unavailable handoff.
+  #6867 remains at its previously handed-over head. That release dependency
+  and its validated local correction have not been consumed or deployed here.
+- The coordinator retains the parent objective and all unresolved resource
+  obligations. Next required coordination is a reachable qualified recipient
+  for the already-directed bootstrap stewardship handover and an accepted
+  canonical preparation contract. A source merge does not satisfy either gate
+  or the actual running-state/timing acceptance.
+- While those handshakes are pending, the next independent slice is payload
+  timeout/process custody and activation-restoration recovery, composing the
+  existing tree-owning runner and preservation primitives rather than adding
+  another process engine or retrying an unproven writer.
+
+### 2026-10-15 - Original-snapshot restoration recovery
+- Kept command retry separate from activation-state recovery. The canonical
+  state owner now retries restoration once after one second only for explicit
+  Windows sharing/lock failures (32/33), including wrapped state-read errors.
+  It retains the immutable pre-install snapshot and reads current documents
+  again; partial settings restoration does not cause command replay or capture
+  of the newly enabled plugin state.
+- Permission, malformed-state and other failures remain terminal. Exhaustion
+  raises the restoration error; a recovered restoration retains the command's
+  original success or timeout outcome. No new journal, constructor, scheduler,
+  dependency or activation policy was introduced.
+- Regression-first reproduced fourteen failures with three controls passing.
+  The canonical library portfolio and updater consumer tests cover activation
+  tri-state, partial two-file progress, retained refreshed inventory, unrelated
+  settings, bounded exhaustion and exactly one install command. Native
+  subprocess fixtures cover existing and previously absent activation state.
+- Native canonical coverage passes 105 cases, updater preservation/retry
+  coverage passes 58, and the isolated standalone consumer passes eight.
+  All thirteen install contracts and canonical/vendor source checks pass.
+  The fresh-state subprocess is the applicable first-touch proof; this change
+  adds no installer/dependency path requiring a full clean-room build.
+  Hosted POSIX/lint, current-head review and CI still gate publication.
+  No live installation was changed; rollout remains separately authorized.
+- Documentation impact: updated the canonical and standalone-vendored library
+  README and the unified-update installation contract. The canonical source
+  change propagates to all eight consumers through one changefile; the sole
+  physical source copy is synchronized without importing unrelated test drift.
+- This closes one narrow restoration-contention gap under the reviewed
+  installer vision. The process-tree owner still cannot positively attest
+  timeout cleanup, so timeout replay remains blocked. Durable interrupted
+  restoration, preparation/readiness, release and actual running-state
+  acceptance remain open; the broad custody Plan item is not complete.

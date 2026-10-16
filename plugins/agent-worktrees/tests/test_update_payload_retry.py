@@ -187,8 +187,9 @@ def test_native_os_error_sharing_is_host_aware(acquisition, monkeypatch, windows
 
 
 @pytest.mark.parametrize("command_timeout", [False, True])
-def test_real_install_restoration_failure_is_never_retried(
-    tmp_path, monkeypatch, command_timeout,
+@pytest.mark.parametrize("recover", [False, True])
+def test_real_install_restoration_never_replays_the_command(
+    tmp_path, monkeypatch, command_timeout, recover,
 ):
     from plugin_activation import state
 
@@ -204,6 +205,7 @@ def test_real_install_restoration_failure_is_never_retried(
     )
     monkeypatch.setattr(core, "_resolve_copilot", lambda: "copilot")
     monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
+    monkeypatch.setattr(state, "sleep", lambda seconds: None)
     monkeypatch.setattr(
         reconcile, "core_installed_payload_dir",
         lambda name: payload if payload.is_dir() else None,
@@ -218,19 +220,25 @@ def test_real_install_restoration_failure_is_never_retried(
                 raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         return subprocess.CompletedProcess(argv, 0, "", "")
     monkeypatch.setattr(subprocess, "run", install)
-    replace = state.os.replace
+    replace, writes = state.os.replace, []
     def fail_restore(source, destination):
         if Path(destination) == settings:
-            error = OSError("activation restoration write blocked")
-            error.winerror = 32
-            raise error
+            writes.append(destination)
+            if not recover or len(writes) == 1:
+                error = OSError("activation restoration write blocked")
+                error.winerror = 32
+                raise error
         return replace(source, destination)
     monkeypatch.setattr(state.os, "replace", fail_restore)
     status = core._update_one_plugin_payload("agent-example", "copilot-extensions")
-    assert not status.startswith("OK")
-    assert "restor" in status
+    if recover:
+        assert status == ("timed out" if command_timeout else "OK (installed)")
+    else:
+        assert not status.startswith("OK")
+        assert "restor" in status
     assert len(calls) == 1
-    assert json.loads(settings.read_text())["enabledPlugins"][identity] is True
+    assert len(writes) == 2
+    assert json.loads(settings.read_text())["enabledPlugins"][identity] is (not recover)
 
 
 def test_retry_timeout_uses_remaining_total_budget(acquisition, monkeypatch):
