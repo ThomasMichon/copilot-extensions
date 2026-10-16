@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,40 @@ def _source(tmp_path: Path) -> tuple[Path, LogRetirementRevision]:
     return source, LogRetirementRevision(
         _fingerprint(source.stat()), hashlib.sha256(CONTENT).hexdigest(),
     )
+
+
+@contextmanager
+def _native_writer(path: Path) -> Iterator[int]:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    # Share READ/WRITE/DELETE: only the retirement handle's mask may deny us.
+    handle = create(
+        windows_extended_path(path), 0x80000000 | 0x40000000,
+        7, None, 3, 0x00200080, None,
+    )
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    fd: int | None = None
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDWR | os.O_BINARY)
+        yield fd
+    finally:
+        if fd is not None:
+            os.close(fd)
+        elif not close(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX must not fall back to pathname deletion")
@@ -61,12 +97,33 @@ def test_source_roots_retirement_abort_preserves_and_releases(tmp_path: Path) ->
 @native
 def test_source_roots_retirement_excludes_existing_writer(tmp_path: Path) -> None:
     source, _ = _source(tmp_path)
-    with source.open("ab") as writer:
+    with _native_writer(source) as writer:
         with archive_directory(tmp_path) as directory:
-            with pytest.raises(OSError):
+            with pytest.raises(OSError) as denied:
                 with retirement_file(directory, NAME):
                     pytest.fail("retirement admitted an existing writable handle")
-        writer.write(b"late")
+            assert denied.value.winerror == 32
+        os.lseek(writer, 0, os.SEEK_END)
+        os.write(writer, b"late")
+    assert source.read_bytes() == CONTENT + b"late"
+    with _native_writer(source):
+        pass
+
+
+@native
+def test_source_roots_retirement_excludes_delete_sharing_native_writer(tmp_path: Path) -> None:
+    source, _ = _source(tmp_path)
+    with _native_writer(source):
+        pass
+    with archive_directory(tmp_path) as directory:
+        with retirement_file(directory, NAME):
+            with pytest.raises(OSError) as denied:
+                with _native_writer(source):
+                    pytest.fail("retirement admitted a DELETE-sharing writable handle")
+            assert denied.value.winerror == 32
+    with _native_writer(source) as writer:
+        os.lseek(writer, 0, os.SEEK_END)
+        os.write(writer, b"late")
     assert source.read_bytes() == CONTENT + b"late"
 
 
