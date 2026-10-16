@@ -123,14 +123,8 @@ try {
     catch [Threading.AbandonedMutexException] { $ownsReconcileMutex = $true }
     if (-not $ownsReconcileMutex) { Exit-SessionStart }
 
-    # Allow the installer's own bounded build + graceful cutover to finish first.
-    $deadlineSeconds = 1050
-    $deadlineRaw = $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC
-    if (-not $deadlineRaw) { $deadlineRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
-    if ($deadlineRaw -and -not [int]::TryParse($deadlineRaw, [ref]$deadlineSeconds)) {
-        throw 'Invalid agent-dispatch installer deadline'
-    }
-    $staleSeconds = [Math]::Max(600, $deadlineSeconds + 60)
+    # --- Good boot-citizen guard: single-flight + live-owner deferral ---
+    # Only the installer's native watchdog owns bounded tree termination.
     try {
         if (Test-Path $statusFile) {
             $prev = Get-Content -LiteralPath $statusFile -Raw -ErrorAction Stop |
@@ -147,24 +141,7 @@ try {
                     [DateTimeOffset]$recordedStart
                 } else { [DateTimeOffset]::Parse([string]$recordedStart) }
                 if ($previousProcess.StartTime.ToUniversalTime() -eq $startedAt.UtcDateTime) {
-                    $at = if ($prev.at -is [DateTime]) {
-                        [DateTimeOffset]$prev.at
-                    } else { [DateTimeOffset]::Parse([string]$prev.at) }
-                    if (([DateTimeOffset]::UtcNow - $at).TotalSeconds -lt $staleSeconds) {
-                        Exit-SessionStart
-                    }
-                    $reapProcess = Get-Process -Id ([int]$prev.launched_pid) -ErrorAction Stop
-                    try {
-                        [void]$reapProcess.Handle
-                        if ($reapProcess.HasExited -or
-                            $reapProcess.StartTime.ToUniversalTime() -ne $startedAt.UtcDateTime) {
-                            throw 'Reconcile process identity changed before retirement'
-                        }
-                        & taskkill.exe /PID $reapProcess.Id /T /F *> $null
-                        if ($LASTEXITCODE -ne 0 -and -not $reapProcess.HasExited) {
-                            throw 'Could not retire the stale reconcile process tree'
-                        }
-                    } finally { $reapProcess.Dispose() }
+                    Exit-SessionStart
                 }
             }
         } elseif (Test-Path $lockFile) {
@@ -176,7 +153,7 @@ try {
             }
         }
     } catch {
-        [Console]::Error.WriteLine("[$name] could not validate or retire prior reconcile: $($_.Exception.Message)")
+        [Console]::Error.WriteLine("[$name] could not validate prior reconcile: $($_.Exception.Message)")
         Exit-SessionStart
     }
 

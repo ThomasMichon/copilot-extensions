@@ -409,7 +409,7 @@ def test_context_install_revalidates_generations_before_cutover() -> None:
 def test_windows_context_install_uses_shallow_staging_root() -> None:
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     context = ps1.split("if ($ContextualInstall) {", 1)[1].split(
-        "# === install-contract:v4 self-stage", 1
+        "# === install-contract:v5 self-stage", 1
     )[0]
 
     assert "[IO.Path]::GetTempPath()" in context
@@ -421,7 +421,7 @@ def test_windows_context_install_uses_shallow_staging_root() -> None:
 def test_windows_context_stage_preserves_argument_boundaries() -> None:
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     context = ps1.split("if ($ContextualInstall) {", 1)[1].split(
-        "# === install-contract:v4 self-stage", 1
+        "# === install-contract:v5 self-stage", 1
     )[0]
 
     assert "[Diagnostics.ProcessStartInfo]::new()" in context
@@ -433,30 +433,30 @@ def test_windows_context_stage_preserves_argument_boundaries() -> None:
     assert "-match '/\\.copilot/installed-plugins/'" in context
 
 
-def test_windows_context_stage_preserves_default_for_invalid_deadline() -> None:
+def test_windows_context_stage_reuses_shared_deadline_policy() -> None:
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     context = ps1.split("if ($ContextualInstall) {", 1)[1].split(
-        "# === install-contract:v4 self-stage", 1
+        "# === install-contract:v5 self-stage", 1
     )[0]
 
-    assert "$parsedContextDeadline = 0" in context
-    assert "[ref]$parsedContextDeadline" in context
-    assert "$parsedContextDeadlineOk = [int]::TryParse" in context
-    assert "$contextDeadline = $parsedContextDeadline" in context
-    assert "[ref]$contextDeadline" not in context
+    assert "Get-InstallWatchdogBudget -Payload $contextStagedPayload" in context
+    assert "Wait-InstallWatchdog -Child $contextChild -Budget $contextBudget" in context
+    assert "$parsedContextDeadline" not in context
 
 
 def test_posix_context_stage_reaps_child_group_before_exit() -> None:
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     context = sh.split(
         "# A structured caller supplies both the validated context", 1
-    )[1].split("# === install-contract:v4 self-stage", 1)[0]
+    )[1].split("# === install-contract:v5 self-stage", 1)[0]
 
-    assert "__aw_stop_context_child()" in context
-    assert 'kill -- -"$__aw_child"' in context
-    assert 'wait "$__aw_child"' in context
-    assert "trap '__aw_stop_context_child 143' TERM" in context
-    assert 'exec bash -c "$__aw_watchdog"' in context
+    helper = (PLUGIN / "scripts" / "installer-watchdog.sh").read_text(encoding="utf-8")
+    assert "start_install_watchdog" in context
+    assert "_install_watchdog_cancel()" in helper
+    assert 'kill -KILL -- -"$child"' in helper
+    assert 'wait "$child"' in helper
+    assert "trap '_install_watchdog_cancel 143' TERM" in helper
+    assert 'exec bash -c "$(declare -f' in helper
     assert 'cd "$__aw_staged_payload"' not in context
     assert '${COPILOT_PLUGIN_INSTALL_STAGED:-}" != context-install' in context
 

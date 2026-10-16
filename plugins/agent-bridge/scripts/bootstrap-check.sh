@@ -47,7 +47,7 @@ fi
 # rather than kept as a redundant consent checkbox. Frequency/trigger stays
 # deliberately bounded -- still only once per session start, only on a real
 # version drift. What DOES still bound concurrency is the single-flight +
-# stale-reap guard below (already present in the .ps1 sibling; this .sh
+# live-owner guard below (already present in the .ps1 sibling; this .sh
 # now carries the same guard, not the removed opt-in). Staleness stays
 # observable via `agent-bridge service status`, which now reports
 # days-since-last-reconcile (see _print_reconcile_status in
@@ -103,16 +103,8 @@ fi
 reconcile_log="$InstallDir/reconcile.log"
 status_file="$InstallDir/reconcile-status.json"
 
-# --- Good boot-citizen guard: single-flight + stale-reap (mirrors the .ps1
-# counterpart) --- This hook fires on EVERY new session now that the opt-in
-# gate is gone: without this, a slow or wedged reconcile gets re-spawned
-# every session, stacking orphaned background installers. Reuses the
-# existing reconcile-status.json (launched_pid/at) rather than a second
-# lock file. If a prior reconcile PID is still alive:
-#   YOUNG (<10m) -> already in flight; do nothing (never stack).
-#   STALE (>=10m) -> wedged; reap it, then relaunch (self-heals a one-off
-#                    wedge instead of poisoning every future session).
-staleSeconds=600
+# --- Good boot-citizen guard: single-flight + live-owner deferral ---
+# Only the installer's native watchdog owns bounded tree termination.
 if [ -f "$status_file" ]; then
   prevPid="$("$py" -c '
 import json, sys
@@ -122,20 +114,7 @@ except Exception:
     print("")
 ' "$status_file" 2>/dev/null)"
   if [ -n "$prevPid" ] && kill -0 "$prevPid" 2>/dev/null; then
-    prevEpoch="$("$py" -c '
-import json, sys, datetime
-try:
-    at = json.load(open(sys.argv[1])).get("at", "")
-    dt = datetime.datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
-    print(int(dt.timestamp()))
-except Exception:
-    print(0)
-' "$status_file" 2>/dev/null)"
-    nowEpoch="$(date -u +%s)"
-    if [ "$prevEpoch" -gt 0 ] && [ $((nowEpoch - prevEpoch)) -lt "$staleSeconds" ]; then
-      exit 0
-    fi
-    kill "$prevPid" 2>/dev/null || true
+    exit 0
   fi
 fi
 

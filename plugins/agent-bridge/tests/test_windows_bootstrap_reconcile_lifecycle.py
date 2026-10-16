@@ -92,6 +92,7 @@ if (Test-Path (Join-Path $root 'block')) {
 } | ConvertTo-Json -Compress | Set-Content (Join-Path $root 'stub.json')
 if ($child) {
     while (-not (Test-Path (Join-Path $root 'release'))) { Start-Sleep -Milliseconds 100 }
+    if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
 }
 exit 9
 """, encoding="utf-8")
@@ -169,7 +170,7 @@ def test_wrapper_exit_does_not_hide_live_supervisor(reconcile):
         wait_for(lambda: (alive(stub["pid"]), alive(stub["child"])), lambda s: s == (False, False))
 
 
-def test_stale_reap_kills_worker_and_grandchild_before_replacement(reconcile):
+def test_old_attempt_waits_for_own_worker_to_finish_before_replacement(reconcile):
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -179,11 +180,15 @@ def test_stale_reap_kills_worker_and_grandchild_before_replacement(reconcile):
     (runtime / "reconcile-status.json").write_text(json.dumps(status), encoding="utf-8")
     (runtime / "block").unlink()
     run_hook()
+    assert read("reconcile-status.json")["attempt_id"] == status["attempt_id"]
+    assert alive(status["launched_pid"]) and alive(stub["pid"]) and alive(stub["child"])
+    (runtime / "release").touch()
+    wait_for(lambda: (alive(status["launched_pid"]), alive(stub["pid"]), alive(stub["child"])),
+             lambda s: s == (False, False, False))
+    run_hook()
     new = wait_for(lambda: read("reconcile-status.json"),
                    lambda s: s.get("attempt_id") != status["attempt_id"] and "completed_at" in s)
     assert new["launched_pid"] != status["launched_pid"]
-    wait_for(lambda: (alive(status["launched_pid"]), alive(stub["pid"]), alive(stub["child"])),
-             lambda s: s == (False, False, False))
 
 
 def test_old_completion_cannot_overwrite_another_attempt(reconcile):
@@ -206,6 +211,7 @@ def test_inherited_staging_cannot_bypass_real_installer_watchdog(reconcile):
     installed = runtime.parent / ".copilot" / "installed-plugins" / "fixture" / "agent-bridge"
     shutil.copytree(plugin, installed)
     shutil.copyfile(HOOK.with_name("install.ps1"), installed / "scripts" / "install.ps1")
+    shutil.copyfile(HOOK.with_name("installer-watchdog.ps1"), installed / "scripts" / "installer-watchdog.ps1")
     run_hook(installed, {
         "COPILOT_PLUGIN_INSTALL_SMOKE": "1",
         "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "60",
@@ -310,7 +316,7 @@ def test_terminating_installer_error_is_recorded_in_status_and_log(reconcile):
     assert "fixture failure" in read_log(Path(status["stderr_log"]))
 
 
-def test_identity_change_at_final_reap_lookup_is_not_signaled(reconcile):
+def test_old_attempt_does_not_authorize_a_second_reap_lookup(reconcile):
     runtime, run_hook, read, plugin = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -330,6 +336,7 @@ function Get-Process {
     if ($Id -eq [int]$env:REAP_TEST_PID) {
         $global:reapQueries++
         if ($global:reapQueries -eq 2) {
+            Set-Content (Join-Path $env:USERPROFILE '.agent-bridge\unexpected-reap-query') 'called'
             $changed = [pscustomobject]@{
                 Handle = $process.Handle
                 HasExited = $false
@@ -347,8 +354,8 @@ function taskkill.exe {
 }
 & (Join-Path $PSScriptRoot 'real-bootstrap.ps1')
 """, encoding="utf-8")
-    result = run_hook(extra_env={"REAP_TEST_PID": str(status["launched_pid"])})
-    assert "identity changed before reaping" in result.stderr
+    run_hook(extra_env={"REAP_TEST_PID": str(status["launched_pid"])})
+    assert not (runtime / "unexpected-reap-query").exists()
     assert not (runtime / "unexpected-kill").exists()
     assert alive(stub["pid"]) and alive(stub["child"])
     assert read("reconcile-status.json")["attempt_id"] == status["attempt_id"]

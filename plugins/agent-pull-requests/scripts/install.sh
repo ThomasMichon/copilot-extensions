@@ -105,7 +105,9 @@ _enter_install_lock() {
     done
 }
 
-# === install-contract:v4 self-stage -- keep byte-identical across plugins ===
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/installer-watchdog.sh"
+
+# === install-contract:v5 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
 # or times out -- it holds the SINGLETON installed-plugins/<mkt>/<plugin> payload
@@ -162,13 +164,6 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                             rm -rf "$__ss_sib" 2>/dev/null || true
                         done
                     fi
-                    # WATCHDOG deadline: <NAME>_INSTALL_DEADLINE_SEC, else
-                    # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
-                    __ss_deadline=480
-                    __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
-                    if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
-                    if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
                     export COPILOT_PLUGIN_STAGED_FROM="$__ss_payload"
                     # Launch the staged child in its OWN process group (bash job
@@ -179,59 +174,8 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # exit code (returns 0), which would mask a failed install.
                     # Re-exec the watchdog without a payload script descriptor.
                     # Merely changing CWD leaves bash's script handle open on Windows.
-                    __ss_watchdog="$(cat <<'INSTALL_WATCHDOG'
-                    __ss_entry=$1
-                    __ss_name=$2
-                    __ss_stage=$3
-                    __ss_deadline=$4
-                    shift 4
-                    set -m
-                    bash "$__ss_entry" "$@" &
-                    __ss_child=$!
-                    set +m
-                    __ss_watcher=""
-                    __ss_cancel() {
-                        local signal_rc="$1"
-                        kill -- -"$__ss_child" 2>/dev/null ||
-                            kill "$__ss_child" 2>/dev/null || true
-                        wait "$__ss_child" 2>/dev/null || true
-                        if [[ -n "$__ss_watcher" ]]; then
-                            kill "$__ss_watcher" 2>/dev/null || true
-                            wait "$__ss_watcher" 2>/dev/null || true
-                        fi
-                        trap - INT TERM
-                        exit "$signal_rc"
-                    }
-                    trap '__ss_cancel 130' INT
-                    trap '__ss_cancel 143' TERM
-                    if [[ "$__ss_deadline" -gt 0 ]]; then
-                        (
-                            __ss_waited=0
-                            while kill -0 "$__ss_child" 2>/dev/null; do
-                                sleep 1
-                                __ss_waited=$((__ss_waited + 1))
-                                if [[ "$__ss_waited" -ge "$__ss_deadline" ]]; then
-                                    : > "$__ss_stage/.watchdog-fired"
-                                    printf '[%sZ] WATCHDOG-KILL %s: install exceeded %ss deadline (child pid %s); killed tree. Slot lacks a completion marker -> will be tossed + retried. Stage: %s\n' \
-                                        "$(date -u +%Y-%m-%dT%H:%M:%S)" "$__ss_name" "$__ss_deadline" "$__ss_child" "$__ss_stage" \
-                                        >> "$HOME/.$__ss_name/reconcile.err.log" 2>/dev/null || true
-                                    kill -- -"$__ss_child" 2>/dev/null || kill "$__ss_child" 2>/dev/null || true
-                                    break
-                                fi
-                            done
-                        ) &
-                        __ss_watcher=$!
-                        if wait "$__ss_child"; then __ss_rc=0; else __ss_rc=$?; fi
-                        kill "$__ss_watcher" 2>/dev/null || true
-                        wait "$__ss_watcher" 2>/dev/null || true
-                        if [[ -e "$__ss_stage/.watchdog-fired" ]]; then exit 124; fi
-                        exit "$__ss_rc"
-                    fi
-                    if wait "$__ss_child"; then exit 0; else exit $?; fi
-INSTALL_WATCHDOG
-                    )"
-                    exec bash -c "$__ss_watchdog" bash \
-                        "$__ss_entry" "$__ss_name" "$__ss_stage" "$__ss_deadline" "$@"
+                    start_install_watchdog "$__ss_entry" "$__ss_name" "$__ss_stage" \
+                        "$HOME/.$__ss_name" "$__ss_staged_payload" "$@"
                 else
                     printf 'self-stage failed; refusing to run from the replaceable payload\n' >&2
                     exit 1
@@ -243,9 +187,9 @@ INSTALL_WATCHDOG
             ;;
     esac
 fi
-# === end install-contract:v4 self-stage ===
+# === end install-contract:v5 self-stage ===
 
-# === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
+# === install-contract:v5 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
 # the self-stage/lock/watchdog behavior WITHOUT a heavy venv build: this
 # (post-stage) process records where it runs from + the recorded marketplace
@@ -272,10 +216,13 @@ if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE:-}" ]]; then
     printf '{"ran_from":"%s","staged_from":"%s","staged":%s,"working_dir":"%s","child_pid":%s,"grandchild_pid":%s}\n' \
         "$__sm_self_dir" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$__sm_staged" "$PWD" "$$" "$__sm_grand_pid" \
         > "$__sm_home/smoke.json"
+    if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE_PHASE:-}" ]]; then
+        enter_install_phase "$COPILOT_PLUGIN_INSTALL_SMOKE_PHASE"
+    fi
     sleep "$__sm_sleep"
     exit 0
 fi
-# === end install-contract:v4 smoke seam ===
+# === end install-contract:v5 smoke seam ===
 
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 

@@ -83,6 +83,7 @@ if (Test-Path (Join-Path $root 'block')) {
 } | ConvertTo-Json -Compress | Set-Content (Join-Path $root 'stub.json')
 if ($child) {
     while (-not (Test-Path (Join-Path $root 'release'))) { Start-Sleep -Milliseconds 100 }
+    if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }
 }
 Write-Error 'fixture installer failure' -ErrorAction Continue
 exit 9
@@ -164,7 +165,7 @@ def test_completion_records_worker_failure_and_clears_inherited_staging(reconcil
     assert "fixture installer failure" in (runtime / "reconcile.log").read_text()
 
 
-def test_missing_wrapper_does_not_duplicate_worker_and_stale_reap_retires_tree(reconcile):
+def test_missing_wrapper_and_old_attempt_do_not_replace_a_live_worker(reconcile):
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -179,11 +180,15 @@ def test_missing_wrapper_does_not_duplicate_worker_and_stale_reap_retires_tree(r
     (runtime / "reconcile-status.json").write_text(json.dumps(status), encoding="utf-8")
     (runtime / "block").unlink()
     run_hook()
+    assert read("reconcile-status.json")["attempt_id"] == status["attempt_id"]
+    assert alive(stub["pid"]) and alive(stub["child"])
+    (runtime / "release").touch()
+    wait_for(lambda: (alive(stub["pid"]), alive(stub["child"])), lambda s: s == (False, False))
+    run_hook()
     wait_for(
         lambda: read("reconcile-status.json"),
         lambda s: s.get("attempt_id") != status["attempt_id"] and "completed_at" in s,
     )
-    wait_for(lambda: (alive(stub["pid"]), alive(stub["child"])), lambda s: s == (False, False))
 
 
 def test_concurrent_hooks_launch_one_installer(reconcile):
@@ -258,6 +263,7 @@ def test_inherited_staging_cannot_disable_real_installer_watchdog(reconcile):
     installed = runtime.parent / ".copilot" / "installed-plugins" / "fixture" / "agent-dispatch"
     shutil.copytree(plugin, installed)
     shutil.copyfile(HOOK.with_name("install.ps1"), installed / "scripts" / "install.ps1")
+    shutil.copyfile(HOOK.with_name("installer-watchdog.ps1"), installed / "scripts" / "installer-watchdog.ps1")
     run_hook(
         installed,
         {

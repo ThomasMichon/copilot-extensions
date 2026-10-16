@@ -40,7 +40,7 @@ fi
 # gone; the gate was removed rather than kept as a redundant consent
 # checkbox. Frequency/trigger stays deliberately bounded -- still only once
 # per session start, only on a real version drift. What DOES still bound
-# concurrency is the single-flight + stale-reap guard below (a lock file,
+# concurrency is the single-flight + live-owner deferral guard below (a lock file,
 # not the removed opt-in) -- see its own comment.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
@@ -120,25 +120,14 @@ else
   exit 0
 fi
 
-# --- Good boot-citizen guard: single-flight + stale-reap ---
-# This hook fires on EVERY new session now that the opt-in gate is gone
-# (agent-bridge-unified-zdd-cutover Phase 0 review finding): without this,
-# a slow or wedged reconcile gets re-spawned every session, stacking
-# orphaned background installers. If a prior reconcile is still running:
-#   YOUNG (<10m) -> already in flight; do nothing (never stack).
-#   STALE (>=10m) -> wedged; reap it, then relaunch (self-heals a one-off
-#                    wedge instead of poisoning every future session).
+# --- Good boot-citizen guard: single-flight + live-owner deferral ---
+# The native watchdog owns bounded tree termination. A cached PID's age
+# never authorizes this separate session hook to kill that process.
 lockFile="$InstallDir/reconcile.lock"
-staleSeconds=600
 if [ -f "$lockFile" ]; then
   lockPid="$(tr -d '[:space:]' < "$lockFile" 2>/dev/null)"
   if [ -n "$lockPid" ] && kill -0 "$lockPid" 2>/dev/null; then
-    lockMtime="$(stat -c %Y "$lockFile" 2>/dev/null || stat -f %m "$lockFile" 2>/dev/null || echo 0)"
-    nowSecs="$(date -u +%s)"
-    if [ "$lockMtime" -gt 0 ] && [ $((nowSecs - lockMtime)) -lt "$staleSeconds" ]; then
-      exit 0
-    fi
-    kill "$lockPid" 2>/dev/null || true
+    exit 0
   fi
 fi
 

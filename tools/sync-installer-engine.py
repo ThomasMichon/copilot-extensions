@@ -262,6 +262,15 @@ def verify() -> list[str]:
         )
     for plugin in ADOPTERS:
         problems.extend(_adopter_problems(plugin))
+    for plugin in ier.watchdog_adopters(REPO):
+        for name in ier.WATCHDOG_FILES:
+            source = CANONICAL_DIR / name
+            destination = REPO / "plugins" / plugin / "scripts" / name
+            if any(uer._find_symlinked_ancestor(path, REPO.resolve()) is not None
+                   for path in (source, destination)):
+                problems.append(f"{destination}: linked watchdog asset refused")
+            elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
+                problems.append(f"{destination}: native watchdog differs from canonical source")
     if ier.human_output_enabled(CANONICAL_DIR):
         source = CANONICAL_DIR / ier.HUMAN_HELPER
         for plugin in ier.human_output_adopters(REPO, ADOPTERS):
@@ -320,6 +329,16 @@ def sync() -> list[str]:
             if os.name != "nt":
                 shutil.copymode(source, destination)
             written.append(destination.relative_to(REPO).as_posix())
+    for plugin in ier.watchdog_adopters(REPO):
+        for name in ier.WATCHDOG_FILES:
+            source = CANONICAL_DIR / name
+            destination = REPO / "plugins" / plugin / "scripts" / name
+            for path in (source, destination):
+                if uer._find_symlinked_ancestor(path, REPO.resolve()) is not None:
+                    raise RuntimeError(f"{path}: linked watchdog asset refused")
+            if not destination.is_file() or destination.read_bytes() != source.read_bytes():
+                shutil.copyfile(source, destination)
+                written.append(destination.relative_to(REPO).as_posix())
     if ier.human_output_enabled(CANONICAL_DIR):
         source = CANONICAL_DIR / ier.HUMAN_HELPER
         for plugin in ier.human_output_adopters(REPO, ADOPTERS):

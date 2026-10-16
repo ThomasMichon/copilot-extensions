@@ -48,7 +48,7 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
     spawn could race a live daemon/session. Now that agent-bridge's own
     update path is always-ZDD (spawn passive -> health-gate -> flip ->
     drain -> retire, safe to run unattended), that justification is gone.
-    The single-flight/stale-reap guard below (not the opt-in) is what keeps
+    The single-flight/live-owner guard below (not the opt-in) is what keeps
     a shared/active-dev machine from stacking background installers.
     Staleness stays observable via `agent-bridge service status`, which
     reports days-since-last-reconcile (see _print_reconcile_status in
@@ -166,16 +166,8 @@ try {
     catch [Threading.AbandonedMutexException] { $ownsReconcileMutex = $true }
     if (-not $ownsReconcileMutex) { Exit-SessionStart }
 
-    # --- Good boot-citizen guard: single-flight + stale-reap ---
-    # This hook fires on EVERY new session. Without a guard, a slow or wedged
-    # reconcile gets re-spawned each session, stacking orphaned background
-    # installers (observed in the wild: 9 wedged copies in one evening, each
-    # holding a session-start hook and blocking CLI startup). So, if a prior
-    # reconcile PID is still alive:
-    #   * YOUNG  -> a reconcile is already in flight; do nothing (never stack).
-    #   * STALE  -> it is wedged; reap it, then relaunch (self-heal, so a one-off
-    #              wedge can't poison every future session).
-    $staleMinutes = 10
+    # --- Good boot-citizen guard: single-flight + live-owner deferral ---
+    # Only the installer's native watchdog owns bounded tree termination.
     try {
         if (Test-Path $statusFile) {
             $prev = Get-Content $statusFile -Raw | ConvertFrom-Json
@@ -196,41 +188,10 @@ try {
                 }
             }
             if ($previousProcess) {
-                # Age from the recorded UTC timestamp. ConvertFrom-Json may hand
-                # back $prev.at as an already-parsed (local-kind) [DateTime], so
-                # normalize via [DateTimeOffset] -- comparing instants regardless
-                # of whether it arrived as a string or a DateTime, and avoiding
-                # the [DateTime]::Parse(...Z).ToUniversalTime() double-convert.
-                $ageMin = $staleMinutes  # default to "stale" if the timestamp is unparseable
-                try {
-                    $atVal = $prev.at
-                    $dto = if ($atVal -is [DateTime]) { [DateTimeOffset]$atVal } else { [DateTimeOffset]::Parse([string]$atVal) }
-                    $ageMin = ([DateTimeOffset]::UtcNow - $dto).TotalMinutes
-                } catch { }
-                if ($ageMin -lt $staleMinutes) { Exit-SessionStart }         # in flight -- don't stack
                 if (-not $recordedStart) {
-                    [Console]::Error.WriteLine("[$name] stale legacy reconcile ownership is unverified; not reaping its PID")
-                    Exit-SessionStart
+                    [Console]::Error.WriteLine("[$name] legacy reconcile ownership is unverified; leaving it running")
                 }
-                $reapProcess = Get-Process -Id $prevPid -ErrorAction SilentlyContinue
-                if (-not $reapProcess) { Exit-SessionStart }
-                try {
-                    # Pin the process object so its PID cannot be recycled while
-                    # taskkill acts; check this fresh handle's identity, not cache.
-                    [void]$reapProcess.Handle
-                    if ($reapProcess.HasExited -or
-                        $reapProcess.StartTime.ToUniversalTime() -ne $startedAt.UtcDateTime) {
-                        [Console]::Error.WriteLine("[$name] reconcile identity changed before reaping; leaving it recorded")
-                        Exit-SessionStart
-                    }
-                    & taskkill.exe /PID $prevPid /T /F *> $null
-                    if ($LASTEXITCODE -ne 0 -and -not $reapProcess.HasExited) {
-                        [Console]::Error.WriteLine("[$name] could not reap stale reconcile tree; leaving it recorded")
-                        Exit-SessionStart
-                    }
-                } finally {
-                    $reapProcess.Dispose()
-                }
+                Exit-SessionStart
             }
         }
     } catch {

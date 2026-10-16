@@ -509,7 +509,11 @@ def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_p
     scripts.mkdir(parents=True)
     (payload / "plugin.json").write_text('{"name":"agent-containers"}\n', encoding="utf-8")
     source = (SCRIPTS / f"init.{extension}").read_text(encoding="utf-8")
-    marker = "# === end install-contract:v4 self-stage ==="
+    marker = "# === end install-contract:v5 self-stage ==="
+    shutil.copyfile(
+        SCRIPTS / f"installer-watchdog.{extension}",
+        scripts / f"installer-watchdog.{extension}",
+    )
     prefix = source[:source.index(marker) + len(marker)]
     receipt = tmp_path / "staged-arguments.txt"
     if extension == "ps1":

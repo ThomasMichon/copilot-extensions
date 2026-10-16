@@ -39,7 +39,7 @@ def test_read_only_and_cell_actions_never_allocate_legacy_stage(
     (payload / "plugin.json").write_text('{"name":"agent-index"}\n', encoding="utf-8")
     text = (PLUGIN / "scripts" / f"install.{extension}").read_text(encoding="utf-8")
     start = text.index("# Status and dependency-light cell-slot actions")
-    end = text.index("# === install-contract:v4 smoke seam", start)
+    end = text.index("# === install-contract:v5 smoke seam", start)
     header = (
         "param([string]$Action)\n$ErrorActionPreference = 'Stop'\n"
         if extension == "ps1"

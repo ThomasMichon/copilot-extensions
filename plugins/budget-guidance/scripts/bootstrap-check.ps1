@@ -37,7 +37,7 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
     redundant consent checkbox. Frequency/trigger stays deliberately
     bounded -- still only once per session start, only on a real version
     drift. What DOES still bound concurrency is the single-flight +
-    stale-reap guard below (a lock file, not the removed opt-in).
+    live-owner deferral guard below (a lock file, not the removed opt-in).
 #>
 $ErrorActionPreference = 'SilentlyContinue'
 $script:SessionStartJsonEmitted = $false
@@ -106,25 +106,16 @@ try {
         $reCmd = "& `"$inst`" install"
     }
 
-    # --- Good boot-citizen guard: single-flight + stale-reap ---
-    # This hook fires on EVERY new session now that the opt-in gate is gone
-    # (agent-bridge-unified-zdd-cutover Phase 0 review finding): without
-    # this, a slow or wedged reconcile gets re-spawned every session,
-    # stacking orphaned background installers. If a prior reconcile PID
-    # recorded in reconcile.lock is still alive:
-    #   YOUNG  -> a reconcile is already in flight; do nothing (never stack).
-    #   STALE  -> it is wedged; reap it, then relaunch (self-heal, so a
-    #             one-off wedge can't poison every future session).
-    $staleSeconds = 600
+    # --- Good boot-citizen guard: single-flight + live-owner deferral ---
+    # The native watchdog owns bounded tree termination. A cached PID's age
+    # never authorizes this separate session hook to kill that process.
     $lockFile = Join-Path $InstallDir 'reconcile.lock'
     try {
         if (Test-Path $lockFile) {
             $lockPid = 0
             [void][int]::TryParse((Get-Content $lockFile -Raw -ErrorAction SilentlyContinue), [ref]$lockPid)
             if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) {
-                $ageSec = ((Get-Date) - (Get-Item $lockFile).LastWriteTime).TotalSeconds
-                if ($ageSec -lt $staleSeconds) { Exit-SessionStart }         # in flight -- don't stack
-                Stop-Process -Id $lockPid -Force -ErrorAction SilentlyContinue  # wedged -- reap
+                Exit-SessionStart
             }
         }
     } catch { }

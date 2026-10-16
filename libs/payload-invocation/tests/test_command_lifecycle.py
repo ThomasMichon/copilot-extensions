@@ -533,6 +533,10 @@ def test_command_binding_real_installer_refuses_before_self_staging(
     suffix = "sh" if shell == "bash" else "ps1"
     installer = payload / f"scripts/install.{suffix}"
     shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/install.{suffix}", installer)
+    shutil.copyfile(
+        ROOT / f"plugins/agent-worktrees/scripts/installer-watchdog.{suffix}",
+        payload / f"scripts/installer-watchdog.{suffix}",
+    )
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     if location == "local-copy":
         copied_payload = binding_fixture["home"] / "local-payload"
@@ -715,7 +719,10 @@ def test_command_binding_bootstrap_preserves_off_path_spaced_interpreter_through
     _prepare_catalog(binding_fixture)
     payload = binding_fixture["payload"]
     scripts = payload / "scripts"
-    for name in ("install.ps1", "bootstrap-check.ps1", "bootstrap-killswitch-guard.ps1"):
+    for name in (
+        "install.ps1", "installer-watchdog.ps1",
+        "bootstrap-check.ps1", "bootstrap-killswitch-guard.ps1",
+    ):
         shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/{name}", scripts / name)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     python_root = binding_fixture["home"] / "Python with spaces"

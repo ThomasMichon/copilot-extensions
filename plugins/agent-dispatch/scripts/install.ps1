@@ -135,7 +135,9 @@ function Set-CopilotPersistentEnvironmentVariable {
 }
 # === end install-contract:test-persistent-environment ===
 
-# === install-contract:v4 self-stage -- keep byte-identical across plugins ===
+. (Join-Path $PSScriptRoot 'installer-watchdog.ps1')
+
+# === install-contract:v5 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
 # or times out -- it holds the SINGLETON `installed-plugins/<mkt>/<plugin>`
@@ -227,33 +229,23 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 # and log. The killed child's stage dir has a dead owner pid, so
                 # the next run's pid-guarded reap cleans it; its half-built slot
                 # has no completion marker, so it is tossed + rebuilt (retry).
-                # Deadline: <NAME>_INSTALL_DEADLINE_SEC, else
-                # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
-                $__wdDeadline = 480
-                $__wdEnvVar = (($__selfStageName -replace '[^A-Za-z0-9]+', '_').ToUpper()) + '_INSTALL_DEADLINE_SEC'
-                $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
-                if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
-                if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__wdBudget = Get-InstallWatchdogBudget -Payload $__selfStagedPayload -Name $__selfStageName
+                $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE = Join-Path $__selfStageDir 'phase.json'
+                $env:COPILOT_PLUGIN_INSTALL_CUTOVER_BUDGET_SEC = [string]$__wdBudget.CutoverSec
                 $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
                     ForEach-Object {
                         '"' + ([regex]::Replace(
                             [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
                         )) + '"'
                     }) -join ' '
+                $__wdStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
-                if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
-                    try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
-                    try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
-                    $__wdLog = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") 'reconcile.err.log'
-                    try {
-                        Add-Content -LiteralPath $__wdLog -Value ("[{0}] WATCHDOG-KILL {1}: install exceeded {2}s deadline (child pid {3}); killed tree. Slot lacks a completion marker -> will be tossed + retried. Stage: {4}" -f ((Get-Date).ToUniversalTime().ToString('s') + 'Z'), $__selfStageName, $__wdDeadline, $__wdChild.Id, $__selfStageDir)
-                    } catch {}
-                    exit 124
-                }
-                $__wdChild.WaitForExit()
-                exit $__wdChild.ExitCode
+                exit (Wait-InstallWatchdog -Child $__wdChild -Budget $__wdBudget `
+                    -StartedAt $__wdStartedAt -PhaseFile $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE `
+                    -Name $__selfStageName -Stage $__selfStageDir `
+                    -LogPath (Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") 'reconcile.err.log'))
             } else {
                 throw 'self-stage requires a plugin identity before leaving the payload'
             }
@@ -263,9 +255,9 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
         exit 1
     }
 }
-# === end install-contract:v4 self-stage ===
+# === end install-contract:v5 self-stage ===
 
-# === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
+# === install-contract:v5 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
 # the self-stage/lock behavior WITHOUT a heavy venv build: this (post-stage)
 # process records where it is running from + the recorded marketplace origin,
@@ -284,10 +276,14 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
         $__smokeGrandPid = 0
         if ($env:COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD) {
             try {
-                $__g = Start-Process -FilePath (Get-Process -Id $PID).Path -PassThru -WindowStyle Hidden `
-                    -ArgumentList @('-NoProfile', '-Command', "Start-Sleep -Seconds $([Math]::Max($__smokeSleep, 3600))")
+                $__grandStart = [Diagnostics.ProcessStartInfo]::new()
+                $__grandStart.FileName = (Get-Process -Id $PID).Path
+                $__grandStart.Arguments = "-NoProfile -Command `"Start-Sleep -Seconds $([Math]::Max($__smokeSleep, 3600))`""
+                $__grandStart.UseShellExecute = $false
+                $__grandStart.CreateNoWindow = $true
+                $__g = [Diagnostics.Process]::Start($__grandStart)
                 $__smokeGrandPid = $__g.Id
-            } catch {}
+            } catch { throw "Smoke grandchild launch failed: $_" }
         }
         ([ordered]@{
             ran_from     = $PSScriptRoot
@@ -297,11 +293,17 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
             child_pid    = $PID
             grandchild_pid = $__smokeGrandPid
         } | ConvertTo-Json -Compress) | Set-Content -LiteralPath (Join-Path $__smokeHome 'smoke.json')
+        if ($env:COPILOT_PLUGIN_INSTALL_SMOKE_PHASE) {
+            Enter-InstallPhase -Name $env:COPILOT_PLUGIN_INSTALL_SMOKE_PHASE
+        }
         Start-Sleep -Seconds $__smokeSleep
-    } catch {}
+    } catch {
+        [Console]::Error.WriteLine("Smoke seam failed: $_")
+        exit 1
+    }
     exit 0
 }
-# === end install-contract:v4 smoke seam ===
+# === end install-contract:v5 smoke seam ===
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
@@ -350,7 +352,7 @@ function Get-UpdateMarkerMutex {
     return New-Object System.Threading.Mutex($false, $name)
 }
 function Write-UpdateMarker {
-    param([int]$TtlSeconds = $UpdateMarkerTtlDefault)
+    param([long]$TtlSeconds = $UpdateMarkerTtlDefault)
     if ($script:UpdateMarkerHeld) { return }
     New-Item -ItemType Directory -Force -Path (Split-Path $UpdateMarker -Parent) | Out-Null
     $countPath = "$UpdateMarker.refcount"
@@ -363,11 +365,12 @@ function Write-UpdateMarker {
             $raw = Get-Content -Path $countPath -Raw -ErrorAction SilentlyContinue
             if ($raw) { [int]::TryParse($raw.Trim(), [ref]$count) | Out-Null }
         }
-        if ($count -eq 0) {
-            # First holder: stamp a fresh marker. A later joiner deliberately
-            # does NOT refresh the expiry -- the TTL is a safety-net backstop,
-            # not a per-holder renewal lease.
-            $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+        $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+        $previousExpiry = 0L
+        if ($count -gt 0 -and (Test-Path $UpdateMarker)) {
+            [void][long]::TryParse((Get-Content $UpdateMarker -Raw).Trim(), [ref]$previousExpiry)
+        }
+        if ($count -eq 0 -or $expiry -gt $previousExpiry) {
             $tmp = "$UpdateMarker.$([Guid]::NewGuid().ToString('N'))"
             Set-Content -Path $tmp -Value $expiry -NoNewline
             Move-Item -Path $tmp -Destination $UpdateMarker -Force
@@ -423,7 +426,7 @@ if (-not $InstallDir) {
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $UpdateMarker = Join-Path $InstallDir 'update-in-progress'
-$UpdateMarkerTtlDefault = 1200  # 20 min -- generous past any observed real cutover
+$UpdateMarkerTtlDefault = Get-InstallWatchdogOuterWindow -Payload $PluginDir -Name 'agent-dispatch' -MinimumSec 1200
 $legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-dispatch'))
 $publishLegacyNames = [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)
 $serviceSuffix = if ($publishLegacyNames) {
@@ -2363,6 +2366,7 @@ function Retire-SupervisorProcessesFallback {
 }
 
 function Confirm-CoordinatorRunning {
+    Enter-InstallPhase -Name cutover
     # After a start/update, verify a coordinator actually answers AND runs the
     # just-installed build -- catching the "reports success but the old detached
     # build is still serving the rendezvous endpoint" drift (#3602). Compares the
@@ -3822,6 +3826,7 @@ function Invoke-Install {
         Write-Host ''; Write-Host '=== agent-dispatch install complete (superseded by a newer concurrent build) ===' -ForegroundColor Cyan
         return
     }
+    if (-not $NoService) { Enter-InstallPhase -Name cutover }
     Install-CoordinatorTask
     Remove-CoordinatorFirewallRule
     Install-SupervisorTask
@@ -3855,6 +3860,7 @@ function Invoke-CoordinatorCutover {
        caller skips a normal task-start), $false to fall back to a normal start. #>
     $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
     if (-not $py) { return $false }
+    Enter-InstallPhase -Name cutover
     Write-Step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -3938,6 +3944,7 @@ function Invoke-Update {
         # identical mutex must honor (see $script:GlobalActivationLockTimeoutSeconds's
         # own docstring): a real Invoke-CoordinatorCutover call can legitimately
         # hold it for up to ~420s.
+        Enter-InstallPhase -Name cutover
         $cutoverMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
         try {
             if (Test-ActivationSupersededNow) {
@@ -3980,6 +3987,7 @@ function Invoke-Update {
 }
 
 function Invoke-Start {
+    Enter-InstallPhase -Name cutover
     # Mark the live-service start lifecycle as in-progress (ce#5066).
     Write-UpdateMarker
     try {

@@ -34,6 +34,20 @@ def test_agent_pull_requests_wrapper_counts_as_real_engine_usage() -> None:
     assert checker._uses_engine_manifest_writer(sh, "sh") is True
 
 
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+def test_contract_rejects_a_v4_watchdog(extension, monkeypatch, capsys):
+    entry = PLUGIN / f"install.{extension}"
+    read_text = Path.read_text
+
+    def old_watchdog(path, *args, **kwargs):
+        text = read_text(path, *args, **kwargs)
+        return text.replace("install-contract:v5", "install-contract:v4") if path == entry else text
+
+    monkeypatch.setattr(Path, "read_text", old_watchdog)
+    assert checker.check() == 1
+    assert f"install-contract:v5 self-stage ({extension})" in capsys.readouterr().err
+
+
 def test_engine_usage_bypass_comments_do_not_count() -> None:
     ps1 = """
 # . (Join-Path $PSScriptRoot 'installer-engine.ps1')

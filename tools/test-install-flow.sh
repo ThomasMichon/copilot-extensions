@@ -91,12 +91,13 @@ trap _cleanup EXIT
 # substitution, or the backgrounded child belongs to a subshell and is not
 # waitable by the main shell).
 _start_install() {
-    local sleep_s="$1" deadline="${2:-0}" grandchild="${3:-0}"
+    local sleep_s="$1" deadline="${2:-0}" grandchild="${3:-0}" phase="${4:-}"
     local env_args=(
         "HOME=$SANDBOX"
         "USERPROFILE=$SANDBOX"
         "COPILOT_PLUGIN_INSTALL_SMOKE=1"
         "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP=$sleep_s"
+        "COPILOT_PLUGIN_INSTALL_SMOKE_PHASE=$phase"
     )
     [[ "$deadline" -gt 0 ]] && env_args+=("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC=$deadline")
     [[ "$grandchild" == "1" ]] && env_args+=("COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD=1")
@@ -204,6 +205,11 @@ grand_alive="$([[ "${grandPid:-0}" -gt 0 ]] && kill -0 "$grandPid" 2>/dev/null &
 _assert 'WATCHDOG killed the staged child' "$([[ "$child_alive" == "0" ]] && echo 1 || echo 0)"
 _assert 'WATCHDOG killed the GRANDCHILD (whole tree)' "$([[ "$grand_alive" == "0" ]] && echo 1 || echo 0)" "grand=$grandPid"
 _assert 'WATCHDOG payload still free after kill' "$(_renamable "$PAYLOAD" && echo 1 || echo 0)"
+
+_start_install 7 4 0 cutover; phase_child="$LAST_PID"
+_wait_exit "$phase_child" 30 || true
+_assert 'CUTOVER finishes beyond build deadline within its phase budget' \
+    "$([[ "$EXIT_RC" == 0 ]] && echo 1 || echo 0)" "exit=$EXIT_RC"
 
 # --- MARKER / TOSS: a killed build leaves NO completion marker; a rebuild tosses it ---
 vr="$PAYLOAD/scripts/versioned_runtime.py"

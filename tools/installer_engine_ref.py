@@ -36,6 +36,7 @@ ADOPTERS = (
     "agent-index",
 )
 HUMAN_HELPER = "installer-human-output.ps1"
+WATCHDOG_FILES = ("installer-watchdog.ps1", "installer-watchdog.sh")
 HUMAN_SOURCE_LINE = ". (Join-Path $PSScriptRoot 'installer-human-output.ps1')"
 HUMAN_PROLOGUE = (
     "if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {\n"
@@ -53,6 +54,18 @@ def human_output_enabled(canonical_dir: Path) -> bool:
         f"# Packaged human-output initialization: {HUMAN_HELPER}"
         in engine.read_text(encoding="utf-8")
     )
+
+
+def watchdog_adopters(repo: Path) -> tuple[str, ...]:
+    if not all((repo / "libs" / "installer-engine" / name).is_file() for name in WATCHDOG_FILES):
+        return ()
+    return tuple(sorted({
+        script.parents[1].name
+        for script in (repo / "plugins").glob("*/scripts/*")
+        if script.name in ("install.ps1", "install.sh", "init.ps1", "init.sh")
+        and " self-stage -- keep byte-identical across plugins ==="
+        in script.read_text(encoding="utf-8")
+    }))
 
 
 def human_output_adopters(repo: Path, adopters) -> tuple[str, ...]:

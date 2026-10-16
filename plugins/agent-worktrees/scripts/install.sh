@@ -28,6 +28,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+. "$SCRIPT_DIR/installer-watchdog.sh"
 
 # A structured caller supplies both the validated context and its exact root.
 # Validate them again before any installer staging or runtime mutation.
@@ -284,82 +285,15 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             fi
             rm -rf "$__aw_sibling" 2>/dev/null || true
         done
-        __aw_deadline=480
-        __aw_deadline_raw="${AGENT_WORKTREES_INSTALL_DEADLINE_SEC:-${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}}"
-        if [[ "$__aw_deadline_raw" =~ ^-?[0-9]+$ ]]; then
-            __aw_deadline="$__aw_deadline_raw"
-        fi
         export COPILOT_PLUGIN_INSTALL_STAGED=context-install
         export COPILOT_PLUGIN_STAGED_FROM="$PLUGIN_DIR"
-        __aw_watchdog="$(cat <<'CONTEXT_INSTALL_WATCHDOG'
-        __aw_staged_entry=$1
-        __aw_stage=$2
-        __aw_deadline=$3
-        __aw_install_root=$4
-        shift 4
-        set -m
-        bash "$__aw_staged_entry" "$@" &
-        __aw_child=$!
-        set +m
-        __aw_watcher=""
-        __aw_stop_context_child() {
-            local __aw_signal_rc="$1"
-            kill -- -"$__aw_child" 2>/dev/null ||
-                kill "$__aw_child" 2>/dev/null || true
-            wait "$__aw_child" 2>/dev/null || true
-            if [[ -n "$__aw_watcher" ]]; then
-                kill "$__aw_watcher" 2>/dev/null || true
-                wait "$__aw_watcher" 2>/dev/null || true
-            fi
-            rm -rf "$__aw_stage"
-            trap - INT TERM
-            exit "$__aw_signal_rc"
-        }
-        trap '__aw_stop_context_child 130' INT
-        trap '__aw_stop_context_child 143' TERM
-        if [[ "$__aw_deadline" -gt 0 ]]; then
-            (
-                __aw_waited=0
-                while kill -0 "$__aw_child" 2>/dev/null; do
-                    sleep 1
-                    __aw_waited=$((__aw_waited + 1))
-                    if [[ "$__aw_waited" -ge "$__aw_deadline" ]]; then
-                        : >"$__aw_stage/.watchdog-fired"
-                        printf '[%sZ] WATCHDOG-KILL agent-worktrees context install exceeded %ss deadline (child pid %s); killed tree. Stage: %s\n' \
-                            "$(date -u +%Y-%m-%dT%H:%M:%S)" \
-                            "$__aw_deadline" "$__aw_child" "$__aw_stage" \
-                            >>"$__aw_install_root/reconcile.err.log" 2>/dev/null ||
-                            true
-                        kill -- -"$__aw_child" 2>/dev/null ||
-                            kill "$__aw_child" 2>/dev/null || true
-                        break
-                    fi
-                done
-            ) &
-            __aw_watcher=$!
-        else
-            __aw_watcher=""
-        fi
-        if wait "$__aw_child"; then __aw_rc=0; else __aw_rc=$?; fi
-        if [[ -n "$__aw_watcher" ]]; then
-            kill "$__aw_watcher" 2>/dev/null || true
-            wait "$__aw_watcher" 2>/dev/null || true
-        fi
-        if [[ -e "$__aw_stage/.watchdog-fired" ]]; then
-            __aw_rc=124
-        fi
-        rm -rf "$__aw_stage"
-        trap - INT TERM
-        exit "$__aw_rc"
-CONTEXT_INSTALL_WATCHDOG
-        )"
-        exec bash -c "$__aw_watchdog" bash \
+        start_install_watchdog \
             "$__aw_staged_payload/scripts/$(basename "${BASH_SOURCE[0]}")" \
-            "$__aw_stage" "$__aw_deadline" "$__aw_install_root" "$@"
+            agent-worktrees "$__aw_stage" "$__aw_install_root" "$__aw_staged_payload" "$@"
     fi
 fi
 
-# === install-contract:v4 self-stage -- keep byte-identical across plugins ===
+# === install-contract:v5 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
 # or times out -- it holds the SINGLETON installed-plugins/<mkt>/<plugin> payload
@@ -416,13 +350,6 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                             rm -rf "$__ss_sib" 2>/dev/null || true
                         done
                     fi
-                    # WATCHDOG deadline: <NAME>_INSTALL_DEADLINE_SEC, else
-                    # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
-                    __ss_deadline=480
-                    __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
-                    if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
-                    if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
                     export COPILOT_PLUGIN_STAGED_FROM="$__ss_payload"
                     # Launch the staged child in its OWN process group (bash job
@@ -433,59 +360,8 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # exit code (returns 0), which would mask a failed install.
                     # Re-exec the watchdog without a payload script descriptor.
                     # Merely changing CWD leaves bash's script handle open on Windows.
-                    __ss_watchdog="$(cat <<'INSTALL_WATCHDOG'
-                    __ss_entry=$1
-                    __ss_name=$2
-                    __ss_stage=$3
-                    __ss_deadline=$4
-                    shift 4
-                    set -m
-                    bash "$__ss_entry" "$@" &
-                    __ss_child=$!
-                    set +m
-                    __ss_watcher=""
-                    __ss_cancel() {
-                        local signal_rc="$1"
-                        kill -- -"$__ss_child" 2>/dev/null ||
-                            kill "$__ss_child" 2>/dev/null || true
-                        wait "$__ss_child" 2>/dev/null || true
-                        if [[ -n "$__ss_watcher" ]]; then
-                            kill "$__ss_watcher" 2>/dev/null || true
-                            wait "$__ss_watcher" 2>/dev/null || true
-                        fi
-                        trap - INT TERM
-                        exit "$signal_rc"
-                    }
-                    trap '__ss_cancel 130' INT
-                    trap '__ss_cancel 143' TERM
-                    if [[ "$__ss_deadline" -gt 0 ]]; then
-                        (
-                            __ss_waited=0
-                            while kill -0 "$__ss_child" 2>/dev/null; do
-                                sleep 1
-                                __ss_waited=$((__ss_waited + 1))
-                                if [[ "$__ss_waited" -ge "$__ss_deadline" ]]; then
-                                    : > "$__ss_stage/.watchdog-fired"
-                                    printf '[%sZ] WATCHDOG-KILL %s: install exceeded %ss deadline (child pid %s); killed tree. Slot lacks a completion marker -> will be tossed + retried. Stage: %s\n' \
-                                        "$(date -u +%Y-%m-%dT%H:%M:%S)" "$__ss_name" "$__ss_deadline" "$__ss_child" "$__ss_stage" \
-                                        >> "$HOME/.$__ss_name/reconcile.err.log" 2>/dev/null || true
-                                    kill -- -"$__ss_child" 2>/dev/null || kill "$__ss_child" 2>/dev/null || true
-                                    break
-                                fi
-                            done
-                        ) &
-                        __ss_watcher=$!
-                        if wait "$__ss_child"; then __ss_rc=0; else __ss_rc=$?; fi
-                        kill "$__ss_watcher" 2>/dev/null || true
-                        wait "$__ss_watcher" 2>/dev/null || true
-                        if [[ -e "$__ss_stage/.watchdog-fired" ]]; then exit 124; fi
-                        exit "$__ss_rc"
-                    fi
-                    if wait "$__ss_child"; then exit 0; else exit $?; fi
-INSTALL_WATCHDOG
-                    )"
-                    exec bash -c "$__ss_watchdog" bash \
-                        "$__ss_entry" "$__ss_name" "$__ss_stage" "$__ss_deadline" "$@"
+                    start_install_watchdog "$__ss_entry" "$__ss_name" "$__ss_stage" \
+                        "$HOME/.$__ss_name" "$__ss_staged_payload" "$@"
                 else
                     printf 'self-stage failed; refusing to run from the replaceable payload\n' >&2
                     exit 1
@@ -497,9 +373,9 @@ INSTALL_WATCHDOG
             ;;
     esac
 fi
-# === end install-contract:v4 self-stage ===
+# === end install-contract:v5 self-stage ===
 
-# === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
+# === install-contract:v5 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
 # the self-stage/lock/watchdog behavior WITHOUT a heavy venv build: this
 # (post-stage) process records where it runs from + the recorded marketplace
@@ -526,10 +402,13 @@ if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE:-}" ]]; then
     printf '{"ran_from":"%s","staged_from":"%s","staged":%s,"working_dir":"%s","child_pid":%s,"grandchild_pid":%s}\n' \
         "$__sm_self_dir" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$__sm_staged" "$PWD" "$$" "$__sm_grand_pid" \
         > "$__sm_home/smoke.json"
+    if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE_PHASE:-}" ]]; then
+        enter_install_phase "$COPILOT_PLUGIN_INSTALL_SMOKE_PHASE"
+    fi
     sleep "$__sm_sleep"
     exit 0
 fi
-# === end install-contract:v4 smoke seam ===
+# === end install-contract:v5 smoke seam ===
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
@@ -845,6 +724,7 @@ _versioned_activate_inner() {
     if [[ -n "$prev" ]]; then
         touch "$INSTALL_DIR/versions/$prev" 2>/dev/null || true
     fi
+    enter_install_phase cutover
     local monitor_was_live=0
     if ! $CONTEXTUAL_INSTALL && PYTHONPATH= "$VENV_PYTHON" - <<'PY' >/dev/null 2>&1; then
 from agent_worktrees.status_monitor_cutover import monitor_live_now

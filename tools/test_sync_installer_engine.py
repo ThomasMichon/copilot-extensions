@@ -39,6 +39,39 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
         assert declaration == contract.human_output_declaration(script)
 
 
+def test_native_watchdog_is_packaged_before_every_staging_path():
+    contract = sync_installer_engine.ier
+    names = contract.watchdog_adopters(REPO)
+    assert len(names) == 13
+    daemon_plugins = {
+        "agent-bridge", "agent-codespaces", "agent-dispatch", "agent-index",
+        "agent-mcp", "agent-vault", "agent-worktrees",
+    }
+    for name in names:
+        scripts = REPO / "plugins" / name / "scripts"
+        for asset in contract.WATCHDOG_FILES:
+            assert (scripts / asset).read_bytes() == (
+                REPO / "libs" / "installer-engine" / asset
+            ).read_bytes()
+        for extension in ("ps1", "sh"):
+            entries = [
+                path for stem in ("install", "init")
+                if (path := scripts / f"{stem}.{extension}").is_file()
+                and "# === install-contract:v5 self-stage" in path.read_text(encoding="utf-8")
+            ]
+            assert len(entries) == 1
+            text = entries[0].read_text(encoding="utf-8")
+            staging = text.index("# === install-contract:v5 self-stage")
+            assert text.index(f"installer-watchdog.{extension}") < staging
+            if name == "agent-worktrees":
+                assert text.index(f"installer-watchdog.{extension}") < text.index(
+                    "# The standard self-stage block"
+                )
+            if name in daemon_plugins:
+                assert ("Enter-InstallPhase -Name cutover" if extension == "ps1" else
+                        "enter_install_phase cutover") in text
+
+
 def test_materialized_human_declaration_binds_rewritten_entrypoint(tmp_path):
     import materialize_installer_engine
 
@@ -197,6 +230,47 @@ def _write_local_refs(scripts: Path) -> None:
         '. "$SCRIPT_DIR/installer-engine.sh"\n',
         encoding="utf-8",
     )
+
+
+@pytest.mark.parametrize("asset", sync_installer_engine.ier.WATCHDOG_FILES)
+def test_sync_native_watchdog_for_non_engine_adopters(fake_repo, asset):
+    registered = _mk_plugin_scripts(fake_repo, "agent-registered")
+    _write_canonical_refs(registered)
+    scripts = _mk_plugin_scripts(fake_repo, "agent-standalone")
+    (scripts / "init.sh").write_text(
+        "# === install-contract:v5 self-stage -- keep byte-identical across plugins ===\n",
+        encoding="utf-8",
+    )
+    canonical = fake_repo / "libs" / "installer-engine"
+    for name in sync_installer_engine.ier.WATCHDOG_FILES:
+        (canonical / name).write_text(f"canonical {name}\n", encoding="utf-8")
+    assert any("native watchdog differs" in p for p in sync_installer_engine.verify())
+    sync_installer_engine.sync()
+    assert sync_installer_engine.verify() == []
+    (scripts / asset).write_text("drift\n", encoding="utf-8")
+    assert any("native watchdog differs" in p for p in sync_installer_engine.verify())
+    sync_installer_engine.sync()
+    assert (scripts / asset).read_bytes() == (canonical / asset).read_bytes()
+
+
+def test_sync_refuses_indirected_watchdog_destination(fake_repo, monkeypatch):
+    registered = _mk_plugin_scripts(fake_repo, "agent-registered")
+    _write_canonical_refs(registered)
+    with (registered / "install.sh").open("a", encoding="utf-8") as stream:
+        stream.write("# === install-contract:v5 self-stage -- keep byte-identical across plugins ===\n")
+    canonical = fake_repo / "libs" / "installer-engine"
+    for name in sync_installer_engine.ier.WATCHDOG_FILES:
+        (canonical / name).write_text("canonical\n", encoding="utf-8")
+    destination = registered / sync_installer_engine.ier.WATCHDOG_FILES[0]
+    original = sync_installer_engine.uer._find_symlinked_ancestor
+    monkeypatch.setattr(
+        sync_installer_engine.uer, "_find_symlinked_ancestor",
+        lambda path, root: destination if path == destination else original(path, root),
+    )
+    assert any("linked watchdog asset refused" in p for p in sync_installer_engine.verify())
+    with pytest.raises(RuntimeError, match="linked watchdog asset refused"):
+        sync_installer_engine.sync()
+    assert not destination.exists()
 
 
 def test_verify_passes_when_adopter_is_byte_identical(fake_repo):
