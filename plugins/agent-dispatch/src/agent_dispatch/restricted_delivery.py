@@ -51,29 +51,45 @@ def record(queue, key: str, info: dict) -> SpawnReservation:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
         task = queue._fetch(conn, row["task_id"]) if row else None
+        previous = json.loads(row["agent_info"]) if row and row["agent_info"] else {}
+        terminal_ack = (
+            task is not None and task.status in Status.CONCLUDED
+            and info.get("delivered") is True and previous.get("send_attempted") is True
+            and task.owner in {None, info["worker_id"]}
+            and task.owner_session_id in {None, info.get("native_session_id")}
+        )
         if (
             row is None or row["driver"] != DRIVER
             or row["state"] not in {SpawnState.RESERVING, SpawnState.SPAWNED}
             or row["release_requested"] or row["conversation_retired"]
-            or task is None or task.status not in Status.HELD or task.hold_reason
-            or task.owner != info["worker_id"] or task.generation != info["task_generation"]
+            or task is None or task.generation != info["task_generation"]
+            or not terminal_ack and (
+                task.status not in Status.HELD or task.hold_reason
+                or task.owner != info["worker_id"]
+            )
             or info["worker_id"] != f"dispatch-{key}"
             or row["worktree"] or row["allocation_project"]
         ):
             raise TaskError("restricted delivery reservation or task incarnation changed")
-        previous = json.loads(row["agent_info"]) if row["agent_info"] else {}
         if any(info.get(field) != value for field, value in previous.items()):
             raise TaskError("restricted delivery identity cannot be replaced")
+        if info.get("delivered"):
+            if previous.get("send_attempted") is not True:
+                raise TaskError("restricted delivery acknowledgement requires its retained send intent")
+        elif info.get("send_attempted") and previous.get("send_attempted"):
+            raise TaskError("restricted delivery send intent was already acquired")
         if "native_session_id" in info and task.owner_session_id not in {None, info["native_session_id"]}:
             raise TaskError("restricted delivery native owner changed")
-        if "send_attempted" in info and task.owner_session_id != info["native_session_id"]:
+        if "send_attempted" in info and not terminal_ack and task.owner_session_id != info["native_session_id"]:
             raise TaskError("restricted delivery requires the bound native owner")
         handle = f"local-body:{info['session_id']}" if "session_id" in info else None
         if row["session_handle"] and row["session_handle"] != handle:
             raise TaskError("restricted delivery bridge handle changed")
         conn.execute(
-            "UPDATE spawn_reservations SET agent_info=?,session_handle=?,updated_at=? WHERE key=?",
-            (json.dumps(info, sort_keys=True), handle, queue._now(None), key),
+            "UPDATE spawn_reservations SET agent_info=?,session_handle=?,updated_at=?,"
+            "state=CASE WHEN ? THEN ? ELSE state END WHERE key=?",
+            (json.dumps(info, sort_keys=True), handle, queue._now(None),
+             terminal_ack, SpawnState.SPAWNED, key),
         )
         result = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
         conn.commit()

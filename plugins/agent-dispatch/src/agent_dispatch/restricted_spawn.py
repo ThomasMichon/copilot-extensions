@@ -127,7 +127,7 @@ def _project(spec: dict, client, task_id: str, info: dict) -> dict:
     return grant
 
 
-def _native_create(prefix: list[str], key: str, agent: str, spec: dict, charter: str | None) -> dict:
+def _native_create(prefix: list[str], key: str, agent: str, spec: dict, charter: str | None) -> tuple[dict, bool]:
     argv = [*prefix, "--json", "create", agent, "--provider-instance", "--creation-key", key]
     if charter:
         argv += ["--charter", charter]
@@ -137,7 +137,10 @@ def _native_create(prefix: list[str], key: str, agent: str, spec: dict, charter:
     venue = connection.get("venue")
     venue = venue if isinstance(venue, dict) else {}
     if (
-        created.get("ready") is not True or created.get("status") != "awaiting_first_prompt"
+        type(created.get("ready")) is not bool
+        or (created.get("ready"), created.get("status")) not in (
+            (True, "awaiting_first_prompt"), (False, "stopped"),
+        )
         or not isinstance(created.get("session_id"), str) or not created["session_id"]
         or not isinstance(connection.get("native_session_id"), str) or not connection["native_session_id"]
         or connection.get("worktree_id")
@@ -145,7 +148,23 @@ def _native_create(prefix: list[str], key: str, agent: str, spec: dict, charter:
         or venue.get("target_id") != agent or venue.get("dispatch_only") is not True
     ):
         raise BridgeUnavailable("restricted provider native startup identity is unproven")
-    return {"session_id": created["session_id"], "native_session_id": connection["native_session_id"]}
+    return {
+        "session_id": created["session_id"], "native_session_id": connection["native_session_id"],
+    }, created["ready"]
+
+
+def _resume_unprompted(prefix: list[str], info: dict) -> None:
+    status = _run([*prefix, "--json", "status", info["session_id"]])
+    if (
+        status.get("session_id") != info["session_id"]
+        or type(status.get("turn_count")) is not int or status["turn_count"] != 0
+        or status.get("status") not in {"idle", "stopped"}
+    ):
+        raise BridgeUnavailable("restricted original conversation is not provably unprompted")
+    if status["status"] == "stopped":
+        resumed = _run([*prefix, "--json", "resume", info["session_id"], "--strict"])
+        if resumed.get("session_id") != info["session_id"] or resumed.get("status") != "idle":
+            raise BridgeUnavailable("restricted strict resume did not retain the original bridge handle")
 
 
 def start(task: dict, *, spec: dict, charter: str | None = None) -> dict:
@@ -215,24 +234,23 @@ def start(task: dict, *, spec: dict, charter: str | None = None) -> dict:
         _save(client, key, info)
     retained_native = "session_id" in info
     if retained_native:
-        status = _run([*prefix, "--json", "status", info["session_id"]])
-        if (
-            status.get("session_id") != info["session_id"]
-            or type(status.get("turn_count")) is not int or status["turn_count"] != 0
-            or status.get("status") not in {"idle", "stopped"}
-        ):
-            raise BridgeUnavailable("restricted original conversation is not provably unprompted")
-        if status["status"] == "stopped":
-            resumed = _run([*prefix, "--json", "resume", info["session_id"], "--strict"])
-            if resumed.get("session_id") != info["session_id"] or resumed.get("status") != "idle":
-                raise BridgeUnavailable("restricted strict resume did not retain the original bridge handle")
-    native = _native_create(prefix, reservation["creation_key"], info["agent"], spec, charter)
+        _resume_unprompted(prefix, info)
+    native, ready = _native_create(prefix, reservation["creation_key"], info["agent"], spec, charter)
     if retained_native:
         if any(info.get(field) != value for field, value in native.items()):
             raise BridgeUnavailable("restricted startup cannot replace its original native conversation")
     else:
         info = {**info, **native}
         _save(client, key, info)
+    if not ready:
+        if retained_native:
+            raise BridgeUnavailable("restricted original conversation did not become ready after strict resume")
+        _resume_unprompted(prefix, info)
+        confirmed, ready = _native_create(
+            prefix, reservation["creation_key"], info["agent"], spec, charter,
+        )
+        if not ready or confirmed != native:
+            raise BridgeUnavailable("restricted startup cannot replace its original native conversation")
     client.bind_owner_session(
         task["id"], info["worker_id"], info["native_session_id"],
         expected_generation=info["task_generation"],

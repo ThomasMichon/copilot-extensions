@@ -298,6 +298,8 @@ The offline ACP witness creates its actual native identity, then starts,
 reads, reports progress and completes its own task through authenticated HTTP.
 It must reject cross-task, fleet-route and signature-tampering attempts, and
 observe protected task-file rotation by the trusted supervisor.
+Acceptance also waits for the witness's final proof after its post-completion
+revocation check, not merely for the central task row to become completed.
 
 Build the central image from the candidate source with
 `services/dispatch/Dockerfile`, using the environment's approved package-index

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from types import SimpleNamespace
 
@@ -184,6 +186,157 @@ def test_lost_native_create_ack_reuses_original_creation_key(rig, monkeypatch):
     assert rig.supervisor.reconcile_reserving() == 1
     assert created[0] == created[1]
     assert reservation(rig)["state"] == "spawned"
+
+
+def test_lost_create_ack_recovers_the_original_stopped_keyed_native(rig, monkeypatch):
+    keys, resumed = [], []
+    stopped = False
+
+    def command(argv, payload=None):
+        nonlocal stopped
+        if "status" in argv:
+            return {"session_id": "bridge-worker", "status": "stopped", "turn_count": 0}
+        if "resume" in argv:
+            assert "--strict" in argv
+            assert reservation(rig)["agent_info"]["native_session_id"] == "native-worker"
+            resumed.append(argv)
+            stopped = False
+            return {"session_id": "bridge-worker", "status": "idle"}
+        result = rig.command(argv, payload)
+        if "create" in argv:
+            keys.append(argv[argv.index("--creation-key") + 1])
+            if len(keys) == 1:
+                stopped = True
+                raise delivery.BridgeUnavailable("lost create acknowledgement")
+            if stopped:
+                return {**result, "ready": False, "status": "stopped"}
+        return result
+
+    monkeypatch.setattr(delivery, "_run", command)
+    assert rig.supervisor.poll_once() == []
+    assert "session_id" not in reservation(rig)["agent_info"]
+    assert rig.supervisor.reconcile_reserving() == 1
+    assert len(keys) == 3 and len(set(keys)) == 1 and len(resumed) == 1
+    assert reservation(rig)["agent_info"]["native_session_id"] == "native-worker"
+    assert sum("send" in argv for argv, _ in rig.calls) == 1
+
+
+def test_overlapping_starters_acquire_only_one_first_send(rig, monkeypatch):
+    project = delivery._project
+    monkeypatch.setattr(
+        delivery, "_project",
+        lambda *_args: (_ for _ in ()).throw(delivery.BridgeUnavailable("interrupted")),
+    )
+    assert rig.supervisor.poll_once() == []
+    receipt = reservation(rig)
+    monkeypatch.setattr(delivery, "_project", project)
+
+    def command(argv, payload=None):
+        if "status" in argv:
+            return {"session_id": "bridge-worker", "status": "idle", "turn_count": 0}
+        return rig.command(argv, payload)
+
+    monkeypatch.setattr(delivery, "_run", command)
+    save = delivery._save
+    gate = threading.Barrier(2)
+
+    def synchronized_intent(client, key, info):
+        if info.get("send_attempted") and not info.get("delivered"):
+            gate.wait(timeout=5)
+        return save(client, key, info)
+
+    monkeypatch.setattr(delivery, "_save", synchronized_intent)
+    task = {
+        **rig.client.get(rig.task.id), "_spawn_client": rig.client,
+        "spawn_reservation_key": receipt["key"],
+    }
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(rig.spawn, [task, task]))
+    assert sum(ok for ok, _ in results) == 1
+    assert sum("send" in argv for argv, _ in rig.calls) == 1
+    assert reservation(rig)["agent_info"]["delivered"] is True
+
+
+def test_delivery_ack_cannot_skip_the_retained_first_send_intent(rig, monkeypatch):
+    monkeypatch.setattr(
+        delivery, "_project",
+        lambda *_args: (_ for _ in ()).throw(delivery.BridgeUnavailable("interrupted")),
+    )
+    assert rig.supervisor.poll_once() == []
+    before = reservation(rig)
+    response = rig.api.post(
+        f"/spawn-reservations/{before['key']}/restricted-delivery", headers=rig.control,
+        json={**before["agent_info"], "send_attempted": True, "delivered": True},
+    )
+    assert response.status_code == 409, response.text
+    assert reservation(rig) == before
+    assert not any("send" in argv for argv, _ in rig.calls)
+
+
+@pytest.mark.parametrize("outcome", ["complete", "abandon"])
+@pytest.mark.parametrize("lost_publication", [False, True])
+def test_terminal_transition_during_send_does_not_strand_lane_capacity(
+    rig, monkeypatch, outcome, lost_publication,
+):
+    def command(argv, payload=None):
+        result = rig.command(argv, payload)
+        if "send" in argv:
+            headers = {TASK_SCOPE_HEADER: rig.grants[-1]}
+            assert rig.api.post(
+                f"/tasks/{rig.task.id}/start", headers=headers, json={"worker_id": "ignored"},
+            ).status_code == 200
+            response = rig.api.post(
+                f"/tasks/{rig.task.id}/{outcome}", headers=headers,
+                json={
+                    "worker_id": "ignored",
+                    **({"reason": "fixture failure", "permitted": True} if outcome == "abandon" else {}),
+                },
+            )
+            assert response.status_code == 200, response.text
+        return result
+
+    monkeypatch.setattr(delivery, "_run", command)
+    if lost_publication:
+        monkeypatch.setattr(
+            rig.client, "record_spawn",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(DispatchError(503, "lost publication")),
+        )
+    assert rig.supervisor.poll_once() == ([] if lost_publication else [rig.task.id])
+    assert reservation(rig)["state"] == "spawned"
+    assert reservation(rig)["agent_info"]["delivered"] is True
+    rig.supervisor.local_body_verdict_fn = lambda _sid: "gone"
+    rig.supervisor.local_body_target_dir_fn = lambda _sid: None
+    rig.supervisor.reconcile()
+    assert reservation(rig)["state"] == "settled"
+    assert rig.supervisor._active_reservations() == []
+    assert sum("send" in argv for argv, _ in rig.calls) == 1
+
+
+def test_terminal_ack_cannot_adopt_a_reclaimed_generation(rig, monkeypatch):
+    def interrupted(argv, payload=None):
+        result = rig.command(argv, payload)
+        if "send" in argv:
+            raise delivery.BridgeUnavailable("lost acknowledgement")
+        return result
+
+    monkeypatch.setattr(delivery, "_run", interrupted)
+    assert rig.supervisor.poll_once() == []
+    receipt = reservation(rig)
+    held = rig.queue.get(rig.task.id)
+    rig.queue.yield_task(held.id, held.owner)
+    rig.queue.claim_one("replacement-owner", task_id=held.id, repo=TEST_REPO)
+    rig.queue.abandon(
+        held.id, worker_id="replacement-owner", permitted=True, reason="replacement concluded",
+    )
+    before = reservation(rig)
+    assert rig.queue.get(held.id).generation > receipt["agent_info"]["task_generation"]
+    response = rig.api.post(
+        f"/spawn-reservations/{receipt['key']}/restricted-delivery", headers=rig.control,
+        json={**receipt["agent_info"], "delivered": True},
+    )
+    assert response.status_code == 409, response.text
+    assert reservation(rig) == before
+    assert "delivered" not in reservation(rig)["agent_info"]
 
 
 @pytest.mark.parametrize("replaced", [False, True])

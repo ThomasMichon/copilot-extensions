@@ -14,6 +14,11 @@ const digest = value => crypto.createHash("sha256").update(value).digest("hex");
 const reply = (id, result) => console.log(JSON.stringify({jsonrpc: "2.0", id, result}));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+function publishProof(value) {
+    fs.writeFileSync("/workspace/proof.next", JSON.stringify(value));
+    fs.renameSync("/workspace/proof.next", "/workspace/proof.json");
+}
+
 async function request(method, path, body, credential = fs.readFileSync(tokenPath, "utf8")) {
     return new Promise((resolve, reject) => {
         const data = body === undefined ? undefined : JSON.stringify(body);
@@ -72,9 +77,9 @@ async function work() {
         worker_id: body.worker_id, summary: "Waiting for trusted credential rotation",
     });
     assert.equal(progress.status, 200, progress.text);
-    fs.writeFileSync("/workspace/proof.json", JSON.stringify({
+    publishProof({
         native, prompts, token_digest: digest(old), refused, phase: "awaiting-renewal",
-    }));
+    });
     const deadline = Date.now() + 60000;
     while (digest(fs.readFileSync(tokenPath, "utf8")) === digest(old)) {
         assert.ok(Date.now() < deadline, "trusted renewal never arrived");
@@ -91,9 +96,9 @@ async function work() {
     });
     assert.equal(completed.status, 200, completed.text);
     assert.equal((await request("GET", `/tasks/${task}`)).status, 403);
-    fs.writeFileSync("/workspace/proof.json", JSON.stringify({
+    publishProof({
         native, prompts, refused, rotated: true, phase: "completed",
-    }));
+    });
 }
 
 readline.createInterface({input: process.stdin}).on("line", async line => {

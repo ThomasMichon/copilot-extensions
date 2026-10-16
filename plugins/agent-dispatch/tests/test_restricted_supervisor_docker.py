@@ -249,6 +249,15 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                 completed = _wait(
                     lambda: (current if (current := client.get(task["id"]))["status"] == "completed" else None),
                 )
+                def final_proof():
+                    proof = json.loads(_run(
+                        "docker", "exec", "-u", "node", physical, "/usr/local/bin/node", "-e",
+                        "process.stdout.write(require('fs').readFileSync('/workspace/proof.json','utf8'))",
+                    ))
+                    return proof if proof["phase"] == "completed" else None
+
+                proof = _wait(final_proof)
+                assert proof["native"] == info["native_session_id"] and proof["rotated"] is True
                 assert completed["generation"] == info["task_generation"]
                 assert completed["result"]["native"] == info["native_session_id"]
                 assert completed["result"]["rotated"] is True and completed["result"]["prompts"] == 1

@@ -93,6 +93,12 @@ credential or executable command. Restart reconciliation retains the claim,
 physical binding, creation key and original native conversation. A recorded
 first-send intent with an uncertain acknowledgement requires explicit repair;
 it is not permission to send another first prompt or create another agent.
+Acquiring that intent is a one-shot queue transaction, including when two
+supervisors overlap. A lost creation acknowledgement can recover the stopped
+original conversation through its keyed identity and strict, unprompted resume.
+An acknowledged send for the same concluded task incarnation retains its
+delivery receipt and advances spawn bookkeeping atomically, so completion
+during delivery cannot strand a reserving lane slot.
 
 On the existing supervision cadence, a positively live, exact native worker
 receives a fresh task grant through the same provider operation. Unknown
