@@ -161,3 +161,22 @@ def test_unavailable_pushed_commit_fails_closed(tmp_path):
     repo = Repository(tmp_path, unrelated_dev=False)
     result = repo.hook(("f" * len(repo.base), repo.base))
     assert result.returncode != 0
+
+
+def test_fallback_base_is_pinned_when_another_worktree_fetches(tmp_path):
+    repo = Repository(tmp_path, unrelated_dev=True)
+    head = repo.file_commit("sized.txt", "x" * (1024 * 1024 + 1))
+    repo.env["COPILOT_EXTENSIONS_FORBIDDEN_IDS"] = "absent-fixture-token"
+    guard = tmp_path / "tools" / "check-no-internal-identifiers.py"
+    source = guard.read_text(encoding="utf-8")
+    source = source.replace(
+        "REPO = Path(__file__).resolve().parent.parent",
+        "REPO = Path(__file__).resolve().parent.parent\n"
+        "subprocess.run(['git', '-C', str(REPO), 'update-ref', "
+        "'refs/remotes/origin/main', 'refs/remotes/origin/dev'], check=True)",
+        1,
+    )
+    guard.write_text(source, encoding="utf-8")
+    result = repo.hook((head, "0" * len(head)))
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "sized.txt" in result.stdout + result.stderr
