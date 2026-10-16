@@ -331,7 +331,7 @@ VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 # `[[ -f "$INSTALL_DIR/update-in-progress" ]] && (( $(cat ...) > $(date +%s) ))`
 # without needing any plugin-specific caller-side wrapping.
 UPDATE_MARKER="${INSTALL_DIR}/update-in-progress"
-UPDATE_MARKER_TTL_DEFAULT=1200  # 20 min -- generous past any observed real cutover
+UPDATE_MARKER_TTL_DEFAULT="$(get_install_watchdog_outer_window "$PLUGIN_DIR" agent-bridge 1200)" || exit $?
 UPDATE_MARKER_REFCOUNT="${UPDATE_MARKER}.refcount"
 UPDATE_MARKER_REFCOUNT_LOCK="${UPDATE_MARKER}.refcount.lock"
 # Process-local: true once THIS invocation holds a refcount slot (see
@@ -373,15 +373,15 @@ _write_update_marker() {
     mkdir -p "$(dirname "${UPDATE_MARKER}")"
     exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}"
     flock -w 10 9 || true   # best-effort: proceed even if briefly uncontended-but-slow
-    local count tmp
+    local count tmp expiry previous_expiry
     count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
     [[ "$count" =~ ^[0-9]+$ ]] || count=0
-    if (( count == 0 )); then
-        # First holder: stamp a fresh marker. A later joiner deliberately
-        # does NOT refresh the expiry -- the TTL is a safety-net backstop,
-        # not a per-holder renewal lease.
+    expiry=$(( $(date +%s) + ttl ))
+    previous_expiry="$(cat "${UPDATE_MARKER}" 2>/dev/null || echo 0)"
+    [[ "$previous_expiry" =~ ^[0-9]+$ ]] || previous_expiry=0
+    if (( count == 0 || expiry > previous_expiry )); then
         tmp="$(mktemp "${UPDATE_MARKER}.XXXXXX")"
-        echo "$(( $(date +%s) + ttl ))" > "${tmp}"
+        echo "$expiry" > "${tmp}"
         mv -f "${tmp}" "${UPDATE_MARKER}"
     fi
     tmp="$(mktemp "${UPDATE_MARKER_REFCOUNT}.XXXXXX")"

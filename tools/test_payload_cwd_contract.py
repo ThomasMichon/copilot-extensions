@@ -9,6 +9,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import time
 
 import pytest
@@ -689,6 +690,140 @@ def test_native_watchdog_budget(
     }, [tmp_path.as_posix()], env)
     assert result.returncode == 0, result.stderr
     assert tuple(map(int, result.stdout.split())) == expected
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("name", ["agent-bridge", "agent-dispatch"])
+@pytest.mark.parametrize("override", [None, "7200", "0"])
+def test_watchdog_update_marker_covers_the_effective_outer_window(
+    tmp_path, extension, name, override,
+):
+    payload = ROOT / "plugins" / name
+    text = (payload / "scripts" / f"install.{extension}").read_text("utf-8")
+    variable = "$UpdateMarkerTtlDefault" if extension == "ps1" else "UPDATE_MARKER_TTL_DEFAULT"
+    assignment = next(line for line in text.splitlines() if line.startswith(variable + (" =" if extension == "ps1" else "=")))
+    env = _env(tmp_path)
+    env.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC", None)
+    if override is not None:
+        env["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = override
+    manifest = json.loads((payload / "plugin.json").read_text("utf-8"))
+    build = int(override) if override is not None else manifest.get("installerDeadlineSeconds", 480)
+    minimum = (build if build > 0 else 480) + manifest.get("cutoverDeadlineSeconds", 300) + 30
+    result = _native_watchdog(tmp_path, extension, {
+        "ps1": "$PluginDir=$args[0]\n" + assignment + "\n$UpdateMarkerTtlDefault",
+        "sh": 'PLUGIN_DIR="$1"\n' + assignment + '\nprintf "%s\\n" "$UPDATE_MARKER_TTL_DEFAULT"',
+    }, [payload.as_posix()], env)
+    assert result.returncode == 0, result.stderr
+    assert int(result.stdout.strip()) >= max(1200, minimum)
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("name", ["agent-bridge", "agent-dispatch"])
+def test_watchdog_marker_joiner_extends_but_never_shortens_expiry(tmp_path, extension, name):
+    source = (ROOT / "plugins" / name / "scripts" / f"install.{extension}").read_text("utf-8")
+    if extension == "ps1":
+        functions = []
+        for function in ("Get-UpdateMarkerMutex", "Write-UpdateMarker", "Clear-UpdateMarker"):
+            start = source.index(f"function {function} {{")
+            functions.append(source[start:source.index("\n}\n", start) + 3])
+        body = (
+            "$UpdateMarker=Join-Path $args[0] 'update-in-progress'\n"
+            "$script:UpdateMarkerHeld=$false\n" + "\n".join(functions) + "\n"
+            "Write-UpdateMarker -TtlSeconds 5\n$first=Get-Content $UpdateMarker\n"
+            "$script:UpdateMarkerHeld=$false\nWrite-UpdateMarker -TtlSeconds 3600\n"
+            "$second=Get-Content $UpdateMarker\n"
+            "$script:UpdateMarkerHeld=$false\nWrite-UpdateMarker -TtlSeconds 1\n"
+            "$third=Get-Content $UpdateMarker\nClear-UpdateMarker\n"
+            "$script:UpdateMarkerHeld=$true\nClear-UpdateMarker\n"
+            "$script:UpdateMarkerHeld=$true\nClear-UpdateMarker\n"
+            '"$first $second $third $(Test-Path $UpdateMarker)"'
+        )
+    else:
+        functions = []
+        for function in ("_write_update_marker", "_clear_update_marker"):
+            match = re.search(rf"^{function}\(\) \{{.*?^\}}$", source, re.M | re.S)
+            assert match
+            functions.append(match.group())
+        body = (
+            'UPDATE_MARKER="$1/update-in-progress"\n'
+            'UPDATE_MARKER_REFCOUNT="$UPDATE_MARKER.refcount"\n'
+            'UPDATE_MARKER_REFCOUNT_LOCK="$UPDATE_MARKER.refcount.lock"\n'
+            "_UPDATE_MARKER_HELD=false\n" + "\n".join(functions) + "\n"
+            # Git Bash checks the expiry logic only; native Linux owns flock proof.
+            + ("flock() { :; }\n" if os.name == "nt" else "")
+            + '_write_update_marker 5\nfirst="$(cat "$UPDATE_MARKER")"\n'
+            '_UPDATE_MARKER_HELD=false\n_write_update_marker 3600\nsecond="$(cat "$UPDATE_MARKER")"\n'
+            '_UPDATE_MARKER_HELD=false\n_write_update_marker 1\nthird="$(cat "$UPDATE_MARKER")"\n'
+            '_clear_update_marker\n_UPDATE_MARKER_HELD=true\n_clear_update_marker\n'
+            '_UPDATE_MARKER_HELD=true\n_clear_update_marker\n'
+            'printf "%s %s %s " "$first" "$second" "$third"\n'
+            'if [[ -e "$UPDATE_MARKER" ]]; then echo True; else echo False; fi'
+        )
+    result = _native_watchdog(tmp_path, extension, {extension: body}, [tmp_path.as_posix()])
+    assert result.returncode == 0, result.stdout + result.stderr
+    first, second, third, remains = result.stdout.split()
+    assert int(second) >= int(first) + 3500, "Joining long holder did not extend the expiry"
+    assert int(third) >= int(second)
+    assert remains == "False"
+
+
+@pytest.mark.skipif(os.name != "nt" or not shutil.which("powershell"), reason="Windows PowerShell required")
+@pytest.mark.parametrize("name", ["agent-bridge", "agent-dispatch"])
+def test_watchdog_marker_policy_supports_windows_powershell(tmp_path, monkeypatch, name):
+    monkeypatch.setitem(globals(), "PWSH", shutil.which("powershell"))
+    test_watchdog_update_marker_covers_the_effective_outer_window(tmp_path, "ps1", name, None)
+    test_watchdog_marker_joiner_extends_but_never_shortens_expiry(tmp_path, "ps1", name)
+
+
+@pytest.mark.parametrize("extension", ["ps1", "sh"])
+@pytest.mark.parametrize("name", sorted(
+    path.parents[1].name for path in ROOT.glob("plugins/*/scripts/bootstrap-check.sh")
+    if "# --- Good boot-citizen guard" in path.read_text("utf-8")
+))
+@pytest.mark.parametrize("age", [601, 1800])
+def test_watchdog_bootstrap_never_reaps_a_live_reconcile_from_age(
+    tmp_path, extension, name, age,
+):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    lock = runtime / "reconcile.lock"
+    lock.write_text("12345", encoding="utf-8")
+    os.utime(lock, (time.time() - age, time.time() - age))
+    birth = "2001-01-01T00:00:00Z"
+    (runtime / "reconcile-status.json").write_text(json.dumps({
+        "launched_pid": 12345, "worker_started_at": birth,
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - age)),
+    }), encoding="utf-8")
+    signal_receipt = tmp_path / "signalled"
+    source = (ROOT / "plugins" / name / "scripts" / f"bootstrap-check.{extension}").read_text("utf-8")
+    start = source.index("# --- Good boot-citizen guard")
+    label = "[agent-ssh]" if name == "agent-ssh" else "[$name]"
+    if extension == "ps1":
+        end = source.index(f'    [Console]::Error.WriteLine("{label} runtime', start)
+        body = (
+            f"$InstallDir='{runtime}'\n"
+            f"$statusFile=Join-Path $InstallDir 'reconcile-status.json'; $name='{name}'\n"
+            "$lockFile=Join-Path $InstallDir 'reconcile.lock'\n"
+            f"function Get-Process {{ param($Id) return @{{Id=$Id; StartTime=[datetime]::Parse('{birth}'); Handle=1; HasExited=$false}} }}\n"
+            f"function Stop-Process {{ [IO.File]::WriteAllText('{signal_receipt}', 'signal') }}\n"
+            f"function taskkill.exe {{ [IO.File]::WriteAllText('{signal_receipt}', 'signal'); $global:LASTEXITCODE=0 }}\n"
+            "function Exit-SessionStart { exit 0 }\n"
+            + source[start:end] + "\n'relaunch'\n"
+        )
+    else:
+        end = source.index(f'echo "{label} runtime', start)
+        body = (
+            f'InstallDir="{runtime.as_posix()}"\n'
+            f'py="{Path(sys.executable).as_posix()}"\nstatus_file="$InstallDir/reconcile-status.json"\n'
+            'kill() { if [[ "$1" == -0 ]]; then return 0; fi; '
+            f'printf signal >"{signal_receipt.as_posix()}"; }}\n'
+            + source[start:end] + '\nprintf "relaunch\\n"\n'
+        )
+    result = _native_watchdog(tmp_path, extension, {extension: body}, [])
+    assert result.returncode == 0, result.stderr
+    assert not signal_receipt.exists(), "Age alone authorized a signal to a live process"
+    assert "relaunch" not in result.stdout
+    assert lock.read_text("utf-8") == "12345"
 
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])

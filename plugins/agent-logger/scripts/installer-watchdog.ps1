@@ -34,6 +34,14 @@ function Get-InstallWatchdogBudget {
     return [pscustomobject]@{ BuildSec = [long]$build; CutoverSec = [long]$cutover }
 }
 
+function Get-InstallWatchdogOuterWindow {
+    param([string]$Payload, [string]$Name, [long]$MinimumSec = 0)
+
+    $budget = Get-InstallWatchdogBudget -Payload $Payload -Name $Name
+    $build = if ($budget.BuildSec -gt 0) { $budget.BuildSec } else { 480L }
+    return [Math]::Max($MinimumSec, $build + $budget.CutoverSec + 30L)
+}
+
 function Enter-InstallPhase {
     param(
         [ValidateSet('cutover')][string]$Name,

@@ -72,6 +72,8 @@ def _write_harness(tmp_path: Path, body: str) -> Path:
     script.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         f'INSTALL_DIR="{tmp_path / "install"}"\n'
+        f'PLUGIN_DIR="{_PLUGIN_ROOT.as_posix()}"\n'
+        '. "$PLUGIN_DIR/scripts/installer-watchdog.sh"\n'
         f"{_MARKER_SOURCE}\n{body}\n",
         encoding="utf-8",
     )
