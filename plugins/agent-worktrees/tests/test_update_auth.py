@@ -78,6 +78,45 @@ def test_working_setup_untouched_and_public_short_circuits():
         assert report.results[0].helper_chain == ["two"]
 
 
+@pytest.mark.parametrize("engine", [False, True])
+@pytest.mark.parametrize("denied", [False, True])
+def test_canonical_payload_acquisition_obeys_the_auth_session(
+    tmp_path, monkeypatch, engine, denied
+):
+    from agent_worktrees import reconcile, update_acquisition
+
+    item = _source(cwd=tmp_path)
+    monkeypatch.setattr(sources, "marketplaces", lambda _: [item])
+    monkeypatch.setattr(
+        auth, "report",
+        lambda items: auth.AuthReport([
+            auth.SourceAuth(
+                item, [], status="auth_required" if denied else "fixable_by_fallback",
+                expected_account="mapped", alternative={"method": "gh"},
+            )
+        ]),
+    )
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda _: tmp_path)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(update_acquisition.subprocess, "run", run)
+    with context.session():
+        result = update_acquisition.acquire(
+            "tool", "example", "copilot-fixture", cwd=tmp_path, engine=engine
+        )
+    assert result == ("auth_required" if denied else "OK")
+    if denied:
+        assert calls == []
+    else:
+        assert calls[0][1]["cwd"] == tmp_path
+        routes = json.loads(calls[0][1]["env"]["CE_UPDATE_AUTH_ROUTES"])
+        assert routes[item.route_key]["method"] == "gh"
+
+
 def test_fallback_preserves_inherited_command_scope_and_contains_no_token():
     probe = Probe()
     report = auth.report([_source()], env={}, runner=probe, account_for=lambda _: "mapped")
