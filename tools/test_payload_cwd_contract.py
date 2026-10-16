@@ -631,6 +631,81 @@ def test_phase_receipt_replacement_survives_a_held_watchdog_reader(tmp_path: Pat
     assert not list(tmp_path.glob("phase.json.*.tmp"))
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native process handles")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+def test_watchdog_refuses_pid_actions_after_child_exits_during_deadline_check(
+    tmp_path: Path, monkeypatch, shell: str,
+) -> None:
+    interpreter = shutil.which(shell)
+    if not interpreter:
+        pytest.skip(f"{shell} unavailable")
+    monkeypatch.setitem(globals(), "PWSH", interpreter)
+    result = _native_watchdog(tmp_path, "ps1", {
+        "ps1": (
+            "$start = [Diagnostics.ProcessStartInfo]::new()\n"
+            "$start.FileName = (Get-Process -Id $PID).Path\n"
+            "$start.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Milliseconds 200\"'\n"
+            "$start.UseShellExecute = $false\n$start.CreateNoWindow = $true\n"
+            "$child = [Diagnostics.Process]::Start($start)\n"
+            "$script:pidActions = 0\n"
+            "function taskkill.exe { $script:pidActions++; throw 'PID kill after exit' }\n"
+            "function Stop-Process { param($Id, [switch]$Force, $ErrorAction) $script:pidActions++ }\n"
+            "function Get-InstallWatchdogDeadline {\n"
+            "  param($BuildSec, $CutoverSec, $StartedAt, $PhaseFile)\n"
+            "  $child.WaitForExit()\n"
+            "  return [pscustomobject]@{ Deadline = 1L; Phase = 'build' }\n"
+            "}\n"
+            "try {\n"
+            "  $budget = [pscustomobject]@{ BuildSec = 1L; CutoverSec = 1L }\n"
+            "  $code = Wait-InstallWatchdog -Child $child -Budget $budget -StartedAt 1 "
+            "-PhaseFile 'unused' -Name fixture -Stage fixture -LogPath (Join-Path $PWD 'kill.log')\n"
+            "  if ($script:pidActions -ne 0) { throw \"Unexpected PID actions: $script:pidActions\" }\n"
+            "  if ($code -ne 0) { throw \"Exited child returned $code instead of its own status\" }\n"
+            "} finally { if (-not $child.HasExited) { $child.Kill() }; $child.Dispose() }\n"
+        ),
+    }, [])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (tmp_path / "kill.log").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native process handles")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+@pytest.mark.parametrize("target", ["matching", "wrong-birth", "exited"])
+def test_watchdog_tree_termination_requires_live_matching_identity(
+    tmp_path: Path, monkeypatch, target: str, shell: str,
+) -> None:
+    interpreter = shutil.which(shell)
+    if not interpreter:
+        pytest.skip(f"{shell} unavailable")
+    monkeypatch.setitem(globals(), "PWSH", interpreter)
+    result = _native_watchdog(tmp_path, "ps1", {
+        "ps1": (
+            "$start = [Diagnostics.ProcessStartInfo]::new()\n"
+            "$start.FileName = (Get-Process -Id $PID).Path\n"
+            "$start.Arguments = '-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 30\"'\n"
+            "$start.UseShellExecute = $false\n$start.CreateNoWindow = $true\n"
+            "$child = [Diagnostics.Process]::Start($start)\n"
+            "$expected = $child.StartTime.ToUniversalTime().Ticks\n"
+            "$mode = $args[0]\n"
+            "try {\n"
+            "  if ($mode -eq 'wrong-birth') {\n"
+            "    $refused = $false\n"
+            "    try { Stop-InstallWatchdogTree -Child $child -ExpectedStartTimeTicks ($expected + 1) }\n"
+            "    catch { $refused = $_.Exception.Message -match 'identity mismatch' }\n"
+            "    if (-not $refused -or $child.HasExited) { throw 'Wrong identity was not refused safely' }\n"
+            "  } else {\n"
+            "    if ($mode -eq 'exited') { $child.Kill(); $child.WaitForExit() }\n"
+            "    $terminated = Stop-InstallWatchdogTree -Child $child -ExpectedStartTimeTicks $expected\n"
+            "    if ($mode -eq 'exited' -and $terminated) { throw 'Exited target was reported killed' }\n"
+            "    if ($mode -eq 'matching' -and -not $terminated) { throw 'Matching target was not killed' }\n"
+            "    if (-not $child.WaitForExit(3000)) { throw 'Owned target survived termination' }\n"
+            "  }\n"
+            "} finally { if (-not $child.HasExited) { $child.Kill() }; $child.Dispose() }\n"
+        ),
+    }, [target])
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 def test_unavailable_home_refuses_in_place_install(tmp_path: Path, extension: str) -> None:
     if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
