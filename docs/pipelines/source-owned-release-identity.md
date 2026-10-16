@@ -58,6 +58,9 @@ The receipt binds the repository, Dev, candidate, content tree, Main parent,
 trusted control, exact CI run-attempt and executed job IDs. Its SHA-256 covers
 the exact canonical UTF-8/LF file bytes. Repeated calls reuse the same exact
 successful run; ambiguous runs refuse.
+CI workflow source parsing and its source fingerprint use declared UTF-8/LF,
+normalizing CRLF checkout/staging representation first; an unsupported lone CR
+refuses. This changes no downloaded index, archive, wheel or receipt bytes.
 
 `publish_python_artifacts.py publish-candidate` requires that receipt and
 rechecks its current provider run/attempt before publication. It verifies

@@ -955,6 +955,16 @@ only the current authority corpus with confined, deterministic capture.
 Current-head approval and CI succeeded; this is a source repair, not proof of
 a qualified containing Main release or installed acceptance.
 
+The Index plugin fixture repair then merged as #6995
+(`46a6c1a78df5aa06d93d9b1bb3bdac76349c00d0`) after current-head approval and
+green CI. Canonical/materialized layouts are explicit, fallback fixtures
+actually remove their temporary local dependency, and staged Bash is normalized
+after all text/materializer rewrites. The full contained Index suite passed
+1,060 cases; the review-fix selection passed 33, including two non-vacuous
+CRLF/coordinator regressions. This closes that source-fixture slice only.
+The next stretch remains reviewed helper/control activation and actual
+known-good replacement, not unpausing on the strength of these source merges.
+
 The new qualifier derives the required executed portfolio from canonical CI,
 including full suites, native platforms and matrix rows. Final publication
 requires its exact successful attempt and consumer-authority raw readback

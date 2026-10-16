@@ -204,6 +204,30 @@ def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregat
     assert len(digest) == 64
 
 
+def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    canonical = workflow.read_text("utf-8").replace("\r\n", "\n").encode("utf-8")
+    workflow.write_bytes(canonical)
+    lf = inventory.required_jobs(ROOT)
+    represented = canonical.replace(b"\n", b"\r\n")
+    assert represented != canonical and b"\r\njobs:\r\n" in represented
+    workflow.write_bytes(represented)
+    assert inventory.required_jobs(ROOT) == lf
+    assert lf[2] == hashlib.sha256(canonical).hexdigest()
+
+
+def test_inventory_rejects_unknown_lone_cr_source_representation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    canonical = workflow.read_text("utf-8").encode("utf-8")
+    workflow.write_bytes(canonical.replace(b"\n", b"\r", 1))
+    with pytest.raises(CandidateValidationError, match="unsupported lone carriage return"):
+        inventory.required_jobs(ROOT)
+
+
 @pytest.mark.parametrize("mutation", ["missing-full", "unknown-job", "duplicate", "matrix", "skip-scope"])
 def test_inventory_refuses_missing_or_unsupported_recipes_instead_of_silently_narrowing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,

@@ -19,7 +19,9 @@ _NON_CANDIDATE = {
 def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
     """Reject unaccounted jobs/matrices instead of shrinking release coverage."""
     payload = regular(root, Path(".github/workflows/ci.yml")).read_bytes()
-    text = payload.decode("utf-8")
+    text = payload.decode("utf-8").replace("\r\n", "\n")
+    if "\r" in text:
+        raise CandidateValidationError("canonical CI source has an unsupported lone carriage return")
     parts = re.split(r"(?m)^  ([a-z][a-z0-9_-]*):\n", text.split("\njobs:\n", 1)[-1])
     jobs = dict(zip(parts[1::2], parts[2::2]))
     if not jobs or len(jobs) != len(parts[1::2]):
@@ -80,4 +82,4 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
         if not rows or expected.intersection(rows) or len(set(rows)) != len(rows):
             raise CandidateValidationError("canonical CI qualification rows are empty or duplicated")
         expected.update(rows)
-    return expected, allowed_skips, hashlib.sha256(payload).hexdigest()
+    return expected, allowed_skips, hashlib.sha256(text.encode("utf-8")).hexdigest()
