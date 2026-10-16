@@ -100,9 +100,13 @@ staged sources while removing runtime/config contents. The existing tool guard
 suite collects native POSIX flock, live PID-fallback, link-target and failure
 cases. Linked roots with terminal slash/dot components must be refused, and a
 symlink followed by `..` must purge only the physical directory holding the lock.
+Root/home resolution preserves trailing newlines and ignores `CDPATH`.
 Vault's transaction suite runs the real shared helper under both Windows
 PowerShell 5.1 and PowerShell 7, with a held lock, open staged source and outside
-junction target. Native consumer cases exercise supported uninstall entrypoints
+junction target. Native PowerShell purge cases compare home directory identities
+through linked ancestors while retaining legitimate aliased runtime paths; the
+existing POSIX guard also exercises that helper under native PowerShell.
+Native consumer cases exercise supported uninstall entrypoints
 and read-only previews in fresh roots; service APIs are isolated, never live.
 Pull Requests retains its existing 300-second production wait: its immediate
 native lock probe and source-wiring test cover contention without stretching a

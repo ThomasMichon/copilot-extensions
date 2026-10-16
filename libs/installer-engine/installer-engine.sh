@@ -27,13 +27,15 @@ remove_install_runtime_content() {
         printf '%s\n' 'Runtime purge requires a real install directory, not a link' >&2
         return 1
     fi
-    root="$(cd -P -- "$root" && pwd -P)" || return 1
+    root="$(CDPATH= cd -P -- "$root" && printf '%s.' "$PWD")" || return 1
+    root="${root%.}"
     if [[ "$root" == "/" ]]; then
         printf '%s\n' 'Refusing to purge a filesystem root' >&2
         return 1
     fi
     if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
-        home="$(cd -P -- "$HOME" && pwd -P)" || return 1
+        home="$(CDPATH= cd -P -- "$HOME" && printf '%s.' "$PWD")" || return 1
+        home="${home%.}"
         if [[ "$root" == "$home" ]]; then
             printf '%s\n' 'Refusing to purge a user home' >&2
             return 1

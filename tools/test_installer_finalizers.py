@@ -55,7 +55,9 @@ $readonly.IsReadOnly = $true
 $lock = [IO.File]::Open((Join-Path $Root '.install.lock'), 'Open', 'ReadWrite', 'None')
 $stage = [IO.File]::Open((Join-Path $Root '.install-stage\owner\running.ps1'), 'Open', 'Read', 'None')
 try {
-    Remove-InstallRuntimeContent -InstallRoot $Root
+    $alias = Join-Path (Split-Path $Root) 'runtime-parent-alias'
+    New-Item -ItemType Junction -Path $alias -Target (Split-Path $Root) | Out-Null
+    Remove-InstallRuntimeContent -InstallRoot (Join-Path $alias (Split-Path $Root -Leaf))
     $contended = $false
     try {
         $other = [IO.File]::Open((Join-Path $Root '.install.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
@@ -95,15 +97,26 @@ def test_native_purge_refuses_home_and_link_roots(tmp_path, host):
     root, outside = _purge_fixture(tmp_path)
     result = _purge_ps(tmp_path, host, root, r"""
 New-Item -ItemType Junction -Path (Join-Path (Split-Path $Root) 'linked-root') -Target $Outside | Out-Null
-foreach ($unsafe in @($env:USERPROFILE, (Join-Path (Split-Path $Root) 'linked-root'))) {
+$alias = Join-Path (Split-Path $Root) 'home-parent-alias'
+New-Item -ItemType Junction -Path $alias -Target (Split-Path $env:USERPROFILE) | Out-Null
+[IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'sentinel'), 'home')
+$aliasedHome = Join-Path $alias (Split-Path $env:USERPROFILE -Leaf)
+foreach ($unsafe in @($env:USERPROFILE, (Join-Path (Split-Path $Root) 'linked-root'), $aliasedHome)) {
     $refused = $false
     try { Remove-InstallRuntimeContent -InstallRoot $unsafe }
-    catch { $refused = $true }
+    catch {
+        $expected = if ($unsafe -eq (Join-Path (Split-Path $Root) 'linked-root')) {
+            'Runtime purge requires a real install directory, not a link'
+        } else { 'Refusing to purge a user home' }
+        if ($_.Exception.Message -ne $expected) { throw }
+        $refused = $true
+    }
     if (-not $refused) { throw 'unsafe purge root accepted' }
 }
 """)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (outside / "sentinel").read_text(encoding="utf-8") == "outside"
+    assert (tmp_path / "home" / "sentinel").read_text(encoding="utf-8") == "home"
     assert (root / "versions" / "old" / "data").is_file()
 
 
@@ -201,6 +214,118 @@ test "$(cat "$ROOT/runtime/sentinel")" = unrelated
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "runtime" / "sentinel").read_text(encoding="utf-8") == "unrelated"
     assert sorted(path.name for path in (outside / "runtime").iterdir()) == [".install.lock"]
+
+
+def test_posix_purge_preserves_trailing_newlines_in_the_root(tmp_path):
+    root, _ = _purge_fixture(tmp_path)
+    result = _purge_bash(tmp_path, root, r"""
+requested="$ROOT"$'\n\n'
+mkdir "$requested"
+printf requested >"$requested/sentinel"
+exec 8>>"$requested/.install.lock"
+remove_install_runtime_content "$requested"
+test "$requested/.install.lock" -ef /dev/fd/8
+test ! -e "$requested/sentinel"
+test -f "$ROOT/versions/old/data"
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "versions" / "old" / "data").read_text(encoding="utf-8") == "runtime"
+    assert sorted(path.name for path in root.with_name(root.name + "\n\n").iterdir()) == [".install.lock"]
+
+
+def test_posix_purge_preserves_trailing_newlines_in_home(tmp_path):
+    root, _ = _purge_fixture(tmp_path)
+    result = _purge_bash(tmp_path, root, r"""
+HOME="$ROOT"$'\n\n'
+mkdir "$HOME"
+printf home >"$HOME/sentinel"
+exec 8>>"$ROOT/.install.lock"
+remove_install_runtime_content "$ROOT"
+test "$ROOT/.install.lock" -ef /dev/fd/8
+test ! -e "$ROOT/versions"
+test "$(cat "$HOME/sentinel")" = home
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert root.with_name(root.name + "\n\n").joinpath("sentinel").read_text(encoding="utf-8") == "home"
+
+
+def test_posix_purge_ignores_cdpath_for_relative_roots(tmp_path):
+    root, _ = _purge_fixture(tmp_path)
+    result = _purge_bash(tmp_path, root, r"""
+cd "$ROOT/.."
+export CDPATH="$PWD"
+HOME=home
+exec 8>>"$ROOT/.install.lock"
+remove_install_runtime_content runtime
+test "$ROOT/.install.lock" -ef /dev/fd/8
+test ! -e "$ROOT/versions"
+if remove_install_runtime_content "$HOME"; then exit 1; fi
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(path.name for path in root.iterdir()) == [
+        ".install-stage", ".install.lock", ".install.lock.pid", ".install.lock.pid.reap",
+    ]
+
+
+@pytest.mark.parametrize("regression", [
+    test_posix_purge_preserves_trailing_newlines_in_the_root,
+    test_posix_purge_preserves_trailing_newlines_in_home,
+    test_posix_purge_ignores_cdpath_for_relative_roots,
+], ids=lambda regression: regression.__name__)
+def test_posix_purge_path_resolution_negative_controls(tmp_path, monkeypatch, regression):
+    source = (ENGINE / "installer-engine.sh").read_text(encoding="utf-8")
+    for variable, argument, indent in (("root", "$root", 4), ("home", "$HOME", 8)):
+        fixed = (
+            f'{variable}="$(CDPATH= cd -P -- "{argument}" && printf \'%s.\' "$PWD")" || return 1\n'
+            f'{" " * indent}{variable}="${{{variable}%.}}"'
+        )
+        assert source.count(fixed) == 1
+        source = source.replace(
+            fixed, f'{variable}="$(cd -P -- "{argument}" && pwd -P)" || return 1',
+        )
+    if os.name == "nt":
+        pytest.skip("native POSIX Bash required")
+    legacy = tmp_path / "legacy-engine"
+    legacy.mkdir()
+    (legacy / "installer-engine.sh").write_text(source, encoding="utf-8")
+    monkeypatch.setitem(globals(), "ENGINE", legacy)
+    with pytest.raises(AssertionError):
+        regression(tmp_path / "probe")
+
+
+def test_posix_powershell_purge_compares_physical_home_identity(tmp_path):
+    if os.name == "nt" or (pwsh := shutil.which("pwsh")) is None:
+        pytest.skip("native POSIX PowerShell required")
+    root, _ = _purge_fixture(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "sentinel").write_text("home", encoding="utf-8")
+    alias = tmp_path / "alias"
+    alias.symlink_to(tmp_path, target_is_directory=True)
+    script = r"""
+. $args[0]
+$refused = $false
+try { Remove-InstallRuntimeContent -InstallRoot $args[1] }
+catch {
+    if ($_.Exception.Message -ne 'Refusing to purge a user home') { throw }
+    $refused = $true
+}
+if (-not $refused) { throw 'aliased home accepted' }
+Remove-InstallRuntimeContent -InstallRoot $args[2]
+"""
+    runner = tmp_path / "purge.ps1"
+    runner.write_text(script, encoding="utf-8")
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner),
+         str(ENGINE / "installer-engine.ps1"), str(alias / "home"), str(alias / root.name)],
+        capture_output=True, text=True, timeout=20,
+        env={**os.environ, "HOME": str(home), "USERPROFILE": str(home)},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (home / "sentinel").read_text(encoding="utf-8") == "home"
+    assert sorted(path.name for path in root.iterdir()) == [
+        ".install-stage", ".install.lock", ".install.lock.pid", ".install.lock.pid.reap",
+    ]
 
 
 def _uninstall_ps(tmp_path, name, *, preview=False, hold=False):
