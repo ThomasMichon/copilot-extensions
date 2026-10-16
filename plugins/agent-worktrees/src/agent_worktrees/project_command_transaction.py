@@ -170,12 +170,9 @@ def recover(
             ):
                 raise ValueError("invalid intended receipt")
             if not inst._same_identity(final["owner"], owner, inst._OWNER_IDENTITY_FIELDS):
-                recorded_owner = (
-                    final["runtime"]["resolver"] == "payload-local"
-                    and inst._same_identity(
-                        final["owner"], receipt["owner"],
-                        inst._OWNER_IDENTITY_FIELDS + ("plugin_version",),
-                    )
+                recorded_owner = inst._same_identity(
+                    final["owner"], receipt["owner"],
+                    inst._OWNER_IDENTITY_FIELDS + ("plugin_version",),
                 )
                 if not recorded_owner:
                     raise ValueError("intended owner changed; refuse stale publication")

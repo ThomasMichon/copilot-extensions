@@ -90,8 +90,9 @@ of another installation.
    ownership receipt; receipt-free recognition is limited to historical
    payload-bearing templates. Native installers publish the successfully
    activated runtime's manifest before shortcut registration or reconciliation.
-   Intact interrupted `payload-local` journals complete against their recorded
-   payload template before reconciliation migrates the recovered shortcut.
+   Intact interrupted journals for either supported resolver complete against
+   their recorded owner and matching payload/user template after lineage
+   admission, before reconciliation migrates the recovered shortcut.
 7. Missing, ambiguous, or mismatched provenance fails closed. Same-cell sibling
    discovery is explicit, and a same-named peer from another cell is never
    selected through `PATH`, a wildcard installed-plugin scan, or a shared

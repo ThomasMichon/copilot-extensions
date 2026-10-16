@@ -57,7 +57,7 @@ def command_home(request, monkeypatch, tmp_path):
     return current, old
 
 
-def seed_old(monkeypatch, roots, *, receipted=True):
+def seed_old(monkeypatch, roots, *, receipted=True, family="payload"):
     from agent_worktrees import project_command_templates as templates
 
     current, old = roots
@@ -67,12 +67,13 @@ def seed_old(monkeypatch, roots, *, receipted=True):
         patch.setattr(inst, "_project_binstub_specs", lambda project, **_kwargs: [
             (inst.local_bin() / name, content)
             for name, content in templates.render(
-                project, old, windows=inst.platform.system() == "Windows", family="payload",
+                project, old, windows=inst.platform.system() == "Windows",
+                family=family, user_bin=inst.local_bin(),
             ).items()
         ])
         inst._deploy_project_binstub("demo")
     receipt = inst._read_receipt("demo")
-    receipt["runtime"]["resolver"] = "payload-local"
+    receipt["runtime"]["resolver"] = "payload-local" if family == "payload" else "user-binstub"
     inst._write_receipt("demo", receipt)
     if not receipted:
         inst._receipt_path("demo").unlink()
@@ -175,8 +176,9 @@ def test_receipt_free_user_shortcut_does_not_identify_an_owner(
 
 @pytest.mark.parametrize("relocation", ["none", "snapshot", "checkout"])
 @pytest.mark.parametrize("final_owner", ["recorded", "unrelated"])
-def test_pre_upgrade_pending_payload_journal_recovers_then_migrates(
-    command_home, monkeypatch, tmp_path, relocation, final_owner,
+@pytest.mark.parametrize("resolver", ["payload-local", "user-binstub"])
+def test_pending_command_journal_recovers_across_proven_relocation(
+    command_home, monkeypatch, tmp_path, relocation, final_owner, resolver,
 ):
     current, snapshot = command_home
     old = current if relocation == "none" else snapshot
@@ -188,9 +190,12 @@ def test_pre_upgrade_pending_payload_journal_recovers_then_migrates(
             "source": {"kind": "marketplace", "plugin": "agent-worktrees",
                        "path": current.as_posix(), "version": "1.1.0"},
         }), encoding="utf-8")
-    before = seed_old(monkeypatch, (current, old))
+    before = seed_old(
+        monkeypatch, (current, old),
+        family="payload" if resolver == "payload-local" else "current",
+    )
     receipt = inst._read_receipt("demo")
-    assert receipt["runtime"]["resolver"] == "payload-local"
+    assert receipt["runtime"]["resolver"] == resolver
     receipt["transaction"] = {
         "version": 1,
         "before": {p.name: {"bytes": None, "mode": 0o755} for p in before},
@@ -214,7 +219,7 @@ def test_pre_upgrade_pending_payload_journal_recovers_then_migrates(
     final = inst._read_receipt("demo")
     assert "transaction" not in final
     assert final["runtime"]["resolver"] == "user-binstub"
-    assert all(data != p.read_bytes() for p, data in before.items())
+    assert all((data != p.read_bytes()) == (resolver == "payload-local") for p, data in before.items())
     assert inst.reconcile_binstubs()["added"] == 0
 
 
