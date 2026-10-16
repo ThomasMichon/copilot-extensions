@@ -175,6 +175,14 @@ class Connection:
                 sessions[sid]["history"].append({
                     "jsonrpc": "2.0", "method": "session/update",
                     "params": {"sessionId": sid, "update": {
+                        "sessionUpdate": "tool_call", "toolCallId": "historical/tool",
+                        "title": "Historical unfinished tool", "kind": "other",
+                        "status": "in_progress",
+                    }},
+                })
+                sessions[sid]["history"].append({
+                    "jsonrpc": "2.0", "method": "session/update",
+                    "params": {"sessionId": sid, "update": {
                         "sessionUpdate": "agent_message_chunk",
                         "content": {"type": "text", "text": "unseen during disconnect"},
                     }},

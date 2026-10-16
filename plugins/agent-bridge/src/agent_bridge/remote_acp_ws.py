@@ -9,6 +9,7 @@ import ssl as ssl_module
 from collections.abc import Callable
 from http.cookiejar import CookieJar
 from urllib.request import Request
+from urllib.parse import urlsplit
 from typing import Any
 
 from websockets.asyncio.client import connect
@@ -41,8 +42,9 @@ class WsAcpTransport(RemoteTransport):
 
     async def open(self) -> WsAcpTransport:
         url = self.target.endpoint
-        uri = ("wss" if url.startswith("https:") else "ws") + url[url.index(":"):]
-        request = Request(url)
+        parsed = urlsplit(url)
+        uri = parsed._replace(scheme="wss" if parsed.scheme == "https" else "ws").geturl()
+        request = Request(parsed.geturl())
         self._cookies.add_cookie_header(request)
         for attempt in range(2):
             headers = await self.headers()

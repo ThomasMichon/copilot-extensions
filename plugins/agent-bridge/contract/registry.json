@@ -142,7 +142,7 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_wire_compat.py",
-          "sha256": "83728e07defb2ce501055554ec7c26e9707038a04c477e75e18b23525a0620a4",
+          "sha256": "4f41ee6015666a3a144b254a8a9adfc5efd5bd710f244451f4ffabc1473df2b4",
           "semantic": false,
           "non_semantic_reason": "This guard asserts tolerant reading but does not produce the registered wire shape."
         },

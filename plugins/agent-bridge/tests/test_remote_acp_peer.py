@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import json
 import socket
 import ssl
 import subprocess
@@ -29,6 +30,8 @@ from agent_bridge.remote_acp_transport import RemoteTransportError
 from agent_bridge.remote_acp_sessions import connect_remote_session
 from agent_bridge.session_manager import session_manager_from_config
 from agent_bridge.models import ServiceConfig
+from agent_bridge.events import EventLog
+from agent_bridge import telemetry
 
 
 @pytest.fixture
@@ -314,6 +317,8 @@ async def test_actual_service_resume_retains_history_as_replay_without_spawn(pee
         await original(client, target, transport=wire)
 
     monkeypatch.setattr(AcpClient, "start_remote", start)
+    records = []
+    monkeypatch.setattr(telemetry, "emit", records.append)
     manager = session_manager_from_config(tmp_db, ServiceConfig(remote_acp={"peer": spec}))
     session = await connect_remote_session(manager, "peer", cwd="/workspace")
     try:
@@ -342,6 +347,13 @@ async def test_actual_service_resume_retains_history_as_replay_without_spawn(pee
         assert len([event for event in replay if event.event == "agent_message"]) == 6
         assert any(event.data.get("text") == "unseen during disconnect" for event in replay)
         assert session.client.pending_ask_user() == []
+        assert any(event.event == "tool_call_start" for event in replay)
+        assert session.event_log.active_tool_call() is None
+        assert "historical/tool" not in json.dumps(records)
+        restored = EventLog.from_db(manager.db, session.session_id)
+        assert restored.active_tool_call() is None
+        restored.rebuild([(event.event, event.data) for event in restored.get_events()])
+        assert restored.active_tool_call() is None
     finally:
         await manager.stop_session(session.session_id)
     assert proc.poll() is None
@@ -377,10 +389,12 @@ async def test_actual_remote_redirect_refused_without_forwarding(peer, mode):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
-async def test_answer_admitted_before_cancel_still_has_terminal_route(peer, mode):
+@pytest.mark.parametrize("scheme", ["https", "HTTPS", "HtTpS"])
+async def test_answer_admitted_before_cancel_still_has_terminal_route(peer, mode, scheme):
     url, context, proc = peer
     spec = RemoteAcpTarget(
-        endpoint=url + "/acp", transport=mode, allow_loopback_test=True,
+        endpoint=url.replace("https:", scheme + ":") + "/acp",
+        transport=mode, allow_loopback_test=True,
         auth={"source": "injected", "identity": "synthetic"},
     )
     wire = (

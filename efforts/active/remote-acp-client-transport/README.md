@@ -177,6 +177,22 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Fresh review and full CI corrections
+
+- Fresh review of #6997 found two additional issues: mixed-case HTTPS schemes
+  could select the wrong WS scheme, and historical tool updates reached live
+  tracking/telemetry reducers. Both are corrected without changing the profile.
+- Actual TLS HTTP/2/WSS roundtrips now cover lowercase, uppercase and mixed-case
+  HTTPS endpoints. Remote load contains an unfinished historical tool; it is
+  retained in history but cannot become live tool state or emit tool telemetry,
+  including on database restore and event-log rebuild.
+- Required CI exposed an overbroad tolerant-reader inventory treating the two
+  strict local endpoint/auth configuration models as peer request/response
+  readers. Classify exactly those two immutable settings types; keep every
+  other model and any future subclass under the tolerant-reader guard.
+- Focused peer/event/telemetry/wire selection: 88 passed. Required CI and a new
+  review remain pending; there is no merge or deployment claim.
+
 ### 2026-10-16 — Runtime review corrections and immutable contract evidence
 
 - Runtime PR #6997 remains open while required review and CI are completed.

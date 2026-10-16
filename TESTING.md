@@ -42,6 +42,14 @@ prove deployment readiness. Existing ACP/client/API tests retain local/provider
 regression coverage; the new lane is bounded rather than an exhaustive fleet
 matrix.
 
+Bridge's tolerant-wire-reader guard continues to cover every discovered peer
+model. Its only explicit local-configuration classifications are the immutable
+`RemoteAuth` and `RemoteAcpTarget` settings: unknown auth/transport configuration
+fails closed instead of silently ignoring a typo. Subclasses do not inherit
+that classification. Remote replay tests also include unfinished historical
+tools, checking live tracking and telemetry after load, database restore and
+event-log rebuild.
+
 The shared `agent-procutil` daemon-broker unit suite covers authenticated frame
 bounds, WMI's JSON-stdin environment boundary, containment opt-out, partial-start
 cleanup and adoption failures. Its Windows-only native regression launches from
