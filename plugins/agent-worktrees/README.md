@@ -64,12 +64,15 @@ ownership, not invented readiness. See the
 [shared binding contract](../../libs/payload-invocation/README.md#source-qualified-command-binding)
 for selection/refusal semantics and consumer compatibility.
 
-Project launchers are attributable global entry points. Each launcher invokes
-the absolute payload-local agent-worktrees command that created it and carries
-an ownership receipt under `~/.agent-worktrees/binstub-receipts/`. Routine
+Project launchers are attributable global entry points with ownership receipts
+under `~/.agent-worktrees/binstub-receipts/`. Legacy launchers delegate to the
+installed user-side `agent-worktrees` command in their resolved local-bin
+directory, not a checkout or plugin payload. Cell-scoped launchers retain their
+selected payload-local command. Routine
 install, update, repair, and reconciliation preserve foreign owners and edited
 bytes. Known historical generated launchers migrate automatically when receipt,
-installation lineage and exact generated-content checks establish ownership.
+installation lineage and exact generated-content checks establish ownership,
+including checkout-to-marketplace adoption of the same legacy runtime.
 Attributable obsolete or knowledge-only launchers retire through the same
 recoverable boundary; unknown unreceipted files and ambiguous relocations still
 require deliberate attribution. Windows command names are compared
