@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+import os
 import sys
 from types import SimpleNamespace
 
@@ -30,7 +30,7 @@ def test_record_resolves_startup_roots_and_original_policy(tmp_path, monkeypatch
     config.enable_credential_relay = False
     assert origins.config_root == tmp_path / "relative-config"
     assert origins.install_root == tmp_path / "relative-install"
-    assert origins.executable == Path(sys.executable).resolve()
+    assert origins.executable == executing_executable()
     assert origins.port_policy == 43210
     assert origins.relay_policy
     assert origins.required_environment == ("DECLARED_FIXTURE_SECRET", "DECLARED_ABSENCE")
@@ -55,7 +55,15 @@ def test_explicit_empty_contract_is_not_guessed_from_environment(tmp_path, monke
 
 @pytest.mark.parametrize("executable", ["", "/nonexistent-private-interpreter"])
 def test_unknown_executing_executable_refuses_without_private_details(monkeypatch, executable):
-    monkeypatch.setattr(sys, "executable", executable)
+    if os.name == "nt":
+        from zdd.private_windows_native import Native
+
+        def failed_query(self, handle):
+            raise PrivateIPCError(Refusal.IDENTITY)
+
+        monkeypatch.setattr(Native, "process_image", failed_query)
+    else:
+        monkeypatch.setattr(sys, "executable", executable)
     with pytest.raises(PrivateIPCError) as error:
         executing_executable()
     assert str(error.value) == Refusal.AUTHORITY.value
@@ -119,7 +127,7 @@ def test_cmd_start_records_only_explicit_contract_before_activation(
             assert app.state.runtime_origins.port_policy == 43210
             assert app.state.runtime_origins.relay_policy
             assert app.state.runtime_origins.required_environment == contract
-            assert app.state.runtime_origins.executable == Path(sys.executable).resolve()
+            assert app.state.runtime_origins.executable == executing_executable()
 
     monkeypatch.setattr(
         start.uvicorn, "Server",
