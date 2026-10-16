@@ -420,16 +420,33 @@ def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(tmp_path: Path
 
 
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX installer coverage")
+@pytest.mark.parametrize("manifest_layout", ["canonical", "materialized"])
 def test_posix_stamp_uses_owned_versioned_snapshot_without_marketplace_fallback(
-    tmp_path: Path,
+    tmp_path: Path, manifest_layout: str,
 ):
     _, env = _fake_uv_environment(tmp_path)
     install_dir = Path(env["HOME"]) / ".budget-guidance"
+    source = tmp_path / "source" / "plugins" / "budget-guidance"
+    _copy_payload(source)
+    manifest = source / "pyproject.toml"
+    local_ref = b'agent-procutil = { path = "libs/agent-procutil" }'
+    canonical_ref = b'agent-procutil = { path = "../../libs/agent-procutil", editable = true }'
+    original_manifest = manifest.read_bytes()
+    assert local_ref in original_manifest
+    if manifest_layout == "canonical":
+        library = source / "libs" / "agent-procutil"
+        shutil.copytree(library, source.parents[1] / "libs" / "agent-procutil")
+        shutil.rmtree(library)
+        original_manifest = original_manifest.replace(local_ref, canonical_ref)
+        manifest.write_bytes(original_manifest)
+        assert canonical_ref in original_manifest
+    expected_manifest = original_manifest.replace(canonical_ref, local_ref)
+    assert (expected_manifest != original_manifest) is (manifest_layout == "canonical")
 
     result = subprocess.run(
         [
             BASH,
-            str(PLUGIN / "scripts" / "install.sh"),
+            str(source / "scripts" / "install.sh"),
             "stamp",
             "--install-dir",
             str(install_dir),
@@ -446,18 +463,12 @@ def test_posix_stamp_uses_owned_versioned_snapshot_without_marketplace_fallback(
     assert result.returncode == 0, result.stdout
     snapshot = Path((install_dir / "payload-dir").read_text(encoding="utf-8").strip())
     assert snapshot == install_dir / "snapshots" / VERSION
-    assert snapshot != PLUGIN
+    assert snapshot != source
     assert (snapshot / "scripts" / "install.sh").is_file()
     assert (snapshot / "libs" / "agent-procutil" / "pyproject.toml").is_file()
-    original_manifest = (PLUGIN / "pyproject.toml").read_bytes()
-    expected_manifest = original_manifest.replace(
-        b'agent-procutil = { path = "../../libs/agent-procutil", editable = true }',
-        b'agent-procutil = { path = "libs/agent-procutil" }',
-    )
-    assert expected_manifest != original_manifest
     assert (snapshot / "pyproject.toml").read_bytes() == expected_manifest
     assert (snapshot / ".payload-source").read_text(encoding="utf-8").strip() == str(
-        PLUGIN
+        source
     )
 
     wrapper = Path(env["HOME"]) / ".local" / "bin" / "budget-guidance"
