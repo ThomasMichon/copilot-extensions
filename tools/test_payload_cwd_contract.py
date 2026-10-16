@@ -392,11 +392,13 @@ def test_cutover_can_extend_the_build_deadline(
         "COPILOT_PLUGIN_INSTALL_SMOKE_PHASE": "cutover",
     })
     kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    started = time.monotonic()
     result = subprocess.run(
         _command(entry, extension), cwd=home, env=env,
         capture_output=True, text=True, timeout=30, **kwargs,
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
+    assert time.monotonic() - started >= 6, "cutover never exercised the extended lifetime"
     assert (home / ".agent-example" / "smoke.json").is_file()
     log = home / (".agent-example" if not contextual else "runtime") / "reconcile.err.log"
     assert not log.exists() or "WATCHDOG-KILL" not in log.read_text()
@@ -726,6 +728,30 @@ def test_unavailable_home_refuses_in_place_install(tmp_path: Path, extension: st
     assert proc.returncode != 0
     assert "self-stage failed" in proc.stderr
     assert "running in place" not in proc.stdout + proc.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell smoke seam")
+@pytest.mark.parametrize("failure", ["invalid-phase", "receipt-publication"])
+def test_powershell_smoke_phase_failure_cannot_report_success(tmp_path: Path, failure: str) -> None:
+    payload, entry = _entry(tmp_path, "ps1")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _env(home)
+    env["COPILOT_PLUGIN_INSTALL_SMOKE_PHASE"] = (
+        "invalid" if failure == "invalid-phase" else "cutover"
+    )
+    if failure == "receipt-publication":
+        helper = payload / "scripts" / "installer-watchdog.ps1"
+        with helper.open("a", encoding="utf-8") as stream:
+            stream.write(
+                "\nfunction Enter-InstallPhase { throw 'injected receipt publication failure' }\n"
+            )
+    result = subprocess.run(
+        _command(entry, "ps1"), cwd=home, env=env, capture_output=True,
+        text=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Smoke seam failed:" in result.stderr
 
 
 def test_all_reconcile_launchers_choose_home() -> None:

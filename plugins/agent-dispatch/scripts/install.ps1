@@ -329,7 +329,7 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
                 $__grandStart.CreateNoWindow = $true
                 $__g = [Diagnostics.Process]::Start($__grandStart)
                 $__smokeGrandPid = $__g.Id
-            } catch {}
+            } catch { throw "Smoke grandchild launch failed: $_" }
         }
         ([ordered]@{
             ran_from     = $PSScriptRoot
@@ -343,7 +343,10 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
             Enter-InstallPhase -Name $env:COPILOT_PLUGIN_INSTALL_SMOKE_PHASE
         }
         Start-Sleep -Seconds $__smokeSleep
-    } catch {}
+    } catch {
+        [Console]::Error.WriteLine("Smoke seam failed: $_")
+        exit 1
+    }
     exit 0
 }
 # === end install-contract:v5 smoke seam ===

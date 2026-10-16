@@ -2,7 +2,7 @@
   "version": 1,
   "encoding": "utf-8",
   "entrypoint": "install.ps1",
-  "entrypoint_sha256": "d7f229105eebbdb7880e9f7b5fa5e785b30d98fecf8006337f06c0d4e24597db",
+  "entrypoint_sha256": "c92d0dc77aa50ed48483737318ba4ebbb53a0cd5a7f9b8ca1d151f0acdd15193",
   "initializer": "installer-human-output.ps1",
   "initializer_sha256": "dec20240d84b19aed644d4c879950b96e5f0f171ccbd579904bc2a54b4c6c015"
 }
