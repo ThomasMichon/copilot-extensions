@@ -33,7 +33,7 @@ def _has_history_schema(conn: sqlite3.Connection) -> bool:
         row[1]: (row[2].upper(), row[3], row[5])
         for row in conn.execute("PRAGMA table_info(seeds)")
     }
-    if seeds != 1 or columns != {
+    if objects != 1 or version != 0 or application != 0 or seeds != 1 or columns != {
         "id": ("INTEGER", 0, 1),
         "project": ("TEXT", 1, 0),
         "prompt": ("TEXT", 1, 0),

@@ -180,3 +180,35 @@ def test_unknown_history_database_is_refused_without_schema_changes(
     with pytest.raises(seed_history.SeedHistoryError):
         history.remember("must not adopt this database")
     assert history.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", [
+    "discard-trigger", "extra-table", "extra-index", "version-marker", "application-marker",
+])
+def test_initialized_history_refuses_extra_schema_and_markers_without_mutation(
+    tmp_path: Path, kind: str,
+) -> None:
+    history = seed_history.SeedHistory("demo", tmp_path)
+    history.remember("previous")
+    with sqlite3.connect(history.path) as conn:
+        if kind == "discard-trigger":
+            conn.execute(
+                "CREATE TRIGGER discard_submitted AFTER INSERT ON seeds "
+                "BEGIN DELETE FROM seeds WHERE id = NEW.id; END"
+            )
+        elif kind == "extra-table":
+            conn.execute("CREATE TABLE foreign_data(value TEXT)")
+        elif kind == "extra-index":
+            conn.execute("CREATE INDEX foreign_index ON seeds(project)")
+        elif kind == "version-marker":
+            conn.execute("PRAGMA user_version = 19")
+        else:
+            conn.execute("PRAGMA application_id = 19")
+    conn.close()
+    before = history.path.read_bytes()
+    with pytest.raises(seed_history.SeedHistoryError):
+        history.entries()
+    assert history.path.read_bytes() == before
+    with pytest.raises(seed_history.SeedHistoryError):
+        history.remember("must remain recoverable")
+    assert history.path.read_bytes() == before

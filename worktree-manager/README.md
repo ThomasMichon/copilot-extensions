@@ -189,6 +189,8 @@ retains exact submitted text locally under `WORKTREE_MANAGER_ROOT` (or the
 normal `~/.worktree-manager` root). It is not synced, logged, or automatically
 executed. Consecutive identical submissions do not create duplicates; entries
 are not automatically expired. Treat this database as private prompt content.
+Initialized history accepts only the expected table with zero application/version
+markers; extra triggers, indexes, tables or foreign markers refuse prompt reads/writes.
 The history directory and database are owner-only on POSIX; Windows uses a
 protected owner/SYSTEM ACL, including inherited protection for SQLite journals.
 Existing history permissions are repaired before access; failure blocks submission.
