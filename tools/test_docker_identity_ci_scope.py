@@ -112,4 +112,7 @@ def test_workflow_runs_scoped_minimum_without_changing_guard_python() -> None:
     assert "steps.docker-identity-python.outputs.python-path" in smoke["run"]
     assert "libs/docker-resource-producer/tests" in smoke["run"]
     assert "--timeout=20" in smoke["run"]
-    assert "uv pip install --python" in smoke["run"] and "-m pip install" not in smoke["run"]
+    assert "python tools/seasoned_uv.py --uv uv -- --python" in smoke["run"]
+    assert "uv pip install" not in smoke["run"] and "-m pip install" not in smoke["run"]
+    manifest = (HERE.parent / "libs/docker-resource-producer/pyproject.toml").read_text()
+    assert '[tool.uv]\nexclude-newer = "7 days"' in manifest

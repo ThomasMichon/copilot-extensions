@@ -485,7 +485,7 @@ jobs:
         if: steps.docker-identity.outputs.run == 'true'
         timeout-minutes: 3
         run: |
-          uv pip install --python "${{ steps.docker-identity-python.outputs.python-path }}" --system pytest pytest-timeout
+          python tools/seasoned_uv.py --uv uv -- --python "${{ steps.docker-identity-python.outputs.python-path }}" --system pytest pytest-timeout
           "${{ steps.docker-identity-python.outputs.python-path }}" -m pytest -q --timeout=20 libs/docker-resource-producer/tests
       - id: zdd-singleton
         name: Detect zdd singleton changes

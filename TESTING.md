@@ -357,6 +357,8 @@ select it when that library, its selector, promotion tool/tests, or the CI workf
 on the declared minimum Python 3.10 with bounded per-test and step timeouts.
 The same selection runs the canonical package's focused promotion-compatibility
 regression on guard Python, before minimum-runtime setup.
+Minimum-runtime dependency provisioning uses the canonical seasoned UV adapter.
+The library also declares the native seven-day UV cutoff for direct consumers.
 Minimum-runtime setup uses its explicit interpreter output without replacing
 the guard job's Python 3.12 environment. This catches fractional-timestamp and
 optional TLS client-identity compatibility; it is not live Docker lifecycle
