@@ -177,6 +177,17 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Startup ownership and recoverable accepted identity
+
+- Followed the concurrent-startup path through the manager: late continuations
+  now refuse to overwrite stop/end or another client, and stale-client events
+  are ignored. A validated server session ID survives later stream-setup
+  failure, retaining explicit load recovery instead of creating another
+  conversation.
+- Manager regression selection: 13 passed, including stop during startup and
+  accepted-ID recovery through load. Refreshed only the current candidate's
+  source capture; all historical generations remain unchanged.
+
 ### 2026-10-16 — Asynchronous SDK diagnostic privacy
 
 - Fresh review confirmed synchronous malformed-result fixes and identified the

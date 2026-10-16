@@ -218,6 +218,9 @@ Historical tool output never establishes a live background-task inventory.
 New/load results are adopted by the client before session-stream events are
 admitted; prompt sends wait for the session stream to be ready. A handshake
 finishing after explicit teardown is refused and its acquired socket closed.
+Startup continuations cannot overwrite an operator stop/end. If the server
+returned a validated durable session ID but stream setup failed, the stopped
+ledger retains that ID for explicit `session/load`, never silent recreation.
 
 Affinity cookies stay in memory per target/identity and survive explicit resume
 within the same daemon; they are not persisted across daemon restart. `source:
