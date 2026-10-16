@@ -164,10 +164,10 @@ def test_native_fixture_early_failure_stops_broker_and_worker_before_receipt(tmp
 
 
 @pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
-@pytest.mark.parametrize("published", [False, True])
-def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path, published):
+@pytest.mark.parametrize(("published", "refuse_cleanup"), [(False, False), (True, False), (True, True)])
+def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path, published, refuse_cleanup):
     import agent_bridge
-    from agent_bridge.serving_candidate import ServingCandidate
+    from agent_bridge.serving_candidate import ServingCandidate, receipt_path
     from agent_bridge.service_process_state import _service_health_on_port
     from agent_bridge.serving_reconcile import ServingReconcileError
 
@@ -243,6 +243,20 @@ def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path, published
             )
             candidate.mark_published(endpoint)
             candidate.verify_health(health())
+        if refuse_cleanup:
+            def refuse_shutdown():
+                raise RuntimeError("fixture predecessor unavailable")
+
+            candidate._before_shutdown = refuse_shutdown
+            with pytest.raises(RuntimeError, match="fixture predecessor unavailable"):
+                candidate.terminate()
+            restored = health()
+            candidate.verify_health(restored)
+            assert restored["draining"] is False, "real HTTP compensation left admission closed"
+            assert candidate.poll() is None
+            assert receipt_path(root, candidate.launch_id).exists()
+            assert routing.read_table(root)["active"] == endpoint.to_dict()
+            candidate._before_shutdown = None
         candidate.terminate()
         assert candidate.process.wait(2), "owned actual worker did not gracefully exit"
         launcher.wait(timeout=2)

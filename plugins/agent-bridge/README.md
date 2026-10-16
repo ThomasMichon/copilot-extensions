@@ -66,6 +66,12 @@ non-forcingly drain a successor that may have accepted work before requesting
 its shutdown, even if another owner has since replaced its route. A busy or
 unverified successor is retained with reconciliation evidence; never-published
 passive cleanup does not acquire a drain gate.
+If published cleanup fails after closing an initially open admission gate,
+it reopens only that gate, after fresh native-worker and exact active-publication
+checks. Both the undrain acknowledgement and fresh health must confirm admission
+is open. A pre-existing or unknown drain is not reopened, and changed ownership
+refuses compensation. The original cleanup failure and reconciliation evidence
+remain even when admission is successfully restored.
 After draining a published successor, rollback revalidates the captured
 predecessor's native identity and health before successor shutdown, and probes
 again before restoring routing. Predecessor shutdown also requires its own

@@ -589,6 +589,7 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
     calls = []
     old_shutdowns = []
     successor_drains = []
+    successor_undrains = []
 
     def request(client, method, path, body=None, **_kwargs):
         calls.append((method, path, body))
@@ -622,6 +623,10 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
                 state["draining"] = False
             return {"drained": True, "clean": True, "forced": False, "busy_sessions": []}
         if path == "/api/v1/undrain":
+            if urlparse(client._base).port != row["port"]:
+                successor_undrains.append(path)
+                state["successor_draining"] = False
+                return {"draining": False}
             state["draining"] = False
             return {"draining": False}
         if path == "/api/v1/shutdown":
@@ -767,13 +772,18 @@ def test_serving_reconcile_actual_cutover_requires_native_retirement(
         )
         assert (root / "cutover.json").exists()
         assert state["successor_stopped"] is False
-        assert not any(path in ("/api/v1/undrain", "/api/v1/shutdown") for _, path, _ in calls)
+        assert not any(path == "/api/v1/shutdown" for _, path, _ in calls)
+        assert len(successor_undrains) == (0 if scenario.endswith("owner-changed") else 1)
+        assert state["successor_draining"] is scenario.endswith("owner-changed")
         assert list(root.glob("serving-launch-*.json")), "busy worker lost recovery identity"
     if scenario == "predecessor-exits-during-successor-drain":
         assert result["rolled_back"] is False
         assert routing.read_table(root)["active"]["pid"] == 2222
         assert state["successor_stopped"] is False
-        assert not any(path in ("/api/v1/undrain", "/api/v1/shutdown") for _, path, _ in calls)
+        assert not any(path == "/api/v1/shutdown" for _, path, _ in calls)
+        assert len(successor_undrains) == 1
+        assert state["successor_draining"] is False, "only surviving daemon rejects admission"
+        assert state["draining"] is True, "compensation reopened the exited predecessor"
         assert (root / "cutover.json").exists()
     if scenario == "predecessor-exits-after-successor-stop":
         assert result["rolled_back"] is False

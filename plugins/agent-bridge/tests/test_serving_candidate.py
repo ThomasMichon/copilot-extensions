@@ -155,13 +155,91 @@ def test_published_candidate_retains_worker_if_drain_gate_reopens(candidate):
     from zdd.routing import Endpoint
 
     value, body, _, client = candidate
-    value.mark_published(Endpoint("127.0.0.1", 9012, 2222, "1.2.3", 8, "123456"))
+    endpoint = Endpoint("127.0.0.1", 9012, 2222, "1.2.3", 8, "123456")
+    (value.root / "active.json").write_text(json.dumps({"active": endpoint.to_dict()}))
+    body["slot"].update(role="active", active=endpoint.to_dict())
+    value.mark_published(endpoint)
     client.drain.return_value = {"drained": True, "clean": True, "forced": False}
     body["draining"] = False
     with pytest.raises(ServingReconcileError, match="drain gate changed"):
         value.terminate()
     client.shutdown.assert_not_called()
+    client.undrain.assert_not_called()
     value.close(completed=False)
+
+
+@pytest.mark.parametrize("case", [
+    "callback", "busy", "manual-drain", "unknown-drain", "owner-changed",
+    "generation-changed", "native-exited", "native-birth-changed", "already-open",
+    "undrain-refused", "undrain-malformed", "undrain-health-closed", "undrain-owner-changed",
+])
+def test_failed_cleanup_only_reopens_its_own_active_admission(candidate, monkeypatch, case):
+    from zdd.routing import Endpoint
+
+    value, body, reference, client = candidate
+    endpoint = Endpoint("127.0.0.1", 9012, 2222, "1.2.3", 8, "123456")
+    active = endpoint.to_dict()
+    (value.root / "active.json").write_text(json.dumps({"active": active}))
+    body["slot"].update(role="active", active=active.copy())
+    body["draining"] = True if case == "manual-drain" else None if case == "unknown-drain" else False
+    value.mark_published(endpoint)
+    failure = RuntimeError("predecessor no longer available")
+
+    def drain(**_kwargs):
+        body["draining"] = True
+        if case == "busy":
+            return {"drained": False, "clean": False, "forced": False}
+        return {"drained": True, "clean": True, "forced": False}
+
+    def refuse_shutdown():
+        if case in ("owner-changed", "generation-changed"):
+            changed = {**active, "generation": 9}
+            if case == "owner-changed":
+                changed.update(pid=3333, process_start_time="999999")
+            (value.root / "active.json").write_text(json.dumps({"active": changed}))
+            body["slot"].update(active=changed, role="passive" if case == "owner-changed" else "active")
+        elif case == "native-exited":
+            reference.wait.return_value = True
+        elif case == "native-birth-changed":
+            monkeypatch.setattr(diagnostics, "process_start_time", lambda _: "654321")
+        elif case == "already-open":
+            body["draining"] = False
+        raise failure
+
+    def undrain():
+        if case == "undrain-refused":
+            return {"draining": True}
+        if case == "undrain-malformed":
+            return None
+        body["draining"] = case == "undrain-health-closed"
+        if case == "undrain-owner-changed":
+            changed = {**active, "generation": 9}
+            (value.root / "active.json").write_text(json.dumps({"active": changed}))
+            body["slot"]["active"] = changed
+        return {"draining": False}
+
+    value._before_shutdown = refuse_shutdown
+    client.drain.side_effect = drain
+    client.undrain.side_effect = undrain
+    with pytest.raises((ServingReconcileError, RuntimeError)) as caught:
+        value.terminate()
+    compensated = case in (
+        "callback", "busy", "undrain-refused", "undrain-malformed",
+        "undrain-health-closed", "undrain-owner-changed",
+    )
+    assert client.undrain.call_count == int(compensated)
+    if case in ("callback", "manual-drain", "unknown-drain", "already-open"):
+        assert caught.value is failure, "successful compensation hid the original failure"
+    elif case != "busy":
+        assert "admission compensation failed" in str(caught.value)
+        assert caught.value.__cause__ is failure
+    if case in ("callback", "busy", "already-open"):
+        assert body["draining"] is False
+    if case in ("manual-drain", "unknown-drain"):
+        assert body["draining"] is True
+    client.shutdown.assert_not_called()
+    value.launcher.terminate.assert_not_called()
+    assert receipt_path(value.root, value.launch_id).exists()
 
 
 def test_worker_receipt_records_actual_self_and_is_not_overwritten(tmp_path, monkeypatch):

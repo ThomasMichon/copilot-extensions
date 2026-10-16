@@ -48,6 +48,7 @@ class ServingCandidate:
         self.process: process_exit.ProcessExitReference | None = None
         self._health, self._make_client = health, make_client
         self._published = False
+        self._published_endpoint: routing.Endpoint | None = None
         self._drain_timeout = drain_timeout
         self._before_shutdown = before_shutdown
 
@@ -105,6 +106,7 @@ class ServingCandidate:
 
     def mark_published(self, endpoint: routing.Endpoint) -> None:
         self._published = True
+        self._published_endpoint = endpoint
         if (
             endpoint.pid != self.pid or endpoint.port != self.port
             or endpoint.process_start_time != self.process_start_time
@@ -114,11 +116,16 @@ class ServingCandidate:
     def terminate(self) -> None:
         if self.poll() == 0:
             return
-        self.verify_health(self._health(), ready=False)
+        initial_health = self._health()
+        self.verify_health(initial_health, ready=False)
         # No broker/tree signal: graceful control is admitted only after the
         # endpoint proves this launch's retained native worker identity.
         client = self._make_client()
-        if self._published:
+        if not self._published:
+            client.shutdown()
+            return
+        opened_gate = isinstance(initial_health, dict) and initial_health.get("draining") is False
+        try:
             drained = client.drain(timeout=self._drain_timeout, poll=1.0, force=False)
             if (
                 not isinstance(drained, dict) or drained.get("drained") is not True
@@ -133,7 +140,44 @@ class ServingCandidate:
                 raise ServingReconcileError("published successor drain gate changed; worker retained")
             if self._before_shutdown is not None:
                 self._before_shutdown()
-        client.shutdown()
+            client.shutdown()
+        except Exception as failure:
+            if opened_gate:
+                try:
+                    self._restore_admission(client)
+                except Exception as compensation:
+                    raise ServingReconcileError(
+                        f"successor cleanup failed ({type(failure).__name__}); "
+                        f"admission compensation failed ({type(compensation).__name__}); "
+                        "worker and reconciliation evidence retained"
+                    ) from failure
+            raise
+
+    def _verify_active_publication(self, body: dict | None) -> dict:
+        self.verify_health(body, ready=False)
+        active = (routing.read_table(self.root, strict=True) or {}).get("active")
+        if (
+            self._published_endpoint is None
+            or active != self._published_endpoint.to_dict()
+            or not isinstance(body, dict)
+            or body.get("slot", {}).get("role") != "active"
+            or body["slot"].get("active") != active
+        ):
+            raise ServingReconcileError("successor no longer owns the exact active publication")
+        return body
+
+    def _restore_admission(self, client: BridgeClient) -> None:
+        health = self._verify_active_publication(self._health())
+        if health.get("draining") is False:
+            return
+        if health.get("draining") is not True:
+            raise ServingReconcileError("successor admission state is unknown")
+        response = client.undrain()
+        if not isinstance(response, dict) or response.get("draining") is not False:
+            raise ServingReconcileError("successor admission compensation was not acknowledged")
+        health = self._verify_active_publication(self._health())
+        if health.get("draining") is not False:
+            raise ServingReconcileError("successor admission remained closed after compensation")
 
     def close(self, *, completed: bool) -> None:
         if self.process is not None:
