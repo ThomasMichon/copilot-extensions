@@ -867,11 +867,7 @@ class RemoteOperationService:
             or shell in {"pwsh", "powershell", "powershell.exe", "cmd", "cmd.exe"}
             else "linux"
         )
-        source = SSHProfileSource(
-            host_alias=environment.alias,
-            user=environment.user,
-            port=environment.port,
-        )
+        source = SSHProfileSource(host_alias=environment.alias)
         try:
             return await acquire_remote_carrier(
                 f"carrier:{environment.alias}",

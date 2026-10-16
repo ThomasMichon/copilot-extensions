@@ -498,8 +498,7 @@ async def _run_ssh_ex(
     host: str | None, user: str | None, project: str,
     args: list[str] | None = None, *, timeout: float | None = None,
 ) -> tuple[str | None, str]:
-    """Like :func:`_run_ssh`, also returning stderr (empty on success)."""
-    ssh_target = f"{user}@{host}" if user else host
+    """Return stdout/stderr without applying legacy user metadata to the SSH profile."""
     sub = " ".join(shlex.quote(a) for a in (args if args is not None else ["list", "--json"]))
     remote_cmd = f"{shlex.quote(project)} {sub}"
 
@@ -508,7 +507,7 @@ async def _run_ssh_ex(
         "-o", "ConnectTimeout=10",
         "-o", "BatchMode=yes",
         "-T",
-        ssh_target,
+        host,
         remote_cmd,
     ]
     return await _exec_ex(cmd, timeout=timeout)

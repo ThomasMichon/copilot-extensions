@@ -56,6 +56,21 @@ context leaves that session intact; a known non-machine restart skips irrelevant
 owner preference checks. The target-bound prepared result is reused during
 startup, with no roster lookup or sender revalidation after termination.
 
+### SSH profile authority
+
+For named-machine ACP connections, remote carriers, worktree discovery and
+session reads, Bridge selects the declared SSH alias and leaves connection
+identity to its existing OpenSSH profile. `HostName`, `User`, `Port`,
+`IdentityFile`, proxy configuration and host-key settings come from that profile.
+Topology `ssh.environments[].user` / `port` and legacy agent `ssh_user` metadata
+do not override it, including an explicit topology port or the default port 22.
+Change the SSH profile itself when its connection settings need to change.
+
+Bridge's noninteractive/protocol options and explicit application-authentication
+forwarding remain in effect. Provider-returned connection configurations retain
+their separate provider contract; this rule does not rewrite those configurations
+or generate, edit or repair SSH profiles.
+
 ## Quick Setup
 
 ### Auto-adopt from a repo
@@ -427,7 +442,7 @@ invalidate either profile.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `host` | No | Machine key from `machines.yaml`. **Omit for local agents.** |
-| `ssh_user` | No | SSH username override (defaults to the SSH env's `user`) |
+| `ssh_user` | No | Legacy user metadata; profile-backed connections use the SSH profile's user |
 | `ssh_environment` | No | Which SSH environment to use (e.g., `wsl`, `windows`, `linux`) |
 | `cwd` | No | Working directory on the remote machine |
 | `copilot_path` | No | Path to the `copilot` binary (default: `copilot` on PATH) |

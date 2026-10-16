@@ -968,7 +968,7 @@ async def spawn_ssh(
         target.env = merged
 
     manager = get_default_manager()
-    source = SSHProfileSource(host_alias=target.host, user=target.user)
+    source = SSHProfileSource(host_alias=target.host)
 
     # Stage 3: establish the SSH connection -- patient (retry to deadline) when
     # connect_timeout is set, else a single fast attempt.

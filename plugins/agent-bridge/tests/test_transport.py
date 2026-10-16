@@ -264,7 +264,7 @@ class TestSpawnSsh:
         source = call_args[0][1]
         config = source.get_ssh_config()
         assert config.host_alias == "server-a"
-        assert config.user == "deploy"
+        assert config.user is None
 
         # Verify open_stdio_channel was called
         mock_manager.open_stdio_channel.assert_called_once()
