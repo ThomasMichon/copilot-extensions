@@ -607,6 +607,30 @@ def test_native_watchdog_supports_windows_powershell(tmp_path: Path, monkeypatch
     assert not list(tmp_path.glob("phase.json.*.tmp"))
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows reader sharing modes")
+def test_phase_receipt_replacement_survives_a_held_watchdog_reader(tmp_path: Path) -> None:
+    phase = tmp_path / "phase.json"
+    env = _env(tmp_path)
+    env["COPILOT_PLUGIN_INSTALL_PHASE_FILE"] = phase.as_posix()
+    before = time.time()
+    result = _native_watchdog(tmp_path, "ps1", {
+        "ps1": (
+            "Enter-InstallPhase -Name cutover -BudgetSec 10\n"
+            "$original = [IO.File]::ReadAllText($env:COPILOT_PLUGIN_INSTALL_PHASE_FILE)\n"
+            "$stream = Open-InstallPhaseReceipt -Path $env:COPILOT_PLUGIN_INSTALL_PHASE_FILE\n"
+            "try {\n"
+            "  Enter-InstallPhase -Name cutover -BudgetSec 20\n"
+            "  $reader = [IO.StreamReader]::new($stream)\n"
+            "  try { if ($reader.ReadToEnd() -cne $original) { throw 'Reader lost its snapshot' } }\n"
+            "  finally { $reader.Dispose() }\n"
+            "} finally { $stream.Dispose() }\n"
+        ),
+    }, [], env)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(phase.read_text(encoding="utf-8"))["extend_until"] >= before + 19
+    assert not list(tmp_path.glob("phase.json.*.tmp"))
+
+
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 def test_unavailable_home_refuses_in_place_install(tmp_path: Path, extension: str) -> None:
     if (extension == "ps1" and not PWSH) or (extension == "sh" and not BASH):
