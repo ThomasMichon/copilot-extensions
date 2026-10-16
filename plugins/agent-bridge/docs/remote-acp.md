@@ -193,10 +193,14 @@ is permitted after an explicit pre-admission 401. Timeouts, disconnects, server
 errors and ambiguous acceptance are **not** retried. Redirects are disabled
 before credentials can reach a different destination. Remote RPC error text is
 sanitized, not incorporated into bridge errors/logs.
+Malformed successful SDK results are likewise replaced by a sanitized typed
+failure before caller errors, event logs or turn-failure persistence.
 
 Defaults: 1 MiB JSON/SSE/WS frames, 64 queued messages/callbacks/sessions,
 30-second connect/send/close deadlines, a 900-second RPC result/approval deadline,
-and a 120-second stream idle deadline.
+and a 120-second SSE idle deadline. WebSocket liveness uses native ping/pong
+with a 20-second ping interval and the ordinary timeout as its pong deadline;
+quiet application traffic alone does not disconnect a healthy WebSocket.
 `max_frame_bytes`, `max_queue_messages`, `timeout_seconds`, `idle_seconds`,
 `rpc_timeout_seconds` expose
 bounded validated adjustments. Overflow or stream loss invalidates the live
@@ -207,6 +211,9 @@ Failure also starts idempotent connection cleanup automatically: sibling
 consumers are cancelled and wire resources close without a later operator stop.
 Consumer-drain and wire-close phases each use the configured ordinary timeout.
 Historical tool output never establishes a live background-task inventory.
+New/load results are adopted by the client before session-stream events are
+admitted; prompt sends wait for the session stream to be ready. A handshake
+finishing after explicit teardown is refused and its acquired socket closed.
 
 Affinity cookies stay in memory per target/identity and survive explicit resume
 within the same daemon; they are not persisted across daemon restart. `source:

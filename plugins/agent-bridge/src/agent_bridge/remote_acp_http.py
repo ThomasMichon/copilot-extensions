@@ -195,8 +195,8 @@ class HttpAcpTransport(RemoteTransport):
                     raise RemoteTransportError("Remote SSE frame limit exceeded")
         except asyncio.CancelledError:
             raise
-        except Exception:
-            self.fail("Remote SSE stream lost; outcome unknown")
+        except Exception as exc:
+            self.fail(f"Remote SSE stream lost ({type(exc).__name__}); outcome unknown")
         finally:
             ready.set()
             if response is not None:

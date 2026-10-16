@@ -177,6 +177,29 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Sanitized SDK results and adopted session streams
+
+- Current review identified malformed successful SDK results leaking through
+  validation exceptions, WS application-idle incorrectly replacing ping/pong
+  liveness, late handshakes escaping teardown and immediate session-stream
+  traffic preceding new/load-result adoption. Corrected all four without
+  changing wire identities or the qualified profile.
+- Public SDK calls remain the schema/protocol owner; remote exceptions are
+  sanitized before caller errors, logging or turn-failure persistence.
+  Immediate HTTP2/WSS updates wait until the client adopts the lifecycle
+  result; HTTP prompt sends wait for stream readiness.
+- Quiet WSS is checked with actual ping/pong responses beyond the configured
+  application-idle interval. A handshake completing after close releases its
+  acquired socket. Session cardinality is bounded on both transports.
+- The focused remote transport/ledger/independent peer/legacy ACP selection
+  passes 120 tests, including malformed-result markers absent from real
+  service events, logs and persisted turn failures on both transports.
+- A prior-head Linux CI roundtrip lost an HTTP connection after a
+  request-scoped form; the focused lane has not reproduced it. SSE failures
+  now expose only the exception class for diagnosis, never remote contents.
+  Required current-head CI remains a completion gate; no flake waiver or
+  bypass is claimed.
+
 ### 2026-10-16 — Failed-connection cleanup and historical background inventory
 
 - A delayed prior-head review found historical background-task output entering

@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import httpx
-from acp.schema import PermissionOption, ToolCallUpdate
+from acp.schema import PermissionOption, ToolCallUpdate, PromptResponse
 from credential_relay.http_auth import HttpAuthContext, SourceHttpAuth
 
 from agent_bridge.acp_client import AcpClient
@@ -419,3 +420,62 @@ async def test_sse_line_endings_and_chunk_boundaries(ending, split_bytes):
         assert await asyncio.wait_for(wire.receive(), 3) == message
     finally:
         await wire.close()
+
+
+@pytest.mark.asyncio
+async def test_ws_handshake_finishing_after_close_releases_acquired_socket(monkeypatch):
+    from agent_bridge import remote_acp_ws
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    socket = SimpleNamespace(close=AsyncMock())
+
+    async def handshake(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return socket
+
+    spec = RemoteAcpTarget(
+        endpoint="https://localhost/acp", transport="websocket",
+        auth={"source": "none", "identity": "synthetic"}, allow_loopback_test=True,
+    )
+    monkeypatch.setattr(remote_acp_ws, "_NoRedirectConnect", handshake)
+    wire = WsAcpTransport(spec)
+    opening = asyncio.create_task(wire.open())
+    await entered.wait()
+    await wire.close()
+    release.set()
+    with pytest.raises(RemoteTransportError, match="handshake failed"):
+        await opening
+    socket.close.assert_awaited_once()
+    assert wire.closed and not wire._tasks
+
+
+@pytest.mark.asyncio
+async def test_session_events_wait_for_owner_adoption_after_lifecycle_result():
+    wire = RemoteTransport(target())
+    wire.outgoing_session({"jsonrpc": "2.0", "id": 1, "method": "session/new", "params": {}})
+    result = {"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "new-session"}}
+    await wire.incoming(result)
+    update = {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "new-session"}}
+    arriving = asyncio.create_task(wire.incoming(update, "new-session"))
+    await asyncio.sleep(0)
+    assert not arriving.done()
+    assert await wire.receive() == result
+    await wire.adopt_session("new-session")
+    await arriving
+    assert await wire.receive() == update
+    await wire.close()
+
+
+@pytest.mark.asyncio
+async def test_re_raised_sdk_validation_error_contains_no_untrusted_result_value():
+    client, _ = live_client()
+
+    async def invalid_result():
+        return PromptResponse.model_validate({"stopReason": "SYNTHETIC-SENSITIVE-MARKER"})
+
+    with pytest.raises(RemoteTransportError) as failure:
+        await client._remote_sdk_rpc(invalid_result)
+    assert "SYNTHETIC-SENSITIVE-MARKER" not in str(failure.value)
+    assert "SYNTHETIC-SENSITIVE-MARKER" not in repr(failure.value)
+    await client._remote_transport.close()

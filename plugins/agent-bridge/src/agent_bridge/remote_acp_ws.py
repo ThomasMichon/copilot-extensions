@@ -41,6 +41,8 @@ class WsAcpTransport(RemoteTransport):
         self._initialized = False
 
     async def open(self) -> WsAcpTransport:
+        if self.closed or self._ended.is_set():
+            raise RemoteTransportError("Remote ACP connection closed")
         url = self.target.endpoint
         parsed = urlsplit(url)
         uri = parsed._replace(scheme="wss" if parsed.scheme == "https" else "ws").geturl()
@@ -64,6 +66,8 @@ class WsAcpTransport(RemoteTransport):
                     compression=None, proxy=None, **options,
                     logger=logging.Logger("agent-bridge.remote-acp.wire", logging.WARNING),
                 )
+                if self.closed or self._ended.is_set():
+                    raise RemoteTransportError("Remote WS handshake completed after close")
                 connection_id = self._ws.response.headers.get("Acp-Connection-Id")
                 if not connection_id or len(connection_id) > 1024:
                     raise RemoteTransportError("Missing remote connection identity")
@@ -108,7 +112,7 @@ class WsAcpTransport(RemoteTransport):
     async def _consume(self) -> None:
         try:
             while True:
-                frame = await asyncio.wait_for(self._ws.recv(), self.target.idle_seconds)
+                frame = await self._ws.recv()
                 if isinstance(frame, bytes):
                     continue
                 await self.incoming(self.decode(frame))

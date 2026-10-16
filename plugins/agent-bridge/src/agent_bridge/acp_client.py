@@ -586,6 +586,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
         if timing_callback is not None:
             timing_callback("session_new_rpc", time.monotonic() - started)
         self._acp_session_id = result.session_id
+        await self._adopt_remote_session()
         # Set the session's model/effort now that it exists (dotfiles#790):
         # copilot ignores the ``--model`` launch flag in ``--acp`` mode, so the
         # model is chosen here against the advertised select options.
@@ -664,6 +665,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
             self._suppress_replay = True
             self._subagent_attr.reset_text_runs()
         self._acp_session_id = session_id
+        await self._adopt_remote_session()
         # Re-assert the model/effort on resume: a reloaded session may report
         # the agent's default in its config options (dotfiles#790).
         started = time.monotonic()
@@ -716,7 +718,7 @@ class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
         host mode the event never fires, so behavior is unchanged.
         """
         prompt_fut = asyncio.ensure_future(
-            self._connection.prompt(
+            self._prompt_rpc(
                 session_id=self._acp_session_id,
                 prompt=[text_block(text)],
             )

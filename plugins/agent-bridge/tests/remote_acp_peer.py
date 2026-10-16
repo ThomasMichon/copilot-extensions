@@ -50,7 +50,10 @@ def affinity_cookie(headers):
 
 
 class Connection:
-    def __init__(self, ws_send=None, *, supported=True, creation_question=False, affinity=None):
+    def __init__(
+        self, ws_send=None, *, supported=True, creation_question=False,
+        affinity=None, immediate=False,
+    ):
         self.id = uuid.uuid4().hex
         self.affinity = affinity or uuid.uuid4().hex
         self.queues = {None: asyncio.Queue(32)}
@@ -59,6 +62,7 @@ class Connection:
         self.ws_send = ws_send
         self.supported = supported
         self.creation_question = creation_question
+        self.immediate = immediate
 
     async def emit(self, message, sid=None):
         if self.ws_send is not None:
@@ -169,6 +173,8 @@ class Connection:
                     "jsonrpc": "2.0", "id": "rpc/opaque", "method": name,
                     "params": callback,
                 }, sid)
+            elif text == "malformed-result":
+                await self.emit(rpc(message, {"stopReason": "SYNTHETIC-SENSITIVE-MARKER"}), sid)
             elif text == "wait":
                 self.pending["cancel"] = message, sid
             elif text == "drop-session-only":
@@ -232,6 +238,14 @@ class Connection:
         self.queues[sid] = asyncio.Queue(32)
         evidence["created_sessions"] += 1
         await self.emit(rpc(request, {"sessionId": sid}))
+        if self.immediate:
+            await self.emit({
+                "jsonrpc": "2.0", "method": "session/update",
+                "params": {"sessionId": sid, "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "immediately after new"},
+                }},
+            }, sid)
 
     async def finish(self, request, sid):
         update = {
@@ -288,6 +302,7 @@ async def app(scope, receive, send):
             send, supported=scope["path"] != "/unsupported",
             creation_question=scope["path"] == "/creation-question",
             affinity=affinity_cookie(headers),
+            immediate=scope["path"] == "/immediate",
         )
         if affinity_cookie(headers):
             evidence["ws_cookies"] += 1
@@ -323,6 +338,7 @@ async def app(scope, receive, send):
                 conn = Connection(
                     creation_question=scope["path"] == "/creation-question",
                     affinity=affinity_cookie(headers),
+                    immediate=scope["path"] == "/immediate",
                 )
                 connections[conn.id] = conn
                 await respond(send, 200, json.dumps(initialize(

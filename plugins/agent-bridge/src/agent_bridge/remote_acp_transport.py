@@ -48,6 +48,7 @@ class RemoteTransport:
         self._watching = False
         self._close_task: asyncio.Task | None = None
         self.sessions: set[str] = set()
+        self._adopting: dict[str, asyncio.Event] = {}
 
     async def send(self, message: dict[str, Any]) -> None:
         raise NotImplementedError("Select an explicit HTTP or WebSocket transport")
@@ -133,6 +134,8 @@ class RemoteTransport:
             sid = self.request_session(request_id)
         if stream_session is not None and sid is not None and sid != stream_session:
             raise RemoteTransportError("Remote ACP session routing mismatch")
+        if sid in self._adopting and "method" in message:
+            await asyncio.wait_for(self._adopting[sid].wait(), self.target.timeout_seconds)
         if "method" in message and "id" in message:
             key = rpc_key(message["id"])
             if not request_scoped and (not isinstance(sid, str) or sid not in self.sessions):
@@ -159,8 +162,10 @@ class RemoteTransport:
                 sid = message["result"].get("sessionId") or requested_sid
                 if not isinstance(sid, str) or not sid:
                     raise RemoteTransportError("Missing remote session identity")
+                if sid not in self.sessions and len(self.sessions) >= self.target.max_queue_messages:
+                    raise RemoteTransportError("Remote ACP session limit exceeded")
                 self.sessions.add(sid)
-                await self.session_ready(sid)
+                self._adopting[sid] = asyncio.Event()
             elif stream_session is not None and requested_sid != stream_session:
                 raise RemoteTransportError("Remote response session mismatch")
         elif sid is not None and sid not in self.sessions:
@@ -174,6 +179,12 @@ class RemoteTransport:
 
     async def session_ready(self, session_id: str) -> None:
         pass
+
+    async def adopt_session(self, session_id: str) -> None:
+        event = self._adopting.pop(session_id, None)
+        if event is not None:
+            event.set()
+        await self.session_ready(session_id)
 
     def request_session(self, request_id: object) -> str | None:
         if type(request_id) not in (str, int):

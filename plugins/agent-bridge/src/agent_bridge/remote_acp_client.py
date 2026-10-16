@@ -30,8 +30,27 @@ class RemoteAcpClientMixin:
         self, method: Callable[..., Awaitable[Any]], **kwargs: Any,
     ) -> Any:
         if self._remote_transport is not None:
-            return await method(**kwargs)
+            return await self._remote_sdk_rpc(method, **kwargs)
         return await self._subagent_attr.call_with_meta(method, **kwargs)
+
+    async def _remote_sdk_rpc(
+        self, method: Callable[..., Awaitable[Any]], **kwargs: Any,
+    ) -> Any:
+        try:
+            return await method(**kwargs)
+        except Exception as exc:
+            reason = f"Remote ACP SDK request failed ({type(exc).__name__}); outcome unknown"
+            self._remote_transport.fail(reason)
+            raise RemoteTransportError(reason) from None
+
+    async def _adopt_remote_session(self) -> None:
+        if self._remote_transport is not None:
+            await self._remote_transport.adopt_session(self._acp_session_id)
+
+    async def _prompt_rpc(self, **kwargs: Any) -> Any:
+        if self._remote_transport is not None:
+            return await self._remote_sdk_rpc(self._connection.prompt, **kwargs)
+        return await self._connection.prompt(**kwargs)
 
     async def start_remote(
         self, target: RemoteAcpTarget, *, auth: HttpAuthInjector | None = None,
@@ -70,7 +89,7 @@ class RemoteAcpClientMixin:
                 _BridgeClientImpl(self), remote, use_unstable_protocol=True,
             )
             result = await asyncio.wait_for(
-                self._connection.initialize(
+                self._remote_sdk_rpc(self._connection.initialize,
                     protocol_version=REMOTE_ACP_VERSION,
                     client_capabilities=client_capabilities(capability_metadata()),
                     client_info=Implementation(name="agent-bridge", version=__version__),

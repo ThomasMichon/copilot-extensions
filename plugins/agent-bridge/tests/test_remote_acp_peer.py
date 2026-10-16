@@ -34,6 +34,26 @@ from agent_bridge.events import EventLog
 from agent_bridge import telemetry
 
 
+def authenticated_wire(spec, context, cookies=None):
+    wire = (
+        HttpAcpTransport(spec, client=httpx.AsyncClient(
+            http2=True, verify=context, trust_env=False, follow_redirects=False,
+            cookies=cookies,
+        )) if spec.transport == "streamable-http"
+        else WsAcpTransport(spec, ssl=context, cookies=cookies)
+    )
+
+    class Source:
+        def supports(self, action, fields):
+            return action == "get"
+
+        async def resolve(self, action, fields, *, timeout):
+            return "\n".join(("username=synthetic", "password=synthetic-credential", ""))
+
+    wire.auth = SourceHttpAuth(Source(), wire.context, spec.endpoint)
+    return wire
+
+
 @pytest.fixture
 def peer(tmp_path):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -86,13 +106,14 @@ def peer(tmp_path):
         proc.stderr.close()
 
 
-async def wait_event(events, kind):
+async def wait_event(events, kind, wire=None):
     for _ in range(100):
         match = [data for event, data in events if event == kind]
         if match:
             return match[-1]
         await asyncio.sleep(0.02)
-    pytest.fail(f"No expected {kind} event")
+    failure = getattr(wire, "_failure", None)
+    pytest.fail(f"No expected {kind} event; transport failure: {failure}")
 
 
 @pytest.mark.asyncio
@@ -138,7 +159,7 @@ async def test_actual_remote_lifecycle_permission_form_cancel_and_survival(peer,
         sid = await asyncio.wait_for(client.new_session(cwd="/workspace"), 5)
         assert client.pid is None
         prompt = asyncio.create_task(client.send_prompt("permission"))
-        event = await wait_event(events, "permission_request")
+        event = await wait_event(events, "permission_request", wire)
         assert event["decision_id"] == "decision/opaque"
         selected = "allow/opaque" if mode == "streamable-http" else "reject/opaque"
         assert client.resolve_permission(event["request_id"], selected)
@@ -147,14 +168,14 @@ async def test_actual_remote_lifecycle_permission_form_cancel_and_survival(peer,
         assert not client.resolve_permission(event["request_id"], "allow/opaque")
 
         prompt = asyncio.create_task(client.send_prompt("form"))
-        event = await wait_event(events, "ask_user_request")
+        event = await wait_event(events, "ask_user_request", wire)
         assert client.resolve_elicitation(
             "tool/opaque", {"choice": "explicit"}, request_id=event["request_id"],
         )
         await asyncio.wait_for(prompt, 5)
         events.clear()
         prompt = asyncio.create_task(client.send_prompt("form-request"))
-        event = await wait_event(events, "ask_user_request")
+        event = await wait_event(events, "ask_user_request", wire)
         assert type(event["native_request_id"]) is int
         assert event["tool_call_id"] == ""
         assert client.resolve_elicitation(
@@ -163,7 +184,7 @@ async def test_actual_remote_lifecycle_permission_form_cancel_and_survival(peer,
         await asyncio.wait_for(prompt, 5)
         events.clear()
         prompt = asyncio.create_task(client.send_prompt("permission"))
-        event = await wait_event(events, "permission_request")
+        event = await wait_event(events, "permission_request", wire)
         await client.cancel_prompt()
         assert (await asyncio.wait_for(prompt, 5))["stop_reason"] == "cancelled"
         assert not client.resolve_permission(event["request_id"], "allow/opaque")
@@ -491,5 +512,80 @@ async def test_failure_closes_wire_and_sibling_resources_without_stop(peer, mode
         else:
             assert wire._ws.close_code is not None
         assert proc.poll() is None
+    finally:
+        await client.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_quiet_ws_keeps_ping_pong_liveness_beyond_application_idle(peer):
+    url, context, proc = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/acp", transport="websocket", allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"}, idle_seconds=1,
+    )
+    wire = authenticated_wire(spec, context)
+    client = AcpClient()
+    try:
+        await client.start_remote(spec, transport=wire)
+        await client.new_session(cwd="/workspace")
+        await asyncio.wait_for(await wire._ws.ping(), 2)
+        await asyncio.sleep(1.5)
+        await asyncio.wait_for(await wire._ws.ping(), 2)
+        assert client.is_running
+        assert await asyncio.wait_for(client.send_prompt("fresh"), 5)
+    finally:
+        await client.shutdown()
+    assert proc.poll() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+async def test_malformed_sdk_results_never_reach_logs_events_or_failure_records(
+    peer, tmp_db, monkeypatch, caplog, mode,
+):
+    url, context, _ = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/acp", transport=mode, allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"},
+    )
+    original = AcpClient.start_remote
+
+    async def start(client, target, *, cookies=None):
+        await original(client, target, transport=authenticated_wire(target, context, cookies))
+
+    monkeypatch.setattr(AcpClient, "start_remote", start)
+    manager = session_manager_from_config(tmp_db, ServiceConfig(remote_acp={"peer": spec}))
+    session = await connect_remote_session(manager, "peer")
+    try:
+        await manager.submit_prompt(session.session_id, "malformed-result")
+        await asyncio.wait_for(session._prompt_task, 5)
+        rows = manager.db.execute_read(
+            "SELECT stop_reason FROM turns WHERE session_id=?", (session.session_id,),
+        )
+        evidence = str([dict(row) for row in rows]) + str(session.event_log.get_events()) + caplog.text
+        assert "SYNTHETIC-SENSITIVE-MARKER" not in evidence
+        assert "Remote ACP SDK request failed" in evidence
+    finally:
+        await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+async def test_immediate_session_stream_update_waits_for_owner_adoption(peer, mode):
+    url, context, _ = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/immediate", transport=mode, allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"},
+    )
+    events = []
+    client = AcpClient(on_event=lambda kind, data: events.append((kind, data)))
+    wire = authenticated_wire(spec, context)
+    try:
+        await client.start_remote(spec, transport=wire)
+        sid = await client.new_session(cwd="/workspace")
+        event = await wait_event(events, "agent_message")
+        assert event["text"] == "immediately after new"
+        assert client.acp_session_id == sid and wire._failure is None
+        assert not any(kind == "error" for kind, data in events)
     finally:
         await client.shutdown()
