@@ -65,11 +65,13 @@ def creation_rig(rig, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_finalizing_workspace_matches_frozen_retryable_http_refusal(creation_rig):
+@pytest.mark.parametrize("generation", [37, 38])
+async def test_finalizing_workspace_matches_frozen_retryable_http_refusal(creation_rig, generation):
     fixture = json.loads(
         (Path(__file__).resolve().parents[1] / "contract/fixtures/http/current"
-         / "workspace-finalization-retry-generation-37.json").read_text(encoding="utf-8")
+         / f"workspace-finalization-retry-generation-{generation}.json").read_text(encoding="utf-8")
     )
+    assert fixture["captured_from"]["protocol_generation"] == generation
     rig = creation_rig
     rig.row["status"] = "finalizing"
     request = StartSessionRequest.model_validate(fixture["request"]["json"])
