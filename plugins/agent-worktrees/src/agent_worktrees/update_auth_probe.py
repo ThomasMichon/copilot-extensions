@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .repo_accounts import remote_host
 from .update_auth_process import publish_group
 
 
@@ -18,6 +19,10 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def login(host: str, authtype: str, credential: str) -> dict[str, str]:
+    try:
+        host = remote_host(host)
+    except ValueError:
+        return {"status": "denied"}
     authority = urlsplit("https://" + host)
     if (
         not authority.hostname or authority.username or authority.password

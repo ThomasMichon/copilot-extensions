@@ -1569,6 +1569,9 @@ User `settings.local.json` overrides `settings.json` before repository overrides
 an exact registered repository keeps its own account override, not a sibling's.
 Repository-account matching retains the remote host and port across HTTPS, SSH
 and SCP spellings; an enterprise source never inherits a public-host sibling's account.
+Default network ports are canonicalized consistently across registry lookup,
+token discovery, helper replay and API selection: `github.com:443` is public
+GitHub, while a non-default enterprise port remains a distinct authority.
 The report resolves ancestor or transported marketplace settings through the same
 context selection as normal update, including its active-project fallback.
 Bare and non-bare anchors on detached or non-default branches are excluded from
@@ -1623,6 +1626,9 @@ Unresolved required sources are denied without retrying a stalled helper and
 contribute `auth_required` (exit 4, unless a worse failure applies). The shared
 exit remains 4 for auth-only acquisition failures even without telemetry; another
 required command failure still wins. The shared
+Manager result retains that precedence with or without telemetry; a recorded
+Manager authentication failure cannot hide an independent engine command failure.
+The shared
 status includes `auth.report` and `auth.fallback_used`; helper command values
 are not included. `CE_UPDATE_AUTH=report-only` applies no credential fix, so
 fixable sources remain unresolved. `CE_UPDATE_AUTH=off` skips this preflight.

@@ -140,10 +140,14 @@ def test_update_auth_required_is_required_and_keeps_exit_four(monkeypatch):
 @pytest.mark.parametrize(("engine_rc", "expected"), [
     (0, 4), (1, 1), (2, 2), (3, 4), (4, 4), (5, 4), (6, 6), (130, 130),
 ])
-def test_update_auth_exit_precedence_without_telemetry(monkeypatch, engine_rc, expected):
+@pytest.mark.parametrize("telemetry", [False, True])
+def test_update_auth_exit_precedence_with_or_without_telemetry(
+    monkeypatch, engine_rc, expected, telemetry, update_home,
+):
     from worktree_manager import update_events
 
-    monkeypatch.setattr(update_events, "_ut", None)
+    if not telemetry:
+        monkeypatch.setattr(update_events, "_ut", None)
     rc, calls, _ = _run_update(
         [], monkeypatch, su_action="auth_required", engine_rc=engine_rc,
     )

@@ -22,6 +22,7 @@ from ._git_credential_route import (
     original_environment,
     parse_attributes,
 )
+from .repo_accounts import remote_host
 from .update_auth_process import run
 
 
@@ -70,7 +71,11 @@ def source(
         return None
     if not parsed.hostname or any(not re.fullmatch(r"[\w.-]+", part) for part in parts):
         return None
-    return Source(id, url, parsed.netloc, *parts, required, purpose, cwd)
+    try:
+        host = remote_host(parsed.netloc)
+    except ValueError:
+        return None
+    return Source(id, url, host, *parts, required, purpose, cwd)
 
 
 @dataclasses.dataclass

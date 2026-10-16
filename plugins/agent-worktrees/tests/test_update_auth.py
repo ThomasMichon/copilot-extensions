@@ -431,8 +431,10 @@ def test_inherited_git_parameters_cannot_replace_readonly_routing(tmp_path, monk
     ("host", "token_name", "gh_host"),
     [
         ("GitHub.com", "GH_TOKEN", ""),
+        ("GitHub.com:443", "GH_TOKEN", ""),
         ("enterprise.test", "GH_ENTERPRISE_TOKEN", "enterprise.test"),
         ("enterprise.test", "GITHUB_ENTERPRISE_TOKEN", "ENTERPRISE.TEST"),
+        ("enterprise.test:8443", "GH_ENTERPRISE_TOKEN", "ENTERPRISE.TEST:8443"),
     ],
 )
 def test_environment_token_selection_matches_host_in_discovery_and_replay(
@@ -451,6 +453,25 @@ def test_environment_token_selection_matches_host_in_discovery_and_replay(
         auth.fallback(report).environment(env),
     )
     assert router.parse_attributes(answer)[router.SECRET_KEY] == "fixture-secret"
+
+
+def test_default_https_port_discovery_replays_through_real_git(tmp_path, monkeypatch):
+    _clean_git_env(monkeypatch, tmp_path)
+    item = auth.source("source", "https://github.com:443/team/repo", cwd=tmp_path)
+    report = auth.report(
+        [item], env={"GH_TOKEN": "fixture-secret"}, runner=Probe(gh=False),
+        account_for=lambda _: "mapped",
+    )
+    assert report.results[0].status == "fixable_by_fallback"
+    assert report.results[0].alternative["method"] == "env"
+    overlay = auth.fallback(report)
+    result = process.run(
+        ["git", "credential", "fill"], cwd=tmp_path,
+        input="protocol=https\nhost=github.com:443\npath=team/repo\n\n",
+        env=overlay.environment({**os.environ, "GH_TOKEN": "fixture-secret"}),
+    )
+    assert result.status == 0, result.stderr
+    assert router.parse_attributes(result.stdout)[router.SECRET_KEY] == "fixture-secret"
 
 
 @pytest.mark.parametrize("host", ["github.com", "unrelated.test"])
@@ -942,7 +963,10 @@ def test_registered_siblings_keep_their_own_account_overrides(monkeypatch):
 
 
 @pytest.mark.parametrize("remote_form", ["https", "ssh", "scp"])
-def test_same_slug_on_different_hosts_uses_its_own_registered_account(monkeypatch, remote_form):
+@pytest.mark.parametrize("public_port", ["", ":443"])
+def test_same_slug_on_different_hosts_uses_its_own_registered_account(
+    monkeypatch, remote_form, public_port,
+):
     from agent_worktrees import repos
 
     enterprise = {
@@ -960,7 +984,7 @@ def test_same_slug_on_different_hosts_uses_its_own_registered_account(monkeypatc
     })
     monkeypatch.setattr(repos, "read_registry", lambda: registry)
     selected = [
-        auth.source("public", "https://github.com/team/repo"),
+        auth.source("public", f"https://github.com{public_port}/team/repo"),
         auth.source("enterprise", "https://enterprise.test/team/repo"),
         auth.source("unregistered", "https://unrelated.test/team/repo"),
     ]

@@ -19,7 +19,7 @@ pytestmark = pytest.mark.guard
 
 
 @pytest.mark.parametrize("scheme", ["Bear" + "er", "Ba" + "sic", "fixture-scheme"])
-@pytest.mark.parametrize("host", ["GitHub.com", "enterprise.test:8443"])
+@pytest.mark.parametrize("host", ["GitHub.com", "GitHub.com:443", "enterprise.test:8443"])
 def test_real_request_preserves_scheme_and_credential(monkeypatch, scheme, host):
     opener = Mock()
     opener.open.return_value = io.BytesIO(b'{"login": "mapped"}')
@@ -33,7 +33,7 @@ def test_real_request_preserves_scheme_and_credential(monkeypatch, scheme, host)
     assert request.get_header("Authorization") == scheme + " " + credential
     assert opener.open.call_args.kwargs["timeout"] == 4
     expected = (
-        "https://api.github.com/user" if host.casefold() == "github.com"
+        "https://api.github.com/user" if host.casefold() in ("github.com", "github.com:443")
         else "https://" + host + "/api/v3/user"
     )
     assert request.full_url == expected

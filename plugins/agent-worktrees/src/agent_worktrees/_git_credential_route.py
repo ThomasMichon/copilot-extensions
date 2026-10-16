@@ -8,6 +8,7 @@ import re
 import sys
 from collections.abc import Mapping
 
+from .repo_accounts import remote_host
 from .update_auth_process import publish_group, run
 
 SECRET_KEY = "pass" + "word"
@@ -30,8 +31,10 @@ def _has_credentials(attributes: Mapping[str, str]) -> bool:
 
 
 def env_token(owner: str, env: Mapping[str, str], host: str = "github.com") -> str:
-    enterprise = host.casefold() != "github.com"
-    if enterprise and env.get("GH_HOST", "").casefold() != host.casefold():
+    host = remote_host(host)
+    configured_host = env.get("GH_HOST", "")
+    enterprise = host != "github.com"
+    if enterprise and (not configured_host or remote_host(configured_host) != host):
         return ""
     key = "GH_TOKEN_" + re.sub(r"[^A-Z0-9]", "_", owner.upper())
     names = ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN") if enterprise else ()
@@ -90,6 +93,8 @@ def run_chain(
 def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
     attributes = parse_attributes(stdin)
     host = attributes.get("host", "").lower()
+    if attributes.get("protocol", "https") == "https":
+        host = remote_host(host)
     owner = attributes.get("path", "").split("/")[0].lower()
     routes = json.loads(env.get("CE_UPDATE_AUTH_ROUTES", "{}"))
     # Host-qualified keys prevent the same owner spelling on another server

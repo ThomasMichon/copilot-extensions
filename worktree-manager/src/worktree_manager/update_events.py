@@ -104,12 +104,16 @@ class UpdateRun:
     def finish(self, rc: int) -> int:
         """Close the run; ``rc`` is mapped through the shared exit-code table.
 
-        A generic failure (1) defers to a more specific recorded outcome.
+        A generic failure (1) defers to its more specific recorded outcome,
+        but not to an independent Manager authentication failure.
         """
         try:
             if self._run is not None:
                 outcome, code = _ut.outcome_for_exit_code(rc)
-                if rc == 1 and _ut.is_failure(self._run.outcome):
+                if (
+                    rc == 1 and _ut.is_failure(self._run.outcome)
+                    and self._run.outcome != _ut.AUTH_REQUIRED
+                ):
                     outcome = None
                 rc = self._run.finish(outcome, error={"code": code} if code else None)
             if self._human is not None:
