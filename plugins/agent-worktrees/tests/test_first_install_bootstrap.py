@@ -475,7 +475,7 @@ def test_installers_preserve_activation_during_inventory_bootstrap() -> None:
     assert "copilot plugin install agent-worktrees@copilot-extensions" not in ps1
 
 
-def test_generated_project_binstubs_use_payload_dispatchers() -> None:
+def test_generated_project_binstubs_use_installed_user_commands() -> None:
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh_binstub = sh.split("deploy_binstub() {", 1)[1].split(
@@ -485,9 +485,11 @@ def test_generated_project_binstubs_use_payload_dispatchers() -> None:
         "function Deploy-GlobalBinstub {", 1
     )[0]
 
-    assert "bin/payload/agent-worktrees" in sh_binstub
+    assert '"$LOCAL_BIN/agent-worktrees"' in sh_binstub
+    assert "bin/payload/agent-worktrees" not in sh_binstub
     assert "resolve-runtime.sh" not in sh_binstub
-    assert "bin\\payload\\agent-worktrees" in ps1_binstub
+    assert "Join-Path $LocalBin 'agent-worktrees" in ps1_binstub
+    assert "bin\\payload\\agent-worktrees" not in ps1_binstub
     assert "resolve-runtime.ps1" not in ps1_binstub
     assert "last-known-good" not in sh_binstub
 
