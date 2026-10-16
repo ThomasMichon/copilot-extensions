@@ -176,11 +176,13 @@ def _update_registered_plugins(
     refreshed_contexts: set[Path | None] = set()
     browse_contexts: list[Path | None] = []
     refresh_marketplace = _core_helper("_refresh_marketplace", _refresh_marketplace)
+    required_contexts = {target.context for target in targets.values() if target.required}
     for target in targets.values():
         context = target.context
         if context in refreshed_contexts:
             continue
         refreshed_contexts.add(context)
+        _auth.prepare_marketplace(context, required=context in required_contexts)
         if refresh_marketplace(reconcile.MARKETPLACE, cwd=context):
             browse_contexts.append(context)
 
@@ -193,6 +195,7 @@ def _update_registered_plugins(
             fallback_context = None
         if fallback_context is not None and fallback_context not in refreshed_contexts:
             refreshed_contexts.add(fallback_context)
+            _auth.prepare_marketplace(fallback_context, required=False)
             if refresh_marketplace(reconcile.MARKETPLACE, cwd=fallback_context):
                 browse_contexts.append(fallback_context)
 

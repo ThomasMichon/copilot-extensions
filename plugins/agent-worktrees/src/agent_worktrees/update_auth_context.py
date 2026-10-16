@@ -49,22 +49,31 @@ class Session:
     def __init__(self) -> None:
         self.reports: dict[Path | None, auth.AuthReport] = {}
         self.overlays: dict[Path | None, auth.RunOverlay | None] = {}
+        self.context_required: dict[Path | None, bool] = {}
         self.anchor_reports: dict[Path, auth.AuthReport] = {}
         self.anchor_overlays: dict[Path, auth.RunOverlay | None] = {}
         self.anchors_prepared = False
         self.unresolved = False
         self.anchor_failed = False
 
-    def prepare(self, context: Path | None, *, include_anchors: bool = False) -> auth.AuthReport:
-        if context not in self.reports:
+    def prepare(
+        self, context: Path | None, *, include_anchors: bool = False,
+        required: bool | None = None,
+    ) -> auth.AuthReport:
+        was_required = self.context_required.get(context)
+        required = was_required is True or (
+            required if required is not None else was_required is None
+        )
+        if context not in self.reports or required != was_required:
             from .reconcile import MARKETPLACE
 
             selected = [
                 item for item in sources.marketplaces(context)
                 if item.id == "marketplace:" + MARKETPLACE
             ]
-            report, overlay = self._prepare_report(selected)
+            report, overlay = self._prepare_report(selected, required=required)
             self.reports[context], self.overlays[context] = report, overlay
+            self.context_required[context] = required
         if include_anchors and not self.anchors_prepared:
             for source in sources.anchors():
                 if source.cwd is None:
@@ -74,16 +83,18 @@ class Session:
             self.anchors_prepared = True
         return self.reports[context]
 
-    def _prepare_report(self, selected: list[auth.Source]):
+    def _prepare_report(self, selected: list[auth.Source], *, required: bool = True):
         if selected:
             update_events.enter("auth_report")
         report = auth.report(selected)
         overlay = auth.fallback(report, apply_fixes=mode() != "report-only")
-        self.unresolved |= bool(overlay and overlay.denies)
+        self.unresolved |= required and bool(overlay and overlay.denies)
         describe(report)
         for item in report.results:
             applied = overlay is not None and item.source.id in overlay.applies_to
-            update_events.auth_result(item.summary(), applied=applied)
+            summary = item.summary()
+            summary["required"] = summary["required"] and required
+            update_events.auth_result(summary, applied=applied)
         return report, overlay
 
     def environment(self, context: Path | None) -> dict[str, str] | None:
@@ -116,6 +127,12 @@ def child_environment(context: Path | None) -> dict[str, dict[str, str]]:
 def blocked(context: Path | None, marketplace: str) -> bool:
     value = _current.get()
     return value is not None and value.blocked(context, "marketplace:" + marketplace)
+
+
+def prepare_marketplace(context: Path | None, *, required: bool) -> None:
+    value = _current.get()
+    if value is not None:
+        value.prepare(context, required=required)
 
 
 class AuthRequired(RuntimeError):

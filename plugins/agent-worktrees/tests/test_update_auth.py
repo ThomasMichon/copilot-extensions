@@ -1148,6 +1148,99 @@ def test_normal_update_only_blocks_on_acquired_marketplaces(monkeypatch, core_de
     assert context.cmd_report(standalone) == 4
 
 
+@pytest.mark.parametrize("user_required", [False, True])
+@pytest.mark.parametrize("telemetry", [False, True])
+def test_inventory_only_auth_context_remains_advisory(
+    tmp_path, monkeypatch, user_required, telemetry,
+):
+    import update_telemetry as ut
+
+    project = tmp_path / "project"
+    monkeypatch.setattr(context, "_marketplace_context", lambda: project)
+    home = tmp_path / "telemetry"
+    monkeypatch.setenv(ut.ENV_HOME, str(home))
+    for variable in (ut.ENV_RUN_ID, ut.ENV_EVENTS, ut.ENV_OWNER):
+        monkeypatch.delenv(variable, raising=False)
+    if not telemetry:
+        monkeypatch.setattr(update_events, "_ut", None)
+    monkeypatch.setattr(
+        sources, "marketplaces",
+        lambda cwd: [_source(id="marketplace:copilot-extensions", cwd=cwd)],
+    )
+    probed = []
+
+    def report(items):
+        probed.extend(item.cwd for item in items)
+        return auth.AuthReport([
+            auth.SourceAuth(item, [], status="auth_required" if item.cwd is None else "anonymous")
+            for item in items
+        ])
+
+    monkeypatch.setattr(auth, "report", report)
+    monkeypatch.setattr(update_runtime, "_core_helper", lambda name, local: local)
+    monkeypatch.setattr(
+        update_runtime, "_refresh_marketplace",
+        lambda marketplace, cwd: not context.blocked(cwd, marketplace),
+    )
+    monkeypatch.setattr(
+        update_runtime, "_browse_marketplace_plugins",
+        lambda *args, **kwargs: {"active", "inventory", "required"},
+    )
+    monkeypatch.setattr(
+        update_runtime, "_update_one_plugin_payload",
+        lambda name, marketplace, cwd: "auth_required" if context.blocked(cwd, marketplace) else "OK",
+    )
+    target = update_runtime._RegisteredPluginTarget
+    activation = update_runtime._PluginActivation
+    targets = {
+        "inventory": target(None, activation.INACTIVE),
+        "active": target(project, activation.ACTIVE),
+    }
+    if user_required:
+        targets["required"] = target(None, activation.ACTIVE)
+    update_events.start()
+    try:
+        rc = context.run_update(
+            argparse.Namespace(no_anchor_sync=True),
+            lambda _: 0 if update_runtime._update_registered_plugins(targets) else 1,
+        )
+        assert update_events.finish(rc) == (4 if user_required else 0)
+    finally:
+        update_events.finish(1)
+    assert probed.count(None) == 1
+    if telemetry:
+        status = json.loads((home / "update-status.json").read_text(encoding="utf-8"))
+        assert status["run"]["outcome"] == (
+            ut.AUTH_REQUIRED if user_required else ut.VERIFIED_CURRENT
+        )
+
+
+def test_required_auth_context_cannot_be_downgraded_to_advisory(monkeypatch):
+    monkeypatch.setattr(
+        sources, "marketplaces",
+        lambda cwd: [_source(id="marketplace:copilot-extensions", cwd=cwd)],
+    )
+    monkeypatch.setattr(
+        auth, "report",
+        lambda items: auth.AuthReport([
+            auth.SourceAuth(item, [], status="auth_required") for item in items
+        ]),
+    )
+    recorded = []
+    monkeypatch.setattr(
+        update_events, "auth_result",
+        lambda summary, **kwargs: recorded.append(summary["required"]),
+    )
+    with context.session() as session:
+        session.prepare(None, required=False)
+        assert session.blocked(None, "marketplace:copilot-extensions")
+        assert not session.unresolved
+        session.prepare(None, required=True)
+        session.prepare(None, required=False)
+        assert session.unresolved
+    assert recorded == [False, True]
+
+
 def test_user_local_settings_override_marketplace_source_and_activation(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     user = tmp_path / ".copilot"
