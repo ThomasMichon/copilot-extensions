@@ -258,7 +258,13 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
-          "sha256": "c685f0755107582cad5b274621d32c2dfc66654f67b5d0148da8a92fbc323884",
+          "sha256": "6f15a86baacea36999ec24347e5a80df78ae0596e706746ec1dc2720118bf8cc",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+          "sha256": "17d5d8c5c054feeb080000b77bdb33dacd255160c24b1bab16a46f71dd844cf1",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -974,7 +980,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-39.json",
-          "sha256": "94139bd4d728671945ec9270c941a25f67b3813ecad4d8ca2ad444f90108f8bb",
+          "sha256": "45455f171ae7960b4c561b0f0062af4ffe2784bd357bd82fc310fb1e14d0a844",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
@@ -1127,6 +1133,12 @@
           "sha256": "cf3545221721bd2541abaa4dcbe59dcbe5b2ab4f0dbf4979618a3a1f4c17a305",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-39.json",
+          "sha256": "f98ded39e1cbb604ee01bfd4c70b88c9080edcf6d64ec4f5cc5d3a9a7c7ba0ed",
+          "generation": 39,
+          "role": "Extracted bridge-owned carrier version selection; real request matrix and two-bridge tests retain wire behavior"
         }
       ],
       "provenance": [
@@ -3049,6 +3061,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
           "source_git_blob": "7ee9ecda25dfbd806565c2935cc497b159675d09",
           "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "ad14b0a408be559564b8f479e54be309210de2d4",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "b5337dfe12cef78c3206a94b9389535958267152",
+          "capture_method": "Re-attest committed carrier version extraction against unchanged independent receipt wait packet and version-skew expectations."
+        },
+        {
+          "commit": "ad14b0a408be559564b8f479e54be309210de2d4",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+          "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
+          "capture_method": "Re-attest committed carrier version extraction against unchanged independent receipt wait packet and version-skew expectations."
         }
       ],
       "support_window": "HTTP generations 1 through 39 remain supported. Immutable native33, workspace34, qualified-peer35, provider-creation36, render-cache37 and remote-ACP38 evidence is retained independently from receipt generation 39.",
