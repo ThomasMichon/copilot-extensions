@@ -21,7 +21,8 @@ INSTALLER = PLUGIN / "scripts" / "init.sh"
 pytestmark = pytest.mark.guard
 LIB_ORDER = [
     "dropin-registry", "plugin-resolve", "agent-procutil",
-    "remote-login-shell", "machine-transport", "plugin-activation",
+    "remote-login-shell", "machine-transport", "installation-context",
+    "installer-readiness", "plugin-activation",
 ]
 
 
@@ -116,12 +117,13 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
         for line in proc.stdout.splitlines()
         if line.startswith(marker)
     ]
-    assert len(installs) == 6
+    assert len(installs) == 8
     order = [Path(p).name for p in installs]
     assert order == LIB_ORDER
     assert order.index("plugin-activation") > order.index("dropin-registry")
     assert order.index("plugin-activation") > order.index("plugin-resolve")
     assert order.index("machine-transport") > order.index("remote-login-shell")
+    assert order.index("installer-readiness") > order.index("installation-context")
 
 
 @pytest.mark.parametrize("have_uv", [True, False])
@@ -146,7 +148,7 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
         for line in proc.stdout.splitlines()
         if line.startswith(marker)
     ]
-    assert len(installs) == 6
+    assert len(installs) == 8
     assert [Path(p).name for p in installs] == LIB_ORDER
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

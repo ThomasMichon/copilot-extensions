@@ -69,6 +69,52 @@ actions) and per-machine data stay in the consuming repo.
 
 For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 
+## Explicit installation repair
+
+`installation-repair` is separate from requirement-package restore. It discovers
+enabled, attributable plugin-owned `installer-readiness.json` contracts for the
+current project and global settings. Discovery never invokes an installer;
+selecting qualified modules observes their transitive same-source prerequisite
+closure in read-only/no-self-provision mode:
+
+```text
+agent-machines installation-repair --project-root <project>
+agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module>
+```
+
+Review the returned closure and `planDigest`, then apply that exact selection:
+
+```text
+agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module> --apply --expected-plan-digest <digest>
+```
+
+Repeat `--module` for independent branches. Apply reconstructs host admission,
+checks the bound payload/source/graph/activation inputs and revalidates before
+each installer. A digest is a stale-input check, **not** permission or signed
+release verification. Only the manifest's native owner actions execute, with
+bounded deadlines/output and caller-owned transient descendants. Declared
+installer-owned durable services keep their own supervision contract.
+`--readiness-timeout` and `--installer-timeout` are seconds (positive, at most
+3600); defaults are 15 and 300.
+
+Each attempted installer gets an independent readiness probe. Zero exit alone
+is not readiness. Failed/unknown/unsupported, unsatisfied configuration-empty
+and restart-required prerequisites block dependents; independent branches may
+continue. JSON includes before/after states, installer outcome, blockers and
+restart boundaries, never raw subprocess output. Exit 0 means discovery,
+observation, or a ready selected apply; exit 2 means incomplete apply (including
+optional failure), and exit 1 means invalid/refused admission or stale inputs.
+Interrupted execution retains partial outcomes, exits 130 and does not replay.
+
+Ordinary downstream owners need declared no-self-provision and legacy-root
+protocols; inherited core-cell control variables are cleared. Linked/reparse
+targets, ambiguous owners and migration/deactivation/maintenance states refuse
+repair rather than guessing an installer. Validated active-core cells may be
+observed, but **unready core-cell repair is not yet supported**: ordinary `init`
+actions are not cell-lifecycle permission. This command never creates cells,
+changes mode policy, enrolls machines, acquires capacity, or removes durable
+data. It is on-demand only; enabling the plugin does not apply a repair.
+
 ## Install / update
 
 Enable the plugin in Copilot settings. Its session-start hook runs from the

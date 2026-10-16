@@ -73,8 +73,8 @@ def _uv_source_entry_pattern(name: str, raw_path: str) -> re.Pattern[str]:
     path_value = r'(?:"' + escaped_path + r'"|\'' + escaped_path + r"')"
     return re.compile(
         r'^([ \t]*' + key + r'\s*=\s*)\{\s*(?:'
-        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*true'
-        r'|editable\s*=\s*true\s*,\s*path\s*=\s*' + path_value +
+        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*(?:true|false)'
+        r'|editable\s*=\s*(?:true|false)\s*,\s*path\s*=\s*' + path_value +
         r')\s*\}[ \t]*(?:#.*)?$',
         re.MULTILINE,
     )
@@ -176,7 +176,12 @@ def materialize_nested_uv_editable_refs(
     # nested_raw_path so a crafted raw_path can never redirect the copy.
     dest_consumer_dir = dest_lib_dir.parent.parent.resolve()
     for nested_name, nested_raw_path, nested_lib, nested_editable in nested_refs:
-        if not nested_editable:
+        if not nested_editable and not (
+            uer.is_safe_lib_name(nested_lib)
+            and uer.is_retained_flat_ref(
+                dest_lib_dir, nested_name, canonical_root_r / "libs" / nested_lib,
+            )
+        ):
             log.append(
                 f"SKIP {dest_pyproject}: {nested_name} references {nested_raw_path} "
                 "outside its own root but is missing editable = true -- "
@@ -257,7 +262,7 @@ def materialize_nested_uv_editable_refs(
                 )
                 continue
         else:
-            if not (nested_canonical / "src").is_dir():
+            if not uer.has_canonical_python_sources(nested_canonical):
                 log.append(
                     f"SKIP {nested_dest}: {nested_canonical}/src not found "
                     "-- refusing (canonical lib source must exist)"

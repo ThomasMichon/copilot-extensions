@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit digest-bound installation repair with ordinary host admission and independent readiness",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

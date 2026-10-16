@@ -143,15 +143,29 @@ def _owned(root: Path, env: dict[str, str]) -> set[int]:
 
 
 @contextmanager
-def _run(sandbox):
+def _run(sandbox, *, timeout: int = 18):
     root, host, env = sandbox
     process = subprocess.Popen(
         [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(root / "driver.ps1")],
-        env=env, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env, cwd=root, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     try:
-        stdout, stderr = process.communicate(timeout=18)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            smoke_home = Path(env["USERPROFILE"]) / ".agent-machines"
+            diagnostics = {
+                name: (smoke_home / name).read_text(encoding="utf-8-sig")
+                for name in ("smoke.json", "reconcile.err.log")
+                if (smoke_home / name).is_file()
+            }
+            raise AssertionError(
+                f"Installer helper timed out: {error}; owned={sorted(_owned(root, env))}; "
+                f"records={diagnostics}; stdout={error.stdout!r}; stderr={error.stderr!r}"
+            ) from error
         yield subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
     finally:
         pids = _owned(root, env) | {process.pid}
@@ -166,37 +180,66 @@ def _run(sandbox):
         assert not [pid for pid in pids if _alive(pid)], "Fixture leaked owned processes"
 
 
-def test_cleanup_does_not_replace_result_or_original_exception(sandbox) -> None:
+@pytest.mark.parametrize(
+    ("scenario", "expected"), (("37", 37), ("0", 0), ("launch", 73), ("read", 73)),
+)
+def test_cleanup_does_not_replace_result_or_original_exception(
+    sandbox, scenario: str, expected: int,
+) -> None:
     root, _, env = sandbox
     env["FIXTURE_DELETE_FAILURE"] = "1"
-    for scenario, expected in (("37", 37), ("0", 0), ("launch", 73), ("read", 73)):
-        env["FIXTURE_FAILURE"] = scenario
-        Path(env["FIXTURE_INSTALLER"]).write_text(
-            "param([string]$Action)\n"
-            "[Console]::Error.WriteLine('installer diagnostic')\n"
-            + (f"exit {scenario}\n" if scenario.isdigit() else "Start-Sleep -Seconds 8\n"),
-            encoding="utf-8",
+    env["FIXTURE_FAILURE"] = scenario
+    Path(env["FIXTURE_INSTALLER"]).write_text(
+        "param([string]$Action)\n"
+        "[Console]::Error.WriteLine('installer diagnostic')\n"
+        + (f"exit {scenario}\n" if scenario.isdigit() else "Start-Sleep -Seconds 8\n"),
+        encoding="utf-8",
+    )
+    Path(env["FIXTURE_CLEANUPS"]).unlink(missing_ok=True)
+    Path(env["FIXTURE_PIDS"]).unlink(missing_ok=True)
+    with _run(sandbox) as result:
+        assert result.returncode == expected, result.stderr
+        assert result.stdout == ""
+        assert "injected-delete-failure" in result.stderr
+        paths = Path(env["FIXTURE_CLEANUPS"]).read_text().splitlines()
+        assert len(paths) == 2 and paths[0] != paths[1]
+        assert Path(paths[0]).is_file()
+        assert not Path(paths[1]).exists(), "Second capture cleanup was skipped"
+        if scenario.isdigit():
+            assert "installer diagnostic" in result.stderr
+        else:
+            assert f"caught-original: original-{scenario}-failure" in result.stderr
+        assert not any(_alive(pid) for pid in _owned(root, env))
+    Path(paths[0]).unlink()
+
+
+@pytest.mark.parametrize(
+    ("sleep", "deadline", "expected"), (("0", "8", 0), ("12", "3", 124)),
+)
+@pytest.mark.parametrize(
+    "sandbox",
+    [
+        pytest.param(
+            host,
+            marks=pytest.mark.timeout(60 if host.stem.lower() == "powershell" else 45),
         )
-        Path(env["FIXTURE_CLEANUPS"]).unlink(missing_ok=True)
-        Path(env["FIXTURE_PIDS"]).unlink(missing_ok=True)
-        with _run(sandbox) as result:
-            assert result.returncode == expected, result.stderr
-            assert result.stdout == ""
-            assert "injected-delete-failure" in result.stderr
-            paths = Path(env["FIXTURE_CLEANUPS"]).read_text().splitlines()
-            assert len(paths) == 2 and paths[0] != paths[1]
-            assert Path(paths[0]).is_file()
-            assert not Path(paths[1]).exists(), "Second capture cleanup was skipped"
-            if scenario.isdigit():
-                assert "installer diagnostic" in result.stderr
-            else:
-                assert f"caught-original: original-{scenario}-failure" in result.stderr
-            assert not any(_alive(pid) for pid in _owned(root, env))
-        Path(paths[0]).unlink()
-
-
-def test_real_init_stages_and_watchdog_preserves_124(sandbox) -> None:
-    root, _, env = sandbox
+        for host in HOSTS
+    ],
+    indirect=True,
+    ids=lambda host: host.stem,
+)
+def test_real_init_stages_and_watchdog_preserves_124(
+    sandbox, sleep: str, deadline: str, expected: int,
+) -> None:
+    root, host, env = sandbox
+    timeout = 30
+    if Path(host).stem.lower() == "powershell":
+        # PS5's measured cold host/probe chain needs time to reach the smoke seam.
+        timeout, deadline = 45, "20"
+        if expected == 124:
+            sleep = "30"
+    elif expected == 124:
+        deadline = "8"
     home = Path(env["USERPROFILE"])
     payload = home / ".copilot" / "installed-plugins" / "example" / "agent-machines"
     scripts = payload / "scripts"
@@ -224,35 +267,34 @@ def test_real_init_stages_and_watchdog_preserves_124(sandbox) -> None:
     trace = root / "init-trace"
     env["FIXTURE_INIT_TRACE"] = str(trace)
     smoke_home = home / ".agent-machines"
-    for sleep, deadline, expected in (("0", "8", 0), ("12", "3", 124)):
-        env["COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP"] = sleep
-        env["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = deadline
-        (smoke_home / "smoke.json").unlink(missing_ok=True)
-        Path(env["FIXTURE_PIDS"]).unlink(missing_ok=True)
-        trace.unlink(missing_ok=True)
-        started = time.monotonic()
-        with _run(sandbox) as result:
-            diagnostics = {
-                "sleep": sleep, "deadline": deadline,
-                "elapsed": time.monotonic() - started,
-                "probe_events": trace.read_text() if trace.exists() else "",
-                "watchdog": (smoke_home / "reconcile.err.log").read_text(encoding="utf-8-sig")
-                if (smoke_home / "reconcile.err.log").exists() else "",
-                "stdout": result.stdout, "stderr": result.stderr,
-            }
-            assert result.returncode == expected, diagnostics
-            assert result.stdout == ""
-            assert (smoke_home / "smoke.json").is_file(), diagnostics
-            record = json.loads((smoke_home / "smoke.json").read_text(encoding="utf-8-sig"))
-            assert record["staged"] is True
-            assert Path(record["staged_from"]) == payload
-            assert (smoke_home / ".install-stage") in Path(record["ran_from"]).parents
-            assert record["grandchild_pid"] == 0
-            assert not any(_alive(pid) for pid in _owned(root, env))
-            assert not list(Path(env["TEMP"]).iterdir())
-            if expected == 124:
-                log = (smoke_home / "reconcile.err.log").read_text(encoding="utf-8-sig")
-                assert "WATCHDOG-KILL" in log and f"child pid {record['child_pid']}" in log
+    env["COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP"] = sleep
+    env["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = deadline
+    (smoke_home / "smoke.json").unlink(missing_ok=True)
+    Path(env["FIXTURE_PIDS"]).unlink(missing_ok=True)
+    trace.unlink(missing_ok=True)
+    started = time.monotonic()
+    with _run(sandbox, timeout=timeout) as result:
+        diagnostics = {
+            "sleep": sleep, "deadline": deadline,
+            "elapsed": time.monotonic() - started,
+            "probe_events": trace.read_text() if trace.exists() else "",
+            "watchdog": (smoke_home / "reconcile.err.log").read_text(encoding="utf-8-sig")
+            if (smoke_home / "reconcile.err.log").exists() else "",
+            "stdout": result.stdout, "stderr": result.stderr,
+        }
+        assert result.returncode == expected, diagnostics
+        assert result.stdout == ""
+        assert (smoke_home / "smoke.json").is_file(), diagnostics
+        record = json.loads((smoke_home / "smoke.json").read_text(encoding="utf-8-sig"))
+        assert record["staged"] is True
+        assert Path(record["staged_from"]) == payload
+        assert (smoke_home / ".install-stage") in Path(record["ran_from"]).parents
+        assert record["grandchild_pid"] == 0
+        assert not any(_alive(pid) for pid in _owned(root, env))
+        assert not list(Path(env["TEMP"]).iterdir())
+        if expected == 124:
+            log = (smoke_home / "reconcile.err.log").read_text(encoding="utf-8-sig")
+            assert "WATCHDOG-KILL" in log and f"child pid {record['child_pid']}" in log
 
 
 def test_helper_waits_for_child_not_owned_descendant(sandbox) -> None:
@@ -293,7 +335,21 @@ exit 0
         assert not any(_alive(pid) for pid in _owned(root, env))
 
 
-def test_live_capture_preserves_split_boms_and_multibyte_characters(sandbox) -> None:
+@pytest.mark.parametrize(
+    ("encoding", "bom"),
+    (
+        ("utf-8", b""),
+        ("utf-8", b"\xef\xbb\xbf"),
+        ("utf-16-le", b"\xff\xfe"),
+        ("utf-16-be", b"\xfe\xff"),
+        ("utf-32-le", b"\xff\xfe\x00\x00"),
+        ("utf-32-be", b"\x00\x00\xfe\xff"),
+    ),
+    ids=("utf8", "utf8-bom", "utf16-le", "utf16-be", "utf32-le", "utf32-be"),
+)
+def test_live_capture_preserves_split_boms_and_multibyte_characters(
+    sandbox, encoding: str, bom: bytes,
+) -> None:
     root, _, env = sandbox
     (root / "driver.ps1").write_text(
         "$previousEncoding = [Console]::OutputEncoding\ntry {\n"
@@ -303,31 +359,23 @@ def test_live_capture_preserves_split_boms_and_multibyte_characters(sandbox) -> 
         encoding="utf-8",
     )
     text = "x\u00e9\U0001f642\n"
-    for encoding, bom in (
-        ("utf-8", b""),
-        ("utf-8", b"\xef\xbb\xbf"),
-        ("utf-16-le", b"\xff\xfe"),
-        ("utf-16-be", b"\xfe\xff"),
-        ("utf-32-le", b"\xff\xfe\x00\x00"),
-        ("utf-32-be", b"\x00\x00\xfe\xff"),
-    ):
-        data = bom + text.encode(encoding)
-        first = 1 if bom else 0
-        split = len(bom) + len("x\u00e9".encode(encoding)) + 1
-        Path(env["FIXTURE_INSTALLER"]).write_text(
-            "param([string]$Action)\n"
-            f"$bytes = [byte[]]({','.join(str(value) for value in data)})\n"
-            "$outputs = @([Console]::OpenStandardOutput(), [Console]::OpenStandardError())\n"
-            f"foreach ($output in $outputs) {{ $output.Write($bytes, 0, {first}); $output.Flush() }}\n"
-            "Start-Sleep -Milliseconds 150\n"
-            f"foreach ($output in $outputs) {{ $output.Write($bytes, {first}, {split - first}); $output.Flush() }}\n"
-            "Start-Sleep -Milliseconds 150\n"
-            f"foreach ($output in $outputs) {{ $output.Write($bytes, {split}, {len(data) - split}); $output.Flush() }}\n"
-            "exit 0\n",
-            encoding="utf-8",
-        )
-        with _run(sandbox) as result:
-            assert result.returncode == 0, result.stderr
-            assert result.stdout == ""
-            assert result.stderr == text * 2, (encoding, bom, result.stderr)
-            assert not list(Path(env["TEMP"]).iterdir())
+    data = bom + text.encode(encoding)
+    first = 1 if bom else 0
+    split = len(bom) + len("x\u00e9".encode(encoding)) + 1
+    Path(env["FIXTURE_INSTALLER"]).write_text(
+        "param([string]$Action)\n"
+        f"$bytes = [byte[]]({','.join(str(value) for value in data)})\n"
+        "$outputs = @([Console]::OpenStandardOutput(), [Console]::OpenStandardError())\n"
+        f"foreach ($output in $outputs) {{ $output.Write($bytes, 0, {first}); $output.Flush() }}\n"
+        "Start-Sleep -Milliseconds 150\n"
+        f"foreach ($output in $outputs) {{ $output.Write($bytes, {first}, {split - first}); $output.Flush() }}\n"
+        "Start-Sleep -Milliseconds 150\n"
+        f"foreach ($output in $outputs) {{ $output.Write($bytes, {split}, {len(data) - split}); $output.Flush() }}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    with _run(sandbox) as result:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == ""
+        assert result.stderr == text * 2, (encoding, bom, result.stderr)
+        assert not list(Path(env["TEMP"]).iterdir())

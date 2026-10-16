@@ -2218,6 +2218,8 @@ foreach ($lib in @(
     @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil' },
     @{ Dir = 'remote-login-shell'; Pkg = 'agent-remote-login-shell' },
     @{ Dir = 'machine-transport'; Pkg = 'agent-machine-transport' },
+    @{ Dir = 'installation-context'; Pkg = 'agent-installation-context' },
+    @{ Dir = 'installer-readiness'; Pkg = 'agent-installer-readiness' },
     @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation' }
 )) {
     $libDir = Join-Path $PluginDir "libs\$($lib.Dir)"

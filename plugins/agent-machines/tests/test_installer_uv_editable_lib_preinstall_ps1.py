@@ -78,6 +78,7 @@ def _make_libs(root: Path) -> None:
     for lib in (
         "dropin-registry", "plugin-resolve", "agent-procutil",
         "remote-login-shell", "machine-transport", "plugin-activation",
+        "installation-context", "installer-readiness",
     ):
         lib_dir = root / lib
         lib_dir.mkdir(parents=True)
@@ -102,13 +103,14 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
     installs = [
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
-    assert len(installs) == 6
+    assert len(installs) == 8
     order = [Path(p).name for p in installs]
     assert "machine-transport" in order
     assert order.index("remote-login-shell") < order.index("machine-transport")
     assert order.index("plugin-activation") > order.index("dropin-registry")
     assert order.index("plugin-activation") > order.index("plugin-resolve")
     assert order.index("machine-transport") > order.index("remote-login-shell")
+    assert order.index("installer-readiness") > order.index("installation-context")
 
 
 @pytest.mark.parametrize("have_uv", [True, False])
@@ -131,8 +133,9 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
     installs = [
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
-    assert len(installs) == 6
+    assert len(installs) == 8
     order = [Path(p).name for p in installs]
     assert order.index("remote-login-shell") < order.index("machine-transport")
+    assert order.index("installation-context") < order.index("installer-readiness")
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

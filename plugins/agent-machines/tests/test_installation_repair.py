@@ -1,0 +1,633 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from agent_machines import installation_repair as repair_api
+from agent_machines.installation_repair_admission import (
+    RepairAdmissionError, admit_host, ordinary_environment,
+)
+from agent_machines.installation_repair_process import run_action
+
+pytestmark = pytest.mark.guard
+
+
+@pytest.mark.parametrize("containerized,expected", [(True, "linux"), (False, "wsl")])
+def test_installation_repair_platform_uses_userspace_not_container_host_kernel(
+    monkeypatch, containerized, expected,
+):
+    monkeypatch.setattr(repair_api.sys, "platform", "linux")
+    monkeypatch.setattr(repair_api.host_platform, "release", lambda: "6.6-microsoft-standard-WSL2")
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    monkeypatch.delenv("container", raising=False)
+    monkeypatch.setattr(Path, "is_file", lambda path: containerized)
+    assert repair_api.current_platform().value == expected
+
+
+def write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+@pytest.fixture
+def repair_fixture(tmp_path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    market = project / ".ai"
+    payload = market / "agent-example"
+    payload.mkdir(parents=True)
+    write_json(market / ".claude-plugin" / "marketplace.json", {
+        "name": "fixture",
+        "plugins": [{"name": "agent-example", "source": "./agent-example"}],
+    })
+    write_json(project / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {
+            "fixture": {"source": {"source": "directory", "path": "./.ai"}},
+        },
+        "enabledPlugins": {"agent-example@fixture": True},
+    })
+    write_json(payload / "plugin.json", {
+        "name": "agent-example", "version": "1.0.0",
+        "installerReadiness": "installer-readiness.json",
+    })
+    write_json(payload / "payload-invocation.json", {
+        "schema": "copilot-extensions.payload-invocation", "version": 2,
+        "command": "agent-example", "module": "agent_example",
+        "legacyRuntimeRoot": ".agent-example", "installationContext": "required",
+        "noSelfProvisionEnv": "AGENT_EXAMPLE_NO_SELFPROVISION",
+        "payloadRootEnv": "AGENT_EXAMPLE_PAYLOAD_ROOT", "purpose": "Fixture runtime",
+    })
+    scripts = payload / "scripts"
+    scripts.mkdir()
+    # Actual native owner actions: readiness may read but never create its state.
+    (scripts / "action.ps1").write_text(
+        "param([string]$Action, [string]$Module)\n"
+        "$state = Join-Path $env:HOME ($Module.Replace('/', '-') + '.ready')\n"
+        "if ($Action -eq 'install') {\n"
+        "  if ($env:AGENT_EXAMPLE_NO_SELFPROVISION) { exit 8 }\n"
+        "  [IO.File]::WriteAllText($state, 'ready'); exit 0\n"
+        "}\n"
+        "if ($env:AGENT_EXAMPLE_NO_SELFPROVISION -ne '1') { exit 9 }\n"
+        "$value = if (Test-Path -LiteralPath $state) { 'ready' } else { 'not-ready' }\n"
+        "@{schema='copilot-extensions.module-readiness'; version=1; "
+        "module=$Module; state=$value; detail='fixture-private-detail'} "
+        "| ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    (scripts / "action.sh").write_text(
+        '#!/usr/bin/env bash\nset -eu\n'
+        'state="$HOME/${2//\\//-}.ready"\n'
+        'if [ "$1" = install ]; then\n'
+        '  [ -z "${AGENT_EXAMPLE_NO_SELFPROVISION:-}" ] || exit 8\n'
+        '  printf ready > "$state"; exit 0\nfi\n'
+        '[ "${AGENT_EXAMPLE_NO_SELFPROVISION:-}" = 1 ] || exit 9\n'
+        'value=not-ready; [ ! -f "$state" ] || value=ready\n'
+        'printf \'{"schema":"copilot-extensions.module-readiness","version":1,'
+        '"module":"%s","state":"%s","detail":"fixture-private-detail"}\\n\' "$2" "$value"\n',
+        encoding="utf-8",
+    )
+
+    def configure(*, restart="none", classification="required", dependencies=()):
+        modules = []
+        for name, deps in (("base", ()), ("child", dependencies)):
+            local_id = "agent-example/" + name
+            invocations = {}
+            installers = {}
+            for platform in ("windows", "linux", "wsl", "macos"):
+                target = "scripts/action." + ("ps1" if platform == "windows" else "sh")
+                invocations[platform] = {
+                    "kind": "payload-script", "path": target,
+                    "arguments": ["probe", local_id],
+                }
+                installers[platform] = {
+                    "kind": "payload-script", "path": target,
+                    "arguments": ["install", local_id],
+                }
+            modules.append({
+                "id": local_id, "platforms": list(invocations),
+                "classification": classification if name == "base" else "required",
+                "installer": installers, "readiness": {
+                    "schema": "copilot-extensions.module-readiness", "version": 1,
+                    "configurationEmpty": "satisfied", "invocations": invocations,
+                },
+                "dependsOn": list(deps), "restart": restart if name == "base" else "none",
+            })
+        write_json(payload / "installer-readiness.json", {
+            "schema": "copilot-extensions.installer-readiness", "version": 1,
+            "owner": {"plugin": "agent-example"}, "state": "supported", "modules": modules,
+        })
+
+    configure(dependencies=("agent-example/base",))
+    host = admit_host(project, home=home)
+    assert not host.refused
+    assert not host.report.findings
+    identity = next(iter(host.bindings.values())).installation.provenance.marketplace_id
+    return home, project, payload, configure, identity
+
+
+def invoke(fixture, *, apply=False, digest=None, selection=("child",)):
+    home, project, _, _, identity = fixture
+    return repair_api.repair(
+        project, home=home,
+        modules=[identity + "::agent-example/" + name for name in selection],
+        apply=apply, expected_plan_digest=digest,
+    )
+
+
+def test_installation_repair_discovery_and_plan_never_install(repair_fixture):
+    home, project, _, _, _ = repair_fixture
+    discovery = repair_api.repair(project, home=home)
+    assert discovery["status"] == "discovered"
+    assert discovery["outcomes"] == []
+    plan = invoke(repair_fixture)
+    assert plan["status"] == "observed"
+    assert [row["observedBefore"]["state"] for row in plan["outcomes"]] == [
+        "not-ready", "not-ready",
+    ]
+    assert not list(home.glob("*.ready"))
+    assert not (home / ".agent-example").exists()
+    assert "fixture-private-detail" not in json.dumps(plan)
+
+
+def test_installation_repair_native_apply_freshly_probes_dependencies(repair_fixture):
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "ready"
+    assert result["requiredSatisfied"]
+    assert [row["attempted"] for row in result["outcomes"]] == [True, True]
+    assert [row["observedAfter"]["state"] for row in result["outcomes"]] == ["ready", "ready"]
+    again = invoke(repair_fixture, apply=True, digest=result["planDigest"])
+    assert again["status"] == "ready"
+    assert not any(row["attempted"] for row in again["outcomes"])
+
+
+def test_installation_repair_stale_digest_refuses_before_execution(repair_fixture):
+    plan = invoke(repair_fixture)
+    home, _, payload, _, _ = repair_fixture
+    (payload / "scripts" / "action.ps1").write_text("# changed\n", encoding="utf-8")
+    with pytest.raises(RepairAdmissionError, match="inputs changed"):
+        invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert not list(home.glob("*.ready"))
+
+
+@pytest.mark.parametrize("modules,digest", [((), None), (("child",), None), ((), "a" * 64)])
+def test_installation_repair_apply_requires_explicit_bound_selection(repair_fixture, modules, digest):
+    with pytest.raises(RepairAdmissionError, match="requires qualified modules"):
+        invoke(repair_fixture, apply=True, digest=digest, selection=modules)
+
+
+def test_installation_repair_restart_blocks_actual_dependents(repair_fixture):
+    _, _, _, configure, _ = repair_fixture
+    configure(restart="session", dependencies=("agent-example/base",))
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "incomplete"
+    base, child = result["outcomes"]
+    assert base["observedAfter"]["state"] == "ready"
+    assert base["restartRequired"]
+    assert not child["attempted"]
+    assert child["blockedBy"] == [base["module"]]
+
+
+def test_installation_repair_failed_installer_cannot_count_ready(repair_fixture, monkeypatch):
+    from agent_machines.installation_repair_process import ActionResult
+
+    original = repair_api._invoke
+
+    def failed(module, owner, platform, *, readonly, timeout):
+        result = original(module, owner, platform, readonly=readonly, timeout=timeout)
+        return result if readonly else ActionResult("exited", 7)
+
+    monkeypatch.setattr(repair_api, "_invoke", failed)
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "incomplete"
+    base, child = result["outcomes"]
+    assert base["observedAfter"]["state"] == "ready"
+    assert base["installer"]["exitCode"] == 7
+    assert not child["attempted"]
+    assert child["blockedBy"] == [base["module"]]
+
+
+def test_installation_repair_ordinary_environment_drops_inherited_core(tmp_path):
+    clean = ordinary_environment({
+        "COPILOT_EXTENSIONS_CONTEXT": "foreign", "COPILOT_EXTENSIONS_ACTION": "repair",
+        "AGENT_EXAMPLE_CELL_ROOT": "foreign", "COPILOT_PLUGIN_STAGED_FROM": "foreign",
+        "COPILOT_EXTENSIONS_TEST_CONTAINED": "1", "PATH": "fixture-path",
+    }, home=tmp_path, payload=tmp_path / "payload")
+    assert clean == {
+        "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "COPILOT_PLUGIN_ROOT": str(tmp_path / "payload"),
+        "COPILOT_EXTENSIONS_TEST_CONTAINED": "1", "PATH": "fixture-path",
+    }
+
+
+def test_installation_repair_missing_readonly_protocol_never_runs(repair_fixture):
+    home, _, payload, _, _ = repair_fixture
+    (payload / "payload-invocation.json").unlink()
+    plan = invoke(repair_fixture)
+    assert plan["outcomes"][0]["observedBefore"] == {
+        "state": "unknown", "reason": "owner-readonly-protocol-not-declared",
+    }
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "incomplete"
+    assert not any(row["attempted"] for row in result["outcomes"])
+    assert not list(home.glob("*.ready"))
+
+
+def test_installation_repair_migration_permission_is_not_repair_permission(
+    repair_fixture, monkeypatch,
+):
+    from agent_machines import installation_repair_admission as admission
+
+    real_probe = admission.context.probe_legacy_entrypoint
+
+    def migration(**kwargs):
+        result = real_probe(**kwargs)
+        result.update(status="migration-required", desiredMode="namespaced", allowMutation=True)
+        return result
+
+    monkeypatch.setattr(admission.context, "probe_legacy_entrypoint", migration)
+    plan = invoke(repair_fixture)
+    assert plan["outcomes"][0]["observedBefore"]["reason"] == (
+        "ordinary-owner-mutation-not-admitted"
+    )
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert not any(row["attempted"] for row in result["outcomes"])
+
+
+def test_installation_repair_changed_binding_after_probe_prevents_install(
+    repair_fixture, monkeypatch,
+):
+    from agent_machines.installation_repair_process import ActionResult
+
+    plan = invoke(repair_fixture)
+    home, _, payload, _, _ = repair_fixture
+    calls = []
+
+    def changed(module, owner, platform, *, readonly, timeout):
+        calls.append(readonly)
+        assert readonly
+        (payload / "plugin.json").write_text(
+            (payload / "plugin.json").read_text(encoding="utf-8").replace("1.0.0", "1.0.1"),
+            encoding="utf-8",
+        )
+        return ActionResult("exited", 0, json.dumps({
+            "schema": "copilot-extensions.module-readiness", "version": 1,
+            "module": module.module_id, "state": "not-ready",
+        }).encode())
+
+    monkeypatch.setattr(repair_api, "_invoke", changed)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["outcomes"][0]["installer"]["reason"] == "owner-binding-changed"
+    assert not any(row["attempted"] for row in result["outcomes"])
+    assert calls == [True, True]
+    assert not list(home.glob("*.ready"))
+
+
+def test_installation_repair_interruption_preserves_partial_outcomes(repair_fixture, monkeypatch):
+    from agent_machines.installation_repair_process import ActionResult
+
+    def interrupted(module, owner, platform, *, readonly, timeout):
+        if not readonly:
+            raise KeyboardInterrupt
+        return ActionResult("exited", 0, json.dumps({
+            "schema": "copilot-extensions.module-readiness", "version": 1,
+            "module": module.module_id, "state": "not-ready",
+        }).encode())
+
+    monkeypatch.setattr(repair_api, "_invoke", interrupted)
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["interrupted"]
+    assert result["status"] == "incomplete"
+    assert result["outcomes"][0]["installer"]["status"] == "interrupted"
+    assert not result["outcomes"][1]["attempted"]
+
+
+@pytest.mark.parametrize("output,state", [
+    (b"not-json", "unknown"),
+    (b'{"schema":"copilot-extensions.module-readiness","version":1,'
+     b'"module":"foreign/runtime","state":"ready"}', "unknown"),
+])
+def test_installation_repair_invalid_probe_is_not_dependency_readiness(
+    repair_fixture, monkeypatch, output, state,
+):
+    from agent_machines.installation_repair_process import ActionResult
+
+    monkeypatch.setattr(
+        repair_api, "_invoke",
+        lambda *args, **kwargs: ActionResult("exited", 0, output),
+    )
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    base, child = result["outcomes"]
+    assert base["observedAfter"]["state"] == state
+    assert child["blockedBy"] == [base["module"]]
+    assert not child["attempted"]
+    assert result["status"] == "incomplete"
+
+
+def test_installation_repair_independent_branch_continues(repair_fixture, monkeypatch):
+    from agent_machines.installation_repair_process import ActionResult
+
+    _, _, _, configure, _ = repair_fixture
+    configure(dependencies=())
+    real_invoke = repair_api._invoke
+
+    def fail_base(module, owner, platform, *, readonly, timeout):
+        if module.module_id.endswith("/base"):
+            if not readonly:
+                return ActionResult("exited", 3)
+            return ActionResult("exited", 0, json.dumps({
+                "schema": "copilot-extensions.module-readiness", "version": 1,
+                "module": module.module_id, "state": "not-ready",
+            }).encode())
+        return real_invoke(module, owner, platform, readonly=readonly, timeout=timeout)
+
+    monkeypatch.setattr(repair_api, "_invoke", fail_base)
+    plan = invoke(repair_fixture, selection=("base", "child"))
+    result = invoke(
+        repair_fixture, selection=("base", "child"), apply=True, digest=plan["planDigest"],
+    )
+    assert result["status"] == "incomplete"
+    assert result["outcomes"][1]["observedAfter"]["state"] == "ready"
+    assert result["outcomes"][1]["attempted"]
+
+
+def test_installation_repair_distinct_sources_refuse_shared_legacy_writer(repair_fixture):
+    home, project, payload, _, _ = repair_fixture
+    peer = project / ".peer"
+    shutil.copytree(payload.parent, peer)
+    manifest = peer / ".claude-plugin" / "marketplace.json"
+    value = json.loads(manifest.read_text())
+    value["name"] = "peer"
+    write_json(manifest, value)
+    settings = project / ".github" / "copilot" / "settings.json"
+    value = json.loads(settings.read_text())
+    value["extraKnownMarketplaces"]["peer"] = {
+        "source": {"source": "directory", "path": "./.peer"},
+    }
+    value["enabledPlugins"]["agent-example@peer"] = True
+    write_json(settings, value)
+    host = admit_host(project, home=home)
+    assert len(host.bindings) == 2
+    assert len({owner.installation.provenance.source_fingerprint
+                for owner in host.bindings.values()}) == 2
+    assert all(owner.refusal == "ordinary-legacy-writer-ambiguous"
+               for owner in host.bindings.values())
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "incomplete"
+    assert not any(row["attempted"] for row in result["outcomes"])
+    assert not list(home.glob("*.ready"))
+
+
+def test_installation_repair_cycle_refuses_before_any_invocation(repair_fixture, monkeypatch):
+    _, _, payload, _, _ = repair_fixture
+    path = payload / "installer-readiness.json"
+    declaration = json.loads(path.read_text())
+    declaration["modules"][0]["dependsOn"] = ["agent-example/child"]
+    write_json(path, declaration)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *args, **kwargs: pytest.fail("executed"))
+    with pytest.raises(RepairAdmissionError, match="cycle"):
+        invoke(repair_fixture)
+
+
+def test_installation_repair_unsupported_platform_never_invokes(repair_fixture, monkeypatch):
+    _, _, payload, _, _ = repair_fixture
+    path = payload / "installer-readiness.json"
+    declaration = json.loads(path.read_text())
+    actual = repair_api.current_platform().value
+    for module in declaration["modules"]:
+        module["platforms"].remove(actual)
+        module["installer"].pop(actual)
+        module["readiness"]["invocations"].pop(actual)
+    write_json(path, declaration)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *args, **kwargs: pytest.fail("executed"))
+    plan = invoke(repair_fixture)
+    assert plan["outcomes"][0]["observedBefore"]["state"] == "unsupported"
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "incomplete"
+    assert not any(row["attempted"] for row in result["outcomes"])
+
+
+@pytest.mark.parametrize("empty_satisfied", [True, False])
+def test_installation_repair_optional_empty_prerequisite_respects_declared_semantics(
+    repair_fixture, monkeypatch, empty_satisfied,
+):
+    from agent_machines.installation_repair_process import ActionResult
+
+    _, _, payload, configure, _ = repair_fixture
+    configure(classification="optional", dependencies=("agent-example/base",))
+    path = payload / "installer-readiness.json"
+    declaration = json.loads(path.read_text())
+    declaration["modules"][0]["readiness"]["configurationEmpty"] = (
+        "satisfied" if empty_satisfied else "unsatisfied"
+    )
+    write_json(path, declaration)
+
+    def probe(module, owner, platform, *, readonly, timeout):
+        if readonly:
+            state = "configuration-empty" if module.module_id.endswith("/base") else "ready"
+            return ActionResult("exited", 0, json.dumps({
+                "schema": "copilot-extensions.module-readiness", "version": 1,
+                "module": module.module_id, "state": state,
+            }).encode())
+        return ActionResult("exited", 2)
+
+    monkeypatch.setattr(repair_api, "_invoke", probe)
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    base, child = result["outcomes"]
+    if empty_satisfied:
+        assert result["status"] == "ready"
+        assert not base["attempted"]
+        assert not child["blockedBy"]
+    else:
+        assert result["status"] == "incomplete"
+        assert not result["requiredSatisfied"]
+        assert child["observedBefore"]["state"] == "ready"
+        assert child["blockedBy"] == [base["module"]]
+
+
+def test_installation_repair_active_cell_validates_receipts_and_refuses_ordinary_init(
+    repair_fixture,
+):
+    import installation_context as context
+
+    home, project, payload, _, identity = repair_fixture
+    environment = ordinary_environment(os.environ, home=home, payload=payload)
+    stamped = context.stamp_context(
+        payload_root=payload, plugin_id="agent-example", copilot_home=home / ".copilot",
+        project_root=project, environment=environment, durable_home=home / ".copilot-extensions",
+        payload_version="1.0.0", payload_origin="explicit",
+        expected_namespace_generation=0, expected_install_generation=0,
+    )
+    install_path = Path(stamped["installReceipt"])
+    install = context.read_json(install_path)
+    namespace = context.read_json(Path(install["namespaceReceipt"]))
+    write_json(home / ".copilot-extensions" / "installation-mode.json", {
+        "schema": "copilot-extensions.installation-mode", "version": 1,
+        "installationMode": {"enabled": True},
+    })
+    write_json(install_path.parent / "installation-activation.json", {
+        "schema": "copilot-extensions.installation-activation", "version": 1,
+        "marketplaceId": identity, "pluginId": "agent-example",
+        "mode": "namespaced", "state": "active",
+        "environment": {
+            "platform": "windows" if os.name == "nt" else "posix",
+            "homeRealPath": str(home.resolve()),
+            "wslDistro": None if os.name == "nt" else os.environ.get("WSL_DISTRO_NAME") or None,
+        },
+        "context": str(install_path), "namespaceGeneration": namespace["generation"],
+        "installGeneration": install["generation"], "generation": 1,
+        "legacy": {
+            "disposition": "absent",
+            "probe": {"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+        },
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+    })
+    host = admit_host(project, home=home)
+    owner = next(iter(host.bindings.values()))
+    assert owner.mode == "core-active"
+    assert owner.refusal is None
+    assert owner.environment["COPILOT_EXTENSIONS_CONTEXT"] == str(install_path)
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["outcomes"][0]["installer"]["reason"] == "active-core-action-not-declared"
+    assert not any(row["attempted"] for row in result["outcomes"])
+    assert not list(home.glob("*.ready"))
+    for name in ("base", "child"):
+        (home / f"agent-example-{name}.ready").write_text("ready")
+    observed = invoke(repair_fixture)
+    assert all(row["observedBefore"]["state"] == "ready" for row in observed["outcomes"])
+
+
+@pytest.mark.parametrize("pipe", ["stdout", "stderr"])
+def test_installation_repair_process_bounds_both_pipes(tmp_path, pipe):
+    result = run_action(
+        [sys.executable, "-c", f"import sys; sys.{pipe}.write('x' * 70000)"],
+        cwd=tmp_path, environment=os.environ, timeout=5, readonly=True,
+    )
+    assert result.status == "output-limit"
+    assert result.stdout == b""
+
+
+def test_installation_repair_process_timeout(tmp_path):
+    result = run_action(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        cwd=tmp_path, environment=os.environ, timeout=0.2, readonly=True,
+    )
+    assert result.status == "timeout"
+    assert result.exit_code is not None
+
+
+def test_installation_repair_process_cancellation_reaps_started_process(tmp_path, monkeypatch):
+    from agent_machines import installation_repair_process as process_api
+
+    started = []
+    spawn = process_api.spawn_sync_in_kill_on_close_job
+    sleep = process_api.time.sleep
+    interrupted = False
+
+    def record(*args, **kwargs):
+        result = spawn(*args, **kwargs)
+        started.append(result[0])
+        return result
+
+    def interrupt(_seconds):
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt
+        sleep(_seconds)
+
+    monkeypatch.setattr(process_api, "spawn_sync_in_kill_on_close_job", record)
+    monkeypatch.setattr(process_api.time, "sleep", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        run_action(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            cwd=tmp_path, environment=os.environ, timeout=5, readonly=True,
+        )
+    assert len(started) == 1
+    assert started[0].poll() is not None
+
+
+def test_installation_repair_process_reaps_inherited_pipe_descendant(tmp_path):
+    marker = tmp_path / "descendant-pid"
+    code = (
+        "import subprocess, sys; from pathlib import Path; "
+        "from agent_procutil import no_window_kwargs; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], "
+        "stdout=sys.stdout, stderr=sys.stderr, **no_window_kwargs()); "
+        "Path(sys.argv[1]).write_text(str(child.pid))"
+    )
+    result = run_action(
+        [sys.executable, "-c", code, str(marker)],
+        cwd=tmp_path, environment=os.environ, timeout=2, readonly=True,
+    )
+    assert marker.is_file()
+    assert result.status == "timeout"
+    pid = int(marker.read_text())
+    deadline = time.monotonic() + 5
+    while True:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x00100000, False, pid)
+            if not handle:
+                break
+            try:
+                alive = kernel.WaitForSingleObject(handle, 0) == 0x102
+            finally:
+                kernel.CloseHandle(handle)
+        else:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            proc = Path("/proc") / str(pid) / "stat"
+            alive = not proc.is_file() or proc.read_text().split(") ", 1)[1][0] != "Z"
+        if not alive:
+            break
+        assert time.monotonic() < deadline, "owned descendant survived cleanup"
+        time.sleep(0.02)
+
+
+def test_installation_repair_installed_cli_native_first_touch(repair_fixture):
+    home, project, _, _, identity = repair_fixture
+    command = Path(sys.executable).parent / (
+        "agent-machines.exe" if os.name == "nt" else "agent-machines"
+    )
+    assert command.is_file(), "this contract requires the installed console entry point"
+    environment = ordinary_environment(os.environ, home=home, payload=project / ".ai")
+    argv = [
+        str(command), "installation-repair", "--project-root", str(project),
+        "--module", identity + "::agent-example/child",
+    ]
+    plan = run_action(argv, cwd=project, environment=environment, timeout=15, readonly=True)
+    assert plan.status == "exited" and plan.exit_code == 0
+    preview = json.loads(plan.stdout)
+    assert not list(home.glob("*.ready"))
+    applied = run_action(
+        [*argv, "--apply", "--expected-plan-digest", preview["planDigest"]],
+        cwd=project, environment=environment, timeout=20, readonly=False,
+    )
+    assert applied.status == "exited" and applied.exit_code == 0
+    result = json.loads(applied.stdout)
+    assert result["status"] == "ready"
+    assert list(home.glob("*.ready"))

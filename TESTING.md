@@ -384,6 +384,50 @@ and retains timestamped Bridge diagnostics and operation-label-only stage
 timing, without writing provider stdin or task credentials into the stage log.
 All diagnostics remain inside the unchanged test and subprocess deadlines.
 
+### Native Agent Machines lifecycle boundaries
+
+`plugins/agent-machines/tests/test_payload_installer_lifecycle_powershell.py`
+likewise gives each cleanup outcome, staging/watchdog outcome and output
+encoding its own function-scoped sandbox and pytest item. The default remains
+an 18-second subprocess bound and the runner's 30-second item budget; combining
+those native scenarios into serial loops exceeds the composed budget. The two
+Windows PowerShell 5 staging items alone use a 45-second subprocess bound and
+a 60-second item budget: measured cold nested hosts/probes consumed roughly
+five CPU seconds apiece before reaching the smoke seam. Their fixture watchdog
+uses 20 seconds and a 30-second simulated sleeper so it can observe the started
+child before proving exit 124. PowerShell 7 staging uses a 30-second subprocess
+bound and 45-second item budget, with an eight-second fixture watchdog: its
+three-second watchdog demonstrably killed a cold staged child before its smoke
+record existed. Other native cases, production deadlines and every
+readiness/output/cleanup assertion are unchanged. Run the
+native lifecycle file without `--guards`, which excludes these integration
+items. An individual subprocess timeout still fails and requires diagnosis;
+parameterization does not excuse it.
+
+This lifecycle fixture preserves the upstream in-process governance stub and
+its phase diagnostics; it is not an end-to-end governance invocation. Actual
+owner admission and native installed first-touch repair are exercised separately
+by `test_installation_repair.py`.
+
+The first-use items in
+`plugins/agent-machines/tests/test_payload_provisioning_powershell.py` separate
+stamp refusal from the real failed-provision-then-retry-then-warm sequences.
+PS5's retry flows use at most 60 seconds per invocation within a shared
+120-second workflow deadline and a 150-second item budget. Measured native
+failure/retry/warm chains took 50-80 seconds; a 45-second invocation bound still
+expired before the first installer entered in the namespaced cold-host chain.
+The single stamp refusal instead uses a 45-second workflow and 60-second item
+budget. PowerShell 7's retry/warm cases use a 30-second invocation within a
+shared 60-second workflow and a 90-second item budget: a measured cold
+legacy invocation exceeded 20 seconds after stamp but before provision.
+Its single stamp-refusal case retains the 20-second invocation and
+30-second item limits, with a 25-second workflow bound leaving cleanup time.
+These are aggregate deadlines, not independent retries that each reset the
+workflow budget. Both hosts still verify live progress, complete split
+stdout/stderr capture, exact exit codes, actual retry, warm dispatch and cleanup.
+Transient processes use the canonical caller-owned Windows Job: a deadline must
+close the whole tree before joining readers or closing their streams.
+
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and
 `services/dispatch`, respectively. It normalizes aliases before environment

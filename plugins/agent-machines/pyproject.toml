@@ -23,10 +23,15 @@ dependencies = [
     "agent-procutil",
     "agent-machine-transport",
     "agent-remote-login-shell",
+    "agent-installer-readiness",
+    "agent-installation-context",
 ]
 
 [tool.uv.sources]
 agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = true }
+agent-installer-readiness = { path = "../../libs/installer-readiness", editable = true }
+# Flat-module metadata must remain retained, not an unsupported live editable.
+agent-installation-context = { path = "../../libs/installation-context", editable = false }
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Vendored byte-identical from libs/plugin-resolve;
 # shared with agent-worktrees / agent-bridge / agent-codespaces.

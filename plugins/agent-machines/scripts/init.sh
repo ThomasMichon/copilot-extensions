@@ -1732,6 +1732,8 @@ for _lib_entry in \
     'agent-procutil:agent-procutil' \
     'remote-login-shell:agent-remote-login-shell' \
     'machine-transport:agent-machine-transport' \
+    'installation-context:agent-installation-context' \
+    'installer-readiness:agent-installer-readiness' \
     'plugin-activation:agent-plugin-activation'; do
     _lib_dir_name="${_lib_entry%%:*}"
     _lib_pkg_name="${_lib_entry#*:}"

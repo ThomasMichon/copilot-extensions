@@ -72,6 +72,57 @@ def is_safe_lib_name(lib: str) -> bool:
     return bool(lib) and lib not in (".", "..") and Path(lib).name == lib
 
 
+def has_canonical_python_sources(root: Path) -> bool:
+    """Accept src layouts or explicitly declared, ordinary flat setuptools modules."""
+    if (root / "src").is_dir():
+        return True
+    project = root / "pyproject.toml"
+    if project.is_symlink():
+        return False
+    try:
+        data = tomllib.loads(project.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        return False
+    tool = data.get("tool")
+    setuptools = tool.get("setuptools") if isinstance(tool, dict) else None
+    modules = setuptools.get("py-modules") if isinstance(setuptools, dict) else None
+    if not isinstance(modules, list) or not modules or any(
+        not isinstance(module, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", module)
+        for module in modules
+    ) or len(set(modules)) != len(modules):
+        return False
+    for module in modules:
+        path = root / (module + ".py")
+        try:
+            attributes = path.lstat()
+        except OSError:
+            return False
+        if (
+            path.is_symlink() or not path.is_file()
+            or getattr(attributes, "st_file_attributes", 0) & 0x400
+        ):
+            return False
+    return True
+
+
+def is_retained_flat_ref(consumer_dir: Path, name: str, canonical: Path) -> bool:
+    """Admit explicit noneditable flat modules through the same canonical copy path."""
+    if canonical.is_symlink() or (canonical / "src").exists():
+        return False
+    manifest = consumer_dir / "pyproject.toml"
+    if manifest.is_symlink():
+        return False
+    try:
+        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        entry = data["tool"]["uv"]["sources"][name]
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError):
+        return False
+    return (
+        isinstance(entry, dict) and entry.get("editable") is False
+        and has_canonical_python_sources(canonical)
+    )
+
+
 def iter_consumer_dirs() -> list[tuple[str, Path]]:
     """``(consumer name, consumer dir)`` for every ``plugins/*`` plugin and
     every extra top-level consumer tree (``_EXTRA_CONSUMER_DIRS``) that has
@@ -236,7 +287,7 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
                 "separator) -- refusing"
             )
             continue
-        if not editable:
+        if not editable and not is_retained_flat_ref(consumer_dir, name, LIBS_DIR / lib):
             problems.append(
                 f"{consumer}: {name} references {raw_path} outside its own "
                 "root but is missing editable = true (would resolve to a "
@@ -261,12 +312,10 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
                 f"{consumer}: {name} references {raw_path} (resolved "
                 f"{canonical}) which is not libs/{lib}"
             )
-        elif not (canonical / "src").is_dir():
+        elif not has_canonical_python_sources(canonical):
             # `--check` must not treat an existing-but-incomplete
-            # libs/<lib> as valid: `uv` can't install it, and both
-            # convert_to_uv_editable() and promotion already require this,
-            # so a canonical lib missing it should never silently pass the
-            # dev-time guard.
+            # libs/<lib> as valid. Explicit flat py-modules are also a
+            # supported setuptools layout; an undeclared/missing module is not.
             problems.append(
                 f"{consumer}: {name} references {raw_path} (resolved "
                 f"{canonical}), but libs/{lib}/src does not exist"

@@ -199,7 +199,10 @@ def materialize_uv_editable_ref_into(
         # refuse the whole consumer explicitly instead.
         return [f"SKIP {dest_consumer_dir}: {exc}"]
     for name, raw_path, lib, editable in refs:
-        if not editable:
+        if not editable and not (
+            uer.is_safe_lib_name(lib)
+            and uer.is_retained_flat_ref(source_consumer_dir, name, canonical_root_r / "libs" / lib)
+        ):
             log.append(
                 f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
                 "outside its own root but is missing editable = true -- "
@@ -345,8 +348,8 @@ def _uv_source_entry_pattern(name: str, raw_path: str) -> re.Pattern[str]:
     path_value = r'(?:"' + escaped_path + r'"|\'' + escaped_path + r"')"
     return re.compile(
         r'^([ \t]*' + key + r'\s*=\s*)\{\s*(?:'
-        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*true'
-        r'|editable\s*=\s*true\s*,\s*path\s*=\s*' + path_value +
+        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*(?:true|false)'
+        r'|editable\s*=\s*(?:true|false)\s*,\s*path\s*=\s*' + path_value +
         r')\s*\}[ \t]*(?:#.*)?$',
         re.MULTILINE,
     )
@@ -404,7 +407,7 @@ def _materialize_one_uv_editable_ref(
     so the rewrite must too, or a valid `uv`-editable entry authored with
     the other order would pass ``--check`` yet make promotion emit an
     unresolvable ``SKIP``."""
-    if not (canonical / "src").is_dir():
+    if not uer.has_canonical_python_sources(canonical):
         return f"SKIP {dest_lib_dir}: {canonical}/src not found -- refusing (canonical lib source must exist)"
     if not (canonical / "pyproject.toml").is_file():
         return f"SKIP {dest_lib_dir}: {canonical}/pyproject.toml missing -- refusing"
