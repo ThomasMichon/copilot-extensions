@@ -68,6 +68,83 @@ def test_serving_reconcile_native_first_touch_never_activates(tmp_path, body, co
 
 
 @pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
+def test_serving_candidate_native_worker_is_not_its_launcher(tmp_path):
+    import agent_bridge
+    from agent_bridge.serving_candidate import ServingCandidate
+    from agent_bridge.serving_reconcile import ServingReconcileError
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "config.yaml").write_text(
+        "schema_version: 2\nbind: '127.0.0.1'\nenable_credential_relay: false\n"
+        "topologies: {}\nretention:\n  enabled: false\n",
+    )
+    token = "contained-fixture-token"
+    (root / "auth.yaml").write_text(f"token: {token}\n")
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+
+    def health():
+        with urllib.request.urlopen(f"{base}/health", timeout=0.25) as response:
+            return json.load(response)
+
+    candidate = ServingCandidate(
+        root, port, agent_bridge.__version__, health,
+        lambda: BridgeClient(base, token, timeout=1, connect_grace=0),
+    )
+    deadline = time.monotonic() + 25
+    with (root / "fixture.log").open("wb") as log, ExitStack() as cleanup:
+        worker_command = [
+            sys.executable, "-u", "-m", "agent_bridge", "start",
+            "--port", str(port), "--passive", "--serving-launch-id", candidate.launch_id,
+        ]
+        command = [
+            sys.executable, "-u", "-c",
+            "print('fixture launcher started',flush=True); import subprocess,sys; "
+            "sys.exit(subprocess.call(sys.argv[1:], "
+            "creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0))",
+            *worker_command,
+        ]
+        launcher, job = spawn_sync_in_kill_on_close_job(
+            command,
+            require_job=sys.platform == "win32", allow_breakaway=False,
+            cwd=root, env=_environment(root), stdout=log, stderr=log, **no_window_kwargs(),
+        )
+        candidate.launcher = launcher
+        cleanup.callback(_stop_fixture, launcher, job)
+        cleanup.callback(candidate.close, completed=False)
+        last_probe = None
+        while time.monotonic() < deadline:
+            try:
+                body = health()
+                candidate.verify_health(body)
+                break
+            except (OSError, ValueError, ServingReconcileError) as exc:
+                last_probe = f"{type(exc).__name__}: {exc}"
+                if candidate.pid is not None:
+                    assert candidate.poll() is None, "actual passive worker exited during startup"
+                time.sleep(0.05)
+        else:
+            pytest.fail(
+                f"worker={candidate.pid}, probe={last_probe}; "
+                f"{(root / 'fixture.log').read_text()}"
+            )
+        assert candidate.process is not None
+        assert candidate.pid != launcher.pid
+        assert candidate.process.start_time == diagnostics.process_start_time(candidate.pid)
+        assert body["slot"]["pid"] == candidate.pid
+        assert not (root / "active.json").exists()
+        with pytest.raises(ServingReconcileError):
+            candidate.verify_health({**body, "slot": {**body["slot"], "pid": launcher.pid}})
+        candidate.terminate()
+        assert candidate.process.wait(2), "owned actual worker did not gracefully exit"
+        launcher.wait(timeout=2)
+        assert time.monotonic() < deadline, "worker proof exhausted the shared consumer budget"
+
+
+@pytest.mark.skipif(sys.platform not in ("win32", "linux"), reason="native reference platform")
 @pytest.mark.parametrize(("bind", "stopped"), [
     ("127.0.0.1", False), ("::1", False), ("127.0.0.2", False), ("127.0.0.1", True),
 ])

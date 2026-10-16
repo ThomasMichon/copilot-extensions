@@ -261,13 +261,32 @@ def _cmd_deploy(
         s.close()
         return port
 
+    candidate = None
+
     def spawn_passive(port: int):
+        nonlocal candidate
         cmd = [sys.executable, "-m", "agent_bridge", "start", "--port", str(port), "--passive"]
+        if serving is not None:
+            from .serving_candidate import ServingCandidate
+
+            candidate = ServingCandidate(
+                Path(config_dir()), port, __version__,
+                lambda: core._service_health_on_port(port, host=host),
+                lambda: BridgeClient(
+                    f"http://{routing.format_authority(host, port)}", token,
+                    timeout=2, connect_grace=0,
+                ),
+            )
+            cmd.extend(["--serving-launch-id", candidate.launch_id])
         # A passive generation inside the deploy's Job would die with it once
         # the cutover retires the active daemon: never start it contained.
-        return core._launch_bridge_daemon(
+        launcher = core._launch_bridge_daemon(
             cmd, display="agent-bridge passive generation", contained_last_resort=False
         )
+        if candidate is not None:
+            candidate.launcher = launcher
+            return candidate
+        return launcher
 
     def health_check(h: str, port: int) -> bool:
         try:
@@ -278,20 +297,15 @@ def _cmd_deploy(
                     return False
                 body = json.loads(resp.read().decode("utf-8"))
                 if serving is not None:
-                    from .serving_reconcile import compare_serving_version
-
                     if predecessor is not None and (h, port) == (
                         predecessor.client_host, predecessor.port,
                     ):
                         serving.verify_health(body)
                         return True
-                    return (
-                        isinstance(body, dict)
-                        and body.get("status") == "ok"
-                        and body.get("service") == "agent-bridge"
-                        and body.get("ready") is True
-                        and compare_serving_version(body.get("version"), __version__) == "current"
-                    )
+                    if candidate is None:
+                        return False
+                    candidate.verify_health(body)
+                    return True
                 return body.get("status") == "ok" and body.get("ready", True) is True
         except Exception:
             return False
@@ -343,6 +357,16 @@ def _cmd_deploy(
     if passive_reap.get("reaped"):
         prelude_steps.append(f"reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
 
+    def refuse_serving(active: dict | None) -> str | None:
+        refusal = serving.refuse(active)
+        if refusal or candidate is None:
+            return refusal
+        try:
+            candidate.verify_health(core._service_health_on_port(candidate.port, host=host))
+        except Exception as exc:
+            return f"successor identity changed before publication ({type(exc).__name__})"
+        return None
+
     orch = CutoverOrchestrator(
         config_dir(),
         bind=cfg.bind,
@@ -352,12 +376,17 @@ def _cmd_deploy(
         make_client=make_client,
         pick_free_port=pick_free_port,
         refuse_old=(
-            serving.refuse if serving is not None else
+            refuse_serving if serving is not None else
             lambda active: forwarded_skip if active_route_is_forward(active) else None
         ),
         expected_old=routing.Endpoint.from_dict(serving.route) if serving is not None else None,
     )
-    res = orch.run(health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force)
+    res = None
+    try:
+        res = orch.run(health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force)
+    finally:
+        if candidate is not None:
+            candidate.close(completed=res is not None and res.ok)
     # Prepend rather than print eagerly: an eager print corrupts `--json`
     # output, since it lands on stdout ahead of the single JSON payload
     # `core._json_out(res.to_dict())` emits below.

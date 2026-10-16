@@ -58,7 +58,7 @@ def _rollback(
     if guarded:
         try:
             old_live = bool(
-                drain_started and old and self.health_check(old.client_host, old.port)
+                (flipped or drain_started) and old and self.health_check(old.client_host, old.port)
             )
         except Exception:
             old_live = False
@@ -82,7 +82,7 @@ def _rollback(
 
     # 1. Try to restore the old endpoint as active (only if it is still alive).
     old_restored = False
-    if old is not None and (not guarded or drain_started):
+    if old is not None and (not guarded or flipped or drain_started):
         try:
             predecessor_live = (
                 old_live if old_live is not None
@@ -131,7 +131,7 @@ def _rollback(
                 # We may have opened the old daemon's drain gate before the
                 # failure -- release it so the survivor does not stay closed
                 # to new work (#1756). Recorded either way for traceability.
-                undrained = self._undrain(old, result)
+                undrained = self._undrain(old, result) if drain_started else True
                 if guarded:
                     old_restored = undrained
         except routing_persistence.PublicationCommitUncertain:

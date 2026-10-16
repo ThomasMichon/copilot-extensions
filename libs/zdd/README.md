@@ -180,6 +180,12 @@ retirement before `shutdown()` returns, raising if native exit is unconfirmed.
 Post-commit failures retain full predecessor identity and a writer-reconciliation
 breadcrumb; keeping a healthy successor serving does not make retirement
 successful. Callers without `expected_old` retain the existing behavior.
+The candidate handle may represent a brokered worker: after the health gate the
+orchestrator refreshes its worker PID and captured `process_start_time` (when
+provided) before guarded publication. The adopter must retain and validate the
+actual worker's native reference separately from any launch handle. A startup
+failure before publication or drain admission cleans up only that owned
+candidate, without rewriting or undraining an untouched predecessor.
 If the confirmed-exited successor retracted its own active route during
 shutdown, rollback can restore the predecessor only while `active` is absent
 and `previous` still exactly identifies that successor. Recheck that condition

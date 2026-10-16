@@ -46,6 +46,14 @@ process has verifiably exited or is absent and the route stays unchanged.
 Permission failures, reused/live PIDs and retained cutover evidence still refuse
 without repair. Supported bind addresses are checked against local OS binding,
 not a literal-address list; native process and health ownership checks remain.
+The successor CLI worker writes a fresh per-launch PID/native-birth receipt.
+Reconcile retains that worker's native reference, separately from a broker or
+virtual-environment launch handle, and matches its existing health slot PID,
+slot ownership and birth before publication and retirement. A same-version
+unrelated responder is not a successful launch. Cleanup uses identity-verified
+graceful control, never a broker-PID tree kill; uncertain cleanup retains its
+receipt and writer-reconciliation breadcrumb. Failure before drain admission
+leaves the predecessor's raw route and any operator-owned drain unchanged.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`

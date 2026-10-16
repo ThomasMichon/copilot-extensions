@@ -175,6 +175,13 @@ def _cmd_start(args: argparse.Namespace) -> None:
     # (False) means "run the normal startup reattach scan" -- the safe
     # default for anything that isn't this CLI's own --passive cutover spawn.
     app.state.passive = passive
+    launch_id = getattr(args, "serving_launch_id", None)
+    if launch_id:
+        if not passive:
+            raise ValueError("a serving launch identity requires passive startup")
+        from .serving_candidate import record_worker
+
+        record_worker(config_dir(), launch_id)
 
     dynamic_port = _dynamic_bind_requested(cfg.port, explicit_port)
     requested_port = 0 if dynamic_port else (cfg.port if cfg.port > 0 else default_port())
@@ -596,6 +603,7 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Start as a passive cutover instance: do NOT self-publish the routing table (the deploy orchestrator flips it after a health check) and do NOT bind the credential relay (the active daemon owns it until cutover completes).",
     )
+    start_p.add_argument("--serving-launch-id", help=argparse.SUPPRESS)
     start_p.set_defaults(func=_cmd_start)
 
     acp_connect_p = sub.add_parser(
