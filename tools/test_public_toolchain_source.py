@@ -128,6 +128,35 @@ def _artifact_scope(job_name: str) -> tuple[dict, str]:
     return jobs, expression.group(1)
 
 
+def test_windows_source_contracts_use_the_existing_second_budget_without_dropping_cases():
+    jobs, _ = _artifact_scope("checks")
+    builder = jobs["windows-python-artifact-builder"]
+    candidate = jobs["promotion-candidate-windows"]
+    assert builder["timeout-minutes"] == candidate["timeout-minutes"] == 5
+    assert candidate["needs"] == "windows-python-artifact-builder"
+    composed = next(step for step in builder["steps"]
+                    if step.get("name") == "Composed promotion artifact contracts (Windows)")
+    source = next(step for step in candidate["steps"]
+                  if step.get("name") == "Source-owned qualification and publication contracts (Windows)")
+    assert source["if"] == "needs.windows-python-artifact-builder.outputs.run == 'true'"
+    assert " -k " not in source["run"]
+    for name in (
+        "test_qualify_promotion_candidate.py", "test_promotion_source_identity.py",
+        "test_reuse_promotion_artifacts.py", "test_publish_candidate_artifacts.py",
+        "test_promotion_source_alias.py", "test_release_publication_boundary.py",
+        "test_rollback_release.py",
+    ):
+        assert composed["run"].count("tools/" + name) == 0
+        assert source["run"].count("tools/" + name) == 1
+    for name in (
+        "test_promotion_control.py", "test_promotion_python_artifacts.py",
+        "test_promotion_wheel_sources.py", "test_promotion_workflow_adapter.py",
+    ):
+        assert composed["run"].count("tools/" + name) == 1
+    for gate in ("pr-gate", "promotion-gate"):
+        assert {"windows-python-artifact-builder", "promotion-candidate-windows"} <= set(jobs[gate]["needs"])
+
+
 @pytest.mark.parametrize("job_name", ["checks", "windows-python-artifact-builder"])
 @pytest.mark.parametrize("changed", [
     ".gitattributes", "plugins/demo/.gitattributes", "libs/library/src/.gitattributes",

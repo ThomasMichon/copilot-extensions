@@ -20,6 +20,10 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from _promotion_workflow_test_support import (
+    assert_source_owned_boundary, heredoc, reviewed_helpers, source_owned,
+)
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_python_artifacts as builder
 import promote_release as promotion
@@ -1465,12 +1469,25 @@ def test_invalid_candidate_identity_fails_before_git_or_source_access(tmp_path):
 def _run_workflow_validator(repo, directory, dev, main, monkeypatch):
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
+    current = source_owned(workflow["jobs"])
     validator = next(
         step for step in workflow["jobs"]["python-artifacts"]["steps"]
-        if step.get("name") == "Validate untrusted bundles using only trusted default-branch code"
+        if step.get("name") == (
+            "Validate untrusted bundles using only pinned reviewed helpers" if current
+            else "Validate untrusted bundles using only trusted default-branch code"
+        )
     )
-    script = validator["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
-    monkeypatch.setattr(sys, "argv", ["-", dev, main, str(directory)])
+    script = heredoc(validator["run"])
+    if current:
+        if all(isinstance(value, str) and len(value) == 40
+               and all(char in "0123456789abcdef" for char in value) for value in (dev, main)):
+            _helpers, pin = reviewed_helpers(repo, root)
+        else:
+            pin = "f" * 40
+        argv = ["-", str(repo), pin, dev, main, str(directory), "false"]
+    else:
+        argv = ["-", dev, main, str(directory)]
+    monkeypatch.setattr(sys, "argv", argv)
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.chdir(repo)
     exec(compile(script, "<trusted-workflow-validator>", "exec"), {})
@@ -1545,8 +1562,12 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())
     jobs = workflow["jobs"]
+    current = source_owned(jobs)
     builder, signer = jobs["build-python-artifacts"], jobs["python-artifacts"]
-    assert builder["permissions"] == {"contents": "read"}
+    assert builder["permissions"] == (
+        {"contents": "read", "actions": "read", "attestations": "read"} if current
+        else {"contents": "read"}
+    )
     assert signer["permissions"] == {
         "contents": "read", "id-token": "write", "attestations": "write",
     }
@@ -1563,10 +1584,20 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     assert checkout["with"]["persist-credentials"] is False
     validator = next(
         step for step in steps
-        if step.get("name") == "Validate untrusted bundles using only trusted default-branch code"
+        if step.get("name") == (
+            "Validate untrusted bundles using only pinned reviewed helpers" if current
+            else "Validate untrusted bundles using only trusted default-branch code"
+        )
     )
-    assert "artifacts.validate_artifacts(" in validator["run"]
-    assert '"checkout-index", "--all"' in validator["run"]
+    if current:
+        assert_source_owned_boundary(jobs)
+        assert "artifacts.validate_composed_artifacts(" in validator["run"]
+        assert "checkout-index" not in validator["run"]
+        assert 'trusted_source=helpers' in validator["run"]
+        assert "normal artifact validation cannot bypass the pause" in validator["run"]
+    else:
+        assert "artifacts.validate_artifacts(" in validator["run"]
+        assert '"checkout-index", "--all"' in validator["run"]
     assert 'source_policy="seasoned-public", min_age_days=7' in validator["run"]
     assert "promote_release.py" not in json.dumps(signer)
     assert "build_python_artifacts.py" not in json.dumps(signer)
@@ -1585,9 +1616,14 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     decision = next(step for step in steps if step.get("id") == "decide")
     assert "needs.python-artifacts.result" in decision["run"]
     publishing = jobs["publish-python-artifacts"]
-    assert "needs.merge-promotion.outputs.merge_sha != ''" in publishing["if"]
+    if current:
+        assert "needs.qualify-candidate.result == 'success'" in publishing["if"]
+        assert "merge-promotion" not in publishing["needs"]
+        assert "MERGE_SHA" not in publishing["env"]
+    else:
+        assert "needs.merge-promotion.outputs.merge_sha != ''" in publishing["if"]
+        assert publishing["env"]["MERGE_SHA"] == "${{ needs.merge-promotion.outputs.merge_sha }}"
     assert jobs["merge-promotion"]["outputs"]["merge_sha"] == "${{ steps.merged.outputs.merge_sha }}"
-    assert publishing["env"]["MERGE_SHA"] == "${{ needs.merge-promotion.outputs.merge_sha }}"
     assert "GH_TOKEN" not in publishing["env"]
     assert "ARTIFACT_VERIFY_TOKEN" not in publishing["env"]
     publisher_step = next(step for step in publishing["steps"] if "publish_python_artifacts.py publish" in step.get("run", ""))

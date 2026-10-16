@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from _promotion_workflow_test_support import assert_source_owned_boundary, source_owned
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promotion_artifact_readiness as readiness
 import promote_release as promotion
@@ -297,16 +299,21 @@ def test_workflow_readiness_precedes_pr_creation_and_pins_the_merge_head():
     merger = jobs["merge-promotion"]
     wait = next(step for step in merger["steps"] if step.get("id") == "merged")
     assert steps.index(ready) < steps.index(land)
-    assert set(merger["needs"]) == {
-        "promote", "materialized-candidate-plan", "materialized-candidate-consumers",
-        "materialized-candidate-windows",
-    }
-    assert re.sub(r"\s+", " ", merger["if"]).strip() == (
-        "needs.promote.outputs.pr_number != '' && "
-        "needs.materialized-candidate-plan.result == 'success' && "
-        "needs.materialized-candidate-consumers.result == 'success' && "
-        "needs.materialized-candidate-windows.result == 'success'"
-    )
+    if source_owned(jobs):
+        assert_source_owned_boundary(jobs)
+        assert '--repo "$GITHUB_WORKSPACE"' in ready["run"]
+        assert "candidate must preserve the admitted pipeline pause state" in ready["run"]
+    else:
+        assert set(merger["needs"]) == {
+            "promote", "materialized-candidate-plan", "materialized-candidate-consumers",
+            "materialized-candidate-windows",
+        }
+        assert re.sub(r"\s+", " ", merger["if"]).strip() == (
+            "needs.promote.outputs.pr_number != '' && "
+            "needs.materialized-candidate-plan.result == 'success' && "
+            "needs.materialized-candidate-consumers.result == 'success' && "
+            "needs.materialized-candidate-windows.result == 'success'"
+        )
     assert jobs["promote"]["outputs"]["pr_number"] == "${{ steps.land.outputs.pr_number }}"
     assert "publish_python_artifacts.py prepare" in ready["run"]
     assert "continue-on-error" not in ready

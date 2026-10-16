@@ -983,6 +983,16 @@ per-plugin source closure, not a nonexistent Main ancestry relationship.
 Real two-release regressions cover both cases and preserve current raw-byte,
 signature, provenance and no-clobber refusals.
 
+Before activation, an actual controlled consumer view exposed legacy-only test
+assumptions that the default Dev view could not reveal. All prior assertions
+and negative cases are retained; the prepared graph now executes its real
+pinned launcher, canonical reader, fresh-proof merge waiter, premerge publisher
+and postmerge receipt path. The full legacy view passes 1,226 cases and the
+controlled view passes 1,235; their explicit platform/inactive-tier skips are
+not credited as live qualification. A measured native cumulative timeout is
+addressed by partitioning into the existing second Windows job, preserving all
+cases and both five-minute bounds rather than extending a deadline.
+
 These source changes do not activate Main control. #6237 retains one
 coordinated, explicitly authorized workflow/control repair; the pipeline is
 paused after #6949, and the exposed product snapshot is not declared healthy.

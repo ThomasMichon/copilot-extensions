@@ -347,6 +347,7 @@ def test_missing_validator_bootstrap_inputs_refuse_inventory(subject, relative):
 
 
 def test_validator_bootstrap_recipe_keeps_pinned_deny_local_contract(subject, tmp_path, monkeypatch):
+    from _promotion_workflow_test_support import source_owned
     root = subject[0]
     workspace = tmp_path / "fresh-bootstrap"
     workspace.mkdir()
@@ -364,7 +365,8 @@ def test_validator_bootstrap_recipe_keeps_pinned_deny_local_contract(subject, tm
           "import packaging; print(packaging.__version__)"], root),
     ]
     jobs = yaml.safe_load((ROOT / ".github/workflows/validate-and-promote.yml").read_text())["jobs"]
-    prefix = "python tools/seasoned_uv.py --registry-only --uv uv --"
+    helper_root = "reviewed-helpers/" if source_owned(jobs) else ""
+    prefix = f"python {helper_root}tools/seasoned_uv.py --registry-only --uv uv --"
     for job in ("build-python-artifacts", "python-artifacts", "promote", "publish-python-artifacts"):
         body = next(step["run"] for step in jobs[job]["steps"] if prefix in step.get("run", ""))
         line = next(line.strip() for line in body.replace("\\\n", "").splitlines() if prefix in line)
@@ -373,7 +375,7 @@ def test_validator_bootstrap_recipe_keeps_pinned_deny_local_contract(subject, tm
         assert actual[actual.index("--index-url") + 1] == (
             "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}"
         )
-        assert actual[actual.index("-r") + 1] == "tools/artifact_validation_requirements.txt"
+        assert actual[actual.index("-r") + 1] == helper_root + "tools/artifact_validation_requirements.txt"
         actual[:2] = [sys.executable, str(root / "tools/seasoned_uv.py")]
         actual[actual.index("--python") + 1] = str(interpreter)
         actual[actual.index("--index-url") + 1] = "https://packages.example.invalid/simple"
@@ -593,11 +595,32 @@ def test_isolated_trusted_cli_loads_inventory_and_executes_actual_consumer(subje
 
 
 def test_pipeline_requires_successful_exact_candidate_jobs_and_preserves_old_gates():
+    from _promotion_workflow_test_support import assert_source_owned_boundary, source_owned
     workflow = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "validate-and-promote.yml").read_text(),
     )
     jobs = workflow["jobs"]
     merger = jobs["merge-promotion"]
+    if source_owned(jobs):
+        assert_source_owned_boundary(jobs)
+        qualifier = jobs["qualify-candidate"]
+        assert qualifier["permissions"] == {"contents": "read", "actions": "write"}
+        assert "environment" not in qualifier and "secrets." not in json.dumps(qualifier)
+        checkouts = [step for step in qualifier["steps"] if step.get("uses") == "actions/checkout@v4"]
+        assert len(checkouts) == 3
+        assert all(step["with"]["persist-credentials"] is False for step in checkouts)
+        assert checkouts[0]["with"]["ref"] == "${{ env.RELEASE_HELPERS_SHA }}"
+        assert checkouts[1]["with"]["ref"] == "${{ needs.promote.outputs.candidate_sha }}"
+        assert checkouts[2]["with"]["ref"] == "${{ needs.gate.outputs.sha }}"
+        execute = next(step for step in qualifier["steps"] if step.get("id") == "qualify")
+        for argument in (
+            "--candidate-root candidate", "--dev-root validated-dev", "--candidate-sha",
+            "--dev-sha", "--main-before", "--control-sha", "--receipt", "--github-output",
+        ):
+            assert argument in execute["run"]
+        assert not any("checkout" in step.get("uses", "") for step in merger["steps"])
+        assert "python-artifacts" in jobs
+        return
     assert set(merger["needs"]) == {
         "promote", "materialized-candidate-plan", "materialized-candidate-consumers",
         "materialized-candidate-windows",

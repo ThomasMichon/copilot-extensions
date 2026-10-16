@@ -12,6 +12,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import yaml
 
+from _promotion_workflow_test_support import assert_source_owned_boundary, source_owned
+
 import verify_promotion_workflows as verification
 
 SHA = "a" * 40
@@ -482,6 +484,23 @@ def test_native_candidate_guard_binds_the_owner_run_ref_and_exact_workflow(chang
 
 def test_postmerge_verifier_and_failure_reporter_are_bound_to_actual_merge_and_tag():
     jobs = workflows()["validate-and-promote.yml"]["jobs"]
+    if source_owned(jobs):
+        assert_source_owned_boundary(jobs)
+        qualifier = jobs["qualify-candidate"]
+        run = next(step for step in qualifier["steps"] if step.get("id") == "qualify")
+        assert qualifier["permissions"] == {"contents": "read", "actions": "write"}
+        assert run["env"]["GH_TOKEN"] == "${{ github.token }}"
+        assert "APERTURE_RELEASE_TOKEN" not in json.dumps(qualifier)
+        for argument in ("qualify_promotion_candidate.py", "--candidate-root candidate",
+                         "--dev-root validated-dev", "--control-sha", "--receipt", "--github-output"):
+            assert argument in run["run"]
+        assert "continue-on-error" not in run
+        record = jobs["record-promotion"]
+        tag = next(step for step in record["steps"] if "tag_promotion.py" in step.get("run", ""))
+        assert tag["env"]["MERGE_SHA"] == "${{ needs.merge-promotion.outputs.merge_sha }}"
+        assert tag["env"]["SOURCE_RELEASE"] == "${{ needs.publish-python-artifacts.outputs.source_release }}"
+        assert "verify_promotion_workflows.py" not in json.dumps(record)
+        return
     proof = jobs["postmerge-workflows"]
     assert set(proof["needs"]) == {"merge-promotion", "publish-python-artifacts"}
     run = proof["steps"][-1]
