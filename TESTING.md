@@ -420,10 +420,12 @@ executable admission and re-admission of initially-ready outcomes; its real
 process calls and repeated-apply assertions remain intact.
 Native CMD path/argument preservation and POSIX conductor-termination tests live
 in `test_installation_repair_boundaries.py`; the latter proves descendant cleanup
-before lock release for termination both before and during normal-exit cleanup,
-and preservation of the caller's signal handler. The same file covers executable
+before lock release for SIGINT and SIGTERM during action execution, spawn
+ownership handoff and normal-exit cleanup, plus preservation of caller handlers
+and ignored child dispositions. The same file covers executable
 admission failure without execution and binding drift during an initially-ready
-probe; source-content admission is shared by planning and actual invocation.
+probe and required-dependent blocker propagation after optional prerequisite
+binding refusal; source-content admission is shared by planning and actual invocation.
 
 The first-use items in
 `plugins/agent-machines/tests/test_payload_provisioning_powershell.py` separate

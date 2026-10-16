@@ -22,7 +22,7 @@ from installer_readiness.model import (
 from .installation_repair_admission import (
     HostAdmission, OwnerBinding, RepairAdmissionError, admit_host, digest, ordinary,
 )
-from .installation_repair_process import ActionResult, cancel_on_sigterm, run_action
+from .installation_repair_process import ActionResult, cancel_on_termination, run_action
 from .installation_repair_restarts import RestartJournal
 
 
@@ -303,7 +303,7 @@ def _readmit_owner(
     return owners[owner_id]
 
 
-@cancel_on_sigterm()
+@cancel_on_termination()
 def repair(
     project_root: Path, *, modules: Sequence[str] = (), apply: bool = False,
     expected_plan_digest: str | None = None, home: Path | None = None,
@@ -384,6 +384,7 @@ def _repair(
         if observation.reason == "readiness-interrupted":
             interrupted = True
             break
+    execution_halted = False
     for module in selected:
         outcome = outcomes[module.qualified_id]
         observation = outcome.before
@@ -401,7 +402,7 @@ def _repair(
             ):
                 blockers.append(dependency)
         outcome.blocked_by = tuple(blockers)
-        if not apply or interrupted or blockers or outcome.restart_required:
+        if not apply or interrupted or execution_halted or blockers or outcome.restart_required:
             continue
         owner = owners.get(module.owner.owner_id)
         if not owner or owner.refusal or platform not in module.platforms:
@@ -418,7 +419,7 @@ def _repair(
                 outcome.after = observation
                 if observation.reason == "readiness-interrupted":
                     interrupted = True
-                    break
+                    continue
                 fresh_owner = _readmit_owner(
                     project_root, modules, platform, plan_digest, module.owner.owner_id, home,
                 )
@@ -427,10 +428,11 @@ def _repair(
         except KeyboardInterrupt:
             outcome.after = Observation("unknown", "owner-revalidation-interrupted")
             interrupted = True
-            break
+            continue
         except RepairAdmissionError:
             outcome.installer = {"status": "refused", "reason": "owner-binding-changed"}
-            break
+            execution_halted = True
+            continue
         if fresh_owner.mode == "core-active":
             # An ordinary init action is not permission to synthesize a cell lifecycle operation.
             outcome.installer = {"status": "refused", "reason": "active-core-action-not-declared"}
@@ -446,20 +448,19 @@ def _repair(
         except KeyboardInterrupt:
             outcome.installer = {"status": "interrupted", "exitCode": None}
             interrupted = True
-            break
+            continue
         outcome.installer = {"status": result.status, "exitCode": result.exit_code}
         after = _observe(module, fresh_owner, platform, readiness_timeout)
         outcome.after = after
         if after.reason == "readiness-interrupted":
             interrupted = True
-            break
-    required_satisfied = not interrupted and all(
+    required_satisfied = not interrupted and not execution_halted and all(
         _satisfies(outcome.module, outcome.observed) and not outcome.restart_required
         and not outcome.blocked_by
         and outcome.installer_succeeded
         for outcome in outcomes.values() if outcome.module.classification is Requirement.REQUIRED
     )
-    satisfied = not interrupted and all(
+    satisfied = not interrupted and not execution_halted and all(
         _satisfies(outcome.module, outcome.observed) and not outcome.restart_required
         and not outcome.blocked_by
         and outcome.installer_succeeded

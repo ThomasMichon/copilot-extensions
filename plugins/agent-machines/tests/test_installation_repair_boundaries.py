@@ -99,6 +99,34 @@ def test_initially_ready_probe_cannot_skip_changed_owner_binding(repair_fixture,
     assert not any(row["attempted"] for row in result["outcomes"])
 
 
+def test_binding_refusal_propagates_optional_prerequisite_blockers(
+    repair_fixture, monkeypatch,
+):
+    from agent_machines.installation_repair_process import ActionResult
+
+    _, _, payload, configure, _ = repair_fixture
+    configure(classification="optional", dependencies=("agent-example/base",))
+    plan = invoke(repair_fixture)
+
+    def changed(module, owner, platform, *, readonly, timeout):
+        assert readonly, "installer executed"
+        (payload / "changed-during-observation").write_text("changed", encoding="utf-8")
+        return ActionResult("exited", 0, json.dumps({
+            "schema": "copilot-extensions.module-readiness", "version": 1,
+            "module": module.module_id, "state": "ready",
+        }).encode())
+
+    monkeypatch.setattr(repair_api, "_invoke", changed)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    base, child = result["outcomes"]
+    assert base["classification"] == "optional" and child["classification"] == "required"
+    assert base["installer"]["reason"] == "owner-binding-changed"
+    assert child["observedBefore"]["state"] == "ready"
+    assert child["blockedBy"] == [base["module"]]
+    assert not any(row["attempted"] for row in result["outcomes"])
+    assert not result["requiredSatisfied"] and result["status"] == "incomplete"
+
+
 @pytest.mark.parametrize("initially_unavailable", [False, True])
 def test_executable_changed_after_binding_cannot_run_a_probe(
     repair_fixture, tmp_path, monkeypatch, initially_unavailable,
@@ -143,23 +171,33 @@ def test_native_cmd_preserves_payload_path_and_argument_spaces(tmp_path, readonl
     assert result.stdout.decode().splitlines() == ["[first value]", "[last\\]"]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="native POSIX SIGTERM cleanup")
-def test_sigterm_during_admission_restores_handler_and_releases_apply_lock(
-    repair_fixture, monkeypatch,
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX signal cleanup")
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
+def test_signal_during_admission_restores_handler_and_releases_apply_lock(
+    repair_fixture, monkeypatch, signal_name,
 ):
     home, _, _, _, _ = repair_fixture
     plan = invoke(repair_fixture)
-    previous = signal.getsignal(signal.SIGTERM)
+    signum = getattr(signal, signal_name)
+    original = signal.getsignal(signum)
+
+    def caller_handler(*args):
+        pytest.fail("caller handler was not protected during repair")
+
+    signal.signal(signum, caller_handler)
 
     def terminated(*args, **kwargs):
-        assert signal.getsignal(signal.SIGTERM) is not previous
-        os.kill(os.getpid(), signal.SIGTERM)
+        assert signal.getsignal(signum) is not caller_handler
+        os.kill(os.getpid(), signum)
         pytest.fail("termination was ignored")
 
     monkeypatch.setattr(repair_api, "admit_host", terminated)
-    with pytest.raises(KeyboardInterrupt):
-        invoke(repair_fixture, apply=True, digest=plan["planDigest"])
-    assert signal.getsignal(signal.SIGTERM) is previous
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+        assert signal.getsignal(signum) is caller_handler
+    finally:
+        signal.signal(signum, original)
     with RestartJournal(home).locked():
         pass
 
@@ -175,23 +213,47 @@ def _wait_for(path: Path, process, timeout=8):
 def test_owner_action_does_not_inherit_a_blocked_termination_signal(tmp_path):
     result = run_action(
         [sys.executable, "-c", "import signal; "
-         "print(signal.SIGTERM in signal.pthread_sigmask(signal.SIG_BLOCK, []))"],
+         "print(bool({signal.SIGINT,signal.SIGTERM} & "
+         "signal.pthread_sigmask(signal.SIG_BLOCK, [])))"],
         cwd=tmp_path, environment=os.environ, timeout=5, readonly=False,
     )
     assert result.status == "exited" and result.exit_code == 0
     assert result.stdout.strip() == b"False"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="native POSIX spawn/cancellation race")
-def test_sigterm_during_spawn_defers_until_process_ownership_is_available(tmp_path, monkeypatch):
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX ignored signal inheritance")
+def test_owner_action_retains_caller_ignored_signal_dispositions(tmp_path):
+    previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        for signum in previous:
+            signal.signal(signum, signal.SIG_IGN)
+        result = run_action(
+            [sys.executable, "-c", "import signal; print([int(signal.getsignal(s)) "
+             "for s in (signal.SIGINT,signal.SIGTERM)])"],
+            cwd=tmp_path, environment=os.environ, timeout=5, readonly=True,
+        )
+        assert result.status == "exited" and result.exit_code == 0
+        assert result.stdout.strip() == b"[1, 1]"
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
+def test_signal_during_spawn_defers_until_process_ownership_is_available(
+    tmp_path, monkeypatch, signal_name,
+):
+    if os.name == "nt" and signal_name == "SIGTERM":
+        pytest.skip("Windows cancellation uses SIGINT, not POSIX SIGTERM")
+    signum = getattr(signal, signal_name)
     original = process_api.spawn_sync_in_kill_on_close_job
     children = []
-    previous = signal.getsignal(signal.SIGTERM)
+    previous = signal.getsignal(signum)
 
     def interrupted_spawn(*args, **kwargs):
         process, job = original(*args, **kwargs)
         children.append(process)
-        os.kill(os.getpid(), signal.SIGTERM)
+        signal.raise_signal(signum)
         return process, job
 
     monkeypatch.setattr(process_api, "spawn_sync_in_kill_on_close_job", interrupted_spawn)
@@ -201,18 +263,22 @@ def test_sigterm_during_spawn_defers_until_process_ownership_is_available(tmp_pa
             cwd=tmp_path, environment=os.environ, timeout=5, readonly=True,
         )
     assert len(children) == 1 and children[0].poll() is not None
-    assert signal.getsignal(signal.SIGTERM) is previous
+    assert signal.getsignal(signum) is previous
 
 
-@pytest.mark.skipif(os.name == "nt", reason="native POSIX SIGTERM cleanup and lock ordering")
-@pytest.mark.parametrize("first_during_cleanup", [False, True])
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX signal cleanup and lock ordering")
+@pytest.mark.parametrize("stage", ["action", "spawn", "cleanup"])
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
 def test_terminated_conductor_reaps_installer_before_unlocking(
-    repair_fixture, tmp_path, first_during_cleanup,
+    repair_fixture, tmp_path, stage, signal_name,
 ):
+    signum = getattr(signal, signal_name)
     home, project, payload, _, identity = repair_fixture
     descendant = tmp_path / "descendant.pid"
     cleanup = tmp_path / "cleanup.started"
     release = tmp_path / "cleanup.release"
+    spawning = tmp_path / "spawn.started"
+    release_spawn = tmp_path / "spawn.release"
     sleeper = tmp_path / "sleeper.py"
     sleeper.write_text(
         "import os,time\nfrom pathlib import Path\n"
@@ -223,13 +289,25 @@ def test_terminated_conductor_reaps_installer_before_unlocking(
     installer = (
         f"  '{sys.executable}' '{sleeper}' </dev/null >/dev/null 2>&1 &\n"
         f"  while [ ! -f '{descendant}' ]; do sleep .01; done\n  exit 0"
-        if first_during_cleanup else
+        if stage == "cleanup" else
         f"  '{sys.executable}' '{sleeper}' &\n  wait\n  exit 0"
     )
     script.write_text(script.read_text().replace(
         '  printf ready > "$state"; exit 0', installer,
     ), encoding="utf-8")
     plan = invoke(repair_fixture, selection=("base",))
+    spawn_hook = "" if stage != "spawn" else (
+        "original_spawn=runner.spawn_sync_in_kill_on_close_job\n"
+        "def paused_spawn(*args, **kwargs):\n"
+        "    process,job=original_spawn(*args,**kwargs)\n"
+        "    if kwargs.get('allow_breakaway'):\n"
+        f"        Path({str(spawning)!r}).touch()\n"
+        "        deadline=time.monotonic()+8\n"
+        f"        while not Path({str(release_spawn)!r}).exists() and time.monotonic()<deadline:\n"
+        "            time.sleep(.02)\n"
+        "    return process,job\n"
+        "runner.spawn_sync_in_kill_on_close_job=paused_spawn\n"
+    )
     conductor = tmp_path / "conductor.py"
     conductor.write_text(
         "import json,time\nfrom pathlib import Path\n"
@@ -244,6 +322,7 @@ def test_terminated_conductor_reaps_installer_before_unlocking(
         "            time.sleep(.02)\n"
         "    original(pid,sig)\n"
         "runner.os.killpg=paused_cleanup\n"
+        + spawn_hook +
         f"result=repair(Path({str(project)!r}),home=Path({str(home)!r}),"
         f"modules={[identity + '::agent-example/base']!r},apply=True,"
         f"expected_plan_digest={plan['planDigest']!r})\n"
@@ -256,17 +335,26 @@ def test_terminated_conductor_reaps_installer_before_unlocking(
     )
     try:
         _wait_for(descendant, process)
-        if not first_during_cleanup:
-            os.kill(process.pid, signal.SIGTERM)
+        if stage != "cleanup":
+            if stage == "spawn":
+                _wait_for(spawning, process)
+            os.kill(process.pid, signum)
+            if stage == "spawn":
+                with pytest.raises(RepairAdmissionError, match="already active"):
+                    with RestartJournal(home).locked():
+                        pytest.fail("lock released during spawn ownership handoff")
+                os.kill(int(descendant.read_text()), 0)
+                release_spawn.touch()
         _wait_for(cleanup, process)
-        if first_during_cleanup:
-            os.kill(process.pid, signal.SIGTERM)
+        if stage == "cleanup":
+            os.kill(process.pid, signum)
         with pytest.raises(RepairAdmissionError, match="already active"):
             with RestartJournal(home).locked():
                 pytest.fail("lock released while the installer was still alive")
         os.kill(int(descendant.read_text()), 0)
-        os.kill(process.pid, signal.SIGTERM)
+        os.kill(process.pid, signum)
         release.touch()
+        release_spawn.touch()
         stdout, stderr = process.communicate(timeout=10)
         assert process.returncode == 0, stderr.decode()
         assert json.loads(stdout)["interrupted"]
@@ -276,6 +364,7 @@ def test_terminated_conductor_reaps_installer_before_unlocking(
         assert not stat.exists() or stat.read_text().split()[2] == "Z"
     finally:
         release.touch()
+        release_spawn.touch()
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
         process.wait(timeout=5)

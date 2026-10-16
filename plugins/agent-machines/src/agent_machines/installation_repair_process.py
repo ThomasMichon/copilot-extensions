@@ -17,32 +17,47 @@ from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 MAX_OUTPUT = 64 * 1024
 _termination = threading.local()
+_CANCEL_SIGNALS = (
+    (signal.SIGINT,) if os.name == "nt" else (signal.SIGINT, signal.SIGTERM)
+)
 
 
-def _cancel_sigterm(signum, frame):
+def _ignore_cancellation():
+    for signum in _CANCEL_SIGNALS:
+        signal.signal(signum, signal.SIG_IGN)
+
+
+def _cancel_signal(signum, frame):
     _termination.pending = True
     if not getattr(_termination, "deferring", False):
         # A second termination request must not interrupt descendant cleanup.
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        _ignore_cancellation()
         raise KeyboardInterrupt
 
 
 @contextmanager
-def cancel_on_sigterm():
+def cancel_on_termination():
     """Keep CLI termination inside the same cleanup/lock lifetime as cancellation."""
-    if os.name == "nt" or threading.current_thread() is not threading.main_thread():
+    if threading.current_thread() is not threading.main_thread():
         yield
         return
-    previous = signal.getsignal(signal.SIGTERM)
-    if previous is _cancel_sigterm:
+    previous = {signum: signal.getsignal(signum) for signum in _CANCEL_SIGNALS}
+    if (
+        any(handler is _cancel_signal for handler in previous.values())
+        and all(handler is _cancel_signal or handler == signal.SIG_IGN
+                for handler in previous.values())
+    ):
         yield
         return
     _termination.pending = False
-    signal.signal(signal.SIGTERM, _cancel_sigterm)
     try:
+        for signum, handler in previous.items():
+            if handler != signal.SIG_IGN:
+                signal.signal(signum, _cancel_signal)
         yield
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        for signum, handler in reversed(tuple(previous.items())):
+            signal.signal(signum, handler)
 
 
 @dataclass(frozen=True)
@@ -52,7 +67,7 @@ class ActionResult:
     stdout: bytes = b""
 
 
-@cancel_on_sigterm()
+@cancel_on_termination()
 def run_action(
     argv: Sequence[str], *, cwd: Path, environment: Mapping[str, str],
     timeout: float, readonly: bool, cmd: bool = False,
@@ -71,7 +86,7 @@ def run_action(
         command = subprocess.list2cmdline(argv[:4]) + " " + argv[4]
     if os.name != "nt":
         kwargs["start_new_session"] = True
-    # Defer in Python rather than masking SIGTERM, which a spawned service would inherit.
+    # Defer in Python rather than masking signals, which a spawned service would inherit.
     _termination.deferring = True
     try:
         process, job = spawn_sync_in_kill_on_close_job(
@@ -82,7 +97,7 @@ def run_action(
     except BaseException as error:
         _termination.deferring = False
         if getattr(_termination, "pending", False):
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            _ignore_cancellation()
             raise KeyboardInterrupt from error
         if isinstance(error, (OSError, RuntimeError)):
             return ActionResult("launch-failed", None)
@@ -124,7 +139,7 @@ def run_action(
     try:
         _termination.deferring = False
         if getattr(_termination, "pending", False):
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            _ignore_cancellation()
             raise KeyboardInterrupt
         for stream, retain in ((process.stdout, True), (process.stderr, False)):
             assert stream is not None
@@ -158,5 +173,5 @@ def run_action(
         finally:
             _termination.deferring = False
         if getattr(_termination, "pending", False):
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            _ignore_cancellation()
             raise KeyboardInterrupt
