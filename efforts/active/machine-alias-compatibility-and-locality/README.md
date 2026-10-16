@@ -123,10 +123,9 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
   the original identity repair in #5689.
 - [ ] Follow the release pipeline and verify the promoted snapshot contains
   the repair, rather than inferring release from commit ancestry.
-  Blocked by #6848: the trusted release-branch artifact validator cannot
-  promote its own already-merged fix. The retained pipeline owner needs
-  explicit authorization for the documented bootstrap exception; normal
-  deployment authorization does not grant that exception.
+  The explicitly authorized workflow-only bootstrap #6867 has merged to
+  `main`; #6848 still owns the containing promotion and release qualification.
+  Bootstrap merge alone does not release the alias or readiness repairs.
 - [ ] Install the released repair through the unified update flow in both
   adopting environments; verify the selected running versions.
 
@@ -173,6 +172,24 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-16 - Authorized bootstrap merged; containing release remains open
+- The retained recovery owner landed workflow-only #6867 as
+  `ad7376904b0e622f7f44abf516cbef560b322f36` at `2026-10-16T05:51:54Z`.
+  Its exact published head, `332c6fd5e4d89b0cb7b7cce5b0409ab3ebd034aa`,
+  received independent approval and passing source-admission and hosted
+  provisioning proof. The genuine cleanup-order finding was corrected before
+  merge; the earlier head's green proof was not reused as new-head evidence.
+- This clears the exceptional bootstrap prerequisite, not Phase 3's release
+  gate. Promotion run `38855568035` started from trusted `main` commit
+  `8abb234719a922e5a8e280f2bb0b6864adfae474` before the bootstrap merged;
+  its existence is not evidence of a promotion using the repaired workflow.
+  The retained #6848 owner still owns normal containing-release qualification.
+- The effort remains Active. Verify the regenerated release actually contains
+  #5689 and #6856, then perform the authorized unified Windows/WSL updates and
+  all-existing-worktree and Manager acceptance. No installed result, runtime
+  update, manual promotion, policy waiver, archive or resource closure is
+  claimed. Attribution-only #6815 remains deferred until deployment.
 
 ### 2026-10-15 - Source merged and native proof complete; release remains blocked
 - The original #5689 merged as `24f6f61df26f57456c91cfa9ce98e84763266bc7`
