@@ -134,6 +134,13 @@ def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) ->
     for index, (key, value) in enumerate(entries, base):
         result[f"GIT_CONFIG_KEY_{index}"] = key
         result[f"GIT_CONFIG_VALUE_{index}"] = value
+    if "GIT_CONFIG_PARAMETERS" in env:
+        # Git applies parameters after counted entries. Append routing last using
+        # Git's single-quote encoding, retaining original parameters for replay.
+        parameters = " ".join(
+            "'" + f"{key}={value}".replace("'", "'\\''") + "'" for key, value in entries
+        )
+        result["GIT_CONFIG_PARAMETERS"] = env["GIT_CONFIG_PARAMETERS"] + " " + parameters
     return result
 
 
@@ -211,6 +218,7 @@ def _probe(
     if candidate is not None:
         key = "GH_TOKEN_" + re.sub(r"[^A-Z0-9]", "_", src.owner.upper())
         probe_env[key] = candidate
+        probe_env["GH_HOST"] = src.host
     result = runner(["git", "ls-remote", src.url, "HEAD"], cwd=src.cwd, env=probe_env)
     if result.missing:
         raise ResolverUnavailable("git is not available")
@@ -247,10 +255,7 @@ def _check_token(secret: str, src: Source, expected: str | None, env, runner) ->
 def _alternatives(item: SourceAuth, env: Mapping[str, str], runner) -> list[dict[str, str]]:
     src, expected = item.source, item.expected_account
     attempts = []
-    secret = env_token(src.owner, env)
-    if src.host != "github.com" and env.get("GH_HOST", "").casefold() != src.host.casefold():
-        # An ordinary HTTPS Git host is not a destination for a GitHub token.
-        secret = ""
+    secret = env_token(src.owner, env, src.host)
     if secret:
         attempts.append({"method": "env", **_check_token(secret, src, expected, env, runner)})
         if attempts[-1]["status"] == "ok":

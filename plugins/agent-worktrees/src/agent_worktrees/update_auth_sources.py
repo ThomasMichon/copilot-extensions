@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from plugin_resolve import RepoPluginSettings, read_repo_settings
 
-from . import config as cfg, git_ops
+from . import bare_anchor_sync, config as cfg, git_ops
 from .update_auth import Source, source
 
 
@@ -95,6 +95,11 @@ def anchors() -> list[Source]:
         if not repo.anchor or repo.anchor in seen or not (Path(repo.anchor) / ".git").exists():
             continue
         seen.add(repo.anchor)
+        anchor = Path(repo.anchor)
+        if not bare_anchor_sync.is_bare(anchor) and bare_anchor_sync.branch_skip_reason(
+            anchor, repo.default_branch
+        ):
+            continue
         item = source(
             "anchor:" + repo.anchor,
             remote_url(repo.remote, Path(repo.anchor)),

@@ -32,6 +32,16 @@ def is_bare(path: str | os.PathLike[str]) -> bool:
     return probe.returncode == 0 and probe.stdout.strip() == "true"
 
 
+def branch_skip_reason(anchor: str | os.PathLike[str], default_branch: str) -> str | None:
+    """Why a non-bare anchor will not fetch during update."""
+    current = git_ops.current_branch(anchor)
+    if current is None:
+        return "detached HEAD -- skipped"
+    if current != default_branch:
+        return f"on '{current}', not '{default_branch}' -- skipped"
+    return None
+
+
 def sync_bare_anchor(
     path: str, declared_branch: str | None, *, remote: str = "origin",
 ) -> tuple[str, str]:

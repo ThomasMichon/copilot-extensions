@@ -22,9 +22,15 @@ def format_attributes(attributes: Mapping[str, str]) -> str:
     return "".join(f"{key}={value}\n" for key, value in attributes.items()) + "\n"
 
 
-def env_token(owner: str, env: Mapping[str, str]) -> str:
+def env_token(owner: str, env: Mapping[str, str], host: str = "github.com") -> str:
+    enterprise = host.casefold() != "github.com"
+    if enterprise and env.get("GH_HOST", "").casefold() != host.casefold():
+        return ""
     key = "GH_TOKEN_" + re.sub(r"[^A-Z0-9]", "_", owner.upper())
-    return env.get(key) or env.get("GH_TOKEN") or env.get("GITHUB_TOKEN") or ""
+    names = ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN") if enterprise else ()
+    return env.get(key) or next(
+        (env[name] for name in (*names, "GH_TOKEN", "GITHUB_TOKEN") if env.get(name)), ""
+    )
 
 
 def helper_timeout(env: Mapping[str, str]) -> float:
@@ -32,7 +38,9 @@ def helper_timeout(env: Mapping[str, str]) -> float:
 
 
 def _config_key(key: str) -> bool:
-    return key == "GIT_CONFIG_COUNT" or key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+    return key in ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS") or key.startswith(
+        ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+    )
 
 
 def original_environment(env: Mapping[str, str]) -> dict[str, str]:
@@ -92,7 +100,7 @@ def route(operation: str, stdin: str, env: Mapping[str, str]) -> str:
             filled = run_chain("get", {**attributes, "username": account}, env)
             return format_attributes(filled) if filled.get(SECRET_KEY) else ""
         if selected["method"] == "env":
-            secret = env_token(owner, env)
+            secret = env_token(owner, env, host)
         elif selected["method"] == "gh":
             args = ["gh", "auth", "token", "--hostname", host, "--user", account]
             token_env = {

@@ -1569,10 +1569,14 @@ User `settings.local.json` overrides `settings.json` before repository overrides
 an exact registered repository keeps its own account override, not a sibling's.
 The report resolves ancestor or transported marketplace settings through the same
 context selection as normal update, including its active-project fallback.
+Non-bare anchors on detached or non-default branches are excluded from preflight,
+matching the sync eligibility decision rather than inventing an auth requirement.
 
 Public sources short-circuit anonymously. Other sources first exercise the
 caller's configured credentials through a read-only router, then try an
 environment token, the mapped `gh` account, and `git credential fill`. A candidate
+uses case-insensitive host matching; enterprise environment tokens require the
+matching explicit `GH_HOST`, and discovery and replay share token selection. It
 must pass both its mapped-account check and a read-only Git contents probe;
 repository metadata permission alone does not establish fetch permission. Each
 subprocess is bounded, non-interactive, headless on Windows, and retains at
@@ -1586,7 +1590,9 @@ branch is not an authentication failure.
 
 A working setup gets no environment overlay. Only failed sources acquire an
 environment-only Git command-scope overlay, appended after inherited command
-configuration so local helpers cannot override it. Routes are qualified by
+configuration so local helpers cannot override it. Overrides use counted Git
+entries and, when inherited, appended `GIT_CONFIG_PARAMETERS`; the original
+parameter bytes are retained for original-configuration replay. Routes are qualified by
 host and repository: fixing or denying one repository must not change another
 working repository under the same owner. Other requests delegate to Git under
 the caller's original configuration at the child's actual working directory,

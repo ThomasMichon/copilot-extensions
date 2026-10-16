@@ -242,7 +242,7 @@ def test_real_git_router_does_not_run_poisoned_local_helpers_after_routing(tmp_p
         alternative={"method": "env"},
     )
     overlay = auth.fallback(auth.AuthReport([item]))
-    environment = {**os.environ, "GH_TOKEN_TEAM": "env-fixture"}
+    environment = {**os.environ, "GH_TOKEN_TEAM": "env-fixture", "GH_HOST": "example.test"}
     env = overlay.environment(environment)
     result = process.run(
         ["git", "-c", "credential.helper=!exit 72", "credential", "fill"],
@@ -335,6 +335,145 @@ def test_report_only_is_readonly_and_never_calls_update_steps(monkeypatch, capsy
     )
     assert context.cmd_report(args) == 4
     assert json.loads(capsys.readouterr().out)["all_ok"] is False
+
+
+@pytest.mark.parametrize("scope", ["probe", "fallback"])
+def test_inherited_git_parameters_cannot_replace_readonly_routing(tmp_path, monkeypatch, scope):
+    import shlex
+
+    _clean_git_env(monkeypatch, tmp_path)
+    writes = tmp_path / "credential-writes"
+    helper = (
+        "!f() { if test $1 = get; then echo username=original; echo "
+        + router.SECRET_KEY
+        + "=fixture; else echo $1 >> "
+        + shlex.quote(writes.as_posix())
+        + "; fi; }; f"
+    )
+    parameters = " ".join(
+        "'" + value.replace("'", "'\\''") + "'"
+        for value in ("credential.helper=", "credential.helper=" + helper)
+    )
+    base = {**os.environ, "GIT_CONFIG_PARAMETERS": parameters}
+    attributes = "protocol=https\nhost=example.test\npath=team/repo\n"
+    if scope == "probe":
+        def probe(argv, **kwargs):
+            return process.run(
+                ["git", "credential", "approve"],
+                input=attributes + "username=test\n" + router.SECRET_KEY + "=fixture\n\n",
+                **kwargs,
+            )
+
+        assert auth._probe(auth.SourceAuth(_source(cwd=tmp_path), []), base, False, probe) == "ok"
+    else:
+        overlay = auth.fallback(
+            auth.AuthReport([auth.SourceAuth(_source(), [], status="auth_required")])
+        )
+        env = {**overlay.environment(base), "CE_UPDATE_AUTH_READONLY": "1"}
+        denied = process.run(
+            ["git", "credential", "fill"], cwd=tmp_path, env=env, input=attributes + "\n"
+        )
+        assert denied.status != 0
+        replay = process.run(
+            ["git", "credential", "fill"],
+            cwd=tmp_path,
+            env=env,
+            input=attributes.replace("team/repo", "team/other") + "\n",
+        )
+        assert replay.status == 0, replay.stderr
+        assert router.parse_attributes(replay.stdout)[router.SECRET_KEY] == "fixture"
+    assert not writes.exists(), "read-only routing let an inherited helper store credentials"
+    assert router.original_environment(base)["GIT_CONFIG_PARAMETERS"] == parameters
+
+
+@pytest.mark.parametrize(
+    ("host", "token_name", "gh_host"),
+    [
+        ("GitHub.com", "GH_TOKEN", ""),
+        ("enterprise.test", "GH_ENTERPRISE_TOKEN", "enterprise.test"),
+        ("enterprise.test", "GITHUB_ENTERPRISE_TOKEN", "ENTERPRISE.TEST"),
+    ],
+)
+def test_environment_token_selection_matches_host_in_discovery_and_replay(
+    host, token_name, gh_host
+):
+    item = auth.source("source", f"https://{host}/team/repo")
+    env = {token_name: "fixture-secret", "GH_HOST": gh_host}
+    report = auth.report(
+        [item], env=env, runner=Probe(gh=False), account_for=lambda _: "mapped"
+    )
+    assert report.results[0].status == "fixable_by_fallback"
+    assert report.results[0].alternative["method"] == "env"
+    answer = router.route(
+        "get",
+        f"protocol=https\nhost={host.lower()}\npath=team/repo\n\n",
+        auth.fallback(report).environment(env),
+    )
+    assert router.parse_attributes(answer)[router.SECRET_KEY] == "fixture-secret"
+
+
+@pytest.mark.parametrize("host", ["github.com", "unrelated.test"])
+def test_enterprise_environment_token_never_reaches_another_host(host):
+    probe = Probe(gh=False)
+    report = auth.report(
+        [auth.source("source", f"https://{host}/team/repo")],
+        env={"GH_ENTERPRISE_TOKEN": "fixture-secret", "GH_HOST": "enterprise.test"},
+        runner=probe,
+        account_for=lambda _: "mapped",
+    )
+    assert report.results[0].status == "auth_required"
+    assert not any(argv[:2] == ["gh", "api"] for argv, _ in probe.calls)
+
+
+@pytest.mark.parametrize("branch", ["feature", None])
+def test_skipped_anchor_does_not_create_an_auth_requirement(tmp_path, monkeypatch, branch):
+    _clean_git_env(monkeypatch, tmp_path)
+    anchor = tmp_path / "anchor"
+    subprocess.run(
+        ["git", "init", "-q", "-b", branch or "main", str(anchor)],
+        check=True, **git_ops.no_window_kwargs(),
+    )
+    if branch is None:
+        subprocess.run(
+            ["git", "-C", str(anchor), "-c", "user.name=Test", "-c",
+             "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"],
+            check=True, **git_ops.no_window_kwargs(),
+        )
+        subprocess.run(
+            ["git", "-C", str(anchor), "checkout", "--detach", "-q"],
+            check=True, **git_ops.no_window_kwargs(),
+        )
+    repo = cfg.RepoConfig(
+        anchor=str(anchor), worktree_root=str(tmp_path / "worktrees"), default_branch="main",
+        remote="https://example.test/team/repo",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="windows",
+        repo_name="example", repos={"example": repo},
+    )
+    monkeypatch.setattr(cfg, "active_project", lambda: "example")
+    monkeypatch.setattr(cfg, "load_config", lambda: config)
+    monkeypatch.setattr(sources, "marketplaces", lambda _: [])
+    monkeypatch.setattr(context, "_marketplace_context", lambda: None)
+    monkeypatch.setattr(
+        git_ops, "fast_forward_worktree", lambda *a, **k: pytest.fail("skipped anchor fetched")
+    )
+    seen = []
+
+    def report(items):
+        seen.extend(items)
+        return auth.AuthReport(
+            [auth.SourceAuth(item, [], status="auth_required") for item in items]
+        )
+
+    monkeypatch.setattr(auth, "report", report)
+
+    def steps(args):
+        update_runtime._fast_forward_project_anchors()
+        return 0
+
+    assert context.run_update(argparse.Namespace(no_anchor_sync=False), steps) == 0
+    assert seen == []
 
 
 def test_failing_repo_does_not_route_another_repo_of_the_same_owner(monkeypatch):
