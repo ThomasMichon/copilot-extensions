@@ -48,15 +48,15 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
         handle = history["session_handle"]
         native = native or handle_natives.get(handle)
         is_retired = bool(history["conversation_retired"]) or bool(
-            handle and history["release_requested"]
+            history["release_requested"]
             and history["state"] in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED}
         )
         if native:
             known.add(native)
             if is_retired:
                 retired.add(native)
-        elif handle and is_retired:
-            raise TaskError("retired session handle has no proven native identity")
+        elif is_retired and (handle or history["release_requested"]):
+            raise TaskError("retired conversation has no proven native identity")
         elif handle and not handle.startswith("local-body:"):
             raise TaskError("retained bare session handle has no proven native identity")
     return sorted(known), sorted(retired)
@@ -67,12 +67,4 @@ def inherited_retirement(conn: Any, row: Any, task: Any) -> bool:
     if not row["conversation_retired"] or row["agent_info"] or row["session_handle"]:
         return False
     _, retired = native_bindings(conn, row, task)
-    if not retired:
-        return False
-    # A handleless explicit release has no attributable native to supersede.
-    return not conn.execute(
-        "SELECT 1 FROM spawn_reservations WHERE worktree=? "
-        "AND (task_id=? OR creation_key=?) AND conversation_retired=1 "
-        "AND session_handle IS NULL AND release_requested=1 LIMIT 1",
-        (row["worktree"], task.id, row["creation_key"]),
-    ).fetchone()
+    return bool(retired)

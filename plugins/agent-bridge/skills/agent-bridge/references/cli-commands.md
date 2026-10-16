@@ -316,6 +316,9 @@ be discarded (or the cancel signature *persists* across sends). See the
 # behind your delivery cursor is (head/acked) -- without dumping the feed.
 <agent-bridge catalog argv[0]> status <session-id>
 <agent-bridge catalog argv[0]> status <session-id> --steps 5   # also show the last 5 collapsed steps
+# Exact full SessionInfo JSON (native/worktree/project/path and readiness facts).
+# Unlike compact status and resume acknowledgements, this is a full identity read.
+<agent-bridge catalog argv[0]> status <session-id> --full
 
 # Wait for a running session's current turn
 <agent-bridge catalog argv[0]> wait <session-id>

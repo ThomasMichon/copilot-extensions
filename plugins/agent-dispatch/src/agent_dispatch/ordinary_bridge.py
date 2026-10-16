@@ -233,6 +233,16 @@ def start(
         return subprocess.run([*prefix, *argv], input=prompt_input, capture_output=True,
                               text=True, check=False, timeout=timeout, **no_window_kwargs())
 
+    def resumed_info(session_id: str) -> dict:
+        result = run(["--json", "status", session_id, "--full"])
+        if result.returncode:
+            raise BridgeCarriedSessionBusy("resumed ordinary agent full identity is unavailable")
+        response = _json_result(result)
+        validate_resumed(response, project=project)
+        if response["session_id"] != session_id:
+            raise TaskError("resumed ordinary agent full identity changed bridge session")
+        return {**response, "fact_kind": "resumed"}
+
     from .ordinary_assignment import current_task, read_owner
     def assignment_record() -> dict:
         current_task(client, task)
@@ -283,9 +293,11 @@ def start(
                 response = _json_result(resumed)
                 if resumed.returncode or response.get("session_id") != session_id:
                     raise BridgeCarriedSessionBusy("strict ordinary resume did not preserve the retained bridge identity")
+                current = resumed_info(session_id)
+                if identity(current) != actual:
+                    raise TaskError("strict ordinary resume changed retained native/workspace identity")
                 if info.get("fact_kind") == "resumed":
-                    validate_resumed(response, project=project)
-                    info = {**response, "fact_kind": "resumed"}
+                    info = current
             elif status != "idle":
                 raise BridgeCarriedSessionBusy(f"retained ordinary agent is not idle: {status}")
         except (TaskError, DispatchError, OSError, subprocess.TimeoutExpired) as exc:
@@ -312,8 +324,10 @@ def start(
                     if resumed.returncode:
                         raise BridgeCarriedSessionBusy(resumed.stderr or resumed.stdout or "strict worktree resume refused")
                     response = _json_result(resumed)
-                    validate_resumed(response, project=project)
-                    info = {**response, "fact_kind": "resumed"}
+                    resumed_id = response.get("session_id")
+                    if not isinstance(resumed_id, str) or not resumed_id:
+                        raise TaskError("strict worktree resume returned no bridge session identity")
+                    info = resumed_info(resumed_id)
                     actual = identity(info)
                     if (actual.native != head or actual.worktree != reservation["worktree"]
                             or actual.path != reservation["worktree_path"]):

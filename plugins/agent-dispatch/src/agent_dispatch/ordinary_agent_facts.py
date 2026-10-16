@@ -53,7 +53,7 @@ def validate_resumed(info: dict, *, project: str | None = None) -> dict:
         info["durable_session_id"] != info["acp_session_id"]
         or info.get("status") != "idle"
         or info.get("read_only") is not False
-        or info.get("at_rest") is not False
+        or type(info.get("at_rest")) is not bool
         or "liveness" not in info
         or (info["liveness"] is not None and info["liveness"] != "active")
         or any(field in info for field in ("ready", "created", "acquisition_outcome", "connection"))

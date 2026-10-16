@@ -2431,7 +2431,13 @@ created-agent storage → send the assigned task → store returned session info
 The created-agent facts are visible in the task's `spawn_reservation.agent_info`;
 readiness is not execution. A storage failure sends nothing. Interrupted send
 retries retain the same handle: reuse an idle agent, or strictly resume a
-stopped one, never create a replacement. Both paths recheck the authenticated
+stopped one, never create a replacement. Dispatch reads and validates the
+full `SessionInfo` with `status <session-id> --full` after a strict resume;
+the compact resume acknowledgement is not identity or readiness evidence.
+Receipt-proven terminal retirement remains binding even if interruption occurred
+before the session handle was stored. A different proven, unretired current head
+can be resumed, but an explicitly released conversation with unknown identity
+cannot authorize a replacement. Both paths recheck the authenticated
 reservation/task admission fence immediately before delivery. That coordinator
 transaction is a pre-send admission point, not a cross-service transaction:
 later holds still gate claim/start. The ordinary send itself requires Bridge

@@ -68,6 +68,13 @@ def startup(tmp_path, monkeypatch):
                 "turn_index": 1, "native_session_id": "native-a",
             }), "")
         if command == "status":
+            if "--full" in argv:
+                return subprocess.CompletedProcess(argv, 0, json.dumps({
+                    "session_id": "bridge-a", "acp_session_id": "native-a",
+                    "durable_session_id": "native-a", "worktree_id": "worktree-a",
+                    "project": "example", "target_dir": "synthetic-worktree-a",
+                    "status": "idle", "read_only": False, "at_rest": True, "liveness": None,
+                }), "")
             return subprocess.CompletedProcess(argv, 0, '{"status":"stopped"}', "")
         assert command == "resume" and "--strict" in argv
         return subprocess.CompletedProcess(argv, 0, '{"session_id":"bridge-a"}', "")
@@ -139,7 +146,9 @@ def test_interrupted_send_retries_retained_handle_without_create(startup, monkey
     monkeypatch.setattr(ordinary_bridge.subprocess, "run", original)
     ordinary_bridge.start(task, client=client, agent="local", project="example",
                           charter="reviewer", prompt="assigned task")
-    assert [call[0] for call in calls] == ["create", "store", "store", "store", "status", "resume", "store", "send"]
+    assert [call[0] for call in calls] == [
+        "create", "store", "store", "store", "status", "resume", "status", "store", "send",
+    ]
 
 
 @pytest.mark.parametrize("change", [

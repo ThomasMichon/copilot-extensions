@@ -256,6 +256,9 @@ def _cmd_status(args: argparse.Namespace) -> None:
     if getattr(args, "session_id", None):
         core._cmd_session_status(args)
         return
+    if getattr(args, "full", False):
+        print("[FAIL] status --full requires a session ID", file=sys.stderr)
+        sys.exit(2)
     client = core._get_client(ensure=False)
     base = getattr(client, "_base", "")
     try:
@@ -287,10 +290,12 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
 
     core = _core()
     client = core._get_client(ensure=False)
-    caller_id = core._caller_id_for(args)
     sid = args.session_id
     try:
-        st = client.get_session_status(sid, caller_id=caller_id)
+        if getattr(args, "full", False):
+            core._json_out(client.get_session(sid))
+            return
+        st = client.get_session_status(sid, caller_id=core._caller_id_for(args))
     except BridgeClientError as exc:
         if exc.status == 404:
             print(f"[FAIL] Session {sid} not found", file=sys.stderr)
@@ -652,6 +657,11 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
         "session_id",
         nargs="?",
         help="Session ID -- show that dispatch's compact status (state, in-flight tool + elapsed, cursor lag) instead of service health",
+    )
+    status_p.add_argument(
+        "--full",
+        action="store_true",
+        help="Emit the exact session's full SessionInfo as JSON instead of compact status",
     )
     status_p.add_argument(
         "--steps",

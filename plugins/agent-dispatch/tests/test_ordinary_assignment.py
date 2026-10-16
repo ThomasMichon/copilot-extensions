@@ -52,7 +52,7 @@ def assigned(tmp_path, monkeypatch, request):
         "session_id": "bridge-a", "acp_session_id": "native-a",
         "durable_session_id": "native-a", "worktree_id": "worktree-a",
         "project": "execution-project", "target_dir": worktree_path,
-        "status": "idle", "read_only": False, "at_rest": False, "liveness": None,
+        "status": "idle", "read_only": False, "at_rest": True, "liveness": None,
     }
     calls = []
 
@@ -95,6 +95,11 @@ def assigned(tmp_path, monkeypatch, request):
         if command == "resume":
             assert argv == ["bridge", "--json", "resume", "worktree-a", "--strict"]
             assert kwargs.get("input") is None
+            return subprocess.CompletedProcess(argv, 0, json.dumps({
+                "session_id": response["session_id"], "status": "idle", "verb": "loaded",
+            }), "")
+        if command == "status":
+            assert argv == ["bridge", "--json", "status", "bridge-a", "--full"]
             return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
         if command == "create":
             assert "--worktree-id" in argv
@@ -156,7 +161,7 @@ def test_ordinary_assignment_resumes_same_native_before_one_send(assigned, legac
     before_task = queue.get(task["id"])
     result = _start(assigned)
     assert result["worktree"] == "worktree-a" and result["native_session_id"] == "native-a"
-    assert calls == ["record", "resume", "record", "resumed-store", "record", "resumed-store", "send"]
+    assert calls == ["record", "resume", "status", "record", "resumed-store", "record", "resumed-store", "send"]
     info = queue.get_reservation(task["spawn_reservation_key"]).agent_info
     assert info["status"] == "idle" and info["durable_session_id"] == "native-a"
     assert "ready" not in info and "connection" not in info
@@ -385,7 +390,7 @@ def test_ordinary_fresh_creation_does_not_claim_bridge_workspace_ownership(assig
 @pytest.mark.parametrize("change", [
     {"acp_session_id": "other-native"}, {"durable_session_id": "other-native"},
     {"target_dir": "other-path"}, {"project": "other-project"}, {"worktree_id": "other-worktree"},
-    {"status": "running"}, {"read_only": True}, {"at_rest": True}, {"liveness": "unknown"},
+    {"status": "running"}, {"read_only": True}, {"at_rest": None}, {"liveness": "unknown"},
     {"ready": True},
 ])
 def test_ordinary_assignment_resume_facts_must_be_actual_and_exact(assigned, change):
@@ -393,7 +398,7 @@ def test_ordinary_assignment_resume_facts_must_be_actual_and_exact(assigned, cha
     response.update(change)
     with pytest.raises(bridge.BridgeCarriedSessionBusy):
         _start(assigned)
-    assert calls == ["record", "resume"]
+    assert calls == ["record", "resume", "status"]
     assert queue.get_reservation(task["spawn_reservation_key"]).agent_info is None
 
 

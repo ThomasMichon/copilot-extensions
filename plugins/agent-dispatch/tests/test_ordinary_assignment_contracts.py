@@ -227,6 +227,44 @@ def test_ordinary_assignment_retirement_resolves_carried_cli_producer_first(assi
     assert "create" not in calls
 
 
+@pytest.mark.parametrize("head", ["native-a", "native-b", None])
+def test_ordinary_assignment_receipt_before_handle_keeps_terminal_retirement(assigned, head):
+    queue, task, _, record, response, calls = assigned
+    _legacy(queue, task)
+    old_key = task["spawn_reservation_key"]
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET session_handle=NULL WHERE key=?", (old_key,))
+    queue.fail_spawn(old_key, detail="interrupted before recording handle", release_requested=True)
+    current, admitted = queue.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert admitted and current.session_handle is None
+    task["spawn_reservation_key"] = current.key
+    record.update(last_session_id=head, session_count=2 if head else 0)
+    response.update(acp_session_id=head, durable_session_id=head)
+    facts = reservation_native_facts(queue, current.key)
+    assert facts["retired_native_session_ids"] == ["native-a"]
+    if head == "native-b":
+        _start(assigned)
+        assert calls.count("resume") == calls.count("send") == 1
+        assert queue.get_reservation(current.key).agent_info["acp_session_id"] == head
+    else:
+        with pytest.raises(bridge.BridgeCarriedSessionBusy):
+            _start(assigned)
+        assert "resume" not in calls and "send" not in calls
+    assert "create" not in calls
+
+
+def test_ordinary_assignment_handleless_release_without_native_stays_unknown(assigned):
+    queue, task, _, record, _, calls = assigned
+    queue.fail_spawn(task["spawn_reservation_key"], detail="unproven release", release_requested=True)
+    current, admitted = queue.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert admitted and current.session_handle is None
+    task["spawn_reservation_key"] = current.key
+    record.update(last_session_id="native-b", session_count=2)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no proven native"):
+        _start(assigned)
+    assert not calls
+
+
 @pytest.mark.parametrize("head", ["native-a", "native-b"])
 def test_ordinary_assignment_exclusive_carry_keeps_original_handle_native(assigned, head):
     queue, task, _, record, _, calls = assigned

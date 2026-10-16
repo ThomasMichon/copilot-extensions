@@ -113,6 +113,11 @@ sharing the `exclusive_key` — perpetually failing a resume against a
 confirmed-gone body instead of ever reaching a fresh spawn. See
 `troubleshooting-agent-dispatch`'s "stuck on the same dead session" entry.
 
+For ordinary same-worktree recovery, a receipt proving the retired native
+conversation is binding even when the handle write never completed. A terminal
+release without any native identity evidence remains unknown and refuses
+automatic resume or creation.
+
 Retired reservations keep session and allocation cleanup as separate
 `conclusion_state`/`conclusion_detail` metadata. Positive body absence first
 retires the active reservation atomically; only then may the supervisor run the
