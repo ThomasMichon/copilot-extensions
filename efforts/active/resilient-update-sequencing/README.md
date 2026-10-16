@@ -1018,3 +1018,27 @@ achieved by rearranging today's combined installer invocations.
   `SimpleNamespace` import in the updated auth fixture. Removed that import;
   required lint is rerun normally, not bypassed. Fresh review and all
   exact-head checks remain open.
+
+### 2026-10-16 - Transitive release fixtures and native budget evidence
+- The next exact-head CI run passed the shared-library and real POSIX fork
+  lanes, but Logger's two fresh-release tests failed because their synthetic
+  canonical root omitted plugin-activation's newly declared lease dependency.
+  Added that library to the fixture and a direct materialization regression.
+  Production context staging already copies the full canonical library root.
+- The staged Worktrees import fixture had the same incomplete closure, hidden
+  by importing the missing package from the development environment. It now
+  stages the declared dependency and verifies activation, preservation, lease
+  and operation modules all load from the installed copy after source cleanup.
+  The complete staged-install file passed four cases with one platform skip.
+- Actual Windows Logger provisioning passed in 291.00 seconds within the
+  unchanged 300-second group budget. The separate snapshot-only first-use
+  test exhausted that budget without an assertion failure. Native inspection
+  observed signed-Python venv/ensurepip construction before offline package
+  effects; avoiding fixture cache copies or selecting the real offline-UV
+  venv route did not establish a passing first-use result. Those experiments
+  and diagnostic instrumentation were removed, not shipped as speculative
+  performance fixes.
+- Retain the native first-use discrepancy with the existing #5694/#6919
+  performance owner. No deadline increase, omitted coverage, competing
+  constructor, retry waiver or installed update is authorized. Current-head
+  review/CI, native budget closure and the parent running-state gate remain open.

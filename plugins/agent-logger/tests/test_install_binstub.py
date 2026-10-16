@@ -257,6 +257,7 @@ def _stage_payload(tmp_path: Path) -> Path:
         "agent-procutil",
         "dropin-registry",
         "plugin-resolve",
+        "single-instance-lease",
         "plugin-activation",
     ):
         shutil.copytree(_PLUGIN_ROOT.parents[1] / "libs" / lib, staged_libs / lib)
@@ -307,6 +308,14 @@ def _stage_release_payload(tmp_path: Path) -> Path:
         assert library.is_relative_to(payload.resolve())
         assert (library / "pyproject.toml").is_file()
     return payload
+
+
+@pytest.mark.guard
+def test_release_payload_materializes_activation_closure(tmp_path: Path) -> None:
+    payload = _stage_release_payload(tmp_path)
+    lease = payload / "libs" / "single-instance-lease"
+    assert (lease / "pyproject.toml").is_file()
+    assert (lease / "src" / "single_instance_lease" / "operation.py").is_file()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
