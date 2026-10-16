@@ -325,7 +325,7 @@ class WorktreeRefreshOwner:
                     "superseded" if epoch != self.epoch or self.closed
                     else self.last_outcome or "superseded"
                 )
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 outcome = "failed" if task.done() else "timed-out"
             except Exception:
                 # The holder callback logs the actual failure; this is wire evidence.

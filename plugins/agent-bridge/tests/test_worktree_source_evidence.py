@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from types import SimpleNamespace
@@ -89,3 +90,31 @@ async def test_projection_age_is_not_renewed_by_repeated_reads() -> None:
     second = refresh.validate_inventory(raw)
     assert first is not None and second is not None
     assert abs(first - second) < 0.1
+
+
+async def test_python310_async_timeout_preserves_pending_holder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LegacyAsyncTimeout(Exception):
+        pass
+
+    owner = refresh.WorktreeRefreshOwner()
+    owner.bind("source", ["local"], available=True)
+    release = asyncio.Event()
+
+    async def read(epoch: int) -> None:
+        await release.wait()
+
+    async def expire(*args, **kwargs) -> None:
+        raise LegacyAsyncTimeout
+
+    task = owner.ensure(read)
+    monkeypatch.setattr(asyncio, "TimeoutError", LegacyAsyncTimeout)
+    monkeypatch.setattr(asyncio, "wait_for", expire)
+    try:
+        assert (await owner.wait(task))["outcome"] == "timed-out"
+        assert owner.pending
+        assert owner.ensure(read) is task
+    finally:
+        release.set()
+        await task
