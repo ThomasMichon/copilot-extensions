@@ -137,21 +137,33 @@ class TestBundleInputs:
             bundle.render(source)
 
 
-    @pytest.mark.parametrize("dynamic", ["dependencies", "optional-dependencies"])
+    @pytest.mark.parametrize("dynamic", ["dependencies", "optional-dependencies", "requires-python"])
     def test_dynamic_runtime_metadata_refuses(self, source, dynamic):
-        project(source, "plugins/client", "client", [], dynamic=[dynamic])
+        project(source, "plugins/other", "other")
+        path = project(
+            source, "plugins/client", "client", [], {"store": []}, dynamic=[dynamic],
+        )
+        if dynamic == "requires-python":
+            path.write_text(
+                path.read_text(encoding="utf-8").replace('requires-python = ">=3.10"\n', ""),
+                encoding="utf-8",
+            )
         with pytest.raises(bundle.InputError, match="dynamic runtime"):
             bundle.render(source)
 
 
-    @pytest.mark.parametrize("malformed", ["missing-name", "invalid-name", "dynamic-string"])
+    @pytest.mark.parametrize("malformed", [
+        "missing-project", "missing-name", "invalid-name", "dynamic-string",
+    ])
     def test_malformed_metadata_cannot_turn_first_party_into_registry_dependencies(
         self, source, malformed,
     ):
         project(source, "plugins/other", "other")
         path = source / "plugins/client/pyproject.toml"
         text = path.read_text(encoding="utf-8")
-        if malformed == "missing-name":
+        if malformed == "missing-project":
+            text = "[tool.uv]\npackage = false\n"
+        elif malformed == "missing-name":
             text = text.replace('name = "client"\n', "")
         elif malformed == "invalid-name":
             text = text.replace('name = "client"', 'name = "client-"')
@@ -239,6 +251,36 @@ class TestBundleInputs:
         )
         with pytest.raises(bundle.InputError, match="runtime metadata differs"):
             bundle.render(source)
+
+
+    @pytest.mark.parametrize("condition", [
+        'python_version >= "3.11"', 'sys_platform == "linux"',
+    ])
+    def test_conditional_first_party_python_range_cannot_narrow_the_whole_group(
+        self, source, condition,
+    ):
+        project(
+            source, "plugins/client", "client", [f"shared; {condition}"], {"store": []},
+        )
+        project(source, "libs/shared", "shared", ["attrs>=1"], requires_python=">=3.11")
+        with pytest.raises(bundle.InputError, match="conditional.*Python range"):
+            bundle.render(source)
+
+
+    def test_conditional_redundant_python_range_preserves_group_targets(self, source):
+        project(
+            source, "plugins/client", "client", ['shared; python_version >= "3.11"'],
+            {"store": []},
+        )
+        project(source, "libs/shared", "shared", ["attrs>=1"])
+        groups, ranges = bundle.collect_inputs(source)
+        from packaging.specifiers import SpecifierSet
+
+        assert SpecifierSet(ranges["core"]).contains("3.10")
+        attrs = Requirement(groups["core"][0])
+        assert attrs.name == "attrs"
+        assert not attrs.marker.evaluate({"python_version": "3.10"})
+        assert attrs.marker.evaluate({"python_version": "3.11"})
 
 
     @pytest.mark.parametrize("mapping", [

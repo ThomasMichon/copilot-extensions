@@ -35,11 +35,16 @@ Python 3.11 is the **tooling** prerequisite, not an imposed runtime floor.
 The generated project covers the declared group ranges, with each group's
 first-party Python constraints retained in UV's dependency-group metadata.
 The existing Index service and engine Python 3.10 target remains covered.
+Conditional first-party Python constraints are accepted only when each
+specifier already occurs in the group's unconditional constraints. Other
+conditional ranges refuse generation: flattening them would incorrectly
+narrow the entire group's supported targets.
 
 The candidate core includes Dispatch's MCP and Containers' provider-exec extras
 outside Windows ARM64. Other optional capabilities remain opt-in. Unknown
-first-party extras, duplicate normalized distribution names, dynamic runtime
-dependencies, direct references and unsupported source/extra-marker forms
+first-party extras, duplicate normalized distribution names, missing project
+metadata, dynamic runtime dependencies or Python ranges, direct references
+and unsupported source/extra-marker forms
 refuse generation rather than producing an incomplete closure.
 
 The already-wired install-contract test suite collects the input regression

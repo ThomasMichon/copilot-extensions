@@ -61,7 +61,7 @@ unowned input-generation foundation.
 
 ## Validation Plan
 
-- [x] Unit/contract: all 137 cases in the existing install-contract suite pass,
+- [x] Unit/contract: all 142 cases in the existing install-contract suite pass,
   including input graph, extras, cycles, target markers, refusals and drift.
 - [x] Simple end-to-end: a real CLI subprocess generates a fresh virtual
   project, checks it, detects changed source constraints without rewriting
@@ -102,3 +102,10 @@ second installation/provenance path.
   Python ranges derive from the first-party closure separately from the
   tooling prerequisite. All 137 wired cases pass; real-tree output retains
   Python 3.10. Current-head review/CI and merge remain open.
+- Three further review findings reproduced missing project metadata, dynamic
+  Python metadata and unconditional intersection of a conditional child's
+  Python range. Five new cases cover the failures and safe redundant-range
+  behavior. Generation now refuses missing/dynamic metadata and conditional
+  ranges not already represented by the unconditional group constraints,
+  instead of silently narrowing the target set. All 142 wired cases and
+  targeted lint pass; real-tree generate/check succeeds without input drift.

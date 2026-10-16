@@ -41,7 +41,7 @@ def _catalog(root: Path) -> dict[str, tuple[Path, dict]]:
         manifest = contained_path(manifest, root)
         data = _read(manifest)
         if "project" not in data:
-            continue
+            raise InputError(f"{manifest.relative_to(root)}: project metadata is required")
         project = data["project"]
         if not isinstance(project, dict):
             raise InputError(f"{manifest.relative_to(root)}: project must be a table")
@@ -78,8 +78,8 @@ def _runtime_metadata(project: dict, name: str) -> tuple[str, dict[str, frozense
     dynamic = project.get("dynamic", [])
     if not isinstance(dynamic, list) or any(not isinstance(value, str) for value in dynamic):
         raise InputError(f"{name}: dynamic fields must be a list of names")
-    if set(dynamic) & {"dependencies", "optional-dependencies"}:
-        raise InputError(f"{name}: dynamic runtime dependencies are unsupported")
+    if set(dynamic) & {"dependencies", "optional-dependencies", "requires-python"}:
+        raise InputError(f"{name}: dynamic runtime metadata is unsupported")
     extras = project.get("optional-dependencies", {})
     if not isinstance(extras, dict):
         raise InputError(f"{name}: optional dependencies must be a table")
@@ -154,6 +154,7 @@ def collect_inputs(root: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
         seen = set()
         external = set()
         python = set()
+        conditional_python = set()
         while pending:
             name, extra, inherited, manifest = pending.popleft()
             key = (name, extra, inherited, manifest)
@@ -168,7 +169,10 @@ def collect_inputs(root: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
             metadata = _runtime_metadata(data["project"], name)
             if metadata != _runtime_metadata(catalog[name][1]["project"], name):
                 raise InputError(f"{name}: selected source runtime metadata differs from canonical")
-            python.add(metadata[0])
+            if inherited:
+                conditional_python.add((name, metadata[0]))
+            else:
+                python.add(metadata[0])
             for value in _requirements(data["project"], extra, name):
                 requirement = Requirement(value)
                 dependency = canonicalize_name(requirement.name)
@@ -198,7 +202,12 @@ def collect_inputs(root: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
                     rendered += "; " + " and ".join(f"({condition})" for condition in sorted(conditions))
                 external.add(rendered)
         groups[group] = sorted(external)
-        python_ranges[group] = str(SpecifierSet(",".join(sorted(python))))
+        unconditional_python = SpecifierSet(",".join(sorted(python)))
+        for name, value in sorted(conditional_python):
+            # Group metadata cannot express a marker-dependent Python intersection.
+            if not set(SpecifierSet(value)).issubset(set(unconditional_python)):
+                raise InputError(f"{name}: conditional first-party Python range cannot be flattened")
+        python_ranges[group] = str(unconditional_python)
     return groups, python_ranges
 
 
