@@ -217,6 +217,22 @@ bounded source delta inspection.
 
 ### 2026-10-15 - Native maintenance acceptance and isolated Windows blocker
 
+- A subsequent review identified queued output inflating native action
+  durations. A blocked-sink regression failed before the repair: completion
+  could not be sampled until that sink was released. One in-process clock
+  reader now observes end records independently; action admission starts
+  its clock after prior output drains. Only boundary timestamps are queued
+  in memory, while diagnostics retain the existing private spool.
+  The repaired regression distinguishes a two-second action from an
+  additional 88 seconds of simulated drain delay. Spool initialization
+  failure is also explicitly reported without aborting native continuation.
+  Windows shared renderer coverage passed 30 cases; complete native Linux
+  telemetry and preparation files passed 111 and 21 cases respectively
+  (12 Windows-only skips), retaining the original limits.
+  Repeated the equivalent 256-line comparison against the final repair,
+  including clock-reader and job-shutdown costs: before 3.435s median,
+  after 1.900s, still 256 `date` processes versus none and one formatter.
+  All diagnostics remain; these supersede the pre-review overhead figures.
 - Review of #6904 identified cached-PID shutdown targeting. A contained
   pre-fix regression reproduced signalling a disposable unrelated process.
   Shutdown now verifies the parent shell's renderer job, command and PID

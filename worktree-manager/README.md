@@ -78,7 +78,9 @@ native UTC formatting. Bash, including Bash 3.2, uses one launch-owned
 command starts, providing the shared formatter's UTC and monotonic clocks
 without a Python or `date` process per line. These durations measure the
 containing action, not individual child lines or a verified serving-state
-postcondition. Child output
+postcondition. An in-process clock reader observes native completion records
+independently of the presentation sink, so draining queued diagnostics does
+not inflate a completed action's duration. Child output
 continues streaming to the setup log; interactive action summaries use the
 existing launch-status gate, leaving quiet/protocol stdout unchanged.
 Each pass still obtains a fresh plan and re-resolves the runtime afterward;

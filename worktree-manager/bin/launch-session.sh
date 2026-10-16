@@ -102,7 +102,11 @@ _start_setup_progress() {
         _SETUP_PROGRESS_FAILED=1
         return 0
     fi
-    : > "$_SETUP_PROGRESS_DIR/events"
+    if ! : > "$_SETUP_PROGRESS_DIR/events"; then
+        printf 'WARNING: could not initialize launch progress spool; timing is unavailable.\n' >&2
+        _SETUP_PROGRESS_FAILED=1
+        return 0
+    fi
     "$PYTHON" -m update_telemetry.shell \
         --events "$_SETUP_PROGRESS_DIR/events" --ready "$_SETUP_PROGRESS_DIR/ready" \
         --log "$SETUP_LOG" --parent "$$" --interactive "$_SHOW_LAUNCH_STATUS" \

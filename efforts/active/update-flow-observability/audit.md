@@ -288,10 +288,13 @@ alternating before/after trials include renderer startup and shutdown:
 | Added phase-boundary lines | 0 | 2 |
 | Per-message `date` processes | 256 | 0 |
 | Phase formatter processes | 0 | 1 |
-| Median fixture duration | 3.784 s | 1.252 s |
+| Median fixture duration | 3.435 s | 1.900 s |
 
-The individual before durations were 3.647, 3.946 and 3.784 seconds;
-after durations were 1.672, 1.059 and 1.252 seconds. This proves removal
+The final post-review before durations were 3.452, 3.435 and 3.320
+seconds; after durations were 2.644, 1.855 and 1.900 seconds, including
+the independent clock reader and job-owned shutdown. The earlier
+pre-review comparison had medians of 3.784s and 1.252s; it is not the
+final candidate's measurement. This proves removal
 of repeated formatting subprocesses and a lower cost in this fixture,
 not an end-to-end updater speedup. The remaining phase startup, clock-start
 acknowledgments, private spool and shutdown have a real cost; do not

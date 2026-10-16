@@ -132,11 +132,11 @@ class HumanOperation:
             raise ValueError(f"unknown human output state: {state}")
         self._write(message, state=state)
 
-    def complete(self, state: str = "done", message: str = "") -> None:
+    def complete(self, state: str = "done", message: str = "", *, elapsed: float | None = None) -> None:
         if state not in _STATES - {"starting", "running"}:
             raise ValueError(f"invalid completion state: {state}")
         if not self._completed:
-            elapsed = self.monotonic() - self.started
+            elapsed = self.monotonic() - self.started if elapsed is None else elapsed
             self._write(f"{state} {message}".rstrip(), completed=True, elapsed=elapsed)
             self._completed = True
 

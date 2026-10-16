@@ -151,6 +151,74 @@ def test_shell_progress_cli_uses_one_process_and_rejects_parent_loss(tmp_path):
     assert "failed RuntimeError:" in log.read_text(encoding="utf-8")
 
 
+def test_shell_action_clock_excludes_queued_output_drain(tmp_path, monkeypatch):
+    import io
+    import threading
+    import time
+
+    from update_telemetry import shell
+
+    clock = [10.0]
+    blocked = threading.Event()
+    release = threading.Event()
+    captured = threading.Event()
+    errors = []
+    events, ready = tmp_path / "events", tmp_path / "ready"
+    events.write_bytes(b"")
+
+    def monotonic():
+        value = clock[0]
+        if value == 12.0:
+            captured.set()
+        return value
+
+    class SlowSink(io.StringIO):
+        def write(self, text):
+            if "queued-diagnostic" in text:
+                blocked.set()
+                assert release.wait(5), "test did not release its output sink"
+            return super().write(text)
+
+    sink = SlowSink()
+    progress_type = shell.ShellProgress
+    monkeypatch.setattr(
+        shell, "ShellProgress",
+        lambda *a, **kw: progress_type(*a, **kw, monotonic=monotonic),
+    )
+
+    def append(*record):
+        with events.open("ab") as target:
+            target.write(b"".join(field.encode() + b"\0" for field in record))
+
+    def run():
+        try:
+            shell.render(events, ready, sink, io.StringIO(), parent=os.getppid(), interactive=False)
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    try:
+        append("begin", "1", "native-action")
+        deadline = time.monotonic() + 5
+        while (not ready.exists() or ready.read_text() != "1\n") and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert ready.read_text() == "1\n"
+        append("log", "INFO", "queued-diagnostic")
+        assert blocked.wait(5)
+        clock[0] = 12.0
+        append("end", "done", "exit 0")
+        append("finish", "", "")
+        assert captured.wait(2), "native completion clock waited for the blocked output sink"
+    finally:
+        clock[0] = 100.0
+        release.set()
+        worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert errors == []
+    assert "native-action done exit 0 [duration 2.0s]" in sink.getvalue()
+
+
 @pytest.mark.guard
 def test_human_operation_clocks_nesting_and_outcomes():
     import io

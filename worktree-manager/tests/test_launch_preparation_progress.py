@@ -508,3 +508,31 @@ def test_bash_progress_shutdown_does_not_signal_a_reused_pid(tmp_path, replaceme
     assert result.stdout == "unrelated process preserved\n"
     assert "retained private diagnostics" in result.stderr
     assert spool.exists()
+
+
+def test_bash_spool_initialization_failure_does_not_abort_native_launch(tmp_path):
+    if os.name != "posix":
+        pytest.skip("POSIX native shell contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.sh").read_text()
+    functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+    spool = tmp_path / "unusable-spool"
+    (spool / "events").mkdir(parents=True)
+    fixture = tmp_path / "spool-failure.sh"
+    fixture.write_text("\n".join([
+        "set -euo pipefail",
+        functions,
+        f"mktemp() {{ printf '%s\\n' {shlex.quote(str(spool))}; }}",
+        "_SETUP_LOG_DIR='unused'; _SETUP_PROGRESS_DIR=''; _SETUP_PROGRESS_PID=''; _SETUP_PROGRESS_JOB=''",
+        "_SETUP_PROGRESS_FAILED=0; _SHOW_LAUNCH_STATUS=0",
+        "_start_setup_progress",
+        '[[ "$_SETUP_PROGRESS_FAILED" == 1 && -z "$_SETUP_PROGRESS_PID" ]]',
+        "printf '%s\\n' 'native continuation preserved'",
+    ]))
+    result = subprocess.run(
+        ["/bin/bash", str(fixture)], cwd=tmp_path,
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "native continuation preserved\n"
+    assert "could not initialize launch progress spool" in result.stderr

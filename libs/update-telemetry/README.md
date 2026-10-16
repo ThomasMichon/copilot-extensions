@@ -127,6 +127,11 @@ temporary spool; records are not JSON/protocol stdout or durable update events.
 The renderer acknowledges startup and each action's live clock before native
 execution, streams diagnostics only to the setup log, and echoes selected
 status/completion records to stderr only for an interactive launch.
+One in-process clock thread observes completion records independently of
+the output sink. Admission starts the action clock after earlier output and
+the start line drain; completion uses the observed end boundary even if
+presentation is still draining diagnostics. Only boundary timestamps are
+retained in memory, not another queue of diagnostic text.
 
 `HumanLineBuffer` shares the existing native relay's credential-continuation
 handling; ordinary lines remain live while credential prefixes wait for their
