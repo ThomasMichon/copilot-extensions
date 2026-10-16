@@ -64,6 +64,8 @@ async def connect_remote_session(
         if session.client is not client:
             return
         replay = client._loading_session
+        if client.acp_session_id:
+            session.event_log.set_telemetry_identity(acp_session_id=client.acp_session_id)
         if replay:
             data = {**data, "history_replay": True}
         session.event_log.append(kind, data)
@@ -122,6 +124,7 @@ async def connect_remote_session(
         raise
     finally:
         if session.client is client:
+            session.event_log.set_telemetry_identity(acp_session_id=session.acp_session_id)
             manager._db.update_session_status(
                 session.session_id, session.status.value, time.time(),
             )

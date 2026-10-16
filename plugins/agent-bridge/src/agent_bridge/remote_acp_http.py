@@ -61,9 +61,7 @@ class HttpAcpTransport(RemoteTransport):
                 ) from None
             if response.status_code == 401 and attempt == 0 and self.auth is not None:
                 await response.aclose()
-                await asyncio.wait_for(
-                    self.auth.invalidate(self.context), self.target.timeout_seconds,
-                )
+                await self.refresh_auth()
                 continue
             if response.http_version != "HTTP/2":
                 await response.aclose()

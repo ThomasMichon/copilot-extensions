@@ -532,3 +532,26 @@ async def test_close_while_sse_get_opens_cannot_report_ready_success():
     await wire.close()
     with pytest.raises(RemoteTransportError, match="closed during stream setup"):
         await opening
+
+
+@pytest.mark.asyncio
+async def test_permission_event_retains_native_action_details_available_only_in_callback():
+    client, events = live_client()
+    call = ToolCallUpdate.model_validate({
+        "toolCallId": "native-tool", "title": "Inspect action",
+        "rawInput": {"command": "echo synthetic", "target": "/workspace/example.txt"},
+        "content": [{"type": "content", "content": {
+            "type": "text", "text": "Exact action details",
+        }}],
+        "locations": [{"path": "/workspace/example.txt", "line": 7}],
+    })
+    pending = asyncio.create_task(client._remote_permission(
+        [PermissionOption(option_id="explicit", name="Choose", kind="allow_once")],
+        "session-one", call, {},
+    ))
+    await asyncio.sleep(0)
+    event = events[-1][1]
+    assert event["tool_call"] == call.model_dump(by_alias=True, exclude_none=True)
+    assert client.resolve_permission(event["request_id"], "explicit")
+    await pending
+    await client._remote_transport.close()

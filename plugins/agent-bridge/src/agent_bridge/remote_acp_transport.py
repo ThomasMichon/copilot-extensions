@@ -77,6 +77,14 @@ class RemoteTransport:
         except Exception:
             raise RemoteTransportError("Remote credential acquisition failed") from None
 
+    async def refresh_auth(self) -> None:
+        try:
+            await asyncio.wait_for(
+                self.auth.invalidate(self.context), self.target.timeout_seconds,
+            )
+        except Exception:
+            raise RemoteTransportError("Remote authentication refresh failed") from None
+
     def encode(self, message: dict) -> bytes:
         try:
             raw = json.dumps(message, separators=(",", ":"), allow_nan=False).encode()

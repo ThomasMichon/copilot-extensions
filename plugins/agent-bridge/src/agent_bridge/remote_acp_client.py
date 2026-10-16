@@ -187,6 +187,7 @@ class RemoteAcpClientMixin:
     async def _remote_permission(self, options, session_id, tool_call, kwargs):
         data = {
             "title": getattr(tool_call, "title", None),
+            "tool_call": tool_call.model_dump(by_alias=True, exclude_none=True),
             "options": [o.model_dump(by_alias=True, exclude_none=True) for o in options],
         }
         return await self._remote_request(

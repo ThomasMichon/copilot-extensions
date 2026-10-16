@@ -83,9 +83,7 @@ class WsAcpTransport(RemoteTransport):
                 return self
             except InvalidStatus as exc:
                 if exc.response.status_code == 401 and attempt == 0 and self.auth:
-                    await asyncio.wait_for(
-                        self.auth.invalidate(self.context), self.target.timeout_seconds,
-                    )
+                    await self.refresh_auth()
                     continue
                 raise RemoteTransportError("Remote WS handshake refused") from None
             except Exception:

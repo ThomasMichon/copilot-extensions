@@ -11,6 +11,7 @@ import ssl
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
 import httpx
@@ -630,4 +631,35 @@ async def test_manager_stop_during_session_sse_open_keeps_attachment_stopped(
         await asyncio.wait_for(pending, 5)
     assert session.client is None and session.status.value == "stopped"
     assert manager.db.get_session(session.session_id)["status"] == "stopped"
+    assert proc.poll() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+async def test_auth_refresh_exception_never_exposes_provider_details(peer, mode):
+    url, context, proc = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/acp", transport=mode, allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"},
+    )
+    wire = authenticated_wire(spec, context)
+
+    class Provider:
+        async def headers(self, context):
+            return {}
+
+        async def invalidate(self, context):
+            raise RuntimeError("SYNTHETIC-SENSITIVE-MARKER")
+
+    wire.auth = Provider()
+    try:
+        with pytest.raises(RemoteTransportError) as failure:
+            if mode == "streamable-http":
+                await wire._request("POST", {"Content-Type": "application/json"}, b"{}")
+            else:
+                await wire.open()
+        assert "SYNTHETIC-SENSITIVE-MARKER" not in str(failure.value)
+        assert "SYNTHETIC-SENSITIVE-MARKER" not in "".join(traceback.format_exception(failure.value))
+    finally:
+        await wire.close()
     assert proc.poll() is None

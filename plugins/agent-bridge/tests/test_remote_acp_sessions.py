@@ -305,6 +305,9 @@ async def test_stop_during_remote_startup_does_not_resurrect_the_session(remote_
 @pytest.mark.asyncio
 async def test_accepted_session_id_survives_stream_start_failure(remote_manager, monkeypatch):
     manager, calls = remote_manager
+    from agent_bridge import telemetry
+    records = []
+    monkeypatch.setattr(telemetry, "emit", records.append)
 
     async def accepted_then_failed(client, **kwargs):
         client._acp_session_id = "accepted-server-session"
@@ -315,8 +318,21 @@ async def test_accepted_session_id_survives_stream_start_failure(remote_manager,
         await connect_remote_session(manager, "example")
     session = next(iter(manager._sessions.values()))
     assert manager.db.get_session(session.session_id)["acp_session_id"] == "accepted-server-session"
+    assert any(record.get("acp_session_id") == "accepted-server-session" for record in records)
     await manager.resume_session(session.session_id)
     assert calls[-1] == ("load", "accepted-server-session")
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_remote_start_telemetry_uses_learned_server_session_identity(remote_manager, monkeypatch):
+    from agent_bridge import telemetry
+
+    records = []
+    monkeypatch.setattr(telemetry, "emit", records.append)
+    manager, _ = remote_manager
+    session = await connect_remote_session(manager, "example")
+    assert any(record.get("acp_session_id") == session.acp_session_id for record in records)
     await manager.stop_session(session.session_id)
 
 
