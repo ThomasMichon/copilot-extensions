@@ -21,6 +21,8 @@ allocation provenance, not a dedup re-emission's new task ID. Admission still
 belongs to the current task and generation.
 
 A recorded native head selects strict worktree-scoped Bridge resume. Dispatch
+uses the positional `resume <worktree-id> --strict` CLI contract with default
+headless ACP selection, not a creation-only worktree selector flag. Dispatch
 stores the actual resumed `SessionInfo`, including its exact native, workspace,
 project and path, rather than manufacturing a fresh-created readiness receipt.
 Resume failures never fall through to create. Only positively indexed empty

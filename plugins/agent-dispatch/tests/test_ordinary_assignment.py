@@ -93,7 +93,7 @@ def assigned(tmp_path, monkeypatch, request):
         command = argv[2]
         calls.append(command)
         if command == "resume":
-            assert argv == ["bridge", "--json", "resume", "--worktree-id", "worktree-a", "--strict"]
+            assert argv == ["bridge", "--json", "resume", "worktree-a", "--strict"]
             assert kwargs.get("input") is None
             return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
         if command == "create":

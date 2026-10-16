@@ -308,7 +308,7 @@ def start(
                 if native_conflict(head, known, retired):
                     raise BridgeCarriedSessionBusy("ground head conflicts with known or retired native identity")
                 try:
-                    resumed = run(["--json", "resume", "--worktree-id", reservation["worktree"], "--strict"])
+                    resumed = run(["--json", "resume", reservation["worktree"], "--strict"])
                     if resumed.returncode:
                         raise BridgeCarriedSessionBusy(resumed.stderr or resumed.stdout or "strict worktree resume refused")
                     response = _json_result(resumed)
