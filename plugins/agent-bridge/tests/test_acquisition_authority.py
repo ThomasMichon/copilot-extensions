@@ -97,7 +97,7 @@ async def test_incomplete_record_never_supplies_absent_holder_proof(
 @pytest.mark.parametrize("changes", [
     {"id": "other"}, {"repo": "other-project"}, {"repo": None},
     {"path": None}, {"path": True}, {"path": "relative"}, {"path": "/fixture/../other"},
-    {"status": None}, {"status": {}}, {"status": "completed"},
+    {"status": None}, {"status": {}}, {"status": "unsupported"},
     {"session_count": False}, {"session_count": -1}, {"last_session_id": []},
     {"creation_nonce": True}, {"sessions_indexed": "false"}, {"execution_leg_opaque": 1},
     {"session_backend_opaque": None},
@@ -115,7 +115,7 @@ async def test_malformed_or_foreign_record_refuses_before_head(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["finalized", "complete", "archived"])
+@pytest.mark.parametrize("status", ["finalized", "complete", "completed", "archived"])
 async def test_positive_terminal_record_refuses_before_head(
     acquisition_request, monkeypatch, status,
 ):
@@ -124,6 +124,26 @@ async def test_positive_terminal_record_refuses_before_head(
     with pytest.raises(AcquisitionRefused) as error:
         await authority.verify_worktree(acquisition_request)
     assert error.value.code == "worktree_terminal"
+    assert command.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["finalizing", "completed"])
+async def test_durable_and_legacy_statuses_are_valid_metadata(monkeypatch, status):
+    command = AsyncMock(return_value=record_payload(status=status))
+    row = await authority.read_worktree_record("worktree-a", "project-a", command=command)
+    assert row["status"] == status
+    assert command.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_finalizing_record_retryably_refuses_before_head(acquisition_request, monkeypatch):
+    command = AsyncMock(return_value=record_payload(status="finalizing"))
+    monkeypatch.setattr(authority, "worktree_command", command)
+    with pytest.raises(AcquisitionRefused) as error:
+        await authority.verify_worktree(acquisition_request)
+    assert error.value.code == "transition_pending"
+    assert error.value.effect is None
     assert command.await_count == 1
 
 

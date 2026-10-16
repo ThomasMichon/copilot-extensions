@@ -99,7 +99,10 @@ async def read_worktree_record(
         "\0" in path or not (posix.is_absolute() or windows.is_absolute())
         or ".." in posix.parts or ".." in windows.parts
         or not isinstance(row.get("status"), str)
-        or row["status"] not in {"active", "complete", "pushed", "finalized", "orphaned", "archived"}
+        or row["status"] not in {
+            "active", "complete", "completed", "pushed", "finalizing",
+            "finalized", "orphaned", "archived",
+        }
     ):
         raise AcquisitionRefused("owner_response_invalid", "owner returned an invalid workspace path or status")
     count = row.get("session_count")
@@ -152,6 +155,8 @@ async def verify_worktree(request: AcquisitionRequest) -> tuple[dict[str, Any], 
         row.get("repo") != request.project or row.get("path") != request.worktree_path
     ):
         raise AcquisitionRefused("workspace_identity_conflict", "worktree owner changed execution identity")
+    if row.get("status") == "finalizing":
+        raise AcquisitionRefused("transition_pending", "worktree finalization is in progress")
     if row.get("status") in {"finalized", "complete", "completed", "archived"}:
         raise AcquisitionRefused("worktree_terminal", "worktree is terminal")
     head = parse_head_payload(json.dumps(await worktree_command(

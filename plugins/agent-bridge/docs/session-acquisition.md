@@ -56,7 +56,11 @@ use the ground owner's `record --worktree-id <id> --json`, independently of
 resident roster publication. Missing, unreadable, malformed or incompatible
 record responses explicitly refuse while retaining the same allocation and
 creation key for reconciliation. Old roster/projection responses are incompatible
-API shapes, not metadata authority. They never permanently terminalize the
+API shapes, not metadata authority. The durable `finalizing` status is valid
+metadata but refuses native creation or resumption with retryable
+`transition_pending`, preserving the keyed allocation rather than recording a
+permanent terminal result. Legacy `completed` remains a terminal status.
+Incompatible responses never permanently terminalize the
 allocation or authorize another create. A positively observed terminal workspace or retired
 native result still refuses replay. Ordinary same-key replay reconciles a
 previously terminalized pre-launch observation only when the ground owner now

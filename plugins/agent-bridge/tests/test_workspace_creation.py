@@ -63,6 +63,35 @@ def creation_rig(rig, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_finalizing_workspace_retains_retryable_original_allocation(creation_rig):
+    rig = creation_rig
+    rig.row["status"] = "finalizing"
+    for _ in range(2):
+        with pytest.raises(AcquisitionRefused) as refused:
+            await workspace_creation.start(
+                rig.manager, rig.target, key="logical-work", prompt="Do the work",
+            )
+        assert refused.value.code == "transition_pending"
+        assert refused.value.effect is None
+        assert rig.db.execute_read(
+            "SELECT state FROM workspace_embodiments"
+        )[0]["state"] == "allocated"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    assert not any(args[0] == "head-session" for args, _ in rig.calls)
+    rig.row["status"] = "active"
+    _, receipt = await workspace_creation.start(
+        rig.manager, rig.target, key="logical-work", prompt="Do the work",
+    )
+    assert receipt["worktree"]["id"] == rig.row["id"]
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert len(rig.manager.list_sessions()) == 1
+    assert len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("missing_read", [1, 2])
 @pytest.mark.parametrize("projected", [False, True])
 async def test_missing_workspace_observation_retains_allocation_for_exact_replay(

@@ -83,6 +83,8 @@ async def _workspace(
         row.get(field) != expected.get(field) for field in ("id", "repo", "path", "creation_nonce")
     ):
         raise AcquisitionRefused("creation_conflict", "original workspace identity changed")
+    if row.get("status") == "finalizing":
+        raise AcquisitionRefused("transition_pending", "original workspace finalization is in progress")
     if row.get("status") in {"finalized", "archived", "complete", "completed"}:
         raise AcquisitionRefused("creation_terminal", "original workspace is terminal")
     head = parse_head_payload(json.dumps(await worktree_command(
