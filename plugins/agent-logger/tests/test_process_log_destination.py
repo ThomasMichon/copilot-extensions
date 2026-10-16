@@ -11,6 +11,7 @@ from typing import BinaryIO
 import pytest
 
 from agent_logger.sync.publication_directory import PublicationDirectory, publication_directory
+from agent_logger.sync.provenance import windows_extended_path
 from agent_logger.sync.targets import filesystem
 
 pytestmark = [
@@ -298,3 +299,66 @@ def test_process_log_source_roots_readonly_source_rejection_cleans_temporary(
         assert sorted(p.name for p in dest.iterdir()) == [NAME]
     finally:
         evidence.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX parent directory durability")
+@pytest.mark.parametrize("creation", ["retry", "concurrent"])
+def test_process_log_destination_parent_flush_cannot_be_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, creation: str,
+) -> None:
+    source = _source(tmp_path)
+    dest = tmp_path / "new-destination"
+    parent_identity = (tmp_path.stat().st_dev, tmp_path.stat().st_ino)
+    original_fsync, original_mkdir = os.fsync, os.mkdir
+    failing = True
+    barriers = 0
+    raced = False
+
+    def concurrent_mkdir(
+        path: str | os.PathLike[str], mode: int = 0o777,
+        *, dir_fd: int | None = None,
+    ) -> None:
+        nonlocal raced
+        original_mkdir(path, mode, dir_fd=dir_fd)
+        if creation == "concurrent" and path == dest.name and not raced:
+            raced = True
+            raise FileExistsError(errno.EEXIST, "concurrent creator won")
+
+    def failed_flush(fd: int) -> None:
+        nonlocal barriers
+        info = os.fstat(fd)
+        if (info.st_dev, info.st_ino) == parent_identity:
+            barriers += 1
+            if failing:
+                raise OSError(errno.EIO, "parent durability failed")
+        original_fsync(fd)
+
+    monkeypatch.setattr(os, "mkdir", concurrent_mkdir)
+    monkeypatch.setattr(os, "fsync", failed_flush)
+    for _ in range(2):
+        with pytest.raises(OSError, match="parent durability failed"):
+            filesystem._copy_process_logs(source, dest)
+        assert dest.is_dir() and list(dest.iterdir()) == []
+    assert barriers == 2
+    assert raced == (creation == "concurrent")
+    failing = False
+    assert filesystem._copy_process_logs(source, dest) == (1, len(b"new evidence\n"), [])
+    assert barriers == 3
+    assert (dest / NAME).read_bytes() == b"new evidence\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows extended destination paths")
+def test_process_log_source_roots_native_long_destination_inspection_and_accounting(
+    tmp_path: Path,
+) -> None:
+    source = _source(tmp_path)
+    root = tmp_path / ("destination-" + "a" * 90) / ("nested-" + "b" * 90)
+    dest = root / "example" / "logs"
+    assert len(str(dest / NAME)) > 260
+    target = filesystem.LocalTarget({"path": str(root)})
+    first = target.push_process_logs(source, "example")
+    assert first.ok and first.file_count == 1 and first.byte_count == len(b"new evidence\n")
+    with open(windows_extended_path(dest / NAME), "rb") as stream:
+        assert stream.read() == b"new evidence\n"
+    second = target.push_process_logs(source, "example")
+    assert second.ok and second.file_count == 0 and second.byte_count == 0

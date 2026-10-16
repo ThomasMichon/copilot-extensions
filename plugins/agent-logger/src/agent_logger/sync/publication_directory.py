@@ -20,6 +20,13 @@ from agent_logger.sync.provenance import (
 class PublicationDirectory(ArchiveDirectory):
     """Write only bare filenames beneath one live destination boundary."""
 
+    def stat(self, name: str) -> os.stat_result:
+        if self.fd is None:
+            return os.stat(
+                windows_extended_path(self.path / self._name(name)), follow_symlinks=False,
+            )
+        return super().stat(name)
+
     def create(self, name: str) -> BinaryIO:
         name = self._name(name)
         if self.fd is None:
@@ -101,8 +108,7 @@ def publication_directory(path: Path) -> Iterator[PublicationDirectory]:
                     os.mkdir(component, dir_fd=fd)
                 except FileExistsError:
                     pass
-                else:
-                    os.fsync(fd)
+                os.fsync(fd)
                 fd = os.open(component, flags, dir_fd=fd)
                 stack.callback(os.close, fd)
         yield PublicationDirectory(absolute, fd)

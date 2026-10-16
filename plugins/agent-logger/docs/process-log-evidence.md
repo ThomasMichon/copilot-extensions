@@ -141,7 +141,9 @@ renamed after opening, publication stays in that original directory; a replaceme
 symlink cannot redirect later operations. Windows holds native handles denying
 ancestor rename through creation and payload I/O, then releases every handle at
 operation exit. Its final payload move retains the existing write-through move
-barrier; POSIX additionally fsyncs new parent entries and the replacement directory.
+barrier; POSIX additionally fsyncs every held parent and the replacement directory.
+Parent barriers also run for existing children, so retries after a failed flush
+and concurrent directory creation cannot bypass durability acknowledgement.
 Missing primitives or unsupported durability barriers fail explicitly.
 
 Source identity/size and entry revalidation still run before publication.
