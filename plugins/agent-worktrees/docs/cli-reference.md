@@ -765,6 +765,31 @@ completion of those exact children. Older bundles still support exact source
 references; an alias-only retry without either the source ledger or durable
 proof fails explicitly rather than guessing equivalence.
 
+## Resolve previews
+
+`resolve --dry-run --worktree-id <id>` is read-only, including with `--json`
+or when forwarded to another machine. It does not record a resume, assign a
+codename, reserve a random profile, stage or consume a launch prompt, refresh
+instructions, restore/reclaim a process, or append launch activity/trace logs.
+Existing record/session/seed state is inspected without creating writer lock
+sidecars. Execution-space authority, configuration preflight and seed
+revision/cold-start checks still apply; refusal does not change durable state.
+
+JSON existing-worktree previews retain the normal launch-plan shape and set
+`launch.preview` to `true`; the returned worktree retains its current resume
+count and timestamp. Base-repo JSON plans remain flat and set `preview: true`.
+Explicit profiles and existing-session profile replay remain visible. When a
+new random assignment would be needed, selection is deferred until a real
+launch: `launch.preview_warning` explains that no profile was reserved (the
+interactive preview prints the same warning). A preview's command is advisory,
+not an admitted launch; resolve again without `--dry-run` to execute.
+
+Restoring an existing worktree with `--restore --dry-run` is refused without
+restoring a session.
+`--json --new --dry-run` remains unsupported and creates nothing.
+Interactive dry-run requires an explicit worktree, `--new`, or `--base`;
+it does not open the state-maintaining picker.
+
 ## Remote launch options
 
 Machine-targeted JSON and interactive resolve use the same option policy.

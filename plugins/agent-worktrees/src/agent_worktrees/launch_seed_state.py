@@ -55,23 +55,30 @@ def _read(yaml_path: Path) -> LaunchSeed | None:
     return LaunchSeed(seed_id, "new" if kind == "new" else "resume", text, revision, handoff_id)
 
 
-def peek(yaml_path: Path) -> LaunchSeed | None:
+def peek(yaml_path: Path, *, read_only: bool = False) -> LaunchSeed | None:
+    """Read staged intent; previews never create a writer's lock sidecar."""
     if not state_path(yaml_path).exists():
         return None
+    if read_only:
+        return _peek_snapshot(yaml_path, read_only=True)
     with tracking._RecordLock(yaml_path, require_sidecar=True):
-        current = _read(yaml_path)
-        if current is None:
-            return None
-        try:
-            record = tracking.load_record(yaml_path)
-        except FileNotFoundError:
-            return None
-        if (
-            not getattr(record, "pending_seed", None)
-            and record.pending_seed_revision > current.revision
-        ):
-            return None
-        return current
+        return _peek_snapshot(yaml_path)
+
+
+def _peek_snapshot(yaml_path: Path, *, read_only: bool = False) -> LaunchSeed | None:
+    current = _read(yaml_path)
+    if current is None:
+        return None
+    try:
+        record = tracking.load_record(yaml_path)
+    except FileNotFoundError:
+        return None
+    if (
+        (read_only or not getattr(record, "pending_seed", None))
+        and record.pending_seed_revision > current.revision
+    ):
+        return None
+    return current
 
 
 def _write(yaml_path: Path, seed: LaunchSeed) -> None:

@@ -18,7 +18,7 @@ from .execution_spaces import ExecutionSpaceError, registry_for_config
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
-from .launch_progress import step
+from .launch_progress import preview_mode, step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 
 
@@ -431,6 +431,11 @@ def add_parsers(sub) -> None:
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
+    with preview_mode(getattr(args, "dry_run", False)):
+        return _cmd_resolve(args)
+
+
+def _cmd_resolve(args: argparse.Namespace) -> int:
     if (
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
@@ -440,7 +445,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         return cmd_request(args)
     if getattr(args, "defer_new_seed", None) is None:
         args.defer_new_seed = True
-    append_launch_event("resolve_handler_start")
+    if not getattr(args, "dry_run", False):
+        append_launch_event("resolve_handler_start")
     try:
         state = ResolveCommandState.from_args(args)
     except _ResolveEarlyExit as exc:
@@ -595,6 +601,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 output.err(str(exc))
                 return 1
 
+        if getattr(args, "dry_run", False):
+            output.err("--dry-run requires an explicit worktree, --new, or --base; no picker was opened")
+            return 2
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
         current_platform = cfg.detect_platform()
@@ -719,16 +728,17 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             preflight=launch_preflight,
         )
         env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
-        output._json_output(
-            {
-                "action": "exec",
-                "work_dir": work_dir,
-                "cmd": launch_cmd,
-                "env": env,
-                "post_exit": False,
-                "no_mux": True,
-            }
-        )
+        launch = {
+            "action": "exec",
+            "work_dir": work_dir,
+            "cmd": launch_cmd,
+            "env": env,
+            "post_exit": False,
+            "no_mux": True,
+        }
+        if getattr(state.args, "dry_run", False):
+            launch["preview"] = True
+        output._json_output(launch)
         return 0
 
     if state.use_new:
@@ -788,6 +798,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             compose_pair=True, config=config,
         )
     if getattr(state.args, "restore", False):
+        if getattr(state.args, "dry_run", False):
+            return output._json_error("--restore preview is unsupported; no session was restored", exit_code=3)
         session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
         restored = _perform_remux(
             worktree_id=record.worktree_id,
@@ -810,28 +822,28 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 "Previous launch-prompt handoff is unconfirmed; the seed is retained "
                 "but will not be automatically submitted twice.", exit_code=3,
             )
-    try:
-        with step("Recording worktree resume", worktree_id=worktree_id), tracking._RecordLock(
-            yaml_path, require_sidecar=True,
-        ):
-            record = tracking.load_record(yaml_path)
-            require_record_mutation(record, config)
-            tracking.mark_resumed(record, save=False)
-            tracking.save_record(record)
-    except ExecutionSpaceError as exc:
-        return output._json_error(str(exc), exit_code=3)
-    except TimeoutError as exc:
-        return output._json_error(
-            f"Cannot resolve {record.worktree_id}: contended by another process ({exc})",
-            exit_code=3,
+    if not getattr(state.args, "dry_run", False):
+        try:
+            with step("Recording worktree resume", worktree_id=worktree_id), tracking._RecordLock(
+                yaml_path, require_sidecar=True,
+            ):
+                record = tracking.load_record(yaml_path)
+                require_record_mutation(record, config)
+                tracking.mark_resumed(record, save=False)
+                tracking.save_record(record)
+        except ExecutionSpaceError as exc:
+            return output._json_error(str(exc), exit_code=3)
+        except TimeoutError as exc:
+            return output._json_error(
+                f"Cannot resolve {record.worktree_id}: contended by another process ({exc})",
+                exit_code=3,
+            )
+        activity.log_event(
+            "worktree_resumed",
+            worktree_id=record.worktree_id,
+            branch=record.branch,
+            resume_count=record.resume_count,
         )
-
-    activity.log_event(
-        "worktree_resumed",
-        worktree_id=record.worktree_id,
-        branch=record.branch,
-        resume_count=record.resume_count,
-    )
 
     no_resume = getattr(state.args, "no_resume", False)
     last_session = None
@@ -849,6 +861,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 generation_key=f"new:{record.worktree_id}",
                 explicit_profile=explicit_profile,
                 resume_session=last_session,
+                allocate_new=not getattr(state.args, "dry_run", False),
             )
     except profile_assignment.ProfileAssignmentError as exc:
         return output._json_error(str(exc), exit_code=3)
@@ -903,6 +916,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     }
     if selection.assignment is not None:
         launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+    if getattr(state.args, "dry_run", False):
+        launch["preview"] = True
+        if warning := getattr(selection, "warning", ""):
+            launch["preview_warning"] = warning
     project = config.repo_name
     if project:
         launch["project"] = project
@@ -936,7 +953,10 @@ def _resolve_noninteractive_worktree(state: ResolveCommandState) -> int:
     launch_preflight = _preflight_launch(config, state.args, plan_work_dir)
     if launch_preflight.error:
         return _core()._launch_preflight_error(launch_preflight)
-    if getattr(state.args, "restore", False) and not _restore_before_resume(record):
+    if (
+        getattr(state.args, "restore", False) and not getattr(state.args, "dry_run", False)
+        and not _restore_before_resume(record)
+    ):
         return 1
     profile = _resolve_profile(config, state.args)
     return _resolve_resume(

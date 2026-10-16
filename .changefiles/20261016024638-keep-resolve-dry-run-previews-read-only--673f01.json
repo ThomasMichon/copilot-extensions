@@ -1,0 +1,9 @@
+{
+  "comment": "Keep resolve dry-run previews read-only across JSON and interactive launch planning",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

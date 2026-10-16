@@ -6,20 +6,36 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 
 from . import activity
 from . import output
 
 HEARTBEAT_SECONDS = 10
+_preview = ContextVar("launch_preview", default=False)
+
+
+@contextmanager
+def preview_mode(enabled: bool) -> Iterator[None]:
+    """Keep preview progress visible without recording launch activity."""
+    token = _preview.set(enabled or _preview.get())
+    try:
+        yield
+    finally:
+        _preview.reset(token)
 
 
 @contextmanager
 def step(label: str, *, enabled: bool = True, worktree_id: str | None = None):
     started = time.monotonic()
+    recording = not _preview.get()
     step_id = uuid.uuid4().hex
     stopped = threading.Event()
     def record(state: str, *, error_type: str | None = None):
+        if not recording:
+            return
         activity.log_event(
             "launch_preparation",
             worktree_id=worktree_id,
