@@ -13,20 +13,16 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
     """Classify handles using their producing driver, not the retry's driver."""
     known = {task.owner_session_id} if task.owner_session_id else set()
     retired: set[str] = set()
-    classified_handles: set[str] = set()
+    handle_natives: dict[str, str] = {}
     histories = conn.execute(
         "SELECT s.*,a.native_session_id FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON a.reservation_key=s.key "
         "WHERE s.worktree=? AND (s.task_id=? OR s.creation_key=?)",
         (row["worktree"], task.id, row["creation_key"]),
     ).fetchall() if row["worktree"] else [row]
-    unclassified: set[str] = set()
+    evidence: list[tuple[Any, str | None]] = []
     for history in histories:
         handle = history["session_handle"]
-        is_retired = bool(history["conversation_retired"]) or bool(
-            handle and history["release_requested"]
-            and history["state"] in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED}
-        )
         native = history["native_session_id"] if "native_session_id" in history.keys() else None
         if history["agent_info"]:
             actual = identity(json.loads(history["agent_info"])).native
@@ -38,17 +34,26 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
                 raise TaskError("retained CLI native identity evidence conflicts")
             native = handle
         if native:
-            known.add(native)
             if handle:
-                classified_handles.add(handle)
+                if handle in handle_natives and handle_natives[handle] != native:
+                    raise TaskError("retained session handle has conflicting native identities")
+                handle_natives[handle] = native
+        evidence.append((history, native))
+    for history, native in evidence:
+        handle = history["session_handle"]
+        native = native or handle_natives.get(handle)
+        is_retired = bool(history["conversation_retired"]) or bool(
+            handle and history["release_requested"]
+            and history["state"] in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED}
+        )
+        if native:
+            known.add(native)
             if is_retired:
                 retired.add(native)
         elif handle and is_retired:
             raise TaskError("retired session handle has no proven native identity")
         elif handle and not handle.startswith("local-body:"):
-            unclassified.add(handle)
-    if unclassified - classified_handles:
-        raise TaskError("retained bare session handle has no proven native identity")
+            raise TaskError("retained bare session handle has no proven native identity")
     return sorted(known), sorted(retired)
 
 

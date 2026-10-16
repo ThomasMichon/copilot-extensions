@@ -94,8 +94,8 @@ def _record_agent(
                 from .ordinary_agent_facts import sessionless
                 if resumed or not sessionless(record):
                     raise TaskError("ordinary agent does not match the ground native head")
-        elif resumed:
-            raise TaskError("resumed agent requires the exact ground owner record")
+        elif resumed or row["worktree"] and not row["agent_info"]:
+            raise TaskError("assigned agent requires the exact ground owner record")
         if row["conversation_retired"] and not resumed:
             raise TaskError("retired history requires a proven current native head")
         known, retired = native_bindings(conn, row, task)

@@ -167,3 +167,59 @@ def test_ordinary_assignment_unknown_retired_bridge_native_stays_fenced(assigned
     with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no proven native"):
         _start(assigned)
     assert not calls
+
+
+def test_ordinary_assignment_created_route_requires_record_for_unrecorded_target(assigned):
+    queue, task, _, record, _, _ = assigned
+    _legacy(queue, task)
+    key = task["spawn_reservation_key"]
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET worktree_path=NULL WHERE key=?", (key,))
+    before = queue.get_reservation(key)
+    with TestClient(create_app_for(queue)) as api:
+        response = api.post(f"/spawn-reservations/{key}/created-agent", json={
+            "task_generation": task["generation"],
+            "agent_info": {
+                "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
+                "connection": {
+                    "worktree_id": record["id"], "repo": record["repo"],
+                    "native_session_id": record["last_session_id"],
+                    "target_dir": record["path"] + "-foreign",
+                },
+            },
+        })
+    assert response.status_code == 409
+    assert "requires the exact ground owner record" in response.json()["detail"]
+    assert queue.get_reservation(key) == before
+
+
+@pytest.mark.parametrize("head", ["native-a", "native-b"])
+def test_ordinary_assignment_retirement_resolves_carried_cli_producer_first(assigned, head):
+    queue, task, _, record, response, calls = assigned
+    old_key = task["spawn_reservation_key"]
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET driver='cli',session_handle='native-a' WHERE key=?",
+            (old_key,),
+        )
+    queue.defer_spawn(old_key, detail="legacy CLI transport interrupted")
+    carried, admitted = queue.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert admitted and carried.session_handle == "native-a" and carried.agent_info is None
+    queue.fail_spawn(carried.key, detail="carried conversation retired", release_requested=True)
+    current, admitted = queue.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert admitted and current.conversation_retired and current.session_handle is None
+    task["spawn_reservation_key"] = current.key
+    record.update(last_session_id=head, session_count=2)
+    response.update(acp_session_id=head, durable_session_id=head)
+    facts = reservation_native_facts(queue, current.key)
+    assert facts["retired_native_session_ids"] == ["native-a"]
+    assert facts["ordinary_assignment_error"] is None
+    if head == "native-b":
+        _start(assigned)
+        assert calls.count("resume") == calls.count("send") == 1
+        assert queue.get_reservation(current.key).conversation_retired is False
+    else:
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
+            _start(assigned)
+        assert calls == ["record"]
+    assert "create" not in calls
