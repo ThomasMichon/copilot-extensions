@@ -160,6 +160,9 @@ Generic chat text such as "yes" is never an approval. Unknown options, mismatche
 tokens, cross-session answers, repeated answers and stale generations refuse.
 Cancellation, withdrawal, disconnect and close invalidate pending answer
 authority. Reissued decisions require a new callback and fresh explicit answer.
+Every approval wait has its own `rpc_timeout_seconds` deadline, including an
+idle-session callback with no outstanding outbound RPC. Expiry closes the
+connection and refuses later answers.
 
 ## Authentication owner and limits
 

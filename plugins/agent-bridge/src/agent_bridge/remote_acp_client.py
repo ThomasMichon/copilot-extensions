@@ -173,7 +173,14 @@ class RemoteAcpClientMixin:
         })
         self._completion_event.set()
         try:
-            return await future
+            try:
+                return await asyncio.wait_for(
+                    future, self._remote_transport.target.rpc_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                reason = "Remote ACP approval deadline exceeded; answer authority expired"
+                self._remote_transport.fail(reason)
+                raise RemoteTransportError(reason) from None
         finally:
             self._remote_answers.pop(token, None)
 

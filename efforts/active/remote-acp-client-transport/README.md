@@ -177,6 +177,20 @@ ID already serves that role. Neither identity is an official ACP registration.
 
 ## Journal
 
+### 2026-10-16 — Independent approval expiry and interrupted SSE readiness
+
+- A delayed review identified idle/background approval waits lacking their
+  own clock and a cancelled session-stream opener reporting ready success.
+  Every live approval now has an independent deadline and invalidates its
+  connection on expiry, without depending on an outbound RPC.
+- Session SSE setup refuses closed/ended transports before and after its
+  readiness wait. Tests cover both low-level cancellation and actual manager
+  stop while a real HTTP2 session stream is opening; attachment fails and the
+  session stays stopped.
+- Remote transport and independent-peer selection: 64 passed, including late
+  permission/form answers refused after expiry with no outbound RPC pending.
+  Required review and full current-head CI remain open; no rollout.
+
 ### 2026-10-16 — Startup ownership and recoverable accepted identity
 
 - Followed the concurrent-startup path through the manager: late continuations

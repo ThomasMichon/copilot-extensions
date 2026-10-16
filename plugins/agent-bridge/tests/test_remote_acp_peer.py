@@ -593,3 +593,41 @@ async def test_immediate_session_stream_update_waits_for_owner_adoption(peer, mo
         assert not any(kind == "error" for kind, data in events)
     finally:
         await client.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manager_stop_during_session_sse_open_keeps_attachment_stopped(
+    peer, tmp_db, monkeypatch,
+):
+    url, context, proc = peer
+    spec = RemoteAcpTarget(
+        endpoint=url + "/acp", transport="streamable-http", allow_loopback_test=True,
+        auth={"source": "injected", "identity": "synthetic"},
+    )
+    original = AcpClient.start_remote
+    entered = asyncio.Event()
+
+    async def start(client, target, *, cookies=None):
+        wire = authenticated_wire(target, context, cookies)
+        request = wire._request
+
+        async def gated(method, headers, content=None):
+            if method == "GET" and headers.get("Acp-Session-Id"):
+                entered.set()
+                await asyncio.Event().wait()
+            return await request(method, headers, content)
+
+        wire._request = gated
+        await original(client, target, transport=wire)
+
+    monkeypatch.setattr(AcpClient, "start_remote", start)
+    manager = session_manager_from_config(tmp_db, ServiceConfig(remote_acp={"peer": spec}))
+    pending = asyncio.create_task(connect_remote_session(manager, "peer"))
+    await asyncio.wait_for(entered.wait(), 5)
+    session = next(iter(manager._sessions.values()))
+    await manager.stop_session(session.session_id)
+    with pytest.raises(RemoteTransportError, match="closed during stream setup"):
+        await asyncio.wait_for(pending, 5)
+    assert session.client is None and session.status.value == "stopped"
+    assert manager.db.get_session(session.session_id)["status"] == "stopped"
+    assert proc.poll() is None

@@ -28,8 +28,11 @@ def _install() -> None:
 
         def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
             record = previous(*args, **kwargs)
-            path = os.path.normcase(os.path.abspath(record.pathname))
-            if _REMOTE_SCOPE.get() and path.startswith(_SDK_ROOT):
+            sdk_record = (
+                _REMOTE_SCOPE.get() and isinstance(record.pathname, str)
+                and os.path.normcase(os.path.abspath(record.pathname)).startswith(_SDK_ROOT)
+            )
+            if sdk_record:
                 record.msg = "Remote ACP SDK diagnostic (details redacted)"
                 record.args = ()
                 record.exc_info = None

@@ -142,11 +142,15 @@ class HttpAcpTransport(RemoteTransport):
         await self._open_stream(session_id)
 
     async def _open_stream(self, session_id: str | None) -> None:
+        if self.closed or self._ended.is_set():
+            raise RemoteTransportError("Remote ACP connection closed during stream setup")
         if session_id in self._streams:
             return
         ready = self._streams[session_id] = asyncio.Event()
         self.task(self._consume(session_id, ready))
         await asyncio.wait_for(ready.wait(), self.target.timeout_seconds)
+        if self.closed or self._ended.is_set():
+            raise RemoteTransportError("Remote ACP connection closed during stream setup")
         if self._failure:
             raise self._failure
 

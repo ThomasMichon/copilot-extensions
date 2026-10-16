@@ -479,3 +479,56 @@ async def test_re_raised_sdk_validation_error_contains_no_untrusted_result_value
     assert "SYNTHETIC-SENSITIVE-MARKER" not in str(failure.value)
     assert "SYNTHETIC-SENSITIVE-MARKER" not in repr(failure.value)
     await client._remote_transport.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["permission", "form"])
+async def test_idle_approval_has_independent_deadline_and_refuses_late_answer(kind):
+    client, events = live_client()
+    client._remote_transport = RemoteTransport(target(rpc_timeout_seconds=1))
+    assert not client._remote_transport._pending
+    if kind == "permission":
+        pending = asyncio.create_task(client._remote_permission(
+            [PermissionOption(option_id="explicit", name="Choose", kind="allow_once")],
+            "session-one", ToolCallUpdate(tool_call_id="tool"), {},
+        ))
+    else:
+        pending = asyncio.create_task(client._remote_elicitation(
+            "Choose", SimpleNamespace(
+                session_id="session-one", tool_call_id="tool", requested_schema={},
+            ), {},
+        ))
+    await asyncio.sleep(0)
+    token = events[-1][1]["request_id"]
+    with pytest.raises(RemoteTransportError, match="approval deadline"):
+        await asyncio.wait_for(pending, 3)
+    if kind == "permission":
+        assert not client.resolve_permission(token, "explicit")
+    else:
+        assert not client.resolve_elicitation("tool", {}, request_id=token)
+    assert not client._remote_answers
+    await client._remote_transport.close()
+
+
+@pytest.mark.asyncio
+async def test_close_while_sse_get_opens_cannot_report_ready_success():
+    entered = asyncio.Event()
+    spec = RemoteAcpTarget(
+        endpoint="https://localhost/acp", transport="streamable-http",
+        auth={"source": "none", "identity": "synthetic"}, allow_loopback_test=True,
+    )
+    wire = HttpAcpTransport(spec)
+    wire._connection_id = "synthetic"
+
+    async def request(method, headers, content=None):
+        if method == "GET":
+            entered.set()
+            await asyncio.Event().wait()
+        return httpx.Response(202, extensions={"http_version": b"HTTP/2"})
+
+    wire._request = request
+    opening = asyncio.create_task(wire._open_stream("session-one"))
+    await entered.wait()
+    await wire.close()
+    with pytest.raises(RemoteTransportError, match="closed during stream setup"):
+        await opening
