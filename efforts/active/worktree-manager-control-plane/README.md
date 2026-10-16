@@ -1218,6 +1218,25 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-16** — Submitted-prompt recovery merged through
+  [#6176](https://github.com/ThomasMichon/copilot-extensions/pull/6176) as
+  `dc68e210ba09c64c9d4815bdf8fd125b8cc696b1`, from reviewed head
+  `73ea4ed4bc351885a0c1c56b25382e376dd82aa4`. Exact-head review approved with
+  no findings and the explicit required PR gate passed before managed merge.
+  The change retains accepted local-native prompts before launch failures,
+  validates private history stores, and fences native seed staging against
+  hosted-provider activation. Review follow-ups close structured-wrapper
+  version skew, disappearing SQLite journals, incompatible initialized stores,
+  and unsupported remote/cross-environment composer admission. Focused
+  validation includes 172 engine cases (one platform skip), 88 remote/CLI
+  cases, 64 history cases (four platform/privilege skips), and the final
+  16 native-fence cases. The merged PR claim is released and the source
+  worktree reconciled through the managed flow with recovery refs retained.
+  No installation, deployment or live cross-machine acceptance is claimed.
+  [Remote Picker Seed Parity](../remote-picker-seed-parity/README.md) retains
+  its release/live-validation obligations; this receipt does not complete that
+  effort or this umbrella's remaining configuration, AHP and update work.
+
 - **2026-10-14** — Implemented #6717's optional Configuration row-form preview
   candidate: strict provider result/row-target binding, bounded off-thread
   reads, Cancel-default consent, context/late-result fencing, reserved token
