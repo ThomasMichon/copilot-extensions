@@ -156,11 +156,19 @@ def reclaim_process_logs(
     age = settings.min_age_seconds
     if age is None:
         raise ValueError("process-log reclamation requires explicit retention age")
-    validate_required_log_targets(log_root, settings, targets)
+    requested = log_root.expanduser().absolute()
+    canonical = requested.resolve(strict=True)
+    selected_root = canonical.stat()
+    validate_required_log_targets(canonical, settings, targets)
     if not dry_run and os.name != "nt":
         raise OSError(errno.ENOTSUP, "exact-file process-log retirement requires native Windows")
-    requested = log_root.expanduser().absolute()
-    with archive_directory(requested) as root:
+    with archive_directory(canonical) as root:
+        opened_root = os.fstat(root.fd) if root.fd is not None else root.path.stat()
+        if (opened_root.st_dev, opened_root.st_ino) != (
+            selected_root.st_dev, selected_root.st_ino,
+        ):
+            raise ValueError("process-log source root changed after target resolution")
+        _validate_root(requested, root)
         for name in root.names():
             if not name.startswith("process-") or not name.endswith(".log"):
                 continue

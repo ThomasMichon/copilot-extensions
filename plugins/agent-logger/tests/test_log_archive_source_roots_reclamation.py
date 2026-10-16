@@ -413,3 +413,51 @@ def test_source_roots_reclamation_rechecks_target_bytes_after_publication(
     assert result.retained == 1 and result.retired == result.reclaimed_bytes == 0
     assert len(result.failed) == 1 and (source / NAME).read_bytes() == CONTENT
     assert targets[0].verify(REVISION).verified and not targets[1].verify(REVISION).verified
+
+
+def test_source_roots_reclamation_binds_source_root_before_target_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, targets = _prepare(tmp_path, monkeypatch)
+    original = reclamation.archive_directory
+
+    @contextmanager
+    def replaced(path: Path) -> Iterator[ArchiveDirectory]:
+        source.rename(tmp_path / "parked")
+        _zip(source)
+        (source / NAME).write_bytes(CONTENT)
+        with original(path) as root:
+            yield root
+
+    monkeypatch.setattr(reclamation, "archive_directory", replaced)
+    with pytest.raises(ValueError, match="root changed after target resolution"):
+        _run(source, targets, dry_run=True)
+    assert (source / NAME).read_bytes() == (tmp_path / "parked" / NAME).read_bytes() == CONTENT
+    assert all(target.directory is not None and not target.directory.exists() for target in targets)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX intentionally relocated ancestor")
+def test_source_roots_reclamation_rejects_source_alias_change_before_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, targets = _prepare(tmp_path, monkeypatch)
+    alias = tmp_path / "alias"
+    alias.symlink_to(source.parent, target_is_directory=True)
+    requested = alias / source.name
+    other = tmp_path / "other"
+    _zip(other / source.name)
+    (other / source.name / NAME).write_bytes(CONTENT)
+    original = reclamation.archive_directory
+
+    @contextmanager
+    def changed(path: Path) -> Iterator[ArchiveDirectory]:
+        alias.rename(tmp_path / "old-alias")
+        alias.symlink_to(other, target_is_directory=True)
+        with original(path) as root:
+            yield root
+
+    monkeypatch.setattr(reclamation, "archive_directory", changed)
+    with pytest.raises(ValueError, match="source root changed"):
+        _run(requested, targets, dry_run=True)
+    assert (source / NAME).read_bytes() == CONTENT
+    assert (other / source.name / NAME).read_bytes() == CONTENT
