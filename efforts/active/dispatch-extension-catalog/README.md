@@ -117,9 +117,9 @@ implementation and validation choices remain proposed means.
 
 ### Phase 2 - Owner-declared template discovery
 
-- [ ] Define consistent, documented template homes and provider declaration
+- [x] Define consistent, documented template homes and provider declaration
   metadata without putting inert templates into active registrar discovery.
-- [ ] Extend the owning catalog to enumerate builtin, enabled-plugin,
+- [x] Extend the owning catalog to enumerate builtin, enabled-plugin,
   repository and supported local contributions with qualified identity,
   revision, provenance, input requirements and explicit invalid/ambiguous states.
 - [ ] Preserve current activation checks, source isolation, inheritance and
@@ -708,3 +708,32 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   preparation, job budgets and aggregate dependencies; do not add a new job,
   dependency or advisory check. The workflow contract proves that independent
   route for helper, test, runner and workflow changes.
+
+### 2026-10-17 - Read-only discovery merged; atomic steering next
+
+- #7144 merged at 18:59Z as `f16efb9e863efaa24a822faa53e422af48b54f6a`.
+  Exact head `ca9cbb33475fad0936e26ac71204c1a0f694b03f` received an
+  approving Copilot review with no open issues. Normal CI run 39059175005
+  completed successfully, including the full `PR gate (required check)`;
+  every review thread was resolved before the actor-aware merge.
+- Marked only documented template homes and owner-backed enumeration complete.
+  Verified multi-root/plugin, repository-layer and local contributions retain
+  qualified identity/revision, applicability, requirements and scoped partial/
+  invalid states. New provider fragments remain non-instantiable and expose
+  no executable values. Existing built-in actions and registrar controls retain
+  their authority; no new registry, producer or service was introduced.
+- The final native run exercised all three dispatch partitions successfully,
+  including reporting/cleanup, in 4m22s, 4m55s and 3m29s. Both independent
+  native runner lanes and Windows promotion qualification passed. The complete
+  suite retains its test inventory, containment and unchanged deadlines; #6052's
+  recurrence is corrected, not retried or bypassed. The separate #7020 native
+  PowerShell signature remains unresolved and is not waived by this result.
+- Re-read this effort's entire Plan and Validation Plan after merge. Broad
+  instantiation, generic process/evaluator proof, mapped-source production,
+  common source/actions/history/input semantics, promotion and authorized
+  installed proof remain open. No merge-only deployment or live-effect claim.
+- Next bounded stretch is #7141: atomic owner acceptance of stale-card steering,
+  exact-request retries and request-specific acknowledgement/wake/consumption
+  semantics through existing owner/client boundaries. Preserve #6379, #4959
+  and #6283 ownership; provenance-safe external-template instantiation remains
+  open rather than silently materializing unresolved relative resources.
