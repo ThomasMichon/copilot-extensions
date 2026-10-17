@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import json
 import os
 import sys
@@ -11,11 +12,11 @@ import time
 from . import registrar_discovery as rd
 from .config import overrides_path
 from .overrides import overridden_off_ids
-from .registrar import RegistrarError
+from .registrar import ProfileDeclaration, RegistrarError
 from .registrar_reconcile import declared_registration_id, declaration_to_registration
 from .supervisor_registration import registration_override_ids
 from .worker_instances import (
-    ACTIVATION_CONSENT, OWNER, active_dir, digest, read_records,
+    ACTIVATION_CONSENT, OWNER, active_dir, digest, instance_dir, read_records,
     save_instance, templates, validate_configuration, _validate_dependencies,
 )
 
@@ -107,10 +108,21 @@ def _states(declarations: tuple, overrides: set, observed: dict) -> dict:
     }
 
 
+def _code_span(value: str) -> str:
+    delimiter = "`"
+    while delimiter in value:
+        delimiter += "`"
+    return f"{delimiter} {value} {delimiter}"
+
+
 def _cards(row: dict, body: str) -> dict:
     if row.get("components"):
-        body += f"\n\nComponents ({row['components_basis']}): " + "; ".join(
-            f"{component['name']} ({component['kind']}, {component['id']})"
+        body += f"\n\nComponents ({row['components_basis']}):\n\n" + "\n\n".join(
+            f"{component['name']} ({component['kind']}, {component['id']})\n\n"
+            f"Declared scopes: {json.dumps(component['repo_scopes'])}; "
+            f"labels: {json.dumps(component['labels'])}.\n\n"
+            f"Source document: {_code_span(component['source_path']) if component['source_path'] else 'not recorded'}\n\n"
+            f"Content revision: {component['revision']}"
             for component in row["components"]
         )
     row["card"] = {"title": row["title"], "body": body}
@@ -119,28 +131,65 @@ def _cards(row: dict, body: str) -> dict:
     return row
 
 
-def _component_metadata(declarations: tuple, *, basis: str) -> dict:
+def _declared_routing(declaration: ProfileDeclaration) -> tuple[list[str], list[str]]:
+    if declaration.kind == "supervised-lane":
+        return [declaration.repos], list(declaration.labels)
+    spec = declaration.spec
+    loop = next(
+        (spec[key] for key in ("repository_issue_loop", "effort_driver_loop") if key in spec),
+        None,
+    ) if declaration.kind == "emitter" else None
+    if declaration.kind == "schedule":
+        entries = spec.get("schedules") or [spec]
+    else:
+        entries = [spec if loop is None else loop]
+    scopes = []
+    labels = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise RegistrarError(f"{declaration.name}: routing metadata requires an object")
+        repo = "all" if declaration.kind == "evaluator" and entry.get("all_repos") else entry.get("repo")
+        if declaration.kind == "schedule":
+            repo = repo or spec.get("default_repo")
+        if repo is not None and not isinstance(repo, str):
+            raise RegistrarError(f"{declaration.name}: declared repo scope must be text")
+        if repo:
+            scopes.append(repo)
+        selected_labels = [entry.get("task_label")] if loop is not None else entry.get("labels", ())
+        if selected_labels is None:
+            selected_labels = ()
+        if not isinstance(selected_labels, (list, tuple)) or any(
+            not isinstance(label, str) for label in selected_labels
+        ):
+            raise RegistrarError(f"{declaration.name}: declared labels must be a list of text")
+        labels.extend(selected_labels)
+    return list(dict.fromkeys(scopes)), list(dict.fromkeys(labels))
+
+
+def _component_metadata(declarations: tuple, *, basis: str, source_path: str | None = None) -> dict:
     """Project registrar identity without exposing executable specs or environment."""
     components = []
     for declaration in declarations:
         registration = declaration_to_registration(declaration, machine=None)
-        repo = (
-            declaration.repos if declaration.kind == "supervised-lane"
-            else declaration.spec.get("repo")
-        )
+        scopes, labels = _declared_routing(declaration)
         components.append({
             "id": registration["id"],
             "name": declaration.name,
             "kind": registration["kind"],
             "declaration_kind": declaration.kind,
             "owner": declaration.owner,
-            "repo_scope": repo if isinstance(repo, str) else None,
-            "labels": list(declaration.labels),
-            "source_path": declaration.source_path,
+            "repo_scope": scopes[0] if scopes else None,
+            "repo_scopes": scopes,
+            "labels": labels,
+            "source_path": declaration.source_path or source_path,
             "revision": digest(registration),
         })
+    if len(components) == 1:
+        kind = components[0]["kind"]
+    else:
+        kind = "composite" if components else "unknown"
     return {
-        "kind": components[0]["kind"] if len(components) == 1 else "composite" if components else "unknown",
+        "kind": kind,
         "components": components,
         "components_basis": basis,
     }
@@ -240,6 +289,7 @@ def catalog() -> dict:
             **state,
             **_component_metadata(
                 runtime_declarations, basis="published" if active_conf is not None else "draft",
+                source_path=str((publication if active_conf is not None else instance_dir() / f"{record['name']}.json").absolute()),
             ),
         }
         if publication_errors:

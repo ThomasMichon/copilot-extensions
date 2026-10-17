@@ -522,12 +522,18 @@ def read_declaration_file_set(
             ) from exc
         if not in_local_directory:
             raise RegistrarError(f"{p}: local instance envelope outside its user-local directory")
-        return validate_configuration(
+        declarations = validate_configuration(
             p.stem, data.get("configuration"), data.get("repo_root", "")
         )[1]
-    return expand_declaration_document(
-        data, directory=p.parent, repo_root=repo_root,
-        allow_plugin_companion=allow_plugin_companion,
+    else:
+        declarations = expand_declaration_document(
+            data, directory=p.parent, repo_root=repo_root,
+            allow_plugin_companion=allow_plugin_companion,
+        )
+    source_path = str(p.absolute())
+    return tuple(
+        replace(declaration, source_path=declaration.source_path or source_path)
+        for declaration in declarations
     )
 
 

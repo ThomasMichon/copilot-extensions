@@ -35,6 +35,21 @@ known, and content revisions. Executable specs, command argv and environment
 values are not included in component metadata. A multi-component configuration
 has kind `composite`, including when several components have the same kind.
 
+`repo_scopes` preserves every declared scope in first-declared order, including
+wrapped schedule entries and their `default_repo` fallback. The legacy
+`repo_scope` string retains the first scope for compatible older consumers;
+use the list for a complete view. Evaluator all-repository opt-in is `all`.
+Labels come from each kind's actual routing configuration: lane labels,
+evaluator watch labels, schedule task labels, or a composed emitter's nested
+task label. No title/name classification is used.
+
+File-backed declarations retain the observed leaf source document through
+repository and verified-plugin discovery. Local instance components name the
+draft or published file matching their basis. This attribution does not alter
+the executable registration. The content revision fingerprints the complete
+canonical registration, so an executable change remains observable without
+returning its command, spec or environment values.
+
 For a published local instance the component basis is `published`, even if
 its Save-only draft has changed shape. An unpublished instance uses `draft`;
 source-owned declarations use `source`. An unreadable publication uses
@@ -45,7 +60,8 @@ registration IDs. Discovery-error rows similarly contain no components.
 These additive fields let independent terminal and graphical consumers
 describe the same owning catalog without classifying sources from titles or
 reconstructing composed registrations. The Manager table shows Kind and its
-Details card lists the components. At standard terminal widths the secondary
+Details card lists component identity, scopes, labels, source documents and
+content revisions. At standard terminal widths the secondary
 Kind column yields to the existing status, capacity, source and description
 columns; wider terminals show it alongside them. Existing IDs, edit revisions,
 form fields and activation semantics are unchanged.

@@ -101,6 +101,9 @@ def test_source_component_metadata_is_attributable_without_executable_fields(tmp
     assert component["name"] == "incoming" and component["owner"] == "repo:source"
     assert component["declaration_kind"] == component["kind"] == "emitter"
     assert component["repo_scope"] is None and len(component["revision"]) == 64
+    assert component["repo_scopes"] == []
+    assert component["source_path"] == str(document)
+    assert row["source_path"] == str(document)
     assert "not-component-metadata" not in json.dumps(component)
     assert "command" not in component and "env" not in component and "spec" not in component
     assert "Components (source)" in row["card"]["body"]
@@ -132,6 +135,7 @@ def test_component_metadata_preserves_supported_lane_scope_and_authored_label_or
     assert first == _component_metadata((declaration,), basis="source")
     component, = first["components"]
     assert component["repo_scope"] == "example/requests"
+    assert component["repo_scopes"] == ["example/requests"]
     assert component["labels"] == ["zeta", "alpha"]
     for unsupported in (["example/requests"], ("example/requests",)):
         with pytest.raises(RegistrarError, match="lane string"):
@@ -145,6 +149,150 @@ def test_unreadable_publication_never_projects_draft_components():
     assert row["publication"] == "error" and row["publication_errors"]
     assert row["kind"] == "unknown" and row["components"] == []
     assert row["components_basis"] == "unknown"
+
+
+@pytest.mark.parametrize("all_repos", [False, True])
+def test_direct_evaluator_metadata_retains_declared_scope_and_label_order(all_repos):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    declaration = load_declaration({
+        "name": "review", "kind": "evaluator",
+        "spec": {
+            **({"all_repos": True} if all_repos else {"repo": "example/requests"}),
+            "labels": ["zeta", "alpha"], "evaluator_ref": "fixture",
+            "evaluator_spec": {"rules": []},
+        },
+    })
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    assert component["repo_scope"] == ("all" if all_repos else "example/requests")
+    assert component["repo_scopes"] == [component["repo_scope"]]
+    assert component["labels"] == ["zeta", "alpha"]
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_schedule_metadata_reads_bare_or_wrapped_entry_without_source_mutation(wrapped):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    entry = {"id": "tick", "repo": "example/requests", "labels": ["scheduled"], "interval_seconds": 60}
+    spec = {"schedules": [entry]} if wrapped else entry
+    before = copy.deepcopy(spec)
+    declaration = load_declaration({"name": "tick", "kind": "schedule", "spec": spec})
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    assert component["repo_scopes"] == ["example/requests"]
+    assert component["labels"] == ["scheduled"]
+    assert spec == before
+
+
+def test_schedule_metadata_retains_all_scopes_defaults_and_labels_in_declaration_order():
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    declaration = load_declaration({
+        "name": "ticks", "kind": "schedule",
+        "spec": {
+            "default_repo": "example/default",
+            "schedules": [
+                {"id": "first", "repo": "example/first", "labels": ["first", "shared"], "interval_seconds": 60},
+                {"id": "second", "repo": "example/second", "labels": ["shared", "second"], "interval_seconds": 60},
+                {"id": "default", "labels": ["default"], "interval_seconds": 60},
+            ],
+        },
+    })
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    assert component["repo_scope"] == "example/first"
+    assert component["repo_scopes"] == ["example/first", "example/second", "example/default"]
+    assert component["labels"] == ["first", "shared", "second", "default"]
+
+
+@pytest.mark.parametrize("key", ["repository_issue_loop", "effort_driver_loop"])
+def test_composed_emitter_metadata_reads_its_own_nested_routing(key):
+    from agent_dispatch.registrar import ProfileDeclaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    declaration = ProfileDeclaration(name="source", kind="emitter", spec={
+        key: {"repo": "example/requests", "task_label": "routed-work"},
+    })
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    assert component["repo_scopes"] == ["example/requests"]
+    assert component["labels"] == ["routed-work"]
+
+
+def test_configuration_components_name_the_draft_or_published_file_without_guessing():
+    receipt = create()
+    row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
+    assert row["components"][0]["source_path"] == str(instance_dir() / "local-pool.json")
+    receipt = edit(receipt, activate=True)
+    row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
+    assert row["components"][0]["source_path"] == str(active_dir() / "local-pool.json")
+    assert str(active_dir() / "local-pool.json") in row["card"]["body"]
+
+
+def test_observational_source_path_does_not_change_a_lane_registration(tmp_path):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    document = {"name": "pool", "labels": ["work"], "owner": "fixture"}
+    path = tmp_path / "pool.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    declaration, = rd.read_declaration_file_set(path)
+    assert declaration.source_path == str(path)
+    assert declaration_to_registration(declaration, machine=None) == declaration_to_registration(
+        load_declaration(document), machine=None,
+    )
+
+
+def test_component_cards_keep_literal_backslashes_and_backticks_in_source_paths():
+    from agent_dispatch.registrar import ProfileDeclaration
+    from agent_dispatch.workers_catalog import _cards, _component_metadata
+
+    path = "C:\\source\\.config\\a``b`file.json"
+    row = {"title": "fixture", **_component_metadata((ProfileDeclaration(name="fixture"),), basis="source", source_path=path)}
+    card = _cards(row, "Fixture")["card"]["body"]
+    assert f"Source document: ``` {path} ```" in card
+
+
+def test_ordinary_plugin_components_retain_the_verified_source_document(monkeypatch, tmp_path):
+    from dropin_registry import EntryDecision, ScanAuthority
+    from plugin_activation import ActivationReport, ActivePlugin
+
+    source = "example-producer@example-marketplace"
+    root = tmp_path / "example-producer"
+    directory = root / "registrar"
+    directory.mkdir(parents=True)
+    (root / "plugin.json").write_text(json.dumps({"name": "example-producer", "version": "1.2.3"}), encoding="utf-8")
+    document = directory / "pool.json"
+    document.write_text(json.dumps({"name": "plugin-pool"}), encoding="utf-8")
+    registry = Path(os.environ["AGENT_DISPATCH_REGISTRAR_DROPINS_DIR"])
+    registry.mkdir()
+    (registry / "producer.json").write_text(json.dumps({
+        "schema_version": 1, "plugin": source, "plugin_root": str(root), "registrar": "registrar",
+    }), encoding="utf-8")
+    plugin = ActivePlugin(source=source, name="example-producer", marketplace="example-marketplace",
+                          root=root.resolve(), scopes=("global",))
+    report = ActivationReport(authority=ScanAuthority.COMPLETE, decisions={source: EntryDecision.active(plugin)})
+    sources = rd.RegistrarSources
+    monkeypatch.setattr(rd, "RegistrarSources", lambda: sources(activation_source=lambda: report))
+    data = catalog()
+    row = next(row for row in data["entries"] if row["title"] == "plugin-pool")
+    assert data["summary"]["errors"] == []
+    assert row["source_path"] == str(document)
+    assert row["components"][0]["source_path"] == str(document)
+
+
+@pytest.mark.parametrize("spec", [
+    {"repo": 42, "labels": ["work"]},
+    {"repo": "example/requests", "labels": "not-a-list"},
+    {"repo": "example/requests", "labels": False},
+    {"repo": "example/requests", "labels": [42]},
+])
+def test_invalid_declared_routing_is_an_explicit_error_not_empty_metadata(spec):
+    from agent_dispatch.registrar import ProfileDeclaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    with pytest.raises(RegistrarError, match="declared"):
+        _component_metadata((ProfileDeclaration(name="invalid", kind="evaluator", spec=spec),), basis="source")
 
 
 def test_template_save_edit_and_publish_preserve_identity():
@@ -395,6 +543,10 @@ def test_composed_template_discovers_with_preserved_repo_context(tmp_path):
     assert row["kind"] == "composite" and row["components_basis"] == "published"
     assert {component["kind"] for component in row["components"]} == {"emitter", "supervised-lane"}
     assert {component["id"] for component in row["components"]} == set(row["registration_ids"])
+    assert all(component["repo_scopes"] == ["example/project"] for component in row["components"])
+    assert all(component["labels"] == ["issue-work"] for component in row["components"])
+    assert all(component["source_path"] == str(active_dir() / "issue-loop.json") for component in row["components"])
+    assert "example/project" in row["card"]["body"] and "issue-work" in row["card"]["body"]
     assert len(rd.discover()) == 2
 
 

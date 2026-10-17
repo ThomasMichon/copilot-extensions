@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -467,7 +468,8 @@ def test_read_declaration_file_non_mapping(tmp_path):
 def test_read_declaration_file_set_resolves_extends_against_repo_root(tmp_path):
     """Phase 3's own validation contract: a resolved `extends:` declaration
     must behave *identically* to a hand-written direct declaration with the
-    same effective fields -- compare the full `ProfileDeclaration`, not just
+    same effective fields -- compare the full `ProfileDeclaration` except
+    its observed leaf source path, not just
     a couple of fields a regression in `kind`/`owner`/`concurrency`/filters
     could slip past."""
     repo_root = tmp_path / "repo"
@@ -496,7 +498,9 @@ def test_read_declaration_file_set_resolves_extends_against_repo_root(tmp_path):
     (resolved,) = read_declaration_file_set(extends_path, repo_root=repo_root)
     (direct,) = read_declaration_file_set(direct_path, repo_root=repo_root)
 
-    assert resolved == direct
+    assert resolved.source_path == str(extends_path)
+    assert direct.source_path == str(direct_path)
+    assert replace(resolved, source_path=direct.source_path) == direct
 
 
 def test_read_declaration_file_set_resolves_extends_against_declaration_dir_without_repo_root(

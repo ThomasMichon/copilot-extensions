@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Amended planning PR, then authorized dependency-ordered PRs against `dev`
 - **Created:** 2026-10-16
-- **Status:** Active <!-- Execution authorized; implementation waits for the amended plan's review and merge. -->
+- **Status:** Active <!-- Implementation underway; activation and installed rollout remain separately authorized. -->
 - **Vision:** [agent-dispatch](../../../visions/plugins/agent-dispatch/README.md):
   discoverable-extension-templates, extend-any-declaration,
   task-or-charter-owns-the-workflow
@@ -270,3 +270,28 @@ automation activation still require their applicable operational authorization.
   Configuration backstage file passed 25 tests with one platform-specific
   skip on Windows; changed Python lint passed. Updated-head review and
   required CI remain prerequisites to merge.
+
+### 2026-10-17 - Supported routing shapes and observed file provenance
+
+- Balanced current-head review identified two real projection gaps after the
+  earlier speculative findings were dispositioned: non-lane scope/labels
+  were stored in kind-specific configurations, and ordinary file-backed
+  declarations lost their known source path before catalog projection.
+- Normalize evaluator, bare/wrapped schedule and composed-emitter routing.
+  Add ordered `repo_scopes` without changing the legacy first-scope string;
+  retain lane label order and include every schedule entry/default.
+- Attribute the read leaf document in discovery and the known draft/publication
+  path in local configuration projection. Observational path attribution does
+  not alter the executable registration; a regression compares that complete
+  registration before and after attribution.
+- Both clients can read richer component prose through the existing card:
+  identity, all scopes, labels, source document and content revision. The
+  content hash still tracks full desired registration changes without
+  returning raw executable fields.
+- Extend focused coverage for every routing shape, ordinary verified-plugin
+  files and local draft/publication files. Keep review, aggregate CI, normal
+  release and separately authorized installed proof as open delivery gates.
+- The final contained catalog/instance, discovery and registry selection passed
+  170 tests. Changed Python lint, the 13-plugin install contract and all
+  non-widened source-module ceilings passed. No service, source activation,
+  installed update or live external process was used as a success claim.
