@@ -374,3 +374,14 @@ def test_projection_reuses_canonical_identity_for_selection_and_collisions(ledge
         [], identity=copy.deepcopy(identity),
     )
     assert snapshot["complete"] and len(snapshot["entries"]) == 1 and calls == 1
+
+
+def test_filtered_rows_are_validated_globally_but_not_serialized(ledgers: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_worktrees import resource_producer as producer
+    bound = reserve(ledgers, bound=True)
+    monkeypatch.setattr(producer, "wire_metadata", lambda value: pytest.fail("filtered row serialized"))
+    snapshot = ownership_snapshot(
+        [ObservedClaim("m/p/owner", "container", bound["ref"], "active", "", bound["producer"])],
+        [], owner="m/p/consumer",
+    )
+    assert snapshot["complete"] and snapshot["entries"] == []

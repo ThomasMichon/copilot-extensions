@@ -9,7 +9,7 @@ import yaml
 
 from . import config as cfg, installer
 from .producer_views import ObservedClaim, issue, ownership_snapshot, qualified_owner
-from .projects_registry import load_projects_document as _load_strict_yaml
+from .strict_yaml import load_strict_yaml_document
 
 _READ_ERRORS = (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError, yaml.YAMLError)
 
@@ -25,7 +25,7 @@ def _stamp(path: Path, *, directory: bool = False) -> tuple[int, ...]:
 
 def _read(path: Path) -> tuple[object, tuple[int, ...]]:
     before = _stamp(path)
-    data = _load_strict_yaml(path.read_text(encoding="utf-8"))
+    data = load_strict_yaml_document(path.read_text(encoding="utf-8"))
     if _stamp(path) != before:
         raise ValueError("file changed while reading")
     return data, before

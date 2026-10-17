@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -142,7 +141,6 @@ def ownership_snapshot(
     for row in rows:
         metadata = row.metadata if isinstance(row.metadata, dict) else {}
         is_valid = id(row) in valid_ids
-        wire = producer.wire_metadata(row.metadata)
         if owner is not None and row.owner != owner:
             continue
         if kind is not None and row.kind != kind:
@@ -154,6 +152,7 @@ def ownership_snapshot(
             or identities[id(row)] != identity_json
         ):
             continue
+        wire = producer.wire_metadata(row.metadata)
         terminal = terminals.get(metadata["token"]) if is_valid else None
         current_owner = None
         resolution = "unknown"
@@ -167,7 +166,7 @@ def ownership_snapshot(
         entries.append({
             "record_owner": row.owner, "kind": row.kind, "ref": row.ref,
             "state": row.state, "handoff_bundle": row.handoff_bundle,
-            "producer": copy.deepcopy(wire),
+            "producer": wire,
             "creator": metadata["creator"] if is_valid else None,
             "phase": metadata["phase"] if is_valid else "invalid",
             "current_owner": current_owner, "resolution": resolution,
