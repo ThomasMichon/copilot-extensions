@@ -16,7 +16,7 @@ if ! capture "python-prerequisite" -- python3 -I -c \
 fi
 if ! capture "node-prerequisite" -- node -e \
     'if (Number(process.versions.node.split(".")[0]) < 20) { console.error("Node.js 20+ is required"); process.exit(1); } console.log(process.versions.node);'; then
-    jam "npm-registry" "scenario requires Node.js 20+" "use the documented base-image toolchain"
+    jam "node-prerequisite" "scenario requires Node.js 20+" "use the documented base-image toolchain"
     cr_finalize
 fi
 SOURCE="${CR_HARNESS_MOUNT:-}"

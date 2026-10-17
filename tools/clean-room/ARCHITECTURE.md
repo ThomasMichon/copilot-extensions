@@ -161,6 +161,7 @@ envdump), hint, [autofix]}`. The taxonomy makes a red line *legible*:
 | `runtime-install` | the real installer returned nonzero before a usable runtime was published | inspect the captured installer error; repair the owning installation path, not the scenario |
 | `pip-feed-governance` | public PyPI blocked and no index configured for the tool in use | point both pip *and* uv at the internal index |
 | `npm-registry` | `@github/copilot` / node install blocked | pass an internal registry build-arg |
+| `node-prerequisite` | Node.js is absent or below the scenario's declared version floor | use the supported base-image Node toolchain; do not misclassify this as a package-feed failure |
 | `auth-gh` / `auth-copilot` / `auth-ado` | clone/login/relay 401/403 | re-auth; correct account (EMU vs personal) |
 | `repo-config` | knowledge binding / `state-root` unresolved | re-run the setup/link step |
 | `codespace-config` | CodeSpace create/connect/relay fails | check machine/repo prereqs; relay port |
