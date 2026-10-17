@@ -495,10 +495,12 @@ async def _run_ssh(
 
 
 async def _run_ssh_ex(
-    host: str | None, user: str | None, project: str,
+    host: str, user: str | None, project: str,
     args: list[str] | None = None, *, timeout: float | None = None,
 ) -> tuple[str | None, str]:
     """Return stdout/stderr without applying legacy user metadata to the SSH profile."""
+    if not host:
+        raise ValueError("SSH target requires a host (SSH alias)")
     sub = " ".join(shlex.quote(a) for a in (args if args is not None else ["list", "--json"]))
     remote_cmd = f"{shlex.quote(project)} {sub}"
 

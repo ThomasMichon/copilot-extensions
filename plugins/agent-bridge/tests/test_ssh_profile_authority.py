@@ -27,6 +27,7 @@ def ssh_profile(tmp_path):
         "    User profile-user\n"
         "    Port 40222\n"
         "    IdentityFile profile-identity\n"
+        "    IdentityFile profile-identity-2\n"
         "    HostKeyAlias profile-host-key\n"
         "    ProxyCommand profile-proxy %h %p\n",
         encoding="utf-8",
@@ -41,13 +42,16 @@ def _profile_source(monkeypatch, module, path):
     monkeypatch.setattr(module, "SSHProfileSource", source)
 
 
-def _assert_profile(values):
-    assert values["hostname"] == "configured.example.invalid"
-    assert values["user"] == "profile-user"
-    assert values["port"] == "40222"
-    assert values["identityfile"] == "profile-identity"
-    assert values["hostkeyalias"] == "profile-host-key"
-    assert values["proxycommand"].startswith("profile-proxy ")
+def _assert_profile(items):
+    values = {}
+    for key, value in items:
+        values.setdefault(key, []).append(value)
+    assert values["hostname"] == ["configured.example.invalid"]
+    assert values["user"] == ["profile-user"]
+    assert values["port"] == ["40222"]
+    assert {"profile-identity", "profile-identity-2"}.issubset(values["identityfile"])
+    assert values["hostkeyalias"] == ["profile-host-key"]
+    assert any(value.startswith("profile-proxy ") for value in values["proxycommand"])
 
 
 @pytest.mark.asyncio
@@ -75,7 +79,7 @@ async def test_remote_carrier_preserves_profile_identity(
     await remote_operations.RemoteOperationService(resolver)._lease("profile-host")
 
     assert len(acquired) == 1
-    _assert_profile(dict(acquired[0].effective_config))
+    _assert_profile(acquired[0].effective_config)
     assert acquired[0].port is None
     assert acquired[0].user is None
     assert ssh_profile.read_bytes() == before
@@ -98,7 +102,7 @@ async def test_acp_connection_preserves_profile_user(monkeypatch, ssh_profile):
 
     source = manager.ensure_connected.await_args.args[1]
     config = source.get_ssh_config()
-    _assert_profile(dict(config.effective_config))
+    _assert_profile(config.effective_config)
     assert config.user is None
     assert ssh_profile.read_bytes() == before
 
@@ -129,7 +133,18 @@ async def test_discovery_and_session_reads_preserve_profile_user(
         capture_output=True, text=True, check=True, timeout=10,
         creationflags=no_window_flags(),
     )
-    values = dict(line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
-    _assert_profile(values)
+    _assert_profile(line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
     assert command[-2] == "profile-host"
     assert ssh_profile.read_bytes() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["", None])
+async def test_missing_profile_alias_refuses_before_execution(monkeypatch, host):
+    execute = AsyncMock()
+    monkeypatch.setattr(worktrees, "_exec_ex", execute)
+
+    with pytest.raises(ValueError, match="SSH alias"):
+        await worktrees._run_ssh_ex(host=host, user="agent-user", project="example")
+
+    execute.assert_not_awaited()
