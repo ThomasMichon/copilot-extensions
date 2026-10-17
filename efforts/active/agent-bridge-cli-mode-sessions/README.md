@@ -883,6 +883,14 @@ in preview. Finalizing refusal is additionally exercised through the actual
 The complete owner profile/embodiment/admission selection passed 182 tests;
 the resume CLI selection passed 12. Review and required CI remain open.
 
+Base integration subsequently introduced the independent message-receipt
+capability at HTTP generation 39. Native recovery therefore advances to 40,
+retaining receipt capability 39, remote ACP capability 38 and the supported
+minimum of 1. Official generation-39 receipt vectors stay byte-for-byte intact;
+colliding, previously published native-draft vectors are retained under a
+separate historical namespace rather than overwritten. New generation-40
+evidence must attest the combined committed producers before publication.
+
 ### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
 
 Moved native receipt binding into the final locked delivery section, after

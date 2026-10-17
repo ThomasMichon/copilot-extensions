@@ -375,7 +375,7 @@ be discarded (or the cancel signature *persists* across sends). See the
 <agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --cli
 ```
 
-The client requires HTTP protocol 39 and uses
+The client requires HTTP protocol 40 and uses
 `POST /api/v1/worktrees/{id}/resume/{mode}` (`mode`: `acp` or `cli`). The mode-qualified route is
 absent on older daemons, so even a downgrade after capability negotiation
 cannot select an old daemon's fresh-conversation fallback. The original

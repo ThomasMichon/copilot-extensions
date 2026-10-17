@@ -64,15 +64,23 @@ def test_http_declared_generation_matches_current_fixture() -> None:
     )
 
 
+def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None:
+    assert bridge_protocol.REMOTE_ACP_PROTOCOL_VERSION == 38
+    assert bridge_protocol.LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION == 39
+    assert bridge_protocol.WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION == 40
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 40
+    assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
+
+
 @pytest.mark.parametrize("mode", ["acp", "cli"])
 def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, mode):
     from agent_bridge.client import BridgeClient
     from unittest.mock import Mock
 
-    fixture = _fixture("fixtures/http/current/native-worktree-resume-generation-39.json")
+    fixture = _fixture("fixtures/http/current/native-worktree-resume-generation-40.json")
     assert fixture["capability"]["required_protocol_version"] == bridge_protocol.WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION
     client = BridgeClient("http://localhost:9999", "test")
-    monkeypatch.setattr(client, "daemon_supports", lambda version: version <= 39)
+    monkeypatch.setattr(client, "daemon_supports", lambda version: version <= 40)
     request = Mock(return_value={"durable_session_id": "native-example-head", "mode": mode})
     monkeypatch.setattr(client, "_request", request)
     result = client.resume_worktree("example-worktree", mode=mode)
@@ -91,7 +99,7 @@ async def test_owner_record_fixture_matches_real_cold_lookup(monkeypatch):
     from agent_bridge.routes import worktree_probe, worktrees
     from unittest.mock import AsyncMock
 
-    fixture = _fixture("fixtures/http/current/worktree-owner-record-generation-39.json")
+    fixture = _fixture("fixtures/http/current/worktree-owner-record-generation-40.json")
     owner = AgentConfig(name="example", project="example")
     resolver = SimpleNamespace(agents={"example": owner})
     command = AsyncMock(return_value=json.dumps(fixture["required_owner_record"]))
@@ -162,7 +170,7 @@ def test_live_registration_fixture_preserves_opt_in_wire_shape_and_default() -> 
     assert fixture["compatibility"]["ordinary_null_heartbeat_retains_metadata"] is True
 
 
-@pytest.mark.parametrize("generation", [35, 36, 37, 38, 39])
+@pytest.mark.parametrize("generation", [35, 36, 37, 38, 39, 40])
 @pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
 def test_native_bound_wire_is_preserved_at_later_generations(owner, generation) -> None:
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse

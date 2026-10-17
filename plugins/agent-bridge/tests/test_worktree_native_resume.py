@@ -856,7 +856,7 @@ def test_client_gates_and_sends_explicit_native_resume_mode(mode):
     assert client.resume_worktree("wt-example", mode=mode)["durable_session_id"] == "native-original"
     assert client._request.call_args.args[1] == f"/api/v1/worktrees/wt-example/resume/{mode}"
     assert client._request.call_args.kwargs["params"] is None
-    client.daemon_supports.assert_called_once_with(39)
+    client.daemon_supports.assert_called_once_with(40)
     client.daemon_supports.return_value = False
     with pytest.raises(BridgeClientError) as refused:
         client.resume_worktree("wt-example", mode=mode)
@@ -865,9 +865,10 @@ def test_client_gates_and_sends_explicit_native_resume_mode(mode):
 
 
 @pytest.mark.parametrize("mode", ["acp", "cli"])
-def test_remote_acp_generation_does_not_advertise_native_worktree_resume(mode):
+@pytest.mark.parametrize("generation", [38, 39])
+def test_remote_acp_or_receipt_generation_does_not_advertise_native_resume(mode, generation):
     client = object.__new__(BridgeClient)
-    client.daemon_supports = Mock(side_effect=lambda version: version <= 38)
+    client.daemon_supports = Mock(side_effect=lambda version: version <= generation)
     client._request = Mock()
     with pytest.raises(BridgeClientError) as refused:
         client.resume_worktree("wt-example", mode=mode)
