@@ -519,3 +519,35 @@ not to the vision. This effort does not acquire or migrate live capacity.
   closure. #6424 retains managed client lifecycle; controller/connector,
   authorization, useful roles and adopter migration remain independently open.
   This campaign and routing foundation remain Active.
+
+### 2026-10-17 - Repair review corrections; lifecycle integration retained
+- #6944 remains open at `c82d93bdd9dd6926d80cfc69083cd2b5fcdfd149`.
+  Its review corrections bind actual executable admission, re-admit initially
+  ready and refreshed/post-install outcomes, propagate refused prerequisite
+  blockers, and preserve process ownership through SIGINT/SIGTERM spawn and
+  cleanup boundaries. A relative PATH entry now invokes the exact admitted
+  absolute executable instead of selecting another file from the payload cwd.
+- The latest complete native WSL repair portfolio passed 91 cases with three
+  Windows-only skips, plus 166 packaging/source/trusted-reader cases and an
+  installed-platform check. Focused native Windows executable/CMD/plan-apply
+  coverage passed nine cases with one POSIX-only skip. The preceding final-probe
+  cancellation/drift selection passed 14 native Windows cases. These are
+  bounded selections, not a new full Windows-suite claim.
+- Fresh-box attempts passed materialization and payload stamping but failed
+  first-use provisioning on a public package-feed TLS handshake. No TLS/feed
+  waiver was used, and that lane is not recorded as passing. Native macOS,
+  declared active-core apply and actual consuming setup remain under #6464.
+  Current-head review and required CI still gate #6944; source publication
+  does not establish a promoted release, installed repair or live deployment.
+- The reviewed #6624 client-admission boundary and merged #6569 byte staging
+  remain the managed-client prerequisites under #6424/#6240. Separate proposed
+  Gateway SSH runtime/policy leaves are published in #7083/#7087, not yet
+  accepted as merged dependencies or wired lifecycle behavior. Their owners
+  may add the required canonical release entries for those leaves; shared
+  configuration, admission/execution and lifecycle integration stays with its
+  existing owner. An admission receipt is not an execution grant.
+- Next serial implementation remains the validated client boundary followed by
+  explicit configuration projection, provider adaptation and setup/reconcile
+  integration against reviewed dependencies. Standalone controller/connector
+  lifecycle, authorization, useful service roles, persistence and safe cutover
+  remain unresolved. This campaign and routing foundation stay Active.
