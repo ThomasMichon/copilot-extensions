@@ -138,7 +138,7 @@ def _declared_routing(declaration: ProfileDeclaration) -> tuple[list[str], list[
     if declaration.kind == "supervised-lane":
         return [declaration.repos], list(declaration.labels)
     spec = declaration.spec
-    if declaration.kind == "emitter" and "ci_repair" in spec:
+    if declaration.kind == "emitter" and spec.get("ci_repair") is not None:
         from .producers.ci_repair import task_routing
         config = spec["ci_repair"]
         if not isinstance(config, Mapping):
@@ -148,7 +148,7 @@ def _declared_routing(declaration: ProfileDeclaration) -> tuple[list[str], list[
             raise RegistrarError(f"{declaration.name}: declared repo scope must be text")
         return [repo], labels
     loop = next(
-        (spec[key] for key in ("repository_issue_loop", "effort_driver_loop") if key in spec),
+        (spec[key] for key in ("repository_issue_loop", "effort_driver_loop") if spec.get(key) is not None),
         None,
     ) if declaration.kind == "emitter" else None
     if declaration.kind == "schedule":

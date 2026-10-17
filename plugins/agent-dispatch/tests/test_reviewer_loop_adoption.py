@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from contextlib import nullcontext
+from dataclasses import replace
 
 import pytest
 
@@ -119,7 +120,12 @@ def test_reviewer_loop_yaml_preserves_existing_identities(reviewer_loop, tmp_pat
 
     path = tmp_path / "review.yaml"
     path.write_text(yaml.safe_dump(reviewer_loop), encoding="utf-8")
-    assert read_declaration_file_set(path) == expand_reviewer_loop(reviewer_loop)
+    expected = expand_reviewer_loop(reviewer_loop)
+    actual = read_declaration_file_set(path)
+    assert actual == tuple(replace(declaration, source_path=str(path)) for declaration in expected)
+    assert [declaration_to_registration(declaration, machine="host-a") for declaration in actual] == [
+        declaration_to_registration(declaration, machine="host-a") for declaration in expected
+    ]
 
 
 @pytest.mark.parametrize(

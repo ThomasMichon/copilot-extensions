@@ -338,3 +338,24 @@ automation activation still require their applicable operational authorization.
   install contract passed. Current-head review and
   aggregate CI remain required; installed rollout and live source effects
   are not part of these isolated fixtures.
+
+### 2026-10-17 - Nullable bindings and attribution-aware compatibility
+
+- Follow the producer's non-null binding selection in catalog routing and
+  dependency checks. A null CI-repair binding is absent; a null issue-loop
+  binding must not mask an actual effort-driver binding or crash a direct
+  command emitter's dependency projection. Only emitters select those bindings.
+- Add valid source/catalog cases for all three emitter modes with null
+  alternatives, preserving scopes, labels, healthy controls, source bytes
+  and executable registrations. Non-emitter prerequisites retain their own spec.
+- Required CI exposed two compatibility assertions comparing file-backed
+  declarations to a different file or a pure expansion. Update only their
+  expected leaf-source attribution and additionally assert complete canonical
+  registration equivalence. Do not remove attribution or change dataclass
+  equality to make these tests pass.
+- The catalog, CI-repair, recipe and reviewer-adoption selection passed
+  234 tests. The final catalog selection, including the non-emitter dependency
+  regression with its required evaluator reference, passed 86 tests; changed
+  Python lint passed. This is a real source-attribution coupling, not a
+  pre-existing failure or waiver.
+  Fresh-head review and the complete required CI gate remain open.

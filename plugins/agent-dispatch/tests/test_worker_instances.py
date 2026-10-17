@@ -286,6 +286,66 @@ def test_composed_emitter_metadata_reads_its_own_nested_routing(key):
     assert component["labels"] == ["routed-work"]
 
 
+@pytest.mark.parametrize("mode", ["command", "repository_issue_loop", "effort_driver_loop"])
+def test_null_emitter_bindings_do_not_mask_the_selected_kind_or_break_catalog(tmp_path, mode):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    create("healthy", activate=True)
+    spec = {
+        "id": "nullable-source", "interval_seconds": 60, "cwd": str(tmp_path),
+        "command": None, "ci_repair": None,
+        "repository_issue_loop": None, "effort_driver_loop": None,
+    }
+    if mode == "command":
+        spec.update(command=[sys.executable, "-c", "print('[]')"], repo="example/project", labels=["routed-work"])
+    else:
+        config = {
+            "kind": mode.replace("_", "-"), "name": "nullable",
+            "repo": "example/project", "source": "fixture-source",
+            "task_label": "routed-work", "cadence_seconds": 60,
+            "pool": {"body": {"type": "headless", "agent": "task-worker"}},
+        }
+        if mode == "repository_issue_loop":
+            config.update(
+                forge={"provider": "github", "producer_login": "fixture-bot"},
+                reservation={"label": "fixture-reserved"},
+            )
+        else:
+            config.update(effort_slugs=["fixture-effort"], state_root=str(tmp_path))
+        spec[mode] = config
+    document = {"name": "nullable-source", "kind": "emitter", "spec": spec}
+    declaration = load_declaration(document)
+    before = declaration_to_registration(declaration, machine=None)
+    source = tmp_path / "source"
+    source.mkdir()
+    path = source / "emitter.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    original = path.read_bytes()
+    rd.add_pointer("nullable-source", source, owner="repo:source")
+    data = catalog()
+    row = next(row for row in data["entries"] if row["title"] == "nullable-source")
+    assert row["validity"] == "valid" and row["component_errors"] == []
+    assert row["components"][0]["repo_scopes"] == ["example/project"]
+    assert row["components"][0]["labels"] == ["routed-work"]
+    assert data["summary"]["errors"] == []
+    assert next(row for row in data["entries"] if row["id"] == "instance:healthy")["pool_toggleable"] == "true"
+    assert declaration_to_registration(declaration, machine=None) == before
+    assert path.read_bytes() == original
+
+
+def test_non_emitter_prerequisites_do_not_select_opaque_emitter_binding_names():
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.worker_instances import _validate_dependencies
+
+    declaration = load_declaration({
+        "name": "review", "kind": "evaluator",
+        "spec": {"all_repos": True, "evaluator_ref": "fixture", "evaluator_spec": {"rules": []},
+                 "repository_issue_loop": False, "effort_driver_loop": False},
+    })
+    _validate_dependencies((declaration,), "", available_declarations=(declaration,))
+
+
 def test_configuration_components_name_the_draft_or_published_file_without_guessing():
     receipt = create()
     row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
