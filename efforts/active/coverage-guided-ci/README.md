@@ -556,6 +556,12 @@ risk wedging everything").
       previously-failing tests now pass in both plugins.
 
 ### Phase 5 — Generalize beyond `agent-worktrees`
+- [ ] Execute the existing selector for the `agent-dispatch` required PR lane,
+      with a bounded cross-cutting smoke floor and unchanged outer deadlines.
+      Proposal and acceptance gates:
+      [`dispatch-pr-selection.md`](dispatch-pr-selection.md).
+      This bounded slice does not activate the unrelated shadow consumers or
+      take over standalone Fleet Manager baseline enrollment.
 - [ ] Assess whether other plugins would benefit from diff-scoped selection
       over their current smoke/full split (no plugin besides
       `agent-worktrees` is currently collect-only-gated, so this phase is
