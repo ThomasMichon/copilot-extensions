@@ -3,7 +3,9 @@
 Parent: [Session Intelligence and Accounting](README.md), Phase 1; issue #5676.
 
 **Status:** Policy amendment reviewed and merged in #7016; implementation active.
-This document specifies future behavior, not an available command or setting.
+This document owns the selected contract and remaining acceptance gates.
+Supported source behavior is documented in
+[process-log evidence](../../../plugins/agent-logger/docs/process-log-evidence.md).
 
 ## Selected policy and boundary
 
@@ -123,6 +125,11 @@ cloud acknowledgement.
   without changing existing collection, snapshots or retention defaults.
   Strict policy parsing and explicit target resolution landed in #7026;
   enabled runtime settings remain refused until orchestration exists.
+  The current integration adds file-backed `load_config(include_repo=False)`
+  provenance and an explicit machine-only run mode. Repository-layered and
+  ad-hoc/tenant config remain usable but cannot authorize retirement; filtered
+  and detached retirement contexts remain excluded. Native
+  scheduled-path acceptance must pass before this implementation gate closes.
 - [x] Add typed per-revision readback results through the target abstraction;
   implement bounded supported transports and reject the rest explicitly.
   #7026 supplies full filesystem ZIP readback for local/OneDrive targets,
@@ -132,6 +139,13 @@ cloud acknowledgement.
   under the existing lock, keeping dry-run and manual additive behavior intact.
   The exact-ZIP-only publisher landed in #7038 with current-head Linux/native
   Windows coverage; it remains internal and does not yet orchestrate retirement.
+  #7047 composes the internal sequence and post-hash commit guard with real
+  Windows retirement coverage. Correct configuration provenance and an
+  existing-lock scheduled caller are still required before runtime enablement.
+  The current adapter now composes that caller with a final protected
+  machine-file policy guard, a pass-bound source identity, current resolved-path
+  checks and positive active-log publication completion. Native end-to-end
+  execution and current-head review/CI remain required, not inferred from #7047.
 - [ ] Document actual supported behavior and land a plugin changefile with the
   implementation; release/install and live retirement remain separate gates.
 

@@ -1,4 +1,4 @@
-"""Internal post-publication retirement sequence; no scheduled caller yet."""
+"""All-target post-publication retirement under a caller-owned sync/policy boundary."""
 
 from __future__ import annotations
 
@@ -130,13 +130,14 @@ def reclaim_process_logs(
     process_logs_enabled: bool, active_target: str,
     targets: tuple[ProcessLogReadback, ...], policy_guard: PolicyGuard,
     dry_run: bool = False,
+    source_identity: tuple[Path, int, int] | None = None,
 ) -> LogReclamationResult:
     """Compose all-target evidence with exact-entry retirement under the sync lock.
 
     The caller must own that lock, supply a local-unfiltered pass and a policy
     guard that revalidates/pins the current machine-local configuration at commit.
-    No runtime caller supplies that provenance yet, so configuration still refuses
-    enabling reclamation. This function is exercised only by synthetic fixtures.
+    The machine-only run_sync adapter supplies that provenance; tenant, manual
+    snapshot and namespace callers do not participate.
     """
     archives = resolve_log_archive_settings({
         "enabled": archives.enabled, "local_source": archives.local_source,
@@ -159,6 +160,10 @@ def reclaim_process_logs(
     requested = log_root.expanduser().absolute()
     canonical = requested.resolve(strict=True)
     selected_root = canonical.stat()
+    if source_identity is not None and source_identity != (
+        canonical, selected_root.st_dev, selected_root.st_ino,
+    ):
+        raise ValueError("process-log source root changed after pass preparation")
     validate_required_log_targets(canonical, settings, targets)
     if not dry_run and os.name != "nt":
         raise OSError(errno.ENOTSUP, "exact-file process-log retirement requires native Windows")

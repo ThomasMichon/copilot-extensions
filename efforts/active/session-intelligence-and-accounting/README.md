@@ -238,6 +238,57 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-16 - Machine-only scheduled integration
+- Added an explicit machine-only configuration origin and scheduled run mode.
+  Default repository-layered loads and ad-hoc/tenant configurations provide no
+  retirement authority; ordinary config consumers remain usable. Filtered or
+  namespaced contexts, unsupported transports and detached execution cannot
+  authorize retirement. Disabled defaults and manual additive snapshots stay
+  unchanged; no rollout or live configuration changes are part of this slice.
+- The existing sync lock now spans source/target preparation, sidecar marking,
+  snapshots, active-target log publication and all-target exact-ZIP retirement.
+  Positive process-log publication completeness distinguishes locked deferrals
+  from an ordinary successful transfer/no-op.
+- Bound source identity before publication and revalidate effective source and
+  target paths, machine identity, automation and original machine-file policy
+  after final raw hashing. Native protected policy-file and ancestor handles
+  span disposition but do not prevent an operator disabling policy during
+  long publication.
+- Synthetic tests cover actual scheduled two-target retirement, idempotence,
+  file and memory policy changes during publication/final hashing, configuration
+  writer/rename exclusion, dry-run zero effects and excluded contexts.
+  Full isolated Linux validation passed 1,477 tests with 114 skips and verified
+  cleanup. Native scheduled-path execution, current-head review and complete
+  CI remain acceptance gates; neither parent effort is complete.
+- Addressed review findings at the actual consumer boundaries: ordinary
+  configuration loads retain repository settings but cannot authorize a retiring
+  run; initially absent logs skip reclamation without blocking session sync or
+  adopting a later-created directory. Native writable-handle probes now use a
+  shared pytest fixture rather than a cross-test-module import.
+
+### 2026-10-16 - Internal retirement sequence reviewed and merged
+- #7047 actually merged at `2026-10-16T23:57:27Z` as
+  `40f3f51dac6b0e69124d51215a2b4371571394c1`, from final head
+  `fade814a315c05c0fb51948c3d834b4d89675b39`. Current-head Copilot
+  `COMMENTED` review `5554507289` reported no open issues; the owner-authored
+  clean-Comment policy applied. Exact-head native validation and all required
+  checks passed before normal author merge.
+- Complete final-head CI `38976318218` passed, followed by the latest
+  required same-head CI `38978649397` and workflow guard `38978650098`.
+  Native archive job `117243474723` executed the real Windows sequence:
+  541 passed, 38 skipped. Final isolated Linux validation passed 1,442 tests
+  with 102 skips and verified cleanup; native success was not inferred from
+  those skips.
+- Additional source-root tests bind the initial canonical directory identity
+  before target validation and opening. Valid-clone directory replacement and
+  retargeted configured ancestry are rejected before inspection, not adopted
+  as a fresh source mid-pass.
+- Both canonical Plan/Validation Plans were re-read after actual merge.
+  The internal mechanism has no scheduled caller and runtime reclamation is
+  still refused. Correct machine-local configuration provenance, final policy
+  pinning and existing-lock engine integration are next. Broad preservation,
+  catalog/accounting, daily output and adoption gates remain open.
+
 ### 2026-10-16 - Internal all-target retirement sequence
 - Composed the prepared exact-ZIP publisher, full readback and native exclusive
   original-file boundary in an internal post-publication routine. It requires

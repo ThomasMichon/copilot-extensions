@@ -5,8 +5,9 @@ line reads for the session-intelligence accounting pipeline. `session-sync`
 can now additionally publish process-log evidence alongside session-state for
 the ordinary local-machine sync path (`sync.process_logs.enabled`, opt-in,
 filesystem targets only). Optional scheduled ZIP snapshots preserve settled
-local logs without deleting originals; reclamation and usage ingestion remain
-separate implementation slices.
+local logs without deleting originals. Separately opted-in machine-only native
+Windows runs can retire raw revisions after all-target verification; usage
+ingestion remains a separate implementation slice.
 
 ## Supported observations
 
@@ -124,8 +125,8 @@ Two scope limits, both deliberate rather than overlooked:
   repo-scoped sync needs its own design -- a known, explicit follow-up, never
   silently approximated here.
 
-Source reclamation after settled-log ZIP verification, SSH/ingest target support, and
-admission fencing for repo-scoped syncs remain outstanding.
+Source retirement has a separate machine-only gate below. SSH/ingest target
+support and admission fencing for repo-scoped syncs remain outstanding.
 
 ### Filesystem payload destination boundary
 
@@ -160,7 +161,7 @@ This boundary covers process-log payloads only, not `sync-meta.json`,
 session-state publication, identity admission or session readers. It does not
 serialize independent writers, make mutable source bytes immutable, or implement
 kernel-owned ZIP snapshot claims. Those contracts and the remaining #5727 work
-are separate; no source retirement or rollout is enabled.
+are separate. Payload publication alone never authorizes source retirement.
 
 ### Additive settled-log ZIP snapshots
 
@@ -234,15 +235,15 @@ stays on the kernel-owned original handle and checks the published file identity
 Raw sources remain present and continue syncing alongside ZIP revisions.
 Readers deliberately retain those aliases; accounting must reconcile them by
 evidence identity, not count each path as new usage. This slice adds scheduled
-ZIP preservation, **not storage reclamation or completed compaction**. Source
-retirement, full normalized-storage parity, and native platform acceptance
-remain separate completion gates.
+ZIP preservation, **not storage reclamation**. The separate retirement policy
+below never changes manual snapshot-only behavior. Full normalized-storage
+parity remains a separate completion gate.
 
-### Retirement boundary prototype
+### Exact-entry retirement boundary
 
 `sync.log_retirement_file` supplies an internal exact-file boundary for native
-Windows safety validation. It is not called by sync or the manual snapshot
-command and enables no retirement policy. A caller-held archive directory pins
+Windows retirement. It is used only after the scheduled all-target/policy gate,
+never by the manual snapshot command. A caller-held archive directory pins
 ancestry; the source opens with read/delete access and no sharing. Existing and
 new writable opens and source renames are excluded while that original handle
 is held. Full revision fingerprint and content hash must still match before
@@ -257,7 +258,7 @@ without attribute changes or pathname-delete fallbacks.
 POSIX retirement is explicitly unsupported by this primitive. Directory
 descriptors and advisory file locks alone do not prove exact-entry deletion
 and writer exclusion. The all-target readback, required-target set, explicit
-retention age, scheduler integration and native acceptance gates remain in the
+retention age and validation obligations remain in the
 [reclamation contract](../../../efforts/active/session-intelligence-and-accounting/process-log-reclamation.md).
 No local or target ZIP is removed by this primitive.
 
@@ -283,7 +284,7 @@ exposing configured paths. OneDrive readback proves local stored bytes only,
 not cloud upload acknowledgement. These observations alone do not authorize
 retirement or promise continued retention at the destination.
 
-The reserved machine-local `sync.process_logs.reclamation` block is strictly
+The machine-local `sync.process_logs.reclamation` block is strictly
 parsed: boolean `enabled`, positive integer `min_age_seconds` with no default,
 and explicit `required_targets` transport names including the active target.
 Enabling also requires process-log collection, ZIP snapshots and the local
@@ -292,11 +293,51 @@ The internal target-set resolver reuses existing options, resolves them once,
 and rejects unknown/unsupported, duplicate and source-overlapping destinations.
 It does not turn ordinary session-state sync into a multi-target transfer.
 
-**Enabled runtime reclamation is still explicitly refused at configuration
-construction**, before any sync writes. Post-publication orchestration, scope
-gates, revision revalidation and the retirement policy are not wired yet.
-Disabled defaults and existing additive snapshot/manual behavior are unchanged.
-Do not enable this reserved setting as an operational feature.
+### Machine-only scheduled reclamation
+
+Reclamation is disabled by default. It requires an explicit positive
+`min_age_seconds` (no default), a nonempty `required_targets` list including the
+active target, and all preservation opt-ins above. The quiet threshold is not
+retention. Changing source code does not authorize enabling this policy, deleting
+production evidence or changing a scheduled task.
+
+The initial supported invocation is `session-sync run --machine-config-only`
+on native Windows. It excludes repository configuration completely, including
+`sync.local_path`: explicitly supply every required destination in the machine's
+`config.yaml`. An embedded caller must use `load_config(include_repo=False)`.
+Default repository-layered loads and ad-hoc/tenant `Config` instances remain
+usable by ordinary consumers, preserving repository settings, but supply no
+retirement authority: an enabled `run` refuses them before sync writes.
+Filtered runs, namespace labels, detached runs and unsupported required
+transports also refuse retirement; there is no implicit fallback. Manual
+`compact-logs`, status, namespace publication, preparation and chronicle commands
+remain non-retiring and usable with that same machine policy.
+POSIX enabled non-dry runs refuse before any sync writes.
+
+The existing sync lock spans provenance/target preparation, origin/worktree
+sidecars, snapshots, ordinary active-target publication and retirement. Only
+the exact selected ZIP is additionally published to other required targets;
+session-state and neighboring raw/gzip files are not fanned out. Partial log
+publication, including locked-file deferral, retains raw originals.
+An initially absent process-log directory visibly skips reclamation without
+blocking valid session-state synchronization. A directory that appears later
+is not adopted for retirement until a subsequent pass.
+
+The loader binds the original machine file's identity/hash and a deep copy of
+effective configuration. At commit, its file and lexical ancestry are reopened
+read-only under native sharing exclusions and remain protected through
+disposition. Changed or missing files, settings, environment-resolved
+source/target paths, source root, machine identity, lock policy or automation
+consent invalidate the pass. Configuration is not held locked during long
+transfers: an operator can disable reclamation before the final guard. No
+repository reload or cached receipt substitutes for machine-local authority.
+
+`session-sync run --machine-config-only --dry-run` inspects existing evidence
+without acquiring/writing the sync lock, creating archives/directories,
+publishing or retiring anything. It reports eligibility, retained files and
+missing verification/platform capability, not a promise of successful deletion.
+Manual `compact-logs` remains additive even when given a machine-only config
+that enables scheduled reclamation.
 
 ### Exact-ZIP publication preparation
 
@@ -322,17 +363,16 @@ evidence; the helper never deletes that copy to simulate rollback.
 
 Dry run performs source and existing-target verification without creating
 directories, claims or archives, or issuing durability writes. Missing evidence
-remains unverified. This helper is not called by scheduled sync or manual
-snapshotting yet and does not enable reclamation. The orchestration and
+remains unverified. Scheduled reclamation calls this helper only for its exact
+selected ZIP; manual snapshotting never does. The remaining
 retirement gates in the [reclamation contract](../../../efforts/active/session-intelligence-and-accounting/process-log-reclamation.md)
 remain open.
 
-### Internal post-publication retirement sequence
+### Post-publication retirement sequence
 
 `sync.log_reclamation.reclaim_process_logs` composes the prepared primitives
-for isolated validation. It has no scheduled, tenant, namespace or manual CLI
-caller. Enabled runtime reclamation is still refused: correct machine-local
-configuration provenance and scheduling integration remain unimplemented.
+under the machine-only scheduled adapter. Tenant, namespace and manual
+snapshot callers do not participate.
 
 A caller must own the sync lock and supply the complete resolved target set,
 explicit preservation/retention settings and a current-policy commit guard.
