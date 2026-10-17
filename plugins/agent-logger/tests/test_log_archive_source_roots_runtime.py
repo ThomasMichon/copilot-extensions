@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 import os
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from agent_logger.config import Config, load_config
+from agent_logger import __main__ as logger_cli
+from agent_logger.segmenter import prepare_log
 from agent_logger.sync import (
     engine, log_archives, log_reclamation, log_reclamation_runtime, log_retirement_file,
 )
@@ -82,10 +85,11 @@ def test_source_roots_runtime_provenance_requires_explicit_machine_only_loader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg, raw = _setup(tmp_path, monkeypatch)
-    with pytest.raises(ValueError, match="requires machine-only"):
-        load_config(home=cfg.home)
-    with pytest.raises(ValueError, match="file-backed"):
-        Config(cfg.as_dict(), cfg.home)
+    for ordinary in [load_config(home=cfg.home), Config(cfg.as_dict(), cfg.home)]:
+        assert ordinary.process_log_reclamation.enabled
+        assert ordinary._machine_origin is None
+        with pytest.raises(ValueError, match="requires file-backed"):
+            engine.run_sync(ordinary, dry_run=True)
     assert raw.read_bytes() == CONTENT
     with cfg._machine_origin.guard(cfg):
         pass
@@ -358,20 +362,19 @@ def test_source_roots_runtime_pass_source_identity_is_not_recaptured(
 @native
 def test_source_roots_runtime_native_policy_file_and_ancestry_exclusion(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    native_file_writer: Callable[[Path], AbstractContextManager[int]],
 ) -> None:
-    from test_log_archive_source_roots_retirement import _native_writer
-
     cfg, _ = _setup(tmp_path, monkeypatch)
     run = _pass(cfg)
     path = cfg.home / "config.yaml"
-    with _native_writer(path):
+    with native_file_writer(path):
         with pytest.raises(OSError) as denied:
             with run.guard():
                 pytest.fail("policy guard admitted a pre-existing native writer")
         assert denied.value.winerror == 32
     with run.guard():
         with pytest.raises(OSError) as denied:
-            with _native_writer(path):
+            with native_file_writer(path):
                 pytest.fail("policy guard admitted a new native writer")
         assert denied.value.winerror == 32
         with pytest.raises(OSError):
@@ -379,7 +382,7 @@ def test_source_roots_runtime_native_policy_file_and_ancestry_exclusion(
         with pytest.raises(OSError):
             cfg.home.rename(cfg.home.with_name("old"))
     # Locks are scoped to the commit: the operator may edit after it releases.
-    with _native_writer(path):
+    with native_file_writer(path):
         pass
 
 
@@ -413,3 +416,99 @@ def test_source_roots_runtime_native_final_hash_policy_change_is_retained(
         tmp_path / "second" / "sessions" / "example" / "logs",
     ]:
         assert len(list(directory.glob("*.zip"))) == 1
+
+
+@pytest.mark.parametrize("command", ["status", "compact-logs", "push", "prepare", "scan", "tick"])
+def test_source_roots_runtime_non_retiring_cli_preserves_repository_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cfg, raw = _setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(cfg.home))
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    repo_config = repo / ".agent-logger.yaml"
+    repo_config.write_text(json.dumps({
+        "log": {"root": "output", "note_marker": "EXAMPLE_NOTE"},
+        "sync": {"local_path": str(tmp_path / "repo-target")},
+    }), encoding="utf-8")
+    monkeypatch.chdir(repo)
+    ordinary = load_config()
+    assert ordinary.repo_config_path == repo_config
+    assert ordinary.sync_path == tmp_path / "repo-target"
+    assert ordinary.note_marker == "EXAMPLE_NOTE"
+    assert ordinary.process_log_reclamation.enabled and ordinary._machine_origin is None
+    if command == "push":
+        rescue = tmp_path / "rescue"
+        (rescue / "session-state").mkdir(parents=True)
+        assert engine.main(["push", "--source", str(rescue), "--machine", ".codespaces/example"]) == 0
+    elif command == "prepare":
+        user = tmp_path / "user"
+        session = user / ".copilot" / "session-state" / "example-session"
+        session.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(user))
+        monkeypatch.setenv("USERPROFILE", str(user))
+        class Output(io.StringIO):
+            def reconfigure(self, **kwargs: object) -> None:
+                pass
+        output = Output()
+        with monkeypatch.context() as context:
+            context.setattr(prepare_log.sys, "stdout", output)
+            context.setattr(prepare_log.sys, "argv", [
+                "prepare-session-log", "--session", "example-session", "--json",
+            ])
+            prepare_log.main()
+        result = json.loads(output.getvalue())
+        assert result["output_root"] == str(repo / "output")
+        assert result["note_marker"] == "EXAMPLE_NOTE"
+    elif command in {"scan", "tick"}:
+        assert logger_cli.main(["chronicle", command]) == 0
+    else:
+        assert engine.main([command]) == 0
+    assert raw.read_bytes() == CONTENT
+    assert not (tmp_path / "second").exists()
+    if command == "compact-logs":
+        assert len(list(raw.parent.glob("*.zip"))) == 1
+    else:
+        assert not list(raw.parent.glob("*.zip"))
+    if command == "status":
+        assert str(tmp_path / "repo-target") in capsys.readouterr().out
+
+
+def test_source_roots_runtime_initially_missing_logs_dry_run_is_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cfg, raw = _setup(tmp_path, monkeypatch)
+    raw.parent.rename(raw.parent.with_name("retained-elsewhere"))
+    assert engine.run_sync(cfg, dry_run=True) == 0
+    assert "reclamation skipped (no process-log source)" in capsys.readouterr().out
+    assert not raw.parent.exists()
+    assert not (cfg.home / cfg.sync_lock_name).exists()
+
+
+@native
+@pytest.mark.parametrize("appears_later", [False, True])
+def test_source_roots_runtime_initially_absent_logs_do_not_block_sessions_or_get_adopted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, appears_later: bool,
+) -> None:
+    cfg, raw = _setup(tmp_path, monkeypatch)
+    raw.parent.rename(raw.parent.with_name("retained-elsewhere"))
+    session = cfg.sync_source / "session-state" / "example-session"
+    session.mkdir(parents=True)
+    (session / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    if appears_later:
+        original = engine._mark_source
+        def create_logs(*args: Any, **kwargs: Any) -> None:
+            raw.parent.mkdir()
+            raw.write_bytes(CONTENT)
+            os.utime(raw, (1, 1))
+            original(*args, **kwargs)
+        monkeypatch.setattr(engine, "_mark_source", create_logs)
+    assert engine.run_sync(cfg) == 0
+    assert (tmp_path / "first" / "example" / "session-state" / "example-session" / "events.jsonl").is_file()
+    assert not (tmp_path / "second").exists()
+    if appears_later:
+        assert raw.read_bytes() == CONTENT
+    else:
+        assert not raw.parent.exists()

@@ -80,10 +80,7 @@ def machine_config_origin(
     if not isinstance(raw, dict) or raw.get("enabled") is not True:
         return None
     if include_repo:
-        raise ValueError(
-            "process-log reclamation requires machine-only configuration: "
-            "load_config(include_repo=False) or session-sync run --machine-config-only"
-        )
+        return None  # Ordinary config consumers receive no retirement authority.
     absolute = home.expanduser().absolute()
     with _pinned_config(absolute) as (revision, digest):
         if _machine_data(absolute) != data:

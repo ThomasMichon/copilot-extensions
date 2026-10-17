@@ -305,10 +305,13 @@ The initial supported invocation is `session-sync run --machine-config-only`
 on native Windows. It excludes repository configuration completely, including
 `sync.local_path`: explicitly supply every required destination in the machine's
 `config.yaml`. An embedded caller must use `load_config(include_repo=False)`.
-Default repository-layered loads and ad-hoc/tenant `Config` construction refuse
-an enabled policy. Filtered runs, namespace labels, detached runs and unsupported
-required transports also refuse it; there is no implicit fallback. Ordinary
-sync, manual `compact-logs` and disabled defaults retain their existing behavior.
+Default repository-layered loads and ad-hoc/tenant `Config` instances remain
+usable by ordinary consumers, preserving repository settings, but supply no
+retirement authority: an enabled `run` refuses them before sync writes.
+Filtered runs, namespace labels, detached runs and unsupported required
+transports also refuse retirement; there is no implicit fallback. Manual
+`compact-logs`, status, namespace publication, preparation and chronicle commands
+remain non-retiring and usable with that same machine policy.
 POSIX enabled non-dry runs refuse before any sync writes.
 
 The existing sync lock spans provenance/target preparation, origin/worktree
@@ -316,6 +319,9 @@ sidecars, snapshots, ordinary active-target publication and retirement. Only
 the exact selected ZIP is additionally published to other required targets;
 session-state and neighboring raw/gzip files are not fanned out. Partial log
 publication, including locked-file deferral, retains raw originals.
+An initially absent process-log directory visibly skips reclamation without
+blocking valid session-state synchronization. A directory that appears later
+is not adopted for retirement until a subsequent pass.
 
 The loader binds the original machine file's identity/hash and a deep copy of
 effective configuration. At commit, its file and lexical ancestry are reopened
