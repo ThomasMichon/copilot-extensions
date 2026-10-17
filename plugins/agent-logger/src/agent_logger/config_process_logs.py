@@ -39,7 +39,7 @@ class ProcessLogArchiveConfig:
 
     @property
     def process_log_reclamation(self) -> LogReclamationSettings:
-        """Parse the reserved policy without pretending orchestration exists."""
+        """Validate the separate, disabled-by-default machine-local retirement policy."""
         sync = self._data.get("sync", {})
         process_logs = sync.get("process_logs", {})
         raw = process_logs.get("reclamation")

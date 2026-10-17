@@ -1888,11 +1888,9 @@ class FilesystemTarget(Target):
         write_process_log_meta(machine_root, status, deferred_files, reason=reason)
 
     def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
-        """Publish process-log evidence; see :class:`Target`'s base method.
+        """Publish logs with pinned source/destination ancestry, including creation.
 
-        Source and payload destination ancestors are pinned during transfer,
-        including destination creation. Health metadata and session-state
-        writes remain outside that payload boundary (tracked in #5727).
+        Health metadata and session-state remain outside this boundary (#5727).
         """
         try:
             log_root = _anchored_path(log_root)
@@ -1947,7 +1945,8 @@ class FilesystemTarget(Target):
             machine, "partial" if locked_paths else "ok",
             tuple(path.name for path in locked_paths),
         )
-        return PushResult(ok=True, detail=detail, file_count=copied, byte_count=nbytes)
+        return PushResult(ok=True, detail=detail, file_count=copied, byte_count=nbytes,
+                          process_logs_complete=not locked_paths)
 
     def process_log_readback(self, machine: str) -> ProcessLogReadback:
         return filesystem_log_readback(self.name, self._root(), machine)

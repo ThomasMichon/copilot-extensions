@@ -1,4 +1,4 @@
-"""Strict policy parsing for the not-yet-enabled process-log reclamation path."""
+"""Strict policy parsing for machine-local, all-target process-log reclamation."""
 
 from __future__ import annotations
 
