@@ -59,6 +59,7 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
     for outcome in manifest["cases"]:
         case = root / outcome
         case.mkdir()
+        # The contained fixture creates its evidence directory exclusively.
         evidence = case / "evidence"
         env = dict(os.environ)
         env.update({
@@ -113,7 +114,9 @@ def main() -> int:
     supplied = args.results_root.absolute()
     if any(
         path.is_symlink()
-        or getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or (os.name == "nt" and (
+            getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        ))
         for path in (supplied, *supplied.parents)
     ):
         parser.error("--results-root must not contain link indirection")
