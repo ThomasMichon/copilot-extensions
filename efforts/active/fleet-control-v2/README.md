@@ -1680,3 +1680,48 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Fresh-box client isolation stays covered by the existing artifact lane;
   no managed-role clean-room or live external-venue readiness is claimed.
   The full effort remains Active with its existing Plan/Validation gates open.
+
+### 2026-10-17 - Admission review and authorized controller expiry repair
+
+- #7099's first three review threads were addressed in the published follow-up:
+  confirm exact retained Permit identity before consumption, preserve unknown
+  handles without mutating retained state, and consolidate the duplicate
+  verifier merge record. Required planner validation passes 410 cases in
+  80.23 seconds under its unchanged 120-second deadline.
+- The next review identified two transport details: derive select wait and
+  attempt scheduling from one monotonic sample, and unregister pending selector
+  entries before socket closure. Added advancing-clock and cleanup-order
+  assertions without changing the original deadline or TLS identity.
+- Broader validation exposed a timing-dependent controller expiry failure:
+  after actual acquisition-budget exhaustion, `Controller.step` attempted a
+  failure receipt and received `subscription-unavailable` instead of returning
+  `UNKNOWN`. Its passing isolated retry was not treated as resolution. The
+  operator explicitly authorized the narrow controller expiry repair,
+  coordinated under #6443; provider adapters, broker policy/enrollment,
+  lease extension, redelivery and live custody remain outside this scope.
+- Actual acquisition-timer expiry now returns `UNKNOWN` without signing or
+  sending a late failure receipt, even if wall time remains before expiry.
+  Acquisition, post-result checks and receipt/envelope expiry share the earlier
+  signed-dispatch/request bound. A provider's own earlier failure still yields
+  `UNAVAILABLE` while authority remains valid; cancellation still propagates.
+  This is a finite work-authority bound, not a user-presence countdown.
+- Three new real-TLS/genuinely signed dispatch cases cover timer exhaustion
+  with a pre-expiry wall clock, a result arriving after dispatch expiry but
+  before the request deadline, and successful delivery whose receipt and
+  decrypted material both retain the shorter dispatch expiry.
+- Focused fence/transport validation passes 43 cases before the third positive
+  case was added. Subsequent required Gateway validation reports 128 passed
+  and one existing acquisition-phase test failure: its 0.7-second budget
+  expired before the intended delayed acknowledgement route was reached.
+  All four unchanged phase cases then pass in isolation, and the complete
+  required Gateway partition passes 129 cases in 96.94 seconds under its
+  unchanged 120-second deadline. The earlier failed run and a partition
+  timeout are retained as observations, not called green or a repaired worker
+  defect. No worker fixture, budget or provider policy was changed.
+- Separate-process Gateway/backend/controller/worker/restart revalidation
+  passes all four cases in 59.64 seconds under the unchanged 120-second
+  boundary, including the retained import-only and thin-SDK assertions.
+  Touched Python passes F/E9 lint and the 13-plugin installation contract.
+  Current-head hosted checks and fresh review remain independent merge
+  gates. The full parent effort remains Active; no live enrollment,
+  deployment, provider-adapter adoption or worktree finalization is claimed.

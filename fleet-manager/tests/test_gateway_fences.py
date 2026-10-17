@@ -2,6 +2,7 @@
 
 import copy
 import time
+from types import SimpleNamespace
 
 import pytest
 from fleet_manager.gateway_auth import AuthContext, Signer, thumbprint, verify
@@ -322,6 +323,91 @@ def test_actual_provider_wait_for_deadline_is_unknown_not_success(fixture, capsy
         provider.close()
     logs = capsys.readouterr()
     assert "SYNTHETIC" not in logs.out + logs.err
+
+
+@pytest.mark.parametrize("outcome", [
+    "budget-expired", "result-after-dispatch-expiry", "result-before-dispatch-expiry",
+])
+def test_controller_acquisition_respects_dispatch_expiry(fixture, monkeypatch, outcome):
+    import asyncio
+
+    from fleet_manager import gateway_controller
+    from fleet_manager.gateway_client import CredentialMaterial, consume_credential
+
+    with running(build_server(fixture.config, fixture.signer)) as gateway:
+        worker = fixture.client("worker", gateway.server_port)
+        worker.connect()
+        provider = controller(fixture, fixture.client("controller", gateway.server_port))
+        clock = [time.time()]
+        cancelled, replies, expiries = [], [], []
+        monkeypatch.setattr(gateway_controller, "time", SimpleNamespace(time=lambda: clock[0]))
+        real_sign = gateway.gateway.broker.signer.sign
+
+        def sign_dispatch(payload, audience, ttl=30, *, expires_at=None):
+            if "recipient_jwk" not in payload:
+                return real_sign(payload, audience, ttl, expires_at=expires_at)
+            expiry = expires_at - 1
+            expiries.append(expiry)
+            return real_sign(payload, audience, ttl, expires_at=expiry)
+
+        monkeypatch.setattr(gateway.gateway.broker.signer, "sign", sign_dispatch)
+        real_poll = provider.client.poll
+
+        def poll(subscription):
+            result = real_poll(subscription)
+            dispatch = verify(result["dispatch"], fixture.gateway_keys,
+                              "fixture-issuer", "controller", lifetime=60)
+            assert dispatch["exp"] < dispatch["deadline"]
+            clock[0] = (time.time() if outcome == "result-before-dispatch-expiry"
+                        else dispatch["exp"] - 0.05)
+            return result
+
+        monkeypatch.setattr(provider.client, "poll", poll)
+        real_reply = provider.client.reply
+
+        def reply(*args):
+            replies.append(args)
+            return real_reply(*args)
+
+        monkeypatch.setattr(provider.client, "reply", reply)
+
+        class ExpiringProvider:
+            async def acquire(self, request, *, timeout):
+                try:
+                    if outcome == "budget-expired":
+                        await asyncio.sleep(timeout + 10)
+                    if outcome == "result-after-dispatch-expiry":
+                        clock[0] = expiries[-1]
+                    return CredentialMaterial(
+                        "SYNTHETIC-EXPIRY-REGRESSION", int(time.time()) + 300,
+                        request["source"], request["account"], request["audience"],
+                        tuple(request["scopes"]),
+                    )
+                finally:
+                    cancelled.append(True)
+
+        provider.provider = ExpiringProvider()
+        provider.start()
+        value = credential_request()
+        worker.request_credential(value)
+        if outcome == "result-before-dispatch-expiry":
+            assert provider.step() == "READY"
+            keys = {"keys": [fixture.config.enrollments[3].receipt_jwk]}
+            receipt = verify(replies[0][-1], keys, "controller", "worker", lifetime=60)
+            assert receipt["exp"] == expiries[-1]
+            result = worker.credential_result(
+                value["request_id"], correlation(value)["request_digest"],
+            )
+            material = consume_credential(
+                worker, value, result, recipient_key=fixture.recipient,
+                controller_keys=keys, controller="controller", controller_generation=1,
+            )
+            assert material.expires_at == expiries[-1]
+        else:
+            assert provider.step() == "UNKNOWN"
+            assert replies == []
+        assert cancelled == [True]
+        provider.close()
 
 
 def test_unicode_secret_error_is_sanitized(fixture):

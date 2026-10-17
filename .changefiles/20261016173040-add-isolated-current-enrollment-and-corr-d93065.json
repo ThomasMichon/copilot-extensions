@@ -1,5 +1,5 @@
 {
-  "comment": "Add isolated current-policy permits and bounded dual-stack Gateway fallback",
+  "comment": "Add current-policy permits, bounded Gateway fallback and truthful controller expiry",
   "changes": [
     {
       "plugin": "fleet-manager",

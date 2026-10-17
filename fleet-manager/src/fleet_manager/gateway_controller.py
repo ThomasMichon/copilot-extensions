@@ -105,15 +105,16 @@ class Controller:
                     "recipient_jwk", "deadline", "subscription"}}
         recipient = claims["recipient_jwk"]
         require(thumbprint(recipient) == binding["recipient_jkt"], "recipient-mismatch")
-        remaining = min(claims["exp"], claims["deadline"]) - time.time()
+        dispatch_deadline = min(claims["exp"], claims["deadline"])
+        remaining = dispatch_deadline - time.time()
         require(remaining > 0, "dispatch-expired")
         try:
             material = asyncio.run(asyncio.wait_for(
                 _provider_result(self.provider, dict(binding["parameters"]), remaining),
                 timeout=remaining))
         except (asyncio.TimeoutError, TimeoutError):
-            material = None
-            state = "UNAVAILABLE"
+            # The acquisition budget is exhausted even if wall time moved back.
+            return "UNKNOWN"
         else:
             if isinstance(material, BaseException):
                 if not isinstance(material, Exception):
@@ -122,7 +123,7 @@ class Controller:
                 state = "UNAVAILABLE"
             else:
                 state = "UNSUPPORTED" if material is None else "READY"
-        ttl = claims["deadline"] - int(time.time())
+        ttl = dispatch_deadline - int(time.time())
         if ttl <= 0:
             return "UNKNOWN"
         reply = {"binding": binding, "state": state}
@@ -134,7 +135,7 @@ class Controller:
                          and type(material.expires_at) is int and time.time() < material.expires_at)
             if not supported:
                 receipt = self.signer.sign({"binding": binding, "state": "UNSUPPORTED"}, binding["worker"], ttl,
-                                           expires_at=claims["deadline"])
+                                           expires_at=dispatch_deadline)
                 self.client.reply(self.subscription, binding["worker"], binding["request_id"], receipt)
                 return "UNSUPPORTED"
             from .gateway_contract import text
@@ -142,7 +143,7 @@ class Controller:
             text(material.token, 16384)
             protected = encode({"alg": "RSA-OAEP-256", "enc": "A256GCM", "typ": "fleet-credential-v1",
                                 "recipient": binding["recipient_jkt"], "binding": digest(binding)})
-            effective_expiry = min(material.expires_at, claims["deadline"])
+            effective_expiry = min(material.expires_at, dispatch_deadline)
             plain = encode({"binding": binding, "token": material.token, "expires_at": effective_expiry,
                             "source": material.source, "account": material.account,
                             "audience": material.audience, "scopes": list(material.scopes)})
@@ -151,7 +152,7 @@ class Controller:
             sealed = envelope.serialize(compact=True)
             ttl = min(ttl, effective_expiry - int(time.time()))
             reply |= {"sealed": sealed, "sealed_digest": hashlib.sha256(sealed.encode()).hexdigest()}
-        receipt = self.signer.sign(reply, binding["worker"], ttl, expires_at=claims["deadline"])
+        receipt = self.signer.sign(reply, binding["worker"], ttl, expires_at=dispatch_deadline)
         self.client.reply(self.subscription, binding["worker"], binding["request_id"], receipt)
         return state
 

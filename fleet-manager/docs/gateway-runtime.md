@@ -267,6 +267,12 @@ Provider timeout normalization explicitly handles Python 3.10's distinct
 `asyncio.TimeoutError` as well as built-in timeouts. If the dispatch deadline
 has elapsed, the controller reports `UNKNOWN` instead of attempting an expired
 reply or claiming delivery; an earlier provider timeout can return `UNAVAILABLE`.
+Exhausting the actual acquisition timer returns `UNKNOWN` without signing or
+sending a failure receipt, even if the wall clock still reads before expiry.
+Successful acquisition and reply/envelope expiry are also capped by the earlier
+of signed dispatch expiry and request deadline. A provider's own earlier
+failure remains `UNAVAILABLE` while that authority is valid; no subscription or
+dispatch is renewed to deliver a late result.
 The pending limit bounds active requests; at most 1024 request identities are
 retained per Gateway epoch, then admission refuses new work. The in-memory
 broker is not a durable queue/task ledger. Restart means `UNKNOWN`, not success.
