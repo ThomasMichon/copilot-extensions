@@ -9,6 +9,7 @@ import getpass
 import hmac
 import logging
 import ntpath
+import os
 import re
 import secrets
 import subprocess
@@ -37,6 +38,7 @@ from .process import (
 
 log = logging.getLogger("ssh-manager.proxy")
 _DRAIN_TIMEOUT = 2.0
+_WINDOWS_FD_STATE = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
 
 
 def _is_windows() -> bool:
@@ -368,6 +370,15 @@ async def create_ssh_subprocess(
     *args: str, config: SSHConfig, **kwargs: Any,
 ) -> asyncio.subprocess.Process:
     """Launch SSH, owning any Windows native proxy outside OpenSSH's child spawn."""
+    if _is_windows():
+        # OpenSSH's inherited descriptor metadata describes an ancestor's handles,
+        # not the newly redirected stdio owned by this subprocess.
+        environment = kwargs.get("env")
+        kwargs["env"] = {
+            key: value
+            for key, value in (os.environ if environment is None else environment).items()
+            if key.casefold() != _WINDOWS_FD_STATE.casefold()
+        }
     proxy = getattr(config, "proxy_command", None)
     if not proxy and isinstance(config, SSHConfig):
         proxy = _option(config, "proxycommand")
