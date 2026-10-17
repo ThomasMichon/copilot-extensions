@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { cp, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createQuotaTool } from "../extensions/budget-guidance/session-quota.mjs";
 
 const invocation = { sessionId: "session-example" };
@@ -77,9 +81,20 @@ test("credential-free identity reads bracket quota, retaining non-atomic scope",
     });
 });
 
-test("actual extension entry joins once with no startup read or extra authority", async () => {
-    const sdk = await import("@github/copilot-sdk/extension");
-    await import("../extensions/budget-guidance/extension.mjs");
+test("actual extension entry joins once with no startup read or extra authority", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "budget-host-quota-"));
+    t.after(() => rm(root, { recursive: true }));
+    await cp(fileURLToPath(new URL("../extensions/budget-guidance/", import.meta.url)),
+        join(root, "extensions"), { recursive: true });
+    const sdkRoot = join(root, "node_modules", "@github", "copilot-sdk");
+    await mkdir(sdkRoot, { recursive: true });
+    await writeFile(join(sdkRoot, "package.json"), JSON.stringify({
+        type: "module", exports: { "./extension": "./extension.mjs" },
+    }));
+    await copyFile(fileURLToPath(new URL("./fixtures/host-sdk.mjs", import.meta.url)),
+        join(sdkRoot, "extension.mjs"));
+    const sdk = await import(pathToFileURL(join(sdkRoot, "extension.mjs")).href);
+    await import(pathToFileURL(join(root, "extensions", "extension.mjs")).href);
     assert.equal(sdk.state.joins, 1);
     assert.deepEqual(Object.keys(sdk.state.options), ["tools"]);
     assert.deepEqual(sdk.state.calls, []);
@@ -128,12 +143,44 @@ test("invalid arguments fail before any read, including paired identity and uppe
         { ...accountArgs, expectedHost: "https://github.com/private/.." },
         { ...accountArgs, expectedHost: "https://github.com?" },
         { ...accountArgs, expectedHost: "https://github.com#" },
+        { ...accountArgs, expectedHost: "https://99999999999" },
         { ...accountArgs, expectedHost: "https://git\nhub.com" },
         { session_owned: true }, { providerId: "x".repeat(257) },
     ]) {
         const f = fixture();
         withheld(await f.read(args), "quota-arguments-invalid");
         assert.deepEqual(f.calls, []);
+    }
+});
+
+test("unexpected argument processing errors have a distinct sanitized diagnostic", async () => {
+    const f = fixture();
+    const input = new Proxy({}, { ownKeys() { throw new Error(secret); } });
+    withheld(await f.read(input), "quota-arguments-error");
+    assert.deepEqual(f.calls, []);
+});
+
+test("string quantity magnitude is exact at the numeric-domain boundary", async () => {
+    for (const [value, valid] of [
+        ["1000000000000000000", true], ["1000000000000000000.000", true],
+        ["999999999999999999.999999999999999999", true],
+        ["-1000000000000000000", true], ["0000000000000000001", true],
+        ["1000000000000000001", false], ["1000000000000000000.000000000000000001", false],
+        ["-1000000000000000001", false], ["-1000000000000000000.1", false],
+    ]) {
+        const f = fixture();
+        f.session.rpc.quota.get = async () => {
+            const raw = projection();
+            raw.snapshots.premium_interactions.entitlementRequests = value;
+            return raw;
+        };
+        const result = await f.read();
+        if (valid) {
+            assert.equal(result.status, "captured", value);
+            assert.equal(result.capture.projection.snapshots.premium_interactions.entitlementRequests, value);
+        } else {
+            withheld(result, "quota-projection-invalid");
+        }
     }
 });
 

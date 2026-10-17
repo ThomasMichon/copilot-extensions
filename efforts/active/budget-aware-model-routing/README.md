@@ -281,6 +281,17 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Foreground capture review corrections
+
+- Addressed current-head review findings in the implementation PR: the Node
+  entry fixture now provisions its own temporary fake SDK and cannot import a
+  live SDK under direct CI discovery; exact string/BigInt magnitude checks
+  reject decimal quantities just above the numeric ceiling; unexpected
+  argument-processing errors have a distinct sanitized diagnostic.
+- The failed PR guard named the direct-discovery missing SDK dependency,
+  confirming the fixture finding. No SDK installation, live reload, or review
+  system remediation is needed.
+
 ### 2026-10-16 - Foreground-session integration implemented for review
 
 - Added the optional `budget_guidance_session_quota` extension entry under the

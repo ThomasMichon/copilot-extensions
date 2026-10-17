@@ -15,6 +15,8 @@ than zero, default 10, at most 30), and the paired `expectedLogin` and
 `expectedHost`. Provider evidence is copied only for an explicitly selected
 provider and optional quota ID. Unknown provider enums or malformed known
 fields fail closed rather than becoming optimistic defaults.
+String quantity magnitude checks are exact through the `1e18` boundary;
+floating-point rounding cannot admit an out-of-range decimal string.
 
 The payload entry `extensions/budget-guidance/extension.mjs` uses the standard
 plugin `extensions/<name>/extension.mjs` discovery convention; it requires no
@@ -51,10 +53,12 @@ recovery action. Implementation and fixture qualification do not authorize live
 enablement, runtime update, or rollout.
 
 The isolated contract test `tests/test_host_quota.py` requires Node.js with
-`node:test` support alongside the ordinary Python test dependencies. It copies
-the real entry and tests into temporary storage with a fake SDK module; no
-live extension reload or account network request occurs. The default Python
-test-isolation image does not currently include Node.js: run this focused test
+`node:test` support alongside the ordinary Python test dependencies. The Node
+suite copies the real entry into temporary storage and provisions its own fake
+SDK before importing it, so direct `node --test` discovery never imports a
+real SDK or depends on the Python wrapper having run first. No live extension
+reload or account network request occurs. The default Python test-isolation
+image does not currently include Node.js: run this focused test
 through the bounded local plugin runner on a Node-equipped host, and run the
 remaining suite through the devcontainer runner with `-k 'not host_quota'`.
 The Node test remains required on the normal Node-equipped CI host; its absence

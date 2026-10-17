@@ -7,7 +7,12 @@ function origin(value) {
     if (!/^https:\/\/[a-z0-9.-]+(?::443)?\/?$/iu.test(value)) {
         throw new CaptureError("account-origin-invalid");
     }
-    const parsed = new URL(value);
+    let parsed;
+    try {
+        parsed = new URL(value);
+    } catch {
+        throw new CaptureError("account-origin-invalid");
+    }
     if (parsed.protocol !== "https:" || parsed.username || parsed.password
         || !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u.test(parsed.hostname)
         || parsed.hostname.includes("..") || parsed.port
@@ -79,8 +84,9 @@ export function createQuotaTool(getSession) {
             let config;
             try {
                 config = options(args);
-            } catch {
-                return respond(failure("quota-arguments-invalid", "error"));
+            } catch (error) {
+                return respond(failure(error instanceof CaptureError
+                    ? "quota-arguments-invalid" : "quota-arguments-error", "error"));
             }
             const session = getSession();
             const sessionId = invocation?.sessionId;
