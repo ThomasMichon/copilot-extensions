@@ -53,6 +53,32 @@ def _wait(probe, *, timeout=30, diagnostic=lambda: ""):
     pytest.fail("real integration boundary did not become ready before its deadline\n" + diagnostic())
 
 
+def _cleanup_docker(containers, networks):
+    failures = []
+    for kind, names in (("container", containers), ("network", networks)):
+        for name in names:
+            missing = f"No such container: {name}" if kind == "container" else f"network {name} not found"
+            argv = ["docker", "rm", "-f", "-v", name] if kind == "container" else [
+                "docker", "network", "rm", name,
+            ]
+            try:
+                removed = subprocess.run(
+                    argv, capture_output=True, text=True, timeout=30,
+                    creationflags=no_window_flags(),
+                )
+                if removed.returncode and missing not in removed.stderr:
+                    failures.append(f"{kind} removal: {removed.stderr}")
+                inspected = subprocess.run(
+                    ["docker", kind, "inspect", name], capture_output=True, text=True,
+                    timeout=30, creationflags=no_window_flags(),
+                )
+                if inspected.returncode == 0 or missing not in inspected.stderr:
+                    failures.append(f"{kind} absence not confirmed: {name}: {inspected.stderr}")
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                failures.append(f"{kind} cleanup failed: {name}: {exc}")
+    assert not failures, "\n".join(failures)
+
+
 def _provider_runtime(python: str, destination: Path):
     identity = json.loads(_run(python, "-c", (
         "import json,sys,agent_containers;from importlib.metadata import version;"
@@ -72,7 +98,8 @@ def _provider_runtime(python: str, destination: Path):
     (destination / "current-version").write_text(identity["version"], encoding="utf-8")
 
 
-def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monkeypatch):
+@pytest.mark.parametrize("outcome", ["complete", "abandon"])
+def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkeypatch, outcome):
     evidence = tmp_path
     if override := os.environ.get("AGENT_DISPATCH_E2E_EVIDENCE_DIR"):
         evidence = Path(override)
@@ -234,7 +261,7 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                 }))
                 task = client._unwrap(client._http.post("/tasks", json={
                     "title": "restricted first touch", "repo": _REPO, "labels": ["restricted"],
-                    "payload_inline": json.dumps({"other": other["id"]}),
+                    "payload_inline": json.dumps({"other": other["id"], "outcome": outcome}),
                 }))
 
                 def bridge_state(sid):
@@ -299,29 +326,41 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                 assert supervisor.renew_restricted_grants() == 1
                 _run(
                     "docker", "exec", "-u", "node", physical, "/usr/local/bin/node", "-e",
-                    "require('fs').writeFileSync('/workspace/complete','release')",
+                    "require('fs').writeFileSync('/workspace/finish','release')",
                 )
-                completed = _wait(
-                    lambda: (current if (current := client.get(task["id"]))["status"] == "completed" else None),
+                terminal_status = "completed" if outcome == "complete" else "abandoned"
+                terminal = _wait(
+                    lambda: (current if (current := client.get(task["id"]))["status"] == terminal_status else None),
                 )
                 def final_proof():
                     proof = json.loads(_run(
                         "docker", "exec", "-u", "node", physical, "/usr/local/bin/node", "-e",
                         "process.stdout.write(require('fs').readFileSync('/workspace/proof.json','utf8'))",
                     ))
-                    return proof if proof["phase"] == "completed" else None
+                    return proof if proof["phase"] == "terminal" else None
 
                 proof = _wait(final_proof)
                 assert proof["native"] == info["native_session_id"] and proof["rotated"] is True
-                assert completed["generation"] == info["task_generation"]
-                assert completed["result"]["native"] == info["native_session_id"]
-                assert completed["result"]["rotated"] is True and completed["result"]["prompts"] == 1
-                assert all(item["status"] == 403 for item in completed["result"]["refused"])
+                assert proof["outcome"] == outcome and proof["prompts"] == 1
+                assert len(proof["refused"]) == 5
+                assert all(item["status"] == 403 for item in proof["refused"])
+                assert terminal["generation"] == info["task_generation"]
+                if outcome == "complete":
+                    assert terminal["result"]["native"] == info["native_session_id"]
+                    assert terminal["result"]["rotated"] is True and terminal["result"]["prompts"] == 1
+                else:
+                    assert terminal["owner"] is None and terminal["lease_expires_at"] is None
                 assert client.get(other["id"])["status"] == "queued"
                 assert supervisor.renew_restricted_grants() == 0
                 inspected = _run("docker", "inspect", physical)
                 assert fleet_token not in inspected and control_token not in inspected
                 assert bridge_state(session_id)["acp_session_id"] == info["native_session_id"]
+                (evidence / "proof.json").write_text(json.dumps({
+                    "outcome": outcome, "status": terminal_status,
+                    "native_preserved": True, "prompts": proof["prompts"],
+                    "refused": proof["refused"], "rotated": True,
+                    "terminal_credential_refused": True,
+                }), encoding="utf-8")
                 trace("acceptance", "complete")
     finally:
         trace("cleanup", "start")
@@ -345,14 +384,5 @@ def test_real_supervisor_delivers_rotates_and_completes_own_task(tmp_path, monke
                     process.terminate()
                     process.wait(timeout=15)
             finally:
-                for name in (worker, central):
-                    subprocess.run(
-                        ["docker", "rm", "-f", "-v", name], capture_output=True, text=True,
-                        timeout=30, creationflags=no_window_flags(),
-                    )
-                for name in (network, management):
-                    subprocess.run(
-                        ["docker", "network", "rm", name], capture_output=True, text=True,
-                        timeout=30, creationflags=no_window_flags(),
-                    )
+                _cleanup_docker((worker, central), (network, management))
                 trace("cleanup", "complete")
