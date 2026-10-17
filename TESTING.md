@@ -1290,6 +1290,8 @@ twelve-minute job runs `tools/run-coverage-selected-tests.py`, which reuses
 `coverage_guided_selection.decide()` and the trusted main-history pointer /
 Release-asset baseline. Push, manual and promotion portfolios remain full;
 `agent-worktrees`' separate selection consumer remains shadow-only.
+Changes to the dispatch selection, containment, runner or workflow inputs also
+nominate dispatch, so the mechanism's own PRs cannot silently skip its execution.
 
 The dispatch lane always unions three sets: exact diff-attributed test nodes,
 the existing weighted-set-cover smoke floor (120 seconds of measured baseline
@@ -1307,7 +1309,8 @@ changes outside the attributed source scope remain explicit fallback triggers.
 That fallback adds the measured smoke set without removing known implicated
 tests. No usable baseline (including an unavailable Release asset) visibly
 runs the full/default portfolio; it never means “guards only” or zero tests.
-An empty curated selection is an error.
+An empty curated selection is an error. The pilot CLI also refuses an absent
+plugin test suite, so full fallback cannot become a successful no-suite skip.
 
 `--selection-file PATH` on `run-plugin-tests.py` accepts a versioned JSON
 manifest, for example:

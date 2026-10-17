@@ -240,6 +240,78 @@ def test_ci_pilot_is_pr_only_and_does_not_increase_job_deadline():
     )
 
 
+def test_cli_missing_suite_cannot_turn_full_fallback_into_a_successful_skip(tmp_path, monkeypatch):
+    script = Path(__file__).resolve().parent / "run-coverage-selected-tests.py"
+    spec = importlib.util.spec_from_file_location("coverage_execution_missing_suite", script)
+    assert spec and spec.loader
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    monkeypatch.setattr(cli, "REPO", tmp_path)
+    monkeypatch.setattr(
+        cli, "build_execution_payload", lambda **_k: pytest.fail("planned an absent suite"),
+    )
+    with pytest.raises(SystemExit) as error:
+        cli.main([
+            "--repo", "example/project", "--plugin", "agent-dispatch", "--base-ref", "fixture",
+            "--smoke-budget", "120", "--commit-volume-threshold", "200",
+            "--age-threshold-seconds", "604800", "--out", str(tmp_path / "decision.json"),
+        ])
+    assert error.value.code == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the discovery job executes Bash on Linux")
+@pytest.mark.parametrize("changed,event,expected", [
+    ("tools/coverage_guided_selection/fallback.py", "pull_request", True),
+    ("tools/run-coverage-selected-tests.py", "pull_request", True),
+    ("tools/run-plugin-tests.py", "pull_request", True),
+    ("tools/plugin_test_selection.py", "pull_request", True),
+    ("tools/plugin_test_containment.py", "pull_request", True),
+    ("tools/pytest_portfolio_guard.py", "pull_request", True),
+    ("tools/_devcontainer_selection.py", "pull_request", True),
+    ("tools/_devcontainer_network_scope.py", "pull_request", True),
+    (".github/workflows/ci.yml", "pull_request", True),
+    ("docs/unrelated.md", "pull_request", False),
+    ("tools/unrelated.py", "pull_request", False),
+    ("tools/plugin_test_selection.py", "push", False),
+])
+def test_discovery_runs_dispatch_for_its_selection_inputs(history, changed, event, expected):
+    import yaml
+
+    root, _, _ = history
+    tools = root / "tools"
+    tools.mkdir()
+    stub = tools / "run-plugin-tests.py"
+    stub.write_text("print('[]')\n", encoding="utf-8")
+    _git(root, "add", "tools/run-plugin-tests.py")
+    _git(root, "commit", "-qm", "discovery list stub")
+    base = _git(root, "rev-parse", "HEAD")
+    target = root / changed
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as stream:
+        stream.write("# changed input\n")
+    _git(root, "add", changed)
+    _git(root, "commit", "-qm", "changed discovery input")
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(),
+    )
+    script = next(
+        step["run"] for step in workflow["jobs"]["discover"]["steps"]
+        if step.get("id") == "set"
+    ).replace("${{ github.event_name }}", event).replace(
+        "${{ github.event.pull_request.base.sha }}", base,
+    )
+    output = root / "discovery-output"
+    env = ar.scrubbed_git_env()
+    env.update(HEAVY_PLUGIN="agent-worktrees", GITHUB_OUTPUT=str(output))
+    subprocess.run(
+        ["bash", "-e", "-c", script], cwd=root, env=env,
+        capture_output=True, text=True, check=True, timeout=30,
+    )
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert json.loads(values["smoke"]) == (["agent-dispatch"] if expected else [])
+    assert values["heavy"] == "false"
+
+
 @pytest.mark.skipif(
     os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1",
     reason="opt-in real coverage collection and contained runtime regression",

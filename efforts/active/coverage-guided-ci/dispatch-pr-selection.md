@@ -110,3 +110,15 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
   curation and container-transport contracts passed (481 passed, 16 skipped);
   the separate opted-in runtime-covered regression proof passed all 15
   contracts, including the intentionally failing selected subprocess.
+- 2026-10-17: the first hosted implementation run failed both runner-contract
+  jobs on an exact dependency-command assertion that had not been updated for
+  the new `pytest-timeout` requirement. Updated that assertion rather than
+  weakening the installation contract. Its discovery output also showed no
+  plugin smoke targets for this tools-only PR; selection/runner/workflow
+  changes now explicitly nominate dispatch. Real-Git tests execute the
+  workflow's discovery script for relevant and unrelated inputs and verify
+  the PR-only nomination. The complete required runner portfolio plus
+  selection/discovery contracts passed locally: 642 passed, 22 skipped,
+  22 exhaustive cases deselected, 18.72 seconds. The pilot CLI also refuses
+  an absent suite before planning so no-evidence full fallback cannot
+  become a successful no-suite skip. The hosted deadline proof remains open.

@@ -1520,6 +1520,19 @@ jobs:
           fi
           FULL=$(python tools/run-plugin-tests.py $MODE --list)
           SMOKE=$(python tools/run-plugin-tests.py $MODE --exclude "$HEAVY_PLUGIN" --list)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PILOT_PATHS=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              .github/workflows/ci.yml tools/coverage_guided_selection/ \
+              tools/run-coverage-selected-tests.py tools/run-plugin-tests.py \
+              tools/plugin_test_selection.py tools/pytest_test_selection.py \
+              tools/plugin_test_containment.py tools/pytest_portfolio_guard.py \
+              tools/run_tests_in_devcontainer.py tools/_devcontainer_selection.py \
+              tools/_devcontainer_network_scope.py)
+            if [ -n "$PILOT_PATHS" ]; then
+              FULL=$(python -c 'import json,sys; print(json.dumps(sorted(set(json.loads(sys.argv[1])) | {"agent-dispatch"})))' "$FULL")
+              SMOKE=$(python -c 'import json,sys; print(json.dumps(sorted(set(json.loads(sys.argv[1])) | {"agent-dispatch"})))' "$SMOKE")
+            fi
+          fi
           echo "Full set:  $FULL"
           echo "Fast set:  $SMOKE"
           echo "smoke=$SMOKE" >> "$GITHUB_OUTPUT"

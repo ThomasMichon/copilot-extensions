@@ -36,6 +36,9 @@ def main(argv: list[str] | None = None) -> int:
         or not math.isfinite(args.age_threshold_seconds) or args.age_threshold_seconds <= 0
     ):
         parser.error("smoke and coverage-debt budgets must be finite and positive")
+    tests = REPO / "plugins" / args.plugin / "tests"
+    if not tests.is_dir() or not any(tests.glob("test_*.py")):
+        parser.error("coverage execution requires an existing plugin test suite, not a no-suite skip")
     started = time.monotonic()
     payload = build_execution_payload(
         repo_root=REPO, repo=args.repo, plugin=args.plugin,
