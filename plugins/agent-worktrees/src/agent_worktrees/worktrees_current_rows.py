@@ -23,10 +23,13 @@ def populate_claims(
     resources = claims_rank._claims_with_pr_backfill(record.resources, active_pr)
     unresolved = []
     if any(claim.kind == "worktree" and claim.is_unsettled for claim in record.resources):
-        found, unresolved = claims_transitive_cli.transitive_obligations(
-            record.worktree_id, record.repo, machine=record.machine,
-            _record=record, _records=claim_records,
-        )
+        if record.machine:
+            found, unresolved = claims_transitive_cli.transitive_obligations(
+                record.worktree_id, record.repo, machine=record.machine,
+                _record=record, _records=claim_records,
+            )
+        else:
+            found, unresolved = [], [{"reason": "root machine identity unavailable"}]
         refs = {
             claims_rank.claim_url(kind, ref) or ref
             for kind, ref in claims_rank.rank_claims(resources, limit=None)

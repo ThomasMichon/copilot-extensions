@@ -160,6 +160,26 @@ def test_cycle_retains_found_pr_and_marks_projection_incomplete(graph):
     assert row["claims_projection"]["unresolved_count"] == 1
 
 
+@pytest.mark.parametrize("current_only", [False, True])
+def test_missing_root_machine_preserves_direct_claims_and_marks_incomplete(graph, current_only):
+    _record(graph, "dependency", "child", [_pr(42)])
+    parent = _record(graph, "control", "parent", [_pr(7), _child("dependency", "child")])
+    parent.machine = ""
+    row = core._worktree_to_dict(parent, current_only=current_only)
+    assert row["claims_links"][0]["label"] == "dependency#7"
+    assert row["claims_projection"] == {
+        "inherited_pr_count": 0, "unresolved_count": 1, "complete": False,
+    }
+    if current_only:
+        assert row["claims_assets"]["held_count"] == 2
+        assert row["claims_links_complete"] is False
+        store = projection.WorktreesProjection(graph / "current.sqlite3")
+        store.publish("control", [row], observed_at=1)
+        assert store.read("control")["worktrees"] == [row]
+    else:
+        assert "claims_links_complete" not in row
+
+
 def test_current_projection_counts_all_links_before_bounding_visible_entries(graph):
     _record(graph, "dependency", "child", [_pr(number) for number in range(20)])
     parent = _record(graph, "control", "parent", [_child("dependency", "child")])
