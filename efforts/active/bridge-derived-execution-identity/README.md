@@ -71,7 +71,7 @@ is context for existing machine authority, not a new runtime code dependency.
   authority; update the directly affected configuration documentation and changefile.
 
 ### Phase 3 — Validate, land and close
-- [ ] Complete targeted then required contained plugin gates, lint and install-contract validation.
+- [x] Complete targeted then required contained plugin gates, lint and install-contract validation.
 - [ ] Complete REVIEW.md self-check, documentation-impact review and public privacy scan.
 - [ ] Land the implementation through normal review/check/role gates; re-read this
   effort, resolve its checklists and land the Done/archive delta.
@@ -88,7 +88,7 @@ is context for existing machine authority, not a new runtime code dependency.
   ambiguous, platform-mismatched and contradictory bindings fail closed.
 - [x] Standalone no-sibling and deliberate legacy-selector compatibility cases.
 - [x] Fresh isolated configuration/startup check without touching a shared daemon.
-- [ ] Targeted tests followed by required contained plugin suites, ruff F/E9 and
+- [x] Targeted tests followed by required contained plugin suites, ruff F/E9 and
   `check-install-contract`; stage new files before wrapper snapshots.
 - [x] Record exercised validation tiers and explicit reasons for unavailable
   clean-room/external lanes; no deployment implied by unit success.
@@ -225,3 +225,10 @@ with implementation tests; standalone compatibility remains first-class.
   unchanged 300-second group budget after progressing without reported assertion
   failures. Complete that guard portfolio in bounded selections before treating
   the required validation gate as satisfied; do not increase limits or omit cases.
+- The exact collected owner guard portfolio completed: 2,047 selected nodes in
+  93 files, all run in bounded selections at the unchanged limits, with normal
+  platform skips preserved. No assertion failures or omitted selections.
+- Review follow-up distinguishes actual remote-ACP validation failures in mixed
+  identity/ACP configuration. Adopted source locators deliberately precede the
+  legacy control-project fallback; documentation and a regression make both
+  precedence branches explicit. The focused identity selection passed 46 tests.

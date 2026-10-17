@@ -167,7 +167,9 @@ machine setting to maintain. Direct daemon launch captures the stable source
 repository before detach and working-directory changes. Adoption records that
 source repository automatically as `topologies.<profile>.source_repo`, so a
 supervised restart can recompute the identity without the caller's cwd.
-For older profiles, the declared control-plane project precedes the repository
+An adopted `source_repo` selects that source project's configuration ahead of
+the topology's legacy control-plane fallback, even when both locators exist.
+For older profiles without `source_repo`, the declared control-plane project precedes the repository
 that happens to store shared topology; an in-repository topology source is the
 fallback when no control-plane project is declared. These are configuration
 locators, not identity authority.

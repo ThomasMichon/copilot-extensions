@@ -11,6 +11,7 @@ from typing import cast
 
 import yaml
 from agent_procutil import no_window_kwargs
+from pydantic import ValidationError
 
 from .install_paths import effective_config_dir, legacy_install_dir, normalized_path
 from .models import RepoBridgeConfig, ServiceConfig
@@ -151,6 +152,13 @@ def load_config() -> ServiceConfig:
                 "refusing caller-settings fallback"
             ) from exc
         except Exception as exc:
+            if isinstance(exc, ValidationError) and any(
+                error["loc"] and error["loc"][0] == "remote_acp"
+                for error in exc.errors()
+            ):
+                raise ValueError(
+                    "Invalid remote ACP configuration; refusing configuration fallback",
+                ) from None
             if isinstance(data, dict) and (
                 "local_execution_space" in data or "topologies" in data
             ):

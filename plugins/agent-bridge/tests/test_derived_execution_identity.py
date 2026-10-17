@@ -221,6 +221,18 @@ def test_declared_control_project_precedes_topology_storage_repository(source, t
     ]
 
 
+def test_adopted_source_precedes_legacy_control_project(source, tmp_path, monkeypatch):
+    machines = source / "machines.yaml"
+    machines.write_text("control_plane:\n  project: legacy-control\nmachines: {}\n", encoding="utf-8")
+    cfg = ServiceConfig(topologies={"adopted": TopologyProfile(
+        source_repo=str(source), machines_yaml=str(machines),
+    )})
+    cfg._source_worktree = tmp_path
+    calls = _authority(monkeypatch)
+    assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-a"
+    assert calls == [(["get", "execution-identity"], source)]
+
+
 def test_unregistered_optional_project_preserves_valid_legacy_selector(source, tmp_path, monkeypatch):
     cfg = ServiceConfig(
         local_execution_space="native-b",
@@ -397,6 +409,23 @@ def test_malformed_source_profile_never_becomes_default_config(tmp_path, monkeyp
         "topologies:\n  sample:\n    source_repo: 123\n", encoding="utf-8",
     )
     with pytest.raises(ValueError, match="refusing identity fallback"):
+        config.load_config()
+
+
+@pytest.mark.parametrize(
+    "data,message",
+    [
+        ({"topologies": {}, "remote_acp": "invalid"}, "Invalid remote ACP configuration"),
+        (
+            {"local_execution_space": "bad/key", "remote_acp": {}},
+            "Invalid execution-space or topology configuration",
+        ),
+    ],
+)
+def test_mixed_config_reports_actual_validation_source(tmp_path, monkeypatch, data, message):
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
         config.load_config()
 
 
