@@ -609,6 +609,30 @@ def test_recovery_interrupted_audit_rolls_back_eligibility(held, monkeypatch):
     assert queue.cleanup_recovery_history(key) == []
 
 
+@pytest.mark.parametrize("field", ["reason", "request_id", "expected_preview"])
+@pytest.mark.parametrize("value", [None, False, 0, True, 1, [], {}, ["value"], {"key": "value"}, "", "  "])
+def test_direct_recovery_apply_rejects_invalid_request_identity_before_sql(held, monkeypatch, field, value):
+    queue, task_id, key = held
+    plan = preview(held)
+    before = asdict(queue.get_reservation(key)), queue.events(task_id)
+    arguments = {
+        "expected_generation": plan["generation"], "current_host": "host",
+        "apply": True, "reason": "corrected", "request_id": "exact-request",
+        "expected_preview": plan["preview_token"],
+    }
+    arguments[field] = value
+
+    def forbidden():
+        raise AssertionError("invalid recovery identity reached SQLite")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(queue, "_connect", forbidden)
+        with pytest.raises(TaskError):
+            queue.recover_held_cleanup(key, **arguments)
+    assert (asdict(queue.get_reservation(key)), queue.events(task_id)) == before
+    assert queue.cleanup_recovery_history(key) == []
+
+
 def test_recovery_history_survives_later_success(held):
     queue, _, key = held
     prior = queue.get_reservation(key).conclusion_detail

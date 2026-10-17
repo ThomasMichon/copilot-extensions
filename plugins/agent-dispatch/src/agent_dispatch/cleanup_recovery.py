@@ -132,8 +132,12 @@ def recover(queue, key, *, expected_generation, current_host, apply=False,
     if (type(expected_generation) is not int or expected_generation < 0
             or not isinstance(current_host, str) or not current_host.strip()):
         raise TaskError("cleanup recovery requires exact generation and current host")
-    reason = (reason or "").strip()
-    if apply and (not reason or not request_id or not expected_preview):
+    if reason is not None and not isinstance(reason, str):
+        raise TaskError("cleanup recovery reason must be a string")
+    reason = reason.strip() if reason is not None else ""
+    if apply and (not reason or any(
+            not isinstance(value, str) or not value.strip()
+            for value in (request_id, expected_preview))):
         raise TaskError("cleanup recovery apply requires preview, request id and audit reason")
     request = _json({"key": key, "generation": expected_generation, "host": current_host.casefold(),
                      "preview": expected_preview, "reason": reason})

@@ -30,6 +30,8 @@ agent-dispatch reservations cleanup-history <reservation-key>
 Replaying the same apply request returns its original acceptance without
 resetting progress again. Reusing its identity with different parameters is
 an error. `scheduled: true` means accepted, not successfully cleaned or removed.
+The direct Python API also requires nonblank string request/preview identities
+and a string audit reason before any database access; it does not coerce IDs.
 Inspect reservation conclusion progress afterward; the existing supervisor
 claims a tokenized, expiring cleanup lease before executing the retry.
 

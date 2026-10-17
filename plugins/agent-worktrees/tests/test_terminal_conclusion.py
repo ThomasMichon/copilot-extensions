@@ -1714,6 +1714,43 @@ class TestReciprocalDisposal:
         assert progress.reciprocal_snapshot(primary, sibling, sibling.yaml_path) is None
         assert [path.read_bytes() for path in paths] == before
 
+    @pytest.mark.parametrize("changed_half", ["primary", "sibling"])
+    def test_pair_gc_readback_detects_change_during_identity_loading(self, tmp_path, monkeypatch, changed_half):
+        from agent_worktrees import reap_cli
+
+        sibling, sibling_path, sibling_worktree = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                           reservation_key="dispatch-task:task-1:1")
+        assert result["managed_gc_eligible"]
+        current = tracking.load_record(sibling_path)
+        paths = (record_path, sibling_path, record_path.with_suffix(".terminal-pair.json"),
+                 sibling_path.with_suffix(".terminal-pair.json"))
+        before = {path: path.read_bytes() for path in paths}
+        target = record_path if changed_half == "primary" else sibling_path
+        changed = before[target] + b"\nfixture_metadata: changed\n"
+        original = tracking.load_record
+
+        def mutate_after_loading(path, *args, **kwargs):
+            record = original(path, *args, **kwargs)
+            if path == target:
+                target.write_bytes(changed)
+            return record
+
+        monkeypatch.setattr(tracking, "load_record", mutate_after_loading)
+        removed, reasons = reap_cli._remove_managed_worktree(
+            current, repo, sibling_path.parent,
+        )
+        assert not removed and reasons == ["terminal-pair-record-changed"]
+        assert sibling_worktree.exists()
+        assert {path: path.read_bytes() for path in paths} == {**before, target: changed}
+
     def test_pair_progress_interrupted_receipt_publication_keeps_reciprocity(self, tmp_path, monkeypatch):
         sibling, sibling_path, _ = _pair_sibling(
             tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
