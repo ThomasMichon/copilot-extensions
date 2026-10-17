@@ -144,6 +144,7 @@ def _admit_invocation(
             if remaining <= 0:
                 raise RepairAdmissionError("repair interpreter exceeds its content bound")
             content.update(block)
+    argv[0] = str(executable)
     return argv, executable, content.hexdigest()
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -154,6 +155,50 @@ def test_executable_changed_after_binding_cannot_run_a_probe(
     plan = invoke(repair_fixture)
     assert all(row["observedBefore"]["reason"] == "readiness-invocation-refused"
                for row in plan["outcomes"])
+
+
+@pytest.mark.parametrize("platform", [Platform.WINDOWS, Platform.LINUX])
+def test_admitted_executable_argv_is_absolute(tmp_path, monkeypatch, platform):
+    conductor = tmp_path / "conductor"
+    executable = conductor / "relative-bin" / "interpreter"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"admitted-interpreter")
+    monkeypatch.chdir(conductor)
+    monkeypatch.setattr(repair_api, "_argv", lambda *args: [
+        str(Path("relative-bin") / "interpreter"), "unchanged-argument",
+    ])
+    action = Invocation(kind="payload-script", target=tmp_path / "action", arguments=())
+    argv, admitted, _ = repair_api._admit_invocation(action, platform)
+    assert argv == [str(executable), "unchanged-argument"]
+    assert admitted == executable and Path(argv[0]).is_absolute()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX relative PATH execution")
+def test_relative_path_executes_admitted_interpreter_not_payload_twin(
+    repair_fixture, tmp_path, monkeypatch,
+):
+    home, _, payload, _, _ = repair_fixture
+    interpreter = shutil.which("bash")
+    assert interpreter
+    conductor = tmp_path / "conductor"
+    admitted = conductor / "relative-bin" / "bash"
+    admitted.parent.mkdir(parents=True)
+    shutil.copyfile(interpreter, admitted)
+    admitted.chmod(0o755)
+    twin = payload / "relative-bin" / "bash"
+    twin.parent.mkdir()
+    twin.write_text("#!/bin/sh\nexit 96\n", encoding="utf-8")
+    twin.chmod(0o755)
+    monkeypatch.chdir(conductor)
+    monkeypatch.setenv("PATH", "relative-bin")
+    assert shutil.which("bash") == str(Path("relative-bin") / "bash")
+    plan = invoke(repair_fixture, selection=("base",))
+    assert plan["outcomes"][0]["observedBefore"]["state"] == "not-ready"
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"], selection=("base",))
+    assert result["status"] == "ready" and result["requiredSatisfied"]
+    assert result["outcomes"][0]["installer"] == {"status": "exited", "exitCode": 0}
+    assert result["outcomes"][0]["observedAfter"]["state"] == "ready"
+    assert (home / "agent-example-base.ready").read_text() == "ready"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows CMD contract")

@@ -426,6 +426,10 @@ and ignored child dispositions. The same file covers executable
 admission failure without execution and binding drift during an initially-ready
 probe and required-dependent blocker propagation after optional prerequisite
 binding refusal; source-content admission is shared by planning and actual invocation.
+The admitted executable is passed as an absolute argv path. A native POSIX
+relative-PATH case separates the conductor and payload working directories and
+places a different executable at the payload-relative path; real plan/apply
+must still invoke the admitted interpreter.
 Post-install probes also require fresh owner admission before readiness is
 accepted, including the final selected module. Binding drift or cancellation
 retains the completed installer result but rejects stale readiness and blocks
