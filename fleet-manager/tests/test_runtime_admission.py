@@ -338,6 +338,26 @@ def test_capacity_refuses_without_evicting_live_handle_or_proof(harness):
             role="client", installation="client-a")
 
 
+def test_expiry_prunes_in_place_without_discarding_live_handles_or_evidence(harness):
+    first = harness.admit()
+    first_evidence = harness.owner._issued[id(first)].identity.evidence
+    issued, evidence = harness.owner._issued, harness.owner._evidence
+    harness.clock.value = NOW + 10
+    second = harness.admit()
+    second_evidence = issued[id(second)].identity.evidence
+    harness.clock.value = NOW + PERMIT_SECONDS
+    third = harness.admit()
+    assert harness.owner._issued is issued and harness.owner._evidence is evidence
+    assert id(first) not in issued and id(second) in issued and id(third) in issued
+    assert first_evidence in evidence and second_evidence in evidence
+    harness.owner.revalidate(second, ObservationRead("fleet-a"))
+    harness.clock.value = NOW + REQUEST_SECONDS
+    fourth = harness.admit()
+    assert harness.owner._issued is issued and harness.owner._evidence is evidence
+    assert list(issued) == [id(fourth)]
+    assert first_evidence not in evidence and second_evidence in evidence
+
+
 def test_exact_production_capacity_and_expired_fence_recovery(harness):
     request = ObservationRead("fleet-a", (A,))
     verified = harness.identity()

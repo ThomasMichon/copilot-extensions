@@ -123,6 +123,7 @@ class Controller:
                 state = "UNAVAILABLE"
             else:
                 state = "UNSUPPORTED" if material is None else "READY"
+        # Acquisition can cross expiry; do not reuse its earlier clock sample.
         ttl = dispatch_deadline - int(time.time())
         if ttl <= 0:
             return "UNKNOWN"

@@ -367,13 +367,12 @@ class AdmissionAuthority:
         action, request_digest = _request(request)
         with self._lock:
             now = self._now()
-            self._issued = {
-                key: item for key, item in self._issued.items()
-                if now < item.permit.expires_at
-            }
-            self._evidence = {
-                key: expiry for key, expiry in self._evidence.items() if now < expiry
-            }
+            for key in [
+                key for key, item in self._issued.items() if now >= item.permit.expires_at
+            ]:
+                del self._issued[key]
+            for key in [key for key, expiry in self._evidence.items() if now >= expiry]:
+                del self._evidence[key]
             if not identity.verified_at <= now < identity.verified_at + REQUEST_SECONDS:
                 raise AdmissionError("stale-identity")
             if identity.evidence in self._evidence:
