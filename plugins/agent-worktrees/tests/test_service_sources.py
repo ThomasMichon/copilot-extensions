@@ -72,7 +72,9 @@ def repository(repository_template, tmp_path, monkeypatch):
     monkeypatch.setattr(services_cli.svc, "_preferred_installer_order", lambda: ("install.py",))
     monkeypatch.setattr(
         services_cli, "_installer_cmd",
-        lambda installer, args: [sys._base_executable, "-I", "-S", str(installer), *args],
+        lambda installer, args: [
+            getattr(sys, "_base_executable", sys.executable), "-I", "-S", str(installer), *args,
+        ],
     )
     monkeypatch.setattr(
         services_cli, "subprocess",
@@ -238,3 +240,18 @@ def test_anchor_key_collision_refuses_foreign_checkout(repository, monkeypatch):
     with pytest.raises(RuntimeError, match="belongs to another anchor"):
         service_sources.resolve(other, r.config)
     assert _git(source, "rev-parse", "HEAD") == r.reviewed
+
+
+def test_regular_file_in_source_slot_is_explicitly_refused(repository, monkeypatch):
+    r = repository
+    monkeypatch.setattr(
+        service_sources, "hashlib",
+        SimpleNamespace(sha256=lambda value: SimpleNamespace(hexdigest=lambda: "b" * 64)),
+    )
+    commit = _git(r.anchor, "rev-parse", "refs/heads/main")
+    slot = service_sources.cfg.project_dir() / "service-sources" / ("b" * 16) / commit
+    slot.parent.mkdir(parents=True)
+    slot.write_text("preserve this file\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="not a real checkout directory"):
+        service_sources.resolve(r.anchor, r.config)
+    assert slot.read_text(encoding="utf-8") == "preserve this file\n"

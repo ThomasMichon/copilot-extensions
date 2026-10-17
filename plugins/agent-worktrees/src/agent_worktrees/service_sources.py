@@ -63,8 +63,8 @@ def resolve(repo: Path, config: cfg.Config, *, deploy: bool = False) -> Path:
                 "Service checkout creation failed; validating an existing checkout: %s", exc,
             )
 
-    if source.is_symlink():
-        raise RuntimeError(f"Service source checkout is a symbolic link: {source}")
+    if source.is_symlink() or not source.is_dir():
+        raise RuntimeError(f"Service source path is not a real checkout directory: {source}")
     owner = _git(source, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
     expected_owner = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
     if Path(owner).resolve() != Path(expected_owner).resolve():
