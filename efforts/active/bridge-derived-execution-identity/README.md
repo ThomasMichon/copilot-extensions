@@ -232,3 +232,11 @@ with implementation tests; standalone compatibility remains first-class.
   identity/ACP configuration. Adopted source locators deliberately precede the
   legacy control-project fallback; documentation and a regression make both
   precedence branches explicit. The focused identity selection passed 46 tests.
+- Reconciled independently merged native-resume and source-generation work.
+  The sole conflict was the model fingerprint: retained the newer wire generation
+  and fixtures, refreshed the merged model's LF-normalized hash, and confirmed
+  the local-only locator delta. Contract validation now covers 224 fixtures.
+  The post-reconcile identity/config/reader/startup/native-resume selection passed
+  273 tests with 2 normal skips. Module-size, install, docs/version, F/E9 and
+  whitespace gates passed again. No source owner protocol or mutation policy
+  changed during reconciliation.
