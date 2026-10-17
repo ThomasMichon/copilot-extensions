@@ -240,7 +240,8 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ### 2026-10-16 - Machine-only scheduled integration
 - Added an explicit machine-only configuration origin and scheduled run mode.
-  Default repository-layered loads, ad-hoc/tenant configurations, filtered or
+  Default repository-layered loads and ad-hoc/tenant configurations provide no
+  retirement authority; ordinary config consumers remain usable. Filtered or
   namespaced contexts, unsupported transports and detached execution cannot
   authorize retirement. Disabled defaults and manual additive snapshots stay
   unchanged; no rollout or live configuration changes are part of this slice.
@@ -256,9 +257,14 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 - Synthetic tests cover actual scheduled two-target retirement, idempotence,
   file and memory policy changes during publication/final hashing, configuration
   writer/rename exclusion, dry-run zero effects and excluded contexts.
-  Full isolated Linux validation passed 1,470 tests with 112 skips and verified
+  Full isolated Linux validation passed 1,477 tests with 114 skips and verified
   cleanup. Native scheduled-path execution, current-head review and complete
   CI remain acceptance gates; neither parent effort is complete.
+- Addressed review findings at the actual consumer boundaries: ordinary
+  configuration loads retain repository settings but cannot authorize a retiring
+  run; initially absent logs skip reclamation without blocking session sync or
+  adopting a later-created directory. Native writable-handle probes now use a
+  shared pytest fixture rather than a cross-test-module import.
 
 ### 2026-10-16 - Internal retirement sequence reviewed and merged
 - #7047 actually merged at `2026-10-16T23:57:27Z` as

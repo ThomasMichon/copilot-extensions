@@ -126,8 +126,9 @@ cloud acknowledgement.
   Strict policy parsing and explicit target resolution landed in #7026;
   enabled runtime settings remain refused until orchestration exists.
   The current integration adds file-backed `load_config(include_repo=False)`
-  provenance and an explicit machine-only run mode. Repository-layered,
-  ad-hoc/tenant, filtered and detached contexts remain excluded; native
+  provenance and an explicit machine-only run mode. Repository-layered and
+  ad-hoc/tenant config remain usable but cannot authorize retirement; filtered
+  and detached retirement contexts remain excluded. Native
   scheduled-path acceptance must pass before this implementation gate closes.
 - [x] Add typed per-revision readback results through the target abstraction;
   implement bounded supported transports and reject the rest explicitly.

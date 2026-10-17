@@ -112,7 +112,13 @@ def prepare_reclamation(
         return None
     validate_reclamation_context(cfg, dry_run=dry_run)
     source = cfg.process_logs_source.expanduser().absolute()
-    identity = _identity(source)
+    try:
+        identity = _identity(source)
+    except FileNotFoundError:
+        # Absence at initial preparation is not a changed, already-bound source.
+        # Never adopt a directory that appears later in this same pass.
+        print("session-sync: process-log reclamation skipped (no process-log source)")
+        return None
     targets = resolve_required_log_targets(cfg, cfg.process_log_reclamation, machine)
     active = next(item for item in targets if item.target_name == cfg.sync_target)
     if target.process_log_readback(machine) != active:

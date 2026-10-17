@@ -654,11 +654,7 @@ class Config(ProcessLogArchiveConfig):
         self.repo_config_path = repo_config_path
         self.repo_root = repo_root
         self._machine_origin = _machine_origin
-        if self.process_log_reclamation.enabled and _machine_origin is None:
-            raise ValueError(
-                "process-log reclamation is not available without file-backed "
-                "machine-only configuration provenance"
-            )
+        _ = self.process_log_reclamation
 
     # -- resolved convenience accessors ---------------------------------
 
