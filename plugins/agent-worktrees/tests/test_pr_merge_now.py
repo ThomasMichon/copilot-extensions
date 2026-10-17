@@ -405,16 +405,18 @@ def test_now_omits_match_head_commit_without_config(monkeypatch):
     ]
 
 
-def test_now_json_success_shape(monkeypatch, capsys):
+@pytest.mark.parametrize("provider_name,verified", [("github", True), ("gitea", None)])
+def test_now_json_success_shape(monkeypatch, capsys, provider_name, verified):
     import json as _json
     fake = _FakeProvider()
+    fake.name = provider_name
     _patch_provider(monkeypatch, fake)
-    rc = m._pr_merge_now(_args(json=True), _prcfg(), _self_merge_flow(),
+    rc = m._pr_merge_now(_args(json=True), _prcfg(provider=provider_name), _self_merge_flow(),
                          apply=True)
     assert rc == 0
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["applied"] is True
-    assert out["merged"] is True and out["completion_verified"] is True
+    assert out["merged"] is True and out["completion_verified"] is verified
     assert out["action"] == "merge"
     assert out["reminder"]["profile"] == "pr-self-merge"
 
@@ -520,6 +522,7 @@ def test_prefer_auto_merge_arms_native_auto_merge(monkeypatch, capsys):
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["action"] == "auto-merge"
     assert out["merged"] is False
+    assert out["completion_verified"] is False
     assert out["applied"] is True
 
 
@@ -683,6 +686,27 @@ def test_ado_self_merge_uses_native_completion(monkeypatch, capsys):
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["action"] == "auto-complete"
     assert out["applied"] is True
+    assert out["merged"] is False and out["completion_verified"] is None
+
+
+@pytest.mark.parametrize("provider_name", ["github", "gitea", "azure-devops"])
+def test_merge_request_failure_has_stable_completion_keys(monkeypatch, capsys, provider_name):
+    import json
+
+    fake = _FakeProvider(err="refused", auto_err="refused")
+    fake.name = provider_name
+    _patch_provider(monkeypatch, fake)
+    flow = pc.classify_pr_flow(
+        enabled=True, required=True, provider=provider_name,
+        automerge_label="", merge_actor="submitter-direct",
+    )
+    assert m._pr_merge_now(
+        _args(json=True), _prcfg(provider=provider_name), flow, apply=True,
+    ) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["merged"] is False
+    assert result["completion_verified"] is (False if provider_name == "github" else None)
+    assert result["error"] == "refused"
 
 
 def test_ado_self_merge_surfaces_completion_failure(monkeypatch):

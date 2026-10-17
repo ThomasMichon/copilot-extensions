@@ -35,7 +35,7 @@ def _poll_ready(
     if any(descriptor == peer for descriptor, _flags in events):
         raise PrivateIPCError(Refusal.IDENTITY)
     if any(flags & select.POLLNVAL for _descriptor, flags in events):
-        raise PrivateIPCError(Refusal.IO)
+        raise PrivateIPCError(Refusal.CLOSED)
     return bool(events)
 
 

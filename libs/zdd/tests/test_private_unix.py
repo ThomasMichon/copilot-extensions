@@ -118,6 +118,17 @@ def test_closed_socket_poll_refuses_explicitly() -> None:
     assert caught.value.reason is Refusal.CLOSED
 
 
+def test_native_pollnval_refuses_as_closed_descriptor() -> None:
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    os.close(connection.fileno())
+    try:
+        with pytest.raises(PrivateIPCError) as caught:
+            _poll_ready(connection, write=False, deadline=Deadline(1))
+        assert caught.value.reason is Refusal.CLOSED
+    finally:
+        connection.detach()
+
+
 @pytest.mark.parametrize("high_descriptor", ["socket", "pidfd", "both"])
 def test_real_channel_io_and_peer_exit_above_fd_setsize(
     tmp_path: Path, high_descriptor: str,
