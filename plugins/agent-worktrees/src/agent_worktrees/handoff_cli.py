@@ -319,6 +319,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     # duplicate (one live session per cwd). Report it and stop.
     already = sessions.has_mux_session(wt_id)
     acquisition = getattr(args, "bridge_acquisition", None)
+    native_resume = acquisition if acquisition != "fresh" else None
     if acquisition and already:
         return output._json_error("bridge acquisition target already has a live mux", exit_code=3)
     seed = getattr(args, "seed", None)
@@ -356,8 +357,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     record,
                     lane="new",
                     generation_key=f"new:{wt_id}",
-                    resume_session=acquisition,
-                    allocate_new=not acquisition and not getattr(args, "dry_run", False),
+                    resume_session=native_resume,
+                    allocate_new=not native_resume and not getattr(args, "dry_run", False),
                 )
                 _reflect_assignment(record, selection)
             except profile_assignment.ProfileAssignmentError as exc:

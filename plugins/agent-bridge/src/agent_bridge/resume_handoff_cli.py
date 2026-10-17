@@ -149,7 +149,7 @@ def run_resume(
     if repo is not None:
         anchor = anchor_session_key(repo.name)
         if anchor != target:
-            attempts.append(("Repo", repo.name, anchor))
+            attempts = [("Repo", repo.name, anchor)]
 
     for noun, label, worktree_id in attempts:
         try:

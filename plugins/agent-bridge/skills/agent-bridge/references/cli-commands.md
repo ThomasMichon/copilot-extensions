@@ -180,6 +180,8 @@ For a **singleton repo** (one anchor checkout, no worktree isolation),
 `create` is also a declared refusal: there is no second checkout to create.
 Use `resume <repo-or-agent>` to load/take over the anchor's current head, or
 `handoff <repo-or-agent>` to roll it forward deliberately.
+Recognized singleton agent aliases are canonicalized to `<repo>@anchor`
+before worktree-ID validation; the raw alias is not treated as a worktree ID.
 
 The singleton registry lookup is a finite, 15-second command probe. Its
 scrubbed child environment excludes the caller's Python/venv overrides.

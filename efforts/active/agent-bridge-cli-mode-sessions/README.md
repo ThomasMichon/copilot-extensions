@@ -873,6 +873,16 @@ owner/HTTP continuity proof remains distinct from these simulated failure cases.
 Current-head review, required CI and merge remain outstanding; no broader
 Phase 6 completion or installed rollout is claimed.
 
+The next current-head review confirmed those liveness/reservation corrections
+and found two additional regressions. Recognized singleton aliases now
+canonicalize before native HTTP ID validation; the CLI regression crosses the
+actual validation route. The `fresh` acquisition sentinel no longer selects
+native profile replay, preserving armed allocation on launch and no allocation
+in preview. Finalizing refusal is additionally exercised through the actual
+`embody` command before preflight and after its locked record re-read.
+The complete owner profile/embodiment/admission selection passed 182 tests;
+the resume CLI selection passed 12. Review and required CI remain open.
+
 ### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
 
 Moved native receipt binding into the final locked delivery section, after
