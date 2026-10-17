@@ -23,8 +23,8 @@ def _proof(root, outcome):
     root.mkdir()
     proof = {
         "outcome": outcome, "status": "completed" if outcome == "complete" else "abandoned",
-        "native_preserved": True, "prompts": 1, "rotated": True,
-        "terminal_credential_refused": True,
+        "native": "native-1", "owner_native": "native-1", "bridge_native": "native-1",
+        "prompts": 1, "rotated": True, "terminal_credential_status": 403,
         "refused": [{"status": 403} for _ in range(5)],
     }
     (root / "proof.json").write_text(json.dumps(proof), encoding="utf-8")
@@ -62,7 +62,9 @@ def test_clean_room_retains_two_independent_cases_and_original_limits(lane, tmp_
     assert json.loads((tmp_path / "cr-report.json").read_text())["result"] == "pass"
 
 
-@pytest.mark.parametrize("failure", ["nonzero", "skip", "malformed", "revocation", "cleanup", "refusals"])
+@pytest.mark.parametrize("failure", [
+    "nonzero", "skip", "malformed", "revocation", "cleanup", "refusals", "native", "rotation",
+])
 def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch, failure):
     calls = []
 
@@ -72,9 +74,13 @@ def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch
         if failure != "skip":
             proof = _proof(root, "complete")
             if failure == "revocation":
-                proof["terminal_credential_refused"] = False
+                proof["terminal_credential_status"] = 200
             elif failure == "refusals":
                 proof["refused"] = []
+            elif failure == "native":
+                proof["bridge_native"] = "replacement-native"
+            elif failure == "rotation":
+                proof["rotated"] = False
             (root / "proof.json").write_text(
                 "{" if failure == "malformed" else json.dumps(proof), encoding="utf-8",
             )
@@ -94,7 +100,7 @@ def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch
     assert report["jams"][0]["evidence"] == "complete/runner.log"
 
 
-@pytest.mark.parametrize("failure", [None, "remove", "inspect", "timeout"])
+@pytest.mark.parametrize("failure", [None, "remaining", "inventory", "malformed", "nonstring", "timeout"])
 def test_docker_cleanup_confirms_absence_and_attempts_every_resource(monkeypatch, failure):
     script = Path(__file__).with_name("test_restricted_supervisor_docker.py")
     spec = importlib.util.spec_from_file_location("restricted_docker_case", script)
@@ -104,22 +110,31 @@ def test_docker_cleanup_confirms_absence_and_attempts_every_resource(monkeypatch
 
     def run(argv, **kwargs):
         calls.append(argv)
-        kind = "network" if argv[1] == "network" else "container"
-        name = argv[-1]
-        missing = f"No such container: {name}" if kind == "container" else f"network {name} not found"
-        if name == "worker" and failure:
+        inventory = "ls" in argv
+        name = argv[argv.index("--filter") + 1].removeprefix("name=") if inventory else argv[-1]
+        if not inventory:
+            if name == "worker" and failure == "timeout":
+                raise module.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+            return SimpleNamespace(returncode=1, stderr="arbitrary localized removal diagnostic")
+        if name == "worker":
             if failure == "timeout":
                 raise module.subprocess.TimeoutExpired(argv, kwargs["timeout"])
-            if failure == "remove" and "inspect" not in argv:
-                return SimpleNamespace(returncode=1, stderr="access denied")
-            if failure == "inspect" and "inspect" in argv:
-                return SimpleNamespace(returncode=0, stderr="")
-        return SimpleNamespace(returncode=1, stderr=missing)
+            if failure == "inventory":
+                return SimpleNamespace(returncode=1, stderr="daemon unavailable", stdout="")
+            if failure == "remaining":
+                return SimpleNamespace(returncode=0, stderr="", stdout='"worker"\n')
+            if failure == "malformed":
+                return SimpleNamespace(returncode=0, stderr="", stdout="{")
+            if failure == "nonstring":
+                return SimpleNamespace(returncode=0, stderr="", stdout="null")
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
 
     monkeypatch.setattr(module.subprocess, "run", run)
     if failure:
-        with pytest.raises(AssertionError, match="cleanup|absence|removal"):
+        with pytest.raises(AssertionError, match="cleanup|inventory|still exists"):
             module._cleanup_docker(("worker", "central"), ("internal", "management"))
     else:
         module._cleanup_docker(("worker", "central"), ("internal", "management"))
-    assert {argv[-1] for argv in calls} == {"worker", "central", "internal", "management"}
+    assert {argv[-1] for argv in calls if "ls" not in argv} == {
+        "worker", "central", "internal", "management",
+    }

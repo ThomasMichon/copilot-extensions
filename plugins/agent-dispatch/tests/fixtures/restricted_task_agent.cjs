@@ -86,6 +86,8 @@ async function work() {
         assert.ok(Date.now() < deadline, "trusted renewal never arrived");
         await sleep(100);
     }
+    const rotated = digest(fs.readFileSync(tokenPath, "utf8")) !== digest(old);
+    assert.ok(rotated);
     const heartbeat = await request("POST", `/tasks/${task}/heartbeat`, body);
     assert.equal(heartbeat.status, 200, heartbeat.text);
     while (!fs.existsSync("/workspace/finish")) {
@@ -99,9 +101,11 @@ async function work() {
     });
     assert.equal(terminal.status, 200, terminal.text);
     assert.equal(JSON.parse(terminal.text).status, outcome === "complete" ? "completed" : "abandoned");
-    assert.equal((await request("GET", `/tasks/${task}`)).status, 403);
+    const revoked = await request("GET", `/tasks/${task}`);
+    assert.equal(revoked.status, 403);
     publishProof({
-        native, prompts, refused, rotated: true, phase: "terminal", outcome,
+        native, prompts, refused, rotated, terminal_credential_status: revoked.status,
+        phase: "terminal", outcome,
     });
 }
 
