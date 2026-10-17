@@ -32,7 +32,7 @@ def human_lifecycle(tmp_path: Path) -> Path:
     for target, source in (
         ("__init__.py", ROOT / "libs/update-telemetry/src/update_telemetry/human.py"),
         ("redact.py", ROOT / "libs/update-telemetry/src/update_telemetry/redact.py"),
-        ("capabilities.py", ROOT / "plugins/agent-worktrees/src/agent_worktrees/installer_capabilities.py"),
+        ("capabilities.py", ROOT / "libs/update-telemetry/src/update_telemetry/capabilities.py"),
     ):
         shutil.copyfile(source, package / target)
     return helper
@@ -49,7 +49,7 @@ def test_lifecycle_human_assets_match_canonical_sources() -> None:
         for name, source in (
             ("__init__.py", ROOT / "libs/update-telemetry/src/update_telemetry/human.py"),
             ("redact.py", ROOT / "libs/update-telemetry/src/update_telemetry/redact.py"),
-            ("capabilities.py", manifest.parent / "src/agent_worktrees/installer_capabilities.py"),
+            ("capabilities.py", ROOT / "libs/update-telemetry/src/update_telemetry/capabilities.py"),
         ):
             assert generated[parent / "_lifecycle_human" / name] == source.read_text(encoding="utf-8")
 

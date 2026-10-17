@@ -225,6 +225,33 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-16 - Keep the lifecycle capability source plugin-independent
+
+- Review of #7119 identified a real source-ownership coupling: generic
+  payload generation read its capability probe from Worktrees. Moved that
+  unchanged implementation into `update_telemetry.capabilities`; the old
+  Worktrees module re-exports the same API. Generated bootstrap assets
+  remain unchanged and require no installed runtime.
+- A regression generates and verifies another eligible plugin's two human
+  helper packages from a minimal source root with no Worktrees plugin.
+  Runtime compatibility exports are the shared owner's actual objects.
+  Windows focused generation, lifecycle and real producer contracts passed:
+  32 passed, one platform skip in 57.30 seconds. Exact-snapshot native Linux
+  bootstrap/generation coverage passed nine cases with four platform skips;
+  a separate isolated import verified every compatibility export against
+  that snapshot's shared source. Original containment limits are unchanged.
+- The additional Linux Worktrees test-file attempt could not collect in the
+  available Dispatch test environment (missing `machine_transport`); the
+  existing Worktrees environment has no pytest. Neither attempt is a pass.
+  The actual relocated import contract was instead exercised directly in
+  the contained snapshot process; the full native producer matrix above
+  ran in the available Windows Worktrees environment. No dependencies were
+  installed or production runtimes modified to obtain this evidence.
+- All 13 generated manifests, Python lint and the install-contract gate
+  passed. This is a source-only review repair; required current-head review
+  and CI must clear again after publication. The remaining presentation,
+  whole-flow cost, promoted-release and parent-launch gates stay open.
+
 ### 2026-10-16 - Reuse native types, never governance results
 
 - A private two-caller trace found the first caller spending 7.6 seconds

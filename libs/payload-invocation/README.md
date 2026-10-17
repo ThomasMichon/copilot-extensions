@@ -110,7 +110,9 @@ mechanism.
 Standalone Worktrees `install` and `update` explicitly request
 `--human-operation install|update` from this existing admission parent.
 It uses the canonical human formatter and redactor copied into a small
-payload-local `_lifecycle_human` package; no installed runtime, extra Python
+payload-local `_lifecycle_human` package. All three assets, including the
+entrypoint-bound capability probe, come from `libs/update-telemetry`, not
+another plugin's runtime source; no installed runtime, extra Python
 process or formatter process is needed. Native output is merged onto the
 human diagnostic stream with UTC prefixes and monotonic elapsed time, followed
 by the child's actual success/failure duration and exit code. PowerShell

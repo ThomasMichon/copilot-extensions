@@ -127,6 +127,39 @@ def _required_context_multi_manifest(tmp_path: Path) -> Path:
     return path
 
 
+def test_binding_human_assets_do_not_require_worktrees_source(tmp_path, monkeypatch):
+    manifest = _required_context_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["catalogBinding"] = True
+    data["catalogBindingModule"] = "src/agent_machines/_command_binding.py"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    primitive = manifest.parent / "scripts/installation-context/installation_context.py"
+    primitive.parent.mkdir()
+    primitive.write_text("# fixture\n", encoding="utf-8")
+    root = tmp_path / "source"
+    shared = root / "libs/update-telemetry/src/update_telemetry"
+    shared.mkdir(parents=True)
+    for name in ("human.py", "redact.py", "capabilities.py"):
+        shutil.copyfile(REPO / "libs/update-telemetry/src/update_telemetry" / name, shared / name)
+    roster = root / ".github/plugin/marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(json.dumps({"plugins": [
+        {"name": "agent-machines", "source": "./plugins/agent-machines"},
+    ]}), encoding="utf-8")
+    project = root / "plugins/agent-machines/pyproject.toml"
+    project.parent.mkdir(parents=True)
+    project.write_text("", encoding="utf-8")
+    monkeypatch.setattr(generator, "REPO", root)
+
+    assert not (root / "plugins/agent-worktrees").exists()
+    assert generator.process_manifest(manifest, check=False) == []
+    assert generator.process_manifest(manifest, check=True) == []
+    for parent in (manifest.parent / "scripts", manifest.parent / "src/agent_machines"):
+        assert (parent / "_lifecycle_human/capabilities.py").read_text(encoding="utf-8") == (
+            shared / "capabilities.py"
+        ).read_text(encoding="utf-8")
+
+
 def _write_runtime_completion(slot: Path, version: str) -> None:
     (slot / ".install-complete.json").write_text(
         json.dumps(

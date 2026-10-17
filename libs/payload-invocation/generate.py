@@ -694,7 +694,7 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             for name, source in (
                 ("__init__.py", REPO / "libs/update-telemetry/src/update_telemetry/human.py"),
                 ("redact.py", REPO / "libs/update-telemetry/src/update_telemetry/redact.py"),
-                ("capabilities.py", REPO / "plugins/agent-worktrees/src/agent_worktrees/installer_capabilities.py"),
+                ("capabilities.py", REPO / "libs/update-telemetry/src/update_telemetry/capabilities.py"),
             ):
                 asset = human_root / name
                 if asset in generated or asset in protected_paths:

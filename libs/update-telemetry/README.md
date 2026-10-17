@@ -157,6 +157,9 @@ Captured PowerShell installers opt in through generated
 packaged `installer-human-output.ps1` initializer. The digests normalize only
 CRLF to LF for portable checkouts. These are fixed build declarations, not user
 configuration or an alternative signature/trust authority.
+`update_telemetry.capabilities` owns the shared declaration probe; payload
+generation copies that canonical source without depending on a plugin's
+runtime package.
 `tools/sync-installer-engine.py` owns the helper copies and declarations.
 Re-run it when a declaring installer changes. Materialization refreshes the
 declaration after rewriting an engine reference and refuses linked, missing

@@ -78,6 +78,15 @@ def test_installer_process_extraction_preserves_runtime_seams():
     assert runtime._run_human_installer is update_installer_process._run_human_installer
 
 
+def test_installer_capability_exports_share_the_canonical_owner():
+    from update_telemetry import capabilities
+
+    from agent_worktrees import installer_capabilities
+
+    for name in installer_capabilities.__all__:
+        assert getattr(installer_capabilities, name) is getattr(capabilities, name)
+
+
 @pytest.mark.parametrize("shell", ["powershell", "pwsh", "bash"])
 @pytest.mark.real_installer_processes
 def test_human_installer_frames_native_streams_once_and_retains_failure(
