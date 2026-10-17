@@ -225,6 +225,25 @@ def test_usage_scope_rebuild_missing_and_corrupt_store(tmp_path: Path) -> None:
     assert (session / ARTIFACT).read_bytes() == prior
 
 
+@pytest.mark.parametrize("created_at", [None, ""])
+def test_usage_missing_timestamp_retains_prior_and_allows_raw_transfer(
+    tmp_path: Path, created_at: str | None,
+) -> None:
+    cfg = _cfg(tmp_path)
+    session = _session(cfg.sync_source)
+    _db(cfg.sync_source)
+    assert engine.run_sync(cfg) == 0
+    prior = (session / ARTIFACT).read_bytes()
+    with closing(sqlite3.connect(cfg.sync_source / "session-store.db")) as db, db:
+        db.execute("UPDATE assistant_usage_events SET created_at = ?", (created_at,))
+    with (session / "events.jsonl").open("ab") as stream:
+        stream.write(b'{"type":"test.raw-change"}\n')
+    assert engine.run_sync(cfg) == 1
+    assert (session / ARTIFACT).read_bytes() == prior
+    copied = tmp_path / "dest" / "synthetic" / "session-state" / "s1" / "events.jsonl"
+    assert copied.read_bytes() == (session / "events.jsonl").read_bytes()
+
+
 @pytest.mark.parametrize("missing_store", [False, True])
 def test_usage_store_coverage_uses_error_type_not_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_store: bool,

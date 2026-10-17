@@ -1931,6 +1931,23 @@ def test_status_handles_malformed_and_control_metadata(
     assert "(invalid deferred_files metadata)" in output
 
 
+def test_status_text_bounds_input_before_printable_filtering() -> None:
+    from agent_logger.sync.meta import MAX_STATUS_SCAN_CHARS, status_text
+
+    slices = []
+
+    class LargeText(str):
+        def __getitem__(self, key):
+            slices.append(key)
+            return super().__getitem__(key)
+
+    assert status_text(LargeText("x" * 1_000_000)) == "x" * 512
+    assert slices == [slice(None, MAX_STATUS_SCAN_CHARS)]
+    assert status_text(10**10000) == "(unknown)"
+    assert status_text("\x00" * 1_000_000) == "(unknown)"
+    assert status_text("a\nb", limit=1) == "a"
+
+
 def test_status_sanitizes_unreadable_metadata_error(
     monkeypatch,
     capsys,

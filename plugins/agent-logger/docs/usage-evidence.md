@@ -27,7 +27,10 @@ call identity.
 
 Values allow only model, original timestamp, call/session/agent lineage,
 integer token buckets, duration, request multiplier and provider nano-AIU
-meters. Missing values remain null or absent, not zero. Input tokens already
+meters. Optional missing values remain null or absent, not zero. An original,
+nonempty timestamp is required for each published observation; a store row with
+a null or empty timestamp is a capture failure, not an invented timestamp or
+an omitted row. Input tokens already
 include cache reads/writes; those buckets must not be added to input tokens.
 Legacy request multipliers are not currency. No prompts, response/reasoning
 text, raw tool arguments, token-details blobs, account identities or consumer

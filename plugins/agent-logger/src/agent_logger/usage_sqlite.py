@@ -107,6 +107,8 @@ def _check_sqlite_names(path: Path, identities: dict[str, os.stat_result]) -> No
 
 
 def _validate_scalar(column: str, value: Any) -> None:
+    if column == "created_at" and (not isinstance(value, str) or not value):
+        raise UsageReadError("accounting store timestamp is unavailable")
     if value is None:
         return
     if column in _TEXT:

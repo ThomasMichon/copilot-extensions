@@ -207,7 +207,7 @@ def test_optional_allowlist_and_privacy(tmp_path: Path) -> None:
         connection.execute(
             "INSERT INTO assistant_usage_events VALUES "
             "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("chosen", None, None, "call", 0, "agent", "parent", 1, 2, 3, 4, 5, 6,
+            ("chosen", "2026-01-01T00:00:00Z", None, "call", 0, "agent", "parent", 1, 2, 3, 4, 5, 6,
              0.0, 0.5, "private-raw", "private-prompt", "private-account", "private-auth"),
         )
         connection.commit()
@@ -216,11 +216,18 @@ def test_optional_allowlist_and_privacy(tmp_path: Path) -> None:
     values = records[0]["values"]
     assert set(values) == set(usage_sqlite._COLUMNS) - {"session_id"}
     assert "session_id" not in values
-    assert values["created_at"] is None
+    assert values["created_at"] == "2026-01-01T00:00:00Z"
     assert values["api_call_id"] == "call"
     assert values["request_multiplier"] == 0.0
     assert "private-" not in repr(records)
     assert "rowid" not in values
+
+
+@pytest.mark.parametrize("created_at", [None, ""])
+def test_store_observation_requires_original_timestamp(tmp_path: Path, created_at: str | None) -> None:
+    path = _store(tmp_path / "usage.db", [_row(created_at=created_at)])
+    with pytest.raises(UsageReadError, match="timestamp is unavailable"):
+        read_sqlite_usage(path, {"chosen"})
 
 
 def test_bound_session_values_are_not_sql(tmp_path: Path) -> None:
