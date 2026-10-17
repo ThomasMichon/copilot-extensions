@@ -403,7 +403,10 @@ def test_expired_snapshot_and_pending_effect_never_start_execution(tmp_path):
     expired = owner.snapshot.to_dict()
     expired.update(observed_at=0, valid_until=1)
     plan = plan_gateway_ssh(owner.selected, GatewaySSHObservation.from_dict(expired))
-    assert reconcile_gateway_ssh(plan, authority=authority, owner=owner).reason == "observation-expired"
+    result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
+    assert (result.state, result.reason, result.effect) == ("blocked", "observation-expired", "none")
+    assert result.to_dict()["reobserve_required"] is True
+    assert result.observation is None
     pending = owner.snapshot.to_dict()
     pending["pending_operation"] = "f" * 64
     plan = plan_gateway_ssh(owner.selected, GatewaySSHObservation.from_dict(pending))
@@ -411,6 +414,12 @@ def test_expired_snapshot_and_pending_effect_never_start_execution(tmp_path):
     assert result.reason == "effect-reobservation-required"
     assert result.to_dict()["reobserve_required"] is True
     assert not owner.calls
+
+
+@pytest.mark.parametrize("value", ["invalid", "F" * 64, None])
+def test_nonprofile_digest_validation_has_an_accurate_diagnostic(value):
+    with pytest.raises(PlanError, match="SSH digest must be lowercase SHA-256"):
+        GatewaySSHAuthorization(value, "f" * 64, "f" * 64, int(time.time()) + 60)
 
 
 @pytest.mark.parametrize("failure", ["authenticate", "observe", "before-effect", "after-effect"])

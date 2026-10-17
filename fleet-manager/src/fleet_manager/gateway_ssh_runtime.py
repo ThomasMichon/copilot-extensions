@@ -33,7 +33,7 @@ class _BudgetExpired(TimeoutError):
 
 def _fingerprint(value):
     if not isinstance(value, str) or not SHA256.fullmatch(value):
-        raise PlanError("SSH profile binding must be lowercase SHA-256")
+        raise PlanError("SSH digest must be lowercase SHA-256")
 
 
 def _target(value):
@@ -279,7 +279,8 @@ class GatewaySSHResult:
             "state": self.state, "reason": self.reason, "plan_digest": self.plan_digest,
             "effect": self.effect,
             "reobserve_required": (
-                self.state == "unknown" or self.reason == "effect-reobservation-required"
+                self.state == "unknown"
+                or self.reason in ("effect-reobservation-required", "observation-expired")
                 or (observation is not None and observation["pending_operation"] is not None)
             ),
             "observation": observation,
