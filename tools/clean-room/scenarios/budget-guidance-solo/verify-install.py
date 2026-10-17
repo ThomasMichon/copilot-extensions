@@ -11,6 +11,8 @@ import tempfile
 
 if sys.flags.optimize:
     raise SystemExit("verification requires assertions (run without -O)")
+if len(sys.argv) != 3:
+    raise SystemExit("usage: verify-install.py <installed-binstub> <snapshot>")
 
 import agent_procutil
 import budget_guidance
