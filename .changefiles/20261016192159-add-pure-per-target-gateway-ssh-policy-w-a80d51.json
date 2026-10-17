@@ -1,0 +1,9 @@
+{
+  "comment": "Add pure per-target Gateway SSH policy with immutable directional decisions and explicit host-mediation fences",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

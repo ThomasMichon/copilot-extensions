@@ -285,3 +285,6 @@ takeover or implementation completion is asserted.
 - F/E9 lint, whitespace and install-contract checks passed. No installer or
   first-provision path changed; full clean-room provisioning and live SSH
   effects remain with the separately admitted adapter/setup integration.
+- Included the required generated `fleet-manager` patch changefile: its
+  coupled standalone content participates in the repository release guard.
+  No shared manifest or version number is edited manually.
