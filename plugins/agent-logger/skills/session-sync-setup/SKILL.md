@@ -366,8 +366,11 @@ Two deliberate scope limits:
   publication entirely rather than attempting to filter it.
 
 See [`process-log-evidence.md`](../../docs/process-log-evidence.md#sync-publication-session-sync)
-for the full design and current gaps (source reclamation and SSH/ingest target
-support remain outstanding).
+for the full design and current gaps (POSIX reclamation and SSH/ingest target
+support remain outstanding). Native Windows reclamation is a separate explicit
+machine-only opt-in; follow that doc's "Machine-only scheduled reclamation"
+section. Never enable it or change scheduled-task arguments without operator
+authorization.
 
 ### Scheduled ZIP snapshots (originals retained)
 
@@ -389,8 +392,8 @@ Omitting `--dry-run` creates additive snapshots under the sync lock, without
 transferring them to a target. The complete configuration, active-producer,
 revision, error, and platform contract is owned by
 [Process-log evidence](../../docs/process-log-evidence.md#additive-settled-log-zip-snapshots).
-ZIP preservation is implemented; storage reclamation and completed compaction
-remain separate gates.
+ZIP preservation is implemented; all-target raw retirement has its own separate
+opt-in and platform gate in that same document.
 
 ## Change tracking (incremental sync)
 

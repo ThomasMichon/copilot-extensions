@@ -263,6 +263,8 @@ class PushResult:
     #: WAL/SHM) had at least one file deferred -- same reasoning as
     #: ``deferred_sessions``, kept separate since the index is not a session.
     index_deferred: bool = False
+    #: Positive process-log publication completion, not a generic transport no-op.
+    process_logs_complete: bool = False
 
 
 @dataclass

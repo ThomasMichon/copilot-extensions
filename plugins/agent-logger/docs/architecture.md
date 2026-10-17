@@ -60,8 +60,12 @@ sync transfers pin canonical ancestors through the same directory boundary
 used by additive ZIP snapshots. Process-log payload destinations separately pin
 lexical ancestors before directory creation and retain that boundary through
 incremental inspection, atomic publication and cleanup. Session-state and
-health-metadata containment, source reclamation, SSH/ingest target support,
+health-metadata containment, POSIX source reclamation, SSH/ingest target support,
 repo-scoped admission fencing, and accounting ingestion remain outstanding.
+Native Windows source reclamation is a separate machine-only, explicit-age,
+all-target opt-in under the existing sync lock; ordinary/manual snapshots remain
+additive. See the process-log evidence doc's "Machine-only scheduled reclamation"
+section for supported invocation, provenance and unsupported contexts.
 
 ### Segmenter (`agent_logger.segmenter`)
 

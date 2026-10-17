@@ -71,7 +71,7 @@ def test_reclamation_requires_all_preservation_opt_ins(
 
 
 def test_reclamation_enabled_runtime_is_refused_before_any_sync(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="not available.*post-publication"):
+    with pytest.raises(ValueError, match="not available.*file-backed"):
         Config({"sync": {"process_logs": {
             "enabled": True, "zip_snapshots": {
                 "enabled": True, "local_source": True,
