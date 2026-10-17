@@ -40,6 +40,7 @@ def _run_captured(
                 # Windows reader threads may still own descendant-inherited pipes.
                 # Closing a TextIO stream here can itself block waiting for them.
                 pass
+            process.poll()
             raise lifecycle.CompanionIndeterminate("companion command timed out") from exc
         return subprocess.CompletedProcess(
             command, process.returncode, stdout=stdout, stderr=stderr,

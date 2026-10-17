@@ -124,8 +124,10 @@ one-second bookkeeping budget, so retirement exhausting the execution budget
 does not itself strand an otherwise valid selection. Metadata changes, lock
 contention or write failures still retain unknown authority.
 Captured command execution charges process-creation elapsed time against its
-timeout; post-timeout pipe draining has its own one-second deadline. The OS
-process-creation call itself cannot be interrupted by this subprocess API.
+timeout; post-timeout pipe draining has its own one-second deadline. The child
+is polled non-blockingly afterward to reap an exited direct child even
+when a descendant still holds its pipes; the timeout remains indeterminate.
+The OS process-creation call itself cannot be interrupted by this subprocess API.
 The containment gate runs its pinned, standard-library-only script directly,
 without initializing the coordinator package or resolving it through the
 contributed command's working directory.

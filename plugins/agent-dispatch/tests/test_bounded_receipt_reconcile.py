@@ -950,6 +950,10 @@ def test_captured_timeout_includes_process_creation(tmp_path, monkeypatch):
         def kill(self):
             pass
 
+        def poll(self):
+            waits.append("reaped")
+            return -9
+
     def create(*args, **kwargs):
         now[0] += 2.5
         return Process()
@@ -959,10 +963,21 @@ def test_captured_timeout_includes_process_creation(tmp_path, monkeypatch):
     monkeypatch.setattr(companion, "contained_test_mode", lambda: True)
     with pytest.raises(CompanionIndeterminate, match="timed out"):
         companion._run_captured(("fixture",), cwd=str(tmp_path), environment={}, timeout=4)
-    assert waits == [1.5, 1.0]
+    assert waits == [1.5, 1.0, "reaped"]
 
 
-def test_native_captured_timeout_bounds_inherited_descendant_pipes(tmp_path):
+def test_native_captured_timeout_bounds_inherited_descendant_pipes(tmp_path, monkeypatch):
+    from agent_dispatch import companion_capture
+
+    created = []
+    original = companion_capture.subprocess.Popen
+
+    def launch(*args, **kwargs):
+        process = original(*args, **kwargs)
+        created.append(process)
+        return process
+
+    monkeypatch.setattr(companion_capture.subprocess, "Popen", launch)
     # A first-touch subprocess, not a mocked communicate boundary.
     child_code = (
         "import os,sys,time\n"
@@ -997,6 +1012,10 @@ def test_native_captured_timeout_bounds_inherited_descendant_pipes(tmp_path):
                 environment=dict(os.environ), timeout=4.0,
             )
         assert ready.exists(), trace.read_text() if trace.exists() else "interpreter not entered"
+        assert created[0].returncode is not None
+        if os.name != "nt":
+            with pytest.raises(ChildProcessError):
+                os.waitpid(created[0].pid, os.WNOHANG)
         assert companion._process_exists(int(ready.read_text()))
         elapsed = time.monotonic() - started
         print(f"ready inherited-pipe timeout elapsed={elapsed:.3f}s")

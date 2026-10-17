@@ -43,6 +43,61 @@ def test_blocked_progress_io_is_coalesced_and_tracked_without_blocking_units():
         daemon.shutdown()
 
 
+def test_slow_native_status_identity_is_off_master_and_coalesced(tmp_path, monkeypatch):
+    from agent_dispatch import companion, supervise_cli
+
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    monkeypatch.setattr(supervise_cli, "_supervisor_runtime_status_path", lambda scope: tmp_path / "status.json")
+
+    def identity(pid):
+        calls.append(pid)
+        entered.set()
+        assert release.wait(3)
+        return "native-generation"
+
+    monkeypatch.setattr(companion, "process_start_token", identity)
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unit", machine="host")]), "host", launcher=FakeLauncher(),
+        companion_controller=FakeCompanionController(), reconcile_call_budget=0.05,
+    )
+    daemon._progress_callback = lambda frame: supervise_cli._write_supervisor_progress("fixture", frame)
+    try:
+        daemon._cycle_count = 1
+        daemon.queue_cycle_start(1, time.time(), lambda cycle, start: supervise_cli._write_supervisor_cycle_start(
+            "fixture", cycle, start,
+        ))
+        assert entered.wait(1)
+        started = time.monotonic()
+        assert daemon.reconcile_once().started == ["unit"]
+        for index in range(20):
+            daemon._phase(f"phase-{index}")
+        assert time.monotonic() - started < 0.5
+        assert len(calls) == 1
+        release.set()
+        daemon._progress_future.result(2)
+        assert len(calls) <= 3
+        assert supervise_cli._read_supervisor_runtime_status("fixture")[0]["progress"]["phase"] == "phase-19"
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
+def test_confirmed_registry_snapshot_retains_nested_spec_isolation(monkeypatch):
+    registration = _reg("unit", machine="host")
+    registration["spec"]["nested"] = {"labels": ["original"]}
+    client = FakeClient([registration])
+    daemon = SupervisorDaemon(client, "host")
+    current = daemon._store_registrations()
+    current[0]["spec"]["nested"]["labels"].append("caller-mutation")
+
+    def unavailable(**kwargs):
+        raise TimeoutError("registry pending")
+
+    monkeypatch.setattr(client, "list_registrations", unavailable)
+    assert daemon._store_registrations()[0]["spec"]["nested"] == {"labels": ["original"]}
+
+
 def test_slow_receipt_inventory_is_off_master_and_single_inflight(tmp_path, monkeypatch):
     from agent_dispatch import companion_reconcile
 
