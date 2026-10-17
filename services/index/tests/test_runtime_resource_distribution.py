@@ -27,7 +27,9 @@ def _project(tmp_path):
     primitive = project.parent / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive.parent.mkdir(parents=True)
     shutil.copy2(source.parent.parent / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
-    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+    for name in (
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py",
+    ):
         shutil.copy2(source.parent.parent / "libs/versioned-runtime" / name, primitive.with_name(name))
     shutil.copy2(
         source.parent.parent / "libs" / "versioned-runtime" / "standalone_build.py",
@@ -89,7 +91,10 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distrib
         assert wheel.read(member) == expected
         record = next(name for name in wheel.namelist() if name.endswith(".dist-info/RECORD"))
         assert member in wheel.read(record).decode()
-        for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+        for name in (
+            "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+            "versioned_runtime_source.py",
+        ):
             member = f"agent_index_service/{name}"
             assert wheel.read(member) == primitive.with_name(name).read_bytes()
             assert member in wheel.read(record).decode()

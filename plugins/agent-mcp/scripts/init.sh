@@ -452,6 +452,17 @@ _enter_install_lock() {
 }
 # === end install-transaction lock ===
 
+_bootstrap_python() {
+    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    local candidate
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then command -v "$candidate"; return 0; fi
+    done
+    return 1
+}
+
+source "$SCRIPT_DIR/source-runtime.sh"
+_initialize_source_runtime || exit 1
 if ! _enter_install_lock; then
     _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
     exit 1
@@ -459,29 +470,21 @@ fi
 trap '_exit_install_lock' EXIT
 trap '_exit_install_lock; exit 130' INT
 trap '_exit_install_lock; exit 143' TERM
+_assert_source_runtime || exit 1
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        _stamp_source_snapshot || exit 1
+    else
+        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    fi
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     exit 0
 fi
-
-_bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
-}
 
 _payload_hash() {
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
@@ -513,6 +516,7 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
@@ -524,10 +528,12 @@ _versioned_slot_clean() {
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
@@ -595,6 +601,7 @@ else
 fi
 
 # -- 2b. Preinstall workspace path deps (non-uv fallback) --------------
+_assert_source_runtime || exit 1
 # `agent-credential-relay`/`agent-procutil`/`agent-single-instance-lease`
 # are `uv`-editable canonical references (vendor-pointer-generalization
 # effort, Phase 1: no local copy in a dev checkout at all); `agent-zdd` is
@@ -658,6 +665,7 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
         exit 1
     fi
     _versioned_mark_complete || exit 1
+    _assert_source_runtime || exit 1
     if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
             activate "$SRC_VERSION" --replace-nonlink --no-link >/dev/null 2>&1; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
@@ -770,6 +778,14 @@ _git_info() {
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
+_assert_source_runtime || exit 1
+SOURCE_FIELDS=""
+if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+    SOURCE_FIELDS="$("$(_bootstrap_python)" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+        --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-mcp \
+        --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || exit 1
+    SOURCE_FIELDS="$SOURCE_FIELDS,"
+fi
 KIND="$(_source_kind "$PLUGIN_DIR")"
 VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
 COMMIT="null"; BRANCH="null"; DIRTY="false"
@@ -783,6 +799,7 @@ cat > "$TMP" << EOF
 {
   "schema_version": 3,
   "service": "agent-mcp",
+  $SOURCE_FIELDS
   "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
   "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
   "source": {

@@ -319,7 +319,7 @@ function Get-BootstrapPython {
         # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
+    if ((Get-Command Invoke-Hidden -ErrorAction SilentlyContinue) -and (Get-Command py -ErrorAction SilentlyContinue)) {
         $exe = (Invoke-Hidden -FilePath py -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
@@ -350,6 +350,7 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -362,11 +363,12 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
-
+    Assert-SourceRuntime
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntime
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -508,12 +510,22 @@ function Invoke-Stamp {
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Assert-SourceRuntime
+    $exclude = if ($script:SourceRuntimeIdentity) { @() } else {
+        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    }
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    Assert-SourceSnapshot -Snapshot $snapTmp
+    if ($script:SourceRuntimeIdentity -and (Test-Path -LiteralPath $snapDir)) {
+        Assert-SourceSnapshot -Snapshot $snapDir
+        Remove-Item -LiteralPath $snapTmp -Recurse -Force
+    } else {
+        if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    }
+    Assert-SourceSnapshot -Snapshot $snapDir
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
@@ -588,6 +600,9 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
+$ScriptDir = $PSScriptRoot
+. (Join-Path $ScriptDir 'source-runtime.ps1')
+Initialize-SourceRuntime
 if (-not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
     exit 1
@@ -595,6 +610,7 @@ if (-not (Enter-InstallLock)) {
 
 $script:McpInstallFailure = $null
 try {
+Assert-SourceRuntime
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 # -- Windowless spawn helper --------------------------------------------
@@ -754,6 +770,7 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 
 # -- 3. Install the package into the venv (uv pip install) -------------
 
+Assert-SourceRuntime
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 # Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
@@ -823,6 +840,7 @@ if ($VersionedRuntime) {
         throw "Fresh runtime slot failed its health gate (versions/$SrcVersion)"
     }
     if (-not (Invoke-VersionedMarkComplete)) { throw 'Runtime construction completion failed' }
+    Assert-SourceRuntime
     Invoke-Hidden -FilePath $VenvPython -ArgList @($VrScript, '--root', $InstallDir, '--link-name', '.venv', 'activate', $SrcVersion, '--no-link') | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
@@ -914,6 +932,7 @@ Deploy-SelfProvisioningBinstub
 
 # -- 5. Write deploy manifest ------------------------------------------
 
+Assert-SourceRuntime
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
@@ -947,6 +966,11 @@ $manifest = [ordered]@{
     }
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
+}
+if ($script:SourceRuntimeIdentity) {
+    $fields = $script:SourceRuntimeIdentity | ConvertFrom-Json
+    $manifest.runtime_version = $fields.runtime_version
+    $manifest.runtime_source = $fields.runtime_source
 }
 $tmp = "$manifestPath.tmp"
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8

@@ -118,8 +118,9 @@ def _materialize(snapshot: Path, plugin: str, destination: Path) -> None:
     if not (source / "pyproject.toml").is_file():
         raise SourcePreparationError(f"No Python runtime plugin at plugins/{plugin}")
     shutil.copytree(source, destination)
-    if (destination / SOURCE_FILE).exists() or (destination / SOURCE_FILE).is_symlink():
-        raise SourcePreparationError("Source payload already contains reserved deployment metadata")
+    for metadata in (SOURCE_FILE, "snapshot-provenance.json"):
+        if (destination / metadata).exists() or (destination / metadata).is_symlink():
+            raise SourcePreparationError("Source payload already contains reserved deployment metadata")
     retired = materializer.find_retired_directory_pointers_in_plugin(destination)
     if retired:
         raise SourcePreparationError("Source payload contains retired directory vendor pointers")

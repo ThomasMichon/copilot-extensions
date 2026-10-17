@@ -106,6 +106,7 @@ def test_installer_deploys_complete_canonical_resolver(tmp_path, shell):
     for name in (
         "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
     ):
         assert (own / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
     result = subprocess.run(

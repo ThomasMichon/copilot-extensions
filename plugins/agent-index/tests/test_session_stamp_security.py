@@ -23,6 +23,7 @@ def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str
     scripts = gate.parent
     for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py", "versioned_runtime.py",
                  "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+                 "versioned_runtime_source.py",
                  "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     suffix = "sh" if shell == "bash" else "ps1"

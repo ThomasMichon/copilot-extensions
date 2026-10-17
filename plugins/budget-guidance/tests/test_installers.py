@@ -50,7 +50,7 @@ def test_installers_recommend_supported_version_flag():
 def test_package_installers_retain_quiet_native_output_with_explicit_failure():
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
-    assert '"$procutil" "$PLUGIN_DIR" --quiet' in posix
+    assert '"${dependencies[@]}" "$PLUGIN_DIR" --quiet' in posix
     assert '@pipSources --quiet 2>&1' in powershell
     assert "installer_dependency_policy.py" in posix and "installer_dependency_policy.py" in powershell
     assert '-m pip install' not in posix and '-m pip install' not in powershell

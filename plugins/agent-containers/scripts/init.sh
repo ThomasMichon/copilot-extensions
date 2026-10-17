@@ -255,6 +255,31 @@ VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
 
+PACKAGE_VERSION="$SRC_VERSION"
+SOURCE_SELECTED=0
+_source_python() {
+    local candidate
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -I -c 'import sys; assert sys.version_info >= (3, 10)' >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    _fail 'Source runtime selection requires a bootstrap Python interpreter'
+    return 1
+}
+_source_runtime_version() {
+    local py
+    py="$(_source_python)" || return 1
+    "$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+        --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-containers "$@"
+}
+if [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+    SRC_VERSION="$(_source_runtime_version)" || exit 1
+    SOURCE_SELECTED=1
+fi
+
 # --- self-provisioning (runtime-self-provisioning pattern) -------------------
 # Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
 _ensure_uv() {
@@ -474,6 +499,10 @@ trap '_exit_install_lock' EXIT
 trap '_exit_install_lock; exit 130' INT
 trap '_exit_install_lock; exit 143' TERM
 
+if [[ "$SOURCE_SELECTED" == 1 || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+    _source_runtime_version --expected-runtime-version "$SRC_VERSION" >/dev/null || exit 1
+fi
+
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
@@ -482,7 +511,15 @@ if [[ "$ACTION" == "stamp" ]]; then
         exit 2
     fi
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    stamp_payload="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    if [[ "$SOURCE_SELECTED" == 1 ]]; then
+        source_python="$(_source_python)" || exit 1
+        stamp_payload="$("$source_python" -I -B "$SCRIPT_DIR/runtime_profile.py" \
+            --root "$INSTALL_DIR" --payload "$PLUGIN_DIR" --stamp-source \
+            --expected-source-version "$SRC_VERSION")" || exit 1
+        printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
+    fi
+    printf '%s\n' "$stamp_payload" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     exit 0
@@ -531,6 +568,7 @@ _ok "Directories: $INSTALL_DIR"
 profile_args=(
     -I "$SCRIPT_DIR/runtime_profile.py" --root "$INSTALL_DIR"
     --payload "$PLUGIN_DIR" --python "$PYTHON_CMD" --tsv
+    --expected-source-version "$SRC_VERSION"
 )
 if [[ "$HAVE_UV" -eq 1 ]]; then profile_args+=(--uv "$(command -v uv)"); fi
 if [[ -n "$PROFILE" ]]; then profile_args+=(--profile "$PROFILE"); fi
@@ -581,8 +619,15 @@ if [[ "$KIND" == "local" ]]; then
     COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
 fi
 TMP="$MANIFEST_PATH.tmp"
+SOURCE_FIELDS=""
+if [[ "$SOURCE_SELECTED" == 1 ]]; then
+    SOURCE_FIELDS="$(_source_runtime_version --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || exit 1
+    # The profile coordinator owns the profiled runtime_version; retain only source evidence here.
+    SOURCE_FIELDS="$("$PYTHON_CMD" -I -c 'import json,sys; d=json.loads("{"+sys.argv[1]+"}"); print(json.dumps({"runtime_source":d["runtime_source"]})[1:-1]+",")' "$SOURCE_FIELDS")"
+fi
 cat > "$TMP" << EOF
 {
+  $SOURCE_FIELDS
   "schema_version": 3,
   "service": "agent-containers",
   "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",

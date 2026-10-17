@@ -51,6 +51,18 @@ def runtime_version(package_version: str, commit: str, assembly_hash: str) -> st
     return f"{package_version}{separator}source.{commit}.{assembly_hash[:16]}"
 
 
+def requires_exact_selection(versions: list[str]) -> bool:
+    """Refuse unordered source recovery, including implicit plain-slot downgrade."""
+    if not any(re.search(r"[+.]source\.", version) for version in versions):
+        return False
+    print(
+        "Source-qualified runtime recovery requires an exact current-version or "
+        "last-known-good selector; refusing unordered source fallback",
+        file=sys.stderr,
+    )
+    return True
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -86,6 +98,7 @@ def assembly_hash(payload: Path) -> str:
         ):
             raise SourceIdentityError("Materialized runtime inputs must not be linked")
 
+    require_plain(payload)
     for directory, directories, names in os.walk(payload, onerror=scan_error, followlinks=False):
         project_root = (Path(directory) / "pyproject.toml").is_file()
         directories[:] = [
@@ -100,6 +113,10 @@ def assembly_hash(payload: Path) -> str:
             if path == payload / SOURCE_FILE or name.endswith((".pyc", ".pyo")):
                 continue
             require_plain(path)
+            # Installation-cell provenance is published after source assembly;
+            # its separate receipt validator owns this non-runtime root sidecar.
+            if path == payload / "snapshot-provenance.json":
+                continue
             files.append(path)
     if not files:
         raise SourceIdentityError("Materialized runtime payload is empty")

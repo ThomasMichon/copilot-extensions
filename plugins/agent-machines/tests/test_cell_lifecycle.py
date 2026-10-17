@@ -669,6 +669,7 @@ def test_uninstall_accepts_actual_powershell_installer_manifest(tmp_path):
     quote = lambda value: "'" + str(value).replace("'", "''") + "'"
     harness = tmp_path / "manifest.ps1"
     harness.write_text(
+        "$SourceRuntimeIdentity = $null\nfunction Assert-SourceRuntimeIdentity {}\n"
         "function Write-CellDeployManifest {" + body + "\n"
         "Write-CellDeployManifest "
         f"-PluginRoot {quote(root)} -SourcePluginDir {quote(args.expected_payload_root)} "

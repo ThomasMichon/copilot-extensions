@@ -23,6 +23,15 @@ The installer builds an immutable versioned venv under
 `~/.local/bin/agent-pull-requests` binstub, and self-reconciles that runtime on
 session start the same way the other Python runtime plugins do.
 
+Both native installers also accept an explicitly
+[prepared source payload](../../tools/prepare_runtime_source.md). Its verified
+receipt selects a source-qualified immutable generation; the deploy manifest
+retains the package version in `source.version` and records the independent
+`runtime_version` and `runtime_source`. Stamping preserves the complete hashed
+assembly rather than rematerializing its dependencies from a checkout.
+An existing source-qualified snapshot is reused only after its complete receipt
+matches the selected source; it is never replaced in place.
+
 The installer's `uninstall` action holds the same transaction lock as
 install/update. It removes runtime/config contents but retains the lock files
 and `.install-stage` coordination, so the install directory may remain.

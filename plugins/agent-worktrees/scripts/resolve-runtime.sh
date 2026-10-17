@@ -217,17 +217,28 @@ fi
 
 # Tier 3: true first-run -> newest complete installed slot.
 if [ -z "$AW_PY" ]; then
-  for _awv in $(
-    for _slot in "$_awr"/versions/*; do
-      [ -d "$_slot" ] || continue
-      printf '%s\n' "${_slot##*/}"
-    done | _aw_version_key | LC_ALL=C sort | cut -f2-
-  ); do
-    if _aw_try_slot "$_awv"; then
-      _aw_trace_source="newest"
-      _aw_trace_version="$_awv"
-    fi
+  _aw_source_present=0
+  for _slot in "$_awr"/versions/*; do
+    [ -d "$_slot" ] || continue
+    case "${_slot##*/}" in
+      *+source.*|*.source.*) _aw_source_present=1; break ;;
+    esac
   done
+  if [ "$_aw_source_present" = 1 ]; then
+    printf '%s\n' 'Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback' >&2
+  else
+    for _awv in $(
+      for _slot in "$_awr"/versions/*; do
+        [ -d "$_slot" ] || continue
+        printf '%s\n' "${_slot##*/}"
+      done | _aw_version_key | LC_ALL=C sort | cut -f2-
+    ); do
+      if _aw_try_slot "$_awv"; then
+        _aw_trace_source="newest"
+        _aw_trace_version="$_awv"
+      fi
+    done
+  fi
 fi
 if [ -n "$AW_PY" ]; then
   _aw_boot_trace resolver-slot-result resolver "$_aw_trace_source" resolved "$_aw_trace_version"
@@ -235,7 +246,7 @@ else
   _aw_boot_trace resolver-slot-result resolver none miss
 fi
 AGENT_RT_PY="$AW_PY"
-unset _awr _awv _awlkg _sub _slot _aw_trace_source _aw_trace_version \
+unset _awr _awv _awlkg _sub _slot _aw_source_present _aw_trace_source _aw_trace_version \
   _aw_bt_raw _aw_bt_plugin _aw_bt_extra _aw_bt_log_path _aw_bt_log_dir \
   _aw_bt_line _aw_bt_iso _aw_phase _aw_now_ms _aw_emitter \
   _aw_resolution_source _aw_result _aw_version _aw_dispatch_path \

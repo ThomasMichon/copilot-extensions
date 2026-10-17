@@ -267,6 +267,9 @@ function Resolve-VendoredLib {
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
     }
+    if (Get-Item -LiteralPath (Join-Path $PluginDir 'runtime-source.json') -Force -ErrorAction SilentlyContinue) {
+        throw "Source-qualified payload is missing its materialized library: $LibName"
+    }
 
     # 2. Relative path (git checkout layout)
     $candidate = Join-Path $PluginDir "..\..\libs\$LibName"
@@ -418,6 +421,7 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
 }
 
 function Invoke-VersionedActivate {
+    Assert-SourceRuntimeIdentity
     <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
        junction onto it (first migration moves a legacy real `.venv` aside), then
        gc old slots keeping current + the previous-good. Returns $false on failure.
@@ -425,7 +429,10 @@ function Invoke-VersionedActivate {
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) { return $true }
+    if (-not (Test-Path $py)) {
+        if ($SourceRuntimeIdentity) { throw 'Source-qualified runtime interpreter is unavailable; refusing activation' }
+        return $true
+    }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     & $VenvPython -c 'import agent_ssh' 2>$null
     $slotOk = ($LASTEXITCODE -eq 0)
@@ -435,6 +442,7 @@ function Invoke-VersionedActivate {
         return $false
     }
     if (-not (Invoke-VersionedMarkComplete)) { return $false }
+    Assert-SourceRuntimeIdentity
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
@@ -505,6 +513,10 @@ function Get-BootstrapPython {
 function Get-PayloadHash {
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
+    if ($SourceRuntimeIdentity) {
+        Assert-SourceRuntimeIdentity
+        return ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_source.assembly_hash
+    }
     try {
         $parts = @()
         $pp = Join-Path $PluginDir 'pyproject.toml'
@@ -522,6 +534,7 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntimeIdentity
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -534,11 +547,12 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
-
+    Assert-SourceRuntimeIdentity
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntimeIdentity
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -547,6 +561,62 @@ function Invoke-VersionedMarkComplete {
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
+
+function Get-SourceRuntimeIdentity {
+    param([string]$Payload = $PluginDir, [string]$ExpectedVersion = '')
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Source runtime validation requires a bootstrap Python interpreter' }
+    $arguments = @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_source.py'),
+        '--payload', $Payload, '--package-version', $PackageVersion,
+        '--plugin', 'agent-ssh', '--format', 'json')
+    if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $result = @(& $py @arguments 2>&1)
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previous }
+    $detail = ($result | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if ($code -ne 0) { throw "Source runtime identity validation failed: $detail" }
+    return $detail.Trim()
+}
+
+function Initialize-SourceRuntime {
+    $script:SourceRuntimeIdentity = $null
+    try {
+        [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
+    } catch [IO.FileNotFoundException] {
+        return
+    } catch [IO.DirectoryNotFoundException] {
+        return
+    }
+    $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
+    $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else { Join-Path $VenvDir 'bin/python' }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
+}
+
+function Assert-SourceRuntimeIdentity {
+    param([string]$Payload = $PluginDir)
+    $metadataPresent = $true
+    try {
+        [IO.File]::GetAttributes((Join-Path $Payload 'runtime-source.json')) | Out-Null
+    } catch [IO.FileNotFoundException] {
+        $metadataPresent = $false
+    } catch [IO.DirectoryNotFoundException] {
+        $metadataPresent = $false
+    }
+    if ($SourceRuntimeIdentity -or $metadataPresent) {
+        $identity = Get-SourceRuntimeIdentity -Payload $Payload -ExpectedVersion $SrcVersion
+        if ($identity -cne $SourceRuntimeIdentity) {
+            throw 'Source runtime identity changed after runtime selection; refusing publication'
+        }
+    }
+}
 
 function Get-SourceKind {
     param([string]$PluginPath)
@@ -788,6 +858,7 @@ function Invoke-Stamp {
     }
     $stampPublicationLock = Acquire-StampPublicationLock
     try {
+        Assert-SourceRuntimeIdentity
         $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
         $sourceKind = Get-SourceKind -PluginPath $sourcePath
         $currentSnapshot = Get-CurrentSnapshotPath
@@ -797,6 +868,7 @@ function Invoke-Stamp {
             return
         }
         if (Test-SnapshotReusable -SnapshotDir $currentSnapshot -SourceKind $sourceKind -SourcePath $sourcePath -SourceVersion $SrcVersion) {
+            Assert-SourceRuntimeIdentity -Payload $currentSnapshot
             $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
             [System.IO.File]::WriteAllText($payloadTmp, $currentSnapshot, $utf8NoBom)
             Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
@@ -812,11 +884,17 @@ function Invoke-Stamp {
         # Copy everything needed to `uv pip install .` from the slot (src, libs,
         # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
         $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        if ($SourceRuntimeIdentity) { $exclude = @() }
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
         }
-        Materialize-SnapshotLibs -SnapshotDir $snapTmp
-        Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+        if ($SourceRuntimeIdentity) {
+            Assert-SourceRuntimeIdentity -Payload $snapTmp
+            Assert-SourceRuntimeIdentity
+        } else {
+            Materialize-SnapshotLibs -SnapshotDir $snapTmp
+            Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+        }
         $currentSnapshot = Get-CurrentSnapshotPath
         if (Test-PublishedSnapshotIsNewer -SnapshotDir $currentSnapshot -SourcePath $sourcePath -SourceVersion $SrcVersion) {
             Remove-Item -LiteralPath $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -824,9 +902,17 @@ function Invoke-Stamp {
             Write-Binstubs
             return
         }
-        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-        [System.IO.File]::WriteAllText((Get-SnapshotSourceMarkerPath -SnapshotDir $snapDir), $sourcePath, $utf8NoBom)
-        [System.IO.File]::WriteAllText((Get-SnapshotVersionMarkerPath -SnapshotDir $snapDir), $SrcVersion, $utf8NoBom)
+        if ($SourceRuntimeIdentity) {
+            [IO.Directory]::Move($snapTmp, $snapDir)
+        } else {
+            Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+        }
+        if (-not $SourceRuntimeIdentity) {
+            [System.IO.File]::WriteAllText((Get-SnapshotSourceMarkerPath -SnapshotDir $snapDir), $sourcePath, $utf8NoBom)
+            [System.IO.File]::WriteAllText((Get-SnapshotVersionMarkerPath -SnapshotDir $snapDir), $SrcVersion, $utf8NoBom)
+        }
+        Assert-SourceRuntimeIdentity -Payload $snapDir
+        Assert-SourceRuntimeIdentity
         $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
         [System.IO.File]::WriteAllText($payloadTmp, $snapDir, $utf8NoBom)
         Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
@@ -908,6 +994,8 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
+$PackageVersion = $SrcVersion
+Initialize-SourceRuntime
 $needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -916,6 +1004,7 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 }
 
 try {
+Assert-SourceRuntimeIdentity
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 if ($Action -eq 'status') {
@@ -1081,6 +1170,7 @@ Write-Ok 'Package installed: agent-ssh'
 # Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
 if (-not (Invoke-VersionedActivate)) { exit 1 }
 
+Assert-SourceRuntimeIdentity
 Write-Binstubs
 
 $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
@@ -1097,7 +1187,12 @@ Write-DeployManifest `
     -GetSourceKind ${function:Get-SourceKind} `
     -GetGitInfo ${function:Get-GitInfo} `
     -SourcePathOverride $sourcePath `
-    -VersionOverride $SrcVersion `
+    -VersionOverride $PackageVersion `
+    -AdditionalFields $(if ($SourceRuntimeIdentity) {
+        $fields = @{}
+        ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $fields[$_.Name] = $_.Value }
+        $fields
+    } else { @{} }) `
     -PayloadHash (Get-PayloadHash)
 
 Write-Host ''

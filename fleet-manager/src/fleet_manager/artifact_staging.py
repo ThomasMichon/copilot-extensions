@@ -116,7 +116,9 @@ def _primitive() -> Iterator[ModuleType]:
     if hashlib.sha256(content).hexdigest() != evidence["runtime_resource_sha256"]:
         raise PlanError("installed runtime resource changed after RECORD admission")
     companions = {}
-    for component in ("versioned_runtime_leases", "versioned_runtime_construction"):
+    for component in (
+        "versioned_runtime_leases", "versioned_runtime_construction", "versioned_runtime_source",
+    ):
         member = component + ".py"
         retained = _bytes(resource.with_name(member), MAX_BYTES)
         if hashlib.sha256(retained).hexdigest() != evidence["runtime_resource_sha256s"][member]:

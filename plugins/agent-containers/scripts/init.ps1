@@ -289,6 +289,35 @@ if ($SrcVersion) {
 }
 # === end install-contract:v3 versioned-venv ===
 
+$PackageVersion = $SrcVersion
+$SourceSelected = $false
+function Get-SourceRuntimeVersion {
+    param([string]$ExpectedVersion = '')
+    $py = @('python3', 'python') | ForEach-Object {
+        Get-Command $_ -ErrorAction SilentlyContinue
+    } | Where-Object { $_.Source -and $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
+    if (-not $py) { throw 'Source runtime selection requires a bootstrap Python interpreter' }
+    $arguments = @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_source.py'),
+        '--payload', $PluginDir, '--package-version', $PackageVersion, '--plugin', 'agent-containers')
+    if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
+    $preference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $result = @(& $py.Source @arguments 2>&1)
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $preference }
+    if ($code -ne 0) { throw "Source runtime validation failed: $($result -join [Environment]::NewLine)" }
+    return ($result -join '').Trim()
+}
+$sourceMetadata = Join-Path $PluginDir 'runtime-source.json'
+try {
+    [IO.File]::GetAttributes($sourceMetadata) | Out-Null
+    $SourceSelected = $true
+} catch [IO.FileNotFoundException] {
+} catch [IO.DirectoryNotFoundException] {
+}
+if ($SourceSelected) { $SrcVersion = Get-SourceRuntimeVersion }
+
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
@@ -418,6 +447,19 @@ function Invoke-Stamp {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    if ($SourceSelected) {
+        $py = @('python3', 'python') | ForEach-Object {
+            Get-Command $_ -ErrorAction SilentlyContinue
+        } | Where-Object { $_.Source -and $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
+        $snapshot = & $py.Source -I -B (Join-Path $PSScriptRoot 'runtime_profile.py') `
+            --root $InstallDir --payload $PluginDir --stamp-source --expected-source-version $SrcVersion
+        if ($LASTEXITCODE -ne 0) { throw 'Source snapshot validation failed; redirects were not published' }
+        $snapDir = ($snapshot -join '').Trim()
+        [IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+        [IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+        Deploy-SelfProvisioningBinstub
+        return
+    }
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
@@ -507,6 +549,9 @@ if (-not (Enter-InstallLock)) {
 }
 
 try {
+if ($SourceSelected -or (Test-Path -LiteralPath $sourceMetadata)) {
+    [void](Get-SourceRuntimeVersion -ExpectedVersion $SrcVersion)
+}
 if ($Action -eq 'stamp') {
     if ($Profile) { throw 'Select a runtime profile with provision, not stamp' }
     Invoke-Stamp
@@ -628,6 +673,7 @@ $profileArgs = @(
 $uv = Get-Command uv -ErrorAction SilentlyContinue
 if ($uv) { $profileArgs += @('--uv', $uv.Source) }
 if ($Profile) { $profileArgs += @('--profile', $Profile) }
+$profileArgs += @('--expected-source-version', $SrcVersion)
 $profileJson = & $pythonCmd @profileArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Fail 'Failed to provision the selected agent-containers runtime profile'
@@ -681,6 +727,7 @@ $manifest = [ordered]@{
     runtime_profile = [string]$profileResult.profile
     runtime        = 'python'
 }
+if ($profileResult.runtimeSource) { $manifest['runtime_source'] = $profileResult.runtimeSource }
 $tmp = "$manifestPath.tmp"
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
 Move-Item -Force -Path $tmp -Destination $manifestPath

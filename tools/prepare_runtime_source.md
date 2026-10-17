@@ -5,9 +5,10 @@ merged Git commit into an installer-owned location outside its source
 checkout. It prepares first-party code; it does not install a runtime, update
 Copilot, select a marketplace, or change service supervision.
 
-The initial native consumer is Agent Bridge's Windows and POSIX installer.
-Other runtime plugins receive the shared identity helper but do not yet
-consume source-qualified payloads. Manager source selection and the local
+Native consumers on Windows and POSIX are Agent Bridge, Codespaces,
+Containers, MCP, SSH, Machines, Pull Requests and Budget Guidance. Other
+runtime plugins receive the shared identity helper but do not yet consume
+source-qualified payloads. Manager source selection and the local
 plugin-deployment gate are separate effort slices.
 
 ## Inputs and invocation
@@ -68,16 +69,21 @@ the current preparation and cleaned up on exit.
 Success emits one JSON object with `payload`, `identity` and `reused`.
 Failure writes the concrete refusal to stderr and exits nonzero.
 
-The prepared payload's own installer is the installation entry point. Agent
-Bridge validates its plugin/package identity and assembly bytes before using
-the source-qualified slot, and revalidates that selection before manifest
-publication. Its deploy manifest preserves `source.version` as the original
-package version and adds `runtime_version` plus `runtime_source`.
+The prepared payload's own installer is the installation entry point. Native
+consumers validate the plugin/package identity and assembly bytes before using
+the source-qualified slot, and revalidate that selection at construction and
+publication boundaries. Their deploy manifests preserve `source.version` as
+the original package version and add `runtime_version` plus `runtime_source`.
+Source snapshots preserve the complete prepared assembly and are reused only
+after their receipt matches; they do not reopen the original checkout.
+Containers retains its separate dependency profile in the selected generation
+(see the [install contract](../docs/install-contract.md)).
 When running from an attributable source slot, Bridge advertises the
 qualified build through its existing operational version field while the
 installed distribution metadata remains at the original package version.
 Different source hashes are selections, not lexicographically ordered release
-versions; serving reconciliation uses the existing guarded cutover.
+versions. Source-qualified recovery requires an exact current or last-known-good
+selection; serving reconciliation uses the existing guarded cutover.
 
 The preparation CLI is currently an explicit validation/recovery surface,
 not a replacement for the ordinary unified updater. It must not be treated
@@ -98,9 +104,10 @@ and foreground changes.
 
 The credential-free `merged-dev-runtime` clean-room scenario exercises the
 actual installer from a merged source commit, then checks the installed
-command and vendor imports with the source checkout unavailable. It also
-checks live authenticated health, routed process identity and the running
-marker against the selected source generation.
+command and vendor imports with the source checkout unavailable. For Bridge it
+also checks live authenticated health, routed process identity and the running
+marker against the selected source generation. For CLI adopters it repeats the
+real installer and requires unchanged completion bytes and exact selection.
 
 ## See also
 

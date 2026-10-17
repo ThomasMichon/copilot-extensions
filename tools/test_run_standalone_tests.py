@@ -44,6 +44,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
             "versioned_runtime.py": "_versioned_runtime.py",
             "versioned_runtime_leases.py": "versioned_runtime_leases.py",
             "versioned_runtime_construction.py": "versioned_runtime_construction.py",
+            "versioned_runtime_source.py": "versioned_runtime_source.py",
         }.items()
     }
     output = tmp_path / "artifacts"
@@ -60,7 +61,8 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
         retained.append(Path(kwargs["cwd"]))
         assert retained[0] != checkout
         for name in ("standalone_build.py", "versioned_runtime.py",
-                     "versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+                     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+                     "versioned_runtime_source.py"):
             (resources / name).write_text("raise RuntimeError('mutable original reopened')\n")
         candidate = Path(next(argument for argument in command if argument.endswith(str(Path(component)))))
         result = actual_run(

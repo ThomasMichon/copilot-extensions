@@ -52,7 +52,10 @@ def _completed_engine_slot(home, version):
 
 def _stage_engine_resolver(home):
     source = Path(__file__).resolve().parents[3] / "libs/versioned-runtime/versioned_runtime.py"
-    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime.py"):
+    for name in (
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py", "versioned_runtime.py",
+    ):
         shutil.copyfile(source.with_name(name), home / name)
 
 
