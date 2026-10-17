@@ -649,7 +649,7 @@ profile-record API or a competing admission constructor.
   ordinary users must not have to construct that map themselves.
 
 ### 2026-10-17 - Zero-configuration plan reviewed and merged
-- #7066 merged to `dev` as `1d18d3a05` after current-head Copilot review and
+- #7066 merged to `dev` as `1d18d3a05` after reduced current-head Copilot review and
   successful CI `38986244874`; all 42 actual check contexts completed without
   failures. The earlier approving review found a conflicting automatic-GPU
   definition; that definition now consistently follows authority capability
@@ -659,7 +659,9 @@ profile-record API or a competing admission constructor.
   threads; there were no unresolved blocking findings.
 - Re-read the canonical effort and default sub-plan after merge. Closed only
   the ordered review gate and transitioned this retained worktree from Phase 5
-  to Phase 4. The parent campaign remains Active; no implementation, platform
+  (helper investigation) back to the still-open Phase 4 engine-profile work.
+  This does not reopen completed helper investigation. The parent campaign
+  remains Active; no implementation, platform
   acceptance, accepted owner transfer or production rollout is inferred.
 - Continued the authority integration trace: the existing shared
   `installer_dependency_policy.py` owns configured UV resolution, stronger
