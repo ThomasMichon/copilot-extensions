@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -69,7 +70,7 @@ def test_clean_room_retains_two_independent_cases_and_original_limits(lane, tmp_
 
 @pytest.mark.parametrize("failure", [
     "nonzero", "skip", "malformed", "revocation", "cleanup", "refusals", "native", "rotation",
-    "timeout", "io",
+    "timeout", "io", "runner-value",
 ])
 def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch, failure):
     calls = []
@@ -80,6 +81,8 @@ def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch
             raise lane.subprocess.TimeoutExpired(argv, kwargs["timeout"])
         if failure == "io":
             raise PermissionError("runner unavailable")
+        if failure == "runner-value":
+            raise ValueError("invalid runner argument")
         root = Path(kwargs["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"])
         if failure != "skip":
             proof = _proof(root, "complete")
@@ -110,10 +113,58 @@ def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch
     assert report["jams"][0]["evidence"] == "complete/runner.log"
     expected = {
         "nonzero": "runner-exit", "timeout": "contained-timeout", "io": "runner-io",
+        "runner-value": "runner-io",
     }.get(failure, "proof-invalid")
     assert report["jams"][0]["category"] == expected
     assert report["jams"][0]["error_type"] == report["stages"][0]["error_type"]
     assert report["jams"][0]["error"] == report["stages"][0]["error"]
+
+
+@pytest.mark.parametrize("failure", ["json", "identity", "empty-cases", "budgets"])
+def test_manifest_failure_never_launches_or_passes_without_original_cases(lane, tmp_path, monkeypatch, failure):
+    manifest = json.loads(lane.MANIFEST.read_text(encoding="utf-8"))
+    if failure == "identity":
+        manifest["name"] = "another-lane"
+    elif failure == "empty-cases":
+        manifest["cases"] = []
+    elif failure == "budgets":
+        manifest["deadlines_seconds"]["contained_case"] = 720
+    path = tmp_path / "manifest.json"
+    path.write_text("{" if failure == "json" else json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(lane, "MANIFEST", path)
+    monkeypatch.setattr(lane.subprocess, "run", lambda *a, **kw: pytest.fail("invalid manifest launched"))
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "fail" and report["stages"] == []
+    assert report["jams"][0]["category"] == "manifest-invalid"
+    assert json.loads((tmp_path / "cr-report.json").read_text())["result"] == "fail"
+
+
+def test_pytest_retains_acceptance_failure_and_reports_cleanup_error_separately(tmp_path):
+    script = Path(__file__).with_name("test_restricted_supervisor_docker.py")
+    source = tmp_path / "test_unwind.py"
+    source.write_text(
+        "import importlib.util\nimport pytest\n"
+        f"spec = importlib.util.spec_from_file_location('docker_fixture', {str(script)!r})\n"
+        "module = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\n"
+        "def fail_cleanup(*args):\n    raise AssertionError('secondary-cleanup-failure')\n"
+        "module._cleanup_docker = fail_cleanup\n"
+        "@pytest.fixture\n"
+        "def resources(request):\n"
+        "    module._register_docker_cleanup(request, (), (), lambda *args: None)\n"
+        "def test_primary(resources):\n    raise ValueError('primary-acceptance-failure')\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(source)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "primary-acceptance-failure" in result.stdout
+    assert "secondary-cleanup-failure" in result.stdout
+    assert "1 failed, 1 error" in result.stdout
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not prove a Windows ACL")

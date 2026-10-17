@@ -48,14 +48,38 @@ def verify_case(root: Path, outcome: str) -> dict:
     return proof
 
 
+def _finish_report(root: Path, report: dict) -> dict:
+    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    (root / "cr-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return report
+
+
 def run(root: Path, *, central_image: str, bridge_python: Path, provider_python: Path) -> dict:
-    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     report = {
-        "scenario": manifest["name"], "tier": manifest["tier"], "family": manifest["family"],
+        "scenario": "restricted-dispatch", "tier": "P", "family": "F1",
         "result": "fail", "stages": [], "jams": [],
         "started_at": datetime.now(timezone.utc).isoformat(),
         "env": {"host_os": sys.platform, "central_image": central_image},
     }
+    try:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or any(
+            manifest.get(key) != value
+            for key, value in {"name": "restricted-dispatch", "tier": "P", "family": "F1"}.items()
+        ):
+            raise ValueError("manifest identity does not match the restricted-dispatch lane")
+        if manifest.get("cases") != ["complete", "abandon"]:
+            raise ValueError("manifest must retain both independent completion and abandonment cases")
+        limits = manifest["deadlines_seconds"]
+        if limits != {"pytest_item": 300, "contained_case": 360}:
+            raise ValueError("manifest must retain the original 300/360-second budgets")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        report["jams"].append({
+            "category": "manifest-invalid", "evidence": str(MANIFEST),
+            "error_type": type(exc).__name__, "error": str(exc),
+            "hint": "Restore the declared lane identity, both cases and original deadlines before running.",
+        })
+        return _finish_report(root, report)
     for outcome in manifest["cases"]:
         case = root / outcome
         case.mkdir()
@@ -72,16 +96,20 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
         started = time.monotonic()
         stage = {"case": outcome, "status": "fail", "log": f"{outcome}/runner.log"}
         phase = "runner"
+        runner_failed = False
         try:
             with (case / "runner.log").open("wb") as log:
                 process = subprocess.run(
                     [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"),
                      "agent-dispatch", "--test-file", TEST_FILE, "-k", outcome,
-                     "--test-timeout", "300", "--timeout", "360", "--plugin-timeout", "360"],
+                     "--test-timeout", str(limits["pytest_item"]),
+                     "--timeout", str(limits["contained_case"]),
+                     "--plugin-timeout", str(limits["contained_case"])],
                     cwd=REPO, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                    timeout=360, **NO_WINDOW,
+                    timeout=limits["contained_case"], **NO_WINDOW,
                 )
             if process.returncode:
+                runner_failed = True
                 raise ValueError(f"Contained case exited {process.returncode}")
             phase = "proof"
             verify_case(evidence, outcome)
@@ -92,7 +120,7 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
             category = (
                 "contained-timeout" if isinstance(exc, subprocess.TimeoutExpired)
                 else "proof-invalid" if phase == "proof"
-                else "runner-exit" if isinstance(exc, ValueError)
+                else "runner-exit" if runner_failed
                 else "runner-io"
             )
             hints = {
@@ -113,9 +141,7 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
         stage["status"] == "pass" for stage in report["stages"]
     ):
         report["result"] = "pass"
-    report["finished_at"] = datetime.now(timezone.utc).isoformat()
-    (root / "cr-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    return report
+    return _finish_report(root, report)
 
 
 def main() -> int:

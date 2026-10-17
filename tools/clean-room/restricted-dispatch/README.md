@@ -29,6 +29,11 @@ Lane-specific jam categories distinguish `runner-exit`, `runner-io`,
 its log reference and targeted hint. POSIX run directories are created
 owner-only by `mkdtemp`; Windows callers must supply a private ACL-protected
 results root rather than treating POSIX mode bits as ACL enforcement.
+Manifest parsing and workload/budget drift fail as `manifest-invalid` before
+any case launches; an empty case list cannot produce a passing report.
+The manifest supplies execution limits only after validation against the
+original two-case 300/360-second contract. Pytest-owned Docker finalizers report
+cleanup errors separately, preserving an earlier acceptance failure as well.
 
 Each case has independent new containers, networks, Bridge state, signed
 credentials and native conversation. The worker is UID 1000 with only its
