@@ -12,6 +12,16 @@ from . import output, update_events
 
 def add_update_options(p: argparse.ArgumentParser) -> None:
     p.add_argument(
+        "--auth-report",
+        action="store_true",
+        help="Report source authentication without updating or changing credentials",
+    )
+    p.add_argument("--auth-source", action="append", metavar="HTTPS_URL", help=argparse.SUPPRESS)
+    p.add_argument("--auth-cwd", metavar="PATH", help=argparse.SUPPRESS)
+    p.add_argument("--auth-non-repository", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--auth-environment", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--json", action="store_true", help="JSON output for --auth-report only")
+    p.add_argument(
         "--force-runtime",
         action="append",
         default=None,
@@ -28,9 +38,23 @@ def forced_runtimes(args: argparse.Namespace) -> frozenset[str]:
 def forwarded_flags(args: argparse.Namespace) -> list[str]:
     """The options above, rebuilt for forwarding through the Manager seam."""
     flags: list[str] = []
+    if getattr(args, "auth_report", False):
+        flags.append("--auth-report")
     for name in getattr(args, "force_runtime", None) or ():
         flags += ["--force-runtime", name]
     return flags
+
+
+def validate_auth_flags(args: argparse.Namespace) -> None:
+    report_only = [
+        "--" + name.replace("_", "-")
+        for name in ("auth_source", "auth_cwd", "auth_non_repository", "auth_environment", "json")
+        if getattr(args, name, False)
+    ]
+    if not getattr(args, "auth_report", False) and report_only:
+        argparse.ArgumentParser(prog="update").error(
+            "unrecognized arguments: " + " ".join(report_only) + " (requires --auth-report)"
+        )
 
 
 def _module_dirs(plugin_dir: Path) -> dict[str, Path]:
@@ -69,8 +93,9 @@ def _deployable(name: str, payload_dir: Path | None, context: Path | None) -> bo
         return True  # the reconciler itself reports the detection failure
 
 
-def eligible_runtimes(args: argparse.Namespace, targets: Mapping[str, object],
-                      plugin_dir: Path) -> set[str]:
+def eligible_runtimes(
+    args: argparse.Namespace, targets: Mapping[str, object], plugin_dir: Path
+) -> set[str]:
     """Runtimes this update would deploy, from the reconcilers' own plan.
 
     agent-worktrees itself, plus every active target (``modules.json`` module or

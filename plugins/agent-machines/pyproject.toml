@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-machines"
-version = "0.2.26-dev1"
+version = "0.2.27-dev1"
 description = "Portable machine setup and restore for Copilot CLI."
 readme = "README.md"
 license = "MIT"

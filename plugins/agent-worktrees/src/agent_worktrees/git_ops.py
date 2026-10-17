@@ -50,13 +50,11 @@ _REPOSITORY_CONTEXT_ENV = frozenset({
 })
 
 
-def repository_identity_env() -> dict[str, str]:
-    """Return ambient process state without inherited Git context.
-
-    Repository identity probes supply their checkout via ``git -C``; inherited
-    repo/config-selection vars are removed so they cannot override it (others remain).
+def repository_identity_env(environment: dict[str, str] | None = None) -> dict[str, str]:
+    """Remove inherited Git context; probes supply their checkout via ``git -C``.
+    Other environment variables remain unchanged.
     """
-    env = env_scrub.scrub_python_runtime_env(os.environ.copy())
+    env = env_scrub.scrub_python_runtime_env(dict(os.environ if environment is None else environment))
     for name in list(env):
         upper = name.upper()
         if (
@@ -158,6 +156,7 @@ def git(
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
+    auth_acquisition: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a git command with consistent error handling.
 
@@ -176,21 +175,27 @@ def git(
             disable to internal git ops). #3707.
         kill_tree: If True (real timeout), kill the whole tree on a stall -- :mod:`push_timeout`.
         isolated_repository: Ignore inherited Git repo/config selectors; use cwd.
+        auth_acquisition: Record update-auth use only after this acquisition child runs.
     Returns:
         CompletedProcess with stdout/stderr as strings.
     """
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
     env = repository_identity_env() if isolated_repository else os.environ.copy()
+    from .update_auth_context import repository_environment, run_acquisition
+    env = repository_environment(env)
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
-    if kill_tree and timeout is not None:
-        result = push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
-    else:
-        result = subprocess.run(
+
+    def execute():
+        if kill_tree and timeout is not None:
+            return push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
+        return subprocess.run(
             cmd, cwd=cwd, capture_output=capture, text=True,
             encoding="utf-8", errors="replace", env=env, timeout=timeout,
             **no_window_kwargs(),
         )
+
+    result = run_acquisition(execute, repository=True) if auth_acquisition else execute()
     if check and result.returncode != 0:
         raise GitError(cmd, result.returncode, result.stderr.strip())
     return result
@@ -699,6 +704,7 @@ def fetch(
         git(
             *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet",
             cwd=cwd, timeout=timeout, isolated_repository=isolated_repository,
+            auth_acquisition=True,
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(
@@ -1368,20 +1374,10 @@ def _auth_config_args_for_url(url: str) -> list[str]:
 
 
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
-    """Build ``-c http.extraheader=...`` args to auth as the remote's owner.
-
-    Returns ``[]`` when no override is needed or possible (non-GitHub remote,
-    ``gh`` unavailable, owner is not an authenticated ``gh`` account, or the
-    owner **is** the active ``gh`` account).
-
-    The override exists for the cross-account case: the repo is owned by a
-    different account than the active ``gh`` account, so a plain push would
-    403. But when the owner *is* the active account, the default credential
-    helper already authenticates correctly; injecting the active account's
-    ``gh`` OAuth token would *override* that helper with a token that may lack
-    push scope, turning a working push into a 403 (#900). So skip injection in
-    that case and let the credential helper do its job.
-    """
+    """Use legacy cross-account headers only outside auth-managed update scopes."""
+    from .update_auth_context import managed_repository
+    if managed_repository():
+        return []
     url = _remote_url(remote, cwd=cwd)
     if not url:
         return []

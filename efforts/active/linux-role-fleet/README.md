@@ -494,3 +494,28 @@ not to the vision. This effort does not acquire or migrate live capacity.
   established client-closure/API/data-schema compatibility gate before execution
   and activation, with an incompatible-candidate refusal case that preserves
   the prior active client/configuration and the monotonic admission floor.
+
+### 2026-10-14 - Repair candidate and retained native execution gate
+- The #6464 boundary reviewed in #6477 is implemented as a locally committed
+  `agent-machines` candidate, not a published PR, released runtime or live
+  consumer repair. It uses the current public source-neutral activation and
+  installation-context APIs; ordinary downstream delivery neither creates nor
+  requires core installation cells.
+- A fresh native Linux clean-room run passed all six gates: real materialized
+  payload installation and first-use CLI repair, 30 conductor cases and 138
+  canonical packaging/source-guard cases. The Windows conductor portfolio also
+  passed all 30 cases. These synthetic ordinary-owner proofs do not satisfy
+  live setup, native WSL/macOS or unsupported active-core apply gates.
+- Full Windows integration remains blocked. Serial native scenario matrices
+  were separated without dropping assertions; measured cold-host workflow
+  budgets and whole-tree fixture cleanup are explicit. A native ARM64
+  interpreter comparison passed nine of ten selected integration cases, but a
+  subsequent run failed four of ten. Shared host scheduling pressure remains
+  observed, not a proven root cause or an accepted flake. An isolated pass is
+  not permission to merge around the still-red native gate.
+- The candidate observes validated already-active core cells but refuses
+  undeclared core repair actions. #6464 retains native execution, actual
+  consuming setup integration and real missing/stale-runtime repair before
+  closure. #6424 retains managed client lifecycle; controller/connector,
+  authorization, useful roles and adopter migration remain independently open.
+  This campaign and routing foundation remain Active.

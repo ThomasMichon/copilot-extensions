@@ -1563,6 +1563,117 @@ depth: it snapshots the real User and Machine registry environment keys and
 fails the test flow if drift is observed. It never rolls back the whole key,
 because doing so could overwrite a legitimate concurrent edit.
 
+## Update-source authentication
+
+`agent-worktrees update` reports authentication before acquiring its configured
+GitHub marketplaces and HTTPS repo anchors. `update --auth-report` performs only
+that read-only report; it does not update payloads, install runtimes, write
+telemetry, or change saved credentials. `--json` returns the sanitized report.
+Sources and account mappings come from effective user/repository settings and
+the repository registry, not an updater-specific credential configuration.
+User `settings.local.json` overrides `settings.json` before repository overrides;
+an exact registered repository keeps its own account override, not a sibling's.
+Repository-account matching retains the remote host and port across HTTPS, SSH
+and SCP spellings; an enterprise source never inherits a public-host sibling's account.
+Default network ports are canonicalized consistently across registry lookup,
+token discovery, helper replay and API selection: `github.com:443` is public
+GitHub, while a non-default enterprise port remains a distinct authority.
+The report resolves ancestor or transported marketplace settings through the same
+context selection as normal update, including its active-project fallback.
+Bare and non-bare anchors on detached or non-default branches are excluded from
+preflight. Branch selection is isolated from caller Git repository selectors
+and shared with synchronization rather than inventing an auth requirement.
+
+Public probes clear source-scoped HTTP headers as well as disabling helpers.
+When a clean public probe succeeds, an effective-header diagnostic avoids
+another network request unless configured headers exist. Working configured
+headers remain untouched; a failing configured path can use an anonymous,
+source-scoped header-clearing overlay, without acquiring credentials.
+Other sources first exercise the
+caller's configured credentials through a read-only router, then try an
+environment token, the mapped `gh` account, and `git credential fill`. A candidate
+uses case-insensitive host matching; enterprise environment tokens require the
+matching explicit `GH_HOST`, and discovery and replay share token selection. It
+must pass both its mapped-account check and a read-only Git contents probe;
+repository metadata permission alone does not establish fetch permission. Each
+subprocess is bounded, non-interactive, headless on Windows, and retains at
+most 1 MiB per output stream. Windows requires a no-breakaway Job; POSIX probes
+own their session and nested helper children remain inside that boundary.
+Owned sessions are swept after success too, including redirected descendants;
+inherited sessions are never swept by an inner helper.
+Contained tests retain their test runner's ownership instead of detaching.
+Reachability does not require an advertised `HEAD`: an unborn or dangling default
+branch is not an authentication failure.
+
+A working setup gets no environment overlay. Only failed sources acquire an
+environment-only Git command-scope overlay, appended after inherited command
+configuration so local helpers cannot override it. Overrides use counted Git
+entries and, when inherited, appended `GIT_CONFIG_PARAMETERS`; the original
+parameter bytes are retained for original-configuration replay. Routes are qualified by
+host and repository: fixing or denying one repository must not change another
+working repository under the same owner. Other requests delegate to Git under
+the caller's original configuration at the child's actual working directory,
+preserving native helper matching, ordering, resets, and includes. Credential
+discovery and replay use the source URL's actual path without adding a `.git`
+suffix. Tokens are never written into the overlay. Read-only probes suppress
+credential approval and rejection; no path switches the active `gh` account.
+Discovery negotiates native `authtype`/`credential` responses as well as password
+credentials. Native identity validation preserves the helper's HTTP scheme,
+uses an isolated, bounded stdlib probe with credential input over stdin rather
+than argv, refuses redirects, and still checks the mapped principal and Git
+contents access. The resulting fallback stores only the fill route, never the
+credential; acquisition replays the original helper response.
+The slot-interpreter helper runs in isolated Python mode so checkout-local
+modules and inherited Python import paths cannot replace its code or standard library.
+Marketplace contexts and individual anchors have separate reports and overlays,
+even when they reference the same URL with different local credentials.
+
+Unresolved required sources are denied without retrying a stalled helper and
+contribute `auth_required` (exit 4, unless a worse failure applies). The shared
+exit remains 4 for auth-only acquisition failures even without telemetry; another
+required command failure still wins. The shared
+Manager result retains that precedence with or without telemetry; a recorded
+Manager authentication failure cannot hide an independent engine command failure.
+The shared
+status includes `auth.report` and `auth.fallback_used`; helper command values
+are not included. Preflight reports fallback availability separately from use.
+A source enters `fallback_used` only after its acquisition child receives the
+overlay, including a child that later times out. Failed spawns, activation
+preconditions, ordinary anchor inspection, and unattempted anchors do not count;
+activation restoration failures after launch do not erase the usage evidence.
+`CE_UPDATE_AUTH=report-only` applies no credential fix, so
+fixable sources remain unresolved. `CE_UPDATE_AUTH=off` skips this preflight.
+There is no persistent configuration cleanup or cleanup-consent flag.
+
+The Worktree Manager consumes the same report through its existing engine JSON
+process seam before its own Git fetch. Its engine environment preserves an
+overlay when present while still discarding parent Python runtime variables.
+Reused staging checkouts supply their own acquisition cwd to the report, so
+local helpers and conditional includes are observed in the right checkout.
+First clones use an empty staging directory with a discovery ceiling for both
+preflight and acquisition, retaining global/command credentials without reading
+the caller's repository-local configuration. Relative install roots and local Git
+sources are anchored before changing cwd; URLs and SCP-style sources stay intact.
+The machine report transports
+explicit environment removals as well as additions. Local-only anchors without
+a configured remote produce no HTTPS auth source.
+The internal `--auth-source`/`--auth-environment` report options transport only
+child environment differences over that pipe; never persist or publish that
+environment. Explicit-source reports can run from an unadopted directory without
+a selected project; ordinary updates still require their normal project context.
+Repository-isolated engine Git calls continue to discard arbitrary
+inherited Git selectors, including inherited updater snapshots, and receive only
+the updater's explicitly scoped auth overlay. Anchor preflight uses that same
+isolation. Every anchor operation is isolated even for local/SSH sources or when
+auth preflight is disabled; isolation alone does not suppress the legacy account
+policy. Auth-managed anchors suppress legacy injected headers even when
+configured credentials passed, so acquisition cannot override the report's
+credential authority.
+The Manager's own updater remains independently usable: a missing/older engine
+or a source outside this reporter's supported shape produces an explicit notice
+and retains the existing Git authentication path, not a false auth refusal.
+Known failed credentials reported by a capable engine still block that fetch.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is

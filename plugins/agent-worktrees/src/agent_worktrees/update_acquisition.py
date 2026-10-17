@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 import subprocess
+from functools import partial
 from pathlib import Path
 from time import monotonic, sleep
 
-from . import output, update_events
+from . import output, update_events, update_auth_context as _auth
 
 
 _REFUSAL = re.compile(
@@ -63,6 +64,8 @@ def acquire(
     from . import activation_preservation, reconcile
     from .update_runtime import describe_copilot_spawn_error
 
+    if _auth.blocked(cwd, marketplace):
+        return "auth_required"
     ref = f"{name}@{marketplace}"
     missing_ledger_pattern = re.compile(
         rf"\bplugin\s+['\"`]?{re.escape(name)}(?:@{re.escape(marketplace)})?"
@@ -82,11 +85,17 @@ def acquire(
         kwargs = {
             "capture_output": True, "text": True,
             "timeout": min(_ATTEMPT_TIMEOUT_S, remaining), "cwd": cwd,
+            **_auth.child_environment(cwd),
         }
         try:
             result = (
-                activation_preservation.run_install_preserving_activation(argv, ref, **kwargs)
-                if verb == "install" else subprocess.run(argv, **kwargs)
+                activation_preservation.run_install_preserving_activation(
+                    argv, ref, runner=partial(_auth.run_acquisition, subprocess.run, context=cwd),
+                    **kwargs,
+                )
+                if verb == "install" else _auth.run_acquisition(
+                    subprocess.run, argv, context=cwd, **kwargs,
+                )
             )
         except activation_preservation.PluginStateError as error:
             status = f"plugin state error: {update_events.bounded(str(error), 200)}"

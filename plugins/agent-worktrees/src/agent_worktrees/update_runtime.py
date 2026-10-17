@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import bare_anchor_files, bare_anchor_sync, git_ops, output, update_events
 from . import update_runtime_plan
+from . import update_auth_context as _auth
 from . import config as cfg
 from .installer_capabilities import posix_zero_downtime_flag_supported  # noqa: F401 - planning seam
 from .update_gate import (  # noqa: F401 - re-exported for callers and tests
@@ -175,11 +176,13 @@ def _update_registered_plugins(
     refreshed_contexts: set[Path | None] = set()
     browse_contexts: list[Path | None] = []
     refresh_marketplace = _core_helper("_refresh_marketplace", _refresh_marketplace)
+    required_contexts = {target.context for target in targets.values() if target.required}
     for target in targets.values():
         context = target.context
         if context in refreshed_contexts:
             continue
         refreshed_contexts.add(context)
+        _auth.prepare_marketplace(context, required=context in required_contexts)
         if refresh_marketplace(reconcile.MARKETPLACE, cwd=context):
             browse_contexts.append(context)
 
@@ -192,6 +195,7 @@ def _update_registered_plugins(
             fallback_context = None
         if fallback_context is not None and fallback_context not in refreshed_contexts:
             refreshed_contexts.add(fallback_context)
+            _auth.prepare_marketplace(fallback_context, required=False)
             if refresh_marketplace(reconcile.MARKETPLACE, cwd=fallback_context):
                 browse_contexts.append(fallback_context)
 
@@ -610,16 +614,21 @@ def _fast_forward_project_anchors() -> None:
         seen.add(anchor)
 
         anchor_path = Path(anchor)
+        if _auth.anchor_blocked(anchor_path):
+            continue
         if not (anchor_path / ".git").exists():
             output.warn(f"Anchor not checked out, skipping: {anchor}")
             continue
         if bare_anchor_sync.is_bare(anchor_path):
             # No work tree: the dirty check / merge below can't run there.
             try:
-                state, detail = bare_anchor_sync.sync_bare_anchor(
-                    anchor, repo.default_branch, remote=repo.remote)
+                with _auth.repository_scope(anchor_path):
+                    state, detail = bare_anchor_sync.sync_bare_anchor(
+                        anchor, repo.default_branch, remote=repo.remote)
             except Exception as exc:  # e.g. a fetch timeout: report, keep updating
                 state, detail = "error", str(exc) or type(exc).__name__
+            if state == "error":
+                _auth.anchor_failure(anchor, detail)
             # Like `repos sync`: files left stale after the ref moved need attention.
             files = bare_anchor_files.status_of(detail)
             stale = files is not None and files not in bare_anchor_files.QUIET_STATUSES
@@ -629,21 +638,19 @@ def _fast_forward_project_anchors() -> None:
             )
             continue
 
-        current = git_ops.current_branch(anchor_path)
-        if current is None:
-            output.info(f"{anchor}: detached HEAD -- skipped")
-            continue
-        if current != repo.default_branch:
-            output.info(f"{anchor}: on '{current}', not '{repo.default_branch}' -- skipped")
+        with _auth.repository_scope(anchor_path):
+            skip = bare_anchor_sync.branch_skip_reason(anchor_path, repo.default_branch)
+        if skip:
+            output.info(f"{anchor}: {skip}")
             continue
 
-        ff = git_ops.fast_forward_worktree(
-            anchor_path,
-            remote=repo.remote,
-            default_branch=repo.default_branch,
-            do_fetch=True,
-        )
+        with _auth.repository_scope(anchor_path):
+            ff = git_ops.fast_forward_worktree(
+                anchor_path, remote=repo.remote,
+                default_branch=repo.default_branch, do_fetch=True,
+            )
         if ff.fetch_error:
+            _auth.anchor_failure(anchor, ff.fetch_error)
             output.warn(f"{anchor}: fetch from {repo.remote} failed; compared against "
                         f"the last-known upstream ({update_events.redact(ff.fetch_error)})")
         if ff.updated:

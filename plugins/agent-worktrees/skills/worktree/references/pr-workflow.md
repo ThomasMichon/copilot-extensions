@@ -996,6 +996,14 @@ SHA** as an exact remote lease. It never fetches a new lease to overwrite
 someone else's newer work. A moved/deleted remote head requires inspection
 and reconciliation, not blind retry.
 
+If a verified rebased publication reached the remote before its transport
+acknowledgement was recorded, a later update can recover without rewriting
+that remote again. The source-owned replay proof and unchanged open PR,
+repository and head association must still verify. When the independently
+confirmed remote head is already an ancestor of the pinned source commit,
+recovery uses normal non-forcing transport, with the usual hooks and deadline.
+Unknown provider evidence or an unrelated concurrent update remains a refusal.
+
 The opt-in requires the owning `worktree/{id}` checkout, persisted successful
 `create-pr` publication ownership, and an open, exclusively tracked private
 head ending in that worktree's canonical creation suffix. Ownership also binds

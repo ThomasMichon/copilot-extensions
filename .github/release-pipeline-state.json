@@ -1,9 +1,9 @@
 {
   "last_promotion": {
-    "dev_head": "fc61ab3aa44ac2b235ea540601127ff91129b81c",
-    "main_before": "ad7376904b0e622f7f44abf516cbef560b322f36",
-    "promoted_at": "2026-10-16T06:19:44Z",
-    "tag": "promote-20261016061944"
+    "dev_head": "07bdd666ed5c59afa55366774740071b867b8962",
+    "main_before": "6b2fa0ac2887a8fda669dfb8356e5c6083f6729d",
+    "promoted_at": "2026-10-16T07:38:46Z",
+    "tag": "promote-20261016073846"
   },
   "last_rollback": null,
   "pause_reason": "Operator-approved containment until pre-merge qualification makes Main safe to consume (#6237)",

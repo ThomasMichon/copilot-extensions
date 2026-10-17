@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"be5d882b8ad5eb70096e199f297be8ccc6c47ca4979f0834ee27961b38d059f2","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.23-dev1","renderedBytes":4038,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":2970,"templateSha256":"8dd4f1ac7d716ff5a2ed3f02e11ccfbcedbfed9e8071c4fd7f1f61cfd457fd9e","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"be5d882b8ad5eb70096e199f297be8ccc6c47ca4979f0834ee27961b38d059f2","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.24-dev1","renderedBytes":4038,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":2970,"templateSha256":"8dd4f1ac7d716ff5a2ed3f02e11ccfbcedbfed9e8071c4fd7f1f61cfd457fd9e","version":1} -->
 
 
 > If `.github/instructions/customizing-copilot/local-cache-catchall.local.instructions.md` is available, compare
@@ -54,4 +54,4 @@ context reconstruction, and after source changes. Persist no loaded-state
 claims. These instructions, selectors and inventories do not attest that any
 other body has reached the model.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"fa8f8a46343c50b3df66ccf6acffa24a831332190fff1cf12ecde247f2d58d71"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"d799e39655e9ce6e3446277f3ea43bfc30ca50f6bb972d3dd8cd9e0272317d9c"} -->

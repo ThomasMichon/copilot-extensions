@@ -32,6 +32,36 @@ def is_bare(path: str | os.PathLike[str]) -> bool:
     return probe.returncode == 0 and probe.stdout.strip() == "true"
 
 
+def _branch_selection(
+    anchor: str | os.PathLike[str], default_branch: str | None, *, bare: bool,
+) -> tuple[str, str | None]:
+    args = ("branch", "--show-current") if bare else ("rev-parse", "--abbrev-ref", "HEAD")
+    probe = git_ops.git(*args, cwd=anchor, check=False, isolated_repository=True)
+    current = probe.stdout.strip() if probe.returncode == 0 else ""
+    if not current or current == "HEAD":
+        return "", "detached HEAD"
+    target = default_branch or current
+    if current != target:
+        if bare:
+            return target, (
+                f"HEAD is on '{current}', not declared default '{target}' "
+                "(bare anchor); switch it explicitly with: "
+                + _display_command(
+                    ["git", "-C", str(anchor), "symbolic-ref", "HEAD", f"refs/heads/{target}"]
+                )
+            )
+        return target, f"on '{current}', not '{target}'"
+    return target, None
+
+
+def branch_skip_reason(
+    anchor: str | os.PathLike[str], default_branch: str | None, *, bare: bool = False,
+) -> str | None:
+    """The same isolated branch eligibility used by auth discovery and sync."""
+    _, reason = _branch_selection(anchor, default_branch, bare=bare)
+    return reason + " -- skipped" if reason and not bare else reason
+
+
 def sync_bare_anchor(
     path: str, declared_branch: str | None, *, remote: str = "origin",
 ) -> tuple[str, str]:
@@ -74,22 +104,9 @@ def sync_bare_anchor(
     def _git(*args: str):
         return git_ops.git(*args, cwd=path, check=False, isolated_repository=True)
 
-    current = _git("branch", "--show-current").stdout.strip()
-    if not current:
-        return ("skipped", "detached HEAD")
-    target = declared_branch or current
-    if target != current:
-        # A bare repo has no index/work tree for `git checkout` to act on;
-        # moving HEAD to a different declared branch is a structural change
-        # best left to an explicit operator action, not an unattended sync.
-        return (
-            "skipped",
-            f"HEAD is on '{current}', not declared default '{target}' "
-            "(bare anchor); switch it explicitly with: "
-            + _display_command(
-                ["git", "-C", str(path), "symbolic-ref", "HEAD", f"refs/heads/{target}"]
-            ),
-        )
+    target, skip = _branch_selection(path, declared_branch, bare=True)
+    if skip:
+        return ("skipped", skip)
     old_sha = _git("rev-parse", "--verify", f"refs/heads/{target}").stdout.strip()
     if not old_sha:
         return ("error", f"could not resolve '{target}'")
@@ -118,6 +135,7 @@ def sync_bare_anchor(
             "fetch", "--quiet", "--no-tags", remote,
             f"+refs/heads/{target}:{scratch_ref}",
             cwd=path, check=False, timeout=180, isolated_repository=True,
+            auth_acquisition=True,
         )
     finally:
         for refspec in saved_refspecs:

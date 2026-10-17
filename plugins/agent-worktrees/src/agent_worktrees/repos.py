@@ -41,6 +41,7 @@ import yaml
 from agent_procutil import no_window_kwargs
 
 from . import bare_anchor_sync, git_ops, output, registry_paths
+from .repo_accounts import account_for_remote as account_for_remote
 from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
 # ---------------------------------------------------------------------------
@@ -640,20 +641,19 @@ def is_unresolved_registered_target(target: str | None) -> bool:
 
 
 def account_for_github_slug(slug: str | None) -> str | None:
-    """Resolve the effective account for a github ``owner/name`` slug, a bare
-    ``owner``, or a bare registered repo *name*.
+    """Resolve a GitHub slug or registry alias to its configured account.
 
-    A bare registered repo name resolves via its own matched entry's
-    :func:`resolve_account` (explicit ``account:`` -> ``account_map[owner]`` ->
-    the remote owner itself -> None) -- never by handing the owner alone to
-    the owner-*wide* resolver (:func:`account_for_github_owner`), which scans
-    every registered repo and can return a *different, sibling* repo's
-    explicit account for the same owner (see #3032 follow-up: with `proj-a`
-    unoverridden and `proj-b` -> `account-b` under the same owner,
-    `account-for proj-a` must not resolve to `account-b`).
+    Exact registered repository matches take precedence over owner-wide policy,
+    so sibling repositories can use different accounts. Bare registered names
+    resolve directly through their entry; unregistered slugs use owner policy.
     """
     if not slug:
         return None
+    if "/" in slug:
+        for entry in read_registry().repos.values():
+            remote_slug = github_slug(entry.remote)
+            if remote_slug and remote_slug.casefold() == slug.casefold():
+                return resolve_account(entry)
     if "/" not in slug:
         entry = find_repo(slug)
         if entry is not None:

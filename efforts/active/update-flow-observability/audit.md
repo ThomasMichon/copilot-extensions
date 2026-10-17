@@ -373,3 +373,43 @@ required payload acquisition fails. Preserve and verify those owners' work;
 do not duplicate it or count it as a newly implemented optimization here.
 Neither a source merge nor a passing formatter fixture measures the installed
 flow's execution count or duration.
+
+### Final integration work counts (isolated native source fixtures)
+
+Verified the existing #6836 optimization rather than adding a competing
+finishing path. The real PowerShell `Reconcile-Binstubs` function is invoked
+twice with the same synthetic runtime callback. With ordinary standalone
+installer behavior it invokes that callback twice; with the unified updater's
+explicit local-integration deferral it invokes it zero times. This removes
+two installer-owned reconciliation subprocesses when those two call sites
+are reached; it does not remove the final required reconciliation. The
+native Bash fixture independently observes the same two-to-zero count.
+
+The aggregate-update fixture separately records the real orchestration's
+collaborator calls on Windows:
+
+| Initial runtime state | Engine installer calls | Final command passes | Final profile passes |
+|---|---:|---:|---:|
+| Current version | 0 | 1 | 1 |
+| Different version | 1 | 1 | 1 |
+| No deployed version (first touch) | 1 | 1 | 1 |
+
+All three require the ordering `modules`, `runtimes`, `commands`, `profiles`.
+The first-touch case and exact installer-count assertion extend
+`test_update_quick_skip.py::test_local_finishing_runs_once_after_runtime_work`.
+The native deferral fixture is
+`test_terminal_refresh.py::test_native_powershell_installer_defers_both_reconcile_passes`.
+Companion native fixtures preserve standalone profile work and require a
+verified Manager result; final-integration fixtures retain required command
+and profile failures instead of converting them into a successful no-op.
+
+These are invocation-count proofs with external work replaced by synthetic
+callbacks, not timings of real command migration, package construction or
+profile publication. The two complete orchestration/integration modules
+passed 42 cases on Windows in 12.89 seconds and 42 on native Linux in 14.92
+seconds. Six selected native PowerShell deferral/compatibility cases passed
+in 13.68 seconds; the two native Bash count cases passed in 5.26 seconds.
+Those are validation costs, not claimed update savings. No installed updater
+or service lifecycle was invoked. Equivalent historical/current end-to-end
+durations and promoted installed operation counts remain separate,
+unresolved evidence.

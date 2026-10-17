@@ -406,6 +406,10 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
     command = args_list[0]
     if command in _NO_PROJECT_COMMANDS or command.startswith("-"):
         return True
+    if command == "update" and "--auth-report" in args_list[1:] and any(
+        arg == "--auth-source" or arg.startswith("--auth-source=") for arg in args_list[1:]
+    ):
+        return True
     if command == "list-sessions" and "--all-projects" in args_list[1:]:
         return True
     if command == "claims" and args_list[1:3] == ["find", "pr"]:

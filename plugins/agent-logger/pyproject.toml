@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-logger"
-version = "0.3.24-dev1"
+version = "0.3.25-dev1"
 description = "Reusable Copilot CLI session logging -- segmenter, log writer, local/rescue session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"

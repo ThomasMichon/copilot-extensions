@@ -15,10 +15,15 @@ from . import config as cfg
 from . import output, services as svc
 from . import picker_profiles_cli, services_cli
 from . import update_events as _events, update_options, update_runtime_plan, update_acquisition
+from . import update_auth_context as _auth
 from . import worktree_identity
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 from .update_runtime import (  # noqa: F401 - compatibility seams used by the plan collector
     _installer_timeout, _run_engine_installer, installer_deadline_status,
+)
+from .update_runtime import (
+    _invocation_update_context as _invocation_update_context,
+    _project_update_context as _project_update_context,
 )
 
 
@@ -173,6 +178,9 @@ def cmd_update(args: argparse.Namespace) -> int:
     re-entry and an operator escape hatch -- and the DQ8 fallback whenever the
     Manager is absent or fails its health check, so ``update`` never dead-ends.
     """
+    update_options.validate_auth_flags(args)
+    if getattr(args, "auth_report", False):
+        return _auth.cmd_report(args)
     if not getattr(args, "no_manager", False):
         mgr = _usable_worktree_manager()
         if mgr:
@@ -200,12 +208,7 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def _update_flags(args: argparse.Namespace) -> list[str]:
-    """Reconstruct the forwardable ``update`` flags to thread through the seam.
-
-    So ``<project> update --force`` (etc.) keeps its meaning when handed to the
-    Worktree Manager, which forwards them back to ``agent-worktrees update
-    --no-manager``. ``--no-manager`` itself is never forwarded (it is the bypass).
-    """
+    """Forward update flags through the Manager, excluding its re-entry bypass."""
     flags: list[str] = []
     if getattr(args, "force", False):
         flags.append("--force")
@@ -224,20 +227,11 @@ def _update_flags(args: argparse.Namespace) -> list[str]:
 
 
 def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
-    """The in-plugin harness update mechanics (the seam's DQ8 fallback + the
-    body the Worktree Manager drives via ``agent-worktrees update --no-manager``).
-
-    1. Run ``copilot plugin update`` to fetch the latest plugin version.
-    2. Locate the installed plugin directory.
-    3. Run the platform-specific installer from the freshly updated plugin.
-
-    Records the run's phases/targets through ``update_events`` and returns an
-    exit code from the shared table (0 success, non-zero failure classes).
-    """
+    """Run the update with auth scopes, outcome telemetry and human framing."""
     with output.human_operation("update/engine") as human:
         _events.start("engine")
         try:
-            rc = _update_in_plugin_steps(args)
+            rc = _auth.run_update(args, _update_in_plugin_steps)
         except BaseException as exc:
             _events.finish(None, exc)
             raise
@@ -260,9 +254,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     plugin_ref = "agent-worktrees@copilot-extensions"
     _events.enter("payload_refresh")
     output.info(f"Updating plugin: {plugin_ref}")
-    update_context = _core_helper(
-        "_invocation_update_context", _invocation_update_context
-    )() or _core_helper("_project_update_context", _project_update_context)()
+    update_context = _auth._marketplace_context()
     payload_status = update_acquisition.acquire(
         "agent-worktrees", "copilot-extensions", _resolve_copilot() or "copilot",
         cwd=update_context, engine=True,
@@ -437,45 +429,20 @@ def _prune_stale_pivots_after_update() -> None:
         )
 
 
-def _project_update_context() -> Path | None:
-    """The active project's anchor, whose settings declare marketplace context."""
-    try:
-        return Path(cfg.load_config().default_repo.anchor)
-    except ValueError as exc:
-        output.warn(
-            f"Could not resolve project marketplace context; using current directory: {exc}"
-        )
-        return Path.cwd()
-
-
-def _invocation_update_context() -> Path | None:
-    """Return the invoking checkout when it carries repository Copilot settings."""
-    from plugin_resolve import SETTINGS_RELS
-
-    update_context_env = getattr(_core(), "_UPDATE_CONTEXT_ENV", "AGENT_WORKTREES_UPDATE_CONTEXT")
-    invocation_cwd = getattr(_core(), "_INVOCATION_CWD", None)
-    transported = os.environ.get(update_context_env)
-    cwd = Path(transported) if transported else (invocation_cwd or Path.cwd())
-    for candidate in (cwd, *cwd.parents):
-        try:
-            if any(candidate.joinpath(*rel).is_file() for rel in SETTINGS_RELS):
-                return candidate
-        except OSError as error:
-            raise ValueError(
-                f"cannot inspect plugin settings under {candidate}: {error}"
-            ) from error
-    return None
-
-
 def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
     """Refresh the local marketplace catalog (best-effort, non-fatal)."""
+    if _auth.blocked(cwd, marketplace):
+        return False
     try:
-        r = subprocess.run(
+        r = _auth.run_acquisition(
+            subprocess.run,
             [_resolve_copilot() or "copilot", "plugin", "marketplace", "update", marketplace],
             capture_output=True,
             text=True,
             timeout=120,
             cwd=cwd,
+            context=cwd,
+            **_auth.child_environment(cwd),
         )
         if r.returncode != 0:
             output.warn("Marketplace refresh returned non-zero -- continuing")
@@ -493,8 +460,11 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
 
 def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) -> set[str] | None:
     """Return the refreshed marketplace's plugin names, or ``None`` if unknown."""
+    if _auth.blocked(cwd, marketplace):
+        return None
     try:
-        r = subprocess.run(
+        r = _auth.run_acquisition(
+            subprocess.run,
             [
                 _resolve_copilot() or "copilot",
                 "plugin",
@@ -506,6 +476,8 @@ def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) ->
             text=True,
             timeout=120,
             cwd=cwd,
+            context=cwd,
+            **_auth.child_environment(cwd),
         )
     except OSError as exc:
         output.warn(
