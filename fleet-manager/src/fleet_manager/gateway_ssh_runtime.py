@@ -22,6 +22,7 @@ from .planning import PlanError, boolean, canonical, decode, digest, identifier,
 from .release import SHA256
 
 MAX_PROFILES = 32
+MAX_HOST_HOPS = 32
 OPERATION_SECONDS = 30
 TARGET_FIELDS = ("machine", "environment", "controller", "backend")
 
@@ -138,7 +139,8 @@ def _plan_value(decision, observation):
         "gateway-egress-required", "host-hop-unavailable",
     ):
         raise PlanError("unsupported SSH policy reason")
-    if not isinstance(decision["host_path"], list):
+    if (not isinstance(decision["host_path"], list)
+            or len(decision["host_path"]) > MAX_HOST_HOPS):
         raise PlanError("SSH host path must be a bounded list")
     for hop in decision["host_path"]:
         if not isinstance(hop, dict) or set(hop) != {"machine", "environment"}:
@@ -278,7 +280,7 @@ class GatewaySSHResult:
             "effect": self.effect,
             "reobserve_required": (
                 self.state == "unknown" or self.reason == "effect-reobservation-required"
-                or observation is not None and observation["pending_operation"] is not None
+                or (observation is not None and observation["pending_operation"] is not None)
             ),
             "observation": observation,
         }

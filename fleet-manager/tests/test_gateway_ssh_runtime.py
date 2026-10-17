@@ -514,6 +514,16 @@ def test_policy_host_hops_are_retained_without_inventing_execution_authority():
     assert plan.to_dict()["decision"]["execution_authorized"] is False
 
 
+def test_policy_host_path_is_bounded_at_the_declared_maximum():
+    hops = [{"machine": "host-" + str(i), "environment": "linux"}
+            for i in range(runtime.MAX_HOST_HOPS)]
+    selected = decision(host_path=hops)
+    assert plan_gateway_ssh(selected, observation(selected)).to_dict()["decision"]["host_path"] == hops
+    selected = decision(host_path=[*hops, {"machine": "overflow", "environment": "linux"}])
+    with pytest.raises(PlanError, match="SSH host path must be a bounded list"):
+        plan_gateway_ssh(selected, observation(selected))
+
+
 def test_sibling_decision_digest_must_bind_the_entire_canonical_dictionary():
     class WrongDigest:
         decision_digest = "f" * 64
