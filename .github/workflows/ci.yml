@@ -60,17 +60,11 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  # `false` (not the prior `true`): a rolling build, not cancel-and-restart.
-  # GitHub's default queue:single semantics for a shared group already give
-  # exactly this -- at most one run in progress, at most one pending, and a
-  # newer push only ever supersedes the *pending* run, never kills the one
-  # already in progress. `cancel-in-progress: true` risked starving this
-  # workflow entirely under rapid pushes to the same ref (an in-flight run
-  # gets killed and restarted from zero every time, so if pushes arrive
-  # faster than this suite completes, NO run ever finishes) -- which in turn
-  # means Validation Gate/Promote downstream never fire at all
-  # (ThomasMichon/copilot-extensions#3592).
-  cancel-in-progress: false
+  # Obsolete PR heads cannot admit the current head, so stop their work.
+  # Dev pushes and manual qualification retain rolling queue:single behavior:
+  # a newer push replaces only pending work, never an executing validation.
+  # This preserves the dev-advancement starvation protection from #3592.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -1143,7 +1137,7 @@ jobs:
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
     needs: discover
-    if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
+    if: always() && (github.event_name != 'pull_request' || !cancelled()) && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     steps:
@@ -1162,7 +1156,7 @@ jobs:
   agent-index-service-windows:
     name: agent-index-service (windows-latest, out-of-plugin)
     needs: discover
-    if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
+    if: always() && (github.event_name != 'pull_request' || !cancelled()) && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: windows-latest
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     steps:
@@ -1775,9 +1769,9 @@ jobs:
     # is in scope) -- neither shape can be named directly as a GitHub
     # required status check without risking a PR that never triggers a given
     # dynamic/conditional name getting stuck forever on "Expected -- waiting
-    # for status to be reported." This job is unconditional (`if: always()`)
-    # and always reports exactly one of success/failure, so it is always
-    # itself observable regardless of what its dependencies did.
+    # for status to be reported." This job reports success/failure even after
+    # dependency failures, but stops with a cancelled PR. Obsolete heads must
+    # not keep allocating runners just to publish an irrelevant aggregate.
     #
     # Exists because neither of #4151 nor #4166 (the regressions that stalled
     # dev's CI for hours) was actually invisible: #4151's own PR-time
@@ -1785,7 +1779,7 @@ jobs:
     # no required-status-checks branch protection on dev/main at all --
     # nothing technically blocked it. This job is the anchor that lets that
     # protection finally exist without brittleness.
-    if: always() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
+    if: always() && !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
     needs:
       - checks
       - windows-python-artifact-builder

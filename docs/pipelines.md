@@ -743,6 +743,13 @@ GitHub cannot filter this activity to base edits alone at workflow admission,
 so other PR edits also run CI; excluding main still prevents its redundant
 release-candidate invocation.
 
+Within each PR ref, newer CI supersedes an older head's executing run.
+Cancelled PRs do not continue standalone Index jobs or allocate the final PR
+aggregate; an uncancelled dependency failure still reaches that required
+aggregate and reports failure. Dev pushes and manual qualification keep rolling
+queue semantics, so frequent contributions do not restart an executing release
+validation. This policy changes no required inventory for the current head.
+
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | `pull_request` (all bases except `main`), `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) and `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. The base-branch exclusion prevents the whole redundant main-PR invocation, not just its jobs; main/dev push and manual validation remain unchanged. |

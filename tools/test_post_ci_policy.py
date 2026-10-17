@@ -105,6 +105,97 @@ def test_widen_only_keeps_ordinary_ceiling_checks_without_an_exact_baseline_gate
     assert "checks" in workflow["jobs"]["pr-gate"]["needs"]
 
 
+def _ci_condition(
+    condition: str, *, event: str, cancelled: bool = False,
+    failed: bool = False, standalone: str = "true", base: str = "dev",
+    promotion_run: str = "123",
+) -> bool:
+    condition = condition.removeprefix("${{").removesuffix("}}").strip()
+    for source, target in [
+        ("github.event.pull_request.base.ref", "base"),
+        ("needs.discover.outputs.standalone_service", "standalone"),
+        ("github.event_name", "event"),
+        ("inputs.promotion_run", "promotion_run"),
+        ("!cancelled()", "not cancelled"),
+        ("cancelled()", "cancelled"),
+        ("always()", "True"),
+        ("success()", "success"),
+        ("failure()", "failed"),
+        ("&&", "and"),
+        ("||", "or"),
+    ]:
+        condition = condition.replace(source, target)
+    result = eval(condition, {"__builtins__": {}}, {
+        "event": event, "cancelled": cancelled, "failed": failed,
+        "success": not failed, "standalone": standalone, "base": base,
+        "promotion_run": promotion_run,
+    })
+    assert isinstance(result, bool)
+    return result
+
+
+@pytest.mark.parametrize("event,expected", [
+    ("pull_request", True), ("push", False), ("workflow_dispatch", False),
+])
+def test_only_superseded_pr_ci_is_cancelled(event: str, expected: bool) -> None:
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    concurrency = ci["concurrency"]
+    assert concurrency["group"] == "ci-${{ github.workflow }}-${{ github.ref }}"
+    condition = concurrency["cancel-in-progress"]
+    assert isinstance(condition, str)
+    assert _ci_condition(condition, event=event) is expected
+
+
+@pytest.mark.parametrize("job", [
+    "agent-index-service-linux", "agent-index-service-windows",
+])
+@pytest.mark.parametrize("event,cancelled,standalone,expected", [
+    ("pull_request", True, "true", False),
+    ("pull_request", False, "true", True),
+    ("pull_request", False, "false", False),
+    ("push", True, "true", True),
+    ("workflow_dispatch", True, "false", True),
+    ("workflow_dispatch", False, "false", True),
+])
+def test_cancelled_pr_does_not_keep_standalone_ci_alive(
+    job: str, event: str, cancelled: bool, standalone: str, expected: bool,
+) -> None:
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    assert _ci_condition(
+        ci["jobs"][job]["if"], event=event, cancelled=cancelled, standalone=standalone,
+    ) is expected
+
+
+@pytest.mark.parametrize("event,cancelled,failed,base,expected", [
+    ("pull_request", False, False, "dev", True),
+    ("pull_request", False, True, "dev", True),
+    ("pull_request", True, False, "dev", False),
+    ("pull_request", True, True, "dev", False),
+    ("pull_request", False, False, "main", False),
+    ("push", False, False, "dev", False),
+    ("workflow_dispatch", False, False, "dev", False),
+])
+def test_pr_aggregate_reports_failures_but_never_waits_after_cancellation(
+    event: str, cancelled: bool, failed: bool, base: str, expected: bool,
+) -> None:
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    assert _ci_condition(
+        ci["jobs"]["pr-gate"]["if"], event=event,
+        cancelled=cancelled, failed=failed, base=base,
+    ) is expected
+
+
+def test_queue_containment_does_not_change_promotion_aggregate() -> None:
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    condition = ci["jobs"]["promotion-gate"]["if"]
+    assert condition == (
+        "always() && github.event_name == 'workflow_dispatch' && inputs.promotion_run != ''"
+    )
+    assert _ci_condition(condition, event="workflow_dispatch", cancelled=True)
+    assert not _ci_condition(condition, event="workflow_dispatch", promotion_run="")
+    assert not _ci_condition(condition, event="pull_request")
+
+
 def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
     ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
     host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))

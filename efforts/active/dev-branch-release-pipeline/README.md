@@ -115,6 +115,14 @@ rewrite)._
 > https://github.com/ThomasMichon/copilot-extensions/pull/6938
 > I expect that to mean "release succeeded". If we have a failure, don't allow this merge through.
 
+**2026-10-16 CI capacity clarification (verbatim):**
+
+> CI for PRs should be under 10 minutes; CI for validate-and-promote should be more like 30, but 1 hour is okay nce we have the parallel "use dev locally" effort through
+
+> Focus on getting current promotion flow unblocked before disrupting it; once it runs against, focus on shortening the time
+
+> We've accumulated over 50 actrive PRs in copilot-extensions; we desperately need main promotion and to make the CI pipeline shorter so we're not jammed in the queue. We don't have enough resources to sustain this test load
+
 Phase 9 is the agent-recommended decomposition of this clarification. It does
 not grant a new main-path exception, relax byte integrity or silently change
 the separately owned main-control preservation policy. The original pipeline
@@ -751,7 +759,17 @@ _(Agent-recommended implementation and validation decomposition of the
       main control requires its existing explicit review/authorization path.
 - [ ] Measure actual qualified source advancement, queue time and blocking
       stages against hourly-or-faster delivery while changes are pending;
-      retain the original faster 10-30-minute validation intent.
+      ordinary PR event-to-required-gate time must be below ten minutes,
+      including queueing. Target thirty minutes for validate-and-promote;
+      the one-hour allowance requires actual local-Dev workflow acceptance.
+- [ ] _(Agent-recommended sequencing.)_ Contain superseded PR CI without
+      interrupting the executing Main qualification. Retain rolling Dev/manual
+      validation and every current-head gate. While Main is canonically paused,
+      the reviewed Dev-only policy may land without changing that pinned
+      qualification. After the current release is qualified and landed, activate
+      matching CI policy through the existing reviewed Main-control path before
+      resuming or qualifying newer source that asserts it. Recheck the pause
+      before the Dev merge; governed Main controls are never replaced silently.
 - [ ] Prove normal release and client compatibility, journal the result and
       retain responsibility for unresolved acceptance. A contract PR, source
       merge, tag, or green wrapper alone does not complete this phase.
@@ -937,6 +955,37 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-17 - Retire obsolete CI and prepare PR-only cancellation containment
+
+Read-only inventory confirmed 55 open PRs and 100 queued workflow records in
+the current listing. Twelve ordinary CI runs referenced superseded PR heads.
+The operator approved cancelling only those exact obsolete runs after live
+head, workflow, repository and base checks. Eleven are now provider-confirmed
+cancelled; the twelfth had already completed and was left untouched.
+Normal cancellation could not terminate `always()` jobs, so force cancellation
+was separately approved only for the ten remaining obsolete runs. Current-head
+checks, Dev CI, promotion and review runs were excluded.
+
+The proposed prevention cancels superseded PR runs and prevents cancelled PRs
+from continuing standalone Index jobs or allocating the final required
+aggregate. Uncancelled dependency failures still reach that aggregate and
+report failure. Dev/manual rolling behavior and the promotion aggregate remain
+unchanged; no current-head coverage, timeout, permission or release gate is
+removed. Before implementation, seven regressions failed against the old
+policy. The focused policy/trusted-policy/publication portfolio now passes
+84 tests with 75 subtests and nine existing opt-in skips.
+
+This source policy is not yet landed or active. The current promotion remains
+on its immutable Main controls and pinned source. A fresh canonical pause permits
+landing the reviewed Dev correction first: automatic promotions remain stopped,
+and the executing older candidate does not acquire the new source assertions.
+Main-control preservation still requires the matching reviewed control change
+after the current qualification and before resuming or qualifying newer source;
+otherwise the next candidate would correctly expose the old controlled CI
+behavior. This pause interlock avoids disturbing the active promotion while
+containing new PR waste. It does not complete the ten-minute CI budget or
+release qualification.
 
 ### 2026-10-16 - Required baseline collection blocks paused replacement before publication
 
