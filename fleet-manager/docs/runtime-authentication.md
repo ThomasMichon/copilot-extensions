@@ -53,6 +53,11 @@ one request, not a transferable bearer authorization object.** Resolve current
 enrollment and scoped policy separately, including provider-specific revocation
 freshness, before any lookup, delivery or effect.
 
+The subsequent isolated [admission library](runtime-admission.md) supplies
+current trusted-snapshot enrollment, correlated read/operation scopes and finite
+internal Permit checkpoints. It does not authenticate that snapshot's provenance
+or replace the future transport/provider/resource-owner obligations.
+
 ## Replay ownership and restart
 
 Expose `nonce` only through the selected protected server challenge flow.

@@ -113,6 +113,13 @@ fence. It is not enrollment, scoped policy authorization or a Gateway listener.
 Its `runtime-authentication` extra does not change default client dependencies,
 select a provider, acquire credentials or impose a human-presence timer.
 
+The isolated [current-policy admission API](docs/runtime-admission.md) maps that
+verified request evidence through an independently trusted, current enrollment
+snapshot to exact observation branches or existing operation-intent grants.
+Finite internal permits revalidate current policy before lookup/effect/emit;
+they are not serialized backend credentials. The library does not authenticate
+its snapshot source, wire a resident consumer or implement provider renewal.
+
 ## Thin client artifacts and local diagnostics
 
 `fleet-manager` builds as a dependency-free runtime wheel. Its wheel carries the

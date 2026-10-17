@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ipaddress
+import errno
 import json
+import selectors
 import socket
 import subprocess
 import sys
@@ -12,6 +14,14 @@ from http.client import HTTPSConnection
 from subprocess import Popen
 
 from .gateway_contract import GatewayError, require
+
+ADDRESS_DELAY = 0.25
+_CONNECTING = {
+    errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY, errno.EINTR,
+    getattr(errno, "WSAEWOULDBLOCK", 10035),
+    getattr(errno, "WSAEINPROGRESS", 10036),
+    getattr(errno, "WSAEALREADY", 10037),
+}
 
 _RESOLVE = """
 import json, socket, sys
@@ -81,18 +91,65 @@ class DeadlineHTTPSConnection(HTTPSConnection):
         self._create_connection = self._connect_address
 
     def _connect_address(self, address, timeout=None, source_address=None):
-        for family, resolved in _addresses(address[0], address[1], self._deadline):
-            connection = socket.socket(family, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        resolved = _addresses(address[0], address[1], self._deadline)
+        first = resolved[0][0]
+        primary = [item for item in resolved if item[0] == first]
+        alternate = [item for item in resolved if item[0] != first]
+        addresses = []
+        for index in range(max(len(primary), len(alternate))):
+            if index < len(primary):
+                addresses.append(primary[index])
+            if index < len(alternate):
+                addresses.append(alternate[index])
+        pending = set()
+        winner = None
+        index, next_attempt = 0, 0.0
+        with selectors.DefaultSelector() as selector:
             try:
-                connection.settimeout(_remaining(self._deadline))
-                connection.connect(resolved)
-                # HTTPSConnection now wraps this socket with the original host
-                # for SNI and verification, using only the remaining TLS budget.
-                connection.settimeout(_remaining(self._deadline))
-                return connection
-            except OSError:
-                connection.close()
-            except GatewayError:
-                connection.close()
-                raise
+                while pending or index < len(addresses):
+                    now = time.monotonic()
+                    remaining = self._deadline - now
+                    require(remaining > 0, "transport-unavailable")
+                    if index < len(addresses) and (not pending or now >= next_attempt):
+                        family, target = addresses[index]
+                        index += 1
+                        connection = socket.socket(family, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+                        pending.add(connection)
+                        try:
+                            connection.setblocking(False)
+                            result = connection.connect_ex(target)
+                        except OSError:
+                            pending.remove(connection)
+                            connection.close()
+                            continue
+                        if result == 0:
+                            connection.settimeout(_remaining(self._deadline))
+                            winner = connection
+                            return connection
+                        if result in _CONNECTING:
+                            selector.register(connection, selectors.EVENT_WRITE)
+                        else:
+                            pending.remove(connection)
+                            connection.close()
+                        next_attempt = now + ADDRESS_DELAY
+                        continue
+                    wait = remaining
+                    if index < len(addresses):
+                        wait = min(wait, max(0, next_attempt - now))
+                    for key, _ in selector.select(wait):
+                        connection = key.fileobj
+                        selector.unregister(connection)
+                        if connection.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                            connection.settimeout(_remaining(self._deadline))
+                            winner = connection
+                            return connection
+                        pending.remove(connection)
+                        connection.close()
+            finally:
+                # Pending attempts never survive the winner, deadline or failure.
+                for key in tuple(selector.get_map().values()):
+                    selector.unregister(key.fileobj)
+                for connection in pending:
+                    if connection is not winner:
+                        connection.close()
         raise GatewayError("transport-unavailable")

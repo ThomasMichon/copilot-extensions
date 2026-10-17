@@ -30,6 +30,16 @@ endpoints bypass it; IPv6 zone identifiers are unsupported. Resolved numeric
 addresses are used only for socket connection: certificate verification and SNI
 retain the configured hostname. No resolver daemon or blocked resolver-thread
 pool persists between calls.
+Resolved IPv6/IPv4 candidates are interleaved and nonblocking connection attempts
+are staggered by 250 ms within the same absolute deadline. A slow or refused
+first address cannot consume the other family's entire connection opportunity.
+The winning socket alone continues to TLS; every pending loser is closed on
+success, failure or deadline. This does not extend the request's budget, disable
+IPv6 or substitute a numeric address for certificate hostname verification.
+A connection winner uses one fresh monotonic sample to enforce expiry and set
+its remaining socket timeout. Reusing the loop's pre-connect or pre-select
+sample would extend an already elapsed deadline; a late-ready socket is closed
+rather than admitted after expiry.
 
 All listener connections are TLS, including loopback. All operation routes require
 the shared `jwt-pop-v1` verifier plus current enrollment and policy.
@@ -261,6 +271,21 @@ Provider timeout normalization explicitly handles Python 3.10's distinct
 `asyncio.TimeoutError` as well as built-in timeouts. If the dispatch deadline
 has elapsed, the controller reports `UNKNOWN` instead of attempting an expired
 reply or claiming delivery; an earlier provider timeout can return `UNAVAILABLE`.
+Exhausting the actual acquisition timer returns `UNKNOWN` without signing or
+sending a failure receipt, even if the wall clock still reads before expiry.
+Successful acquisition and reply/envelope expiry are also capped by the earlier
+of signed dispatch expiry and request deadline. A provider's own earlier
+failure remains `UNAVAILABLE` while that authority is valid; no subscription or
+dispatch is renewed to deliver a late result.
+The controller samples wall time again after provider acquisition, rather than
+using its pre-acquisition timestamp to authorize a later result. Fractional
+seconds bound the asynchronous wait; integer epoch seconds bound signed JWTs.
+The receipt verifier already requires integer `exp` values, and the controller
+also requires a bounded integer custom `deadline` before provider acquisition.
+Missing, fractional, boolean or string deadlines are refused, never rounded
+or coerced into a longer authority window.
+The fresh post-acquisition expiry check and absolute signing cap are deliberate,
+not an attempt to make both phases share one stale clock sample.
 The pending limit bounds active requests; at most 1024 request identities are
 retained per Gateway epoch, then admission refuses new work. The in-memory
 broker is not a durable queue/task ledger. Restart means `UNKNOWN`, not success.
