@@ -173,6 +173,57 @@ def test_annotate_delegate_graph_normalizes_windows_platform_token():
     assert delegate["delegate_finalizable"] is True
 
 
+@pytest.mark.parametrize("machine,platform,prefix", [
+    ("host-wsl", "wsl", "host-wsl"),
+    ("host-wsl", "wsl", "host-wsl-wsl"),
+    ("host-win", "windows", "host-win"),
+    ("host-windows", "windows", "host-windows"),
+    ("host-linux", "linux", "host-linux"),
+    ("host", "", "host"),
+])
+@pytest.mark.parametrize("reachable", [False, True])
+def test_missing_environment_named_caller_preserves_reachability_gate(
+    machine: str, platform: str, prefix: str, reachable: bool,
+) -> None:
+    identity = f"{prefix}-20261013-100000-abcd"
+    delegate = _row(
+        "worker-linux-20261013-100001-abcd",
+        machine="worker", platform="linux", status="active", caller_worktree=identity,
+    )
+
+    delegate_cli.annotate_delegate_graph(
+        [delegate], reachable_hosts={(machine, platform): reachable},
+    )
+
+    assert delegate["caller_state"]["machine"] == machine
+    assert delegate["caller_state"].get("platform", "") == platform
+    assert delegate["caller_state"]["state"] == ("gone" if reachable else "unreachable")
+    assert delegate["delegate_finalizable"] is reachable
+    assert delegate["delegate_finalizable_reason"] == (
+        "host-gone" if reachable else "host-unreachable"
+    )
+
+
+def test_normalized_caller_does_not_choose_between_colliding_host_prefixes() -> None:
+    delegate = _row(
+        "worker-linux-20261013-100001-abcd",
+        machine="worker", platform="linux", status="active",
+        caller_worktree="host-wsl-20261013-100000-abcd",
+    )
+    delegate_cli.annotate_delegate_graph(
+        [delegate], reachable_hosts={("host", "wsl"): True, ("host-wsl", "wsl"): False},
+    )
+    assert delegate["delegate_finalizable"] is False
+    assert delegate["delegate_finalizable_reason"] == "host-unresolved"
+
+
+def test_legacy_caller_keeps_the_longest_matching_machine_prefix() -> None:
+    hosts = {("host", "wsl"): False, ("host-wsl", "wsl"): True}
+    assert delegate_cli._expected_host_key(
+        "host-wsl-wsl-20261013-100000-abcd", hosts,
+    ) == ("host-wsl", "wsl")
+
+
 def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
     args = SimpleNamespace(
         mux_details=False,
