@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from . import config as cfg
-from . import git_ops, output
+from . import git_ops, output, service_sources
 from . import services as svc
 from . import worktree_identity
 
@@ -200,6 +200,11 @@ def _cmd_services_list(json_output: bool = False) -> int:
         return 1
 
     env = _resolve_environment(config)
+    try:
+        repo_dir = service_sources.resolve(repo_dir, config)
+    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        output.err(f"Cannot resolve service source: {exc}")
+        return 1
     services = svc.discover_services(
         repo_dir,
         env,
@@ -251,6 +256,11 @@ def _cmd_services_status(json_output: bool = False) -> int:
         return 1
 
     env = _resolve_environment(config)
+    try:
+        repo_dir = service_sources.resolve(repo_dir, config)
+    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        output.err(f"Cannot resolve service source: {exc}")
+        return 1
     services = svc.discover_services(
         repo_dir,
         env,
@@ -316,30 +326,7 @@ _DEPLOY_ACTIONS = {"install", "update", "copy"}
 
 
 def _ensure_repo_current(repo_dir: Path, config: cfg.Config) -> None:
-    git_path = repo_dir / ".git"
-    if not git_path.is_dir():
-        return
-
-    remote = config.default_repo.remote or "origin"
-    branch = config.default_repo.default_branch or "master"
-
-    output.info(f"Syncing anchor repo ({remote}/{branch})…")
-    try:
-        git_ops.fetch(remote, cwd=repo_dir)
-        result = git_ops.git(
-            "merge",
-            "--ff-only",
-            f"{remote}/{branch}",
-            cwd=repo_dir,
-            check=False,
-        )
-        if result.returncode != 0:
-            output.warn(
-                "Anchor has local commits -- fast-forward failed. "
-                "Deploying from current anchor HEAD."
-            )
-    except Exception as exc:
-        output.warn(f"Could not sync anchor: {exc}")
+    service_sources.ensure_current(repo_dir, config)
 
 
 def _is_copilot_plugin_name(name: str) -> bool:
@@ -380,8 +367,13 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
     if not action_args:
         action_args = ["status"]
 
-    if action in _DEPLOY_ACTIONS:
-        _ensure_repo_current(repo_dir, config)
+    try:
+        if action in _DEPLOY_ACTIONS:
+            _ensure_repo_current(repo_dir, config)
+        repo_dir = service_sources.resolve(repo_dir, config)
+    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        output.err(f"Cannot resolve service source: {exc}")
+        return 1
 
     env = _resolve_environment(config)
     services = svc.discover_services(
@@ -435,8 +427,13 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
         output.err(f"Cannot load config: {e}")
         return 1
 
-    if action in _DEPLOY_ACTIONS:
-        _ensure_repo_current(repo_dir, config)
+    try:
+        if action in _DEPLOY_ACTIONS:
+            _ensure_repo_current(repo_dir, config)
+        repo_dir = service_sources.resolve(repo_dir, config)
+    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        output.err(f"Cannot resolve service source: {exc}")
+        return 1
 
     env = _resolve_environment(config)
     services = svc.discover_services(
