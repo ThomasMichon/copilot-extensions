@@ -225,6 +225,19 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-17 - Cover the standalone shared-library consumer in release metadata
+
+- Hosted `guards + lint` failed the changefile-presence check: the
+  `update-telemetry` source change also fans out to its Worktree Manager
+  consumer, but this PR's pending changefiles covered only the eleven
+  plugins. The narrower local plugin-only check missed that standalone
+  consumer; it was not a passing substitute for the actual CI guard.
+- Added the required Worktree Manager patch changefile through the existing
+  changefile tool. No version was hand-edited and no runtime code changed.
+  Publication is gated on the exact CI guard against its explicit base
+  and the repaired committed head. The hosted check and fresh review
+  remain required; this metadata repair does not waive either.
+
 ### 2026-10-17 - Restore complete runtime fixtures for real CLI dispatch
 
 - Review of #7119 found three real-CLI cases incorrectly using the thinner
