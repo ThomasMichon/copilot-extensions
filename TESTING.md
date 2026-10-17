@@ -327,6 +327,26 @@ and retains timestamped Bridge diagnostics and operation-label-only stage
 timing, without writing provider stdin or task credentials into the stage log.
 All diagnostics remain inside the unchanged test and subprocess deadlines.
 
+### Central versus local-only authority
+
+`tests/test_client_authority.py` in `agent-dispatch` covers the opt-in
+`AGENT_DISPATCH_TASK_AUTHORITY` selector, separate credentials, no automatic
+cross-authority fallback, local installer lifecycle, producer/worker routing,
+restricted task pins, explicit browse/create authority and presence-only role
+admission. The existing CLI discovery fixture has its own distinct name so it
+cannot shadow the suite's authentication-command isolation fixture.
+Authority-qualified claim providers retain fixed callback target prefixes and
+disable read-time provisioning. The existing native consumer-prefix tests also
+run under the managed Windows runner: their CMD fixture uses an ordinary path
+spelling of the same interpreter file, while preserving every registered
+argument, child environment and process boundary.
+
+The opt-in native multi-container proof is documented in the
+[central/local authority clean-room lane](tools/clean-room/central-local-authority/README.md).
+It uses the actual central service, an independent peer database and native
+CLI processes inside fresh containers, including a central network partition
+without ownership migration. It is not required PR CI or a model evaluation.
+
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and
 `services/dispatch`, respectively. It normalizes aliases before environment

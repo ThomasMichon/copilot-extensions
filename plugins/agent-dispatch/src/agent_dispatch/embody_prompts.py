@@ -233,6 +233,12 @@ def interactive_worker_prompt(
     )
 
 
+def validate_fleet_route(route: str) -> str:
+    if route not in ("", " --local", " --shared"):
+        raise ValueError("fleet workers require origin discovery, --local or --shared routing")
+    return route
+
+
 def fleet_autopilot_worker_prompt(
     task_id: str,
     *,
@@ -241,6 +247,7 @@ def fleet_autopilot_worker_prompt(
     worker_id: str,
     repo: str | None = None,
     all_repos: bool = False,
+    route: str = "",
 ) -> str:
     """Build the autopilot seed for a **fleet-dispatched, remote** embody body.
 
@@ -249,8 +256,9 @@ def fleet_autopilot_worker_prompt(
     host, not the origin -- drives the origin task's whole lifecycle back over the
     existing bidirectional SSH mesh, by prefixing every ``agent-dispatch`` verb
     with ``ssh <origin>``. That runs the verb **on** the origin against its own
-    local coordinator, so there is **no new network bind** on the origin (its
-    control API never leaves loopback).
+    selected task authority. Explicit ``route`` flags retain local/central
+    selection even when the SSH login has a different default. No new network
+    bind is introduced on the origin.
 
     Two differences from the local :func:`autopilot_worker_prompt`:
 
@@ -266,14 +274,14 @@ def fleet_autopilot_worker_prompt(
     if repo and all_repos:
         raise ValueError("fleet claim scope cannot set repo and all_repos")
     lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
-    ad = f"ssh {origin} agent-dispatch"
+    ad = f"ssh {origin} agent-dispatch{validate_fleet_route(route)}"
     charter_step = _charter_read_step(
         ad, task_charter=AUTOPILOT_CHARTER_NAME, concise=False
     )
     return (
         f"You are a fleet-dispatched agent-dispatch **autopilot** worker (worker "
         f"id: {worker_id}) on this pool host with auto-approved access and SDK "
-        f"extensions enabled (--allow-all --experimental). Task {task_id} lives on the origin coordinator at "
+        f"extensions enabled (--allow-all --experimental). Task {task_id} belongs to the authority selected through origin "
         f"'{origin}'. Drive it there by running every agent-dispatch lifecycle "
         f"verb over SSH against the origin, ALWAYS passing your explicit owner id "
         f"'{owner}' (your working directory here cannot identify you to the "

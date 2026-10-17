@@ -51,7 +51,7 @@ def _reexec_argv(args: argparse.Namespace) -> list[str]:
     forked per-tick subprocess re-invokes -- see ``emitter.serve``/
     ``schedule.serve``'s own docstrings.
 
-    Reproduces THIS invocation's own top-level ``--url``/``--shared``/
+    Reproduces THIS invocation's own top-level ``--url``/``--shared``/``--local``/
     ``--token``/``--control-token`` flags (an operator's explicit,
     deliberately pinned target must keep applying to every tick, exactly
     like ``test_serve_still_supports_a_pinned_static_target`` expects) but
@@ -69,8 +69,13 @@ def _reexec_argv(args: argparse.Namespace) -> list[str]:
         argv += ["--token", args.token]
     if getattr(args, "control_token", None):
         argv += ["--control-token", args.control_token]
-    if getattr(args, "shared", False):
+    from .client_authority import client_authority
+
+    authority = client_authority(args)
+    if getattr(args, "shared", False) or authority == "central":
         argv.append("--shared")
+    if authority == "local":
+        argv.append("--local")
     return argv
 
 

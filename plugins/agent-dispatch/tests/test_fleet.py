@@ -7,6 +7,7 @@ integration (an asleep pool defers a task without burning a spawn attempt).
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 
 import pytest
@@ -95,6 +96,50 @@ def _fake_headless_spawn(record: list | None = None, *, ok: bool = True, rc: int
 
 
 # -- host selection + liveness gate ------------------------------------------
+
+@pytest.mark.parametrize("authority,route", [("central", " --shared"), ("local", " --local")])
+@pytest.mark.parametrize("headless", [False, True])
+def test_fleet_body_retains_origin_authority_instead_of_ssh_login_default(monkeypatch, authority, route, headless):
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", authority)
+    observed = []
+
+    def observe(seed):
+        assert f"ssh origin-host agent-dispatch{route} show task-1" in seed
+        assert f"ssh origin-host agent-dispatch{route} claim" in seed
+        observed.append(seed)
+
+    if headless:
+        class Carrier:
+            def create_session(self, host, **kwargs):
+                observe(kwargs["prompt"])
+                return {"session_id": "session-1"}
+
+        monkeypatch.setattr(embody.bridge_remote, "LocalBridgeRemoteClient", Carrier)
+    else:
+        monkeypatch.setattr(embody.shutil, "which", lambda _command: "/fixture/ssh")
+
+        def ssh(argv, **_kwargs):
+            command = shlex.split(argv[-1])
+            observe(command[command.index("--seed") + 1])
+            return subprocess.CompletedProcess(
+                [], 0, '{"worktree_id":"worktree-1","session_id":"session-1"}', "",
+            )
+
+        monkeypatch.setattr(embody, "run_ssh_command", ssh)
+
+    spawner = fleet.FleetSpawner(
+        ["pool-host"], origin="origin-host", headless=headless,
+        liveness=lambda _host: True,
+    )
+    assert spawner({"id": "task-1", "repo": TEST_REPO})[0] is True
+    assert len(observed) == 1
+
+
+def test_fleet_explicit_local_route_overrides_central_default(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    assert fleet.FleetSpawner(["pool-host"], origin="origin", route=" --local").route == " --local"
+    with pytest.raises(ValueError, match="require origin discovery"):
+        fleet.FleetSpawner(["pool-host"], origin="origin", route=" --url http://raw:8787")
 
 
 def test_select_first_live_host_in_config_order():

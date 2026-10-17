@@ -35,6 +35,13 @@ def _cmd_create(args: argparse.Namespace) -> int:
     from . import remote_dispatch
 
     if remote_dispatch.is_cross_machine(args):
+        from .client_authority import client_authority
+
+        if client_authority(args) != "legacy":
+            raise DispatchError(
+                400, "an explicit task authority cannot switch to another machine's queue; "
+                "enqueue with --target-machine and let that machine's supervisor acquire it",
+            )
         return _core()._dispatch_cross_machine(args, repo)
     payload_inline = args.payload_inline
     if args.remote_create_envelope:
@@ -158,6 +165,9 @@ def _cmd_create(args: argparse.Namespace) -> int:
             not_before=args.not_before,
             claim_as=claim_as,
         )
+    from .client_authority import qualify_task
+
+    task = qualify_task(args, task)
     if claim_as is not None:
         # Signal whether THIS call won the create-and-claim (mine now) or lost the
         # dedup race (the subject was already taken by someone else).
@@ -492,8 +502,8 @@ def _spawn_route(args: argparse.Namespace) -> str:
     A spawned local body reaches its coordinator by discovery or a stable
     moniker, never a raw endpoint: the default local path yields ``""`` (the
     worker rediscovers the live local coordinator, so a zero-downtime port cutover
-    is transparent), and ``--shared`` yields ``" --shared"`` (the env-configured
-    shared moniker). A raw ``--url`` is refused -- baking a raw, possibly-dynamic
+    is transparent). Explicit central/local authority retains ``--shared`` or
+    ``--local`` respectively. A raw ``--url`` is refused -- baking a raw, possibly-dynamic
     endpoint into a worker is the exact foot-gun this routing avoids; route by the
     default local coordinator, ``--shared``, or fleet mode
     (``--pool``/``--origin``, which routes by machine alias).
@@ -504,7 +514,10 @@ def _spawn_route(args: argparse.Namespace) -> str:
             "coordinator; route it by the default local coordinator, --shared, or "
             "fleet mode (--pool/--origin)"
         )
-    return " --shared" if getattr(args, "shared", False) else ""
+    from .client_authority import client_authority
+
+    authority = client_authority(args)
+    return {"central": " --shared", "local": " --local"}.get(authority, "")
 
 def _spawn_ordinary_worker(args, task, reservation, client, *, route: str) -> None:
     from . import bridge, ordinary_bridge

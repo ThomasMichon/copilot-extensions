@@ -25,6 +25,9 @@ lone dev box or against a designated coordinator host on a shared network:
   endpoint is exposed only through the secured mesh).
 - ``AGENT_DISPATCH_SHARED_CONTROL_TOKEN`` -- control bearer for managed producer
   transitions on the shared coordinator.
+- ``AGENT_DISPATCH_TASK_AUTHORITY`` -- opt-in ``central`` default for fleet
+  clients, or strict ``local`` authority. Explicit authority never fails over
+  between independent queues; unset preserves the legacy routing policy.
 - ``AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND`` -- preferred on-demand command
   that prints the current producer capability; the raw
   ``AGENT_DISPATCH_PRODUCER_CAPABILITY`` remains a fallback.
@@ -481,12 +484,13 @@ def has_live_local_coordinator(*, token: str | None = None) -> bool:
     )
 
 
-def client_url() -> str:
+def client_url(*, local: bool = False) -> str:
     """The base URL the CLI should talk to.
 
     Resolution order:
 
-    1. ``AGENT_DISPATCH_URL`` -- explicit operator override.
+    1. ``AGENT_DISPATCH_URL`` -- explicit operator override, ignored for strict
+       local authority (``local=True``).
     2. On a **WSL guest opted in** to Windows-client mode
        (``AGENT_DISPATCH_WSL_WINDOWS_CLIENT``), resolve the Windows-owned
        coordinator dynamically (probe ``127.0.0.1`` for mirrored, then the
@@ -499,7 +503,7 @@ def client_url() -> str:
        -> rendezvous file), falling back to the fixed ``http://127.0.0.1:9847``.
     """
     override = os.environ.get("AGENT_DISPATCH_URL")
-    if override:
+    if override and not local:
         return override
     cfg = load_config()
     try:
