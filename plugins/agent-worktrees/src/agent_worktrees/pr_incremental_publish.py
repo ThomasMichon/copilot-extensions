@@ -77,7 +77,10 @@ def push_refspec(
         return True
 
     budget = publication_deadline.lifecycle_budget(repo.pr)
-    lock = pr_authority.PublicationLock(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record, pushed_pr, timeout=publication_deadline.lock_wait(repo.pr.push_timeout_seconds))
+    lock = pr_authority.PublicationLock(
+        FinalizeLock(lock_path, timeout=budget, stale_after=budget), record, pushed_pr,
+        timeout=publication_deadline.lock_wait(repo.pr.push_timeout_seconds),
+    )
     try:
         lock.acquire()
     except (TimeoutError, ValueError) as exc:
@@ -110,7 +113,7 @@ def push_refspec(
                 force_with_lease=not bool(reconciled_source), repo=repo,
             )
         if not pushed:
-            output.err(f"Failed to push {wt_branch} to {push_to}/{feature}.")
+            output.err(f"Failed to push {reconciled_source or wt_branch} to {push_to}/{feature}.")
             if pushed.retryable:
                 output.err(
                     push_diagnostics.pr_branch_non_fast_forward_hint(
