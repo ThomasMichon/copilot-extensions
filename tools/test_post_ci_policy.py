@@ -126,6 +126,21 @@ def _boolean_expression(expression: str, context: dict[str, str | bool]) -> bool
         if isinstance(node, ast.Name) and node.id not in context:
             raise ValueError(f"unknown condition name: {node.id}")
 
+    def is_boolean_operand(node: ast.AST) -> bool:
+        if isinstance(node, ast.Name):
+            return type(context[node.id]) is bool
+        if isinstance(node, ast.Constant):
+            return type(node.value) is bool
+        return isinstance(node, (ast.BoolOp, ast.UnaryOp, ast.Compare))
+
+    for node in ast.walk(tree):
+        operands = (
+            node.values if isinstance(node, ast.BoolOp)
+            else [node.operand] if isinstance(node, ast.UnaryOp) else []
+        )
+        if any(not is_boolean_operand(operand) for operand in operands):
+            raise ValueError("condition operand must be boolean")
+
     def boolean(value: str | bool) -> bool:
         if type(value) is not bool:
             raise ValueError("condition operand must be boolean")
@@ -141,7 +156,7 @@ def _boolean_expression(expression: str, context: dict[str, str | bool]) -> bool
         if isinstance(node, ast.UnaryOp):
             return not boolean(evaluate(node.operand))
         if isinstance(node, ast.BoolOp):
-            values = [boolean(evaluate(value)) for value in node.values]
+            values = (boolean(evaluate(value)) for value in node.values)
             return all(values) if isinstance(node.op, ast.And) else any(values)
         if isinstance(node, ast.Compare):
             values = [evaluate(node.left), *(evaluate(value) for value in node.comparators)]
@@ -169,6 +184,26 @@ def test_condition_evaluator_rejects_unsupported_expressions(expression: str) ->
 def test_condition_evaluator_rejects_nonprimitive_context() -> None:
     with pytest.raises(ValueError, match="context"):
         _boolean_expression("True", {"event": 1})  # type: ignore[dict-item]
+
+
+@pytest.mark.parametrize("expression,expected,reads", [
+    ("True or flag", True, 1),
+    ("False and flag", False, 1),
+    ("flag or True", True, 2),
+])
+def test_condition_evaluator_short_circuits_after_full_validation(
+    expression: str, expected: bool, reads: int,
+) -> None:
+    class Context(dict[str, str | bool]):
+        lookups = 0
+
+        def __getitem__(self, key: str) -> str | bool:
+            self.lookups += 1
+            return super().__getitem__(key)
+
+    context = Context(flag=False)
+    assert _boolean_expression(expression, context) is expected
+    assert context.lookups == reads
 
 
 def _ci_condition(

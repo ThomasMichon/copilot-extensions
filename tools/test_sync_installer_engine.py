@@ -45,7 +45,29 @@ def _copy_real_installer_engine(root: Path) -> None:
     canonical.mkdir(parents=True)
     origin = REPO / "libs" / "installer-engine"
     for asset in (*contract.FILES, *contract.support_files(origin)):
+        (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(origin / asset, canonical / asset)
+
+
+def test_real_engine_fixture_retains_nested_support_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract = sync_installer_engine.ier
+    origin = tmp_path / "input"
+    canonical = origin / "libs" / "installer-engine"
+    assets = (*contract.FILES, "nested/support.py")
+    for asset in assets:
+        path = canonical / asset
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"fixture {asset}\n", encoding="utf-8")
+    monkeypatch.setattr(contract, "support_files", lambda _: ("nested/support.py",))
+    monkeypatch.setattr(f"{__name__}.REPO", origin)
+    destination = tmp_path / "output"
+    _copy_real_installer_engine(destination)
+    for asset in assets:
+        assert (destination / "libs" / "installer-engine" / asset).read_bytes() == (
+            canonical / asset
+        ).read_bytes()
 
 
 def _real_human_consumer(root: Path, name: str, layout: str) -> Path:

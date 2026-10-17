@@ -989,6 +989,13 @@ evaluator, with unsupported syntax and unknown names rejected even in inactive
 branches. The request quotations remain verbatim, with an outside-quote
 explanation rather than rewritten operator wording.
 
+Follow-up review added full operand-type validation followed by short-circuit
+interpretation, with lookup-count cases proving the distinction, and nested
+support-asset copying in the fixture. The coherent source portfolio now passes
+222 cases plus 75 subtests, with nine existing opt-in skips; the exact failed
+candidate archive passes all 46 installer cases. No production parser,
+materializer or byte-admission policy changed.
+
 The former sequencing assumption below is superseded: the old candidate can no
 longer finish. Retire that attempt (done), land the reviewed Dev repair while
 the canonical pause remains set, activate matching reviewed Main CI controls,
