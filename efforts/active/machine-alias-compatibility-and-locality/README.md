@@ -199,7 +199,7 @@ _(Agent-recommended integration details for the requested #7057 capability.)_
   report partial/error outcomes honestly and make repeated apply idempotent.
 - [x] Pass focused regressions, lint, install-contract and metadata/documentation
   gates; add the agent-worktrees changefile. The final source candidate passes
-  379 affected tests, including native synthetic public-CLI report proof,
+  384 affected tests, including native synthetic public-CLI report proof,
   canonical registration serialization, claim-handoff registry and follow-up
   publication-race coverage.
 - [ ] Land the source candidate through final-head review and required dev CI.
@@ -295,10 +295,14 @@ unrelated service changes or a second machine registry.
   final inspection/write boundary. A real concurrent-writer regression proves
   registration waits until the record commit.
 - The fresh-home native CLI fixture uses the same platform detector as its
-  child, including WSL. Expanded affected validation passes 379 tests.
+  child, including WSL. Expanded affected validation passes 384 tests.
 - Itemized follow-up references and retained release snapshots participate in
   publication fencing too, including a new-peer save attempted after the final
   inventory check. Passive titles, notes and summaries are not ownership edges.
+- The transaction retains a constant-size lock set: publication authority,
+  claim-handoff registry and selected record. Peer claim/controller metadata
+  changes are authority-fenced rather than locking every historical ledger.
+  Busy unrelated peers remain available; duplicate checkout pointers refuse.
 
 ### 2026-10-16 - Guest source repair merged; release containment remains
 - #7009 merged as `6fe63b78740cc0adbf49fad4cd8970dca656ce83`, from exact head

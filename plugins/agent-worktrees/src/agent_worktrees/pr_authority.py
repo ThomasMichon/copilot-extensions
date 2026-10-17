@@ -112,7 +112,7 @@ def write_record(record: tracking.WorktreeRecord, path: Path, content: str) -> N
     """
     current = tracking.load_record(path) if path.exists() else None
     if current is not None and current.machine != record.machine:
-        raise ValueError("record owner machine changed; reload the record (explicit repair uses doctor --migrate-owner)")
+        raise ValueError("record owner machine changed; reload the record")
     if _projection(current) == _projection(record) and _ownership(current) == _ownership(record):
         tracking._atomic_write(path, content)
     else:
@@ -127,12 +127,12 @@ def _ownership(record: tracking.WorktreeRecord | None) -> tuple:
     relationships = (
         record.owner_ref, record.pair_ref, record.pair_id,
         record.caller_worktree, record.owner,
-        tuple((claim.kind, claim.ref) for claim in record.resources),
-        tuple(relation.controller_ref for relation in record.controllers),
+        tuple(record.resources),
+        tuple(record.controllers),
         record.dispatch_attempt, record.execution_leg, record.session_backend,
         record.dispatch_attempt_raw, record.execution_leg_raw,
         record.session_backend_raw, record.controller_raw_entries,
-        tuple((claim.kind, claim.ref) for claim in record.last_finalize_released),
+        tuple(record.last_finalize_released),
         tuple(
             (tuple((ref.kind, ref.ref) for ref in item.refs), item.result_ref, item.transfer_target)
             for item in record.follow_ups if item.refs or item.result_ref or item.transfer_target

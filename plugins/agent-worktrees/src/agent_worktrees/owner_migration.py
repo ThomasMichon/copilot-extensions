@@ -167,8 +167,13 @@ def _require_unlinked(data: dict, inventory, project: str, record_id: str, old: 
             raise ValueError(f"dependent {field} requires resource-owner migration; record-local repair refused")
     for path, (store, _, candidate) in inventory.items():
         if (
-            candidate is not data and candidate.get("repo") == project
-            and candidate.get("worktree_id") == record_id
+            candidate is not data and (
+                (candidate.get("repo") == project and candidate.get("worktree_id") == record_id)
+                or (
+                    isinstance(candidate.get("worktree_path"), str)
+                    and Path(candidate["worktree_path"]) == Path(data["worktree_path"])
+                )
+            )
         ):
             raise ValueError(f"duplicate or misplaced record identity in {store}/{path.stem}; relocation is not owner migration")
         for field, ref in _references(candidate):
@@ -267,12 +272,9 @@ def _apply(project: str, record_id: str, old: str, new: str, observed):
         lock = stack.enter_context(tracking._RecordLock(handoffs, blocking=False))
         if not lock.acquired:
             raise TimeoutError("claim-handoff registry is busy; owner migration refused")
-        for candidate in sorted(inventory, key=str):
-            if candidate == handoffs:
-                continue
-            lock = stack.enter_context(tracking._RecordLock(candidate, blocking=False))
-            if not lock.acquired:
-                raise TimeoutError("tracking record is busy; owner migration refused")
+        lock = stack.enter_context(tracking._RecordLock(path, blocking=False))
+        if not lock.acquired:
+            raise TimeoutError("tracking record is busy; owner migration refused")
         fresh = _inspect(project, record_id, old, new)
         if fresh[1] != inventory:
             raise ValueError("tracking inventory changed; inspect again before owner migration")

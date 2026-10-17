@@ -248,9 +248,13 @@ def test_malformed_peer_inventory_fails_closed(receiving, capsys):
     assert snapshot(root) == before
 
 
-def test_duplicate_identity_in_another_store_is_not_migrated(receiving, capsys):
-    root, path, _, _, _, _, directories, _ = receiving
-    (directories["knowledge"] / path.name).write_bytes(path.read_bytes())
+@pytest.mark.parametrize("same_id", [True, False])
+def test_duplicate_identity_in_another_store_is_not_migrated(receiving, capsys, same_id):
+    root, path, data, _, _, _, directories, _ = receiving
+    duplicate = dict(data)
+    if not same_id:
+        duplicate["worktree_id"] = "duplicate-checkout"
+    (directories["knowledge"] / path.name).write_text(yaml.safe_dump(duplicate), encoding="utf-8")
     before = snapshot(root)
     code, report = run(capsys, "--fix")
     assert code == 1 and "duplicate or misplaced" in report["error"]
@@ -385,6 +389,84 @@ def test_new_peer_obligation_reference_cannot_enter_after_final_inspection(recei
     code, report = run(capsys, "--fix")
     assert code == 0 and report["changed"]
     assert not peer_path.exists() and yaml.safe_load(path.read_bytes())["machine"] == NEW
+
+
+def test_unrelated_busy_peer_does_not_block_record_local_repair(receiving, capsys):
+    _, path, _, _, _, _, _, _ = receiving
+    peer_path = path.with_name("busy-peer.yaml")
+    original = tracking.load_record(path)
+    peer = replace(
+        original, worktree_id="busy-peer", machine=NEW,
+        worktree_path=str(Path(original.worktree_path).parent / "busy-peer"),
+    )
+    tracking.save_record(peer, peer_path)
+    ready, release = threading.Event(), threading.Event()
+
+    def holder():
+        with tracking._RecordLock(peer_path, require_sidecar=True):
+            ready.set()
+            assert release.wait(10)
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    try:
+        assert ready.wait(5)
+        code, report = run(capsys, "--fix")
+        assert code == 0 and report["changed"]
+    finally:
+        release.set()
+        thread.join(5)
+        assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("relation", ["resource", "controller", "producer"])
+def test_existing_peer_relationship_changes_use_authority_not_peer_lock(receiving, capsys, monkeypatch, relation):
+    _, path, data, _, _, _, _, _ = receiving
+    peer_path = path.with_name("existing-peer.yaml")
+    original = tracking.load_record(path)
+    peer = replace(
+        original, worktree_id="existing-peer", machine=NEW,
+        worktree_path=str(Path(original.worktree_path).parent / "existing-peer"),
+    )
+    peer.resources = [tracking.ResourceClaim(kind="pr", ref="example/project#2")]
+    tracking.save_record(peer, peer_path)
+    ref = f"{OLD}/{PROJECT}/{RECORD}"
+    payload = {**data, "worktree_id": "existing-peer", "machine": NEW, "worktree_path": peer.worktree_path}
+    if relation == "resource":
+        peer.resources[0].ref = ref
+        payload["resources"] = [{"kind": "pr", "ref": ref}]
+    elif relation == "producer":
+        peer.resources[0].producer = {"owner_ref": ref}
+        payload["resources"] = [{"kind": "pr", "ref": "example/project#2", "producer": {"owner_ref": ref}}]
+    else:
+        peer.controllers = [tracking.ControllerRelation(
+            kind="worktree", source="manual", relation_revision=1,
+            created_at="now", controller_ref=ref,
+        )]
+        payload["controllers"] = [{"controller_ref": ref}]
+    original_repair = migration.tracking_yaml_repair.apply_repair
+    results = []
+
+    def peer_writer():
+        with tracking._RecordLock(peer_path, blocking=False) as lock:
+            if not lock.acquired:
+                results.append("peer-lock-unavailable")
+                return
+            try:
+                pr_authority.write_record(peer, peer_path, yaml.safe_dump(payload))
+            except TimeoutError:
+                results.append("authority-fenced")
+
+    def commit_with_unlocked_peer(*args):
+        thread = threading.Thread(target=peer_writer)
+        thread.start()
+        thread.join(5)
+        assert not thread.is_alive() and results == ["authority-fenced"]
+        return original_repair(*args)
+
+    monkeypatch.setattr(migration.tracking_yaml_repair, "apply_repair", commit_with_unlocked_peer)
+    assert run(capsys, "--fix")[0] == 0
+    assert ref not in peer_path.read_text(encoding="utf-8")
 
 
 def test_changed_inventory_refuses_under_real_locks(receiving, capsys, monkeypatch):
