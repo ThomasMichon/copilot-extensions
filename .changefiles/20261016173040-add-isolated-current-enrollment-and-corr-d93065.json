@@ -1,0 +1,9 @@
+{
+  "comment": "Add isolated current-policy permits and bounded dual-stack Gateway fallback",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

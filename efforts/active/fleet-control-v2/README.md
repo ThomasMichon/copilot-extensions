@@ -272,9 +272,12 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Agree exact auth records/provider support and exclusive implementation
   scopes before wiring consumers.
   The first isolated verification prerequisite has its own new module, optional
-  JOSE dependency and proof tests; enrollment, scoped policy and resident
+  JOSE dependency and proof tests, merged in #6743; enrollment, scoped policy and resident
   consumers remain separate gates. See the
   [implemented API boundary](../../../fleet-manager/docs/runtime-authentication.md).
+  The isolated [admission library](../../../fleet-manager/docs/runtime-admission.md)
+  adds current trusted-snapshot and finite Permit prerequisites; authenticated
+  snapshot provenance and retained-owner resident wiring remain open.
 - [ ] Review and implement the selected
   [Windows/Entra application adapter](runtime-authentication.md#selected-windowsentra-application-adapter)
   with the retained auth owner: actual broker/API proof compatibility,
@@ -1569,8 +1572,111 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   split; no test, marker, workflow or budget is changed by this slice.
   Touched lint, install-contract validation and exact upstream retention-file
   equality pass.
-
 - #6743 merged at `2026-10-15T03:55:59Z`. The Gateway integration consumes
   the accepted verifier without changing its implementation. Its earlier local
   retention preparation is superseded by the exact current upstream test;
   no alternative fixture optimization is carried forward.
+- #6743 actually merged at `2026-10-15T03:55:59Z`, commit
+  `00627e6bc768f353e5f402de0ed10ccf468764bc`. Final head
+  `d71d8659edd69cbb279426c4d28b20c4ee2c7314` received genuine Copilot APPROVED
+  review `5527674683`, zero open findings (Balanced effort), and all 50 observed
+  checks succeeded or legitimately skipped before the managed self-merge.
+  No failing/pending CI or unreviewed head was merged.
+- At that merge checkpoint, re-read the complete parent Plan/Validation. Only the
+  isolated identity-verification prerequisite is implemented; current
+  enrollment/policy, provider outcomes, scoped observation/operation admission,
+  delegation and encrypted resident transport remain open. Source merge is
+  not release, live enrollment or a deployment-readiness claim.
+- Preserved the published source tip in a backup and pulled the continuing
+  worktree forward onto the verified squash merge without discarding
+  unpublished changes or changing ownership. Next is the retained-owner
+  agreement on trusted current enrollment/policy snapshots and bounded Permit
+  records, followed by an isolated admission slice. The full effort remains
+  Active; no full Plan/Validation item closes and this worktree is not finalized.
+
+### 2026-10-16 - Isolated current-policy admission prerequisite
+
+- Continued the reviewed authentication interface under #5789/#6443 in new
+  library/test/doc paths only. During the pause, #6809 merged the retained
+  owner's opt-in resident Gateway and static configured index/credential
+  enrollment. Reconciled that actual source, preserving its API, selected
+  Windows/Entra amendment and release/lifecycle gates. This library's current
+  snapshot and observation/operation Permit adapter is still unagreed; no
+  resident/index/provider/lifecycle consumer was changed or superseded.
+- `runtime_admission` requires an independently trusted current snapshot on
+  every admission and revalidation. Immutable enrollments preserve stable
+  actor/account/role/installation and independent enrollment generations.
+  Revision rollback, conflicting records, unknown/revoked enrollment,
+  unavailable authority and expired policy/identity freshness refuse.
+- Initial resources are exact correlated origin/project/entity/field branches
+  and the existing canonical `OperationIntent` commands. The original actor,
+  account, authority, content digest and operation ID are compared, never
+  rewritten. Empty grants deny; omitted reads select only the authorized view.
+  No data/backend lookup is performed by the library.
+- Single-owner retained Permit objects bind exact effective resources and
+  finite validity. Revalidation consumes the old handle, rereads current
+  authority and cannot extend expiry. Reconstructing fields or transferring
+  to another owner is not authority. The future execution/emission adapter
+  still owns its real transaction/fence; a library check is not proof of an
+  atomic external effect or safe wire cursor.
+- Focused validation passes 54 cases, including real JOSE evidence for two
+  differently scoped principals, cross-product/actor/content/generation
+  denials, revocation, outage, exact production capacity, clock/expiry checks
+  and silent many-day renewal. A fresh process composes the real verifier,
+  admission and scoped SQLite reads; a denied foreign selection causes zero
+  lookups. A separate fresh-process import proves no optional crypto loads.
+  Touched Python passes F/E9 lint. The pre-sync combined required selection
+  hit its 120-second wall limit, not an assertion failure or a pass. Upstream
+  now supplies six disjoint 120-second partitions; the new tests belong to
+  its existing planner partition. Rebased current-partition validation and
+  review remain the next publication gates. No budget/selector/fixture changes
+  are carried by this slice.
+- Rebased required planner partition subsequently passes all 410 cases in
+  76.33 seconds under its unchanged 120-second deadline. A diagnostic run
+  under the existing manual budget also passes that partition (84.18s);
+  it is not substituted for the required-budget result.
+- Full current fleet validation reports 846 passed, six skipped and one
+  failure in 473.87 seconds: the retained Gateway's named-`localhost` TLS
+  backend test. The exact test reproduces alone (5.51s call). An owned
+  ephemeral-socket probe measures resolver children at 0.484s/0.922s and
+  serial IPv6 refusal at 2.063s/2.062s before immediate IPv4 success.
+  The index route performs two such backend connections inside the same
+  five-second request deadline. Reported the reproducible blocker under
+  #6443 without changing transport, fixtures or deadlines. Admission
+  publication remains blocked pending the retained transport owner's fix
+  or explicit coordination of that narrow source scope; this is not an
+  accepted flake or a full-suite pass.
+- The operator explicitly authorized the narrow transport prerequisite.
+  Coordinated that scope under #6443, retaining all auth/index/provider and
+  lifecycle ownership. Interleaved nonblocking address attempts now give the
+  alternate family an opportunity after 250 ms inside the original deadline;
+  all losing sockets close on success/failure/expiry. TLS still verifies the
+  original hostname. Focused transport validation passes all eight cases,
+  including the formerly failing real named-backend path, wrong certificate
+  hostname rejection, stalled resolver cleanup, fallback and pending-socket
+  deadline closure. No deadline, certificate check or fixture is weakened.
+  Required Gateway-partition and full-suite revalidation remain before PR
+  publication; the earlier red result is retained rather than called a pass.
+- Required Gateway partition then passes 125 cases in 97.63 seconds under
+  its unchanged 120-second limit. The unfiltered recheck passes all transport
+  tests but encounters a separate controller fixture import-startup timeout:
+  851 passed, six skipped and one failure. Its only readiness diagnostic is
+  `fixture: entered`, before `imports ready`; no provider/network failure is
+  established. Reported that distinct observation under #6443 without
+  changing its fixture, startup limit or provider source. The exact four-case
+  required process partition subsequently passes in 63.90 seconds; this is
+  not a diagnosis or claimed repair of the earlier startup delay.
+- Completed the canonical native portfolio as its six disjoint partitions:
+  planner 410, Gateway 125, processes four, full storage 184, artifacts 83
+  plus six skips, and full client distribution 46. These account for all
+  858 collected cases: 852 passed and six platform skips, including both
+  full markers. Storage/artifacts/distribution take 63.69s/52.61s/181.31s
+  under the existing full/manual budget; no selector or deadline changes.
+  This is a complete partitioned portfolio result, not a fabricated green
+  result for either earlier failed unfiltered run. Hosted checks and an
+  exact-head review remain independent merge gates.
+- This source-only prerequisite does not enroll a real issuer/principal,
+  change a provider/OS session, wire encrypted resident traffic or deploy.
+  Fresh-box client isolation stays covered by the existing artifact lane;
+  no managed-role clean-room or live external-venue readiness is claimed.
+  The full effort remains Active with its existing Plan/Validation gates open.

@@ -30,6 +30,12 @@ endpoints bypass it; IPv6 zone identifiers are unsupported. Resolved numeric
 addresses are used only for socket connection: certificate verification and SNI
 retain the configured hostname. No resolver daemon or blocked resolver-thread
 pool persists between calls.
+Resolved IPv6/IPv4 candidates are interleaved and nonblocking connection attempts
+are staggered by 250 ms within the same absolute deadline. A slow or refused
+first address cannot consume the other family's entire connection opportunity.
+The winning socket alone continues to TLS; every pending loser is closed on
+success, failure or deadline. This does not extend the request's budget, disable
+IPv6 or substitute a numeric address for certificate hostname verification.
 
 All listener connections are TLS, including loopback. All operation routes require
 the shared `jwt-pop-v1` verifier plus current enrollment and policy.
