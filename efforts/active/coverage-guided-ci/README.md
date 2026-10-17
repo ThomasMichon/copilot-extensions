@@ -650,10 +650,14 @@ regardless of this effort's local fixes.
       `worktree-manager (out-of-plugin, full)`) fails or is cancelled
       produces **no** selectable generation at all — proving the atomic-
       publication gate, not just asserting it exists.
-- [ ] Phase 2: a constructed multi-commit history (baseline → several
+- [x] Phase 2: a constructed multi-commit history (baseline → several
       line-shifting commits → fork point) resolves to the correct nearest
       ancestor and correctly remaps/invalidates attribution — verified
       against a hand-computed expected result, not just "no exception."
+      **Satisfied by the 2026-10-03 Phase 2 journal entry
+      ([#5049](https://github.com/ThomasMichon/copilot-extensions/pull/5049)):**
+      the real cumulative-deletion history checks a hand-computed mapping;
+      insertion and replacement cases verify attribution invalidation.
 - [x] Phase 3: a change touching only files with valid, resolvable
       attribution selects a strict subset of the full suite; a change
       touching a file with no baseline entry at all, a change touching a
