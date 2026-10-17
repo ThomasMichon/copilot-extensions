@@ -105,8 +105,9 @@ class DeadlineHTTPSConnection(HTTPSConnection):
         with selectors.DefaultSelector() as selector:
             try:
                 while pending or index < len(addresses):
-                    remaining = _remaining(self._deadline)
                     now = time.monotonic()
+                    remaining = self._deadline - now
+                    require(remaining > 0, "transport-unavailable")
                     if index < len(addresses) and (not pending or now >= next_attempt):
                         family, target = addresses[index]
                         index += 1
@@ -128,7 +129,7 @@ class DeadlineHTTPSConnection(HTTPSConnection):
                         else:
                             pending.remove(connection)
                             connection.close()
-                        next_attempt = time.monotonic() + ADDRESS_DELAY
+                        next_attempt = now + ADDRESS_DELAY
                         continue
                     wait = remaining
                     if index < len(addresses):
@@ -144,6 +145,8 @@ class DeadlineHTTPSConnection(HTTPSConnection):
                         connection.close()
             finally:
                 # Pending attempts never survive the winner, deadline or failure.
+                for key in tuple(selector.get_map().values()):
+                    selector.unregister(key.fileobj)
                 for connection in pending:
                     if connection is not winner:
                         connection.close()

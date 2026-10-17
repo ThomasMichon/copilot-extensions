@@ -14,7 +14,8 @@ from gateway_fixtures import Fixtures, query
 from test_gateway_runtime import running, scoped_backend, wait_gateway_slots
 
 
-def connect_fixture(monkeypatch, *, first_result=errno.EINPROGRESS, expire=False):
+def connect_fixture(monkeypatch, *, first_result=errno.EINPROGRESS, expire=False,
+                    clock_step=0):
     clock = [100.0]
     connections = []
     started = []
@@ -42,6 +43,7 @@ def connect_fixture(monkeypatch, *, first_result=errno.EINPROGRESS, expire=False
             return errno.EINPROGRESS if expire else 0
 
         def close(self):
+            assert self not in selected
             self.closed = True
 
     class Selector:
@@ -57,9 +59,18 @@ def connect_fixture(monkeypatch, *, first_result=errno.EINPROGRESS, expire=False
         def unregister(self, connection):
             selected.remove(connection)
 
+        def get_map(self):
+            return {id(connection): SimpleNamespace(fileobj=connection)
+                    for connection in selected}
+
         def select(self, wait):
+            assert 0 <= wait <= 101 - clock[0]
             clock[0] += wait
             return []
+
+    def monotonic():
+        clock[0] += clock_step
+        return clock[0]
 
     monkeypatch.setattr(gateway_transport, "socket", SimpleNamespace(
         socket=lambda family, *args: Connection(family),
@@ -67,7 +78,7 @@ def connect_fixture(monkeypatch, *, first_result=errno.EINPROGRESS, expire=False
         SOCK_STREAM=socket.SOCK_STREAM, IPPROTO_TCP=socket.IPPROTO_TCP,
         SOL_SOCKET=socket.SOL_SOCKET, SO_ERROR=socket.SO_ERROR,
     ))
-    monkeypatch.setattr(gateway_transport, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(gateway_transport, "time", SimpleNamespace(monotonic=monotonic))
     monkeypatch.setattr(gateway_transport.selectors, "DefaultSelector", Selector)
     monkeypatch.setattr(gateway_transport, "_addresses", lambda *args: [
         (socket.AF_INET6, ("::1", 443, 0, 0)),
@@ -108,6 +119,15 @@ def test_all_pending_addresses_closed_at_original_deadline(monkeypatch):
         owner._connect_address(("localhost", 443))
     assert clock[0] == 101
     assert len(started) == 3
+    assert all(connection.closed for connection in connections)
+
+
+def test_wait_uses_one_current_clock_sample_and_unregisters_before_close(monkeypatch):
+    owner, connections, _, _ = connect_fixture(
+        monkeypatch, expire=True, clock_step=0.02,
+    )
+    with pytest.raises(GatewayError, match="transport-unavailable"):
+        owner._connect_address(("localhost", 443))
     assert all(connection.closed for connection in connections)
 
 
