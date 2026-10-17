@@ -15,7 +15,7 @@ TOOLS = Path(__file__).resolve().parent
 _previous_path = sys.path.copy()
 sys.path.insert(0, str(TOOLS))
 try:
-    from plugin_test_selection import load_selection, validate_test_file
+    from plugin_test_selection import load_selection, selection_diagnostic, validate_test_file
 
     spec = importlib.util.spec_from_file_location("exact_selection_runner", TOOLS / "run-plugin-tests.py")
     assert spec and spec.loader
@@ -188,6 +188,46 @@ def test_exact_pytest_option_requires_a_targeted_plugin_name(selection_fixture, 
 
     with pytest.raises(pytest.UsageError, match="requires a nonempty --selection-plugin"):
         pytest_test_selection.pytest_collection_modifyitems(Config(), [])
+
+
+def test_missing_node_failure_reports_count_and_bounded_samples(selection_fixture, monkeypatch):
+    from tools import pytest_test_selection
+
+    root, path = selection_fixture
+    payload = json.loads(path.read_text())
+    payload["nodes"] = [
+        f"tests/test_sample.py::test_missing_{index}[{'x' * 500}]"
+        for index in range(3000)
+    ]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.chdir(root)
+
+    class Config:
+        def getoption(self, option):
+            return {"--exact-selection": path, "--selection-plugin": "fixture"}[option]
+
+    with pytest.raises(pytest.UsageError) as error:
+        pytest_test_selection.pytest_collection_modifyitems(Config(), [])
+    message = str(error.value)
+    assert "selected test nodes were not collected (3000)" in message
+    assert "test_missing_0[" in message
+    assert "test_missing_2999[" not in message
+    assert "... 2990 more" in message
+    assert "selection manifest / decision artifact" in message
+    assert "x" * 300 not in message
+    assert len(message) < 3000
+
+
+def test_invalid_input_and_empty_file_diagnostics_share_the_bound():
+    message = selection_diagnostic(
+        "selected test files collected no tests",
+        (f"tests/test_{index}_{'x' * 500}.py" for index in range(3000)),
+    )
+    assert "(3000)" in message and "... 2990 more" in message
+    assert len(message) < 3000
+    with pytest.raises(ValueError) as error:
+        validate_test_file(Path.cwd(), "tests/" + "x" * 5000 + "/../test_bad.py")
+    assert len(str(error.value)) < 500
 
 
 @pytest.mark.parametrize("arguments", [

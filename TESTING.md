@@ -1329,7 +1329,9 @@ manifest, for example:
 Use one named plugin and no other selection mode. Paths must identify existing,
 unlinked plugin-relative test files; node IDs must match collected items
 exactly, including parameter IDs. Missing/renamed nodes, empty files, malformed
-or empty evidence fail rather than silently deselecting everything. The
+or empty evidence fail rather than silently deselecting everything. Selection
+diagnostics report total counts and bounded samples; the manifest/decision
+artifact retains the complete requested selection. The
 portable validator rejects POSIX absolute paths, Windows drive/UNC paths and
 drive-relative forms on every platform. Interactive `--test-file` still accepts
 native relative Windows separators before normalization.

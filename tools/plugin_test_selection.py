@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -16,6 +17,20 @@ def resolve_plugin_root(repo: Path, name: str, *, plugins_root: Path | None = No
     if name in EXTERNAL_TEST_ROOTS:
         return repo / EXTERNAL_TEST_ROOTS[name]
     return (repo / "plugins" if plugins_root is None else plugins_root) / name
+
+
+def selection_diagnostic(label: str, values: Iterable[str]) -> str:
+    ordered = sorted(values)
+    sample = []
+    for value in ordered[:10]:
+        text = value.replace("\r", "\\r").replace("\n", "\\n")
+        sample.append(text if len(text) <= 200 else text[:200] + "...")
+    if len(ordered) > len(sample):
+        sample.append(f"... {len(ordered) - len(sample)} more")
+    return (
+        f"{label} ({len(ordered)}):\n" + "\n".join(sample)
+        + "\nSee the selection manifest / decision artifact for the complete requested selection."
+    )
 
 
 def validate_test_file(plugin_root: Path, value: str) -> Path:
@@ -35,7 +50,9 @@ def validate_test_file(plugin_root: Path, value: str) -> Path:
             or not candidate.name.startswith("test_") or candidate.suffix != ".py"
         )
     if invalid:
-        raise ValueError(f"test file must be an existing, unlinked tests/test_*.py: {value}")
+        raise ValueError(selection_diagnostic(
+            "test file must be an existing, unlinked tests/test_*.py", (value,),
+        ))
     return candidate
 
 
@@ -81,7 +98,9 @@ def selection_from_payload(payload: object, plugin: str, plugin_root: Path) -> T
     for node in payload["nodes"]:
         file, separator, test = node.partition("::")
         if not separator or not test:
-            raise ValueError(f"selection requires exact test node IDs, not a file: {node}")
+            raise ValueError(selection_diagnostic(
+                "selection requires exact test node IDs, not a file", (node,),
+            ))
     selection = TestSelection(
         plugin, tuple(payload["nodes"]), tuple(payload["files"]), payload["include_guards"],
     )

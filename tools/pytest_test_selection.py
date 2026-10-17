@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from plugin_test_selection import load_selection
+from plugin_test_selection import load_selection, selection_diagnostic
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -28,11 +28,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     available = {item.nodeid for item in items}
     missing = set(selection.nodes) - available
     if missing:
-        raise pytest.UsageError("selected test nodes were not collected:\n" + "\n".join(sorted(missing)))
+        raise pytest.UsageError(selection_diagnostic("selected test nodes were not collected", missing))
     files = set(selection.files)
     empty_files = files - {item.nodeid.split("::", 1)[0] for item in items}
     if empty_files:
-        raise pytest.UsageError("selected test files collected no tests: " + ", ".join(sorted(empty_files)))
+        raise pytest.UsageError(selection_diagnostic("selected test files collected no tests", empty_files))
     requested = set(selection.nodes)
     kept, deselected = [], []
     for item in items:
