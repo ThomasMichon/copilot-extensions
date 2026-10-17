@@ -69,6 +69,15 @@ abstracted; the requested mechanics and priorities are unchanged):
 > and then launch the agent. Agent-bridge uses `--plugin-dir` for ACP; determine
 > whether CLI also needs it.
 
+### Operator clarification
+
+> ACP is supposed to pass `--plugin-dir` for each plugin; CLI will use
+> `.github/copilot/settings.local.json` merged on top of
+> `.github/copilot/settings.json`, but we can also use `--plugin-dir`. For both
+> cases, we should still assemble `.github/copilot/settings.local.json` after
+> installing all remote-marketplace plugins and copying over all locally-sourced
+> in-worktree plugins.
+
 ## Plan
 
 ### Phase 0 - Reconcile and review
@@ -86,11 +95,16 @@ abstracted; the requested mechanics and priorities are unchanged):
   filesystem references for local launches, copied payloads for remote launches,
   and a resolvable local marketplace declaration plus explicit enablement in
   the target repository's `.github/copilot/settings.local.json`.
+- [ ] Complete installation of every selected remote-marketplace plugin and
+  copying of every selected locally sourced in-worktree payload before
+  assembling target-local settings, in both CLI and ACP modes. Verify installed
+  payload locations instead of treating an expected cache path as installation.
 - [ ] Preserve unrelated configuration and repository-native plugins; reconcile
   only owned entries. Make repeat preparation idempotent.
-- [ ] Pass the prepared directories to ACP's `--plugin-dir` input. Establish
-  whether headed CLI discovers the settings directly or also needs explicit
-  directory arguments, and use the supported path.
+- [ ] Pass `--plugin-dir` for every effective prepared plugin to ACP. CLI uses
+  target `settings.local.json` merged over `settings.json`; explicit plugin
+  directories may supplement that supported path. Settings registration is
+  mandatory in both modes, not replaced by the ACP flags.
 - [ ] Prepare before starting either child; surface copy/registration failure
   rather than treating an agent missing requested plugins as ready.
 - [ ] Keep restricted/untrusted containers outside automatic projection.
@@ -129,7 +143,12 @@ abstracted; the requested mechanics and priorities are unchanged):
   loading. Explicit target-local operator overrides remain authoritative unless
   this operation explicitly owns that entry.
 - [ ] Shared preparation covers headed CLI and ACP with the same selected
-  payload identities; ordering tests prove registration completes before launch.
+  payload identities; ordering tests prove remote installation and local copying
+  complete before settings assembly, and settings assembly completes before
+  launch. Missing installation or copy failure prevents child startup.
+- [ ] An independent CLI consumer discovers the merged base/local settings, and
+  ACP receives one `--plugin-dir` for every effective prepared plugin, including
+  both remote-installed and worktree-copied sources.
 - [ ] Synthetic fresh-checkout integration uses the real configuration writer
   and plugin resolver, verifies on-disk payloads and local marketplace sources,
   and launches an independent consumer rather than mocking past registration.
@@ -174,3 +193,5 @@ or a reason to create a daemon.
   registration in both launch modes before remaining static SSH/privileged work.
 - Prepared this public canonical sub-effort; environment-specific adoption
   context remains outside the public repository.
+- Captured the explicit install/copy -> settings assembly -> launch ordering for
+  both modes, mandatory per-plugin ACP arguments, and CLI base/local merge.
