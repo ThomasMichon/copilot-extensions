@@ -751,7 +751,9 @@ so other PR edits also run CI; excluding main still prevents its redundant
 release-candidate invocation.
 
 Within each PR ref, a new head's `synchronize` event supersedes the older head's
-executing CI. Metadata-only edits do not restart the same head's validation.
+executing CI. Metadata-only edits still trigger CI, but do not cancel and
+restart an in-progress run. Standalone Index predicates deliberately preserve
+their prior non-PR `always()` semantics; the cancellation exclusion is PR-only.
 Cancelled PRs do not continue standalone Index jobs or allocate the final PR
 aggregate; an uncancelled dependency failure still reaches that required
 aggregate and reports failure. Dev pushes and manual qualification keep rolling

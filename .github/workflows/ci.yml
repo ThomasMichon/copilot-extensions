@@ -60,7 +60,7 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  # New PR heads supersede old work; metadata edits must not restart the same head.
+  # New PR heads supersede old work; metadata edits do not cancel executing CI.
   # Dev pushes and manual qualification retain rolling queue:single behavior:
   # a newer push replaces only pending work, never an executing validation.
   # This preserves the dev-advancement starvation protection from #3592.
@@ -1137,6 +1137,7 @@ jobs:
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
     needs: discover
+    # Preserve prior non-PR always() semantics; exclude only cancelled PRs.
     if: always() && (github.event_name != 'pull_request' || !cancelled()) && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
@@ -1156,6 +1157,7 @@ jobs:
   agent-index-service-windows:
     name: agent-index-service (windows-latest, out-of-plugin)
     needs: discover
+    # Preserve prior non-PR always() semantics; exclude only cancelled PRs.
     if: always() && (github.event_name != 'pull_request' || !cancelled()) && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: windows-latest
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
