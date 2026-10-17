@@ -169,8 +169,9 @@ directory, contained within the owning provider root. It does not copy the
 declaration into a second registry. IDs use 1-80 letters, digits, `.`, `_` or
 `-`, starting with a letter/digit. Titles are at most 200 characters,
 descriptions 2,000, and requirements at most 32 nonempty strings of up to
-1,000 characters. Each JSON document is bounded to 1 MiB; an index contains at
-most 256 entries. Unknown versions/fields, duplicate JSON keys or entry IDs,
+1,000 characters. Text fields must be NUL-free. Each JSON document is bounded
+to 1 MiB; an index contains at most 256 entries. Unknown versions/fields,
+duplicate JSON keys or entry IDs,
 unsupported kinds, unavailable roots/files and containment failures are explicit
 findings; healthy peers remain visible. `kind` describes the fragment, not
 validated effective registrations. Runtime kinds and existing built-in

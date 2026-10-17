@@ -43,7 +43,10 @@ class TemplateSource:
 
 
 def _finding(findings: list[dict], source: str, reason: str, detail: str) -> None:
-    findings.append({"source": source[:4096], "reason": reason, "detail": detail[:4096]})
+    findings.append({
+        "source": source.replace("\0", "\\0")[:4096], "reason": reason,
+        "detail": detail.replace("\0", "\\0")[:4096],
+    })
 
 
 def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
@@ -144,8 +147,8 @@ def _json_object(path: Path) -> dict:
 
 
 def _text(value: object, field: str, limit: int) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value) > limit:
-        raise ValueError(f"{field} must be nonempty text of at most {limit} characters")
+    if not isinstance(value, str) or not value.strip() or "\0" in value or len(value) > limit:
+        raise ValueError(f"{field} must be nonempty NUL-free text of at most {limit} characters")
     return value
 
 

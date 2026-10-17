@@ -98,7 +98,7 @@ def test_multi_root_templates_keep_identity_scope_revision_and_no_executables(tm
 
 @pytest.mark.parametrize("problem", [
     "version", "version-bool", "schema", "fields", "duplicate", "kind",
-    "path-escape", "absolute", "missing", "not-object", "oversize", "requirements",
+    "path-escape", "absolute", "missing", "not-object", "oversize", "requirements", "nul-text",
 ])
 def test_invalid_contributions_keep_healthy_peers_and_source_bytes(tmp_path, problem):
     root = tmp_path / "provider"
@@ -128,6 +128,8 @@ def test_invalid_contributions_keep_healthy_peers_and_source_bytes(tmp_path, pro
         data["templates"][0]["declaration"] = "missing.json"
     elif problem == "requirements":
         data["templates"][0]["requirements"] = ["x" * 1001]
+    elif problem == "nul-text":
+        data["templates"][0]["description"] = "Invalid\0description"
     else:
         bad = root / "bad.json"
         bad.write_text("[]" if problem == "not-object" else " " * (wt._MAX_BYTES + 1), encoding="utf-8")
@@ -214,6 +216,15 @@ def test_standalone_missing_repository_integration_is_partial_not_healthy_empty(
     assert any(row["id"] == "template:worker-pool" for row in data["entries"])
     assert data["summary"]["errors"] == []
     assert not rd.registrar_dir().exists()
+
+
+def test_external_probe_error_text_is_bounded_and_nul_free(monkeypatch):
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
+        returncode=1, stdout="", stderr="Probe\0failed" + "x" * 5000,
+    ))
+    data = catalog()
+    errors = [row for row in data["entries"] if row.get("finding_scope") == "templates"]
+    assert errors and all("\0" not in row["description"] and len(row["description"]) < 9000 for row in errors)
 
 
 def test_new_provider_id_cannot_be_saved_or_activated(tmp_path):
