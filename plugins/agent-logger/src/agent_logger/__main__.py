@@ -687,6 +687,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     t_sync.set_defaults(func=_cmd_tenants_sync)
 
+    from agent_logger.usage_cli import register_usage
+
+    register_usage(sub)
     return parser
 
 

@@ -80,5 +80,7 @@ accounting directory is not controlled by a concurrent hostile writer. SQLite
 VM work and operations between calls obey a deadline; a blocking operating-system
 filesystem call cannot be preempted by that callback.
 
-This slice does not estimate historical tokens, resolve cross-source billing
-identity, infer cache splits, assign payers or produce dollar invoices.
+The separate [transcript estimation pipeline](usage-estimation.md) can pair
+these preserved measurements with count-only features. Preservation itself does
+not estimate tokens, resolve cross-source billing identity, infer cache splits,
+assign payers or produce dollar invoices.
