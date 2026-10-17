@@ -29,7 +29,7 @@ def selection_diagnostic(label: str, values: Iterable[str]) -> str:
         sample.append(f"... {len(ordered) - len(sample)} more")
     return (
         f"{label} ({len(ordered)}):\n" + "\n".join(sample)
-        + "\nSee the selection manifest / decision artifact for the complete requested selection."
+        + "\nSee the original arguments or selection manifest / decision artifact for the complete requested selection."
     )
 
 
