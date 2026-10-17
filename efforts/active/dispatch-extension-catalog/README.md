@@ -162,6 +162,9 @@ implementation and validation choices remain proposed means.
   declared/enabled/observed state, task lifecycle/category/history, structured
   questions, steering delivery and errors. Presentation may differ; facts
   and supported operations must not silently disappear.
+- [x] Provide owner-atomic card/ownership steering acceptance, exact-request
+  replay and distinct acceptance/consumption/original-wake receipts through
+  the existing HTTP, SDK, CLI and native contributions.
 - [ ] Reuse the existing command-emitter task-output contract for mapped
   external records. Extend only demonstrated gaps in stable record identity,
   column/field mapping, deduplication and acceptance receipts.
@@ -798,3 +801,26 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   Manager discovery, historical migration, ownership/refusal and form-expansion
   coverage passed twenty tests; the broader Manager portfolio remains selected
   by normal required CI. Updated-head review and full CI remain merge gates.
+
+### 2026-10-17 - Atomic owner steering merged; graphical adoption next
+
+- #7146 merged at 20:34Z as `30b262e83e8c131af015f282f754fd93e94d198b`.
+  Exact head `943e20aea417ecdba012710a6795ae50d26cb2a0` received an
+  approving Copilot review with no open issues. Normal CI run 39066375737
+  succeeded, including the full `PR gate (required check)` and native Manager
+  compatibility portfolio. Every review thread was resolved before merge.
+- Marked only the bounded owner-level steering contract complete. Card/
+  ownership CAS, whole-request replay, immutable acceptance, original wake
+  identity and actual consumption now share existing queue/HTTP/client/CLI
+  authority. Both native task contributions forward the owner revision;
+  historical migration retains its exact existing trust guard.
+- Re-read the full Plan and Validation Plan after merge. Independent graphical
+  adoption still needs to send the owner revision, recover exact requests
+  after a card changes, and distinguish durable acceptance from current
+  delivery/consumption. A client preflight hash is not that transaction.
+  Keep #7141 open until that cross-client acceptance is settled.
+- Next bounded stretch is consumer adoption through the existing command
+  transport, not a second input store or authentication path. Source actions/
+  history, durable shared drafts, template instantiation, generic process proof
+  and mapped-source production remain open. Normal release and authorized
+  installed proof remain separate; no live task or runtime was changed.
