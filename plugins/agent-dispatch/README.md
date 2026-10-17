@@ -2753,6 +2753,14 @@ re-registering it with no `--alias` **preserves that empty set** rather than
 auto-deriving one -- enabling enforcement without first adding an explicit
 `--alias` to every pre-existing pointer will reject their lanes' tasks).
 
+For a pinned fleet writer, opt into `AGENT_DISPATCH_TASK_AUTHORITY=central`;
+use `--local` for explicitly local-only work. These separate targets never
+switch databases on an outage, and a retained local coordinator is presence-only
+(`peer`/`satellite`), not an eligible replacement central writer. Unset retains
+legacy routing; `AGENT_DISPATCH_TASK_AUTHORITY=local` selects strict local
+authority. See the [central/local authority deployment contract](../../services/dispatch/README.md#pinned-central-authority-with-optional-local-only-work)
+for credentials, references, lifecycle and migration limits.
+
 ### Federation (`agent-dispatch federation run|status`)
 
 Opt-in cross-machine awareness/claim-plane participation (see the

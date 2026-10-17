@@ -29,7 +29,7 @@ _needs_printf = pytest.mark.skipif(
 
 
 @pytest.fixture(autouse=True)
-def _isolate_discovery(monkeypatch, tmp_path):
+def _isolate_cli_discovery(monkeypatch, tmp_path):
     """Point endpoint + routing discovery at empty tmp dirs so target resolution is
     deterministic and never reads a live coordinator's rendezvous / routing table."""
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))

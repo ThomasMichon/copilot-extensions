@@ -143,6 +143,12 @@ host-driven multi-container integration lane. It requires explicit privileged
 nested-Docker approval and uses no host Docker socket or published ports.
 It is not selected through `-Scenario` and is not a fast/required CI check.
 
+The [central/local authority proof](central-local-authority/README.md) is a
+host-driven Tier-P lane using the canonical contained plugin runner. It creates
+fresh separate central/peer containers and proves that a real central outage
+cannot redirect task operations into a local-only database. It requires no
+privileged containers, mounted Docker socket, host ports or cloud login.
+
 The runner is **scenario-driven** (design doc `docs/clean-room-test-rig.md`
 Sec.6): `-Scenario <name|dir>` selects a self-describing scenario directory that
 the runner mounts (with the shared `lib/`) read-only into the box and runs. This

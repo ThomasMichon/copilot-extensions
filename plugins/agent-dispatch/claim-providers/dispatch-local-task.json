@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "namespace": "dispatch-local-task",
+  "status_command": ["agent-dispatch", "--local"],
+  "no_self_provision_env": "AGENT_DISPATCH_NO_SELFPROVISION",
+  "description": "Explicit local-only task references; never retargeted by the default fleet authority."
+}
