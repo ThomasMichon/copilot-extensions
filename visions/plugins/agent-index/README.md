@@ -62,10 +62,10 @@ as the safety net beneath it.
 
 ### The embedding engine
 The component that turns text into vectors, at both index time and query time.
-It is **acceleration-optional**: it exploits a local accelerator (GPU) when one
-is present for bulk indexing throughput, and falls back to a slower CPU path
-otherwise — but it **never holds search hostage**, so a query is answerable
-whether or not an accelerator is warm.
+It is **acceleration-optional**: the installation authority's capability policy
+selects CPU or a compatible local accelerator (GPU), rather than GPU presence
+automatically selecting acceleration. It **never holds search hostage**, so a
+query is answerable whether or not an accelerator is warm.
 
 The engine is a **durable, persistent, warm runtime kept separate from the
 plugin's versioned service runtime** — the same durable-vs-versioned split the
