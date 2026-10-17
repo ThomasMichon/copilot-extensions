@@ -28,6 +28,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def cmd_ownership(args: argparse.Namespace, target: list[str]) -> int:
     """Print a conservative snapshot; uncertainty always exits nonzero."""
+    json_mode = getattr(args, "json", False)
     try:
         if target:
             raise ValueError("claims ownership takes no positional selectors")
@@ -48,11 +49,11 @@ def cmd_ownership(args: argparse.Namespace, target: list[str]) -> int:
             namespace=getattr(args, "claim_namespace", None), identity=identity,
         )
     except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
-        if args.json:
+        if json_mode:
             return output._json_error(f"claims ownership: {exc}", 2)
         output.err(f"claims ownership: {exc}")
         return 2
-    if args.json:
+    if json_mode:
         output._json_output(result)
     else:
         print(f"Local ledger snapshot: {result['resolution']} (not absence or cleanup authority)")

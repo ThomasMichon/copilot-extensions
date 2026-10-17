@@ -347,3 +347,30 @@ def test_reparse_point_is_not_treated_as_an_ordinary_tracking_file(monkeypatch: 
     monkeypatch.setattr(Path, "lstat", lambda path: SimpleNamespace(st_file_attributes=0x400))
     with pytest.raises(ValueError, match="reparse-point"):
         scanner._stamp(tmp_path / "owner.yaml")
+
+
+def test_programmatic_cli_without_json_flag_handles_output_and_errors(ledgers: Path, capfd: pytest.CaptureFixture) -> None:
+    assert producer_views_cli.cmd_ownership(argparse.Namespace(), []) == 0
+    assert "not-observed" in capfd.readouterr().out
+    assert producer_views_cli.cmd_ownership(argparse.Namespace(), ["unexpected"]) == 2
+    assert "takes no positional selectors" in capfd.readouterr().out
+
+
+def test_projection_reuses_canonical_identity_for_selection_and_collisions(ledgers: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_worktrees import resource_producer as producer
+    bound = reserve(ledgers, bound=True)
+    metadata = bound["producer"]
+    identity = metadata["identity"]
+    original = producer.canonical_json
+    calls = 0
+    def encode(value: object) -> str:
+        nonlocal calls
+        if value is identity:
+            calls += 1
+        return original(value)
+    monkeypatch.setattr(producer, "canonical_json", encode)
+    snapshot = ownership_snapshot(
+        [ObservedClaim("m/p/owner", "container", bound["ref"], "active", "", metadata)],
+        [], identity=copy.deepcopy(identity),
+    )
+    assert snapshot["complete"] and len(snapshot["entries"]) == 1 and calls == 1

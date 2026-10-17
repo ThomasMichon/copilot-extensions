@@ -110,6 +110,7 @@ def ownership_snapshot(
     groups: dict[str, list[ObservedClaim]] = defaultdict(list)
     valid: list[ObservedClaim] = []
     valid_ids: set[int] = set()
+    identities: dict[int, str] = {}
     for row in rows:
         metadata = row.metadata
         if (
@@ -121,6 +122,8 @@ def ownership_snapshot(
             continue
         valid.append(row)
         valid_ids.add(id(row))
+        if "identity" in metadata:
+            identities[id(row)] = producer.canonical_json(metadata["identity"])
         groups[metadata["token"]].append(row)
     terminals = {token: _resolve_group(group, issues) for token, group in groups.items()}
     subjects: dict[tuple[str, str, str], list[ObservedClaim]] = defaultdict(list)
@@ -128,7 +131,7 @@ def ownership_snapshot(
         metadata = row.metadata
         assert isinstance(metadata, dict)
         if metadata["phase"] == "bound":
-            key = (row.kind, metadata["namespace"], producer.canonical_json(metadata["identity"]))
+            key = (row.kind, metadata["namespace"], identities[id(row)])
             subjects[key].append(row)
     for key, claims in subjects.items():
         if len(claims) > 1:
@@ -148,7 +151,7 @@ def ownership_snapshot(
             continue
         if identity_json is not None and (
             not is_valid or "identity" not in metadata
-            or producer.canonical_json(metadata["identity"]) != identity_json
+            or identities[id(row)] != identity_json
         ):
             continue
         terminal = terminals.get(metadata["token"]) if is_valid else None
