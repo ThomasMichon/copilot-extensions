@@ -112,6 +112,29 @@ def test_selection_staging_passes_only_validated_data_over_stdin(monkeypatch):
     assert calls[0][1]["timeout"] == 30
 
 
+@pytest.mark.parametrize("arguments", [
+    ["fixture", "--selection-file"], ["fixture", "--selection-file="],
+    ["fixture", "--selection-file", ""],
+    ["fixture", "--selection-file", "--timeout", "60"],
+    ["fixture", "--selection-file", "-k", "example"],
+    ["fixture", "--selection-file", "-manifest.json"],
+])
+def test_selection_rewrite_rejects_missing_values_without_consuming_other_flags(arguments):
+    with pytest.raises(ValueError, match="requires a path"):
+        wrapper._selection.rewrite_selection(arguments, wrapper._canonicalize_flag, None)
+
+
+def test_selection_rewrite_accepts_explicit_leading_dash_path_and_preserves_other_flags():
+    rewritten, path = wrapper._selection.rewrite_selection(
+        ["fixture", "--selection-file=-manifest.json", "--timeout", "60"],
+        wrapper._canonicalize_flag, "/tmp/ce-selection-example.json",
+    )
+    assert path == "-manifest.json"
+    assert rewritten == [
+        "fixture", "--selection-file=/tmp/ce-selection-example.json", "--timeout", "60",
+    ]
+
+
 @pytest.mark.parametrize("plugin,relative_root", [
     ("fixture", "plugins/fixture"),
     ("worktree-manager", "worktree-manager"),

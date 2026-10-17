@@ -26,8 +26,11 @@ def rewrite_selection(
         if selected is not None:
             raise ValueError("--selection-file must be specified exactly once")
         selected = value if equal else next(iterator, "")
-        if not selected:
-            raise ValueError("--selection-file requires a path")
+        if not selected or (not equal and selected.startswith("-")):
+            raise ValueError(
+                "--selection-file requires a path; use --selection-file=PATH "
+                "for a path starting with '-'"
+            )
         if replacement is not None:
             result.append("--selection-file=" + replacement)
     return result, selected

@@ -183,9 +183,10 @@ def test_execution_cli_preserves_failure_and_reports_complete_invocation(tmp_pat
         "nodes": [f"tests/test_x.py::test_x_{index}" for index in range(3000)],
         "files": [], "include_guards": True,
     }
+    reason = ("fixture `tick`\n</code> <unsafe> &" * 200)[:6000]
     payload = {
         "execution": mode, "selection": selection if mode == "selected" else None,
-        "reason": "fixture" * 1000, "baseline_generation": "fixture-generation",
+        "reason": reason, "baseline_generation": "fixture-generation",
     }
     monkeypatch.setattr(cli, "build_execution_payload", lambda **_k: payload)
     commands = []
@@ -211,14 +212,18 @@ def test_execution_cli_preserves_failure_and_reports_complete_invocation(tmp_pat
     decision = json.loads(output.read_text())
     assert decision["exit_code"] == exit_code
     assert decision["invocation_seconds"] >= 0
-    assert "Complete invocation" in summary.read_text()
+    summary_text = summary.read_text()
+    assert "Complete invocation" in summary_text
+    assert "<unsafe>" not in summary_text
+    assert "&lt;/code&gt; &lt;unsafe&gt; &amp;" in summary_text
+    assert "reason: <code>" in summary_text
     console = capfd.readouterr().out
     assert len(console) < 2000
     assert "tests/test_x.py" not in console
     assert json.loads(console.splitlines()[0])["selected_node_count"] == (
         3000 if mode == "selected" else None
     )
-    assert decision["reason"] == "fixture" * 1000
+    assert decision["reason"] == reason
     if mode == "selected":
         assert commands[0][-4:] == ["--timeout", "540", "--plugin-timeout", "540"]
         assert manifests and all(not path.exists() for path in manifests)

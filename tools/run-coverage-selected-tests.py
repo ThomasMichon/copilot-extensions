@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from html import escape
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -50,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     reason = payload["reason"]
-    console_reason = reason if len(reason) <= 500 else reason[:500] + "... (see decision artifact)"
+    console_reason = " ".join(reason.splitlines())
+    if len(console_reason) > 500:
+        console_reason = console_reason[:500] + "... (see decision artifact)"
     selection_data = payload["selection"]
     floor = payload.get("fallback_set")
     print(json.dumps({
@@ -84,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         with open(summary, "a", encoding="utf-8") as stream:
             stream.write(
                 "### Coverage-selected dispatch execution\n"
-                f"- Execution: `{payload['execution']}`; reason: `{console_reason}`\n"
+                f"- Execution: `{payload['execution']}`; reason: <code>{escape(console_reason)}</code>\n"
                 f"- Baseline: `{payload['baseline_generation']}`\n"
                 f"- Complete invocation: {payload['invocation_seconds']:.2f}s; "
                 f"exit: {result.returncode}\n"
