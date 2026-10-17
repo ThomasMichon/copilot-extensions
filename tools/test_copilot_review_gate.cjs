@@ -29,7 +29,8 @@ const BOT = "copilot-pull-request-reviewer[bot]";
 async function run(options = {}) {
   const writes = [], reads = [], waits = [], failures = [], warnings = [], infos = [];
   let clock = NOW + (options.queueMs ?? 0);
-  const snapshot = () => waits.length ? { ...options, ...options.afterWait } : options;
+  let waitCompleted = false;
+  const snapshot = () => waitCompleted ? { ...options, ...options.afterWait } : options;
   const read = name => {
     reads.push(name);
     clock += options.readMs ?? 0;
@@ -85,7 +86,12 @@ async function run(options = {}) {
     { info: msg => infos.push(msg), setFailed: msg => failures.push(msg),
       warning: msg => warnings.push(msg) },
     { now: () => clock, parse: Date.parse },
-    (callback, ms) => { waits.push(ms); clock += ms; callback(); },
+    (callback, ms) => {
+      waits.push(ms);
+      clock += ms;
+      waitCompleted = true;
+      callback();
+    },
   );
   return { writes, reads, waits, failures, warnings, infos, constructions };
 }
