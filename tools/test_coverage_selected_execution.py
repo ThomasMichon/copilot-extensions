@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 import importlib.util
+import argparse
+import ast
 import os
+import shlex
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -169,19 +172,20 @@ def test_empty_curated_evidence_is_a_hard_error_not_only_guards(history):
 
 
 @pytest.mark.parametrize("mode,exit_code", [("selected", 0), ("selected", 7), ("full", 0)])
-def test_execution_cli_preserves_failure_and_reports_complete_invocation(tmp_path, monkeypatch, mode, exit_code):
+def test_execution_cli_preserves_failure_and_reports_complete_invocation(tmp_path, monkeypatch, capfd, mode, exit_code):
     script = Path(__file__).resolve().parent / "run-coverage-selected-tests.py"
     spec = importlib.util.spec_from_file_location("coverage_execution_cli", script)
     assert spec and spec.loader
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
     selection = {
-        "version": 1, "plugin": "agent-dispatch", "nodes": ["tests/test_x.py::test_x"],
+        "version": 1, "plugin": "agent-dispatch",
+        "nodes": [f"tests/test_x.py::test_x_{index}" for index in range(3000)],
         "files": [], "include_guards": True,
     }
     payload = {
         "execution": mode, "selection": selection if mode == "selected" else None,
-        "reason": "fixture", "baseline_generation": "fixture-generation",
+        "reason": "fixture" * 1000, "baseline_generation": "fixture-generation",
     }
     monkeypatch.setattr(cli, "build_execution_payload", lambda **_k: payload)
     commands = []
@@ -208,12 +212,67 @@ def test_execution_cli_preserves_failure_and_reports_complete_invocation(tmp_pat
     assert decision["exit_code"] == exit_code
     assert decision["invocation_seconds"] >= 0
     assert "Complete invocation" in summary.read_text()
+    console = capfd.readouterr().out
+    assert len(console) < 2000
+    assert "tests/test_x.py" not in console
+    assert json.loads(console.splitlines()[0])["selected_node_count"] == (
+        3000 if mode == "selected" else None
+    )
+    assert decision["reason"] == "fixture" * 1000
     if mode == "selected":
         assert commands[0][-4:] == ["--timeout", "540", "--plugin-timeout", "540"]
         assert manifests and all(not path.exists() for path in manifests)
     else:
         assert commands[0][-1] == "agent-dispatch"
         assert "--selection-file" not in commands[0]
+
+
+def _policy_value(expression, *, plugin: str, event: str):
+    """Evaluate this lane's boolean/numeric policy without executing code."""
+    if not isinstance(expression, str):
+        return expression
+    source = expression.strip().removeprefix("${{").removesuffix("}}").strip()
+    node = ast.parse(source.replace("&&", " and ").replace("||", " or "), mode="eval").body
+    context = {"matrix.plugin": plugin, "github.event_name": event, "true": True, "false": False}
+
+    def value(part):
+        if isinstance(part, ast.Constant):
+            return part.value
+        if isinstance(part, (ast.Name, ast.Attribute)):
+            return context[ast.unparse(part)]
+        if isinstance(part, ast.Compare) and len(part.ops) == 1:
+            left, right = value(part.left), value(part.comparators[0])
+            if isinstance(part.ops[0], ast.Eq):
+                return left == right
+            if isinstance(part.ops[0], ast.NotEq):
+                return left != right
+        if isinstance(part, ast.BoolOp):
+            result = value(part.values[0])
+            for child in part.values[1:]:
+                if isinstance(part.op, ast.And):
+                    result = value(child) if result else result
+                else:
+                    result = result if result else value(child)
+            return result
+        raise AssertionError(f"unsupported workflow policy: {ast.dump(part)}")
+
+    return value(node)
+
+
+@pytest.mark.parametrize("expression,expected", [
+    ("github.event_name=='pull_request' && matrix.plugin=='agent-dispatch'", True),
+    ("${{ (matrix.plugin == 'agent-dispatch') && (github.event_name == 'pull_request') }}", True),
+    ("(matrix.plugin == 'agent-index' || matrix.plugin == 'agent-dispatch') && 12 || 8", 12),
+    ("matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'", False),
+    ("matrix.plugin == 'agent-dispatch' && 1200 || 8", 1200),
+])
+def test_workflow_policy_checks_values_not_expression_format(expression, expected):
+    assert _policy_value(expression, plugin="agent-dispatch", event="pull_request") == expected
+
+
+def test_workflow_policy_never_executes_function_calls():
+    with pytest.raises(AssertionError, match="unsupported workflow policy"):
+        _policy_value("make_green()", plugin="agent-dispatch", event="pull_request")
 
 
 def test_ci_pilot_is_pr_only_and_does_not_increase_job_deadline():
@@ -223,21 +282,37 @@ def test_ci_pilot_is_pr_only_and_does_not_increase_job_deadline():
         (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(),
     )
     job = workflow["jobs"]["smoke"]
-    assert "&& 12 || 8" in job["timeout-minutes"]
-    steps = {step.get("name"): step for step in job["steps"] if "name" in step}
-    selected = steps["Coverage-selected dispatch PR tests plus smoke and guards"]
-    assert selected["if"] == "matrix.plugin == 'agent-dispatch' && github.event_name == 'pull_request'"
-    assert "--smoke-budget 120" in selected["run"]
-    assert "--commit-volume-threshold 200" in selected["run"]
-    assert "--age-threshold-seconds 604800" in selected["run"]
-    ordinary = steps["Test ${{ matrix.plugin }}"]
-    assert ordinary["if"] == "matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'"
-    assert ordinary["run"] == "python tools/run-plugin-tests.py ${{ matrix.plugin }}"
-    assert workflow["env"]["COVERAGE_GUIDED_SELECTION_MODE"] == "shadow"
-    assert any(
-        step.get("run") == ordinary["run"]
-        for step in workflow["jobs"]["full"]["steps"]
+    selected = next(
+        step for step in job["steps"]
+        if "tools/run-coverage-selected-tests.py" in shlex.split(step.get("run", ""))
     )
+    ordinary = next(
+        step for step in job["steps"]
+        if "tools/run-plugin-tests.py" in shlex.split(step.get("run", ""))
+    )
+    for plugin in ("agent-dispatch", "agent-index", "agent-bridge", "other", "agent-dispatch-other"):
+        for event in ("pull_request", "push", "workflow_dispatch", "pull_request_target"):
+            context = {"plugin": plugin, "event": event}
+            expected_deadline = 12 if plugin in {"agent-dispatch", "agent-index", "agent-bridge"} else 8
+            assert _policy_value(job["timeout-minutes"], **context) == expected_deadline
+            is_pilot = plugin == "agent-dispatch" and event == "pull_request"
+            assert bool(_policy_value(selected.get("if", "true"), **context)) == is_pilot
+            assert bool(_policy_value(ordinary.get("if", "true"), **context)) != is_pilot
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--smoke-budget", type=float)
+    parser.add_argument("--commit-volume-threshold", type=int)
+    parser.add_argument("--age-threshold-seconds", type=float)
+    budgets, _ = parser.parse_known_args(shlex.split(selected["run"]))
+    assert budgets.smoke_budget == 120
+    assert budgets.commit_volume_threshold == 200
+    assert budgets.age_threshold_seconds == 604800
+    assert workflow["env"]["COVERAGE_GUIDED_SELECTION_MODE"] == "shadow"
+    full = next(
+        shlex.split(step["run"])
+        for step in workflow["jobs"]["full"]["steps"]
+        if "tools/run-plugin-tests.py" in shlex.split(step.get("run", ""))
+    )
+    assert not {"--selection-file", "--guards", "--collect-only", "--test-file", "-k"} & set(full)
 
 
 def test_cli_missing_suite_cannot_turn_full_fallback_into_a_successful_skip(tmp_path, monkeypatch):

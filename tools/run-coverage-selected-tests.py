@@ -49,10 +49,24 @@ def main(argv: list[str] | None = None) -> int:
         age_threshold_seconds=args.age_threshold_seconds,
     )
     args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(payload, indent=2), flush=True)
+    reason = payload["reason"]
+    console_reason = reason if len(reason) <= 500 else reason[:500] + "... (see decision artifact)"
+    selection_data = payload["selection"]
+    floor = payload.get("fallback_set")
+    print(json.dumps({
+        "execution": payload["execution"],
+        "mode": payload.get("mode"),
+        "reason": console_reason,
+        "baseline_generation": payload["baseline_generation"],
+        "selected_node_count": None if selection_data is None else len(selection_data["nodes"]),
+        "changed_test_file_count": len(payload.get("changed_test_files", [])),
+        "smoke": None if floor is None else {
+            key: floor[key] for key in ("total_runtime_s", "covered_fraction", "universe_size")
+        },
+    }), flush=True)
     command = [sys.executable, str(REPO / "tools/run-plugin-tests.py"), args.plugin]
     if payload["execution"] == "full":
-        print(f"[FALLBACK] full/default portfolio: {payload['reason']}", flush=True)
+        print(f"[FALLBACK] full/default portfolio: {console_reason}", flush=True)
         result = subprocess.run(command, cwd=REPO, check=False)
     else:
         with tempfile.TemporaryDirectory(prefix="ce-selection-") as directory:
@@ -70,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         with open(summary, "a", encoding="utf-8") as stream:
             stream.write(
                 "### Coverage-selected dispatch execution\n"
-                f"- Execution: `{payload['execution']}`; reason: `{payload['reason']}`\n"
+                f"- Execution: `{payload['execution']}`; reason: `{console_reason}`\n"
                 f"- Baseline: `{payload['baseline_generation']}`\n"
                 f"- Complete invocation: {payload['invocation_seconds']:.2f}s; "
                 f"exit: {result.returncode}\n"

@@ -1338,7 +1338,8 @@ from dependency-only preparation, then executes it with networking removed.
 
 The `dispatch-selection` artifact records exact nodes, changed test files,
 baseline generation, debt, fallback reasons, predicted smoke cost and attributed
-line breadth. Complete invocation timing includes planning, dependency
+line breadth. Console and step summaries contain bounded metadata rather than
+repeating the full node lists. Complete invocation timing includes planning, dependency
 preparation, execution and cleanup, not just pytest's test timer. Guard and
 additional implicated/changed-file costs are not claimed to fit the predicted
 smoke-floor cost.
