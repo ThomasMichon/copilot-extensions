@@ -19,9 +19,11 @@ def retirement_blocker(record: WorktreeRecord) -> RetirementBlocker | None:
     """Require explicit terminal PR state and released outbound ownership."""
     pending = [pr for pr in record.prs if pr.state not in ("merged", "closed")]
     if pending:
-        numbers = ", ".join("?" if pr.number is None else f"#{pr.number}" for pr in pending)
+        numbers = ", ".join(
+            "?" if pr.number is None else f"#{pr.number}" for pr in pending
+        )
         return RetirementBlocker(
-            "open-pr", f"PR {numbers or '?'} still open/in review or state unconfirmed"
+            "open-pr", f"PR {numbers} still open/in review or state unconfirmed"
         )
     held = [claim for claim in record.resources if claim.is_live or claim.is_unsettled]
     if held:

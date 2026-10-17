@@ -172,16 +172,22 @@ def test_pair_retirement_preserves_sibling_with_reopened_pr(
     assert sibling_path.read_bytes() == original_sibling
 
 
+@pytest.mark.parametrize("kind", ["pr", "child"])
+@pytest.mark.parametrize("stale", [False, True])
 def test_direct_reaper_refuses_before_any_destructive_action(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, stale: bool
 ) -> None:
     from agent_worktrees import __main__ as cli
 
     reap = cli._reap_worktree
     harness = CleanupHarness(monkeypatch, tmp_path)
     record = make_record(tmp_path)
-    _add_obligation(record, "pr")
-    harness.seed(record)
+    if not stale:
+        _add_obligation(record, kind)
+    path = harness.seed(record)
+    if stale:
+        mutate_record(path, lambda latest: _add_obligation(latest, kind))
+    original = path.read_bytes()
     actions: list[str] = []
     monkeypatch.setattr(
         cli.sessions, "kill_tmux_session", lambda *_a: actions.append("kill")
@@ -204,9 +210,11 @@ def test_direct_reaper_refuses_before_any_destructive_action(
     )
 
     assert failures == 1
-    assert any("#42" in warning for warning in warnings)
+    expected = "#42" if kind == "pr" else "held resource claim"
+    assert any(expected in warning for warning in warnings)
     assert actions == []
     assert Path(record.worktree_path).exists()
+    assert path.read_bytes() == original
 
 
 @pytest.mark.parametrize("checkout_managed", [False, True])
