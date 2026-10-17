@@ -285,6 +285,15 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Exact fixture version forms
+
+- Replaced global version-text replacement with a full match of the
+  repository's release/`-devN` forms; unsupported forms fail explicitly.
+  This keeps the isolated version check precise without adding a runtime
+  packaging dependency.
+- Declared the candidate-cleanup `rm` prerequisite and made the shell-side
+  manifest read UTF-8 as well as the installed verifier.
+
 ### 2026-10-16 - Verifier cannot pass with assertions disabled
 
 - Added an explicit optimization-mode refusal before installed-package

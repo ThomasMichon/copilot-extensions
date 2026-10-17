@@ -58,7 +58,7 @@ if ! capture "stamp" -- timeout 120 bash "$FRESH/plugins/budget-guidance/scripts
     cr_finalize
 fi
 SNAPSHOT="$(cat "$HOME/.budget-guidance/payload-dir")"
-VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$SNAPSHOT/plugin.json")"
+VERSION="$(python3 -c 'import json,sys; from pathlib import Path; print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["version"])' "$SNAPSHOT/plugin.json")"
 RUNTIME="$HOME/.budget-guidance/versions/$VERSION"
 BIN="$HOME/.local/bin/budget-guidance"
 if [ -d "$RUNTIME" ] || [ ! -x "$BIN" ] || [ ! -f "$SNAPSHOT/libs/agent-procutil/pyproject.toml" ]; then

@@ -4,6 +4,7 @@ import hashlib
 from importlib.metadata import version
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,7 +22,11 @@ assert Path(budget_guidance.__file__).is_relative_to(prefix)
 assert Path(agent_procutil.__file__).is_relative_to(prefix)
 expected = json.loads((snapshot / "plugin.json").read_text(encoding="utf-8"))["version"]
 assert budget_guidance.__version__ == expected
-assert version("budget-guidance") == expected.replace("-dev", ".dev")
+parts = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-dev(\d+))?", expected)
+if parts is None:
+    raise AssertionError("scenario requires a repository release or -devN manifest version")
+normalized = parts[1] + (".dev" + parts[2] if parts[2] is not None else "")
+assert version("budget-guidance") == normalized
 original = snapshot / "src/budget_guidance/quota.py"
 installed = Path(budget_guidance.__file__).parent / "quota.py"
 assert hashlib.sha256(original.read_bytes()).digest() == hashlib.sha256(installed.read_bytes()).digest()
