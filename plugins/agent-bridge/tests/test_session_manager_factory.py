@@ -32,3 +32,9 @@ def test_factory_wires_companion_session_host_params(tmp_db: Database) -> None:
     assert mgr._graceful_cancel_settle_seconds == 45
     assert mgr._live_stall_interrupt_after_s == 900
     assert mgr._session_host_unexpected_reap_seconds == 90
+
+
+def test_factory_keeps_ordinary_drain_defaults(tmp_db: Database) -> None:
+    mgr = session_manager_from_config(tmp_db, ServiceConfig())
+    assert mgr._drain_auto_release_s == mgr.DRAIN_AUTO_RELEASE_S
+    assert mgr._drain_warn_interval_s == mgr.DRAIN_WARN_INTERVAL_S

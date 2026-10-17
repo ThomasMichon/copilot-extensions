@@ -128,10 +128,11 @@ class HostIndex:
     _LOCK_TIMEOUT_S = 5.0
     _LOCK_POLL_S = 0.02
 
-    def __init__(self, path: str | os.PathLike[str]) -> None:
+    def __init__(self, path: str | os.PathLike[str], *, load: bool = True) -> None:
         self._path = Path(path)
         self._records: dict[str, HostRecord] = {}
-        self._load()
+        if load:
+            self._load()
 
     # -- persistence -------------------------------------------------------
     def _load(self) -> None:

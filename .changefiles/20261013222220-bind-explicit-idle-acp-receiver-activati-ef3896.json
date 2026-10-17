@@ -1,0 +1,9 @@
+{
+  "comment": "Bind explicit idle ACP receiver activation to native host commit, exact streams, and independent committed event and turn contents",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

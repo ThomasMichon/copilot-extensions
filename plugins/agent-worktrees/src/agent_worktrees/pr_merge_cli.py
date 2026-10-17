@@ -439,6 +439,32 @@ def _pr_merge_now(
             print(rem.text(), file=sys.stderr)
         return 1
 
+    if getattr(provider, "name", "") == "github":
+        confirmation = None
+        observation_error = ""
+        try:
+            confirmation = provider.get_pull(args.repo, args.pr, api_base=base, token=tok)
+            if expected_head_sha and confirmation.head_sha != expected_head_sha:
+                observation_error = "GitHub merge completion returned a different or unavailable head"
+        except (ProviderError, OSError, ValueError, AttributeError) as exc:
+            observation_error = f"GitHub accepted the merge request but completion lookup failed: {exc}"
+        if observation_error or confirmation.merged is not True:
+            rem = pc.pr_reminder(flow, "pr-watch", ok=not observation_error)
+            message = observation_error or "GitHub accepted the merge request; completion is still pending"
+            if args.json:
+                print(_json.dumps({
+                    "repo": args.repo, "pr": args.pr, "action": "merge-pending",
+                    "applied": True, "merged": False, "flow_profile": flow.profile,
+                    "completion_verified": False, "reminder": rem.as_dict(),
+                    **({"error": observation_error} if observation_error else {}),
+                }))
+            else:
+                (output.err if observation_error else output.ok)(
+                    f"pr-merge --now: {message}. Use pr-watch before finalizing."
+                )
+                print(rem.text(), file=sys.stderr)
+            return 1 if observation_error else 0
+
     rem = pc.pr_reminder(flow, "pr-merge", state=pc.PR_STATE_MERGED, ok=True)
     if args.json:
         print(
@@ -448,6 +474,8 @@ def _pr_merge_now(
                     "pr": args.pr,
                     "action": "merge",
                     "applied": True,
+                    "merged": True,
+                    **({"completion_verified": True} if getattr(provider, "name", "") == "github" else {}),
                     "bypassed_review_gate": bypass_review_gate,
                     "flow_profile": flow.profile,
                     "reminder": rem.as_dict(),

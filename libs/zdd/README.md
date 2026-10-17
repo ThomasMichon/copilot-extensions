@@ -232,6 +232,31 @@ Bridge health is anonymous; Dispatch health may require its configured token.
 Each adopter owns those distinct authentication contracts and the authenticated
 capture channel; there is no generic health-based configuration fabrication.
 
+Read-only candidates can opt into a two-phase contract by supplying **both**
+`RuntimeSnapshot.attest_prepared(endpoint)` and `activate_successor(endpoint)`.
+The first returns a distinct `RuntimePreparation` with native PID/start,
+selected version, configuration identity and an exact boolean `prepared`.
+It verifies passive resources before publication; it is neither
+`RuntimeAttestation.ready` nor permission to admit work. The orchestrator
+publishes the verified candidate, then invokes activation **before** predecessor
+drain or retirement. Activation must return `None` only after its receiver-bound
+resource transitions complete. Each mutation needs fresh exact-publication
+authority at the receiver; callbacks may perform bounded waits outside that
+fence. The coordinator does not hold its routing lock across activation.
+Afterwards, the orchestrator independently verifies active `ready: true`
+and the exact publication before draining the predecessor.
+
+For this explicit two-phase path, the later `adopt_successor` callback must
+confirm `adopted: true` after exact predecessor exit, including required
+singleton resources. Adoption failures are fatal, not the ordinary relay
+helper's best-effort success. Final active readiness and route verification
+still precede recovery-state removal. Failed activation retains the promoted
+candidate and follows guarded rollback; failed post-exit adoption retains
+owner-led recovery without claiming success. Unpaired or asynchronous
+two-phase callbacks refuse. Snapshots omitting both callbacks retain their
+existing readiness and best-effort relay sequence. No application adapter,
+listener, launcher or automatic activation is supplied by this contract.
+
 `routing_lock_timeout` bounds each native `active.lock` acquisition, including
 the process-local lock. It is not a whole-attempt deadline: capture, health,
 drain and retirement are distinct operations, and a later lock acquisition
@@ -394,6 +419,163 @@ The conditional and pre-publication drain opt-ins cannot be combined: conditiona
 receiver-bound drain requires an already-published successor, while stateful
 pre-adoption drain requires the predecessor to quiesce before publication.
 Both owned and caller-held authority enforce the same recovery refusals.
+
+### `zdd.private_protocol` -- private local runtime channels
+
+`private_protocol`, `private_unix` and `private_windows` supply a dependency-free,
+synchronous byte-channel boundary for a CLI or a caller-owned worker thread.
+They are not HTTP endpoints and have no network fallback. This implements the
+local-first transport boundary from
+[`service-transport`](../../docs/patterns/service-transport.md), not production
+effective-state capture or authorization to enable conditional retirement.
+
+`Deadline` is one absolute monotonic budget shared by connection, authentication,
+frame reads/writes and cancellation. A cancellation event is checked between
+native waits of at most 50 milliseconds. Frames carry a protocol version and a
+bounded length (1 MiB maximum); unsupported versions, duplicate JSON keys,
+non-object payloads, non-finite values and oversized frames refuse explicitly.
+`PrivateIPCError` exposes only a fixed `Refusal` reason. Callers must not log,
+persist or include secret frames in exception values.
+
+Native channels retain peer process custody independently of frame contents:
+
+- Linux uses `SO_PEERCRED` plus **socket-derived** `SO_PEERPIDFD`, verifies the
+  effective UID and recorded creation token, and checks the held pidfd throughout
+  I/O. A kernel without `SO_PEERPIDFD` refuses; opening a pidfd after sampling a
+  possibly recycled numeric PID is not a substitute. The listener requires an
+  owner-only directory supplied by the installation owner, creates a 0600 socket,
+  never replaces an occupied endpoint, and removes only its own socket inode.
+- Windows uses first-instance, local-only named pipes with an explicit protected
+  current-user-SID-only DACL and identification-only client SQOS. Both sides check
+  native pipe PID, process creation time and process SID through a retained
+  query/synchronize handle; the server also verifies the connected token SID.
+  An independently known `PeerIdentity` creation-time baseline is mandatory for
+  both connection and acceptance. Unknown client baselines refuse rather than
+  trusting a PID/start token supplied in a frame. Native pipe PID APIs do not
+  prove exclusive ownership of duplicated pipe handles.
+
+Each listener/channel owns its descriptors and never signals its peer. Windows
+listeners are single-use. Windows reads, writes and acceptance use overlapped I/O.
+Expired operations issue `CancelIoEx` without granting cleanup another timeout;
+unconfirmed cancellation returns `private-ipc-cancellation-unresolved` and retains
+kernel-referenced buffer, OVERLAPPED, event and pipe custody. Subsequent operations
+reap confirmed completions; a 32-operation cap refuses further admission rather
+than growing that retention indefinitely. Linux partial-I/O failures close the
+channel rather than making a desynchronized stream reusable.
+
+The adopter still owns installation/generation discovery, independently
+established expected-client baselines, authoritative serving-state capture,
+in-memory child transfer, application controls, and actual exit confirmation.
+Channel authentication alone supplies none of those controls.
+Do not expose a capture/control handler or enable automatic repair by merely
+constructing these channels. Focused framing and real-process transport tests
+are `test_private_protocol.py`, `test_private_unix.py`, and
+`test_private_windows.py`; the native suites run on their respective OS, using
+the bounded test path described in [`TESTING.md`](../../TESTING.md).
+
+### `zdd.private_peer` -- retained original peer exit custody
+
+`UnixChannel.retain_peer(deadline)` and `WindowsChannel.retain_peer(deadline)`
+duplicate the channel's already authenticated native process reference while
+that peer is still alive. They never reopen a numeric PID. The returned
+`PeerProcess` owns a non-inheritable pidfd or process handle independently of the
+channel; closing the channel, losing a frame or reaping the process does not
+discard the retained original identity.
+
+`exited(deadline)` makes a nonblocking native observation through that same
+reference. A live peer returns false; unavailable or invalid observations
+refuse, never masquerade as exit. `wait_exit(deadline)` uses the original bounded
+budget with cancellation checks and belongs outside routing authority. Both
+recheck the deadline after observing exit. The receiving thread and process
+exclusively own use and cleanup; `close()` only releases the duplicate.
+
+This is exit evidence, not signalling, reaping, singleton acquisition or adoption
+authority. An adopter must pin the independently expected predecessor before its
+exit, check that exact retained reference under each receiver-bound adoption
+grant, and verify final successor state separately. No automatic lifecycle is
+wired here. `test_private_peer.py` covers refusal and ownership policy; the
+native transport suites prove custody survives channel closure and actual
+process exit on Linux and Windows.
+
+### `zdd.private_child` -- owned child birth custody
+
+`OwnedChild(process, executable, deadline)` pins a sole-owner, unreaped `Popen`
+before private state may be sent. Linux opens a pidfd and uses native
+`waitid(P_PIDFD, WNOWAIT)` to prove that the live reference is still a direct
+child, then checks its birth token, UID and actual image while holding custody.
+The existing libc pidfd acquisition supports Python builds missing
+`os.pidfd_open`; unsupported native capabilities still refuse. Windows duplicates
+the original spawn-owned process handle rather than reopening a numeric PID,
+and verifies native PID, creation time, SID and executable image.
+
+`check(deadline)` rechecks the live held identity and selected executable on the
+owning thread. `close()` only releases that reference; it never signals, reaps,
+detaches or changes the child's containment. The launcher must keep exclusive
+`Popen` ownership during acquisition and separately provide restricted handle
+inheritance and the correct lifetime policy. This component neither implements
+a production successor launcher nor permits publication/adoption. Its focused
+native proof is `test_private_child.py`, run on both Linux and Windows through
+the bounded test path.
+
+### `zdd.private_receiver` -- opt-in receiver authority
+
+`PrivateReceiver` supplies the synchronous mutation fence, not a daemon listener
+or a remotely callable registration endpoint. The application owner registers
+one native peer identity, operation, receiver listener identity, exact active
+publication, configuration binding and original `Deadline`. The wire may supply
+only that opaque grant and operation. Registrations are capped at 64, revoked
+in memory and consumed once, including failed or timed-out attempts. Native
+channels expose `check_peer()` so the receiver can recheck the retained original
+peer process reference immediately before mutation.
+
+Execution must run on the same application thread that constructed the receiver.
+Capture and controls recheck the native peer, this process's PID/start, actual
+listener binding and configuration under a bounded native routing lock, then
+invoke a **short synchronous callback while that lock remains held**. Async
+callbacks, deferred task scheduling, waiting for drain, and routing publication
+are not valid mutation callbacks. Complete bounded waits outside the fence;
+revalidate authority for every subsequent mutation rather than treating a gate
+opened earlier as ongoing permission.
+`execution_deadline()` exposes the grant's original deadline only on the owner
+thread during its synchronous callback, and always clears that callback context
+on return or failure. Resource callbacks must recheck it before committing an
+acquisition made during the callback; opening a resource does not renew the
+budget or authorize deferred work.
+
+Capture, `ACTIVATE_RESOURCES`, `ACTIVATE_SERVING`, `RESERVE_SINGLETON`,
+`ACTIVATE_SINGLETON`, adoption and rollback undrain
+require this receiver to be the exact active publication. Drain and retirement require an exact previous receiver and
+a distinct, identity-checked active successor. Generation authority comes from
+the routing owner, not the application's startup generation, because promotion
+and rollback advance a process's publication generation. Read-only `ATTEST`
+and `ATTEST_PREPARED` do **not** acquire routing authority: final verification
+may already hold that fence. Their callbacks return only the exact
+PID/start/version/configuration identity fields plus the boolean `ready` or
+`prepared`, respectively. Preparation is separate from serving readiness.
+Neither can mutate, capture secrets or claim current routing ownership.
+`ACTIVATE_RESOURCES` is separately attenuated from `ADOPT`: acquiring writable
+resources after publication is not serving readiness or permission to acquire
+singleton resources that remain predecessor-owned until exact exit.
+`ACTIVATE_SERVING` is a separate grant for committing an already prepared
+foreground serving graph. It must not perform async startup or treat route
+installation alone as readiness. The adopter verifies its actual listener and
+serving resources; foreground readiness is not a claim of final post-exit adoption.
+`RESERVE_SINGLETON` and `ACTIVATE_SINGLETON` separately attenuate short
+resource reservation and admission commits. They require the exact active
+receiver and do not themselves prove predecessor exit: the adopter must check
+its retained native exit reference before acquiring predecessor-owned resources.
+Async transport/graph preparation remains outside the routing fence, with
+admission closed and an unrenewed reservation budget. Later activation requires
+a fresh grant and does not imply complete `ADOPT`. Publication comparisons
+require matching fields **and JSON types**; numeric coercion is not identity.
+
+The adopter must independently establish client birth evidence, safely marshal
+requests to the application thread, supply actual listener/configuration
+getters, and wire application-specific controls and exit confirmation.
+`test_private_receiver.py` exercises capability attenuation, replay refusal,
+strict publication and local-state rechecks, thread ownership and fence scope.
+This component does not enable automatic retirement or complete an application's
+capture/handoff contract.
 
 ### `zdd.diagnostics` -- daemon-health audit + repair
 

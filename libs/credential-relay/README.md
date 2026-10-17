@@ -23,6 +23,10 @@ from every venv — hence a lib installed into each, vendored the same way as
 - `credential_relay.sources` — `CredentialSource` protocol.
 - `credential_relay.sources.{git_credential,gh_auth,az_login}` — generic
   host-credential sources (shell out to host `git` / `gh` / `az`).
+- `credential_relay.token_gate.RelayTokenGate` — explicit immutable ownership of
+  build-time validator/authorizer composition and static scope fallback. Builder
+  callbacks retain any-match and remembered scope-denial behavior. This owner
+  does not itself serialize callbacks or authorize a runtime handoff.
 
 ## Wire protocol
 

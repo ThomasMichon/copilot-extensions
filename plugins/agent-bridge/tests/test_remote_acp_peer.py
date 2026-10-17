@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import logging
 import json
+import os
 import socket
 import ssl
 import subprocess
@@ -33,6 +34,7 @@ from agent_bridge.session_manager import session_manager_from_config
 from agent_bridge.models import ServiceConfig
 from agent_bridge.events import EventLog
 from agent_bridge import telemetry
+from agent_bridge.launch_runtime import executing_executable
 
 
 def authenticated_wire(spec, context, cookies=None):
@@ -78,17 +80,20 @@ def peer(tmp_path):
         sock.bind(("localhost", 0))
         port = sock.getsockname()[1]
     context = ssl.create_default_context(cafile=str(cert_path))
+    error_path = tmp_path / "peer-stderr.log"
+    error_log = error_path.open("wb")
     proc = subprocess.Popen(
-        [sys.executable, str(Path(__file__).with_name("remote_acp_peer.py")),
+        [str(executing_executable()), str(Path(__file__).with_name("remote_acp_peer.py")),
          str(port), str(cert_path), str(key_path)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **no_window_kwargs(),
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        stdout=subprocess.DEVNULL, stderr=error_log, **no_window_kwargs(),
     )
     url = f"https://localhost:{port}"
     try:
         with httpx.Client(verify=context, trust_env=False, timeout=1) as probe:
             for _ in range(100):
                 if proc.poll() is not None:
-                    pytest.fail("Synthetic server failed: " + proc.stderr.read().decode())
+                    pytest.fail("Synthetic server failed: " + error_path.read_text()[-8192:])
                 try:
                     if probe.get(url + "/evidence").status_code == 200:
                         break
@@ -104,7 +109,10 @@ def peer(tmp_path):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=5)
-        proc.stderr.close()
+        error_log.close()
+        diagnostics = error_path.read_text(encoding="utf-8", errors="replace")
+        if diagnostics:
+            print("Synthetic peer stderr:\n" + diagnostics[-8192:], file=sys.stderr)
 
 
 async def wait_event(events, kind, wire=None):

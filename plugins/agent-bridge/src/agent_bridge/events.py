@@ -87,6 +87,32 @@ class EventLog:
         )
 
     @classmethod
+    def from_captured_events(
+        cls, events: list[SseEvent], next_id: int | None, *,
+        db: Database, session_id: str, acp_session_id: str | None,
+        worktree_id: str | None,
+    ) -> EventLog:
+        """Hydrate a validated private tail without DB flush/read or emitted events."""
+        ids = [event.id for event in events]
+        if (
+            type(next_id) is not int or next_id <= max(ids, default=0)
+            or ids != sorted(set(ids)) or any(index <= 0 for index in ids)
+        ):
+            raise ValueError("Invalid captured event cursor")
+        log = cls(
+            db=db, session_id=session_id, acp_session_id=acp_session_id,
+            worktree_id=worktree_id,
+        )
+        for evt in events:
+            log._events.append(evt)
+            log._track_tool_event(evt)
+            if evt.id == 1:
+                log._telemetry.set_log_origin(evt.timestamp)
+            log._telemetry.observe(evt.event, evt.data, event_id=evt.id)
+        log._next_id = next_id
+        return log
+
+    @classmethod
     def from_db(
         cls,
         db: Database,

@@ -19,12 +19,15 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ..session_preferences import MAX_RECEIPT_BYTES, validate_receipt
 
 from . import osutil
 from . import protocol as proto
+
+if TYPE_CHECKING:
+    from .acp_boundary import AcpWireBoundary
 
 log = logging.getLogger("agent-bridge.session-host")
 
@@ -85,6 +88,9 @@ class SessionHost:
         self._max_seq = 0
         self._ack_cursor = 0
         self._front: _Front | None = None
+        self._attachment_epoch = 0
+        self._private_attachment: Any = None
+        self._private_acp_boundary: AcpWireBoundary | None = None
         self._child_exit: int | None = None
         self._on_child_exit = on_child_exit
         self._child_done = asyncio.Event()
@@ -174,6 +180,8 @@ class SessionHost:
                 break
             self._max_seq += 1
             self._frames[self._max_seq] = line
+            if self._private_acp_boundary is not None:
+                self._private_acp_boundary.observe(line, to_child=False)
             # Observe (never gate) the agent->client frame for turn state.
             self._observe_frame(line, to_child=False)
             front = self._front
@@ -235,6 +243,18 @@ class SessionHost:
 
     async def _handle_front(self, reader: asyncio.StreamReader,
                             writer: asyncio.StreamWriter) -> None:
+        if self._private_attachment is not None:
+            from zdd.private_protocol import PrivateIPCError
+
+            try:
+                ticket = await self._private_attachment.read_ticket(reader)
+                front = await self._private_attachment.prepare_stream(reader, writer, ticket)
+                await self._serve_front(front)
+            except PrivateIPCError:
+                log.warning("Private Session Host attachment refused")
+            finally:
+                writer.close()
+            return
         # Displace any stale front (its process almost always already gone).
         old = self._front
         if old is not None and not old.closed:
@@ -263,7 +283,11 @@ class SessionHost:
         self._ack_cursor = max(self._ack_cursor, last_acked)
         front = _Front(reader, writer, next_seq=last_acked + 1)
         self._front = front
+        self._attachment_epoch += 1
+        await self._serve_front(front)
 
+    async def _serve_front(self, front: _Front) -> None:
+        reader, writer = front.reader, front.writer
         await self._safe_send(
             front, proto.MsgType.HELLO,
             proto.pack_u64(self._max_seq) + proto.pack_u64(self._child.pid or 0)
@@ -279,9 +303,9 @@ class SessionHost:
                                   proto.pack_liveness(False, self._child_exit or 0))
 
         try:
-            while not self._closing:
+            while not self._closing and not front.closed:
                 msg = await proto.read_message(reader)
-                if msg is None:
+                if msg is None or front.closed or self._front is not front:
                     break  # front detached; child keeps running
                 mtype, payload = msg
                 if mtype == proto.MsgType.ACK:
@@ -306,9 +330,9 @@ class SessionHost:
             front.closed = True
             if self._front is front:
                 self._front = None
+                self._on_front_lost()
             with _suppress_close(writer):
                 writer.close()
-            self._on_front_lost()
 
     def _on_ack(self, seq: int) -> None:
         self._ack_cursor = max(self._ack_cursor, seq)
@@ -320,13 +344,23 @@ class SessionHost:
         # Observe (never gate) the client->agent frame for turn state, then relay
         # the bytes verbatim.
         self._observe_frame(payload, to_child=True)
+        if self._private_acp_boundary is not None:
+            self._private_acp_boundary.observe(payload, to_child=True)
         stdin = self._child.stdin
         if stdin is None:
+            if self._private_acp_boundary is not None:
+                self._private_acp_boundary.invalidate()
             return
         try:
             stdin.write(payload)
             await stdin.drain()
+        except asyncio.CancelledError:
+            if self._private_acp_boundary is not None:
+                self._private_acp_boundary.invalidate()
+            raise
         except (OSError, ConnectionError):
+            if self._private_acp_boundary is not None:
+                self._private_acp_boundary.invalidate()
             log.warning("failed to relay WRITE to child stdin")
 
     # -- protocol-aware turn state (observational; never gates the relay) ---
@@ -543,6 +577,8 @@ class SessionHost:
     async def close(self) -> None:
         self._closing = True
         self._cancel_reap_timer()
+        if self._private_attachment is not None:
+            self._private_attachment.close()
         if self._server is not None:
             self._server.close()
         if self._reader_task is not None:

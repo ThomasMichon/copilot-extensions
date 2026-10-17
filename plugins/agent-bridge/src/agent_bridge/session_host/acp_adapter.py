@@ -13,7 +13,7 @@ asyncio streams while two relay tasks shuttle bytes to/from the host:
 
 * host -> client: iterate ``client.frames()``, feed each frame's raw bytes into
   the pair (ClientSideConnection reads them as agent->client ACP), and **ack**
-  the frame (advancing the durable delivery cursor).
+  the frame (advancing the host's transport-delivery cursor, not a DB commit).
 * client -> host: read ClientSideConnection's outbound ACP bytes from the pair
   and relay them via ``client.write()`` into the child's stdin.
 
@@ -77,11 +77,19 @@ async def open_acp_streams(
 ) -> AcpStreams:
     """Bridge ``client`` into an ACP-ready ``(reader, writer)`` pair.
 
-    ``start_from`` is the last durably-acked frame seq (the caller must have
+    ``start_from`` is the last host-acked frame seq (the caller must have
     already ``attach``-ed the client at this cursor). Returns :class:`AcpStreams`;
     hand ``.reader``/``.writer`` to the ACP connection and ``await .aclose()``
-    when done.
+    when done. Automatic ACK follows stream write/drain, not SDK reducer
+    completion or independent event/turn database persistence.
     """
+    streams = await prepare_acp_streams()
+    start_acp_relays(client, streams, auto_ack=auto_ack)
+    return streams
+
+
+async def prepare_acp_streams() -> AcpStreams:
+    """Create owned ACP streams without any host reads, writes or relay tasks."""
     a, b = socket.socketpair()
     a.setblocking(False)
     b.setblocking(False)
@@ -90,16 +98,32 @@ async def open_acp_streams(
     # so size the relay readers to the protocol's max message -- matching the
     # child-stdout reader -- or ``readline`` raises LimitOverrunError and the
     # ACP receive loop dies ("Connection closed").
-    acp_reader, acp_writer = await asyncio.open_connection(
-        sock=a, limit=proto.MAX_MESSAGE_BYTES)
-    # End B: our relay side.
-    relay_reader, relay_writer = await asyncio.open_connection(
-        sock=b, limit=proto.MAX_MESSAGE_BYTES)
+    acp_writer = None
+    try:
+        acp_reader, acp_writer = await asyncio.open_connection(
+            sock=a, limit=proto.MAX_MESSAGE_BYTES)
+        relay_reader, relay_writer = await asyncio.open_connection(
+            sock=b, limit=proto.MAX_MESSAGE_BYTES)
+    except BaseException:
+        a.close()
+        b.close()
+        if acp_writer is not None:
+            acp_writer.close()
+        raise
 
-    streams = AcpStreams(
+    return AcpStreams(
         reader=acp_reader, writer=acp_writer,
         _pair_reader=relay_reader, _pair_writer=relay_writer, _tasks=[],
     )
+
+
+def start_acp_relays(
+    client: SessionHostClient, streams: AcpStreams, *, auto_ack: bool = True,
+) -> None:
+    """Start the existing byte-exact relays for an explicitly prepared pair."""
+    if streams._tasks:
+        raise RuntimeError("ACP relay pair is already active")
+    relay_reader, relay_writer = streams._pair_reader, streams._pair_writer
 
     async def _host_to_acp() -> None:
         try:
@@ -145,8 +169,14 @@ async def open_acp_streams(
         except (OSError, ConnectionError):
             pass
 
-    streams._tasks = [
-        asyncio.create_task(_host_to_acp(), name="session-host-to-acp"),
-        asyncio.create_task(_acp_to_host(), name="acp-to-session-host"),
-    ]
-    return streams
+    try:
+        streams._tasks.append(
+            asyncio.create_task(_host_to_acp(), name="session-host-to-acp"),
+        )
+        streams._tasks.append(
+            asyncio.create_task(_acp_to_host(), name="acp-to-session-host"),
+        )
+    except BaseException:
+        for task in streams._tasks:
+            task.cancel()
+        raise

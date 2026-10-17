@@ -192,25 +192,25 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-          "sha256": "39a8ed46121e1fc543f4e6b06942858704ff6cbb61cb4ecaaf5a36fe956daae8",
+          "sha256": "237419cbbdd06b91dbaad6b1e53222653af7e2ffe738b028954c7833e0013266",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-          "sha256": "30ae8988e1ad5215aaed4b3b2e5c00121f8cfa3e72b9a7ae1ca89ff3905273c9",
+          "sha256": "f2adc523c768c18244897f2ac423b61cd2291f7562e8c522a9c0203496da8963",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "2102d4ea8fcc4568cff920ca8220f22729e454777f08bc152758c2dc2f9879ed",
+          "sha256": "6f032aa59770dd268d3911cb30c2798d62c94a2ef033bef374f0ce1fd89aad80",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
-          "sha256": "29de15b8101e4a1daa3ad11707136e62ffdd41cb45e91c9abee5e4e0035dc5c5",
+          "sha256": "b16d9044ccd1f8fd37054825b4f4a6c4c6a4e2b4b79d2dd1b3b0f2a4086f9f95",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -872,13 +872,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-38.json",
-          "sha256": "ab375ccf530a0f9d49445751520554ea57ccdbad0077ad4b7dcbd0d0054e2e6b",
+          "sha256": "70188bd0f13803f5a55e6b30a01a46455f328ee1cc7f6a15b7c49f578d39dfd2",
           "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
           "generation": 38
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-38.json",
-          "sha256": "19fbd125186a95e09601eccf3b568bd7c6a993f844a08bbf74543cac37e57eba",
+          "sha256": "6f68d9baa2e1bde5d654a78610b08812a19417a78a8395a3539b26722590a454",
           "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
           "generation": 38
         },
@@ -896,13 +896,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-38.json",
-          "sha256": "6a1335ad6fde11e47f13c28e5917b62fa66e1600ae5a0f95796ff71374b4ada8",
+          "sha256": "80915eeb3faaadc713d3bbd3ae0c5266028d989986cc894190f09d006fa4c243",
           "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
           "generation": 38
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-38.json",
-          "sha256": "cbb123a01be06c4fdc56b64946e9e20711ec0f608b07c1c0c7b9174955aeeb6f",
+          "sha256": "06f95e77d893c5703aedef0c8745bc5ddb98fcab8de47522099dca3d4bdf03ae",
           "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
           "generation": 38
         },
@@ -950,7 +950,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-38.json",
-          "sha256": "445ffcf9384c61e7b1761dc8d781ad64ad3add8527817b919c6ac271b03ce499",
+          "sha256": "f4a830fabc02c5dd4b69c8373067a047bbcb8d410d174e4c036548b533c4582b",
           "role": "Independently expected progress and freshness projection, verified through actual manager rehydration with live failure followed by historical success.",
           "generation": 38
         },
@@ -1052,13 +1052,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-39.json",
-          "sha256": "57fd13eec7f88601e38a2058d8b70a008b571f17d960f7d64fe490d9cffcaa06",
+          "sha256": "9e7c9ff85677ddaaff6b3eed2d156f30af536b4e9076f43789c99cd913932ea8",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-39.json",
-          "sha256": "5ca67ff2dc083e38fe1a5eb26750ef6fc01f6680a3415969c67eae65a4ffd4dc",
+          "sha256": "005b0ef1f335c564f027973fb826fc40bcada2fc0c89fe68a57d00b856c40c9c",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
@@ -1076,13 +1076,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-39.json",
-          "sha256": "6aaf466d5a11fdf1b769b3c2885255a1ef24d61a9e203979691d0aa53b0a1f31",
+          "sha256": "16706d4bf66aa4183b78bfbf2ef14278acb173d621ede608cf84d8fc5bf0a0fc",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-39.json",
-          "sha256": "4beadda60046e1ba6faf33479043c27680c8451c128f3aafd5d246f8e1adee9e",
+          "sha256": "169d888c4800d84fac9283b0a24e5bd579cfda7cfdb9fd23c0d71bcfc1ab716e",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
@@ -1130,7 +1130,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-39.json",
-          "sha256": "cf3545221721bd2541abaa4dcbe59dcbe5b2ab4f0dbf4979618a3a1f4c17a305",
+          "sha256": "adacdb33b2cc5301afd5c3c087d8aeddfa495f292703eda5bd163262b32c9838",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
@@ -3077,6 +3077,70 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
           "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
           "capture_method": "Re-attest committed carrier version extraction against unchanged independent receipt wait packet and version-skew expectations."
+        },
+        {
+          "commit": "8ff64a09a83ff0a04eccf990715cf270457b6ce7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "363c1e7d3964476f0a90a95c9067f2cdd099dfc0",
+          "capture_method": "Committed-source compatibility re-attestation: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests; add only the opt-in private attachment frame to current Session Host evidence. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "8ff64a09a83ff0a04eccf990715cf270457b6ce7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "a761babc5786ddd6c497ee4037f117013e5f0dc4",
+          "capture_method": "Committed-source compatibility re-attestation: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests; add only the opt-in private attachment frame to current Session Host evidence. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "8ff64a09a83ff0a04eccf990715cf270457b6ce7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "811f65f8c9dfdc4e4363b443122d6e15e2dd2d03",
+          "capture_method": "Committed-source compatibility re-attestation: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests; add only the opt-in private attachment frame to current Session Host evidence. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "8ff64a09a83ff0a04eccf990715cf270457b6ce7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
+          "capture_method": "Committed-source compatibility re-attestation: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests; add only the opt-in private attachment frame to current Session Host evidence. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "5191c6bd19f12a6a4b98ea1a846f3206b36bbaba",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "363c1e7d3964476f0a90a95c9067f2cdd099dfc0",
+          "capture_method": "Committed-source generation-39 compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "5191c6bd19f12a6a4b98ea1a846f3206b36bbaba",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "a761babc5786ddd6c497ee4037f117013e5f0dc4",
+          "capture_method": "Committed-source generation-39 compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "5191c6bd19f12a6a4b98ea1a846f3206b36bbaba",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "811f65f8c9dfdc4e4363b443122d6e15e2dd2d03",
+          "capture_method": "Committed-source generation-39 compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "5191c6bd19f12a6a4b98ea1a846f3206b36bbaba",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
+          "capture_method": "Committed-source generation-39 compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
         }
       ],
       "support_window": "HTTP generations 1 through 39 remain supported. Immutable native33, workspace34, qualified-peer35, provider-creation36, render-cache37 and remote-ACP38 evidence is retained independently from receipt generation 39.",
@@ -3118,7 +3182,7 @@
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-          "sha256": "7d29a673827436d7445fcaa488d0140ab89872d5d8fe2aae6e002e9ed4f73cc8",
+          "sha256": "9473a9a76e14beb44e08f7fe334e964d74550d4430f48ca623d3247c0a486360",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -3162,7 +3226,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json",
-          "sha256": "73c717cdbb604b5f2fb1bb8de8769f3d80c59e439dbc716e9d95e787f749cdd5",
+          "sha256": "ed0ce7826b042ac78d7fe9be48dacdc2c715ac831554f7835c19ffd3395330b1",
           "role": "current framing, control/data messages and optional preference HELLO tail",
           "generation": 1
         },
@@ -3174,7 +3238,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-authority-v1.json",
-          "sha256": "e749d38e4622f08c41f1a97ae70296621327083ca2147575ef81d1de32c60758",
+          "sha256": "0ae262187c3957c6a11731bc0ad00c2fe7287cd6238a96b6a3fd4d1b23c222f0",
           "role": "launch-bound wrapper v1 authority and receipt-v2 validity vectors",
           "generation": 1
         },
@@ -3186,13 +3250,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-exec.json",
-          "sha256": "ce65e7684904d022c4de1e9b8a9305bf3474937c2c084a570df3afb3487ecf25",
+          "sha256": "3235dcfbf0c7ee40063e5947426303d573058c295b420e053390cf22d2e037f5",
           "role": "terminal exec consent, private environment closure and PID preservation",
           "generation": 1
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-consent.json",
-          "sha256": "2b4c1f0581d2496cacf80284e64f096b57d7893fb0f028312f5ec581263b8015",
+          "sha256": "3d67eaecb4dc4c137b631051a92da0d48d1e186ed62c912c5649ca08293f8162",
           "role": "complete staged authority closure and consent-owner failure ordering",
           "generation": 1
         },
@@ -3327,6 +3391,38 @@
           "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
           "generation": 1,
           "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "8ff64a09a83ff0a04eccf990715cf270457b6ce7",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "source_git_blob": "b7b62f6ab7bb3ca499359f8a3fdb26e037a79743",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "8ff64a09a83ff0a04eccf990715cf270457b6ce7",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "8ff64a09a83ff0a04eccf990715cf270457b6ce7",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+          "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "8ff64a09a83ff0a04eccf990715cf270457b6ce7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+          "source_git_blob": "54bf4599b2af3b1147fe0d2f9e71a2bd1249d803",
+          "capture_method": "Committed-source compatibility re-attestation: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests; add only the opt-in private attachment frame to current Session Host evidence. Historical fixtures remain unchanged."
         }
       ],
       "support_window": "Session Host generation 1 is the only published envelope and remains supported by the current frontend mux.",
