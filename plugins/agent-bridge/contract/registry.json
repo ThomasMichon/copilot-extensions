@@ -204,7 +204,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "2102d4ea8fcc4568cff920ca8220f22729e454777f08bc152758c2dc2f9879ed",
+          "sha256": "ecad57c5b3c14a70f33d8031b25d9dc4e3df8a344ce6d585e26356358a818d9f",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -258,7 +258,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
-          "sha256": "6f15a86baacea36999ec24347e5a80df78ae0596e706746ec1dc2720118bf8cc",
+          "sha256": "de7ee7f6fdfb6aa8404efabb56a3b8b225f86da70c6d17a5578837b546366a3a",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -980,7 +980,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-39.json",
-          "sha256": "45455f171ae7960b4c561b0f0062af4ffe2784bd357bd82fc310fb1e14d0a844",
+          "sha256": "e90d180f3a090c6708a46d86e81a1cb03f2e7952551e7bf565a9d9fa9285064a",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
@@ -1076,7 +1076,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-39.json",
-          "sha256": "6aaf466d5a11fdf1b769b3c2885255a1ef24d61a9e203979691d0aa53b0a1f31",
+          "sha256": "27e4d5f8a782727fc2f8b77466a825ab0344936df1a063e89ab3ce86ed73a5bb",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
@@ -3077,6 +3077,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
           "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
           "capture_method": "Re-attest committed carrier version extraction against unchanged independent receipt wait packet and version-skew expectations."
+        },
+        {
+          "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "94c94293ff2a03e4b959639cd5adb1fa0577baf6",
+          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after the internal SSH profile-authority correction; native profile and missing-alias regressions preserve valid routing."
+        },
+        {
+          "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+          "capture_method": "Preserve independent receipt-39 packet and version-skew expectations after selecting configured SSH profiles without topology user or port overrides."
         }
       ],
       "support_window": "HTTP generations 1 through 39 remain supported. Immutable native33, workspace34, qualified-peer35, provider-creation36, render-cache37 and remote-ACP38 evidence is retained independently from receipt generation 39.",
