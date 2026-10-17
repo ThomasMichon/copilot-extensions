@@ -388,6 +388,26 @@ def test_audit_failure_reports_committed_record_truthfully(history, capsys, monk
     assert (path.parent / report["backup"]).exists()
 
 
+def test_committed_audit_uses_the_backup_returned_by_the_shared_writer(history, capsys, monkeypatch):
+    path = history[2]
+    apply_repair = repair.tracking_yaml_repair.apply_repair
+
+    def differently_named_backup(*args):
+        audit = next(path.parent.glob(f"{path.name}.machine-label-*.json"))
+        assert json.loads(audit.read_text())["backup"] is None
+        backup = apply_repair(*args)
+        actual = backup.with_name("actual-original-bytes.bak")
+        backup.rename(actual)
+        return actual
+
+    monkeypatch.setattr(repair.tracking_yaml_repair, "apply_repair", differently_named_backup)
+    code, report = run(capsys, "--fix")
+    assert code == 0 and report["backup"] == "actual-original-bytes.bak"
+    receipt = json.loads((path.parent / report["audit"]).read_text())
+    assert receipt["state"] == "committed" and receipt["backup"] == report["backup"]
+    assert (path.parent / receipt["backup"]).exists()
+
+
 def test_no_competing_migration_parser_surface():
     with pytest.raises(SystemExit):
         arguments("--migrate-owner", RECORD)

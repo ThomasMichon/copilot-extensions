@@ -102,7 +102,7 @@ class RepoEntry:
     """A single repo in the registry."""
 
     name: str
-    repo_class: str = "reference"  # reference | singleton | worktree
+    repo_class: str = "reference"  # reference | singleton | worktree | knowledge
     remote: str = ""
     default_branch: str = ""
     tags: list[str] = field(default_factory=list)

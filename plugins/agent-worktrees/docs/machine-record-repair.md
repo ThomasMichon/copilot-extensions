@@ -79,7 +79,8 @@ The existing private original-byte `.repair-<digest>.bak` backup and atomic
 replacement writer are reused. A `.machine-label-<digest>.json` receipt beside
 the record retains exact old/new labels, before/after checksums, receiving
 namespace evidence, proof type and backup name. It is `prepared` before the
-record replacement and `committed` afterward. A final receipt failure returns
+record replacement, with no claimed backup yet, and `committed` afterward using
+the actual backup returned by the shared writer. A final receipt failure returns
 exit 1 with `repaired: true`, the backup and audit names, and an explicit error:
 the already-committed record write is not reported as a harmless refusal.
 An incomplete receipt requires inspection, not a blind retry.

@@ -94,6 +94,7 @@ def _prove_history(data: dict, config) -> None:
     ):
         raise ValueError("removed checkout requires the configured explicit native execution-space key")
     registered = repos.read_registry(strict=True).repos.get(config.repo_name)
+    # Both are established canonical classes validated by repos.VALID_CLASSES.
     if registered is None or registered.repo_class not in ("worktree", "knowledge"):
         raise ValueError("removed checkout requires canonical worktree/knowledge registration")
     local_root = registered.local_path(config.platform)
@@ -182,7 +183,7 @@ def _apply(project: str, record_id: str, previous: str, target: str | None, obse
             "proof": proof, "checkout_path": data["worktree_path"],
             "anchor": config.default_repo.anchor, "worktree_root": config.default_repo.worktree_root,
             "before_sha256": digest, "after_sha256": hashlib.sha256(fixed.encode("utf-8")).hexdigest(),
-            "references": "preserved", "backup": f"{path.name}.repair-{digest[:16]}.bak",
+            "references": "preserved", "backup": None,
         }
         with tracking._RecordLock(path, blocking=False) as lock:
             if not lock.acquired:
@@ -193,6 +194,7 @@ def _apply(project: str, record_id: str, previous: str, target: str | None, obse
                 raise ValueError(f"prior machine-label audit exists; inspect before retrying: {audit}")
             tracking._atomic_write(audit, json.dumps(receipt, indent=2) + "\n")
             backup = tracking_yaml_repair.apply_repair(path, original, fixed)
+            receipt["backup"] = backup.name
             receipt["state"] = "committed"
             try:
                 tracking._atomic_write(audit, json.dumps(receipt, indent=2) + "\n")
