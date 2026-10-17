@@ -87,6 +87,70 @@ def selectable_tests(tmp_path, monkeypatch):
     return tests
 
 
+def test_subsuite_shards_partition_existing_groups_exactly_once(selectable_tests):
+    groups = runner._test_file_groups("example", 1)
+    shards = [runner._test_file_groups("example", 1, shard=(index, 2)) for index in (1, 2)]
+    assert shards == [groups[::2], groups[1::2]]
+    assert sorted(path for shard in shards for group in shard for path in group) == sorted(
+        path for group in groups for path in group
+    )
+
+
+@pytest.mark.parametrize("index", [1, 2])
+def test_subsuite_shard_reaches_contained_runner_with_original_limits(selectable_tests, monkeypatch, index):
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **kw: Path(sys.executable))
+    calls = []
+    monkeypatch.setattr(runner, "run_contained", lambda command, **kw: calls.append((command, kw)) or 0)
+    limits = runner.Limits(wall_seconds=30, max_processes=17, max_memory_mb=256, max_temp_mb=64)
+    assert runner.run_plugin(
+        "example", "unused", reinstall=False, kexpr=None, shard=(index, 2),
+        limits=limits, plugin_timeout=60, test_timeout=7, max_files_per_subsuite=1,
+    ) == 0
+    expected = runner._test_file_groups("example", 1)[index - 1::2]
+    assert len(calls) == len(expected)
+    for (command, kwargs), group in zip(calls, expected):
+        assert command[-1] == str(group[0].relative_to(selectable_tests.parent))
+        assert "--timeout=7" in command
+        assert kwargs["limits"] == limits
+
+
+@pytest.mark.parametrize("value", ["0/2", "3/2", "1/0", "1", "x/2", "1/2/3"])
+def test_subsuite_shard_rejects_invalid_cli_values(value):
+    with pytest.raises(SystemExit) as raised:
+        runner.main(["example", "--sub-suite-shard", value])
+    assert raised.value.code == 2
+
+
+@pytest.mark.parametrize("arguments", [
+    [], ["example", "other"], ["example", "--all"], ["example", "--changed"],
+    ["example", "--prepare-only"], ["example", "--guards"], ["example", "-k", "match"],
+    ["example", "--test-file", "tests/test_selected.py"],
+])
+def test_subsuite_shard_requires_an_unfiltered_named_suite(arguments):
+    with pytest.raises(SystemExit) as raised:
+        runner.main([*arguments, "--sub-suite-shard", "1/2"])
+    assert raised.value.code == 2
+
+
+def test_subsuite_shard_rejects_empty_shards_before_preparation(selectable_tests):
+    with pytest.raises(ValueError, match="more shards than sub-suites"):
+        runner._test_file_groups("example", 25, shard=(1, 2))
+
+
+def test_dispatch_ci_shards_are_required_and_keep_job_budget():
+    import yaml
+
+    workflow = yaml.safe_load((SCRIPT.parent.parent / ".github" / "workflows" / "ci.yml").read_text())
+    jobs = workflow["jobs"]
+    resolve = next(step["run"] for step in jobs["discover"]["steps"] if step.get("id") == "set")
+    assert "smoke_matrix=" in resolve
+    assert "('1/2', '2/2')" in resolve
+    assert "matrix.shard" in jobs["smoke"]["name"]
+    assert "matrix.shard" in jobs["smoke"]["steps"][4]["run"]
+    assert "12 || 8" in jobs["smoke"]["timeout-minutes"]
+    assert "smoke" in jobs["pr-gate"]["needs"]
+
+
 def test_index_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")

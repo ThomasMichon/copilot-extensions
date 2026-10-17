@@ -1442,6 +1442,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       smoke: ${{ steps.set.outputs.smoke }}
+      smoke_matrix: ${{ steps.set.outputs.smoke_matrix }}
       heavy: ${{ steps.set.outputs.heavy }}
       standalone_service: ${{ steps.set.outputs.standalone_service }}
     steps:
@@ -1472,6 +1473,8 @@ jobs:
           echo "Full set:  $FULL"
           echo "Fast set:  $SMOKE"
           echo "smoke=$SMOKE" >> "$GITHUB_OUTPUT"
+          SMOKE_MATRIX=$(echo "$SMOKE" | python -c "import json,sys; print(json.dumps({'include': [{'plugin': p, 'shard': s} for p in json.load(sys.stdin) for s in (('1/2', '2/2') if p == 'agent-dispatch' else ('',))]}))")
+          echo "smoke_matrix=$SMOKE_MATRIX" >> "$GITHUB_OUTPUT"
           if echo "$FULL" | python -c "import json,sys,os; sys.exit(0 if os.environ['HEAVY_PLUGIN'] in json.load(sys.stdin) else 1)"; then
             echo "heavy=true" >> "$GITHUB_OUTPUT"
           else
@@ -1479,18 +1482,18 @@ jobs:
           fi
 
   smoke:
-    name: ${{ matrix.plugin }}
+    name: ${{ matrix.shard != '' && format('{0} (shard {1})', matrix.plugin, matrix.shard) || matrix.plugin }}
     needs: discover
     if: needs.discover.outputs.smoke != '[]' && needs.discover.outputs.smoke != ''
     runs-on: ubuntu-latest
+    # Dispatch partitions the existing sub-suites across two required jobs.
     # These consumers include setup and independent native/integration lanes.
     # Bridge's real TLS HTTP2/WSS lane exceeded eight minutes including cleanup
     # despite passing steps; retain fresh peer processes and a bounded 12m job.
     timeout-minutes: ${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}
     strategy:
       fail-fast: false
-      matrix:
-        plugin: ${{ fromJson(needs.discover.outputs.smoke) }}
+      matrix: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}
     steps:
       - uses: actions/checkout@v4
       - name: Fetch Agent Bridge contract provenance
@@ -1501,7 +1504,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test ${{ matrix.plugin }}
-        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+        run: python tools/run-plugin-tests.py ${{ matrix.plugin }} ${{ matrix.shard != '' && format('--sub-suite-shard {0}', matrix.shard) || '' }}
       - name: Test shared SSH proxy contracts
         if: matrix.plugin == 'agent-bridge'
         # ssh-manager is now consumed as a `uv`-editable canonical

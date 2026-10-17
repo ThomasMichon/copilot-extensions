@@ -1714,6 +1714,46 @@ class TestReciprocalDisposal:
         assert progress.reciprocal_snapshot(primary, sibling, sibling.yaml_path) is None
         assert [path.read_bytes() for path in paths] == before
 
+    @pytest.mark.parametrize("damaged", ["primary", "sibling", "receipt"])
+    def test_pair_invalid_utf8_evidence_is_already_fail_closed(self, tmp_path, damaged):
+        from dataclasses import replace
+        from agent_worktrees import reap_cli
+        from agent_worktrees import terminal_pair_progress as progress
+
+        primary = tracking.create_new_record(
+            "primary", "worktree/primary", str(tmp_path / "primary"), "demo", "host",
+            "windows", tmp_path / "demo" / "worktrees",
+        )
+        sibling = tracking.create_new_record(
+            "sibling", "worktree/sibling", str(tmp_path / "sibling"), "knowledge", "host",
+            "windows", tmp_path / "knowledge" / "worktrees",
+        )
+        for record, role, project, target in (
+            (primary, "harness", "knowledge", "sibling"),
+            (sibling, "knowledge", "demo", "primary"),
+        ):
+            record.owner, record.kind, record.status, record.origin = "dispatcher", "bridge", "complete", "delegate"
+            record.pair_id, record.pair_role, record.pair_kind = "pair", role, "worktree"
+            record.pair_ref = tracking.format_claim_ref("host", project, target)
+            tracking.save_record(record, record.yaml_path)
+        progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
+        paired_primary = replace(primary)
+        for record in (primary, sibling):
+            for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+                setattr(record, field, None)
+            tracking.save_record(record, record.yaml_path)
+        paths = (primary.yaml_path, sibling.yaml_path, progress.receipt_path(sibling.yaml_path))
+        paths[("primary", "sibling", "receipt").index(damaged)].write_bytes(b"\xff")
+        before = [path.read_bytes() for path in paths]
+        assert progress.gc_preservation_reason(sibling.yaml_path) == "terminal-pair-receipt-unverified"
+        removed, reasons = reap_cli._remove_managed_worktree(
+            sibling, types.SimpleNamespace(), sibling.yaml_path.parent,
+        )
+        assert not removed and reasons == ["terminal-pair-receipt-unverified"]
+        if damaged != "primary":
+            assert progress.reciprocal_snapshot(paired_primary, sibling, sibling.yaml_path) is None
+        assert [path.read_bytes() for path in paths] == before
+
     @pytest.mark.parametrize("changed_half", ["primary", "sibling"])
     def test_pair_gc_readback_detects_change_during_identity_loading(self, tmp_path, monkeypatch, changed_half):
         from agent_worktrees import reap_cli

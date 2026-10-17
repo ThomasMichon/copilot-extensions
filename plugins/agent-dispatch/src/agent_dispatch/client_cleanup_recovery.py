@@ -10,13 +10,14 @@ class CleanupRecoveryClientMixin:
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion",
             json={"conclusion_state": conclusion_state, "conclusion_detail": conclusion_detail,
-                  "detail": detail, "claim_token": claim_token, "claimant_machine": claimant_machine},
+                  "detail": detail, "claim_token": claim_token,
+                  **({"claimant_machine": claimant_machine} if claimant_machine is not None else {})},
         ))
 
     def claim_spawn_conclusion_retry(self, key: str, *, claimant_machine: str | None = None) -> dict:
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion/claim",
-            json={"claimant_machine": claimant_machine},
+            **({"json": {"claimant_machine": claimant_machine}} if claimant_machine is not None else {}),
         ))
 
     def validate_spawn_conclusion_claim(
@@ -24,7 +25,8 @@ class CleanupRecoveryClientMixin:
     ) -> dict:
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion/validate",
-            json={"claim_token": claim_token, "claimant_machine": claimant_machine},
+            json={"claim_token": claim_token,
+                  **({"claimant_machine": claimant_machine} if claimant_machine is not None else {})},
         ))
 
     def recover_held_cleanup(

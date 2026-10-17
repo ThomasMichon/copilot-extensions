@@ -451,6 +451,14 @@ python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.
 python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
 ```
 
+Required CI runs Agent Dispatch as two `--sub-suite-shard 1/2` and
+`--sub-suite-shard 2/2` jobs under the unchanged 12-minute job deadline.
+Sharding assigns the existing sorted file-group sub-suites round-robin without
+changing their composition, containment limits, or test selection. Both shards
+must pass the required PR gate. The unsharded local command still runs the full
+suite sequentially. Sharding requires one named plugin and cannot combine with
+test-file, keyword, guard, or preparation-only filters; empty shards fail.
+
 For a focused lane, repeat `--test-file tests/test_name.py` with exactly one
 named plugin to avoid importing unrelated test modules. The selector accepts
 only existing, unlinked Python test files inside that plugin's `tests` tree;

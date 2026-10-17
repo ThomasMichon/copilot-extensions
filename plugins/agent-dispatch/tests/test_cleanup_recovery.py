@@ -899,7 +899,7 @@ def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch,
     async def observe_lease_host(request, call_next):
         if (request.method == "POST" and request.url.path.startswith("/spawn-reservations/")
                 and request.url.path.rsplit("/", 1)[-1] in {"claim", "validate", "conclusion"}):
-            body = await request.json()
+            body = json.loads(await request.body() or b"{}")
             rpc_hosts.append((request.url.path.rsplit("/", 1)[-1], body.get("claimant_machine")))
         return await call_next(request)
 
@@ -942,6 +942,44 @@ def test_ordinary_bridge_identity_and_housekeeping_host_fence(held, monkeypatch,
         assert supervisor.client is client
         assert "spawn_worktree" not in snapshot
     assert transport.is_closed
+
+
+@pytest.mark.parametrize("claimant", [None, "host"])
+@pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
+def test_conclusion_client_preserves_legacy_request_shape(claimant, boundary):
+    import httpx
+    from agent_dispatch.client import DispatchClient
+
+    observed = []
+
+    def respond(request):
+        observed.append(request)
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    with DispatchClient("http://fixture") as client:
+        client._http.close()
+        client._http = httpx.Client(base_url="http://fixture", transport=httpx.MockTransport(respond))
+        if boundary == "claim":
+            client.claim_spawn_conclusion_retry("key", claimant_machine=claimant)
+        elif boundary == "validate":
+            client.validate_spawn_conclusion_claim("key", "token", claimant_machine=claimant)
+        else:
+            client.record_spawn_conclusion(
+                "key", conclusion_state="complete", conclusion_detail="{}",
+                claim_token="token", claimant_machine=claimant,
+            )
+    request = observed[0]
+    if boundary == "claim" and claimant is None:
+        assert request.content == b""
+        assert "content-type" not in request.headers
+    else:
+        body = json.loads(request.content)
+        if claimant is None:
+            assert "claimant_machine" not in body
+        else:
+            assert body["claimant_machine"] == claimant
+        if boundary != "claim":
+            assert body["claim_token"] == "token"
 
 
 @pytest.mark.parametrize("machine_arg,local_machine", [

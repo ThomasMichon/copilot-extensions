@@ -169,6 +169,10 @@ unresolved body or orphan pending cleanup.
 `spawn.spawned`, `spawn.failed`, `spawn.settled`, `spawn.rearmed`) are published
 on the SSE bus.
 
+Conclusion calls include `claimant_machine` only when explicitly supplied.
+An unbound legacy claim remains a bodyless POST; a host-bound supervisor sends
+its resolved identity through claim, validation, and outcome publication.
+
 ### Routing assignment provenance
 
 A caller may attach one immutable routing assignment to the reservation key

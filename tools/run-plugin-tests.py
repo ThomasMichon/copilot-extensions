@@ -343,10 +343,23 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     return py
 
 
+def _parse_subsuite_shard(value: str) -> tuple[int, int]:
+    try:
+        index, count = (int(part) for part in value.split("/"))
+        if not 1 <= index <= count:
+            raise ValueError
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("sub-suite shard must be INDEX/COUNT with 1 <= INDEX <= COUNT") from exc
+    return index, count
+
+
 def _test_file_groups(
     name: str, max_files: int, *, filtered: bool = False,
     test_files: tuple[str, ...] = (),
+    shard: tuple[int, int] | None = None,
 ) -> list[list[Path]]:
+    if shard is not None and (filtered or test_files):
+        raise ValueError("sub-suite sharding requires an unfiltered suite")
     tests = _plugin_dir(name) / "tests"
     if test_files:
         files = []
@@ -369,7 +382,15 @@ def _test_file_groups(
         files = sorted(tests.rglob("test_*.py"))
     if filtered and files:
         return [files]
-    return partition(files, max_files) or [[]]
+    groups = partition(files, max_files) or [[]]
+    if shard is not None:
+        index, count = shard
+        if not 1 <= index <= count:
+            raise ValueError("invalid sub-suite shard")
+        if count > len(groups):
+            raise ValueError("more shards than sub-suites")
+        groups = groups[index - 1::count]
+    return groups
 
 
 def run_plugin(
@@ -388,12 +409,13 @@ def run_plugin(
     allow_explicit_tiers: bool = False,
     allow_host_state: bool = False,
     test_files: tuple[str, ...] = (),
+    shard: tuple[int, int] | None = None,
 ) -> int:
     if test_files and prepare_only:
         raise ValueError("--test-file cannot be combined with --prepare-only")
     groups = _test_file_groups(
         name, max_files_per_subsuite, filtered=bool(guards or kexpr),
-        test_files=test_files,
+        test_files=test_files, shard=shard,
     )
     if not _has_suite(name):
         print(f"[SKIP] {name}: no test suite")
@@ -512,6 +534,11 @@ def main(argv: list[str] | None = None) -> int:
         help="collect only this plugin-relative tests/test_*.py file (repeatable; "
              "requires exactly one named plugin)",
     )
+    ap.add_argument(
+        "--sub-suite-shard", type=_parse_subsuite_shard, metavar="INDEX/COUNT",
+        help="run one round-robin partition of the unchanged file-group sub-suites; "
+             "requires one unfiltered named plugin",
+    )
     ap.add_argument("--guards", action="store_true",
                     help="run only @pytest.mark.guard tests (fast structural/contract checks)")
     ap.add_argument("--collect-only", dest="collect_only", action="store_true",
@@ -567,6 +594,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    if args.sub_suite_shard is not None and (
+        len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
+        or args.guards or args.kexpr or args.test_file
+    ):
+        ap.error("--sub-suite-shard requires one unfiltered named plugin and cannot use --prepare-only")
     if args.test_file and (
         len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
     ):
@@ -682,6 +714,7 @@ def main(argv: list[str] | None = None) -> int:
                     allow_explicit_tiers=args.allow_explicit_tiers,
                     allow_host_state=args.allow_host_state,
                     test_files=tuple(args.test_file),
+                    shard=args.sub_suite_shard,
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)
