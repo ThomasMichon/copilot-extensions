@@ -246,3 +246,12 @@ with implementation tests; standalone compatibility remains first-class.
   fallback semantics. Regressions cover both tiers and an existing global
   fallback. Legacy external launchers retain their original arguments rather
   than receiving an unsupported private source-context flag.
+- Recollected final owner guards after reconciliation: all 2,049 selected nodes
+  across 93 files completed at unchanged budgets. The reviewed invalid-binding
+  and independent-space selection passed 176 tests with 2 normal skips.
+- Subsequent lifecycle review tightened source-directory validation so a missing
+  descendant cannot silently become its parent repository, closed identity-reader
+  stdin (including a real subprocess EOF regression), and distinguished unrelated
+  Bridge configuration errors without allowing identity fallback. The focused
+  identity/config/startup/broker selection passed 129 tests; F/E9 and module-size
+  gates remain clean.

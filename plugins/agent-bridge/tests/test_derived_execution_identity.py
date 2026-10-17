@@ -269,6 +269,20 @@ def test_invalid_captured_source_identifies_path_before_writes(tmp_path, monkeyp
     assert repr(locator) in str(error.value)
 
 
+@pytest.mark.parametrize("file", [False, True])
+def test_invalid_source_under_existing_repository_is_not_promoted(source, monkeypatch, file):
+    from agent_bridge import service_start_cli
+
+    locator = source / "not-a-directory"
+    if file:
+        locator.write_text("not a source worktree", encoding="utf-8")
+    monkeypatch.setattr(config, "load_config", ServiceConfig)
+    monkeypatch.setattr(config, "write_default_config", lambda cfg: pytest.fail("invalid origin was persisted"))
+    with pytest.raises(ValueError, match="unavailable"):
+        service_start_cli._cmd_start(argparse.Namespace(source_worktree=str(locator)))
+    assert execution_identity.source_repository(locator) is None
+
+
 def test_conflicting_adopted_sources_fail_closed(source, tmp_path, monkeypatch):
     other = tmp_path / "other"
     other.mkdir()
@@ -432,6 +446,7 @@ def test_malformed_source_profile_never_becomes_default_config(tmp_path, monkeyp
     "data,message",
     [
         ({"topologies": {}, "remote_acp": "invalid"}, "Invalid remote ACP configuration"),
+        ({"topologies": {}, "port": "invalid"}, "Invalid bridge configuration"),
         (
             {"local_execution_space": "bad/key", "remote_acp": {}},
             "Invalid execution-space or topology configuration",
@@ -479,6 +494,15 @@ def test_query_strips_git_routing_but_preserves_unrelated_environment(source, mo
     environment = run.call_args.kwargs["env"]
     assert not any(key.upper().startswith("GIT_") for key in environment)
     assert environment["SYNTHETIC_IDENTITY_TEST"] == "retained"
+    assert run.call_args.kwargs["stdin"] == subprocess.DEVNULL
+
+
+def test_real_identity_reader_receives_eof_instead_of_caller_stdin(source):
+    result = execution_identity._query(
+        [sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"], [], source,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "''"
 
 
 def test_source_repository_recognizes_registered_bare_anchor(tmp_path):

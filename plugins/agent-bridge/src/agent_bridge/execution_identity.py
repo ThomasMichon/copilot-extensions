@@ -18,6 +18,8 @@ def source_repository(path: Path) -> Path | None:
     from .config import _canonical_repo_root
 
     path = path.expanduser().resolve()
+    if not path.is_dir():
+        return None
     for root in (path, *path.parents):
         if (root / ".git").exists():
             return _canonical_repo_root(root)
@@ -36,7 +38,7 @@ def _query(prefix: list[str], args: list[str], cwd: Path | None) -> subprocess.C
     try:
         return subprocess.run(
             [*prefix, *args], cwd=cwd, env=environment,
-            capture_output=True, text=True, encoding="utf-8", timeout=30,
+            capture_output=True, stdin=subprocess.DEVNULL, text=True, encoding="utf-8", timeout=30,
             **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:

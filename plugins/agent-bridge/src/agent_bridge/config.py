@@ -162,7 +162,13 @@ def load_config() -> ServiceConfig:
             if isinstance(data, dict) and (
                 "local_execution_space" in data or "topologies" in data
             ):
-                raise ValueError("Invalid execution-space or topology configuration; refusing identity fallback") from exc
+                kind = "bridge"
+                if isinstance(exc, ValidationError) and any(
+                    error["loc"] and error["loc"][0] in {"local_execution_space", "topologies"}
+                    for error in exc.errors()
+                ):
+                    kind = "execution-space or topology"
+                raise ValueError(f"Invalid {kind} configuration; refusing identity fallback") from exc
             if isinstance(data, dict) and "remote_acp" in data:
                 raise ValueError(
                     "Invalid remote ACP configuration; refusing configuration fallback",
