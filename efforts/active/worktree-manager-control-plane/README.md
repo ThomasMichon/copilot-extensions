@@ -1237,6 +1237,41 @@ claiming discipline alone.
   its release/live-validation obligations; this receipt does not complete that
   effort or this umbrella's remaining configuration, AHP and update work.
 
+- **2026-10-14** — Implemented the #6721 native Repositories vertical locally:
+  read-only registration/route/state-root/tracked-pair inspection and the existing
+  machine-local Copilot preference's revisioned preview/set/reset. Ordinary
+  registry writers share the same bounded native lock and exact read-baseline
+  fence; no source-file editor, login, credential lookup or agent activation was
+  added. Contained Windows registry/preference compatibility selection passes
+  201 cases. Production Manager UI invokes the actual owner CLI for cancel,
+  set, no-field reset, changed inheritance and stale proposals after an ordinary
+  concurrent registry command, with source-tree/sentinel assertions. This also
+  fixes project-context compatibility for legacy lists and presentation-only
+  row enrichment invalidation. Scoped Linux integration, review/merge,
+  promotion and installed acceptance remain open; this is not Wave 2 or parent
+  completion.
+
+- **2026-10-14** — Claimed #6721 as `creaky-valve` for the next reviewed
+  consumer: native Repositories registration/route/state-root/pair inspection
+  and the existing machine-local `copilot_account` preference set/reset.
+  Reuse #6719's preview interaction; add native revision/shared-writer
+  serialization and real consumer/source-safety proof. No versioned-configuration
+  writer, route/pair writer, credential/login action, service start or worker launch.
+  #6379/#6283/#3296 retain their existing scopes; installed acceptance remains
+  a separate gate. Continue the same active managed source worktree.
+
+- **2026-10-14** — Shared Configuration preview landed through #6719 at
+  `a6742923bfd9cda45112369fb9d2df8981f970b5`; #6717 is closed. Reviewed head
+  `83394d97a5816d1dc7c2d6f2cbf9ea3c97702e4b` has current-head approval;
+  the sole documentation-assessment finding is resolved. Latest required CI
+  `38592321480` passed, including the Ubuntu Manager suite (2,229 passed,
+  25 skipped), before the normal role-scoped merge. The provider confirmed
+  MERGED even though the merge response returned a transient 502; native
+  status reconciled that result. Re-read Phase 5 and Validation Plan: only
+  the shared interaction is complete, not Waves 1-5 or installed acceptance.
+  Pulled the same managed worktree forward to the actual merge; the native
+  Repositories consumer is the next separately claimed slice.
+
 - **2026-10-14** — Implemented #6717's optional Configuration row-form preview
   candidate: strict provider result/row-target binding, bounded off-thread
   reads, Cancel-default consent, context/late-result fencing, reserved token

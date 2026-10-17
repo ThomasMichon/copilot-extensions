@@ -158,7 +158,9 @@ def _resolve_command(command: Sequence[str], *, root: Path | None = None) -> lis
         raise TargetUnusableError(
             "PowerShell scripts must be invoked through an executable wrapper"
         )
-    return [str(canonical), *command[1:]]
+    # Python virtual environments and other multicall launchers depend on the
+    # invocation path even when its validated target is a shared executable.
+    return [str(target.absolute()), *command[1:]]
 
 
 def _rewrite_manifest_commands(
@@ -167,7 +169,7 @@ def _rewrite_manifest_commands(
     root: Path | None,
     require_targets: bool,
 ) -> dict[str, object]:
-    """Return a copy whose external argv heads are canonical absolute paths."""
+    """Validate executable targets and bind absolute invocation paths."""
     from worktree_manager.configuration_preview import validate_preview_actions
     try:
         validate_preview_actions(raw)

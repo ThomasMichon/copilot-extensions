@@ -962,6 +962,8 @@ jobs:
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test worktree-manager
         working-directory: worktree-manager
@@ -969,6 +971,55 @@ jobs:
       - name: Test materialized Manager collection
         working-directory: worktree-manager
         run: uv run --extra dev pytest -q ../tools/test_worktree_manager_collection.py
+
+  repositories-configuration:
+    name: Repositories Configuration (native owner + Manager)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: ubuntu-latest
+    # Keep the real native owner/UI contract out of the six-minute full Manager
+    # lane: preparing its CLI alone took 57 seconds in the first live run.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Repositories Configuration CI contract
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q tools/test_repositories_configuration_ci_scope.py
+      - id: repositories-configuration
+        name: Detect native Repositories Configuration changes
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(\.github/workflows/ci\.yml|tools/(test_repositories_configuration_ci_scope|run-plugin-tests|run-standalone-tests|standalone_consumers|plugin_test_containment)\.py|plugins/agent-worktrees/(src/agent_worktrees/(repos[^/]*|config[^/]*|related[^/]*|state_root[^/]*|installer[^/]*|tracking[^/]*|registry_paths|project_state|context_cli|inrepo_config_source)\.py|pivots/repositories-config\.json|tests/test_(repos_configuration|repos_registry_transaction|registry_paths|context_resolution)\.py)|worktree-manager/(src/worktree_manager/production_picker/(context|picker_tui/(configuration[^/]*|engine_configuration_preview|pivot_registry_materialization|tasks))\.py|tests/production_picker/test_repositories_configuration\.py))$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - id: repositories-owner
+        name: Test native Repositories owner and prepare its isolated CLI
+        if: steps.repositories-configuration.outputs.run == 'true'
+        run: |
+          python tools/run-plugin-tests.py agent-worktrees -k "repos_configuration or repos_registry_transaction or registry_paths or picker_bootstrap"
+          echo "python=$GITHUB_WORKSPACE/.test-venvs/linux/agent-worktrees/bin/python" >> "$GITHUB_OUTPUT"
+      - name: Test real Repositories Configuration UI
+        env:
+          REPOSITORIES_CONFIG_TEST_PYTHON: ${{ steps.repositories-owner.outputs.python }}
+          PYTEST_ADDOPTS: -k repositories_configuration
+        if: steps.repositories-configuration.outputs.run == 'true'
+        run: python tools/run-standalone-tests.py worktree-manager --prepare --admission-wait 60 --timeout 120
 
   agent-dispatch-service:
     name: agent-dispatch-service (out-of-plugin)
@@ -1782,6 +1833,7 @@ jobs:
       - construction-macos
       - bootstrap-killswitch-powershell-5-1
       - worktree-manager
+      - repositories-configuration
       - agent-dispatch-service
       - agent-index-service-linux
       - agent-index-service-windows
@@ -1852,6 +1904,7 @@ jobs:
       - windows-hooks
       - construction-macos
       - worktree-manager
+      - repositories-configuration
       - agent-dispatch-service
       - agent-index-service-linux
       - agent-index-service-windows

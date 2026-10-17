@@ -528,11 +528,16 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
     if not resolved:
         return output._json_error(f"unknown project {project!r}")
     should_switch = bool(anchor is not None and not _cwd_is_inside_project(anchor))
+    tracking_path = cfg.project_dir(resolved) / "worktrees"
+    invocation_cwd = _core()._INVOCATION_CWD or Path.cwd()
+    worktree_id = tracking.find_worktree_id_by_cwd(str(invocation_cwd), project=resolved)
+    record = tracking.load_record_by_id(worktree_id, tracking_path=tracking_path) if worktree_id else None
     payload = {
         "version": 1,
         "project": resolved,
         "should_switch_cwd": should_switch,
         "cwd": str(anchor.resolve()) if should_switch and anchor is not None else None,
+        "workspace": record.worktree_path if record is not None and record.repo == resolved else None,
         "default_live": not _in_ssh_session(),
     }
     if getattr(args, "json", False):

@@ -34,6 +34,7 @@ class _UniqueRegistryLoader(yaml.SafeLoader):
 
 def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
     from . import config_migrations
+    from .repos_registry_transaction import read_bytes, revision
     from .repos import (
         VALID_CLASSES, _LEGACY_TYPE_MAP, RepoEntry, ReposRegistry,
         normalize_class, normalize_visibility,
@@ -54,18 +55,20 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                             f"repository registry ancestor is unavailable: {parent}"
                         )
                     break
-                return ReposRegistry()
+                return ReposRegistry(_baseline=(str(path.resolve()), revision(None)))
             mode = path.stat().st_mode
             if not stat.S_ISREG(mode):
                 raise RepositoryResolutionError("repository registry must be a regular file")
-        elif not path.exists():
-            return ReposRegistry()
-        text = path.read_text(encoding="utf-8")
+        content = read_bytes(path)
+        baseline = (str(path.resolve()), revision(content))
+        if content is None:
+            return ReposRegistry(_baseline=baseline)
+        text = content.decode("utf-8")
         data = yaml.load(text, Loader=_UniqueRegistryLoader) if strict else yaml.safe_load(text)
         if not isinstance(data, dict):
             if strict:
                 raise RepositoryResolutionError("repository registry must be a mapping")
-            return ReposRegistry()
+            return ReposRegistry(_baseline=(str(path.resolve()), "invalid"))
         data = config_migrations.migrate_loaded(data, config_migrations.SCHEMA_REPOS)
         srcroot = data.get("srcroot", {})
         if not isinstance(srcroot, dict):
@@ -119,6 +122,8 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                     raise RepositoryResolutionError(
                         f"registered repository {name!r} has invalid remote"
                     )
+                if strict and not isinstance(entry.get("copilot_account", ""), str):
+                    raise RepositoryResolutionError("registered repository has invalid Copilot preference")
                 repos[name] = RepoEntry(
                     name=name,
                     repo_class=norm_class,
@@ -132,7 +137,9 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                     visibility=normalize_visibility(entry.get("visibility")),
                     paths=paths,
                 )
-        return ReposRegistry(srcroot=srcroot, repos=repos, account_map=account_map)
+        return ReposRegistry(
+            srcroot=srcroot, repos=repos, account_map=account_map, _baseline=baseline,
+        )
     except Exception as exc:
         if strict:
             if isinstance(exc, RepositoryResolutionError):
@@ -140,4 +147,4 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
             raise RepositoryResolutionError(
                 f"repository registry could not be read: {exc}"
             ) from exc
-        return ReposRegistry()
+        return ReposRegistry(_baseline=(str(path.resolve()), "invalid"))

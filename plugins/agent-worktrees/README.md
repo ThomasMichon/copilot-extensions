@@ -144,6 +144,11 @@ uses a source-root discovery fallback. Invalid or duplicate registry mappings,
 missing registrations and unavailable checkouts are explicit errors. Acquisition
 and adoption remain separate owner operations; this read never clones a repo.
 
+Worktree Manager's [Repositories Configuration section](docs/repositories-configuration.md)
+uses the native read/preview/apply CLI to inspect registration, routes, state
+binding and tracked pairs. Its only editable setting is the machine-local
+future-launch Copilot login preference; it does not log in or launch agents.
+
 ## Independent Execution Spaces
 
 Native Windows and WSL can register independent execution-space keys without

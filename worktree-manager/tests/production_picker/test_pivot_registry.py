@@ -6,7 +6,10 @@ import json
 import logging
 import os
 from pathlib import Path
+import subprocess
+import venv
 
+from agent_procutil import no_window_kwargs
 import pytest
 from dropin_registry import (
     EntryDecision,
@@ -596,7 +599,7 @@ def test_dot_relative_commands_resolve_in_their_authority_root(
     assert Path(operator.pivots[0].list_cmd[0]) == operator_command.resolve()
 
 
-def test_symlinked_executable_resolves_to_regular_target(tmp_path):
+def test_symlinked_executable_validates_target_and_preserves_invocation_path(tmp_path):
     root = tmp_path / "commands"
     real = _command(root, "real")
     suffix = ".cmd" if os.name == "nt" else ""
@@ -618,7 +621,27 @@ def test_symlinked_executable_resolves_to_regular_target(tmp_path):
         activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
     )
 
-    assert Path(report.pivots[0].list_cmd[0]) == real.resolve()
+    assert Path(report.pivots[0].list_cmd[0]) == linked.absolute()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX virtual environments use symlinked interpreters")
+def test_symlinked_virtual_environment_interpreter_keeps_its_environment(tmp_path):
+    environment = tmp_path / "owner"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+    interpreter = environment / "bin" / "python"
+    assert interpreter.is_symlink()
+    command = pivot_registry_materialization._resolve_command([
+        str(interpreter), "-c", "import sys; print(sys.prefix)",
+    ])
+    child_env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("PYTHON") and key not in ("VIRTUAL_ENV", "__PYVENV_LAUNCHER__")
+    }
+    result = subprocess.run(
+        command, capture_output=True, text=True, check=True, timeout=15,
+        env=child_env, **no_window_kwargs(),
+    )
+    assert Path(result.stdout.strip()) == environment
 
 
 def test_malformed_operator_peer_does_not_block_valid_operator(tmp_path):
