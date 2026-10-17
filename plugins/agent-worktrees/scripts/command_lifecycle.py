@@ -257,6 +257,8 @@ def run_lifecycle(
             operation = stack.enter_context(human.HumanOperation(
                 f"{arguments['plugin_id']}/{human_operation}",
             ))
+        # Sample elapsed at child exit, then close work to drain output and
+        # verify/release the lease before reporting completion.
         work = stack.enter_context(ExitStack())
         lease = work.enter_context(legacy_lifecycle(
             binding, primitive, reserve=not (deferred_runtime or teardown),
