@@ -251,6 +251,37 @@ def test_inventory_derives_every_shard_from_the_declared_runner_policy(
     assert {"agent-bridge", "agent-index", "full - agent-worktrees"} <= required
 
 
+def test_inventory_accepts_an_unannotated_literal_shard_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    expected = inventory.required_jobs(ROOT)
+    text = runner.read_text("utf-8")
+    runner.write_text(text.replace("_CI_SHARD_COUNTS: dict[str, int]", "_CI_SHARD_COUNTS"),
+                      encoding="utf-8")
+    assert inventory.required_jobs(ROOT) == expected
+
+
+@pytest.mark.parametrize("replacement", [
+    "_CI_SHARD_COUNTS = dict()",
+    "_CI_SHARD_COUNTS = other = {'agent-dispatch': 4}",
+    "_CI_SHARD_COUNTS: dict[str, int] = {'agent-dispatch': 4}\n_CI_SHARD_COUNTS = {'agent-dispatch': 4}",
+])
+def test_inventory_refuses_nonliteral_chained_or_duplicate_shard_assignments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    text = runner.read_text("utf-8")
+    runner.write_text(
+        text.replace('_CI_SHARD_COUNTS: dict[str, int] = {"agent-dispatch": 4}', replacement),
+        encoding="utf-8",
+    )
+    with pytest.raises(CandidateValidationError, match="shard policy"):
+        inventory.required_jobs(ROOT)
+
+
 def test_inventory_ignores_shard_policy_reads_outside_the_matrix_function(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

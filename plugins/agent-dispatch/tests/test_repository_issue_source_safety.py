@@ -152,6 +152,35 @@ def test_release_only_closes_its_own_claim_in_every_order(
 
 
 @pytest.mark.parametrize("order", list(permutations(range(4))))
+@pytest.mark.parametrize("second", [
+    {"at": 7301},
+    {"at": 7300, "task_id": "task-b"},
+    {"at": 7300, "task_id": "task-a", "label": "z-reserved"},
+])
+def test_newest_unreleased_claim_has_a_stable_ownership_tiebreak(order, second):
+    claim_a = _reservation(state="claimed", task_id="task-a", at=7300)
+    claim_b = {**claim_a, **second}
+    snapshots = (
+        claim_a, claim_b,
+        _reservation(state="released", task_id="unrelated", reason="finished"),
+        _reservation(occurrence=3600),
+    )
+    issue = _issue(7, reservations=tuple(snapshots[index] for index in order))
+    assert _latest_reservations(issue)["backlog"] == claim_b
+
+
+@pytest.mark.parametrize("order", list(permutations(range(4))))
+def test_repeated_claim_identity_keeps_its_latest_snapshot_in_every_order(order):
+    old_a = _reservation(state="claimed", task_id="task-a", at=7201)
+    new_a = {**old_a, "at": 7301}
+    claim_b = {**old_a, "task_id": "task-b", "at": 7250}
+    unrelated = _reservation(state="released", task_id="unrelated", reason="finished")
+    snapshots = (old_a, new_a, claim_b, unrelated)
+    issue = _issue(7, reservations=tuple(snapshots[index] for index in order))
+    assert _latest_reservations(issue)["backlog"] == new_a
+
+
+@pytest.mark.parametrize("order", list(permutations(range(4))))
 @pytest.mark.parametrize("second_label", ["agent-reserved", "previous-label"])
 def test_all_matching_claims_released_in_every_order(order, second_label):
     claim_a = _reservation(state="claimed", task_id="task-a", at=7201)
@@ -224,6 +253,26 @@ def test_repository_probe_timeout_reaps_real_stalled_descendant(
         provider._gh("issue", "edit", "7")
     assert completed == [.8]
     assert repository_github_auth._TIMEOUT_SECONDS == 30
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file-only actor bootstrap")
+def test_cold_probe_readiness_does_not_import_the_unrelated_process_runtime(tmp_path):
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "agent_procutil.py").write_text(
+        "raise AssertionError('file-only actor imported the process runtime')\n",
+        encoding="utf-8",
+    )
+    env = procutil.agent_worktrees_environment()
+    env["PYTHONPATH"] = str(shadow)
+    root = tmp_path / "probe"
+    with probe_fixture.PreparedProbe(
+        root, [*probe_fixture.prefix(root, "account", 1), "repos", "account-for", "example/project"],
+        env=env,
+    ) as prepared:
+        assert prepared.child["bootstrap_elapsed"] >= 1
+        assert prepared.readiness_seconds <= probe_fixture.READINESS_SECONDS
+    assert prepared.startup_stderr == ""
 
 
 def test_prepared_probe_refuses_unknown_foreign_identity_and_unexpected_requests(tmp_path):

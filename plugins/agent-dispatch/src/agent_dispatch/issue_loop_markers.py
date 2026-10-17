@@ -151,6 +151,13 @@ def _ownership_key(reservation: dict[str, Any]) -> tuple[Any, ...]:
     ))
 
 
+def _claim_order(reservation: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        reservation.get("at", 0), reservation.get("task_id", ""),
+        reservation.get("label", ""), json.dumps(reservation, sort_keys=True),
+    )
+
+
 def latest_reservations(issue: Any) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     claims: dict[tuple[Any, ...], dict[str, Any]] = {}
@@ -165,7 +172,10 @@ def latest_reservations(issue: Any) -> dict[str, dict[str, Any]]:
             # Another release may occupy the accumulator before its claim appears.
             releases[_ownership_key(reservation)] = reservation
         elif state == "claimed":
-            claims[_ownership_key(reservation)] = reservation
+            key = _ownership_key(reservation)
+            previous = claims.get(key)
+            if previous is None or _claim_order(reservation) > _claim_order(previous):
+                claims[key] = reservation
         if current is None:
             # Providers edit trusted comments in place; the overwritten
             # predecessor need not appear in a fresh ownership snapshot.
@@ -222,8 +232,7 @@ def latest_reservations(issue: Any) -> dict[str, dict[str, Any]]:
         }
         if active:
             # A matching release closes only its owner, never another live claim.
-            if current_key not in active:
-                latest[loop] = next(iter(active.values()))
+            latest[loop] = max(active.values(), key=_claim_order)
         elif current.get("state") == "claimed":
             latest[loop] = releases.get(current_key, current)
     return latest

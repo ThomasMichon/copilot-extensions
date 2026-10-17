@@ -1067,3 +1067,31 @@ requested contract.
 - The previous published head's hosted CI succeeded. That result does not
   validate these later edits: the next published head still needs fresh CI and
   a passing review before merge.
+
+### 2026-10-16 - Make active ownership selection deterministic
+
+- The current review identified insertion-order selection among multiple
+  unreleased claims. Selection now uses greatest marker timestamp, then task
+  ID, label and canonical payload order. Repeated snapshots of the same claim
+  retain the same maximum rather than overwriting it by discovery order.
+- The 96 new permutation cases reproduced 52 failures before repair. The
+  complete issue-loop/source/CLI/recipe selection now passes 556 tests,
+  retaining matching-release and selected-occurrence protection.
+- Qualification accepts either annotated or single-target unannotated literal
+  shard policy. It rejects nonliteral, chained and duplicate declarations,
+  including an annotated declaration followed by a plain reassignment. All 73
+  qualification tests pass.
+- Native validation exposed one cold readiness failure. Finite file-only
+  actors now avoid unrelated process-runtime imports; a poisoned-module
+  regression proves readiness without that dependency under unchanged
+  deadlines. Import-profiler observations with undrained stderr were discarded
+  as observer interference, not presented as causal timing evidence.
+- Shared-helper validation also exposed malformed JSON from one actual Windows
+  process census. The inventory now uses explicit UTF-8 direct stdout rather
+  than host rendering; strict JSON parsing remains unchanged. The original
+  offending code point was not captured, so its precise cause is not claimed.
+  The native transport round-trips a greater-than-400,000-character field with
+  Unicode/control characters. All 12 census, durable-launch and real cutover
+  consumer cases pass after the transport change.
+- No deadlines, skips, production ownership checks or process-tree custody were
+  weakened. Fresh published-head CI and review are still required before merge.

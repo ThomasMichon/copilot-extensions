@@ -170,6 +170,10 @@ releases within one occurrence still cannot clear another task's claim,
 regardless of comment discovery order or a previous reservation label.
 A release matching the claimed task and label still takes precedence in
 either order.
+If multiple claims remain unreleased in the selected occurrence, select the
+greatest `at` timestamp, then task ID and label lexicographically; canonical
+payload order breaks any remaining tie. Repeated snapshots of the same claim
+use that same ordering, independent of comment discovery order.
 A claimed snapshot without a matching local task remains claimed: an empty
 replacement coordinator or failed peer connection is not release evidence.
 

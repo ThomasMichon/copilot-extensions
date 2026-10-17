@@ -12,9 +12,6 @@ import sys
 import time
 import traceback
 
-import agent_procutil as pu
-
-
 def kernel():
     api = ctypes.WinDLL("kernel32", use_last_error=True)
     api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -87,6 +84,8 @@ def wait_file(path, seconds=40):
 
 
 def service(root, launcher_pid=None):
+    import agent_procutil as pu
+
     # No queue, listener, credentials, service installation, or live backend.
     # Even an interrupted ownership handshake has a finite lifetime.
     owners = {"service": identity(os.getpid())}
@@ -131,6 +130,8 @@ def service(root, launcher_pid=None):
 
 
 def caller(root, site):
+    import agent_procutil as pu
+
     ordinary = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(90)"],
         stdin=subprocess.DEVNULL,

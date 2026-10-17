@@ -150,7 +150,8 @@ qualification's expected smoke rows. Qualification reads that policy and the
 unique `_ci_matrix` default as data. It ignores unrelated policy readers,
 requires every named shard to have executed successfully, and refuses unknown
 matrix recipes or counts rather than dropping coverage. Historical unsharded
-CI declarations remain supported.
+CI declarations remain supported. The single literal policy assignment may be
+annotated or unannotated; nonliteral, chained and duplicate declarations refuse.
 
 Real stalled-probe regressions establish descendant readiness and birth-bound
 Job/group custody before the forced 0.8-second capture; that fixture input is
@@ -161,6 +162,15 @@ the existing five-second actor window with one second reserved for heartbeat
 and diagnostics. Failed/unknown observations remain fatal; identity, custody,
 absent stop, signaled exit and stable heartbeat must hold before watchdog
 expiry and fixture Job close. No production timeout or containment is changed.
+The finite Windows probe actors do not import the unrelated process runtime
+before publishing readiness. A poisoned-runtime-module regression proves this
+dependency boundary while retaining the ten-second readiness and five-second
+active windows.
+
+Windows census transport writes compact JSON directly to explicit UTF-8 stdout,
+without host formatting. Its native synthetic-data regression round-trips a
+command line longer than 400,000 characters with Unicode and control characters;
+real durable-launch and cutover tests still exercise the actual CIM inventory.
 
 The registered-repository Git-probe guard follows the real `repos._git` to
 `git_ops.git` call chain. It checks headless options at that subprocess owner,

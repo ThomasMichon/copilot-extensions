@@ -10,8 +10,6 @@ import subprocess
 import sys
 import time
 
-import agent_procutil as pu
-
 READINESS_SECONDS = 10
 ACTIVE_SECONDS = 5
 
@@ -63,6 +61,7 @@ class PreparedProbe:
         self.startup_stderr = ""
 
     def __enter__(self):
+        import agent_procutil as pu
         from tests import windows_durable_launch_fixture as native
 
         self.native = native
@@ -296,7 +295,8 @@ def _actor():
         subprocess.Popen(
             [*prefix(root, stage, delay), "child"],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            **pu.no_window_kwargs(),
+            # Keep this finite actor's bootstrap independent of runtime imports.
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
     else:
         bootstrap_started = time.monotonic()

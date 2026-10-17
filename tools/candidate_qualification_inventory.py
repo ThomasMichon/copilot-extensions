@@ -25,11 +25,18 @@ def _ci_shards(root: Path, plugins: set[str]) -> tuple[dict[str, int], int]:
     """Read the literal runner policy without executing candidate source."""
     try:
         module = ast.parse(regular(root, Path("tools/run-plugin-tests.py")).read_text("utf-8"))
-        declarations = [
-            node.value for node in module.body
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-            and node.target.id == "_CI_SHARD_COUNTS"
-        ]
+        declarations = []
+        for node in module.body:
+            if (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                    and node.target.id == "_CI_SHARD_COUNTS"):
+                declarations.append(node.value)
+            elif isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "_CI_SHARD_COUNTS"
+                for target in node.targets
+            ):
+                if len(node.targets) != 1:
+                    raise ValueError("expected a single shard policy assignment target")
+                declarations.append(node.value)
         matrices = [
             node for node in module.body
             if isinstance(node, ast.FunctionDef) and node.name == "_ci_matrix"
