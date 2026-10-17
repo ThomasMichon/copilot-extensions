@@ -126,13 +126,18 @@ class _Turn:
         return list(self.calls.values())
 
 
-def extract_features(ref: SessionRef, *, usage_store: Path | None = None) -> dict:
-    """Read a stable live/archive transcript and retain only counts and lineage."""
-    from agent_logger.usage_feature_evidence import enrich_features
+def read_transcript_features(ref: SessionRef) -> dict:
+    """Reduce a stable live/archive transcript to counts before scalar joins."""
     from agent_logger.usage_reader import read_session_events
 
-    features = features_from_events(read_session_events(ref), ref.id)
-    return enrich_features(features, ref, usage_store=usage_store)
+    return features_from_events(read_session_events(ref), ref.id)
+
+
+def extract_features(ref: SessionRef, *, usage_store: Path | None = None) -> dict:
+    """Read a stable transcript and pair its explicitly selected measurements."""
+    from agent_logger.usage_feature_evidence import enrich_features
+
+    return enrich_features(read_transcript_features(ref), ref, usage_store=usage_store)
 
 
 def features_from_events(events: list[dict], session_id: str) -> dict:
@@ -146,7 +151,7 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
     seen: dict[str, str] = {}
     calls: list[CallFeatures] = []
     turn: _Turn | None = None
-    context = turns = resets = compactions = unlinked_tools = 0
+    context = turns = resets = compactions = unlinked_tools = child_events = 0
     model: str | None = None
     root_tools: set[str] = set()
     warnings: set[str] = set()
@@ -166,6 +171,12 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
         data = event.get("data", {})
         if not isinstance(data, dict):
             raise UsageEvidenceError("invalid transcript feature data")
+        if (
+            _identifier(event.get("agentId")) or _identifier(data.get("agentId"))
+            or data.get("parentToolCallId")
+        ):
+            child_events += 1
+            continue
         kind = event["type"]
         if kind == "session.start":
             candidate = _identifier(data.get("sessionId"))
@@ -177,10 +188,10 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
             model = _identifier(data.get("newModel") or data.get("model"))
         elif kind == "session.compaction_complete":
             summary = data.get("summaryContent")
-            if data.get("success") is not False and isinstance(summary, str):
-                context = len(summary)
+            if data.get("success") is not False:
+                context = _text(summary)
                 compactions += 1
-            else:
+            if data.get("success") is False or not isinstance(summary, str):
                 warnings.add("unobserved-compaction-context")
         elif kind == "session.context_cleared":
             initial = data.get("initialMessage")
@@ -263,6 +274,7 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
         "coverage": {
             "root_turns": turns, "calls": len(calls), "compactions": compactions,
             "context_resets": resets, "unlinked_tool_results": unlinked_tools,
+            "child_events_excluded": child_events,
         },
         "warnings": sorted(warnings),
         "limitations": "visible replay only; hidden input, cache behavior and unrecorded output are unknown",
