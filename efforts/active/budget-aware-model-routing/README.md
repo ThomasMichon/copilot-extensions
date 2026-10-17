@@ -281,6 +281,16 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Provider observation contract alignment
+
+- Removed an unsupported `unknown` observation-kind enum identified by the next
+  current-head review. Compared the entire provider enum allowlist with the
+  existing Python reader; the remaining choices match its accepted contract.
+- The provider fixture now rejects that value during acquisition. Its real
+  generated provider capture is also parsed through the Python CLI, which
+  accepts the supported observation and rejects a forged unsupported enum.
+  Neither form grants live forecasting authority.
+
 ### 2026-10-16 - Capture serialization resource bounds
 
 - The next current-head review identified allocation-before-check and duplicate

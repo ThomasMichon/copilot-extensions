@@ -115,7 +115,7 @@ const snapshotFields = {
 const providerFields = {
     quotaId: "id", compatibilityKey: "id",
     acquisitionStatus: ["succeeded", "unavailable", "failed"],
-    observationKind: ["account_snapshot", "admission_state", "unknown"],
+    observationKind: ["account_snapshot", "admission_state"],
     observedAt: "instant",
     accessState: ["allowed", "denied", "not_required", "unknown", "unavailable"],
     capacityState: ["available", "exhausted", "unlimited", "not_required",

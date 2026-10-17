@@ -63,3 +63,20 @@ def test_host_quota_entry_and_boundaries(tmp_path, capsys):
     ]) == 2
     error = json.loads(capsys.readouterr().out)
     assert error["error"] == "quota.entitlementRequests must be a finite number"
+    provider_capture = _marker(result, "PROVIDER_CAPTURE=")
+    capture_path.write_text(json.dumps(provider_capture), encoding="utf-8")
+    provider_args = [
+        "quota", "--capture", str(capture_path), "--session-id", "session-example",
+        "--provider-id", "provider-example", "--quota-id", "quota-example", "--json",
+    ]
+    assert main(provider_args) == 1
+    provider_reading = json.loads(capsys.readouterr().out)
+    assert provider_reading["schema"] == "copilot-extensions.session-quota-reading"
+    assert provider_reading["availability"] == "unavailable"
+    assert "provider-observation-after-acquisition" in provider_reading["diagnostics"]
+    assert provider_reading["provider_evidence"]["observation_kind"] == "account_snapshot"
+    assert provider_reading["calculated"] is None
+    provider_capture["projection"]["providerQuotas"][0]["observationKind"] = "unknown"
+    capture_path.write_text(json.dumps(provider_capture), encoding="utf-8")
+    assert main(provider_args) == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "provider observationKind is unsupported"

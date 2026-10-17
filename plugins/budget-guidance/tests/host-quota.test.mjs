@@ -359,7 +359,11 @@ test("selected provider evidence is filtered, preserving business and reset diag
     assert.deepEqual(selected.provider, { id: "provider-example" });
     assert.equal(selected.budgetMetadata.resetAtEpochMs, 1896134400000);
     assert.equal(selected.monthlyUsage.consumedQuantity, 250);
+    console.log("PROVIDER_CAPTURE=" + JSON.stringify(result.capture));
     assert(!("providerQuotas" in (await f.read()).capture.projection));
+    state.observationKind = "unknown";
+    withheld(await f.read(args), "quota-projection-invalid");
+    state.observationKind = "account_snapshot";
     state.quantityKind = secret;
     withheld(await f.read(args), "quota-projection-invalid");
     state.quantityKind = "none";
