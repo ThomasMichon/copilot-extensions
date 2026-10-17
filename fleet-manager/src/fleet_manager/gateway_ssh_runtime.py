@@ -266,11 +266,16 @@ class GatewaySSHResult:
     observation: GatewaySSHObservation | None = None
 
     def to_dict(self):
+        observation = None if self.observation is None else self.observation.to_dict()
         return {
             "schema": "fleet-manager.gateway-ssh-result", "version": 1,
             "state": self.state, "reason": self.reason, "plan_digest": self.plan_digest,
-            "effect": self.effect, "reobserve_required": self.state == "unknown",
-            "observation": None if self.observation is None else self.observation.to_dict(),
+            "effect": self.effect,
+            "reobserve_required": (
+                self.state == "unknown" or self.reason == "effect-reobservation-required"
+                or observation is not None and observation["pending_operation"] is not None
+            ),
+            "observation": observation,
         }
 
 

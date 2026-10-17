@@ -285,6 +285,8 @@ def test_changed_observation_refuses_without_calling_effect(tmp_path, field, val
     result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
     assert result.reason == "observation-changed" and result.effect == "none"
     assert "reconcile" not in owner.calls and authority.calls == 0
+    if field == "pending_operation":
+        assert result.to_dict()["reobserve_required"] is True
 
 
 def test_fresh_observation_time_is_not_mistaken_for_changed_generation(tmp_path):
@@ -307,6 +309,7 @@ def test_expired_snapshot_and_pending_effect_never_start_execution(tmp_path):
     plan = plan_gateway_ssh(owner.selected, GatewaySSHObservation.from_dict(pending))
     result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
     assert result.reason == "effect-reobservation-required"
+    assert result.to_dict()["reobserve_required"] is True
     assert not owner.calls
 
 
@@ -325,7 +328,9 @@ def test_transport_failure_is_bounded_sanitized_and_never_retried(tmp_path, fail
         assert owner.profile.read_bytes() == b"selected-profile"
         observed_plan = plan_gateway_ssh(owner.selected, owner.snapshot)
         assert observed_plan.to_dict()["reason"] == "effect-reobservation-required"
-        assert reconcile_gateway_ssh(observed_plan, authority=authority, owner=owner).effect == "none"
+        pending = reconcile_gateway_ssh(observed_plan, authority=authority, owner=owner)
+        assert pending.effect == "none"
+        assert pending.to_dict()["reobserve_required"] is True
         assert owner.calls.count("reconcile") == 1
 
 
