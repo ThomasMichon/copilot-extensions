@@ -96,7 +96,9 @@ immutable metadata; closed receipts are history, not current ownership.
 Filters apply **after** checking all observed records and transfer chains.
 An identity filter compares the entire canonical JSON object, together with any
 kind/namespace selectors; it is not a partial match or provider-specific alias
-normalization. Providers must choose an immutable physical identity independently
+normalization. Identity keys are provider-defined; `immutable_id` above is only
+an opaque example, not a required field or canonical schema.
+Providers must choose an immutable physical identity independently
 of reservation labels. Use all three selectors for one exact resource.
 
 Unreadable/missing inputs, malformed raw claims or metadata, duplicate YAML keys,

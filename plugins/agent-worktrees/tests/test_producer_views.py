@@ -144,7 +144,11 @@ def test_cross_project_identity_collision_not_hidden_by_filter(ledgers: Path) ->
     assert len(snapshot["entries"]) == 1 and snapshot["entries"][0]["current_owner"] is None
 
 
-@pytest.mark.parametrize("resources", [None, {}, [None], [""], [{"ref": ""}], [{"ref": 1}], [{"ref": "x", "producer": None}]])
+@pytest.mark.parametrize("resources", [
+    None, {}, [None], [""], [{"ref": ""}], [{"ref": 1}],
+    [{"ref": "x", "producer": None}], [{"ref": "x", "kind": ""}],
+    [{"ref": "x", "state": []}], [{"ref": "x", "handoff_bundle": []}],
+])
 def test_raw_malformed_claims_are_not_silently_skipped(ledgers: Path, resources: object) -> None:
     mutate(ledgers, lambda data: data.update(resources=resources))
     snapshot = scan_ownership()
@@ -385,3 +389,14 @@ def test_filtered_rows_are_validated_globally_but_not_serialized(ledgers: Path, 
         [], owner="m/p/consumer",
     )
     assert snapshot["complete"] and snapshot["entries"] == []
+
+
+def test_shared_strict_yaml_loader_has_per_read_labels_and_located_errors() -> None:
+    from agent_worktrees.projects_registry import load_projects_document
+    from agent_worktrees.strict_yaml import load_strict_yaml_document
+    duplicate = "nested:\n  field: 1\n  field: 2\n"
+    with pytest.raises(ValueError, match="projects registry at line 3, column 3: 'field'"):
+        load_projects_document(duplicate)
+    with pytest.raises(ValueError, match="YAML document at line 3, column 3: 'field'"):
+        load_strict_yaml_document(duplicate)
+    assert load_strict_yaml_document("nested: {field: 1}") == {"nested": {"field": 1}}

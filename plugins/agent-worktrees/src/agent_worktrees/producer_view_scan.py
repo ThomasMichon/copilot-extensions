@@ -59,6 +59,9 @@ def _record(data: object, path: Path, project: str, issues: list[dict[str, str]]
         if (
             not isinstance(raw, dict) or not isinstance(raw.get("ref"), str)
             or not raw["ref"] or not isinstance(raw.get("kind", "worktree"), str)
+            or not raw.get("kind", "worktree")
+            or not isinstance(raw.get("state", "active"), str)
+            or not isinstance(raw.get("handoff_bundle", ""), str)
         ):
             issues.append(issue("invalid-claim", owner, "malformed resource entry"))
             continue
@@ -68,10 +71,7 @@ def _record(data: object, path: Path, project: str, issues: list[dict[str, str]]
         refs.add(ref)
         if "producer" not in raw:
             continue
-        if (
-            not raw.get("kind") or not isinstance(raw.get("state", "active"), str)
-            or not isinstance(raw.get("handoff_bundle", ""), str)
-        ):
+        if "kind" not in raw:
             issues.append(issue("invalid-claim", owner, "malformed producer claim fields"))
             continue
         rows.append(ObservedClaim(
