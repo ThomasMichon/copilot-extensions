@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from datetime import datetime, timezone
 import re
+from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -93,6 +94,14 @@ async def acquire_verified_session_quota(
         result["diagnostics"].append("session-github-auth-status-unsupported")
         return result
 
+    deadline = monotonic() + timeout
+
+    def remaining() -> float:
+        budget = deadline - monotonic()
+        if budget <= 0:
+            raise asyncio.TimeoutError
+        return budget
+
     def same_session() -> bool:
         if (
             getattr(session, "session_id", None) != expected_session_id
@@ -107,11 +116,12 @@ async def acquire_verified_session_quota(
         if not same_session():
             return False
         try:
-            raw = await getter(timeout=timeout)
+            raw = await getter(timeout=remaining())
         except NotImplementedError:
             identity["status"] = "unsupported"
             result["diagnostics"].append("session-github-auth-status-unsupported")
             return False
+        remaining()
         if not same_session():
             return False
         status = raw.to_dict()
@@ -144,7 +154,7 @@ async def acquire_verified_session_quota(
             return result
         quota = await acquire_session_quota(
             session, expected_session_id=expected_session_id,
-            runtime_version=runtime_version, timeout=timeout, category=category,
+            runtime_version=runtime_version, timeout=remaining(), category=category,
             provider_id=provider_id, quota_id=quota_id, max_age_seconds=max_age_seconds,
         )
         if not await check_identity():
@@ -156,7 +166,10 @@ async def acquire_verified_session_quota(
         return quota
 
     try:
-        return await asyncio.wait_for(acquire(), timeout=timeout)
+        acquired = await asyncio.wait_for(acquire(), timeout=remaining())
+        # Nested waits can finish while timeout cancellation is being delivered.
+        remaining()
+        return acquired
     except (asyncio.TimeoutError, OSError) as exc:
         result["availability"] = "error"
         result["diagnostics"].append(

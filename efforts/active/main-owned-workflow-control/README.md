@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees; ordinary changes target `dev`
 - **Created:** 2026-10-12
-- **Status:** Active; baseline and main producers live-proven, main-PR CI cutover in progress, artifact recovery separately owned
+- **Status:** Active; main-PR CI invocation cutover live-proven, generated-main validation failures and remaining consolidation open
 - **Vision:** `visions/main-owned-workflow-control/README.md`
 - **Umbrella issue:** #6237
 - **Related campaigns:** #3336; `promotion-failure-reactive-fix-agent`; #6142
@@ -107,10 +107,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
-- [ ] Consolidate main-PR admission into its existing trusted reminder
+- [x] Consolidate main-PR admission into its existing trusted reminder
   invocation: release and prove admission and generated-content identifier
   scanning first, then remove legacy CI allocation while retaining full
   main-push validation.
+  #6789 proves zero CI invocations and preserved required admission/configured
+  scanning. Main-push CI still runs; its generated-tree failures remain open
+  below and are not a passing-coverage claim or permission to remove that lane.
 - [x] Coalesce or prevent redundant event-triggered runs, not merely mark all
   jobs skipped; preserve timely contributor feedback and review delivery.
   #6308/#6314 reduce trusted invocations; released #6359 prevents irrelevant
@@ -1541,3 +1544,147 @@ hosted checks, review and a containing full validation remain required.
   pass 1,320 cases with one skip under the original 25-file/300-second bounds.
   This is not a complete native pass because group 12 remains unproven.
   Normal containing Linux validation remains separate evidence.
+
+### 2026-10-15 - Real release proves invocation cutover, not generated-tree health
+
+- Normal full `38664339697` validates exact dev
+  `4f7b62facbe44df61f159dcde9b1afb11d34b3ea` and genuinely succeeds,
+  including build `116202232786`, attestation `116202731176`, promotion
+  `116202875668` and artifact publication `116203558540`. No early no-op,
+  skipped publication, manual retry or waiver is substituted for that result.
+- #6789 merges candidate `614c453af269f2a13e80a8cd1e823f6a755eabd8`
+  as `c33ccea3da5effc6f21b9e8c2ee726f8e4a85902` at `01:49:48Z`.
+  Annotated tag `promote-20261015015004-c33ccea3` resolves to that exact merge;
+  the merged release state names the validated dev input and prior main.
+- The complete candidate-head CI query reports `total_count: 0`; the complete
+  four-run head roster contains no CI invocation. Trusted host `38667722135`
+  preserves the successful required `main source gate`. Its real configured
+  scanner publishes `116203522264`: 763 changed files on that exact candidate,
+  `DENYLIST_CONFIGURED=true`, `STALE=false`, successful scan, no infrastructure
+  fallback. The published CI declaration excludes main-base PRs while keeping
+  main/dev push, manual and edited-retarget triggers; the old CI gate is absent.
+- Natural main-push CI `38667750280` runs on the actual merged commit, proving
+  that invocation was retained. It fails, so do not claim generated-tree health
+  or remove it. Read-only evidence isolates three families: unintended standalone
+  vendor-test collection plus conflicting canonical/vendored dependency URLs;
+  installer fixtures recopying an already embedded dependency; and a release-label
+  rewrite escaping frozen authority normalization. Genuine coverage, frozen
+  evidence and source identity must be preserved by any correction.
+- The live main rule now reports strict freshness true, unlike the earlier
+  snapshot. This session made no ruleset or credential change. The retained
+  #4876/#6697 publisher was notified; its separate future explicit-dispatch merge
+  contract is not retroactive evidence for this observed natural push.
+- #6788 independently merges the reviewed explicit-reinstall/diagnostic repair
+  as `c3e7dac9c215156c95b2533a44444103090e8213` at `02:18:24Z`.
+  Exact head `41cb01c6a387` receives native approval with zero findings;
+  all required same-head suites and the fresh source verifier pass. Its optional
+  trusted self-hosted suite is skipped, not a missing required check or CI bypass.
+- Reread the canonical Plan and Validation Plan after that merge. Close only
+  the main-PR invocation-cutover item. The test-tooling repair still needs its
+  containing release; generated-main validation, exact-input implementation,
+  coverage/repair ownership, comparable measurements and observation remain
+  open. Independent control activation stays dormant.
+- The complete prior #6642 head and new #6789 head queries show CI PR
+  invocations 1 -> 0, head-associated workflow runs 5 -> 4, and all check
+  records 29 -> 9: 20 fewer records for this event pair. The old set includes
+  20 skipped records and one optional CI failure; these are not 20 deleted
+  test suites or proof of quota improvement. Both check pages return their
+  full reported totals. Changed-file volume differs (322 versus 763), and
+  this one-pair observation does not replace broader comparable-cycle metrics
+  or include completion workflows indexed under another head.
+- Closed only release-proof issues #6699 and #6740 after verifying their
+  fixes are ancestors of the released dev input and actual main-push
+  customizing-copilot job `116203739428` succeeds. Separate installer-copy
+  failures and #6729 remain open; no local runtime adoption was performed.
+- The authority normalizer hashes its own source. Fixing its release-label
+  normalization therefore changes current authority identity, not merely a
+  fixture checksum. Keep frozen v1 bytes unchanged while the owner selects
+  the current-generation capture and historical-support policy; no authority
+  compatibility change or checksum rewrite has been made.
+
+### 2026-10-15 - Owner selects a new corpus revision; payload fixture is repaired
+
+- The operator selects a new independently captured current authority-corpus
+  generation, retaining v1 bytes as historical-producer evidence until
+  owner-reviewed retirement. No runtime acceptance of historical hashes,
+  protocol-generation, credential, service or publisher change is authorized
+  by that choice. The authority implementation/capture remains a separate
+  stretch; no old checksum has been rewritten.
+- Reserved the Budget Guidance payload fixture and standalone preparation/
+  Manager collection seams under #6237. The existing #6598 contributor already
+  touches the Codespaces engine-adoption test; requested that worker's custody
+  rather than pre-patching or superseding its still-open contribution.
+- Five new cross-platform fixture guards reproduce four failures against the
+  old unconditional copy, then pass with shared-copy-on-absence and explicit
+  embedded manifest/package integrity checks. Embedded bytes are preserved
+  even when shared bytes differ or the shared tree is absent; malformed
+  embedded data cannot be silently repaired. Source trees remain unchanged.
+- Full native Budget Guidance validation also exposed an oversized automatic
+  pytest node ID on Windows before the response-rejection test could execute.
+  Added only short explicit IDs, preserving the 65,537-byte input, 65,536-byte
+  rejection boundary and redaction assertions; no response limit was lowered.
+- The complete contained native suite passes 366 cases with 40 platform skips;
+  the actual guard selector executes and passes all five new cases. Existing
+  POSIX installer cases remain skipped on Windows, so hosted Linux and actual
+  containing materialized-main evidence remain mandatory. Ruff, docs and
+  whitespace checks pass. No production installer behavior or deadline changes.
+
+### 2026-10-16 - Resume with the retained release owner and residual Budget scope
+
+- Resumed after the newer operator-authorized release-control and standalone
+  ownership decisions. The single control writer retains Main pause,
+  qualification, manifest activation and verified resume; this session makes
+  no unpause, rollback, workflow or runtime change. Standalone preparation and
+  Manager repairs already have their separately authorized owners.
+- #6801's original copy-helper correction is partially superseded by merged
+  #7008. The operator explicitly selects a residual contribution rather than
+  restoring the obsolete helper or closing the remaining safeguards.
+  Rebase retains #7008's real materializer and both existing stamp-layout tests;
+  only embedded manifest/package integrity checks are added to that helper.
+- The five new guards now supply valid canonical or embedded source declarations
+  to the actual materializer, preserving embedded bytes and source immutability
+  without mocking composition. Their complete module passes five cases.
+  Directly related bootstrap, build-attempt, fixture and response modules pass
+  77 cases with six platform skips.
+- Fresh broader native validation is not claimed green: ordinary cold Python
+  fixture startup can exhaust the existing half-second reader budget before
+  parse/exit classification, and the native failed-install fixture reaches its
+  existing 30-second item bound inside a 45-second child call.
+- Reader snippets require only the standard library, so their fixture now uses
+  isolated no-site Python, with a real-child guard checking both flags. The real
+  reader and cleanup/timeout/byte-limit assertions remain unchanged; the complete
+  reader, boundary and CLI selection passes 70 cases with 23 platform skips.
+  The independent native installer fixture diagnosis remains open; no deadline
+  increase, accepted-flake claim or failed-gate waiver.
+- Bridge #6992 has since merged under the retained source owner's authorization.
+  Its current-fixture re-attestation must be reconciled with this effort's
+  earlier immutable-v1/historical-producer decision; this session does not
+  duplicate the implementation or declare that unresolved policy item complete.
+- The native failed-install fixture now executes from a standalone payload using
+  the real dependency, file-pointer and installer-engine materializers. Nothing
+  is pruned or ignored. Both fresh/retained failure and retry cases pass under
+  the unchanged 30-second item and 45-second child limits, preserving old-slot,
+  partial-slot cleanup and controlled dependency-exit assertions.
+- Broader native validation then reaches a distinct production total-deadline
+  defect: completed quota values can escape the outer timeout while nested
+  async waits race cancellation. The operator explicitly authorizes a narrow
+  correction beyond the original test-only residual scope; #7065's independent
+  foreground extension work remains untouched.
+- Verified-session acquisition now uses one absolute monotonic deadline,
+  checks phase completion and final delivery against it, and passes remaining
+  budget into identity/quota reads. No timeout is increased and no retry or
+  unverified quota fallback is introduced. Two deterministic completion-after-
+  expiry regressions fail before the fix; all 91 identity/quota cases pass
+  afterward. The former sub-OS-timer-resolution test now asserts remaining
+  budget deterministically; separate native async cancellation cases remain.
+- A later full native attempt still reaches the failed-install fixture's
+  unchanged item deadline, despite its focused four-case pass. Standalone
+  materialization alone is therefore not claimed to resolve that timing cause.
+  Bounded fixture diagnostics continue before publication or merge; no green
+  full-suite result, deadline increase or flake acceptance is inferred.
+- The expanded deterministic expiry matrix covers first identity, quota and
+  final identity completion exactly at and after the limit; all 95 identity/
+  quota cases pass. Temporary native trace timers and helper instrumentation
+  are withdrawn after bounded diagnosis establishes no safe further fixture
+  fix. The captured construction/venv/seasoning evidence is shared with the
+  retained #6928 owner; it is not a new watchdog implementation or a waiver.
