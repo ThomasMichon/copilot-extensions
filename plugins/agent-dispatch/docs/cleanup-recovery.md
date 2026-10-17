@@ -94,6 +94,9 @@ alias resolution as registration scope; it does not omit that identity.
 Direct supervisor construction resolves its default local alias before binding
 the housekeeping adapter, so explicit and default identities carry the same
 lease proof.
+The bound adapter accepts omitted or matching explicit claimant values and
+rejects a conflicting override before any request. The optional legacy claim
+body is instantiated per request rather than shared across requests.
 The host binding is confined to those housekeeping RPCs. Ordinary spawning and
 label-routed snapshots retain the supplied client's identity and lifetime;
 the supervisor does not globally substitute a proxy client.
@@ -159,15 +162,15 @@ both owned sidecars are already absent, so repeated removal is idempotent rather
 than stranding an orphan receipt. Seed-only
 removal and preserved/live records retain pair evidence; unrelated sidecars and
 task history are untouched. Caught deletion failures restore the previously
-retained UTF-8 state snapshots through the existing atomic-write primitive, then
+retained raw-byte state snapshots through the existing atomic-write primitive, then
 surface the error so the normal removal can retry. Missing record authority and
 symbolic-file ambiguity preserve state rather than authorizing orphan pruning.
 An abrupt process interruption may leave sidecar teardown partially complete;
 it does not remove YAML authority before that teardown finishes. Retry addresses
 only that exact record, never a newer worktree identity or foreign artifact.
 This is owned-artifact teardown, not a retention sweep or record-writer repair.
-The authoritative `launch_seed_remove` verb advertises and requires version 4
-for this teardown behavior. A known pre-v4 monitor is refused before dispatch
+The authoritative `launch_seed_remove` verb advertises and requires version 5
+for this teardown behavior. A known pre-v5 monitor is refused before dispatch
 or direct fallback, preserving YAML/seed/receipt state during rolling upgrade.
 That refusal applies to live or unprovable owners. A positive dead-PID or
 PID/birth mismatch makes the stale rendezvous absent for normal monitor startup

@@ -38,7 +38,7 @@ def _digest(path: Path) -> str:
     return _document_digest(_document(path))
 
 
-def _primary_identity(record):
+def primary_identity(record):
     return {
         "machine": record.machine, "repo": record.repo,
         "worktree_id": record.worktree_id, "worktree_path": record.worktree_path,
@@ -82,7 +82,7 @@ def reciprocal_identity_valid(primary: dict, sibling: dict) -> bool:
 def publish(record, sibling, sibling_path: Path, *, primary_path: Path | None = None) -> None:
     """Caller holds both records' locks and has saved the primed reciprocal sibling."""
     receipt = {
-        "version": 1, "primary": _primary_identity(record),
+        "version": 1, "primary": primary_identity(record),
         "sibling_pair": {name: getattr(sibling, name) for name in _PAIR_FIELDS},
         "sibling_digest": _digest(sibling_path),
     }
@@ -92,7 +92,7 @@ def publish(record, sibling, sibling_path: Path, *, primary_path: Path | None = 
     if primary_path is not None:
         primary_guard = {
             "version": 1, "receipt_role": "primary", "primary": receipt["primary"],
-            "owner": record.owner, "sibling": _primary_identity(sibling),
+            "owner": record.owner, "sibling": primary_identity(sibling),
             "sibling_record_path": str(sibling_path.resolve()),
         }
         tracking._atomic_write(
@@ -119,7 +119,7 @@ def gc_preservation_reason(sibling_path: Path) -> str | None:
             if any(name in document for name in _PAIR_FIELDS):
                 return "terminal-pair-discharge-pending"
             current = tracking.load_record(sibling_path)
-            identity = _primary_identity(current)
+            identity = primary_identity(current)
             identity["pair"] = expected["pair"]
             other_name = receipt["sibling_record_path"]
             if (receipt["version"] != 1 or not _supported_pair(expected["pair"])
@@ -166,9 +166,9 @@ def gc_preservation_reason(sibling_path: Path) -> str | None:
         sibling = tracking.load_record(sibling_path)
         if _document(primary_path) != primary_document or _document(sibling_path) != sibling_document:
             return "terminal-pair-record-changed"
-        identity = _primary_identity(primary)
+        identity = primary_identity(primary)
         identity["pair"] = expected["pair"]
-        sibling_identity = _primary_identity(sibling)
+        sibling_identity = primary_identity(sibling)
         sibling_identity["pair"] = receipt["sibling_pair"]
         if (identity != expected or primary.kind not in tracking.MANAGED_KINDS
                 or not reciprocal_identity_valid(expected, sibling_identity)
@@ -193,7 +193,7 @@ def reciprocal_snapshot(record, sibling, sibling_path: Path):
         if any(name in document for name in _PAIR_FIELDS):
             return None
         receipt = json.loads(_receipt_path(sibling_path).read_text(encoding="utf-8"))
-        if (receipt["version"] != 1 or receipt["primary"] != _primary_identity(record)
+        if (receipt["version"] != 1 or receipt["primary"] != primary_identity(record)
                 or receipt["sibling_digest"] != _document_digest(document)):
             return None
         pair = receipt["sibling_pair"]

@@ -492,7 +492,8 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion/claim")
-    def claim_spawn_conclusion_retry(key: str, body: ClaimConclusionBody = ClaimConclusionBody()) -> dict:
+    def claim_spawn_conclusion_retry(key: str, body: ClaimConclusionBody | None = None) -> dict:
+        body = body if body is not None else ClaimConclusionBody()
         try:
             reservation, claimed, claim_token = (
                 queue.claim_spawn_conclusion_retry(key, claimant_machine=body.claimant_machine)

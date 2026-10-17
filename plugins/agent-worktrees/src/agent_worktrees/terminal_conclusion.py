@@ -251,8 +251,8 @@ def _reciprocal_pair_valid(
     if sibling.worktree_id != sibling_path.stem:
         return False
     return terminal_pair_progress.reciprocal_identity_valid(
-        terminal_pair_progress._primary_identity(record),
-        terminal_pair_progress._primary_identity(sibling),
+        terminal_pair_progress.primary_identity(record),
+        terminal_pair_progress.primary_identity(sibling),
     )
 
 

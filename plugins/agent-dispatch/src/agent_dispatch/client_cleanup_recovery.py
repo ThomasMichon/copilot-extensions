@@ -57,13 +57,19 @@ class HostBoundConclusionClient:
     def __getattr__(self, name):
         return getattr(self._client, name)
 
+    def _bound_arguments(self, kwargs):
+        claimant = kwargs.get("claimant_machine")
+        if claimant is not None and claimant != self._machine:
+            raise ValueError("claimant machine cannot override the bound supervisor identity")
+        return {**kwargs, "claimant_machine": self._machine}
+
     def claim_spawn_conclusion_retry(self, key, **kwargs):
-        return self._client.claim_spawn_conclusion_retry(key, claimant_machine=self._machine, **kwargs)
+        return self._client.claim_spawn_conclusion_retry(key, **self._bound_arguments(kwargs))
 
     def validate_spawn_conclusion_claim(self, key, token, **kwargs):
         return self._client.validate_spawn_conclusion_claim(
-            key, token, claimant_machine=self._machine, **kwargs,
+            key, token, **self._bound_arguments(kwargs),
         )
 
     def record_spawn_conclusion(self, key, **kwargs):
-        return self._client.record_spawn_conclusion(key, claimant_machine=self._machine, **kwargs)
+        return self._client.record_spawn_conclusion(key, **self._bound_arguments(kwargs))

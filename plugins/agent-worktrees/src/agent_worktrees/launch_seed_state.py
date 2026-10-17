@@ -245,7 +245,7 @@ def _remove_record_state(path: Path, target: Path, receipt: Path) -> None:
     files = (path, target, receipt)
     if any(file.is_symlink() for file in files):
         raise ExecutionSpaceError("cannot authorize record-state removal through a symbolic link")
-    snapshots = {file: file.read_bytes().decode("utf-8") for file in files if file.exists()}
+    snapshots = {file: file.read_bytes() for file in files if file.exists()}
     try:
         target.unlink(missing_ok=True)
         receipt.unlink(missing_ok=True)

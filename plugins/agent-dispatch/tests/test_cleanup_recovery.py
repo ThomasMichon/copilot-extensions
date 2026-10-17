@@ -970,6 +970,58 @@ def test_legacy_conclusion_rpc_without_recovery_keeps_optional_host_behavior(hel
         ).status_code == 200
 
 
+@pytest.mark.parametrize("boundary", ["validate", "record"])
+def test_legacy_cleanup_lease_rejects_equal_timestamp_competitor(held, boundary):
+    queue, _, key = held
+    queue.settle_spawn(key, conclusion_state="pending")
+    _, claimed, token = queue.claim_spawn_conclusion_retry(key, now=11)
+    assert claimed and token
+    newer = queue.create("same timestamp allocation")
+    competitor, _ = queue.reserve_spawn(newer.id, now=10)
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET worktree='worker-exact' WHERE key=?",
+            (competitor.key,),
+        )
+    before = asdict(queue.get_reservation(key))
+    with pytest.raises(TaskError, match="newer reservation"):
+        if boundary == "validate":
+            queue.validate_spawn_conclusion_claim(key, token, now=12)
+        else:
+            queue.record_spawn_conclusion(
+                key, claim_token=token, conclusion_state="complete",
+                conclusion_detail='{"action":"removed"}', now=12,
+            )
+    assert asdict(queue.get_reservation(key)) == before
+
+
+@pytest.mark.parametrize("method", [
+    "claim_spawn_conclusion_retry", "validate_spawn_conclusion_claim", "record_spawn_conclusion",
+])
+@pytest.mark.parametrize("claimant", [None, "host", "other-host"])
+def test_host_bound_cleanup_client_validates_explicit_claimant(method, claimant):
+    from agent_dispatch.client_cleanup_recovery import HostBoundConclusionClient
+
+    calls = []
+
+    class Client:
+        def __getattr__(self, name):
+            def call(*args, **kwargs):
+                calls.append((name, args, kwargs))
+                return {"accepted": True}
+            return call
+
+    bound = HostBoundConclusionClient(Client(), "host")
+    args = ("key", "token") if method == "validate_spawn_conclusion_claim" else ("key",)
+    if claimant == "other-host":
+        with pytest.raises(ValueError, match="bound"):
+            getattr(bound, method)(*args, claimant_machine=claimant)
+        assert calls == []
+    else:
+        assert getattr(bound, method)(*args, claimant_machine=claimant) == {"accepted": True}
+        assert calls == [(method, args, {"claimant_machine": "host"})]
+
+
 @pytest.mark.parametrize("operation", ["settle", "fail"])
 def test_unbound_terminal_alias_cannot_publish_recovery_outcome(held, operation):
     from fastapi.testclient import TestClient

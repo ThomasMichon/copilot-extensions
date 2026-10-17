@@ -556,12 +556,18 @@ def test_terminal_pair_sidecar_removal_preserves_unknown_owner(tmp_path):
 
 
 @pytest.mark.parametrize("failure", ["seed", "record", "receipt"])
-def test_terminal_pair_sidecar_removal_failure_retains_and_retries(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("invalid_utf8", [False, True])
+def test_terminal_pair_sidecar_removal_failure_retains_and_retries(
+    tmp_path, monkeypatch, failure, invalid_utf8,
+):
     path = _record(tmp_path)
     state.stage(path, kind="resume", text="retain on failed removal")
     target = state.state_path(path)
     pair_receipt = path.with_suffix(".terminal-pair.json")
     pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    if invalid_utf8:
+        target.write_bytes(b"\xff\x00seed\r\n")
+        pair_receipt.write_bytes(b"\xfe\x00receipt\r\n")
     before = {file: file.read_bytes() for file in (path, target, pair_receipt)}
     failed_path = {"record": path, "receipt": pair_receipt, "seed": target}[failure]
     unlink = Path.unlink

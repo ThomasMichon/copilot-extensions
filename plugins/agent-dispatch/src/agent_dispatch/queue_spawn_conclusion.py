@@ -157,20 +157,7 @@ class SpawnConclusionMixin:
             if row["cleanup_claim_token"] and current_expiry > ts:
                 conn.execute("COMMIT")
                 return SpawnReservation._from_row(row), False, None
-            blocker = None
-            if row["worktree"]:
-                blocker = conn.execute(
-                    "SELECT key FROM spawn_reservations "
-                    "WHERE key <> ? AND (worktree = ? OR inherited_worktree = ?) "
-                    "AND reserved_at >= ? "
-                    "ORDER BY reserved_at DESC LIMIT 1",
-                    (
-                        key,
-                        row["worktree"],
-                        row["worktree"],
-                        row["reserved_at"],
-                    ),
-                ).fetchone()
+            blocker = _newer_worktree_reservation(conn, row, key)
             claim_token = None
             if blocker is not None:
                 payload: dict[str, object] = {

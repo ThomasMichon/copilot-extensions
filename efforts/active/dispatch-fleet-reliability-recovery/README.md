@@ -928,3 +928,40 @@ requested contract.
   history/provenance override, dropped validation or deadline increase is used.
   Only this hook, its focused tests and directly related documentation differ
   from the already validated runtime/cleanup tree.
+
+- **Fresh resulting-head cleanup review:** Review of the published additive
+  candidate exposes a remaining equal-timestamp gap in the shared legacy
+  allocation helper, duplicate claimant keywords in the bound client and
+  UTF-8 decoding of rollback evidence. Two actual lease cases, nine explicit
+  claimant cases and three raw-byte rollback cases fail before corrections.
+  The allocation claim, validation and publication paths now share the same
+  ambiguous-or-newer predicate. The host-bound adapter accepts omitted/matching
+  claimant values and explicitly rejects a foreign override before I/O.
+  An omitted legacy claim body gets a fresh model per request.
+- **Byte-exact teardown evidence:** Authorized removal snapshots raw bytes and
+  restores them through the existing atomic writer, preserving its per-path
+  serialization and replacement retry. Failure at each seed/receipt/YAML
+  boundary must retain the original bytes, including invalid UTF-8, before a
+  normal retry removes the exact authorized artifacts. Documentation now
+  correctly states removal protocol floor 5; stage/take stay at 5 and
+  restore/finish at 4. The shared reciprocal identity projection is an explicit
+  public helper rather than a cross-module private import.
+- **Current validation boundary:** Complete Dispatch cleanup and reservation
+  coverage passes all 262 cases in 170.45 seconds. A combined worktree selection
+  reaches its existing 300-second aggregate cap without a test assertion failure;
+  it is not a pass. Remaining complete worktree consumer groups are being run
+  disjointly under their unchanged budgets rather than enlarging the cap.
+  Module ceilings, install contract, headless-launch guard and F/E9 lint pass.
+  Publication, new exact-head review and complete CI still gate merge; no result
+  grants rollout, replay, record-repair or lifecycle-owner authority.
+- **Resulting-fix consumer proof:** Complete seed/real-daemon coverage passes
+  86 cases in 250.17 seconds, reciprocal terminal-pair consumers pass 82 in
+  284.45 seconds, and the disjoint remaining terminal/shared-lock/atomic-writer
+  selection passes 51 in 230.77 seconds. Together with the 262 Dispatch cases,
+  these are 481 unique current-candidate passes, each contained invocation
+  exiting zero under unchanged limits. They do not relabel the earlier combined
+  timeout or incomplete provider CI as a pass. Raw-byte rollback exercises each
+  actual filesystem failure/retry boundary; real daemon floor/admission and
+  reciprocal/GC preservation assertions remain intact. Installer/bootstrap is
+  unchanged, so no new full fresh-box provisioning is claimed; hosted Linux and
+  complete resulting-head CI remain the external lane, not a production rollout.
