@@ -31,7 +31,7 @@ def _repos_usage() -> None:
     print(f"Usage: {project} repos <command>")
     print()
     print("Commands:")
-    print("  list [--class reference|singleton|worktree|knowledge]   List known repositories")
+    print("  list [--class reference|singleton|worktree|knowledge] [--strict] [--json]")
     print("  find <name> [--registered-only]      Resolve a repo to its local path")
     print("                                      --registered-only refuses discovery fallback")
     print("  add <name> <path>                   Register a repo at a known path")
@@ -165,55 +165,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         return 0
 
     if sub == "list":
-        class_filter = None
-        for flag in ("--class", "--type"):
-            if flag in rest:
-                idx = rest.index(flag)
-                if idx + 1 < len(rest):
-                    class_filter = rest[idx + 1]
-        json_out = "--json" in rest
-        entries = repos.list_repos(class_filter=class_filter)
-        if json_out:
-            output._json_output(
-                {
-                    "repos": [
-                        {
-                            "name": e.name,
-                            "class": e.repo_class,
-                            "remote": e.remote,
-                            "default_branch": e.default_branch,
-                            "tags": e.tags,
-                            "contributing": e.contributing,
-                            "account": e.account,
-                            "resolved_account": repos.resolve_account(e),
-                            "agent": e.agent,
-                            "visibility": e.visibility,
-                            "paths": e.paths,
-                        }
-                        for e in entries
-                    ],
-                }
-            )
-        elif not entries:
-            print("No repos registered.")
-            print("Add one with: repos add <name> <path> --class <class>")
-            print("Or import the legacy registry with: repos migrate")
-        else:
-            plat = repos._current_platform()
-            output.header("Repos Registry")
-            for e in entries:
-                tag = f"[{e.repo_class}]" if e.agent else f"[{e.repo_class} no-agent]"
-                if e.visibility:
-                    tag = f"{tag[:-1]} visibility={e.visibility}]"
-                local = e.local_path(plat) or "(no local path)"
-                print(f"  {e.name:<25} {tag:<20} {local}")
-                if e.remote:
-                    print(f"  {'':25} {'':20} {e.remote}")
-                acct = repos.resolve_account(e)
-                if acct:
-                    src = "explicit" if e.account else "derived"
-                    print(f"  {'':25} {'':20} account: {acct} ({src})")
-        return 0
+        from .repos_list_cli import command
+        return command(rest)
 
     if sub == "find":
         if not rest:

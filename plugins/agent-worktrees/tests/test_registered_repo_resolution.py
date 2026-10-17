@@ -128,6 +128,45 @@ def test_registered_only_native_cli_first_touch(tmp_path):
     assert payload["class"] == "worktree"
     assert payload["path"] == str(root)
     assert registry.read_bytes() == before
+    inventory = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees", "repos", "list", "--strict", "--json"],
+        cwd=tmp_path, env={**os.environ, "AGENT_HOME": str(home)},
+        capture_output=True, text=True, check=False, timeout=20, **no_window_kwargs(),
+    )
+    assert inventory.returncode == 0, inventory.stderr
+    listed = json.loads(inventory.stdout)
+    assert listed["inventory_authority"] == "complete"
+    assert [entry["name"] for entry in listed["repos"]] == ["tools"]
+    assert registry.read_bytes() == before
+
+
+@pytest.mark.parametrize("body", [
+    "repos: [", "repos: [invalid]", "repos:\n  invalid: null\n",
+    "repos:\n  duplicate: {}\n  duplicate: {}\n",
+])
+def test_strict_inventory_refuses_corrupt_or_dropped_entries(registry_path, capfd, body):
+    registry_path.write_text(body, encoding="utf-8")
+    before = registry_path.read_bytes()
+    assert repos_cli.cmd_repos_dispatch(["list", "--strict", "--json"]) == 2
+    failure = json.loads(capfd.readouterr().out)
+    assert failure["error"] and "inventory_authority" not in failure
+    assert registry_path.read_bytes() == before
+    with pytest.raises(repos.RepositoryResolutionError):
+        repos.list_repos(strict=True)
+
+
+def test_strict_inventory_missing_is_complete_but_legacy_json_is_not_an_attestation(registry_path, capfd):
+    assert repos_cli.cmd_repos_dispatch(["list", "--strict", "--json"]) == 0
+    assert json.loads(capfd.readouterr().out) == {"version": 1, "repos": [], "inventory_authority": "complete"}
+    assert not registry_path.exists()
+    assert repos_cli.cmd_repos_dispatch(["list", "--json"]) == 0
+    assert json.loads(capfd.readouterr().out) == {"version": 1, "repos": []}
+
+
+def test_strict_inventory_refuses_nonregular_registry(registry_path):
+    registry_path.mkdir()
+    with pytest.raises(repos.RepositoryResolutionError, match="regular file"):
+        repos.list_repos(strict=True)
 
 
 @pytest.mark.guard

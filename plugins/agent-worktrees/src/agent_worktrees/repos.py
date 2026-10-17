@@ -287,13 +287,13 @@ def set_srcroot(path: str, plat: str | None = None) -> None:
     output.ok(f"Source root for {plat} set to {path}")
 
 
-def list_repos(class_filter: str | None = None) -> list[RepoEntry]:
+def list_repos(class_filter: str | None = None, *, strict: bool = False) -> list[RepoEntry]:
     """Return all repos, optionally filtered by management class.
 
     The filter accepts new class names (reference/singleton/worktree) and
     legacy type values (project/repo), normalizing both.
     """
-    registry = read_registry()
+    registry = read_registry(strict=strict)
     entries = list(registry.repos.values())
     if class_filter:
         wanted = normalize_class(class_filter)

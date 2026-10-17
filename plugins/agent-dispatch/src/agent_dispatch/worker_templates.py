@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+import stat
 
 from plugin_activation import ActivationReport
 from dropin_registry import ScanAuthority
@@ -16,7 +17,7 @@ from .registrar import RegistrarError
 from .registrations import RegistrationKind
 from .repo_config import layered_repo_surface_dirs
 from .repository_resource_capture import run_agent_worktrees_capture
-from .repository_resources import RepositoryResourceSnapshot
+from .repository_resources import RepositoryResourceSnapshot, split_repository_resource
 from .worker_instances import digest, templates
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
@@ -53,7 +54,7 @@ def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
     roots: dict[str, Path] = {}
     snapshot = RepositoryResourceSnapshot(execution=False)
     try:
-        result = run_agent_worktrees_capture("repos", "list", "--json", timeout=5)
+        result = run_agent_worktrees_capture("repos", "list", "--strict", "--json", timeout=5)
     except RegistrarError as exc:
         result = None
         _finding(findings, "registered-repositories", "unavailable", str(exc))
@@ -70,12 +71,16 @@ def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
             entries = data.get("repos") if isinstance(data, dict) else None
             if not isinstance(entries, list):
                 raise ValueError("expected a repos list")
+            if data.get("inventory_authority") != "complete":
+                _finding(findings, "registered-repositories", "inventory-authority-unavailable",
+                         "The repository owner lacks the strict inventory contract; discovery is partial.")
             valid_names = []
             for offset, entry in enumerate(entries):
-                if (
-                    not isinstance(entry, dict) or not isinstance(entry.get("name"), str)
-                    or not _ID.fullmatch(entry["name"])
-                ):
+                try:
+                    if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
+                        raise RegistrarError("expected a registered repository name")
+                    split_repository_resource(f"repo:{entry['name']}:.")
+                except RegistrarError:
                     _finding(findings, f"registered-repositories#{offset}", "invalid", "Expected a portable registered name.")
                 else:
                     valid_names.append(entry["name"])
@@ -128,6 +133,8 @@ def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
 
 
 def _json_object(path: Path) -> dict:
+    if not stat.S_ISREG(path.stat().st_mode):
+        raise ValueError("template document must be a regular file")
     with path.open("rb") as stream:
         raw = stream.read(_MAX_BYTES + 1)
     if len(raw) > _MAX_BYTES:

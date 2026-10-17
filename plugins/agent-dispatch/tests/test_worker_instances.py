@@ -32,7 +32,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_dispatch.workers_catalog._observation", lambda: {"known": False})
     monkeypatch.setattr(
         "agent_dispatch.worker_templates.run_agent_worktrees_capture",
-        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"repos":[]}', stderr=""),
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"inventory_authority":"complete","repos":[]}', stderr=""),
     )
 
 

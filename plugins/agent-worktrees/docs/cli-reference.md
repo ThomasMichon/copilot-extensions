@@ -1033,6 +1033,22 @@ to the effort after release.
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
 
+### Strict repository inventory (`repos list --strict --json`)
+
+Machine consumers that need a complete inventory use `repos list --strict
+--json`. Success adds `inventory_authority: "complete"` to the existing
+`{repos: [...]}` envelope. A missing registry is a complete empty inventory;
+unreadable, malformed, duplicate-key or non-regular registry files fail with
+exit 2 rather than silently dropping entries. The command does not write,
+discover unregistered checkouts, clone or provision anything. Individual local
+checkout availability is separate: use `repos find <name> --registered-only
+--json` when a read or operation needs that repository's current root.
+
+The default `repos list` remains the tolerant interactive listing. Its legacy
+JSON has no authority marker and must not be interpreted as a completeness
+attestation. An older runtime that does not return the strict marker cannot
+establish inventory completeness even if it accepts or ignores the new flag.
+
 ### Bare-anchor sync (`repos sync`)
 
 `repos sync` fast-forwards a bare anchor (`core.bare=true`) by moving its

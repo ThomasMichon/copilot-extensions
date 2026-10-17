@@ -552,10 +552,38 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   registrar error when there are no plugin registrar candidates.
 - The contained catalog, instance, registrar and recipe selection passed
   279 tests. The final 108-test catalog/instance selection includes actual
-  first-touch CLI output through Manager's real manifest/list/action parsers,
+  first-touch CLI output and the Manager manifest's action-capability contract,
   unchanged source/state bytes and builtin save/publication compatibility.
   Changed Python lint and the 13-plugin install contract passed.
 - This implements discovery only. External fragments remain non-instantiable;
   no source activation, provider command, queue access or installed update was
   used. Native CI, normal promotion and authorized installed proof are
   independent gates; the earlier #7020 timeout remains tracked, not waived.
+
+### 2026-10-17 - Discovery refusal and inventory authority corrections
+
+- A regular-file check now precedes index/declaration opening: a FIFO cannot
+  block catalog discovery before the byte limit applies. Native POSIX index
+  and declaration FIFO cases exercise the real CLI; Windows retains a direct
+  non-regular-file refusal case.
+- Reuse repository-resource name validation instead of imposing a template
+  ID's 80-character limit on repository names. Inert fragments still keep
+  their own bounded local IDs.
+- A tolerant repository listing cannot attest inventory completeness because
+  its reader may omit malformed state. Add an explicit strict read-only
+  inventory contract to the repository owner, preserving the default listing.
+  Older inventory output leaves template discovery partial while individually
+  registered-only roots remain usable. Corrupt/duplicate/non-regular strict
+  inventory must fail before emitting an authority marker.
+- Required CI caught a forbidden plugin-to-Manager import in the integration
+  test. Move the consumer parser/action checks to the Manager-owned suite and
+  keep the real dispatch CLI proof in dispatch's suite. The boundary guard is
+  unchanged; independent installability does not depend on test imports.
+- Both owners' relevant changefiles and operating docs are included. These
+  corrections retain scoped findings and all existing activation controls.
+- The final contained dispatch selection passed 284 tests with two explicit
+  POSIX-only FIFO cases skipped on Windows. Strict inventory and existing
+  repository operations passed 161 tests, including actual native CLI output;
+  Manager's own compatibility/dependency selection passed three tests.
+  Native POSIX FIFO execution and updated-head review/complete CI remain
+  prerequisites rather than inferred Windows coverage.

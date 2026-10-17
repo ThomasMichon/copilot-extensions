@@ -1,0 +1,9 @@
+{
+  "comment": "Expose strict read-only repository inventory authority for consumers without changing tolerant interactive listing.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
