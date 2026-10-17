@@ -17,6 +17,8 @@ from agent_worktrees import pr_config
 from agent_worktrees import pr_contract as pc
 from agent_worktrees import providers as prov
 
+HEAD = "a" * 40
+
 
 def _args(**over):
     base = dict(repo="o/r", pr=7, sweep=False, host="", token=None,
@@ -49,7 +51,7 @@ def _self_merge_flow():
 class _FakeProvider:
     name = "github"
 
-    def __init__(self, err="", auto_err="unsupported", review_gate=None, live_head="",
+    def __init__(self, err="", auto_err="unsupported", review_gate=None, live_head=HEAD,
                  merge_pending=False, confirmation_error=False):
         self._live_head = live_head
         self._err = err
@@ -153,7 +155,7 @@ def test_now_self_merge_calls_merge_pull_squash_admin(monkeypatch, capsys):
     _patch_provider(monkeypatch, fake)
     rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
     assert rc == 0
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha="")]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha=HEAD)]
 
 
 def test_normal_merge_queue_admission_is_not_reported_as_merged(monkeypatch, capsys):
@@ -192,6 +194,8 @@ def test_completion_lookup_diagnostics_do_not_expose_exception_values(
     fake = _FakeProvider()
 
     def unavailable(*args, **kwargs):
+        if not fake.calls:
+            return prov.PullResult(number=7, head_sha=HEAD)
         raise failure_type("fixture-private-completion-secret\nadditional private details")
 
     fake.get_pull = unavailable
@@ -218,7 +222,11 @@ def test_malformed_provider_number_after_accepted_request_is_redacted(monkeypatc
     monkeypatch.setattr(
         github, "run_cli",
         lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, 0, json.dumps({"number": None, "state": "MERGED"}), "",
+            argv, 0, json.dumps({
+                "number": None if fake.calls else 7,
+                "state": "MERGED" if fake.calls else "OPEN",
+                "headRefOid": HEAD,
+            }), "",
         ),
     )
     assert m._pr_merge_now(
@@ -244,7 +252,7 @@ def test_invalid_completion_shape_is_explicit_not_a_post_merge_crash(
 
     fake = _FakeProvider(live_head=expected_head)
     fake.get_pull = lambda *args, **kwargs: (
-        confirmation if fake.calls else prov.PullResult(number=7, head_sha=expected_head)
+        confirmation if fake.calls else prov.PullResult(number=7, head_sha=expected_head or HEAD)
     )
     _patch_provider(monkeypatch, fake)
     monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head", lambda *args: expected_head)
@@ -258,7 +266,8 @@ def test_invalid_completion_shape_is_explicit_not_a_post_merge_crash(
     assert "invalid lifecycle data" in result["error"]
 
 
-def test_normal_merge_completion_with_wrong_head_is_not_success(monkeypatch, capsys):
+@pytest.mark.parametrize("recorded_head", [False, True])
+def test_normal_merge_completion_with_wrong_head_is_not_success(monkeypatch, capsys, recorded_head):
     import json
     from agent_worktrees import pr_cli
 
@@ -274,11 +283,41 @@ def test_normal_merge_completion_with_wrong_head_is_not_success(monkeypatch, cap
     _patch_provider(monkeypatch, fake)
     monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head", lambda *args: "a" * 40)
     assert m._pr_merge_now(
-        _args(json=True), _prcfg(), _self_merge_flow(), apply=True, config=object(),
+        _args(json=True), _prcfg(), _self_merge_flow(), apply=True,
+        config=object() if recorded_head else None,
     ) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["merged"] is False and result["completion_verified"] is False
     assert "different or unavailable head" in result["error"]
+
+
+@pytest.mark.parametrize("head", [None, "", "short", "z" * 40])
+def test_untracked_merge_refuses_unavailable_discovery_before_mutation(monkeypatch, capsys, head):
+    import json
+
+    fake = _FakeProvider(live_head=head)
+    _patch_provider(monkeypatch, fake)
+    assert m._pr_merge_now(_args(json=True), _prcfg(), _self_merge_flow(), apply=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert fake.calls == []
+    assert result["applied"] is False and result["merged"] is False
+    assert "merge head is unavailable or invalid" in result["error"]
+
+
+def test_untracked_merge_head_lookup_failure_is_redacted_before_mutation(monkeypatch, capsys):
+    import json
+
+    fake = _FakeProvider()
+    fake.get_pull = lambda *args, **kwargs: (_ for _ in ()).throw(
+        prov.ProviderError("fixture-private-head-discovery-secret")
+    )
+    _patch_provider(monkeypatch, fake)
+    assert m._pr_merge_now(_args(json=True), _prcfg(), _self_merge_flow(), apply=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert fake.calls == []
+    assert result["applied"] is False and result["completion_verified"] is False
+    assert "head lookup failed (ProviderError)" in result["error"]
+    assert "fixture-private" not in result["error"]
 
 
 def test_now_blocking_review_never_uses_admin_bypass(monkeypatch):
@@ -296,7 +335,7 @@ def test_now_blocking_review_never_uses_admin_bypass(monkeypatch):
     rc = m._pr_merge_now(_args(), _prcfg(), flow, apply=True)
     assert rc == 0
     assert fake.calls == [
-        dict(repo="o/r", number=7, squash=True, admin=False, delete_source_branch=True, expected_head_sha="")
+        dict(repo="o/r", number=7, squash=True, admin=False, delete_source_branch=True, expected_head_sha=HEAD)
     ]
 
 
@@ -388,7 +427,7 @@ def test_now_passes_tracked_pushed_head_as_match_head_commit(monkeypatch):
     merge the wrong commit (ThomasMichon/copilot-extensions#4949)."""
     from agent_worktrees import pr_cli
 
-    fake = _FakeProvider()
+    fake = _FakeProvider(live_head="")
     _patch_provider(monkeypatch, fake)
     monkeypatch.setattr(
         pr_cli, "_tracked_pr_pushed_head",
@@ -413,7 +452,7 @@ def test_now_passes_tracked_pushed_head_to_auto_merge_default_path(monkeypatch):
     on the path most callers actually take (ThomasMichon/copilot-extensions#4949)."""
     from agent_worktrees import pr_cli
 
-    fake = _FakeProvider(auto_err="")  # auto-merge succeeds
+    fake = _FakeProvider(auto_err="", live_head="")  # no readable live head
     _patch_provider(monkeypatch, fake)
     monkeypatch.setattr(
         pr_cli, "_tracked_pr_pushed_head",
@@ -469,16 +508,15 @@ def test_now_attempts_recorded_head_but_cannot_confirm_unreadable_completion(
     assert "completion lookup failed" in capsys.readouterr().out
 
 
-def test_now_omits_match_head_commit_without_config(monkeypatch):
-    """No ``config`` (e.g. an older caller) must not crash and must not
-    fabricate a safety check it has no evidence for."""
+def test_now_discovers_and_pins_head_without_config(monkeypatch):
+    """An untracked caller discovers and retains the actual provider head."""
     fake = _FakeProvider()
     _patch_provider(monkeypatch, fake)
     rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.calls == [
         dict(repo="o/r", number=7, squash=True, admin=True,
-             delete_source_branch=True, expected_head_sha="")
+             delete_source_branch=True, expected_head_sha=HEAD)
     ]
 
 
@@ -524,7 +562,7 @@ def test_dispatch_maintain_role_resolves_self_merge_once(monkeypatch):
     assert rc == 0
     assert len(calls) == 1
     assert fake.calls == [
-        dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha=""),
+        dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha=HEAD),
     ]
 
 
@@ -612,7 +650,7 @@ def test_prefer_auto_merge_falls_back_to_direct_when_unsupported(monkeypatch):
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.auto_calls  # attempted
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha="")]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha=HEAD)]
 
 
 def test_prefer_auto_merge_off_merges_directly(monkeypatch):
@@ -623,7 +661,7 @@ def test_prefer_auto_merge_off_merges_directly(monkeypatch):
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.auto_calls == []
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha="")]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha=HEAD)]
 
 
 def test_prefer_auto_merge_dry_run_previews_auto(monkeypatch, capsys):
@@ -654,7 +692,7 @@ def test_bypassable_review_gate_skips_auto_merge_and_admin_bypasses(
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.auto_calls == []  # never attempted -- would have queued forever
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha="")]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha=HEAD)]
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["action"] == "merge"
     assert out["applied"] is True
@@ -713,7 +751,7 @@ def test_bypassable_review_gate_not_consulted_when_prefer_auto_off(monkeypatch):
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.review_gate_calls == []
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha="")]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha=HEAD)]
 
 
 def test_ado_self_merge_uses_native_completion(monkeypatch, capsys):

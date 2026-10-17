@@ -7,6 +7,7 @@ The functions below were moved verbatim, with no behavior change.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -407,19 +408,34 @@ def _pr_merge_now(
             print(rem.text(), file=sys.stderr)
         return 0
 
-    try:
-        err = provider.merge_pull(
-            args.repo,
-            args.pr,
-            squash=True,
-            admin=bypass_review_gate or not flow.review_blocking,
-            delete_source_branch=getattr(prcfg, "delete_source_branch", True),
-            api_base=base,
-            token=tok,
-            expected_head_sha=expected_head_sha,
-        )
-    except ProviderError as exc:
-        err = str(exc)
+    err = ""
+    if getattr(provider, "name", "") == "github" and not expected_head_sha:
+        try:
+            observed = provider.get_pull(args.repo, args.pr, api_base=base, token=tok)
+            if (
+                not isinstance(observed, PullResult)
+                or not isinstance(observed.head_sha, str)
+                or not re.fullmatch(r"[0-9a-f]{40}", observed.head_sha)
+            ):
+                err = "GitHub merge head is unavailable or invalid; no merge was requested"
+            else:
+                expected_head_sha = observed.head_sha
+        except (ProviderError, OSError, ValueError, TypeError, AttributeError) as exc:
+            err = f"GitHub merge head lookup failed ({type(exc).__name__}); no merge was requested"
+    if not err:
+        try:
+            err = provider.merge_pull(
+                args.repo,
+                args.pr,
+                squash=True,
+                admin=bypass_review_gate or not flow.review_blocking,
+                delete_source_branch=getattr(prcfg, "delete_source_branch", True),
+                api_base=base,
+                token=tok,
+                expected_head_sha=expected_head_sha,
+            )
+        except ProviderError as exc:
+            err = str(exc)
 
     if err:
         rem = pc.pr_reminder(
