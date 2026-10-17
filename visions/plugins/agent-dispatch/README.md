@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-13
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -46,6 +46,14 @@ work is already done, is a duplicate, or is theirs to take — without the
 originating conversation. It also carries **routing** (required capabilities,
 soft affinities) and **targeting** (an optional machine/worktree/repo it is
 addressed to). A task is the atom the whole layer moves through its lifecycle.
+
+The task or its selected worker charter owns the **workflow and sub-stage
+logic**. A task may direct its worker to acquire instructions from another
+capability and follow that capability's CLI or execution process until its
+goal is met. Dispatch allocates an eligible agent and records its lifecycle,
+progress and outcome; it need not understand the process's internal stages or
+make them dispatch task states. The selected worker role or charter does not
+replace the worktree identity that owns the claim.
 
 For work that is **pursued** rather than performed in one shot, the record is
 richer than a fire-once prompt: it can carry a **durable goal** — an objective
@@ -228,7 +236,8 @@ those shipped bases whenever the shared loop contract already fits.
 A consumer **selects and parameterizes** a recipe rather than hand-rolling a loop,
 and may **extend** one where its domain needs more. An instantiated pair knows how
 to **author its own tasks** — deriving the goal and payload, stamping the filters,
-wiring its evaluator, defining the intermediary steps, and owning suspend/resume —
+wiring its evaluator and supplying the task or worker charter that owns the
+workflow and intermediary steps — and handles lifecycle follow-through,
 whether it fires on its own event or is **side-loaded** on demand (see
 *side-load-through-an-emitter*). One reviewer template serves an automated review
 service, an on-demand review of a single check-in, and a batch of target pull
@@ -480,6 +489,22 @@ provides its **own full emitter and evaluator** directly (a direct
 `kind:`-only declaration, no extension at all) — the same no-template path
 that exists today. Extension is the preferred route *when* a close-enough
 base exists, never the only route.
+
+### discoverable-extension-templates
+
+Reusable emitter, evaluator and worker-pool templates have consistent,
+owner-declared homes and a common discovery surface across enabled plugin
+contributions, repository sources and local configuration. A consumer can
+inspect a template's identity, provenance, inputs and prerequisites, understand
+the effective selection and overrides, and instantiate it without searching
+embedded examples or reverse-engineering setup scripts. Discovery never
+implicitly activates work.
+
+Templates, saved configurations, published declarations, operator overrides and
+observed execution remain distinguishable. Human-facing clients and automation
+consume the same owning catalog and configuration lifecycle rather than
+copying templates into competing registries. Concrete paths, formats and
+commands belong in the capability's specifications and reality documentation.
 
 ### concise-event-then-charter-pull
 The seed handed to a freshly embodied worker is a **short, event-classified
@@ -766,6 +791,16 @@ way a coordination-layer caller drives a peer. "Drive or converse with a live
 agent" is the coordination layer; "file work you won't wait on and let a worker
 claim it" is this layer. Both may cross machines — the distinguishing axis is
 **ownership, not location**.
+
+### task-or-charter-owns-the-workflow
+
+Consumer-defined processes plug in through task payloads, worker charters,
+emitters and evaluators with explicit input, result and completion contracts.
+Those injection points let a worker acquire and follow another capability's
+instructions without teaching dispatch that capability's workflow or sub-stage
+model. A manual task can select the same execution procedure without a standing
+producer. Domain-specific judgments remain with their owning evaluator or
+caller; dispatch preserves its common allocation, lifecycle and review rules.
 
 ### liveness-not-lease
 A claimed or started task has **no wall-clock expiration** while the worker that
@@ -1117,6 +1152,10 @@ parallel contract.
 
 ## Non-Goals / Boundaries
 
+- **Not a domain workflow engine.** Dispatch does not interpret consumer
+  process graphs or promote their internal stages into its task lifecycle.
+  The task or worker charter owns that logic; consumers supply execution
+  procedures and domain policies through the layer's injection points.
 - **Not the live-conversation layer.** Driving or messaging a running agent
   turn-by-turn is the **coordination layer** (agent-bridge). This layer carries
   *async, recorded, claimable* work, not a live dialogue.
