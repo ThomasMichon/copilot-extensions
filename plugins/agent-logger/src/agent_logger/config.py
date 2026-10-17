@@ -80,6 +80,7 @@ DEFAULTS: dict[str, Any] = {
         # session-sync) coordinate on the same lock; a tenant with a distinct
         # source sets its own name to run in parallel.
         "lock_name": "session-sync.lock",
+        "usage_capture": True,
         # Target-independent post-push notify. After any successful push the
         # engine fires a best-effort HTTP POST to `url` (JSON body
         # {"machine": <machine>}; `{machine}` in the url is also substituted),

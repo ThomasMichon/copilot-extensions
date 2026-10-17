@@ -96,6 +96,10 @@ deployment-specific hostname, shared-folder path, or persona baked in.
 
 ### Session sync (`agent_logger.sync`)
 
+The scheduled producer preserves content-free, source-qualified accounting
+before signatures and cold compaction; see [session-local usage evidence](usage-evidence.md)
+for coverage, replay, limits and failure semantics.
+
 A transport-blind engine that pushes raw Copilot session data to a configurable
 **target**, under a `{machine}/` subpath. It archives only `session-state/` and,
 when present, sibling `provenance/` sidecars and, when unfiltered, the

@@ -1708,6 +1708,8 @@ def test_ingest_target_doctor_reports_wsl_rsync(monkeypatch) -> None:
 
 def _cfg(home: Path, source: Path, dest: Path) -> Config:
     data = dict(load_config(home=home).as_dict())
+    # Transport fixtures intentionally have no accounting store; tested separately.
+    data["sync"]["usage_capture"] = False
     data["sync"]["source"] = str(source)
     data["sync"]["targets"]["local"]["path"] = str(dest)
     return Config(data, home)

@@ -275,6 +275,16 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   final source/policy revalidation, catalog/accounting, daily outputs and
   release-backed adoption remain open; the effort stays Active.
 
+### 2026-10-16 - Observed-check reporting detour landed
+- #6504 merged as `09bcfec52a69077f29ba3d0fdf60f768886d594d` after exact-head
+  Copilot approval and configured required CI. #6495 is closed.
+- Failure diagnostics now retain bounded names, conclusions, links and available
+  summaries, with explicit incomplete evidence rather than false green rollups.
+  Required CI enforcement and maintainer review policy remain unchanged.
+- The accounting contributor resumes #6439: source-qualified session-local
+  preservation first, then calibrated transcript estimates. Neither capability
+  is complete; this parent effort and its validation obligations remain Active.
+
 ### 2026-10-16 - Exact-ZIP additional-target publication preparation
 - Added a bounded internal publisher for one content-addressed ZIP revision to
   explicitly resolved filesystem targets. It reuses the pinned directory,

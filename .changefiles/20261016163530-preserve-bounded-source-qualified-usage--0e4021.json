@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve bounded source-qualified usage evidence before scheduled session sync and cold compaction, retaining prior observations after accounting-store loss or rebuild.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

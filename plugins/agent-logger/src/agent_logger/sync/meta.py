@@ -30,6 +30,14 @@ MAX_META_FIELD_CHARS = 256
 MAX_SYNC_META_BYTES = 64 * 1024
 
 
+def status_text(value, default: str = "(unknown)", limit: int = 512) -> str:
+    """Render bounded printable scalar status evidence."""
+    if not isinstance(value, (str, int, float, bool)):
+        return default
+    cleaned = "".join(char for char in str(value) if char.isprintable())
+    return cleaned[:limit] or default
+
+
 def _bounded_text(value: str) -> str:
     return str(value)[:MAX_META_FIELD_CHARS]
 
