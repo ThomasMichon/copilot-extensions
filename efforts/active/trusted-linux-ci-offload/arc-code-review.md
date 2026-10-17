@@ -1,7 +1,21 @@
 # Official ARC Code Review Capacity - Proposed Slice
 
-Parent contract: [README.md](README.md), Phase 1a. This is a planning-only
-extension, not implemented configuration or a declaration of runner readiness.
+Parent contract: [README.md](README.md), Phase 1a. This records the approved
+design and staged activation gates, not a declaration of ARC runner readiness.
+
+The first implementation slice stages the dedicated setup on literal
+`ubuntu-latest`. It must remain hosted-safe even if independently promoted
+before ARC capacity is ready. The final static `copilot-extensions-review`
+selector requires a separate explicit READY decision; no dynamic readiness
+expression or runner-label mutation substitutes for that gate.
+
+Hosted staging itself needs no new custom-route exception: the existing guard
+already accepts literal `ubuntu-latest`. Once the same hosted definition lands
+through dev, an owner-authored workflow-only main seed can publish it under
+existing admission without transferring helpers or activating ARC. An
+independent promotion also remains safe because dev carries the hosted file.
+The four-file compatibility and preservation sequence below is still required
+before the later custom-selector activation, not before this hosted-only stage.
 
 ## Intent and supported product
 

@@ -7,6 +7,22 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Copilot Code Review setup staging
+
+The dedicated `copilot-code-review.yml` setup stays on literal `ubuntu-latest`
+until an explicit isolated-capacity activation. Its only job is
+`copilot-setup-steps`, with no setup token permissions, repository checkout or
+dependency install. Copilot performs its checkout after setup. Manual dispatch
+can exercise the setup once the definition is on the default branch; it is not
+proof that an official agentic review completed or that an ARC worker is ready.
+
+`tools/check-trusted-ci.py` and `tools/test_check_trusted_ci.py` retain the
+existing global custom-route restrictions during hosted staging. A future ARC
+route needs its exact workflow/job/label guard and regression coverage before
+activation, plus operator-owned network and ephemeral-worker qualification.
+Do not use a readiness expression or a hosted-label alias to select private
+capacity. Local pytest commands remain wrapped by the bounded test supervisor.
+
 ## The turn-key runner
 
 Guest-environment coverage runs the actual Python, Bash and PowerShell CLIs

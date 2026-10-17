@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Dispatch Extension Catalog](active/dispatch-extension-catalog/README.md) | Active; execution authorized, amended-plan review precedes templates, mapped sources and client semantic parity | #7091; preserves #6379/#4959/#6283 owners |
-| [Trusted Linux CI Offload](active/trusted-linux-ci-offload/README.md) | Active; Linux plan merged, official ARC Code Review proposal prioritized; validators paused | #7122; preserves #6237/#3336/#1303 owners |
+| [Trusted Linux CI Offload](active/trusted-linux-ci-offload/README.md) | Active; hosted-safe review setup staging, shared-helper coordination and ARC readiness pending; validators paused | #7122; preserves #6237/#3336/#1303 owners |
 | [Bridge Derived Execution Identity](active/bridge-derived-execution-identity/README.md) | Draft; reviewed derivation contract before implementation | #7069; preserves #6987/#5839/#7057 owners |
 | [Venue Plugin Staging and Registration Parity](active/venue-plugin-staging-parity/README.md) | Draft; target-local registration before headed/headless launch, Codespace/container first | #5286, #5072; sub-effort of #954 |
 | [Source-Managed Runtime Installs](active/source-managed-runtime-installs/README.md) | Active; clean-room merged-dev proof before native Windows runtime-only pilot | #7028; #3905, #7029, #7030; future plugin-source switch #7031 |

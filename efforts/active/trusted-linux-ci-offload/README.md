@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent managed plan, implementation and control-activation PRs
 - **Created:** 2026-10-16
-- **Status:** Active; Linux offload plan merged, validator implementation paused for official Code Review capacity proposal
+- **Status:** Active; hosted-safe official review setup staging, shared-helper coordination and ARC readiness pending; validators paused
 - **Vision:** `visions/test-portfolio/README.md`: bounded feedback loops,
   shared-host admission, unique value or consolidation, reductions preserve assurance
 - **Umbrella issue:** #7122
@@ -47,6 +47,11 @@ cross-platform parity and explicit failures.
 - **Related ownership:** #6237 retains workflow-control policy, #3336 retains
   release ownership and #1303 retains portfolio rationalization. This effort
   changes neither those owners nor their independent completion gates.
+- **File seam:** leave `.github/workflows/ci.yml` untouched while #6237's owner
+  carries its dev-only job-admission/containment work. Resolve overlap explicitly
+  before any CI edit. The dedicated review setup, narrow route guard and review
+  preservation remain #7122's subject; coordinate shared helper files before
+  implementation.
 - **Stage gate:** the integration owner authorized publication of the
   planning-only proposal. Merge the reviewed plan before implementation, and
   obtain a further implementation authorization. Proposal publication does not
@@ -55,9 +60,11 @@ cross-platform parity and explicit failures.
   changes, repository variables, workflow pins, release resume or direct-main
   edits. Preserve the accepted collaborator boundary and separately qualify
   capacity before enabling routing.
-- **Current priority:** draft the official ARC Code Review capacity proposal
-  first. Broad validator implementation is paused. Do not publish implementing
-  ARC source until the integration owner confirms its prerequisite intent gate.
+- **Current priority:** the official ARC Code Review capacity proposal is merged.
+  Implementing-source publication is authorized, but the initial setup remains
+  on literal `ubuntu-latest` even if promoted before capacity is ready. Broad
+  validator implementation is paused; custom ARC selection requires a separate
+  explicit READY receipt. Shared helper edits remain coordination-gated.
 
 ## Context
 
@@ -170,11 +177,15 @@ change host policy or bypass the release pause.
 - [x] Assess existing review setup, authorization and default-branch control;
   capture the official supported ARC-only integration and exact guard migration
   in [arc-code-review.md](arc-code-review.md).
-- [ ] Obtain the integration owner's implementing-source publication clearance
-  and coordinate the exact dev-first default-branch compatibility transaction
-  with #6237's existing owner.
-- [ ] Land the ARC proposal through its authorized review/merge path before
-  implementation. Do not treat the existing Linux plan merge as ARC code review.
+- [x] Obtain the integration owner's implementing-source publication clearance;
+  keep initial setup hosted-safe and require a separate custom-selector READY
+  decision.
+- [ ] Coordinate the exact shared-helper edits and dev-first default-branch
+  compatibility transaction with #6237's existing owner before editing them.
+- [x] Land the ARC proposal: #7133 merged as
+  `58dd5c890415a65a656acbd8bf4b4931bda97a11` through the operator-authorized
+  exact-head planning exception, with both original protections restored and
+  audited. This is not a claim that full agentic review or required CI passed.
 - [ ] Implement and qualify only the approved official ARC slice after its
   gates clear; keep broad validators paused until separately resumed.
 
@@ -562,3 +573,32 @@ instead of taking ownership of that campaign.
 - The existing #6237 workflow-control owner retains its campaign. This slice
   coordinates the exact compatibility policy rather than declaring an
   unqualified helper-source blockage or taking over the release work.
+
+### 2026-10-17 - ARC planning amendment merged
+
+- #7133 merged at 02:14 America/Los_Angeles as
+  `58dd5c890415a65a656acbd8bf4b4931bda97a11`, from verified planning head
+  `bc74b885de29cef5039118ff717b81e3bc3264bf`. The operator-authorized
+  PR-only protection transaction restored and live-audited both original
+  settings before any continuation; no exception remains open.
+- Posted [the bounded compatibility coordination note](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6232142688)
+  on #6237 before any admission-policy implementation. It names the four-file
+  dev-first transfer, retained owners and prohibition on unrelated release work.
+- Re-read this canonical effort after managed completion advanced the worktree
+  onto the actual merge. Phase 1a's proposal landing is complete; implementing
+  source publication and live ARC readiness remain separately gated.
+- No workflow, guard, credential, runner label or infrastructure implementation
+  was published. Broad validator implementation remains paused; #7122 stays open.
+
+### 2026-10-17 - Hosted-safe setup implementation started
+
+- Integration owner cleared implementing-source publication, requiring literal
+  hosted staging until a separate explicit ARC readiness decision.
+- Added the dedicated official setup with one `copilot-setup-steps` job,
+  `ubuntu-latest`, empty setup permissions and a bounded no-op setup step.
+  No checkout, dependency setup, coding-agent fallback or custom label changed.
+- Existing trusted-route guard passed and all 34 existing guard regressions
+  passed under the bounded test supervisor, with verified cleanup.
+- Shared-helper owner coordination remains outstanding; no admission helper or
+  `ci.yml` was edited. The narrow route-guard and preservation changes follow
+  only after that ownership seam is resolved.
