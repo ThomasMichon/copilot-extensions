@@ -1,9 +1,0 @@
-{
-  "comment": "Record bounded status-monitor successor promotion, admission-lock waits, drain blockers and outcomes without changing lifecycle policy.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

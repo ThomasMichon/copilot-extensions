@@ -1,9 +1,0 @@
-{
-  "comment": "Reuse one fresh activation snapshot per configuration provider scan without caching across reloads",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

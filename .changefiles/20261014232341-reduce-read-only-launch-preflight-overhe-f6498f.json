@@ -1,9 +1,0 @@
-{
-  "comment": "Reduce read-only launch preflight overhead with owning portable authority probes and bootstrap-only configuration.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

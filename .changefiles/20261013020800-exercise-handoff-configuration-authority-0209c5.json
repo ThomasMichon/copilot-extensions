@@ -1,9 +1,0 @@
-{
-  "comment": "Exercise handoff configuration authority with keyword-aware test fixtures.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

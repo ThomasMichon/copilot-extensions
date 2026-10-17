@@ -1,9 +1,0 @@
-{
-  "comment": "Retain content-addressed SSH mesh registry provenance after refresh and preserve prior profile evidence during replacement.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

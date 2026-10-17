@@ -1,9 +1,0 @@
-{
-  "comment": "Use complete child worktree identities in obligation-settlement fixtures.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

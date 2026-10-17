@@ -1,9 +1,0 @@
-{
-  "comment": "Stop engine runtime mutation when required payload acquisition fails",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

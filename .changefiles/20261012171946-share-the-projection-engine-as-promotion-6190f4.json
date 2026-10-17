@@ -1,9 +1,0 @@
-{
-  "comment": "Share the projection engine as promotion-time packaged assets and resolve only projection sources without loading unrelated scanner code",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

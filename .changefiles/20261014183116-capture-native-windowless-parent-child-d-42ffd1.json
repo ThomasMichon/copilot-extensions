@@ -1,9 +1,0 @@
-{
-  "comment": "Capture native windowless-parent child diagnostics without weakening the launch or containment contract",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

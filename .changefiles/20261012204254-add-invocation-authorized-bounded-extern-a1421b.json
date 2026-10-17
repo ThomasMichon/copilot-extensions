@@ -1,9 +1,0 @@
-{
-  "comment": "Add invocation-authorized bounded external budget readers",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

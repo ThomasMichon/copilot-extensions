@@ -1,9 +1,0 @@
-{
-  "comment": "Model registered receiving-side configuration and native platforms in obligation sweep guards",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep repair and remote handoff guards aligned with structured results and deferred seed defaults",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Retry explicit transient payload failures without blind install fallback or repeated successful peers",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

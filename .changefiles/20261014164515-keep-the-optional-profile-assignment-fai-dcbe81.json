@@ -1,9 +1,0 @@
-{
-  "comment": "Keep the optional profile-assignment failure guard aware of both real launch-admission and setup command layers",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

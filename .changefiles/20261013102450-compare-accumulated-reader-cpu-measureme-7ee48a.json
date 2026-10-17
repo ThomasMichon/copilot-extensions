@@ -1,9 +1,0 @@
-{
-  "comment": "Compare accumulated reader CPU measurements with representational floating-point tolerance",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

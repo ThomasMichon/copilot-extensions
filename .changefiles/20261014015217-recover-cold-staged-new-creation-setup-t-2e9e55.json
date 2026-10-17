@@ -1,9 +1,0 @@
-{
-  "comment": "Recover cold staged New creation setup through a targeted doctor repair without consuming the retained intent",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

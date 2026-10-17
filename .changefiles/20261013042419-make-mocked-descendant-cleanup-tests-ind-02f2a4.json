@@ -1,9 +1,0 @@
-{
-  "comment": "Make mocked descendant-cleanup tests independent of the runner PID while retaining self-process protection.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

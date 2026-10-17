@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve literal JSON, multiline and empty Configuration form values through generated Windows PowerShell launchers and report transport failures explicitly",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

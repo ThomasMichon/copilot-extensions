@@ -1,9 +1,0 @@
-{
-  "comment": "Compose explicit fleet policy with fresh source-aware standalone host configuration",
-  "changes": [
-    {
-      "plugin": "agent-index-service",
-      "type": "patch"
-    }
-  ]
-}

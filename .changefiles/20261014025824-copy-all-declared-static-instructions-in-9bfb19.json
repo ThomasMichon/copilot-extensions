@@ -1,9 +1,0 @@
-{
-  "comment": "Copy all declared static instructions in process after final paired plugin composition and launch maintenance",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
