@@ -399,7 +399,13 @@ def test_removed_active_companion_withdraws_selection_off_master(harness, monkey
         assert time.monotonic() - started < 0.5
         assert summary.stopped == [h.rid]
         assert summary.started == ["unrelated"]
-        assert entered.wait(1)
+        deadline = time.monotonic() + 1
+        while not entered.is_set() and time.monotonic() < deadline:
+            started = time.monotonic()
+            h.daemon.reconcile_once()
+            assert time.monotonic() - started < 0.5
+            entered.wait(min(0.01, max(0.0, deadline - time.monotonic())))
+        assert entered.is_set()
         assert caller not in threads
         assert selection.read_bytes() == before
         assert h.controller._receipt_operations
@@ -1062,11 +1068,8 @@ def test_transition_group_restart_mid_cutover_rolls_back_pair_atomically(
     transition_group_harness,
 ):
     h = transition_group_harness
-    started = time.monotonic()
     assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
-    print(f"rollback fixture first launch={time.monotonic() - started:.3f}s", flush=True)
     h.daemon.reconcile_once()
-    print(f"rollback fixture settled cycle={time.monotonic() - started:.3f}s", flush=True)
     selected, rollback, _pending = h.daemon._read_transition_group(h.group_id)
 
     h.change(
@@ -1081,7 +1084,6 @@ def test_transition_group_restart_mid_cutover_rolls_back_pair_atomically(
         for rid in (h.engine_id, h.service_id)
     }
     assert all(snapshot is not None for snapshot in target.values())
-    print(f"rollback fixture target snapshots={time.monotonic() - started:.3f}s", flush=True)
     target = {rid: snapshot for rid, snapshot in target.items() if snapshot is not None}
     h.daemon._write_transition_group(
         h.group_id,
@@ -1091,12 +1093,10 @@ def test_transition_group_restart_mid_cutover_rolls_back_pair_atomically(
     )
     assert h.daemon._stop(h.engine_id)
     h.daemon._launch_managed(target[h.engine_id], ReconcileSummary(), bucket="restarted")
-    print(f"rollback fixture partial cutover={time.monotonic() - started:.3f}s", flush=True)
 
     h.controller = h.make_controller()
     h.daemon = h.make_daemon()
     h.daemon.reconcile_once()
-    print(f"rollback fixture restored={time.monotonic() - started:.3f}s", flush=True)
 
     record = h.group_record()
     assert record["pending"] is None
@@ -1316,7 +1316,6 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
         overrides_source=lambda: {},
     )
     rid = registration["id"]
-    started = time.monotonic()
     try:
         assert daemon.reconcile_once().started == [rid]
         snapshot = daemon._units[rid].companion_resolution.managed_snapshot
@@ -1344,4 +1343,3 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
     finally:
         daemon.shutdown()
     assert not controller._receipt_path(rid).exists()
-    print(f"native readiness, repeated health, rollback and stop elapsed={time.monotonic() - started:.3f}s")

@@ -1646,6 +1646,13 @@ class SupervisorDaemon(BoundedReconciliation):
         reconcile_deadline = time.monotonic() + self._reconcile_call_budget
         self._reconcile_deadline = reconcile_deadline
         self._reconcile_token = object()
+        try:
+            return self._reconcile_cycle(summary, reconcile_deadline)
+        finally:
+            self._reconcile_deadline = None
+            self._reconcile_token = None
+
+    def _reconcile_cycle(self, summary: ReconcileSummary, reconcile_deadline: float) -> ReconcileSummary:
         self._phase("discovery")
         desired = self._desired()
         self._phase("units")
@@ -1777,7 +1784,6 @@ class SupervisorDaemon(BoundedReconciliation):
         summary.dead = sorted(rid for rid, u in self._units.items() if u.dead)
         self._phase("complete")
         summary.progress = self.progress_snapshot()
-        self._reconcile_deadline = None
         return summary
 
     # -- serve loop ----------------------------------------------------------

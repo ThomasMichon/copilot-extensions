@@ -125,32 +125,19 @@ def _write_supervisor_cycle_start(scope: str, cycle_id: int, started_at: float) 
     os.replace(temporary, path)
 
 def _write_supervisor_progress(scope: str, progress: dict) -> None:
-    path = _supervisor_runtime_status_path(scope)
-    payload, error = _read_supervisor_runtime_status(scope)
-    if error is not None or payload is None:
-        raise RuntimeError("supervisor progress snapshot is unavailable")
-    if payload.get("cycle_id") != progress.get("cycle_id"):
-        raise RuntimeError("supervisor progress cycle is superseded")
-    generation = payload.get("generation")
-    if not isinstance(generation, dict) or generation.get("pid") != os.getpid():
-        raise RuntimeError("supervisor progress generation is superseded")
-    payload["progress"] = {**progress, "generation": generation}
-    temporary = path.with_suffix(f".{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload), encoding="utf-8")
-    os.replace(temporary, path)
+    from .companion import process_start_token
+    from .supervisor_status_io import write_progress
+
+    write_progress(
+        _supervisor_runtime_status_path(scope), progress,
+        pid=os.getpid(), start_token=process_start_token(os.getpid()),
+    )
 
 
 def _read_supervisor_runtime_status(scope: str) -> tuple[dict | None, str | None]:
-    path = _supervisor_runtime_status_path(scope)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None, None
-    except (OSError, ValueError) as exc:
-        return None, str(exc)
-    if not isinstance(payload, dict):
-        return None, f"{path}: expected a JSON object"
-    return payload, None
+    from .supervisor_status_io import read_status
+
+    return read_status(_supervisor_runtime_status_path(scope))
 
 
 def _validate_spec_charter_mode(spec: dict) -> None:

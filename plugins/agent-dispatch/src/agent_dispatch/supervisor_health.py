@@ -76,7 +76,7 @@ def supervisor_progress_observation(
         **result, "state": state, "generation": generation,
         "cycle_id": runtime_status.get("cycle_id"),
         "phase": progress.get("phase") if isinstance(progress, dict) else None,
-        "receipt_operations": progress.get("receipt_operations", []) if isinstance(progress, dict) else [],
+        "receipt_operations": progress.get("receipt_operations") if isinstance(progress, dict) else None,
     }
 
 

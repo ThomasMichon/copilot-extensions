@@ -720,3 +720,42 @@ requested contract.
   behavior changed, so a separate fresh-box provision was not run for this fix.
   Publication, fresh review and complete CI remain required. No source result
   closes independent native recovery or rollout.
+
+### 2026-10-17 - Fence native progress and clear failed-cycle authority
+
+- Exact-head CI catches `supervise_cli.py` exceeding the hard module cap at
+  1,005 lines. Extracted only progress-record I/O into a focused leaf module;
+  the CLI entrypoints and their path-resolution seam remain compatible.
+  Validation now runs the exact provider base/head diff scope instead of
+  relying only on the earlier unscoped local result. No baseline was widened.
+- Fresh review confirms the previous five dispositions, then identifies
+  native PID reuse, exceptional cycle cleanup and missing inventory being
+  returned as confirmed empty. Eight new cases fail before fixes. Optional
+  progress publication now requires both the PID and confirmed native start
+  token; missing/changed tokens preserve the original file. A real current
+  process generation successfully publishes through the same atomic path.
+- A `finally` boundary clears cycle deadline/token references after either
+  success or failure, retaining the actual failed phase for diagnosis. The
+  observer returns unknown for a missing receipt inventory and preserves
+  explicitly supplied empty or nonempty inventories. All eleven focused
+  defect cases pass, as does the positive native-generation writer case.
+- The new review's missing-`sys` assertion is not applicable: the published
+  retention test already imports it at module scope, and the actual cold
+  import-order cases have executed successfully. Removed six passing fixture
+  timing prints and their unused timers; service health protocol output and
+  native rollback/readiness/stop assertions remain unchanged.
+- Initial coupled validation records 327 passes, one platform skip and one
+  failed removal observation: a snapshot started before adoption withdrawal
+  can complete asynchronously after the first master pass. The test now drives
+  the real caller's bounded polling within the same original one-second
+  observation budget and keeps every master pass below the original 0.5-second
+  limit. No production deadline, selection-pin assertion or unknown-state
+  requirement is relaxed. The focused removal/current-writer/error controls
+  pass all four cases; complete resulting-candidate validation remains required.
+- Complete resulting master, health, worker-instance, bounded receipt/scheduling,
+  recovery, native companion and cold integrity-import coverage passes 328 cases
+  with one platform skip in 207.64 seconds, contained exit zero with host-state
+  protection enabled. F/E9 lint, the exact CI base/head module-ceiling scope
+  and whitespace checks pass. The original failed coupled attempt remains
+  recorded separately. Publication, fresh verdict and all current provider CI
+  still gate merge; no runtime/native custody or parent completion is implied.

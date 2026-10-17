@@ -245,6 +245,82 @@ def test_progress_writer_rejects_another_live_generation(tmp_path, monkeypatch):
     assert json.loads(path.read_text(encoding="utf-8")) == original
 
 
+@pytest.mark.parametrize("stored_token,current_token", [
+    ("old", "current"), ("", "current"), (None, "current"), ("current", None),
+])
+def test_progress_writer_rejects_reused_or_unconfirmed_native_generation(
+    tmp_path, monkeypatch, stored_token, current_token,
+):
+    import json
+    import os
+    from agent_dispatch import companion, supervise_cli
+
+    path = tmp_path / "status.json"
+    original = {"cycle_id": 1, "generation": {"pid": os.getpid(), "start_token": stored_token}}
+    path.write_text(json.dumps(original), encoding="utf-8")
+    before = path.read_bytes()
+    monkeypatch.setattr(supervise_cli, "_supervisor_runtime_status_path", lambda scope: path)
+    monkeypatch.setattr(companion, "process_start_token", lambda pid: current_token)
+    with pytest.raises(RuntimeError, match="generation is superseded"):
+        supervise_cli._write_supervisor_progress("test", {"cycle_id": 1, "observed_at": time.time()})
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("progress,expected", [
+    (None, None), ({}, None), ({"receipt_operations": None}, None),
+    ({"receipt_operations": []}, []), ({"receipt_operations": [{"state": "unknown"}]}, [{"state": "unknown"}]),
+])
+def test_progress_observer_distinguishes_missing_inventory_from_confirmed_empty(progress, expected):
+    result = supervisor_progress_observation({
+        "generation": {"pid": 123, "start_token": "exact"},
+        "cycle_id": 1, "cycle_started_at": 100.0, "progress": progress,
+    }, token_source=lambda pid: "exact", now=101.0)
+    assert result["receipt_operations"] == expected
+    assert result["recovery_permitted"] is False
+
+
+def test_progress_writer_accepts_current_native_generation(tmp_path, monkeypatch):
+    import json
+    import os
+    from agent_dispatch import companion, supervise_cli
+
+    path = tmp_path / "status.json"
+    generation = {"pid": os.getpid(), "start_token": companion.process_start_token(os.getpid())}
+    assert generation["start_token"]
+    path.write_text(json.dumps({"cycle_id": 1, "generation": generation}), encoding="utf-8")
+    monkeypatch.setattr(supervise_cli, "_supervisor_runtime_status_path", lambda scope: path)
+    frame = {"phase": "units", "cycle_id": 1, "observed_at": time.time(), "receipt_operations": []}
+    supervise_cli._write_supervisor_progress("test", frame)
+    assert json.loads(path.read_text(encoding="utf-8"))["progress"] == {**frame, "generation": generation}
+    assert not path.with_suffix(f".{os.getpid()}.tmp").exists()
+
+
+@pytest.mark.parametrize("failure", [CompanionIndeterminate("pending"), OSError("unavailable")])
+def test_reconcile_error_clears_cycle_authority_before_next_attempt(monkeypatch, failure):
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unit", machine="host")]), "host",
+        launcher=FakeLauncher(), companion_controller=FakeCompanionController(),
+    )
+    original = daemon._desired
+
+    def fail():
+        raise failure
+
+    monkeypatch.setattr(daemon, "_desired", fail)
+    try:
+        with pytest.raises(type(failure)):
+            daemon.reconcile_once()
+        assert daemon._reconcile_deadline is None
+        assert daemon._reconcile_token is None
+        assert daemon._phase_name == "discovery"
+        monkeypatch.setattr(daemon, "_desired", original)
+        assert daemon.reconcile_once().started == ["unit"]
+        assert daemon._reconcile_deadline is None
+        assert daemon._reconcile_token is None
+    finally:
+        daemon.shutdown()
+
+
 def test_unknown_publication_generation_is_read_back_before_new_target():
     from agent_dispatch.supervisor_daemon_registration_publish import BoundedDeclarationPublisher
 

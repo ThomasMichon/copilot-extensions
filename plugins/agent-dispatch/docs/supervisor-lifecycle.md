@@ -96,6 +96,9 @@ only genuinely pending work is retained. A worker-raised timeout is surfaced as
 a failed operation, not mistaken for a still-running wait.
 Receipt reconciliation invoked outside an active cycle uses a forward call
 budget; an existing cycle deadline, including an expired one, is not extended.
+Cycle deadline and admission-token references are cleared on both success and
+exception exits. A failed cycle retains its last phase for diagnosis rather
+than claiming completion; a later retry gets fresh cycle authority.
 Shutdown retires bounded executors and clears their active references even when
 work misses the grace window. A failed successor spawn can reclaim the singleton
 and create usable replacement pools; original futures and publication/receipt
@@ -137,7 +140,10 @@ current cycle and matching generation; future cycle starts and invalid or future
 completion timestamps (including booleans) are unknown, not healthy progress.
 A fresh phase can distinguish an advancing
 slow cycle from a wedge. A superseded writer cannot overwrite another generation's
-progress. These observations still confer no recovery authority.
+progress: both its PID and confirmed native start token must match the stored
+generation before publication. Missing receipt-operation observations remain
+unknown, including a cycle-start record that has no inventory yet. These
+observations still confer no recovery authority.
 Collection and filesystem publication are also off the master: one tracked
 progress worker coalesces the latest phase/cycle-start/final-status frames instead
 of accumulating a backlog behind a blocked status volume. Final summaries use
