@@ -118,7 +118,7 @@ def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
             root = root.resolve(strict=True)
             if not root.is_dir():
                 raise ValueError("repository root is not a directory")
-            layers = layered_repo_surface_dirs(root, "templates")
+            layers = layered_repo_surface_dirs(root, "templates", include_unavailable=True)
             for layer in layers:
                 if not layer.is_dir():
                     _finding(findings, str(layer), "invalid-index", "Template layer must be a directory.")
@@ -217,10 +217,21 @@ def _entry(source: TemplateSource, entry: object, root: Path, index: Path) -> di
 
 def _read_source(source: TemplateSource, findings: list[dict]) -> list[dict]:
     try:
+        if source.kind == "user-local":
+            try:
+                source.root.lstat()
+            except FileNotFoundError:
+                return []
         root = source.root.resolve(strict=True)
         if not root.is_dir():
             raise ValueError("provider root is not a directory")
         source.index.parent.resolve().relative_to(root)
+        try:
+            source.index.parent.lstat()
+        except FileNotFoundError:
+            return []
+        if not source.index.parent.is_dir():
+            raise ValueError("template index parent must be a directory")
         try:
             source.index.lstat()
         except FileNotFoundError:
@@ -282,8 +293,6 @@ def discover_templates(activation: ActivationReport) -> tuple[list[dict], dict]:
         if token in seen:
             continue
         seen.add(token)
-        if source.kind == "user-local" and not base.exists():
-            continue
         rows.extend(_read_source(source, findings))
     return rows, {
         "state": "partial" if findings else "complete",

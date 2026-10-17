@@ -592,3 +592,23 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   precedes target resolution, so an unavailable target produces an explicit
   error without an authority marker. Focused strict-inventory and native CLI
   checks join the existing path-gated guard lane.
+
+### 2026-10-17 - Unavailable template layers remain visible
+
+- Current-head review identified another authoritative-absence distinction:
+  the existing repository-layer helper filters broken directory links before
+  the template reader can inspect them. Add an explicit audit-only option
+  that retains present unavailable entries without changing default registrar
+  selection or hiding healthy canonical/fallback/marketplace layers.
+- Template discovery now reports scoped invalid-index findings for those
+  entries. A shadowed legacy layer remains shadowed, and genuinely missing
+  optional layers remain healthy absence. Installation-local root, directory
+  and index links use the same missing-versus-unavailable distinction.
+- The contained template/instance/registrar/recipe selection passed 293 tests,
+  with only the two native POSIX FIFO cases skipped on Windows. Nine new
+  native filesystem cases cover broken repository/local entries, healthy
+  peers, shadowed fallback selection and first-touch absence. No source bytes,
+  registration, queue, service or deployed runtime changed.
+- Updated-head review and complete required CI remain merge prerequisites;
+  native POSIX execution, promotion and authorized installed proof are not
+  inferred from the Windows result.

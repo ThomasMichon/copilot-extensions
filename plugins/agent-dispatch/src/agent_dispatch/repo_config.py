@@ -56,7 +56,17 @@ def selected_repo_surface_dir(repo_root: str | Path, relative: str) -> Path:
     return canonical
 
 
-def overlay_repo_surface_dir(repo_root: str | Path, relative: str) -> Path | None:
+def _surface_entry_present(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def overlay_repo_surface_dir(
+    repo_root: str | Path, relative: str, *, include_unavailable: bool = False,
+) -> Path | None:
     marketplace_id = installation_marketplace_id()
     if not marketplace_id:
         return None
@@ -66,16 +76,27 @@ def overlay_repo_surface_dir(repo_root: str | Path, relative: str) -> Path | Non
         / marketplace_id
         / relative
     )
-    return candidate if candidate.exists() else None
+    present = _surface_entry_present(candidate) if include_unavailable else candidate.exists()
+    return candidate if present else None
 
 
-def layered_repo_surface_dirs(repo_root: str | Path, relative: str) -> list[Path]:
+def layered_repo_surface_dirs(
+    repo_root: str | Path, relative: str, *, include_unavailable: bool = False,
+) -> list[Path]:
     root = Path(repo_root).expanduser()
     layers: list[Path] = []
     base = selected_repo_surface_dir(root, relative)
     if base.exists():
         layers.append(base)
-    overlay = overlay_repo_surface_dir(root, relative)
+    if include_unavailable:
+        canonical = canonical_repo_surface_dir(root, relative)
+        candidates = [canonical]
+        if not canonical.exists():
+            candidates.append(legacy_repo_surface_dir(root, relative))
+        for candidate in candidates:
+            if candidate not in layers and _surface_entry_present(candidate):
+                layers.append(candidate)
+    overlay = overlay_repo_surface_dir(root, relative, include_unavailable=include_unavailable)
     if overlay is not None:
         layers.append(overlay)
     return layers

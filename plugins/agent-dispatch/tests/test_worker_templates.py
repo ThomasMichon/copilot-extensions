@@ -182,6 +182,59 @@ def test_repository_layers_and_user_local_reuse_existing_roots(monkeypatch, tmp_
     assert before == bytes_at(tmp_path) and not rd.pointers_file().exists()
 
 
+@pytest.mark.parametrize("broken_layer", ["canonical", "legacy", "overlay", "shadowed-legacy", None])
+def test_unavailable_repository_layers_are_not_absent_optional_layers(monkeypatch, tmp_path, broken_layer):
+    root = tmp_path / "repo"
+    canonical = root / ".copilot-extensions" / "agent-dispatch" / "templates"
+    legacy = root / ".agent-dispatch" / "templates"
+    overlay = canonical.parent / "marketplaces" / "example-cell" / "templates"
+    healthy = (
+        legacy if broken_layer == "canonical"
+        else canonical if broken_layer in {"overlay", "shadowed-legacy"}
+        else overlay
+    )
+    write_index(root, index=healthy / "index.json")
+    if broken_layer:
+        target = {"canonical": canonical, "legacy": legacy, "overlay": overlay, "shadowed-legacy": legacy}[broken_layer]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(root / "missing-layer", target_is_directory=True)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout='{"inventory_authority":"complete","repos":[{"name":"library"}]}', stderr="",
+    ))
+    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", lambda self, name: root)
+    before = bytes_at(tmp_path)
+    rows, summary = wt.discover_templates(empty_activation())
+    assert len(rows) == 1
+    unavailable = broken_layer not in {None, "shadowed-legacy"}
+    assert summary["state"] == ("partial" if unavailable else "complete")
+    assert summary["findings"] == ([{
+        "source": str(target), "reason": "invalid-index",
+        "detail": "Template layer must be a directory.",
+    }] if unavailable else [])
+    assert wt.layered_repo_surface_dirs(root, "templates") == [healthy]
+    assert bytes_at(tmp_path) == before and not rd.pointers_file().exists()
+
+
+@pytest.mark.parametrize("broken", ["root", "templates", "index.json", None])
+def test_user_local_broken_entries_remain_visible_not_optional(tmp_path, broken):
+    base = rd.registrar_dir()
+    target = {
+        "root": base, "templates": base / "templates",
+        "index.json": base / "templates" / "index.json",
+    }.get(broken)
+    if target:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(tmp_path / "missing-entry", target_is_directory=broken != "index.json")
+    rows, summary = wt.discover_templates(empty_activation())
+    assert rows == []
+    assert summary["state"] == ("partial" if broken else "complete")
+    assert len(summary["findings"]) == (1 if broken else 0)
+    if broken:
+        assert summary["findings"][0]["reason"] == "invalid-index"
+        assert target.is_symlink() and not target.exists()
+
+
 def test_inert_errors_do_not_disable_existing_controls_and_activation_is_lazy(monkeypatch, tmp_path):
     directory = tmp_path / "source"
     directory.mkdir()
