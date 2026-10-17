@@ -132,8 +132,10 @@ class BoundedReconciliation:
                 operations = getattr(controller, "receipt_operation_progress", None)
                 if controller is None:
                     snapshot.update(receipt_operations=None, observation_error="receipt-progress-pending")
+                elif not callable(operations):
+                    snapshot.update(receipt_operations=None, observation_error="receipt-progress-unsupported")
                 else:
-                    snapshot["receipt_operations"] = operations() if callable(operations) else []
+                    snapshot["receipt_operations"] = operations()
             except (OSError, ValueError, TypeError, RuntimeError) as exc:
                 self._warn_progress_failure("receipt-progress-unavailable", exc)
                 snapshot.update(receipt_operations=None, observation_error="receipt-progress-unavailable")

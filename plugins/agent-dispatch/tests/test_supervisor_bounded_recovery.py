@@ -67,6 +67,47 @@ def test_final_snapshot_data_state_failure_cannot_hide_mutation(error, caplog):
         daemon.shutdown()
 
 
+@pytest.mark.parametrize("observation", ["missing", "non-callable", "empty"])
+def test_progress_publication_distinguishes_unsupported_inventory(observation):
+    controller = FakeCompanionController()
+    supported = observation == "empty"
+    if observation != "missing":
+        controller.receipt_operation_progress = (lambda: []) if supported else None
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unit", machine="host")]), "host",
+        launcher=FakeLauncher(), companion_controller=controller,
+    )
+    frames = []
+    daemon._progress_callback = frames.append
+    try:
+        assert daemon.reconcile_once().started == ["unit"]
+        daemon._progress_future.result(2)
+        assert frames[-1]["receipt_operations"] == ([] if supported else None)
+        assert daemon.progress_snapshot()["receipt_operations"] == ([] if supported else None)
+        if not supported:
+            assert frames[-1]["observation_error"] == "receipt-progress-unsupported"
+    finally:
+        daemon.shutdown()
+
+
+def test_inventory_priming_already_handles_indeterminate_runtime_subclass(monkeypatch, caplog):
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", launcher=FakeLauncher(),
+        companion_controller=FakeCompanionController(),
+    )
+
+    def indeterminate(adopted):
+        raise CompanionIndeterminate("private detail")
+
+    monkeypatch.setattr(daemon, "_reconcile_companion_receipts", indeterminate)
+    try:
+        daemon._prime_receipt_inventory(set())
+        assert "receipt inventory unavailable: error_type=CompanionIndeterminate" in caplog.text
+        assert "private detail" not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
 @pytest.mark.parametrize("progress,expected", [
     ({"cycle_id": 7, "observed_at": 399.0}, "progressing"),
     ({"cycle_id": 6, "observed_at": 399.0}, "stalled"),

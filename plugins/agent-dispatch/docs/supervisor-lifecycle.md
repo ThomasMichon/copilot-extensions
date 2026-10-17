@@ -134,6 +134,8 @@ failures cannot abort desired-state reconciliation or hide completed mutations:
 they report fixed, sanitized reason/error categories through standard logging,
 limited to one warning per category per 30 seconds. Unavailable receipt progress
 is marked unknown (`null` with an observation error), not a confirmed empty list.
+A controller without a callable progress observation reports
+`receipt-progress-unsupported`; only a completed observation may report `[]`.
 Data/state failures in the final summary follow the same classified best-effort
 rules. The observer uses only finite, non-future progress timestamps from the
 current cycle and matching generation; future cycle starts and invalid or future
