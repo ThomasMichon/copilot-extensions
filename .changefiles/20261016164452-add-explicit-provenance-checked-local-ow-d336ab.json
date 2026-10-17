@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit provenance-checked local owner-label repair with read-only JSON reports, exact record selection, backup/audit and dependent-reference fences.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

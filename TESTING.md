@@ -9,6 +9,24 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+Canonical native machine-record repair has focused existing-linked-Git and
+removed-record lanes:
+
+```text
+python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_machine_record_repair.py --test-file tests/test_machine_record_history.py
+```
+
+The removed-record fixture also drives the real CLI from a fresh knowledge-only
+registration without a projects entry or local project config. It verifies
+read-only preview, exact scalar replacement and preserved alias relationships.
+Existing linked-Git proof and native/guest refusal remain separate contracts.
+Legacy handoff fixtures explicitly model their non-Git anchors as having no
+in-repo settings, asserting those files remain absent. Receiving machine-local
+YAML and machine-registry readers remain real, with a fresh memoization scope for
+each offer/accept transaction. No snapshot crosses a topology edit or retry;
+record/registry locks and native Git leases remain real. The ordinary item and
+suite deadlines are unchanged.
+
 Guest-environment coverage runs the actual Python, Bash and PowerShell CLIs
 with only operating-system observations substituted (account home, guest kind
 and machine-id). Each writer's private registration is read repeatedly by all

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -12,7 +13,17 @@ from pathlib import Path
 import yaml
 from machine_transport import resolve_machine_selection
 
-from . import config as cfg, execution_spaces, git_ops, output, tracking_yaml_repair
+from . import config as cfg, execution_spaces, git_ops, output, pr_authority, repos, tracking
+from . import tracking_yaml_repair
+from .config_cache import ConfigCacheSession
+
+
+class RepairAuditError(RuntimeError):
+    """The record replacement committed but the final receipt did not."""
+
+    def __init__(self, backup: Path, audit: Path):
+        super().__init__(f"machine label repaired but final audit failed: {audit}; backup: {backup}")
+        self.backup, self.audit = backup, audit
 
 
 def _prove_local_alias(config, previous: str) -> None:
@@ -61,6 +72,108 @@ def _prove_checkout(data: dict, config) -> None:
         raise ValueError("record checkout is not registered to the selected project repository")
 
 
+def _prove_history(data: dict, config) -> None:
+    """A removed checkout needs independent receiving-registration evidence."""
+    entries = execution_spaces.registry_for_config(config)
+    current = entries.get(config.machine)
+    if (
+        current is None or current.key != config.machine or current.legacy_key
+        or current.execution_platform != cfg.detect_platform()
+    ):
+        raise ValueError("removed checkout requires the configured explicit native execution-space key")
+    registered = repos.read_registry(strict=True).repos.get(config.repo_name)
+    if registered is None or registered.repo_class not in ("worktree", "knowledge"):
+        raise ValueError("removed checkout requires canonical worktree/knowledge registration")
+    local_root = registered.local_path(config.platform)
+    anchor = Path(config.default_repo.anchor)
+    if not local_root or Path(local_root).resolve() != anchor.resolve():
+        raise ValueError("receiving project does not match its registered native repository")
+    checkout = Path(data.get("worktree_path") or "")
+    root = Path(config.default_repo.worktree_root)
+    if (
+        not checkout.is_absolute() or not root.is_absolute()
+        or checkout.is_symlink() or checkout.exists()
+        or (root.exists() and not root.is_dir())
+        or checkout != root / data["worktree_id"]
+        or checkout.resolve() != root.resolve() / data["worktree_id"]
+    ):
+        raise ValueError("removed checkout lacks exact registered worktree-namespace provenance")
+    git_ops.git(
+        "rev-parse", "--path-format=absolute", "--git-common-dir",
+        cwd=anchor, isolated_repository=True, timeout=10,
+    )
+
+
+def _inspect(project: str, record_id: str, previous: str, target: str | None):
+    with ConfigCacheSession().scope():
+        config = cfg.load_config()
+    if config.repo_name != project:
+        raise ValueError("resolved project does not match the selected project")
+    if target is not None and target != config.machine:
+        raise ValueError("--to-machine must exactly match the configured local target")
+    _prove_local_alias(config, previous)
+    path = cfg.tracking_dir() / f"{record_id}.yaml"
+    if path.is_symlink() or path.resolve() != path.absolute():
+        raise ValueError("tracking record path indirection refused")
+    observed = path.read_bytes()
+    data = tracking_yaml_repair.strict_mapping(observed.decode("utf-8"))
+    if data.get("worktree_id") != record_id:
+        raise ValueError("record identity does not match the selected worktree")
+    if data.get("machine") not in (previous, config.machine):
+        raise ValueError("record machine does not match --from-machine or the local target")
+    if data.get("repo") != project or data.get("platform") != config.platform:
+        raise ValueError("record project/platform does not match the selected local project")
+    checkout = Path(data.get("worktree_path") or "")
+    if checkout.is_symlink():
+        raise ValueError("worktree path indirection refused")
+    if checkout.exists():
+        _prove_checkout(data, config)
+        proof = "existing-linked-git"
+    else:
+        _prove_history(data, config)
+        proof = "removed-registered-namespace"
+    if data["machine"] == config.machine:
+        for audit in path.parent.glob(f"{path.name}.machine-label-*.json"):
+            if audit.is_symlink():
+                raise ValueError("machine-label audit path indirection refused")
+            receipt = json.loads(audit.read_text(encoding="utf-8"))
+            if not isinstance(receipt, dict) or receipt.get("state") != "committed":
+                raise ValueError(f"prior machine-label repair has an incomplete audit: {audit}")
+    return config, path, observed, data, proof
+
+
+def _apply(project: str, record_id: str, previous: str, target: str | None, observed):
+    config, path, original, data, proof = observed
+    fixed = _replacement(original.decode("utf-8"), data, config.machine)
+    digest = hashlib.sha256(original).hexdigest()
+    audit = path.with_name(f"{path.name}.machine-label-{digest[:16]}.json")
+    with pr_authority.guard(timeout=0), tracking._RecordLock(path, blocking=False) as lock:
+        if not lock.acquired:
+            raise TimeoutError("tracking record is busy; machine-label repair refused")
+        fresh = _inspect(project, record_id, previous, target)
+        if fresh[1:] != observed[1:] or fresh[0] != config:
+            raise ValueError("record or receiving proof changed; inspect again before repair")
+        if audit.exists() or audit.is_symlink():
+            raise ValueError(f"prior machine-label audit exists; inspect before retrying: {audit}")
+        receipt = {
+            "version": 1, "scope": "machine-record", "state": "prepared",
+            "project": project, "worktree_id": record_id,
+            "from_machine": previous, "to_machine": config.machine, "platform": config.platform,
+            "proof": proof, "checkout_path": data["worktree_path"],
+            "anchor": config.default_repo.anchor, "worktree_root": config.default_repo.worktree_root,
+            "before_sha256": digest, "after_sha256": hashlib.sha256(fixed.encode("utf-8")).hexdigest(),
+            "references": "preserved", "backup": f"{path.name}.repair-{digest[:16]}.bak",
+        }
+        tracking._atomic_write(audit, json.dumps(receipt, indent=2) + "\n")
+        backup = tracking_yaml_repair.apply_repair(path, original, fixed)
+        receipt["state"] = "committed"
+        try:
+            tracking._atomic_write(audit, json.dumps(receipt, indent=2) + "\n")
+        except OSError as exc:
+            raise RepairAuditError(backup, audit) from exc
+    return backup, audit
+
+
 def _replacement(raw: str, data: dict, target: str) -> str:
     document = yaml.compose(raw)
     if not isinstance(document, yaml.MappingNode):
@@ -86,11 +199,12 @@ def _replacement(raw: str, data: dict, target: str) -> str:
 def targeted_doctor(args) -> int:
     record_id = getattr(args, "repair_machine_record", None)
     previous = getattr(args, "from_machine", None)
+    target = getattr(args, "to_machine", None)
     apply = getattr(args, "fix", False)
     report = {
         "version": 1, "scope": "machine-record", "worktree_id": record_id,
         "mode": "fix" if apply else "report", "repairable": False,
-        "repaired": False, "error": None,
+        "repaired": False, "error": None, "resident_projection": "not-verified",
     }
     try:
         if (
@@ -108,28 +222,21 @@ def targeted_doctor(args) -> int:
         project = cfg.project_name()
         if not project:
             raise ValueError("machine-record repair requires an explicitly selected project")
-        config = cfg.load_config()
-        if config.repo_name != project:
-            raise ValueError("resolved project does not match the selected project")
-        _prove_local_alias(config, previous)
-        report.update(project=project, from_machine=previous, to_machine=config.machine)
-        path = cfg.tracking_dir() / f"{record_id}.yaml"
-        if path.is_symlink() or path.resolve() != path.absolute():
-            raise ValueError("tracking record path indirection refused")
-        observed = path.read_bytes()
-        raw = observed.decode("utf-8")
-        data = tracking_yaml_repair.strict_mapping(raw)
-        if data.get("worktree_id") != record_id:
-            raise ValueError("record identity does not match the selected worktree")
-        if data.get("machine") not in (previous, config.machine):
-            raise ValueError("record machine does not match --from-machine or the local target")
-        _prove_checkout(data, config)
+        observed = _inspect(project, record_id, previous, target)
+        config, path, original, data, proof = observed
+        report.update(
+            project=project, from_machine=previous, to_machine=config.machine,
+            proof=proof, references="preserved",
+            before_sha256=hashlib.sha256(original).hexdigest(),
+        )
         if data["machine"] != config.machine:
-            fixed = _replacement(raw, data, config.machine)
             report["repairable"] = True
             if apply:
-                report["backup"] = tracking_yaml_repair.apply_repair(path, observed, fixed).name
+                backup, audit = _apply(project, record_id, previous, target, observed)
+                report.update(backup=backup.name, audit=audit.name)
                 report["repaired"] = True
+    except RepairAuditError as exc:
+        report.update(repaired=True, backup=exc.backup.name, audit=exc.audit.name, error=str(exc))
     except (
         OSError, ValueError, TypeError, RuntimeError, yaml.YAMLError, git_ops.GitError,
         subprocess.SubprocessError,

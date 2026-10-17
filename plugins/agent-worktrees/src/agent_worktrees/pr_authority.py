@@ -107,38 +107,17 @@ def write_record(record: tracking.WorktreeRecord, path: Path, content: str) -> N
 
     A writer already holding a short record lock must never wait for the outer
     authority lock: a rewrite may need that record. Refuse immediately instead.
-    Ordinary stamps with unchanged PR and ownership relations do not contend
-    with network I/O.
+    Ordinary stamps with unchanged PR authority do not contend with network I/O.
     """
     current = tracking.load_record(path) if path.exists() else None
-    if current is not None and current.machine != record.machine:
+    if current is not None and current.machine != getattr(record, "_loaded_machine", record.machine):
         raise ValueError("record owner machine changed; reload the record")
-    if _projection(current) == _projection(record) and _ownership(current) == _ownership(record):
+    if _projection(current) == _projection(record):
         tracking._atomic_write(path, content)
     else:
         with guard(timeout=0):
             tracking._atomic_write(path, content)
-
-
-def _ownership(record: tracking.WorktreeRecord | None) -> tuple:
-    """Fence reference creation while explicit local owner repair scans ledgers."""
-    if record is None:
-        return ()
-    relationships = (
-        record.owner_ref, record.pair_ref, record.pair_id,
-        record.caller_worktree, record.owner,
-        tuple(record.resources),
-        tuple(record.controllers),
-        record.dispatch_attempt, record.execution_leg, record.session_backend,
-        record.dispatch_attempt_raw, record.execution_leg_raw,
-        record.session_backend_raw, record.controller_raw_entries,
-        tuple(record.last_finalize_released),
-        tuple(
-            (tuple((ref.kind, ref.ref) for ref in item.refs), item.result_ref, item.transfer_target)
-            for item in record.follow_ups if item.refs or item.result_ref or item.transfer_target
-        ),
-    )
-    return relationships if any(relationships) else ()
+    record._loaded_machine = record.machine
 
 
 def write_registry(path: Path, content: str) -> None:

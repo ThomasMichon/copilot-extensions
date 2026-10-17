@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import wraps
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,12 +18,33 @@ from agent_worktrees import claimant, legacy_wsl_record_locality
 from agent_worktrees.tracking_claims import ANCHOR_ID, load_or_create_anchor_record
 from agent_worktrees.lease_config import LeaseSettings
 from agent_worktrees.lease_store import GitLeaseStore
+from agent_worktrees.config_cache import ConfigCacheSession
 
 MACHINE = "example-host-wsl"
 
 
 @pytest.fixture(params=["unscoped", "projected"])
 def graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    def no_inrepo_settings(anchor):
+        anchor = Path(anchor)
+        assert not (anchor / ".git").exists()
+        assert not cfg.inrepo_config_path(anchor).exists()
+        assert not cfg.legacy_inrepo_config_path(anchor).exists()
+        assert not (anchor / cfg.INREPO_CONFIG_FILENAME).exists()
+        return {}
+
+    monkeypatch.setattr(cfg, "_load_inrepo_config", no_inrepo_settings)
+    # Memoize real receiving-config reads only within one transaction; topology
+    # edits between operations must always enter a fresh snapshot.
+    for verb in ("offer", "accept"):
+        operation = getattr(claim_handoffs, verb)
+
+        @wraps(operation)
+        def configured_transaction(*args, _operation=operation, **kwargs):
+            with ConfigCacheSession().scope():
+                return _operation(*args, **kwargs)
+
+        monkeypatch.setattr(claim_handoffs, verb, configured_transaction)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path / "runtime")

@@ -92,11 +92,12 @@ refused; review their provenance before any separate migration. Cross-space
 owned creation is still unsupported before allocation. This feature does not
 add reservation/receipt authority.
 
-An explicit [local owner-label migration](local-owner-migration.md) is available
-through `doctor --migrate-owner <exact-id> --from-machine <old> --to-machine <key>`.
-It reports first, requires `--fix` to apply, proves the receiving project,
-execution platform and checkout namespace, and refuses dependent relationships.
-This dedicated recovery does not change automatic alias-resolution behavior.
+Explicit [native machine-record repair](machine-record-repair.md) is available
+through `doctor --repair-machine-record <exact-id> --from-machine <old>`.
+`--to-machine <key>` optionally asserts the configured local target. Existing
+checkouts retain linked-Git proof; removed ones require canonical native
+registration and exact receiving-namespace evidence. Only the label changes:
+same-machine alias relationships remain intact, without automatic rebinding.
 
 Claim and handoff transactions recheck each freshly loaded source, consumer,
 and child record while holding its sidecar lock. Authority comes from the

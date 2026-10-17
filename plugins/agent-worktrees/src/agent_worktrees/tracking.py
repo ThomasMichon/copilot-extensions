@@ -1529,10 +1529,10 @@ def _yaml_safe_load(raw: str) -> object:
 
 
 def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
-    """Load a worktree tracking record from a YAML file. Routed through
-    :mod:`record_cache`; self-invalidating on ``(mtime_ns, size)``. ``copy_result=False`` is read-only."""
+    """Load via the self-invalidating record cache; ``copy_result=False`` is read-only."""
     from .pr_publication_state import loaded
     record = record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result)
+    record._loaded_machine = record.machine  # Read-time CAS evidence, never serialized.
     return loaded(record) if copy_result else record
 
 

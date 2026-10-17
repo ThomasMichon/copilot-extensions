@@ -361,6 +361,7 @@ def cmd_doctor(args) -> int:
     if (
         getattr(args, "repair_machine_record", None) is not None
         or getattr(args, "from_machine", None) is not None
+        or getattr(args, "to_machine", None) is not None
     ):
         from .machine_record_repair import targeted_doctor
         return targeted_doctor(args)

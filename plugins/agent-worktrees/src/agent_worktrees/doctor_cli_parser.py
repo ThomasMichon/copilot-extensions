@@ -48,13 +48,6 @@ def add_parser(sub) -> None:
     )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
     sp.add_argument(
-        "--migrate-owner", metavar="WORKTREE_ID",
-        help="Inspect one proven local historical owner label; --fix explicitly migrates it. "
-        "Linked/provider-owned records are refused, not partially rewritten.",
-    )
-    sp.add_argument("--from-machine", metavar="LABEL", help="Exact stored historical owner label.")
-    sp.add_argument("--to-machine", metavar="KEY", help="Exact configured canonical local execution-space key.")
-    sp.add_argument(
         "--guest-distribution", metavar="NAME",
         help="Inspect only the designated WSL guest/default. With --fix, register "
         "a verified named guest entry; never change the host default or repair records.",
@@ -69,6 +62,11 @@ def add_parser(sub) -> None:
     sp.add_argument(
         "--from-machine", metavar="NAME",
         help="Exact previous local machine label; requires --repair-machine-record.",
+    )
+    sp.add_argument(
+        "--to-machine", metavar="KEY",
+        help="With --repair-machine-record: assert the exact configured local target; "
+        "never selects a different execution space.",
     )
     sp.add_argument(
         "--repair-creation", metavar="WORKTREE_ID",
