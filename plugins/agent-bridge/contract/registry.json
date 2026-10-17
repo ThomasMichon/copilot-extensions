@@ -801,6 +801,12 @@
           "generation": 39
         },
         {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-40.json",
+          "sha256": "842a83513c03496951cb8575ff8843be175fdd8f851e3ff4bcd7d2c9c63ee024",
+          "role": "Generation-40 keyed workspace finalization refuses retryably while retaining all three earlier immutable captures and the original allocation and native-history boundaries",
+          "generation": 40
+        },
+        {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-37.json",
           "sha256": "02e5af6080e73998b2657757874e5f1857edc23c6c82342e7d5c1cd29b47ac31",
           "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
@@ -4061,6 +4067,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
           "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
           "capture_method": "Re-attest the production start_request adapter's retryable finalizing refusal through the isolated exact-owner creation rig after integration with receipt generation 39; preserve the original allocation, native-history boundaries and both earlier immutable captures."
+        },
+        {
+          "commit": "1c6a10da4ca84f9861e2e3ae0ba2b6155ec5a50a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Re-attest the unchanged production start_request adapter's retryable finalizing refusal through the isolated exact-owner creation rig at HTTP generation 40; retain all three earlier immutable captures, the original allocation and native-history boundaries."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",
