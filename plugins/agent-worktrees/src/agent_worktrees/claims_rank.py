@@ -467,7 +467,7 @@ def claim_entries_for_worktree(
     resources: Iterable[Any],
     active_pr: Mapping[str, Any] | None = None,
     *,
-    limit: int = 2,
+    limit: int | None = 2,
     pecking_order: Mapping[str, int] | None = None,
     own_repo: str | None = None,
     label_overrides: Mapping[str, str] | None = None,

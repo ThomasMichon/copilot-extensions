@@ -1091,6 +1091,7 @@ def _worktree_to_dict(
     bridge_live_wts: set[str] | None = None,
     include_profile_assignment_history: bool = False,
     current_only: bool = False,
+    claim_records: dict | None = None,
 ) -> dict:
     """Serialize a WorktreeRecord to a JSON-friendly dict.
 
@@ -1376,8 +1377,7 @@ def _worktree_to_dict(
             summary = session_ctx.latest_summary.get(norm)
             if summary:
                 d["title"] = summary
-    # PR metadata: the active PR (back-compat ``pr``) plus the full list and a
-    # count so consumers can see serial/parallel PRs at a glance.
+    # Direct PR metadata stays distinct from descendant claim projections.
     if rec.prs:
         active = rec.active_pr()
         d["pr"] = pr_ops._pr_to_dict(active) if active is not None else None
@@ -1389,7 +1389,7 @@ def _worktree_to_dict(
     active_pr = ({"repo": active.repo, "number": active.number, "state": active.state}
                  if active is not None else None)
     from .worktrees_current_rows import populate_claims
-    populate_claims(d, rec, active_pr, current_only=current_only)
+    populate_claims(d, rec, active_pr, current_only=current_only, claim_records=claim_records)
     # #93: mark a worktree hosting a bare (un-muxed) bound Copilot so the picker
     # can annotate its row with an orphan marker (a Copilot the mux fleet view
     # cannot see). Set only when true, to keep the dict lean.

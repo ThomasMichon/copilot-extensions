@@ -318,6 +318,25 @@ continue to work unchanged.
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
 
+### Parent worktree PR visibility
+
+Worktree claim summaries include active PR claims reached through active local
+child-worktree edges, including children in another registered project. PR links
+rank ahead of worktree links; the PR ledger and settlement responsibility stay
+on the child. Direct `resources`, `claims_assets` counts, and finalize gates are
+unchanged. No provider polling or claim writes occur while deriving these links.
+
+Current rows carry at most eight ranked links. `claims_link_count` counts all
+available ranked links before truncation, and `claims_links_complete` is false
+when links were omitted or a descendant could not be resolved.
+`claims_projection` reports `inherited_pr_count`, `unresolved_count`, and
+`complete`; a remote, missing, unsafe, or cyclic child remains explicitly
+incomplete rather than appearing to have no PR obligations. Use
+`claims transitive <worktree-id> --json` to inspect the paths and unresolved
+edges. Settled child edges and settled PR claims are not followed or inherited.
+The producer reuses child records within one publication and refreshes them on
+the next; resident and advisory reads consume the published row unchanged.
+
 ### Session command catalog
 
 The session-start hook renders its command catalog in-process from the generated
