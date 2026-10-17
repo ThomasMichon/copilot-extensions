@@ -108,10 +108,42 @@ def _states(declarations: tuple, overrides: set, observed: dict) -> dict:
 
 
 def _cards(row: dict, body: str) -> dict:
+    if row.get("components"):
+        body += f"\n\nComponents ({row['components_basis']}): " + "; ".join(
+            f"{component['name']} ({component['kind']}, {component['id']})"
+            for component in row["components"]
+        )
     row["card"] = {"title": row["title"], "body": body}
     row["save_card"] = {"title": f"Save {row['title']}", "body": f"{body}\n\n{SAVE_EFFECTS}"}
     row["activate_card"] = {"title": f"Save and Activate {row['title']}", "body": f"{body}\n\n{ACTIVATE_EFFECTS}"}
     return row
+
+
+def _component_metadata(declarations: tuple, *, basis: str) -> dict:
+    """Project registrar identity without exposing executable specs or environment."""
+    components = []
+    for declaration in declarations:
+        registration = declaration_to_registration(declaration, machine=None)
+        repo = (
+            declaration.repos if declaration.kind == "supervised-lane"
+            else declaration.spec.get("repo")
+        )
+        components.append({
+            "id": registration["id"],
+            "name": declaration.name,
+            "kind": registration["kind"],
+            "declaration_kind": declaration.kind,
+            "owner": declaration.owner,
+            "repo_scope": repo if isinstance(repo, str) else None,
+            "labels": list(declaration.labels),
+            "source_path": declaration.source_path,
+            "revision": digest(registration),
+        })
+    return {
+        "kind": components[0]["kind"] if len(components) == 1 else "composite" if components else "unknown",
+        "components": components,
+        "components_basis": basis,
+    }
 
 
 def catalog() -> dict:
@@ -133,6 +165,7 @@ def catalog() -> dict:
             "validity": "error", "enabled": "unknown", "activity": "unknown",
             "editable": "false", "instantiable": "false",
             "provenance": "registrar discovery",
+            "kind": "error", "components": [], "components_basis": "unknown",
         }, error + "\n\nRun registrar doctor; unsafe mutations are refused."))
     local_names = set()
     for record in records:
@@ -205,6 +238,9 @@ def catalog() -> dict:
             "dependency_errors": draft_errors,
             "publication_errors": publication_errors,
             **state,
+            **_component_metadata(
+                runtime_declarations, basis="published" if active_conf is not None else "draft",
+            ),
         }
         if publication_errors:
             row.update(
@@ -212,6 +248,7 @@ def catalog() -> dict:
                 enabled="unknown", activity="unknown", pool_toggleable="false",
                 pool_name="", lanes=None,
                 statistics={"declarations": None, "lanes": None, "observed_running": None},
+                kind="unknown", components=[], components_basis="unknown",
             )
         elif active_conf is None:
             row.update(enabled="not-published", activity="not-published")
@@ -248,6 +285,7 @@ def catalog() -> dict:
             "pool_toggleable": str(not errors and declaration.kind == "supervised-lane").lower(),
             "pool_name": declaration.name, "owner": declaration.owner or "local",
             **_states((declaration,), overrides, observed),
+            **_component_metadata((declaration,), basis="source"),
         }
         body = (f"{row['description']}\n\nOwned by {row['provenance']}. "
                 "Read-only here: edit through the owning repository/plugin configuration flow.")
@@ -283,14 +321,18 @@ def catalog() -> dict:
             "editable": "false", "instantiable": "true", "prerequisites": prerequisite,
             "dependency_status": "inputs-required", "dependency_errors": [],
             "revision": digest(fragment), "fields": _fields("", _template_defaults(fragment)),
+            "kind": kind, "components": [], "components_basis": "template",
         }, f"Template: {name}\n\n{prerequisite}\n\nValidation refuses missing inputs/dependencies "
            "before saving or publishing. The template/source remains unchanged."))
     return {
+        "schema_version": 1,
+        "fetched_at": time.time(),
         "entries": rows,
         "summary": {
             "configured": len(records), "source_declarations": sum(r["group"] == "Source declarations" for r in rows),
             "templates": len(templates()), "errors": errors,
             "activity_known": observed["known"], "activity_reason": observed.get("reason"),
+            "activity_updated_at": observed.get("updated_at"),
             "target": "CLI-local machine; independent of operational machine selection",
         },
     }

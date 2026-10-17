@@ -68,6 +68,67 @@ def test_empty_catalog_is_read_only_and_lists_fragments():
     assert templates() == before
 
 
+def test_catalog_version_template_kinds_and_read_time_do_not_claim_activity():
+    before = time.time()
+    data = catalog()
+    assert data["schema_version"] == 1
+    assert before <= data["fetched_at"] <= time.time()
+    assert data["summary"]["activity_updated_at"] is None
+    for row in data["entries"]:
+        assert row["kind"] == templates()[row["title"]]["kind"]
+        assert row["components"] == [] and row["components_basis"] == "template"
+        assert row["activity"] == "not-applicable"
+
+
+def test_source_component_metadata_is_attributable_without_executable_fields(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    document = source / "emitter.json"
+    data = {
+        "name": "incoming", "kind": "emitter",
+        "spec": {
+            "id": "incoming", "command": [sys.executable, "-c", "print('[]')"],
+            "interval_seconds": 60, "env": {"PRIVATE_VALUE": "not-component-metadata"},
+        },
+    }
+    original = json.dumps(data).encode()
+    document.write_bytes(original)
+    rd.add_pointer("source", source, owner="repo:source")
+    row = next(row for row in catalog()["entries"] if row["title"] == "incoming")
+    assert row["kind"] == "emitter" and row["components_basis"] == "source"
+    component, = row["components"]
+    assert component["id"] == row["registration_ids"][0]
+    assert component["name"] == "incoming" and component["owner"] == "repo:source"
+    assert component["declaration_kind"] == component["kind"] == "emitter"
+    assert component["repo_scope"] is None and len(component["revision"]) == 64
+    assert "not-component-metadata" not in json.dumps(component)
+    assert "command" not in component and "env" not in component and "spec" not in component
+    assert "Components (source)" in row["card"]["body"]
+    assert document.read_bytes() == original
+
+
+def test_multiple_components_remain_composite_when_their_kinds_match():
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    result = _component_metadata(tuple(
+        load_declaration({"name": name, "labels": ["work"]})
+        for name in ("first", "second")
+    ), basis="source")
+    assert result["kind"] == "composite"
+    assert len(result["components"]) == 2
+    assert all(component["kind"] == "supervised-lane" for component in result["components"])
+
+
+def test_unreadable_publication_never_projects_draft_components():
+    receipt = create(activate=True)
+    (active_dir() / "local-pool.json").write_text("not-json", encoding="utf-8")
+    row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
+    assert row["publication"] == "error" and row["publication_errors"]
+    assert row["kind"] == "unknown" and row["components"] == []
+    assert row["components_basis"] == "unknown"
+
+
 def test_template_save_edit_and_publish_preserve_identity():
     receipt = create()
     assert receipt["persisted"] and receipt["activation"] == "not-requested"
@@ -141,6 +202,8 @@ def test_published_runtime_and_controls_survive_differently_shaped_draft(tmp_pat
     assert row["lanes"] == 1 and row["statistics"]["declarations"] == 1
     assert row["draft_statistics"]["declarations"] == 3
     assert row["enabled"] == "disabled" and row["activity"] == "observed-running"
+    assert row["kind"] == "supervised-lane" and row["components_basis"] == "published"
+    assert len(row["components"]) == 1 and row["components"][0]["id"] == rid
     assert not any(r["group"] == "Source declarations" for r in data["entries"])
 
 
@@ -311,6 +374,9 @@ def test_composed_template_discovers_with_preserved_repo_context(tmp_path):
     assert all(d.owner == OWNER for d in declarations)
     row = next(r for r in catalog()["entries"] if r["id"] == receipt["id"])
     assert row["publication"] == "published" and row["statistics"]["declarations"] == 2
+    assert row["kind"] == "composite" and row["components_basis"] == "published"
+    assert {component["kind"] for component in row["components"]} == {"emitter", "supervised-lane"}
+    assert {component["id"] for component in row["components"]} == set(row["registration_ids"])
     assert len(rd.discover()) == 2
 
 
@@ -674,6 +740,7 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path):
         assert result.returncode == 0, result.stderr
         return json.loads(result.stdout)
     initial = invoke("catalog")
+    assert initial["schema_version"] == 1
     assert initial["summary"]["configured"] == 0
     row = next(r for r in initial["entries"] if r["id"] == "template:worker-pool")
     arguments = [
@@ -686,4 +753,7 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path):
     activated = invoke(*arguments, "--activate", "--consent", ACTIVATION_CONSENT)
     assert activated["id"] == saved["id"] and activated["activation"] == "pending"
     assert len(rd.discover()) == 1
+    published = next(row for row in invoke("catalog")["entries"] if row["id"] == saved["id"])
+    assert published["kind"] == "supervised-lane" and published["components_basis"] == "published"
+    assert [component["id"] for component in published["components"]] == published["registration_ids"]
     assert invoke(*arguments, "--activate", "--consent", ACTIVATION_CONSENT)["retry"]

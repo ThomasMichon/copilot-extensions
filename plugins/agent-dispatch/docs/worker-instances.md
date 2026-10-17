@@ -20,6 +20,34 @@ The table distinguishes:
 - **Available templates**: built-in recipes plus a bounded worker-pool template,
   with **Instantiate** actions. Recipe fragments are not complete instances.
 
+### Shared catalog metadata
+
+The JSON envelope identifies `schema_version: 1` and a `fetched_at` epoch
+timestamp. The latter is a read time, not proof of recent worker activity.
+`summary.activity_updated_at` separately carries the supervisor receipt time
+when available; `activity_known` and `activity_reason` retain the existing
+freshness judgment.
+
+Each row has a `kind` and `components_basis`. For a concrete configuration,
+`components` projects the effective registrations' IDs, names, runtime and
+declaration kinds, owners, repo scope when declared, labels, source paths when
+known, and content revisions. Executable specs, command argv and environment
+values are not included in component metadata. A multi-component configuration
+has kind `composite`, including when several components have the same kind.
+
+For a published local instance the component basis is `published`, even if
+its Save-only draft has changed shape. An unpublished instance uses `draft`;
+source-owned declarations use `source`. An unreadable publication uses
+`unknown` and exposes no inferred components. Uninstantiated templates have
+their declared kind, basis `template` and an empty component list, not fabricated
+registration IDs. Discovery-error rows similarly contain no components.
+
+These additive fields let independent terminal and graphical consumers
+describe the same owning catalog without classifying sources from titles or
+reconstructing composed registrations. The Manager table shows Kind and its
+Details card lists the components. Existing IDs, edit revisions, form fields
+and activation semantics are unchanged.
+
 Descriptions, source attribution, validation, publication, capacity, effective
 disable overrides, and observed activity are separate facts. A recent local
 supervisor receipt supplies `observed-running`; an absent/stale receipt means

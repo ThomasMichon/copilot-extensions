@@ -236,3 +236,20 @@ automation activation still require their applicable operational authorization.
   semantics and a generic mapped-record source extension to the acceptance scope.
 - Retained process-neutral dispatch ownership and consumer-owned authentication.
   Implementation remains behind the amended plan's review/merge gate.
+
+### 2026-10-16 - Reviewed plan and first shared catalog projection
+
+- Plan #7095 merged after required CI passed. The owner-authored review
+  returned Comment with one Low role-table wording suggestion; the imperative
+  assignments were retained with an explanation and the thread resolved.
+- The first implementation slice extends the existing catalog rather than
+  creating another authority: version/read time, concrete component kinds,
+  IDs, provenance and content revisions, plus a distinct component basis.
+  Published snapshots remain authoritative when a Save-only draft changes.
+- Component metadata excludes executable specs, command argv and environment
+  values. Unknown or unreadable publications expose no inferred components.
+  The existing terminal contribution gains Kind and readable component details.
+- Final contained worker-instance suite passed 57 tests, including direct
+  composite/publication checks and real-CLI first-touch projection assertions.
+  Changed Python lint and the install-contract guard passed. No source/template
+  activation, installed update or delivery claim is made.
