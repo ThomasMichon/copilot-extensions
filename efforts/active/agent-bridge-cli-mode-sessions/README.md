@@ -671,17 +671,22 @@ The ordinary, task-independent resume repair is tracked by
 It closes the retained-conversation part of the existing acquisition contract;
 it does not expand Dispatch's authority or replace its task reservations.
 
-- [ ] Resume an owner-asserted dormant native head even when no bridge session
+- [x] Resume an owner-asserted dormant native head even when no bridge session
       record exists, preserving its exact conversation in explicit ACP or
       headed/muxed CLI mode.
-- [ ] Compose the worktree owner's head/holder facts, existing ACP session load,
+- [x] Compose the worktree owner's head/holder facts, existing ACP session load,
       and existing CLI/mux embodiment across local and SSH targets. Missing
       native history, conflicting holders, changed heads and failed resume must
       refuse without creating a replacement conversation.
-- [ ] Cover both modes, exact native identity, absent bridge records,
+- [x] Cover both modes, exact native identity, absent bridge records,
       concurrency and protocol skew; document the ordinary CLI/HTTP boundary.
       Native process-exit verification must remain distinct from simulated
       provider tests.
+
+These three implementation items landed in PR #7002. Native process-exit
+continuity is verified on Windows; SSH argument/profile checks are separate
+from hosted Linux execution, which remains open under #6934 and the broader
+#6076 validation matrix.
 
 - [x] Review and land the [scoped acquisition contract](dispatch-session-acquisition.md)
       before runtime changes; coordinate through #6076 with the adjacent
@@ -901,6 +906,27 @@ receipt captures updated by the base are retained separately, and changed
 combined producers require new generation-40 attestations rather than edits
 to existing generation-40 vectors. The prior head's CI passed, but the rebase
 requires fresh current-head CI and review.
+
+### 2026-10-17 - Ordinary native recovery merged
+
+PR #7002 merged to `dev` as
+[`143620e4dc`](https://github.com/ThomasMichon/copilot-extensions/commit/143620e4dc2c7a26c0af39a7dc8a126bfc9d6e86)
+after current-head CI passed, including the required PR gate. The current-head
+Copilot Lite fallback `Comment` reported zero open findings. The full agentic
+review never started before its timeout, so that result does not establish a
+completed full review or rule out additional findings. The two addressed
+alias/profile threads were resolved with their implementation and regression
+evidence.
+
+The three ordinary native-recovery implementation items above are complete.
+The 224-vector compatibility ledger preserves previously published bodies;
+combined Bridge HTTP/transport/profile/wire coverage passed 422 tests
+(2 skipped), owner remote-option coverage passed 48, and SSH/profile/native
+coverage passed 103. Real isolated Windows ACP and CLI process-exit continuity
+remains distinct from simulated-provider and nonconnecting `ssh -G` checks.
+Hosted Linux execution and the broader dispatch acquisition matrix remain
+open under #6934 and #6076. This merge does not claim release promotion,
+installed adoption, or deployment.
 
 ### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
 
