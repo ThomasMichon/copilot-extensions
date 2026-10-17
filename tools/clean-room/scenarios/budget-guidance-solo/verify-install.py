@@ -18,17 +18,33 @@ import agent_procutil
 import budget_guidance
 
 
+def package_version(manifest_version):
+    number = r"(?:0|[1-9][0-9]*)"
+    parts = re.fullmatch(rf"({number}\.{number}\.{number})(?:-dev({number}))?", manifest_version)
+    if parts is None:
+        raise AssertionError("scenario requires a canonical repository release or -devN version")
+    return parts[1] + (".dev" + parts[2] if parts[2] is not None else "")
+
+
+for raw, normalized in (
+    ("1.2.3", "1.2.3"), ("1.2.3-dev0", "1.2.3.dev0"), ("1.2.3-dev4", "1.2.3.dev4"),
+):
+    assert package_version(raw) == normalized
+for malformed in ("1.2.3-dev04", "01.2.3", "1.2.3-dev"):
+    try:
+        package_version(malformed)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("noncanonical manifest version was accepted")
+
 bin_path, snapshot = map(Path, sys.argv[1:])
 prefix = Path(sys.prefix)
 assert Path(budget_guidance.__file__).is_relative_to(prefix)
 assert Path(agent_procutil.__file__).is_relative_to(prefix)
 expected = json.loads((snapshot / "plugin.json").read_text(encoding="utf-8"))["version"]
 assert budget_guidance.__version__ == expected
-parts = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-dev(\d+))?", expected)
-if parts is None:
-    raise AssertionError("scenario requires a repository release or -devN manifest version")
-normalized = parts[1] + (".dev" + parts[2] if parts[2] is not None else "")
-assert version("budget-guidance") == normalized
+assert version("budget-guidance") == package_version(expected)
 original = snapshot / "src/budget_guidance/quota.py"
 installed = Path(budget_guidance.__file__).parent / "quota.py"
 assert hashlib.sha256(original.read_bytes()).digest() == hashlib.sha256(installed.read_bytes()).digest()
