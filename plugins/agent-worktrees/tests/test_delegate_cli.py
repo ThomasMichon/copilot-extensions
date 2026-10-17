@@ -253,6 +253,22 @@ def test_missing_paired_caller_retains_exact_host_inference(prefix: str, suffix:
     )
 
 
+def test_host_inference_parses_the_allocation_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    parse = delegate_cli.parse_session_worktree_id
+    calls: list[str] = []
+
+    def counted(identity: str) -> tuple[str, str, str] | None:
+        calls.append(identity)
+        return parse(identity)
+
+    monkeypatch.setattr(delegate_cli, "parse_session_worktree_id", counted)
+    caller = "host-wsl-20261013-100000-abcd"
+    hosts = {(f"host-{number}-wsl", "wsl"): True for number in range(50)}
+    hosts[("host-wsl", "wsl")] = True
+    assert delegate_cli._expected_host_key(caller, hosts) == ("host-wsl", "wsl")
+    assert calls == [caller]
+
+
 def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
     args = SimpleNamespace(
         mux_details=False,

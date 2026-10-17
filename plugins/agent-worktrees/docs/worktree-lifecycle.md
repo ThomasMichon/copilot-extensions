@@ -71,6 +71,8 @@ hexadecimal suffix. The platform is appended only when the logical machine name
 does not already end in that environment (`example-wsl`, not
 `example-wsl-wsl`). Windows accepts either `-win` or `-windows` as the existing
 environment suffix.
+Platform labels are matched case-insensitively without rewriting the logical
+machine name.
 
 Remote prompt admission keeps its request and seed identities in a durable
 receipt, separate from the generated worktree name. Replaying the same request

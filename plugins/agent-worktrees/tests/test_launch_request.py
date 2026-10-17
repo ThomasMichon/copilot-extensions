@@ -75,6 +75,28 @@ def test_resume_admitted_once_via_real_daemon_then_finished_never_replays(tmp_pa
     assert request.inspect(intent["request_id"])["state"] == "completed-or-superseded"
 
 
+def test_resume_does_not_allocate_a_random_worktree_suffix(
+    tmp_path: Path, authority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+    )
+    token_hex = request.secrets.token_hex
+
+    def no_allocation(size: int) -> str:
+        assert size != 2, "Resume attempted to allocate a new worktree suffix"
+        return token_hex(size)
+
+    monkeypatch.setattr(request.secrets, "token_hex", no_allocation)
+    intent = _intent()
+    first = request.execute(authority, intent)
+    receipt = request._read_admission(tmp_path, intent["request_id"])
+    assert receipt["suffix"] == intent["request_id"]
+    assert first["worktree_id"] == intent["worktree_id"]
+    assert request.execute(authority, intent) == first
+    assert request._read_admission(tmp_path, intent["request_id"]) == receipt
+
+
 @pytest.mark.parametrize("state", ["active", "unknown"])
 def test_structured_resume_rejects_hosted_provider_via_real_daemon(
     tmp_path, authority, state,

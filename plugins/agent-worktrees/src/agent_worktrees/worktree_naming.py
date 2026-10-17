@@ -9,6 +9,7 @@ def session_worktree_prefix(
     machine: str, platform: str, *, legacy: bool = False,
 ) -> str:
     """Include the environment once, or preserve the historical prefix."""
+    platform = platform.casefold()
     tag = "win" if platform == "windows" else platform
     environment_suffixes = (f"-{tag}", f"-{platform}")
     return (
@@ -26,16 +27,22 @@ def session_worktree_id(
     return f"{prefix}-{timestamp}-{suffix}"
 
 
+def parse_session_worktree_id(worktree_id: str) -> tuple[str, str, str] | None:
+    """Read a complete allocation's prefix, timestamp and suffix."""
+    match = re.fullmatch(
+        r"(.+)-(\d{8}-\d{6})-([0-9a-f]{4}|[0-9a-f]{32})", worktree_id,
+    )
+    return (match[1], match[2], match[3]) if match is not None else None
+
+
 def session_worktree_allocation(
     worktree_id: str, machine: str, platform: str,
 ) -> tuple[str, str] | None:
     """Recognize a complete native allocation, never a partial machine prefix."""
-    match = re.fullmatch(
-        r"(.+)-(\d{8}-\d{6})-([0-9a-f]{4}|[0-9a-f]{32})", worktree_id,
-    )
-    if match is None or match[1] not in {
+    allocation = parse_session_worktree_id(worktree_id)
+    if allocation is None or allocation[0] not in {
         session_worktree_prefix(machine, platform, legacy=legacy)
         for legacy in (False, True)
     }:
         return None
-    return match[2], match[3]
+    return allocation[1], allocation[2]

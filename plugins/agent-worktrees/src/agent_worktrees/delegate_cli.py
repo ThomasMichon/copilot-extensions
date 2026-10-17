@@ -26,7 +26,7 @@ from agent_procutil import no_window_kwargs
 from . import config as cfg
 from . import list_views_cli
 from . import tracking
-from .worktree_naming import session_worktree_allocation
+from .worktree_naming import parse_session_worktree_id, session_worktree_prefix
 
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
 
@@ -65,12 +65,16 @@ def _expected_host_key(
     reachable_hosts: dict[tuple[str, str], bool],
 ) -> tuple[str, str] | None:
     """Infer the host machine/environment from a machine-stamped worktree id."""
+    allocation = parse_session_worktree_id(worktree_id.removesuffix("-k"))
+    if allocation is None:
+        return None
     matches = [
         (machine, platform)
         for machine, platform in reachable_hosts
-        if session_worktree_allocation(
-            worktree_id.removesuffix("-k"), machine, platform,
-        ) is not None
+        if allocation[0] in {
+            session_worktree_prefix(machine, platform, legacy=legacy)
+            for legacy in (False, True)
+        }
     ]
     return matches[0] if len(matches) == 1 else None
 

@@ -144,7 +144,7 @@ def execute(config, request: dict) -> dict:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     detected_platform = cfg.detect_platform()
     request_id = request["request_id"]
-    suffix = secrets.token_hex(2)
+    suffix = secrets.token_hex(2) if request["kind"] == "new" else request_id
     wid = request["worktree_id"] or session_worktree_id(
         config.machine, detected_platform, timestamp, suffix,
     )
