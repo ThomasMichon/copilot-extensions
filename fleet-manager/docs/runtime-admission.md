@@ -71,6 +71,11 @@ Evidence is consumed once per owner, including a denied admission. Its bounded
 90-second transfer window is request freshness, not human presence. DPoP does
 not sign the body; the library computes the canonical read/intent digest itself,
 while TLS and the adapter protect and associate the original request bytes.
+Consumption also precedes the trusted snapshot callback: an exception propagates
+without restoring already-attempted request evidence. This deliberate one-use
+contract does not retry an already verified proof after an owner fault. Recovery
+uses a fresh proof and verification result with the original operation ID and
+content, not a human check-in, cached allow or evidence rollback.
 
 ## Permit checkpoints, renewal and bounds
 

@@ -373,12 +373,22 @@ def test_snapshot_outage_and_exception_never_fall_back_to_cached_allow(harness):
     harness.current = policy(revision=2)
     refuses("unknown-permit", harness.owner.revalidate, permit, request)
 
+    calls = []
+
     def broken():
+        calls.append(True)
         raise RuntimeError("owner source failed")
 
     failing = AdmissionAuthority(snapshot=broken, clock=harness.clock)
+    identity = harness.identity()
+    with pytest.raises(RuntimeError, match="owner source failed"):
+        failing.authorize(identity, request, role="client", installation="client-a")
+    refuses("identity-reused", failing.authorize, identity, request,
+            role="client", installation="client-a")
+    assert calls == [True]
     with pytest.raises(RuntimeError, match="owner source failed"):
         failing.authorize(harness.identity(), request, role="client", installation="client-a")
+    assert calls == [True, True]
 
 
 def test_invalid_identity_is_refused_before_enrollment_resolution(harness):

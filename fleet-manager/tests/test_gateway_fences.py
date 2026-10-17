@@ -358,7 +358,7 @@ def test_controller_acquisition_respects_dispatch_expiry(fixture, monkeypatch, o
             dispatch = verify(result["dispatch"], fixture.gateway_keys,
                               "fixture-issuer", "controller", lifetime=60)
             assert dispatch["exp"] < dispatch["deadline"]
-            clock[0] = (time.time() if outcome == "result-before-dispatch-expiry"
+            clock[0] = (dispatch["iat"] if outcome == "result-before-dispatch-expiry"
                         else dispatch["exp"] - 0.05)
             return result
 
