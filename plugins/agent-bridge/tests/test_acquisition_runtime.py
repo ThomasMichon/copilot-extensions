@@ -522,6 +522,37 @@ async def test_initial_creation_refuses_unproven_or_historical_launch(rig, monke
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+async def test_lost_receipt_stays_ambiguous_when_owner_ledger_is_empty(rig, monkeypatch, mode):
+    # An interrupted launch followed by bridge-database loss leaves no receipt
+    # while the owner ledger is still empty; that ledger is not no-launch proof.
+    retry = await preflight_retry(rig, monkeypatch, mode)
+    rig.db.execute_write("DELETE FROM acquisition_attempts WHERE delivery_id='delivery-a'")
+    original = acquisition_authority.worktree_command
+    sessionless = {
+        "sessions_indexed": True, "session_count": 0, "last_session_id": None,
+        "execution_leg": None, "session_backend": None,
+    }
+
+    async def command(args, project):
+        if args[0] == "record":
+            return {"version": 1, "ok": True, "worktree": {
+                "id": args[2], "status": "active", **sessionless,
+            }}
+        result = await original(args, project)
+        if args[0] == "list":
+            result["worktrees"] = [{**row, **sessionless} for row in result["worktrees"]]
+        return result
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", command)
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(retry)
+    assert error.value.code == "continuity_ambiguous"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
 async def test_first_conversation_revalidates_authority_after_target_preparation(rig, monkeypatch):
     retry = await preflight_retry(rig, monkeypatch)
     prepare = rig.runtime._prepare_target

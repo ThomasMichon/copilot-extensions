@@ -124,6 +124,8 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "last_session_id": None,
         "execution_leg": None,
         "execution_leg_opaque": False,
+        "execution_leg_live": False,
+        "bound_agent": None,
         "sessions_indexed": True,
         "bound_agent": None,
         "session_backend": None,
@@ -605,6 +607,16 @@ def test_record_read_opaque_legacy_backend_is_not_sessionless(record_fixture):
     assert result["worktree"]["execution_leg"] is None
     assert result["worktree"]["session_backend"] == data["session_backend"]
     assert result["worktree"]["session_backend_opaque"] is True
+    assert result["worktree"]["execution_leg_live"] is True
+
+
+def test_record_read_exposes_bound_agent(record_fixture):
+    data, path = record_fixture
+    data["bound_agent"] = "example-agent"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0
+    assert result["worktree"]["bound_agent"] == "example-agent"
 
 
 @pytest.fixture

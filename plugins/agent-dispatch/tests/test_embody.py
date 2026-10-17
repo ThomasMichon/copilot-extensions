@@ -722,6 +722,68 @@ def test_resolve_worktree_rejects_worktree_owned_by_different_task(monkeypatch):
         embody.resolve_worktree("wt-shared", project="widgets", task_id="task-1")
 
 
+def _roster_then_record(monkeypatch, listed, record):
+    calls = []
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(cmd)
+        if "list" in cmd and isinstance(listed, BaseException):
+            raise listed
+        returncode, stdout = listed if "list" in cmd else record
+        return types.SimpleNamespace(returncode=returncode, stdout=json.dumps(stdout), stderr="")
+
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"])
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+    return calls
+
+
+@pytest.mark.parametrize("listed", [
+    (0, {"worktrees": []}), (1, {"error": "resident unavailable"}),
+    subprocess.TimeoutExpired(["agent-worktrees", "list"], 5),
+])
+def test_resolve_worktree_reads_exact_record_before_roster_publication(monkeypatch, listed):
+    row = {"id": "wt-new", "path": "/tmp/wt-new", "repo": "widgets", "status": "active",
+           "dispatch_attempt": {"task_id": "task-1"}}
+    calls = _roster_then_record(monkeypatch, listed, (0, {"version": 1, "ok": True, "worktree": row}))
+
+    resolved = embody.resolve_worktree("wt-new", project="widgets", task_id="task-1")
+
+    assert resolved == {"worktree": "wt-new", "path": "/tmp/wt-new", "project": "widgets"}
+    assert calls[1] == [
+        "/usr/bin/agent-worktrees", "--project", "widgets", "record", "--worktree-id", "wt-new", "--json",
+    ]
+
+
+@pytest.mark.parametrize("record,match", [
+    ((1, {"version": 1, "ok": False, "code": "record-missing"}), "not found"),
+    ((0, {"version": 1, "ok": True, "worktree": {
+        "id": "wt-new", "path": "/tmp/wt-new", "dispatch_attempt": {"task_id": "task-other"}}}), "now owned by"),
+    ((0, {"version": 1, "ok": True, "worktree": {
+        "id": "wt-new", "path": "/tmp/wt-new", "status": "finalized", "dispatch_attempt": None}}), "terminal"),
+    ((0, {"version": 1, "ok": True, "worktree": {
+        "id": "wt-new", "path": "/tmp/wt-new", "status": "archived", "dispatch_attempt": None}}), "terminal"),
+    # An unparseable attempt cannot prove task attribution either.
+    ((0, {"version": 1, "ok": True, "worktree": {
+        "id": "wt-new", "path": "/tmp/wt-new", "dispatch_attempt": "garbled",
+        "dispatch_attempt_opaque": True}}), "not found"),
+    # An owner that cannot report dispatch provenance cannot prove task attribution.
+    ((0, {"version": 1, "ok": True, "worktree": {"id": "wt-new", "path": "/tmp/wt-new"}}), "not found"),
+])
+def test_resolve_worktree_exact_record_fallback_stays_fail_closed(monkeypatch, record, match):
+    _roster_then_record(monkeypatch, (0, {"worktrees": []}), record)
+
+    with pytest.raises(embody.WorktreeNotFound, match=match):
+        embody.resolve_worktree("wt-new", project="widgets", task_id="task-1")
+
+
+def test_resolve_worktree_preserves_roster_timeout_when_record_is_unproven(monkeypatch):
+    timeout = subprocess.TimeoutExpired(["agent-worktrees", "list"], 5)
+    _roster_then_record(monkeypatch, timeout, (1, {"version": 1, "ok": False, "code": "record-missing"}))
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        embody.resolve_worktree("wt-new", project="widgets", task_id="task-1")
+
+
 def test_prepare_reusable_worktree_preserves_worktree_owned_by_different_task(
     monkeypatch,
 ):
