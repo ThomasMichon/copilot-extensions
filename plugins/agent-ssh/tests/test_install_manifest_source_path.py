@@ -62,9 +62,9 @@ def test_sh_manifest_source_path_prefers_staged_from():
         text,
     ), "install.sh must resolve SOURCE_PATH via COPILOT_PLUGIN_STAGED_FROM"
     assert re.search(
-        r'write_deploy_manifest "agent-ssh" "agent-ssh" "\$INSTALL_DIR" "\$PLUGIN_DIR" "\$VENV_DIR" "" "\$SOURCE_PATH" "\$SRC_VERSION"',
+        r'write_deploy_manifest "agent-ssh" "agent-ssh" "\$INSTALL_DIR" "\$PLUGIN_DIR" "\$VENV_DIR" "\$SOURCE_FIELDS" "\$SOURCE_PATH" "\$PACKAGE_VERSION"',
         text,
-    ), "install.sh must pass SOURCE_PATH as the manifest provenance override"
+    ), "install.sh must retain source fields, stable provenance and the original package version"
     assert "_snapshot_source_marker" in text
 
 

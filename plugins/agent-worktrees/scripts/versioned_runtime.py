@@ -323,7 +323,7 @@ def resolve_python(root: Path) -> Path | None:
     1. the ``current-version`` marker (the source of truth, written atomically);
     2. ``last-known-good`` -- the last version ``activate()`` published -- when
        the marker is missing/unreadable or names an unresolvable slot;
-    3. the newest complete installed slot (true first-run / torn marker).
+    3. the newest complete package slot, only when no source generation needs recovery.
 
     Never resolves through a ``venv``/``.venv`` link (a reparse point on Windows
     that RedirectionGuard blocks) and **never** falls back to a PATH python -- an
@@ -344,8 +344,10 @@ def resolve_python(root: Path) -> Path | None:
         p = slot_python(root, lkg)
         if p is not None:
             return p
-    # Tier 3: newest complete slot.
     versions = list_versions(root)  # sorted, newest last
+    if _runtime_component("versioned_runtime_source").requires_exact_selection(versions):
+        return None
+    # Tier 3: newest complete package-version slot.
     for ver in reversed(versions):
         if is_complete(root, ver):
             p = slot_python(root, ver)

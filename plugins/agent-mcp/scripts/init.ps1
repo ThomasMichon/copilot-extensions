@@ -25,6 +25,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -350,6 +351,7 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -362,11 +364,12 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
-
+    Assert-SourceRuntime
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntime
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -504,16 +507,22 @@ function Invoke-Stamp {
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    Assert-SourceRuntime
+    if ($script:SourceRuntimeIdentity) {
+        $snapDir = Publish-SourceSnapshot
+    } else {
+        $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+        }
+        if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    Assert-SourceSnapshot -Snapshot $snapDir
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
@@ -588,6 +597,9 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
+$ScriptDir = $PSScriptRoot
+. (Join-Path $ScriptDir 'source-runtime.ps1')
+Initialize-SourceRuntime
 if (-not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
     exit 1
@@ -595,52 +607,8 @@ if (-not (Enter-InstallLock)) {
 
 $script:McpInstallFailure = $null
 try {
+Assert-SourceRuntime
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
-
-# -- Windowless spawn helper --------------------------------------------
-# This script is frequently invoked headlessly (no console of its own --
-# spawned via CREATE_NO_WINDOW from the Python-side bridge launcher). A
-# plain `&`-invoked console-subsystem child (python.exe, uv.exe) in that
-# situation gets a FRESH console window allocated by Windows, which flashes
-# on screen once per spawn during provisioning. Route provisioning spawns
-# through this helper (native CreateNoWindow=true) instead, so the child
-# never gets a window regardless of this script's own console state.
-# Bind native argv explicitly so PowerShell cannot consume flags or separators.
-function Invoke-Hidden {
-    param(
-        [Parameter(Mandatory)][string]$FilePath,
-        [string[]]$ArgList = @()
-    )
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    if ($psi.PSObject.Properties['ArgumentList']) {
-        foreach ($a in $ArgList) { [void]$psi.ArgumentList.Add($a) }
-    } else {
-        # Windows PowerShell 5.1 uses .NET Framework's quoted command line.
-        $psi.Arguments = ($ArgList | ForEach-Object {
-            '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
-        }) -join ' '
-    }
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    try {
-        $stdout = $proc.StandardOutput.ReadToEndAsync()
-        $stderr = $proc.StandardError.ReadToEndAsync()
-        $proc.WaitForExit()
-        [Threading.Tasks.Task]::WaitAll($stdout, $stderr)
-        $global:LASTEXITCODE = $proc.ExitCode
-        if ($stderr.Result) {
-            if ($proc.ExitCode -ne 0) { [Console]::Error.Write($stderr.Result) }
-            else { Write-Verbose $stderr.Result }
-        }
-        return $stdout.Result
-    } finally {
-        $proc.Dispose()
-    }
-}
 
 # -- Preflight checks --------------------------------------------------
 
@@ -754,6 +722,7 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 
 # -- 3. Install the package into the venv (uv pip install) -------------
 
+Assert-SourceRuntime
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 # Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
@@ -823,6 +792,7 @@ if ($VersionedRuntime) {
         throw "Fresh runtime slot failed its health gate (versions/$SrcVersion)"
     }
     if (-not (Invoke-VersionedMarkComplete)) { throw 'Runtime construction completion failed' }
+    Assert-SourceRuntime
     Invoke-Hidden -FilePath $VenvPython -ArgList @($VrScript, '--root', $InstallDir, '--link-name', '.venv', 'activate', $SrcVersion, '--no-link') | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
@@ -914,6 +884,7 @@ Deploy-SelfProvisioningBinstub
 
 # -- 5. Write deploy manifest ------------------------------------------
 
+Assert-SourceRuntime
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
@@ -947,6 +918,11 @@ $manifest = [ordered]@{
     }
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
+}
+if ($script:SourceRuntimeIdentity) {
+    $fields = $script:SourceRuntimeIdentity | ConvertFrom-Json
+    $manifest.runtime_version = $fields.runtime_version
+    $manifest.runtime_source = $fields.runtime_source
 }
 $tmp = "$manifestPath.tmp"
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8

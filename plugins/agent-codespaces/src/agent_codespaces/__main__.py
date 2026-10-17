@@ -4538,10 +4538,11 @@ def _cmd_installer_readiness() -> int:
 def _cmd_version() -> int:
     """Show version."""
     from . import __version__
+    from .source_build import effective_runtime_version
 
     try:
         from ._build_info import BUILD_INFO
-        ver = BUILD_INFO.get("version", "0.0.0")
+        ver = effective_runtime_version(BUILD_INFO.get("version", "0.0.0"))
         commit = BUILD_INFO.get("commit", "unknown")[:8]
         print(f"agent-codespaces {ver} ({commit})")
     except ImportError:

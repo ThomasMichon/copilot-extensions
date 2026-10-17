@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ def test_staged_profile_loads_only_its_owned_runtime_with_safe_path(tmp_path, is
     for name in (
         "runtime_profile.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
     ):
         shutil.copyfile(SCRIPTS / name, staged / name)
     foreign = tmp_path / "foreign"
@@ -196,6 +198,7 @@ def test_native_profile_policy_refusal_retains_selected_runtime(
         "runtime_profile.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py", "installer_dependency_policy.py",
         "installer_dependency_config.py",
+        "versioned_runtime_source.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
     (payload / "plugin.json").write_text(
@@ -316,6 +319,246 @@ def test_same_version_source_change_refuses_immutable_rebuild(
     with pytest.raises(RuntimeError, match="content-conflict"):
         _provision(profiles, root, payload)
     assert marker.read_bytes() == before
+
+
+def _prepare_source(profiles, payload, commit="a" * 40):
+    (payload / "plugin.json").write_text(
+        json.dumps({"name": "agent-containers", "version": "1.0.0"}), encoding="utf-8",
+    )
+    digest = profiles.source.assembly_hash(payload)
+    identity = profiles.source.SourceIdentity(
+        "agent-containers", "1.0.0", commit, "b" * 40, digest,
+        profiles.source.runtime_version("1.0.0", commit, digest),
+    )
+    (payload / "runtime-source.json").write_text(
+        json.dumps(identity.document()), encoding="utf-8",
+    )
+    return identity
+
+
+@pytest.mark.parametrize("profile", ["base", "provider-exec"])
+def test_source_generation_preserves_profile_package_and_unchanged_reuse(
+    profiles, payload, commands, tmp_path, profile,
+):
+    identity = _prepare_source(profiles, payload)
+    root = tmp_path / "runtime"
+    first = _provision(profiles, root, payload, requested=profile)
+    assert first["runtimeVersion"] == profiles.source.runtime_version(
+        f"1.0.0+{profile}", identity.source_commit, identity.assembly_hash,
+    )
+    assert first["runtimeSource"] == identity.document()
+    marker = Path(first["venv"]) / ".install-complete.json"
+    before = marker.read_bytes(), marker.stat().st_mtime_ns
+    again = _provision(profiles, root, payload)
+    assert again["reused"]
+    assert before == (marker.read_bytes(), marker.stat().st_mtime_ns)
+    _prepare_source(profiles, payload, commit="c" * 40)
+    changed = _provision(profiles, root, payload)
+    assert changed["venv"] != first["venv"]
+    assert changed["profile"] == profile
+    assert marker.read_bytes() == before[0]
+
+
+@pytest.mark.parametrize("stage", ["lease", "health", "activation"])
+def test_source_mutation_refuses_before_selecting_candidate(
+    profiles, payload, commands, tmp_path, monkeypatch, stage,
+):
+    from contextlib import contextmanager
+
+    root = tmp_path / "runtime"
+    previous = _provision(profiles, root, payload)
+    identity = _prepare_source(profiles, payload)
+    selected = (root / "current-version").read_bytes()
+    marker = Path(previous["venv"]) / ".install-complete.json"
+    before = marker.read_bytes()
+
+    def mutate():
+        (payload / "runtime-source.json").unlink()
+
+    if stage == "lease":
+        lease = profiles.runtime.construction_lease
+
+        @contextmanager
+        def changed(*args, **kwargs):
+            with lease(*args, **kwargs) as held:
+                mutate()
+                yield held
+
+        monkeypatch.setattr(profiles.runtime, "construction_lease", changed)
+    elif stage == "health":
+        health = profiles._health
+
+        def changed(*args, **kwargs):
+            health(*args, **kwargs)
+            mutate()
+
+        monkeypatch.setattr(profiles, "_health", changed)
+    else:
+        retain = profiles.runtime.retention_lease
+
+        @contextmanager
+        def changed(*args, **kwargs):
+            with retain(*args, **kwargs) as held:
+                mutate()
+                yield held
+
+        monkeypatch.setattr(profiles.runtime, "retention_lease", changed)
+    with pytest.raises(RuntimeError, match="source identity changed"):
+        _provision(profiles, root, payload, expected_source_version=identity.runtime_version)
+    assert (root / "current-version").read_bytes() == selected
+    assert marker.read_bytes() == before
+
+
+def test_prepared_source_cannot_substitute_missing_owned_library(
+    profiles, payload, commands, tmp_path,
+):
+    missing = payload / "libs" / profiles.LIBRARIES[0]
+    shutil.rmtree(missing)
+    ambient = payload.parent.parent / "libs" / profiles.LIBRARIES[0]
+    ambient.mkdir(parents=True)
+    (ambient / "pyproject.toml").write_text('version = "1.0.0"\n')
+    _prepare_source(profiles, payload)
+    with pytest.raises(RuntimeError, match="source not found in the owning payload"):
+        _provision(profiles, tmp_path / "runtime", payload)
+    assert commands == []
+
+
+def test_source_stamp_retains_full_assembly_after_original_is_unavailable(
+    profiles, payload, commands, tmp_path,
+):
+    identity = _prepare_source(profiles, payload)
+    snapshot = profiles.stamp_source(tmp_path / "runtime", payload, identity.runtime_version)
+    assert profiles.stamp_source(tmp_path / "runtime", payload, identity.runtime_version) == snapshot
+    payload.rename(tmp_path / "unavailable")
+    assert profiles.source.read_source_identity(snapshot, "1.0.0") == identity
+    result = _provision(profiles, tmp_path / "runtime", snapshot)
+    assert result["runtimeSource"] == identity.document()
+    assert all(str(snapshot / "libs" / name) in _install_command(commands)
+               for name in profiles.LIBRARIES)
+
+
+@pytest.mark.parametrize("operation", ["stamp", "provision"])
+def test_source_handoff_refuses_valid_receipt_change_with_unchanged_generation(
+    profiles, payload, commands, tmp_path, operation,
+):
+    root = tmp_path / "runtime"
+    _provision(profiles, root, payload)
+    before = {path.relative_to(root): path.read_bytes()
+              for path in root.rglob("*") if path.is_file()}
+    selected = _prepare_source(profiles, payload)
+    expected = json.dumps(profiles.source.manifest_fields(selected), sort_keys=True)
+    document = selected.document()
+    document["source_tree"] = "c" * 40
+    (payload / "runtime-source.json").write_text(json.dumps(document), encoding="utf-8")
+    changed = profiles.source.read_source_identity(payload, "1.0.0")
+    assert changed.runtime_version == selected.runtime_version
+    assert changed != selected
+    commands.clear()
+    with pytest.raises(RuntimeError, match="source identity changed after runtime selection"):
+        if operation == "stamp":
+            profiles.stamp_source(
+                root, payload, selected.runtime_version, expected_identity=expected,
+            )
+        else:
+            _provision(
+                profiles, root, payload, expected_source_version=selected.runtime_version,
+                expected_source_identity=expected,
+            )
+    assert commands == []
+    assert {path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("receipt_change", [False, True])
+def test_native_source_stamp_publishes_only_verified_complete_snapshot(
+    profiles, payload, tmp_path, host, receipt_change,
+):
+    if host == "powershell" and os.name != "nt":
+        pytest.skip("Windows PowerShell unavailable")
+    if host == "bash" and os.name == "nt":
+        pytest.skip("Native POSIX installer requires flock or real symlinks, not Git Bash")
+    shell = shutil.which(host)
+    if shell is None:
+        pytest.skip(f"{host} unavailable")
+    shutil.copytree(SCRIPTS, payload / "scripts")
+    if receipt_change:
+        entry = payload / "scripts" / ("init.sh" if host == "bash" else "init.ps1")
+        text = entry.read_text(encoding="utf-8")
+        if host == "bash":
+            boundary = "_enter_install_lock() {\n"
+            mutation = (
+                '    "$(_source_python)" -I -c '
+                "'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); "
+                'd=json.loads(p.read_text()); d["source_tree"]="c"*40; '
+                "p.write_text(json.dumps(d))' \"$PLUGIN_DIR/runtime-source.json\"\n"
+            )
+        else:
+            boundary = (
+                "function Enter-InstallLock {\n"
+                "    param([int]$TimeoutSec = (Get-InstallLockTimeoutSec))\n"
+            )
+            mutation = """
+    $receiptPath = Join-Path $PluginDir 'runtime-source.json'
+    $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    $receipt.source_tree = 'c' * 40
+    [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Compress -Depth 8),
+        (New-Object Text.UTF8Encoding $false))
+"""
+        assert text.count(boundary) == 1
+        entry.write_text(text.replace(boundary, boundary + mutation), encoding="utf-8")
+    (payload / "tests").mkdir()
+    (payload / "tests" / "input.txt").write_text("hashed input\n")
+    identity = _prepare_source(profiles, payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    root = home / ".agent-containers"
+    previous = {"current-version": b"previous", "payload-dir": b"previous-payload",
+                "stamped-version": b"previous"}
+    if receipt_change:
+        root.mkdir()
+        for name, value in previous.items():
+            (root / name).write_bytes(value)
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("COPILOT_", "AGENT_CONTAINERS_"))}
+    env.update(HOME=home.as_posix(), USERPROFILE=str(home),
+               COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+               COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC="2")
+    if host == "bash":
+        arguments = [shell, str(payload / "scripts" / "init.sh"),
+                     "stamp", "--install-dir", str(root)]
+    else:
+        arguments = [shell, "-NoProfile", "-File", str(payload / "scripts" / "init.ps1"),
+                     "stamp", "-InstallDir", str(root)]
+    with tempfile.TemporaryFile(mode="w+b") as output:
+        try:
+            result = subprocess.run(
+                arguments, cwd=home, env=env, stdout=output, stderr=subprocess.STDOUT, timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+        except subprocess.TimeoutExpired:
+            output.seek(0)
+            pytest.fail(output.read().decode("utf-8", errors="replace"))
+        output.seek(0)
+        detail = output.read().decode("utf-8", errors="replace")
+        if receipt_change:
+            assert result.returncode != 0, detail
+            assert "Source runtime identity changed after runtime selection" in detail
+            changed = profiles.source.read_source_identity(payload, "1.0.0")
+            assert changed.runtime_version == identity.runtime_version
+            assert changed != identity
+            for name, value in previous.items():
+                assert (root / name).read_bytes() == value
+            assert not (root / "snapshots").exists()
+            assert not (home / ".local" / "bin").exists()
+            return
+        assert result.returncode == 0, detail
+    snapshot = Path((root / "payload-dir").read_text().strip())
+    assert snapshot.name == identity.runtime_version
+    assert profiles.source.read_source_identity(snapshot, "1.0.0") == identity
+    assert (snapshot / "tests" / "input.txt").is_file()
+    assert not (root / "current-version").exists()
+    assert not (root / "versions").exists()
 
 
 def test_relative_install_root_and_payload_use_the_callers_directory(
@@ -513,6 +756,9 @@ def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_p
     prefix = source[:source.index(marker) + len(marker)]
     receipt = tmp_path / "staged-arguments.txt"
     if extension == "ps1":
+        shutil.copy2(
+            SCRIPTS / "versioned_runtime_native.ps1", scripts / "versioned_runtime_native.ps1",
+        )
         body = (
             '[System.IO.File]::WriteAllLines($env:PROFILE_STAGE_RECEIPT, '
             '[string[]]@($InstallDir, $Profile, $Action, [string]$Force.IsPresent, '

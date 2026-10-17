@@ -31,6 +31,10 @@ _resolve_vendored_lib() {
         cd "$candidate" && pwd
         return 0
     fi
+    if [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+        _fail "Source-qualified payload is missing its materialized library: $lib_name"
+        return 1
+    fi
 
     # 2. Relative path (git checkout layout: plugins/agent-ssh/../../libs/<name>)
     candidate="$PLUGIN_DIR/../../libs/$lib_name"
@@ -372,6 +376,7 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 LINK_PYTHON="$VENV_PYTHON"
 
 _versioned_activate() {
+    _assert_source_runtime_identity || return 1
     # CLI (no daemon): health-gate the slot, swap the `.venv` symlink onto it
     # (first migration moves a legacy real `.venv` aside), gc keeping current +
     # previous-good. Returns non-zero on failure. No-op in legacy mode.
@@ -379,12 +384,19 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    [[ -x "$py" ]] || return 0
+    if [[ ! -x "$py" ]]; then
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _fail "Source-qualified runtime interpreter is unavailable; refusing activation: $py"
+            return 1
+        fi
+        return 0
+    fi
     if ! "$VENV_PYTHON" -c 'import agent_ssh' 2>/dev/null; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
     _versioned_mark_complete || return 1
+    _assert_source_runtime_identity || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
@@ -415,6 +427,13 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _assert_source_runtime_identity || return 1
+        local py
+        py="$(_source_python)" || return 1
+        "$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_source"]["assembly_hash"])' "$SOURCE_RUNTIME_IDENTITY"
+        return
+    fi
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
     # changed the payload WITHOUT bumping the version. Fails on any error.
@@ -444,21 +463,28 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime_identity || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
     local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
-    py="$(_bootstrap_python)" || return 1
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        py="$(_source_python)" || return 1
+    else
+        py="$(_bootstrap_python)" || return 1
+    fi
     [[ -n "$py" ]] || return 1
     if ! declare -F _runtime_construction_begin >/dev/null; then
         helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime_identity
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime_identity || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
@@ -466,6 +492,51 @@ _versioned_mark_complete() {
         return 1
     fi
     _runtime_construction_complete "$actual_hash"
+}
+
+_source_python() {
+    local candidate
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -I -c 'import sys; assert sys.version_info >= (3, 10)' >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    _fail 'Source runtime selection requires a bootstrap Python interpreter'
+    return 1
+}
+
+_source_runtime_identity() {
+    local payload="${1:-$PLUGIN_DIR}" expected="${2:-}" py
+    py="$(_source_python)" || return 1
+    local args=(-I -B "$SCRIPT_DIR/versioned_runtime_source.py"
+        --payload "$payload" --package-version "$PACKAGE_VERSION" --plugin agent-ssh --format json)
+    [[ -z "$expected" ]] || args+=(--expected-runtime-version "$expected")
+    "$py" "${args[@]}"
+}
+
+_initialize_source_runtime() {
+    SOURCE_RUNTIME_IDENTITY=""
+    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
+    local py
+    py="$(_source_python)" || return 1
+    SRC_VERSION="$("$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_PYTHON="$VENV_PYTHON"
+}
+
+_assert_source_runtime_identity() {
+    local payload="${1:-$PLUGIN_DIR}" identity
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -e "$payload/runtime-source.json" || -L "$payload/runtime-source.json" ]]; then
+        identity="$(_source_runtime_identity "$payload" "$SRC_VERSION")" || return 1
+        if [[ "$identity" != "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _fail 'Source runtime identity changed after runtime selection; refusing publication'
+            return 1
+        fi
+    fi
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -827,6 +898,8 @@ _enter_install_lock() {
 }
 # === end install-transaction lock ===
 
+PACKAGE_VERSION="$SRC_VERSION"
+_initialize_source_runtime || exit 1
 case "$ACTION:${DRY_RUN:-0}" in
     uninstall:1) ;;
     install:*|update:*|stamp:*|provision:*|uninstall:*)
@@ -839,6 +912,7 @@ case "$ACTION:${DRY_RUN:-0}" in
         trap '_exit_install_lock; exit 143' TERM
         ;;
 esac
+_assert_source_runtime_identity || exit 1
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
@@ -847,6 +921,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
     SOURCE_KIND="$(_source_kind "$SOURCE_PATH")"
     _acquire_stamp_publication_lock || exit 1
+    _assert_source_runtime_identity || exit 1
     trap '_release_stamp_publication_lock; _exit_install_lock' EXIT
     CURRENT_SNAPSHOT="$(_current_snapshot)"
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
@@ -856,6 +931,7 @@ if [[ "$ACTION" == "stamp" ]]; then
         exit 0
     fi
     if _snapshot_is_reusable "$CURRENT_SNAPSHOT" "$SOURCE_KIND" "$SOURCE_PATH" "$SRC_VERSION"; then
+        _assert_source_runtime_identity "$CURRENT_SNAPSHOT" || exit 1
         printf '%s\n' "$CURRENT_SNAPSHOT" > "$INSTALL_DIR/payload-dir.$$.tmp"
         mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
         _write_stamped_version_marker
@@ -870,7 +946,8 @@ if [[ "$ACTION" == "stamp" ]]; then
     shopt -s dotglob nullglob
     for entry in "$PLUGIN_DIR"/*; do
         case "${entry##*/}" in
-            .git|__pycache__|.pytest_cache|.venv|tests) continue ;;
+            .git|__pycache__|.pytest_cache|.venv|tests)
+                [[ -n "$SOURCE_RUNTIME_IDENTITY" ]] || continue ;;
         esac
         if ! cp -a "$entry" "$SNAPSHOT_TMP/"; then
             shopt -u dotglob nullglob
@@ -880,13 +957,18 @@ if [[ "$ACTION" == "stamp" ]]; then
         fi
     done
     shopt -u dotglob nullglob
-    _materialize_snapshot_vendored_libs "$SNAPSHOT_TMP" || {
-        rm -rf "$SNAPSHOT_TMP"
-        exit 1
-    }
-    _materialize_snapshot_installer_engine "$SNAPSHOT_TMP"
-    printf '%s\n' "$SOURCE_PATH" > "$(_snapshot_source_marker "$SNAPSHOT_TMP")"
-    printf '%s\n' "$SRC_VERSION" > "$(_snapshot_version_marker "$SNAPSHOT_TMP")"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        _assert_source_runtime_identity "$SNAPSHOT_TMP" || exit 1
+        _assert_source_runtime_identity || exit 1
+    else
+        _materialize_snapshot_vendored_libs "$SNAPSHOT_TMP" || {
+            rm -rf "$SNAPSHOT_TMP"
+            exit 1
+        }
+        _materialize_snapshot_installer_engine "$SNAPSHOT_TMP"
+        printf '%s\n' "$SOURCE_PATH" > "$(_snapshot_source_marker "$SNAPSHOT_TMP")"
+        printf '%s\n' "$SRC_VERSION" > "$(_snapshot_version_marker "$SNAPSHOT_TMP")"
+    fi
     CURRENT_SNAPSHOT="$(_current_snapshot)"
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
         rm -rf "$SNAPSHOT_TMP"
@@ -896,6 +978,8 @@ if [[ "$ACTION" == "stamp" ]]; then
         exit 0
     fi
     mv -f "$SNAPSHOT_TMP" "$SNAPSHOT_DIR"
+    _assert_source_runtime_identity "$SNAPSHOT_DIR" || exit 1
+    _assert_source_runtime_identity || exit 1
     printf '%s\n' "$SNAPSHOT_DIR" > "$INSTALL_DIR/payload-dir.$$.tmp"
     mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
     _write_stamped_version_marker
@@ -1005,13 +1089,20 @@ fi
 # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
 _versioned_activate || exit 1
 
+_assert_source_runtime_identity || exit 1
 _deploy_binstub
 
 SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
 if [[ -f "$(_snapshot_source_marker "$PLUGIN_DIR")" ]]; then
     SOURCE_PATH="$(cat "$(_snapshot_source_marker "$PLUGIN_DIR")" 2>/dev/null || printf '%s\n' "$SOURCE_PATH")"
 fi
-write_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "$SOURCE_PATH" "$SRC_VERSION"
+SOURCE_FIELDS=""
+if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+    SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY#\{}"
+    SOURCE_FIELDS="${SOURCE_FIELDS%\}}"
+fi
+_assert_source_runtime_identity || exit 1
+write_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$SOURCE_FIELDS" "$SOURCE_PATH" "$PACKAGE_VERSION"
 
 echo ''
 if "$LINK_PYTHON" -c 'import agent_ssh' 2>/dev/null; then

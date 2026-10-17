@@ -137,7 +137,7 @@ _write_cell_manifest() {
     local runtime_slot="$4" runtime_version="$5" context="$6"
     local marketplace_id="$7" preserve_source="${8:-0}"
     local selected_source_path="$source_plugin_dir"
-    local selected_source_version="$source_version"
+    local selected_source_version="$runtime_version"
     local manifest_path="$plugin_root/deploy-manifest.json"
     local tmp="$manifest_path.tmp.$$" source_kind commit="null" branch="null"
     local dirty="false" repo_root _c _b _d deployed_by selected_kind
@@ -169,9 +169,15 @@ _write_cell_manifest() {
         fi
     fi
     deployed_by="$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')"
+    _assert_source_runtime_identity || return 1
+    local source_fields=""
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        source_fields="${SOURCE_RUNTIME_IDENTITY#\{}"
+        source_fields=", ${source_fields%\}}"
+    fi
     cat > "$tmp" << EOF
 {
-  "schema_version": 4,
+  "schema_version": 4$source_fields,
   "service": "agent-machines",
   "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
   "deployed_by": "$(_json_escape "$deployed_by")",
@@ -230,6 +236,7 @@ _remove_owned_cell_snapshot() {
 
 _ensure_cell_snapshot() {
     local snapshot_root="$1"
+    _assert_source_runtime_identity || return 1
     local owner_marker=".agent-machines-snapshot-publish-owner"
     local stage="" attempt provenance="$snapshot_root/snapshot-provenance.json"
     if [[ -e "$snapshot_root" || -L "$snapshot_root" ]]; then
@@ -251,7 +258,11 @@ _ensure_cell_snapshot() {
             fi
             if _cell_snapshot_is_owned "$snapshot_root"; then
                 rm -f -- "$snapshot_root/$owner_marker"
+                _assert_source_runtime_identity "$snapshot_root" || return 1
+                _assert_source_runtime_identity
             fi
+            _assert_source_runtime_identity "$snapshot_root" || return 1
+            _assert_source_runtime_identity || return 1
             return 0
         fi
     fi
@@ -651,6 +662,62 @@ VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
 
+_source_python() {
+    local candidate
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -I -c 'import sys; assert sys.version_info >= (3, 10)' >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    _fail 'Source runtime selection requires a bootstrap Python interpreter'
+    return 1
+}
+
+_source_runtime_identity() {
+    local payload="${1:-$PLUGIN_DIR}" expected="${2:-}" py
+    py="$(_source_python)" || return 1
+    local args=(-I -B "$SCRIPT_DIR/versioned_runtime_source.py"
+        --payload "$payload" --package-version "$PACKAGE_VERSION" --plugin agent-machines --format json)
+    [[ -z "$expected" ]] || args+=(--expected-runtime-version "$expected")
+    "$py" "${args[@]}"
+}
+
+_initialize_source_runtime() {
+    SOURCE_RUNTIME_IDENTITY=""
+    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
+    local py
+    py="$(_source_python)" || return 1
+    SRC_VERSION="$("$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_DIR="$VENV_DIR"
+}
+
+_assert_source_runtime_identity() {
+    local payload="${1:-$PLUGIN_DIR}" identity
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -e "$payload/runtime-source.json" || -L "$payload/runtime-source.json" ]]; then
+        identity="$(_source_runtime_identity "$payload" "$SRC_VERSION")" || return 1
+        if [[ "$identity" != "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _fail 'Source runtime identity changed after runtime selection; refusing publication'
+            return 1
+        fi
+    fi
+}
+
+PACKAGE_VERSION="$SRC_VERSION"
+_initialize_source_runtime || exit 1
+SELECTED_SOURCE_IDENTITY="$SOURCE_RUNTIME_IDENTITY"
+[[ -n "$SELECTED_SOURCE_IDENTITY" ]] || SELECTED_SOURCE_IDENTITY='{}'
+if [[ -n "${AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY:-}" &&
+      "$AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY" != "$SELECTED_SOURCE_IDENTITY" ]]; then
+    _fail 'Source runtime identity changed across the installation transaction'
+    exit 1
+fi
+export AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY="$SELECTED_SOURCE_IDENTITY"
+
 if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
       -z "${AGENT_MACHINES_CELL_PROVISION_LOCK_HELD:-}" ]]; then
     [[ -n "$CONTEXT" ]] || {
@@ -755,6 +822,7 @@ if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
         done
     fi
     trap unlock_cell_provision EXIT INT TERM
+    _assert_source_runtime_identity || exit 1
     set +e
     AGENT_MACHINES_CELL_PROVISION_LOCK_HELD=1 \
         bash "$SCRIPT_DIR/init.sh" "${ORIGINAL_ARGS[@]}"
@@ -799,13 +867,14 @@ if [[ "$ACTION" == "slot-provision" ||
         --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID"
         --expected-plugin-id agent-machines
         --expected-payload-root "$PLUGIN_DIR"
-        --expected-payload-version "$SRC_VERSION"
+        --expected-payload-version "$PACKAGE_VERSION"
         --snapshot-id "$SRC_VERSION"
         --runtime-version "$SRC_VERSION"
     )
     if [[ -n "$DURABLE_HOME" ]]; then
         SLOT_ARGS+=(--durable-home "$DURABLE_HOME")
     fi
+    _assert_source_runtime_identity || exit 1
     exec bash "$SLOT_RUNNER" "${SLOT_ARGS[@]}"
 fi
 
@@ -839,7 +908,7 @@ if [[ "$ACTION" == "slot-cutover" ]]; then
         --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID"
         --expected-plugin-id agent-machines
         --expected-payload-root "$PLUGIN_DIR"
-        --expected-payload-version "$SRC_VERSION"
+        --expected-payload-version "$PACKAGE_VERSION"
         --snapshot-id "$SRC_VERSION"
         --runtime-version "$SRC_VERSION"
         --expected-namespace-generation "$EXPECTED_NAMESPACE_GENERATION"
@@ -885,6 +954,7 @@ if [[ "$ACTION" == "slot-cutover" ]]; then
         "$PLUGIN_ROOT/deploy-manifest.json" \
         "$EXPECTED_MARKETPLACE_ID" "$CONTEXT" \
         "$EXPECTED_CURRENT_VERSION" "$EXPECT_CURRENT_ABSENT" || exit 1
+    _assert_source_runtime_identity || exit 1
     set +e
     CUTOVER_JSON="$(bash "$SLOT_RUNNER" "${SLOT_ARGS[@]}")"
     CUTOVER_STATUS=$?
@@ -987,13 +1057,15 @@ if [[ "$ACTION" == "cell-provision" ]]; then
     CURRENT_MARKER="$(dirname -- "$VERSIONS_ROOT")/current-version"
     if [[ -f "$CURRENT_MARKER" && ! -L "$CURRENT_MARKER" &&
           "$(cat "$CURRENT_MARKER")" == "$SRC_VERSION" ]]; then
+        _assert_source_runtime_identity || exit 1
+        _assert_source_runtime_identity "$SNAPSHOTS_ROOT/$SRC_VERSION" || exit 1
         set +e
         CURRENT_CUTOVER_JSON="$(bash "$SLOT_RUNNER" slot-cutover \
             --context "$CONTEXT" \
             --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
             --expected-plugin-id agent-machines \
             --expected-payload-root "$ORIGIN_PAYLOAD_ROOT" \
-            --expected-payload-version "$SRC_VERSION" \
+            --expected-payload-version "$PACKAGE_VERSION" \
             --snapshot-id "$SRC_VERSION" \
             --runtime-version "$SRC_VERSION" \
             --expected-namespace-generation "$CELL_NAMESPACE_GENERATION" \
@@ -1012,7 +1084,7 @@ if [[ "$ACTION" == "cell-provision" ]]; then
             exit 1
         fi
         _write_cell_manifest \
-            "$PLUGIN_ROOT" "$ORIGIN_PAYLOAD_ROOT" "$SRC_VERSION" \
+            "$PLUGIN_ROOT" "$ORIGIN_PAYLOAD_ROOT" "$PACKAGE_VERSION" \
             "$VERSIONS_ROOT/$SRC_VERSION" "$SRC_VERSION" "$CONTEXT" \
             "$EXPECTED_MARKETPLACE_ID"
         _ok "Runtime version $SRC_VERSION is already selected in installation cell"
@@ -1044,7 +1116,7 @@ if [[ "$ACTION" == "cell-provision" ]]; then
         --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
         --expected-plugin-id agent-machines \
         --expected-payload-root "$ORIGIN_PAYLOAD_ROOT" \
-        --expected-payload-version "$SRC_VERSION" \
+        --expected-payload-version "$PACKAGE_VERSION" \
         --snapshot-id "$SRC_VERSION" \
         --runtime-version "$SRC_VERSION" \
         --durable-home "$DURABLE_HOME" >/dev/null
@@ -1063,7 +1135,54 @@ _bootstrap_python() {
     return 1
 }
 
+_source_snapshot() {
+    _assert_source_runtime_identity || return 1
+    local snapshot="$INSTALL_DIR/snapshots/$SRC_VERSION" stage py
+    if [[ -e "$snapshot" || -L "$snapshot" ]]; then
+        [[ ! -L "$snapshot" && -d "$snapshot" ]] || {
+            _fail "Source snapshot must be an ordinary directory: $snapshot"
+            return 1
+        }
+        _assert_source_runtime_identity "$snapshot" || return 1
+    else
+        stage="$snapshot.stage-$$"
+        mkdir -p "$INSTALL_DIR/snapshots" || {
+            _fail 'Cannot create the source snapshots root'
+            return 1
+        }
+        mkdir "$stage" || {
+            _fail "Cannot reserve the source snapshot stage: $stage"
+            return 1
+        }
+        cp -a "$PLUGIN_DIR"/. "$stage"/ || {
+            _fail "Cannot copy the assembled source payload into: $stage"
+            return 1
+        }
+        _assert_source_runtime_identity "$stage" || return 1
+        _assert_source_runtime_identity || return 1
+        [[ ! -e "$snapshot" && ! -L "$snapshot" ]] || {
+            _fail "Source snapshot candidate already exists; preserving it: $snapshot"
+            return 1
+        }
+        py="$(_source_python)" || return 1
+        "$py" -I -c 'import os,sys; source,target=sys.argv[1:]; assert not os.path.lexists(target), "Source snapshot candidate already exists"; os.rename(source,target)' "$stage" "$snapshot" || {
+            _fail "Cannot publish the source snapshot without replacing a candidate: $snapshot"
+            return 1
+        }
+    fi
+    _assert_source_runtime_identity "$snapshot" || return 1
+    _assert_source_runtime_identity || return 1
+    printf '%s\n' "$snapshot"
+}
+
 _payload_hash() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _assert_source_runtime_identity || return 1
+        local py
+        py="$(_source_python)" || return 1
+        "$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_source"]["assembly_hash"])' "$SOURCE_RUNTIME_IDENTITY"
+        return
+    fi
     (
         # All non-root entries, including root snapshot-provenance.json, count
         # toward these limits. The provenance file is omitted only from records.
@@ -1372,21 +1491,28 @@ print(f"{kind}|{st.st_dev}|{st.st_ino}|{st.st_size}|{int(st.st_mtime)}|{int(st.s
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime_identity || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
     local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
-    py="$(_bootstrap_python)" || return 1
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        py="$(_source_python)" || return 1
+    else
+        py="$(_bootstrap_python)" || return 1
+    fi
     [[ -n "$py" ]] || return 1
     if ! declare -F _runtime_construction_begin >/dev/null; then
         helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime_identity
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime_identity || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
@@ -1626,6 +1752,7 @@ if [[ "$ACTION" == "stamp" ]]; then
         done
     fi
     trap _unlock_stamp EXIT INT TERM
+    _assert_source_runtime_identity || exit 1
     # Review finding: the stamp lock above serializes writers against each
     # other, but the generated binstub reads payload-dir WITHOUT taking it.
     # A direct `>` redirection truncates the file before printf writes it, so
@@ -1635,8 +1762,20 @@ if [[ "$ACTION" == "stamp" ]]; then
     # temp file, then rename -- a reader always sees either the old or the
     # new content, never a truncated one.
     _payload_dir_tmp="$INSTALL_DIR/.payload-dir.tmp-$$"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$_payload_dir_tmp"
+    STAMP_PAYLOAD="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        STAMP_PAYLOAD="$(_source_snapshot)" || exit 1
+    fi
+    _assert_source_runtime_identity || exit 1
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        _assert_source_runtime_identity "$STAMP_PAYLOAD" || exit 1
+    fi
+    printf '%s\n' "$STAMP_PAYLOAD" > "$_payload_dir_tmp"
     mv -f "$_payload_dir_tmp" "$INSTALL_DIR/payload-dir"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/.stamped-version.tmp-$$"
+        mv -f "$INSTALL_DIR/.stamped-version.tmp-$$" "$INSTALL_DIR/stamped-version"
+    fi
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     _unlock_stamp
@@ -1739,6 +1878,10 @@ for _lib_entry in \
     _lib_pkg_name="${_lib_entry#*:}"
     _lib_path="$PLUGIN_DIR/libs/$_lib_dir_name"
     if [[ ! -f "$_lib_path/pyproject.toml" ]]; then
+        if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+            _fail "Source-qualified payload is missing its materialized library: $_lib_dir_name"
+            exit 1
+        fi
         _lib_path="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/$_lib_dir_name"
     fi
     if [[ -f "$_lib_path/pyproject.toml" ]]; then
@@ -1810,13 +1953,14 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
         exit 1
     fi
     _versioned_mark_complete || exit 1
+    _assert_source_runtime_identity || exit 1
     if [[ "$CELL_MODE" == 1 ]]; then
         bash "$SLOT_RUNNER" slot-complete \
             --context "$CONTEXT" \
             --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
             --expected-plugin-id agent-machines \
             --expected-payload-root "$ORIGIN_PAYLOAD_ROOT" \
-            --expected-payload-version "$SRC_VERSION" \
+            --expected-payload-version "$PACKAGE_VERSION" \
             --snapshot-id "$SRC_VERSION" \
             --runtime-version "$SRC_VERSION" \
             --durable-home "$DURABLE_HOME" >/dev/null
@@ -1827,7 +1971,7 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
             --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID"
             --expected-plugin-id agent-machines
             --expected-payload-root "$ORIGIN_PAYLOAD_ROOT"
-            --expected-payload-version "$SRC_VERSION"
+            --expected-payload-version "$PACKAGE_VERSION"
             --snapshot-id "$SRC_VERSION"
             --runtime-version "$SRC_VERSION"
             --expected-namespace-generation "$CELL_NAMESPACE_GENERATION"
@@ -1866,6 +2010,7 @@ fi
 
 # -- 4. Binstub --------------------------------------------------------
 if [[ "$CELL_MODE" == 0 ]]; then
+    _assert_source_runtime_identity || exit 1
     deploy_binstub
 fi
 
@@ -1890,6 +2035,12 @@ else
         COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
     fi
     TMP="$INSTALL_DIR/deploy-manifest.json.tmp"
+    SOURCE_FIELDS=""
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY#\{}"
+        SOURCE_FIELDS=", ${SOURCE_FIELDS%\}}"
+    fi
+    _assert_source_runtime_identity || exit 1
     cat > "$TMP" << EOF
 {
   "schema_version": 3,
@@ -1907,7 +2058,7 @@ else
     "dirty": $DIRTY
   },
   "venv": "$VENV_DIR",
-  "runtime": "python"
+  "runtime": "python"$SOURCE_FIELDS
 }
 EOF
     mv -f "$TMP" "$INSTALL_DIR/deploy-manifest.json"

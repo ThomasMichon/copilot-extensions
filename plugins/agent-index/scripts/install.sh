@@ -1689,7 +1689,7 @@ _install_engine() {
     _runtime_construction_complete "$payload_hash" || return 1
     fi
     local resolver_tmp name
-    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime.py; do
+    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime.py; do
         resolver_tmp="$(mktemp "$ENGINE_HOME/$name.tmp.XXXXXX")" || return 1
         if ! cp "$SCRIPT_DIR/$name" "$resolver_tmp" || ! mv -f "$resolver_tmp" "$ENGINE_HOME/$name"; then
             rm -f -- "$resolver_tmp"

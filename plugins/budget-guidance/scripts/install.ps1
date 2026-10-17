@@ -12,6 +12,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 if (-not $PSBoundParameters.ContainsKey('Action')) {
     $PSBoundParameters['Action'] = $Action
@@ -401,7 +402,12 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
     }
 }
 
+$PackageVersion = $SrcVersion
+$SourceRuntimeIdentity = $null
+$script:InstallLockHandle = $null
+
 function Invoke-VersionedActivate {
+    Test-SourceRuntimeUnchanged
     <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
        junction onto it (first migration moves a legacy real `.venv` aside), then
        gc old slots keeping current + the previous-good. Returns $false on failure.
@@ -420,6 +426,7 @@ function Invoke-VersionedActivate {
     }
     if (-not (Invoke-VersionedMarkComplete)) { return $false }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    Test-SourceRuntimeUnchanged
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
     if ($LASTEXITCODE -ne 0) {
@@ -474,13 +481,14 @@ function Get-BootstrapPython {
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+        $launcher = (Get-Command py -ErrorAction Stop).Source
+        $exe = (Invoke-Hidden -FilePath $launcher -ArgList @('-3', '-c', 'import sys; print(sys.executable)')).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
         if ($c -and $c.Source -notmatch 'WindowsApps') {
-            $exe = (& $c.Source -I -c "import sys; print(sys.executable)" 2>$null | Out-String).Trim()
+            $exe = (Invoke-Hidden -FilePath $c.Source -ArgList @('-I', '-c', 'import sys; print(sys.executable)')).Trim()
             if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
         }
     }
@@ -513,6 +521,54 @@ function Get-BootstrapPython {
     return $null
 }
 
+function Get-SourceRuntimeIdentity {
+    param([string]$Payload = $PluginDir, [string]$ExpectedVersion = '')
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Source runtime identity validation requires a bootstrap Python interpreter' }
+    $arguments = @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_source.py'),
+        '--payload', $Payload, '--package-version', $PackageVersion,
+        '--plugin', 'budget-guidance', '--format', 'json')
+    if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
+    $nativeError = ''
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "Source runtime identity validation failed (exit ${code}): $detail$nativeError" }
+    return $detail.Trim()
+}
+
+function Initialize-SourceRuntime {
+    try {
+        [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
+    } catch [IO.FileNotFoundException] { return
+    } catch [IO.DirectoryNotFoundException] { return }
+    $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
+    $fields = $SourceRuntimeIdentity | ConvertFrom-Json
+    if (-not $fields.PSObject.Properties['runtime_version']) {
+        throw 'Source runtime identity disappeared during runtime selection'
+    }
+    $script:SrcVersion = $fields.runtime_version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else { Join-Path $VenvDir 'bin/python' }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
+}
+
+function Test-SourceRuntimeUnchanged {
+    if (-not $SourceRuntimeIdentity) {
+        try {
+            [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
+        } catch [IO.FileNotFoundException] { return
+        } catch [IO.DirectoryNotFoundException] { return }
+    }
+    $identity = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
+    $expected = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
+    if ($identity -ne $expected) {
+        throw 'Source runtime identity changed after runtime selection; refusing publication'
+    }
+}
+
 function Get-PayloadHash {
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
@@ -536,6 +592,7 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
+    Test-SourceRuntimeUnchanged
     <# Toss an INCOMPLETE prior slot before building so we never `uv venv
        --allow-existing` over a corpse (#935); the current/active slot is never
        tossed (link-name derived from $LinkDir so the guard works per plugin).
@@ -552,6 +609,7 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+    Test-SourceRuntimeUnchanged
 }
 
 function Invoke-VersionedMarkComplete {
@@ -560,7 +618,9 @@ function Invoke-VersionedMarkComplete {
        killed install never reaches here, leaving its slot markerless and thus
        tossable + retryable (#935). No-op in legacy mode. #>
     if (-not $VersionedRuntime) { return $true }
-    Complete-RuntimeConstruction -PayloadHash (Get-PayloadHash)
+    $actualHash = Get-PayloadHash
+    Test-SourceRuntimeUnchanged
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -701,6 +761,7 @@ exit /b %ERRORLEVEL%
 }
 
 function Invoke-Stamp {
+    Test-SourceRuntimeUnchanged
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE
     # into a per-version snapshot under ~/.budget-guidance/snapshots/<ver>/, record
     # markers, and deploy the self-provisioning binstub -- deferring the heavy
@@ -714,15 +775,31 @@ function Invoke-Stamp {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    $reuseSnapshot = $false
+    if ($SourceRuntimeIdentity) {
+        try {
+            [IO.File]::GetAttributes($snapDir) | Out-Null
+            $reuseSnapshot = $true
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] { }
+        if ($reuseSnapshot -and
+            (Get-SourceRuntimeIdentity -Payload $snapDir -ExpectedVersion $SrcVersion) -ne $SourceRuntimeIdentity) {
+            throw 'Existing source snapshot identity differs from the selected source; refusing replacement'
+        }
+    }
+    if (-not $reuseSnapshot) {
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
     # Copy everything needed to `uv pip install .` from the slot (src, libs,
     # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    $exclude = if ($SourceRuntimeIdentity) { @() } else {
+        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    }
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
+    if (-not $SourceRuntimeIdentity) {
     $procutil = Get-BudgetProcutilSource
     $snapshotLib = Join-Path $snapTmp 'libs/agent-procutil'
     if (-not (Test-Path $snapshotLib)) {
@@ -739,8 +816,14 @@ function Invoke-Stamp {
             'agent-procutil = { path = "libs/agent-procutil" }')
     })
     [IO.File]::WriteAllText($projectPath, $project, $utf8NoBom)
+    } elseif ((Get-SourceRuntimeIdentity -Payload $snapTmp -ExpectedVersion $SrcVersion) -ne $SourceRuntimeIdentity) {
+        throw 'Stamped source snapshot identity changed; redirects were not published'
+    }
+    Test-SourceRuntimeUnchanged
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    }
+    Test-SourceRuntimeUnchanged
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
@@ -748,6 +831,70 @@ function Invoke-Stamp {
     Write-Ok 'Stamped: budget-guidance binstub on PATH; runtime provisions on first use.'
 }
 
+function Get-InstallLockTimeoutSec {
+    $value = 0
+    $raw = [string]$env:COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC
+    if ($raw -and [int]::TryParse($raw, [ref]$value) -and $value -gt 0) { return $value }
+    return 300
+}
+
+function Enter-InstallLock {
+    param([int]$TimeoutSec = (Get-InstallLockTimeoutSec))
+    try {
+        if (-not (Test-Path -LiteralPath $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
+    } catch {
+        Write-Fail "Install-lock error: $($_.Exception.Message)"
+        return $false
+    }
+    $lockPath = Join-Path $InstallDir '.install.lock'
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ($true) {
+        try {
+            $fs = [System.IO.File]::Open(
+                $lockPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None
+            )
+            try {
+                $stamp = [System.Text.Encoding]::UTF8.GetBytes("pid=$PID at=$((Get-Date).ToUniversalTime().ToString('o'))")
+                $fs.SetLength(0)
+                $fs.Write($stamp, 0, $stamp.Length)
+                $fs.Flush()
+            } catch { }
+            $script:InstallLockHandle = $fs
+            return $true
+        } catch [System.IO.IOException] {
+            $win32 = $_.Exception.HResult -band 0xFFFF
+            if ($win32 -eq 32 -or $win32 -eq 33 -or $env:OS -ne 'Windows_NT') {
+                if ((Get-Date) -ge $deadline) { return $false }
+                Start-Sleep -Milliseconds 750
+            } else {
+                Write-Fail "Install-lock IO error: $($_.Exception.Message)"
+                return $false
+            }
+        } catch {
+            Write-Fail "Install-lock error: $($_.Exception.Message)"
+            return $false
+        }
+    }
+}
+
+function Exit-InstallLock {
+    if ($script:InstallLockHandle) {
+        try { $script:InstallLockHandle.Close(); $script:InstallLockHandle.Dispose() } catch { }
+        $script:InstallLockHandle = $null
+    }
+}
+
+if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
+$needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
+if ($needsInstallLock -and -not (Enter-InstallLock)) {
+    Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- refusing to proceed unlocked"
+    exit 1
+}
+try {
+if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 if ($Action -eq 'status') {
@@ -763,8 +910,10 @@ if ($Action -eq 'status') {
 if ($Action -eq 'uninstall') {
     Remove-Item (Join-Path $LocalBin 'budget-guidance.ps1') -Force -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $LocalBin 'budget-guidance.cmd') -Force -ErrorAction SilentlyContinue
-    Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Ok 'budget-guidance runtime removed'
+    Get-ChildItem -LiteralPath $InstallDir -Force | Where-Object {
+        $_.Name -notin @('.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')
+    } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop }
+    Write-Ok 'budget-guidance runtime removed (transaction/staging coordination retained)'
     exit 0
 }
 
@@ -885,8 +1034,8 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
-$procutil = Get-BudgetProcutilSource
-$vendoredDependencies = @($procutil)
+$vendoredDependencies = @()
+if (-not $SourceRuntimeIdentity) { $vendoredDependencies = @((Get-BudgetProcutilSource)) }
 $pkgInstalled = Install-BudgetGuidancePackage `
     -Python $VenvPython `
     -Source $PluginDir `
@@ -936,8 +1085,14 @@ $manifest = [ordered]@{
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
 }
+Test-SourceRuntimeUnchanged
+if ($SourceRuntimeIdentity) {
+    foreach ($property in ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties) {
+        $manifest[$property.Name] = $property.Value
+    }
+}
 $tmp = "$ManifestPath.tmp"
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+$manifest | ConvertTo-Json -Depth 8 | Set-Content -Path $tmp -Encoding UTF8
 Move-Item -Force -Path $tmp -Destination $ManifestPath
 Write-Ok "Deploy manifest written (source: $kind)"
 
@@ -977,3 +1132,12 @@ Write-Host '=== budget-guidance install complete ===' -ForegroundColor Cyan
 }
 Write-Host '  Try: budget-guidance --version' -ForegroundColor DarkGray
 exit 0
+} finally {
+    try {
+        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+            Stop-RuntimeConstruction
+        }
+    } finally {
+        if ($needsInstallLock) { Exit-InstallLock }
+    }
+}

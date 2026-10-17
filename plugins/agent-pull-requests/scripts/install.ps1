@@ -19,6 +19,7 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -227,8 +228,13 @@ if ($true) {
     }
 }
 
+$PackageVersion = $SrcVersion
+$SourceRuntimeIdentity = $null
+$script:uvPath = $null
+
 function Invoke-VersionedActivate {
     param([string]$PayloadHash = '')
+    Test-SourceRuntimeUnchanged
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
@@ -246,6 +252,7 @@ function Invoke-VersionedActivate {
         return $false
     }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    Test-SourceRuntimeUnchanged
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
     if ($LASTEXITCODE -ne 0) {
@@ -289,7 +296,8 @@ function Get-BootstrapPython {
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+        $launcher = (Get-Command py -ErrorAction Stop).Source
+        $exe = (Invoke-Hidden -FilePath $launcher -ArgList @('-3', '-c', 'import sys; print(sys.executable)')).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
@@ -315,6 +323,65 @@ function Get-BootstrapPython {
         if ($found -and (Test-Path $found)) { return $found }
     }
     return $null
+}
+
+function Get-SourceRuntimeIdentity {
+    param([string]$Payload = $PluginDir, [string]$ExpectedVersion = '')
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Source runtime identity validation requires a bootstrap Python interpreter' }
+    $arguments = @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_source.py'),
+        '--payload', $Payload, '--package-version', $PackageVersion,
+        '--plugin', 'agent-pull-requests', '--format', 'json')
+    if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
+    $nativeError = ''
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "Source runtime identity validation failed (exit ${code}): $detail$nativeError" }
+    return $detail.Trim()
+}
+
+function Initialize-SourceRuntime {
+    try {
+        [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
+    } catch [IO.FileNotFoundException] { return
+    } catch [IO.DirectoryNotFoundException] { return }
+    $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
+    $fields = $SourceRuntimeIdentity | ConvertFrom-Json
+    if (-not $fields.PSObject.Properties['runtime_version']) {
+        throw 'Source runtime identity disappeared during runtime selection'
+    }
+    $script:SrcVersion = $fields.runtime_version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else { Join-Path $VenvDir 'bin/python' }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
+}
+
+function Test-SourceRuntimeUnchanged {
+    if (-not $SourceRuntimeIdentity) {
+        try {
+            [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
+        } catch [IO.FileNotFoundException] { return
+        } catch [IO.DirectoryNotFoundException] { return }
+    }
+    $identity = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
+    $expected = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
+    if ($identity -ne $expected) {
+        throw 'Source runtime identity changed after runtime selection; refusing publication'
+    }
+}
+
+function Get-SourceManifestFields {
+    Test-SourceRuntimeUnchanged
+    $fields = @{}
+    if ($SourceRuntimeIdentity) {
+        foreach ($property in ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties) {
+            $fields[$property.Name] = $property.Value
+        }
+    }
+    return $fields
 }
 
 function Get-PayloadHash {
@@ -390,6 +457,7 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
+    Test-SourceRuntimeUnchanged
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -402,6 +470,7 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+    Test-SourceRuntimeUnchanged
     return $true
 }
 
@@ -411,12 +480,14 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
+    Test-SourceRuntimeUnchanged
     Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 
 function Test-VersionedSlotComplete {
     param([string]$ExpectedHash = '')
+    Test-SourceRuntimeUnchanged
     if (-not $VersionedRuntime) { return $false }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -519,6 +590,7 @@ function Exit-InstallLock {
 }
 
 function Invoke-Stamp {
+    Test-SourceRuntimeUnchanged
     Write-Host ''
     Write-Host '=== agent-pull-requests stamp (defer runtime to first use) ===' -ForegroundColor Cyan
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
@@ -526,15 +598,37 @@ function Invoke-Stamp {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    $reuseSnapshot = $false
+    if ($SourceRuntimeIdentity) {
+        try {
+            [IO.File]::GetAttributes($snapDir) | Out-Null
+            $reuseSnapshot = $true
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] { }
+        if ($reuseSnapshot -and
+            (Get-SourceRuntimeIdentity -Payload $snapDir -ExpectedVersion $SrcVersion) -ne $SourceRuntimeIdentity) {
+            throw 'Existing source snapshot identity differs from the selected source; refusing replacement'
+        }
+    }
+    if (-not $reuseSnapshot) {
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    $exclude = if ($SourceRuntimeIdentity) { @() } else {
+        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    }
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
+    if ($SourceRuntimeIdentity -and
+        (Get-SourceRuntimeIdentity -Payload $snapTmp -ExpectedVersion $SrcVersion) -ne $SourceRuntimeIdentity) {
+        throw 'Stamped source snapshot identity changed; redirects were not published'
+    }
+    Test-SourceRuntimeUnchanged
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    }
+    Test-SourceRuntimeUnchanged
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
@@ -553,12 +647,14 @@ function Invoke-Stamp {
 }
 
 $needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
+if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
     Write-Fail "Timed out waiting for the install transaction lock: $(Join-Path $InstallDir '.install.lock')"
     exit 1
 }
 
 try {
+    if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
     if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
     if ($Action -eq 'status') {
@@ -668,6 +764,7 @@ try {
         -ResolverPs1Source (Join-Path $PSScriptRoot 'resolve-runtime.ps1') `
         -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh')
 
+    $sourceFields = Get-SourceManifestFields
     Write-DeployManifest `
         -Service 'agent-pull-requests' `
         -Plugin 'agent-pull-requests' `
@@ -676,7 +773,9 @@ try {
         -VenvPath $VenvDir `
         -GetSourceKind ${function:Get-SourceKind} `
         -GetGitInfo ${function:Get-GitInfo} `
-        -PayloadHash $payloadHash
+        -PayloadHash $payloadHash `
+        -VersionOverride $PackageVersion `
+        -AdditionalFields $sourceFields
 
     Write-Host ''
     $prevEAP = $ErrorActionPreference

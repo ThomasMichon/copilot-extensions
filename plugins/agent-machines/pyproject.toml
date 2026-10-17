@@ -81,3 +81,6 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 # Vendored byte-identical primitive (install-contract); its subprocess calls to
 # mklink are intentional and it must not diverge from the canonical source.
 "scripts/versioned_runtime.py" = ["S603", "S607"]
+
+[tool.pytest.ini_options]
+markers = ["guard: bounded source and structural contract checks"]

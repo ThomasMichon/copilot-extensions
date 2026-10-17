@@ -43,6 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy')) {
     $lifecycleArgs = @($Action)
@@ -471,7 +472,7 @@ function Write-CellDeployManifest {
         [switch]$PreserveSource
     )
     $selectedSourcePath = $SourcePluginDir
-    $selectedSourceVersion = $SourceVersion
+    $selectedSourceVersion = $RuntimeVersion
     $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else {
@@ -562,6 +563,12 @@ function Write-CellDeployManifest {
         }
     }
     $tmp = "$manifestPath.tmp.$PID"
+    Assert-SourceRuntimeIdentity
+    if ($SourceRuntimeIdentity) {
+        ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object {
+            $manifest[$_.Name] = $_.Value
+        }
+    }
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [IO.File]::WriteAllText(
         $tmp,
@@ -615,6 +622,7 @@ function Remove-OwnedCellSnapshot {
 
 function Ensure-CellSnapshot {
     param([Parameter(Mandatory)][string]$SnapshotRoot)
+    Assert-SourceRuntimeIdentity
     $ownerMarkerName = '.agent-machines-snapshot-publish-owner'
     $ownerMarker = Join-Path $SnapshotRoot $ownerMarkerName
     $provenance = Join-Path $SnapshotRoot 'snapshot-provenance.json'
@@ -644,6 +652,8 @@ function Ensure-CellSnapshot {
             if (Test-OwnedCellSnapshot -Root $SnapshotRoot) {
                 Remove-Item -LiteralPath $ownerMarker -Force -ErrorAction Stop
             }
+            Assert-SourceRuntimeIdentity -Payload $SnapshotRoot
+            Assert-SourceRuntimeIdentity
             return
         }
     }
@@ -696,6 +706,8 @@ function Ensure-CellSnapshot {
         if ($LASTEXITCODE -ne 0) {
             throw 'Concurrent cell snapshot publication is invalid'
         }
+        Assert-SourceRuntimeIdentity -Payload $SnapshotRoot
+        Assert-SourceRuntimeIdentity
         return
     }
     try {
@@ -746,6 +758,8 @@ function Ensure-CellSnapshot {
         throw 'Cell snapshot publication ownership marker changed'
     }
     Remove-Item -LiteralPath $ownerMarker -Force -ErrorAction Stop
+    Assert-SourceRuntimeIdentity -Payload $SnapshotRoot
+    Assert-SourceRuntimeIdentity
 }
 
 # -- Paths --------------------------------------------------------------
@@ -798,6 +812,70 @@ if ($SrcVersion) {
 }
 # === end install-contract:v3 versioned-venv ===
 
+function Get-SourceRuntimeIdentity {
+    param([string]$Payload = $PluginDir, [string]$ExpectedVersion = '')
+    $py = $null
+    foreach ($candidate in 'python3', 'python', 'py') {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($command -and $command.Source -notmatch 'WindowsApps') { $py = $command.Source; break }
+    }
+    if (-not $py) { throw 'Source runtime validation requires a bootstrap Python interpreter' }
+    $arguments = @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_source.py'),
+        '--payload', $Payload, '--package-version', $PackageVersion,
+        '--plugin', 'agent-machines', '--format', 'json')
+    if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
+    $nativeError = ''
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "Source runtime identity validation failed: $detail$nativeError" }
+    return $detail.Trim()
+}
+
+function Initialize-SourceRuntime {
+    $script:SourceRuntimeIdentity = $null
+    try {
+        [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
+    } catch [IO.FileNotFoundException] {
+        return
+    } catch [IO.DirectoryNotFoundException] {
+        return
+    }
+    $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
+    $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else { Join-Path $VenvDir 'bin/python' }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
+}
+
+function Assert-SourceRuntimeIdentity {
+    param([string]$Payload = $PluginDir)
+    $metadataPresent = $true
+    try {
+        [IO.File]::GetAttributes((Join-Path $Payload 'runtime-source.json')) | Out-Null
+    } catch [IO.FileNotFoundException] {
+        $metadataPresent = $false
+    } catch [IO.DirectoryNotFoundException] {
+        $metadataPresent = $false
+    }
+    if ($SourceRuntimeIdentity -or $metadataPresent) {
+        $identity = Get-SourceRuntimeIdentity -Payload $Payload -ExpectedVersion $SrcVersion
+        if ($identity -cne $SourceRuntimeIdentity) {
+            throw 'Source runtime identity changed after runtime selection; refusing publication'
+        }
+    }
+}
+
+$PackageVersion = $SrcVersion
+Initialize-SourceRuntime
+$selectedSourceIdentity = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
+if ($env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -and
+    $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -cne $selectedSourceIdentity) {
+    throw 'Source runtime identity changed across the installation transaction'
+}
+$env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY = $selectedSourceIdentity
 if (
     $Action -in @('cell-provision', 'slot-cutover') -and
     -not $env:AGENT_MACHINES_CELL_PROVISION_LOCK_HELD
@@ -874,6 +952,7 @@ if (
     }
     $priorLockMarker = $env:AGENT_MACHINES_CELL_PROVISION_LOCK_HELD
     try {
+        Assert-SourceRuntimeIdentity
         $env:AGENT_MACHINES_CELL_PROVISION_LOCK_HELD = '1'
         & $probeHost -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath @lockForward
         $lockedStatus = $LASTEXITCODE
@@ -940,11 +1019,12 @@ if ($Action -in @(
         '-ExpectedMarketplaceId', $ExpectedMarketplaceId,
         '-ExpectedPluginId', 'agent-machines',
         '-ExpectedPayloadRoot', $PluginDir,
-        '-ExpectedPayloadVersion', $SrcVersion,
+        '-ExpectedPayloadVersion', $PackageVersion,
         '-SnapshotId', $SrcVersion,
         '-RuntimeVersion', $SrcVersion
     )
     if ($DurableHome) { $slotArgs += @('-DurableHome', $DurableHome) }
+    Assert-SourceRuntimeIdentity
     & $probeHost @slotArgs
     exit $LASTEXITCODE
 }
@@ -989,7 +1069,7 @@ if ($Action -eq 'slot-cutover') {
         '-ExpectedMarketplaceId', $ExpectedMarketplaceId,
         '-ExpectedPluginId', 'agent-machines',
         '-ExpectedPayloadRoot', $PluginDir,
-        '-ExpectedPayloadVersion', $SrcVersion,
+        '-ExpectedPayloadVersion', $PackageVersion,
         '-SnapshotId', $SrcVersion,
         '-RuntimeVersion', $SrcVersion,
         '-ExpectedNamespaceGeneration', $ExpectedNamespaceGeneration,
@@ -1058,6 +1138,7 @@ if ($Action -eq 'slot-cutover') {
         Write-Fail "Existing cell deploy manifest is invalid; refusing runtime cutover: $_"
         exit 1
     }
+    Assert-SourceRuntimeIdentity
     $cutoverJson = @(& $probeHost @slotArgs)
     $cutoverStatus = $LASTEXITCODE
     if ($cutoverJson.Count -gt 0) {
@@ -1074,7 +1155,7 @@ if ($Action -eq 'slot-cutover') {
         Write-CellDeployManifest `
             -PluginRoot ([string]$validated.pluginRoot) `
             -SourcePluginDir $PluginDir `
-            -SourceVersion $SrcVersion `
+            -SourceVersion $PackageVersion `
             -RuntimeSlot (Join-Path ([string]$validated.versionsRoot) $SrcVersion) `
             -RuntimeVersion $SrcVersion `
             -ContextPath $Context `
@@ -1179,6 +1260,8 @@ if ($Action -eq 'cell-provision') {
             [IO.FileAttributes]::ReparsePoint) -and
         ([IO.File]::ReadAllText($currentMarker)).Trim() -ceq $SrcVersion
     ) {
+        Assert-SourceRuntimeIdentity
+        Assert-SourceRuntimeIdentity -Payload (Join-Path $snapshotsRoot $SrcVersion)
         $currentCutoverJson = @(
             & $probeHost -NoProfile -ExecutionPolicy Bypass -File $slotRunner `
                 slot-cutover `
@@ -1186,7 +1269,7 @@ if ($Action -eq 'cell-provision') {
                 -ExpectedMarketplaceId $ExpectedMarketplaceId `
                 -ExpectedPluginId agent-machines `
                 -ExpectedPayloadRoot $OriginPayloadRoot `
-                -ExpectedPayloadVersion $SrcVersion `
+                -ExpectedPayloadVersion $PackageVersion `
                 -SnapshotId $SrcVersion `
                 -RuntimeVersion $SrcVersion `
                 -ExpectedNamespaceGeneration $cellNamespaceGeneration `
@@ -1211,7 +1294,7 @@ if ($Action -eq 'cell-provision') {
         Write-CellDeployManifest `
             -PluginRoot $pluginRoot `
             -SourcePluginDir $OriginPayloadRoot `
-            -SourceVersion $SrcVersion `
+            -SourceVersion $PackageVersion `
             -RuntimeSlot (Join-Path $versionsRoot $SrcVersion) `
             -RuntimeVersion $SrcVersion `
             -ContextPath $Context `
@@ -1258,7 +1341,7 @@ if ($Action -eq 'cell-provision') {
         -ExpectedMarketplaceId $ExpectedMarketplaceId `
         -ExpectedPluginId agent-machines `
         -ExpectedPayloadRoot $OriginPayloadRoot `
-        -ExpectedPayloadVersion $SrcVersion `
+        -ExpectedPayloadVersion $PackageVersion `
         -SnapshotId $SrcVersion `
         -RuntimeVersion $SrcVersion `
         -DurableHome $DurableHome | Out-Null
@@ -1413,6 +1496,10 @@ function Get-PayloadHash(
     [long]$MaxPathBytes = 4096,
     [long]$MaxContentBytes = 4294967296
 ) {
+    if ($SourceRuntimeIdentity) {
+        Assert-SourceRuntimeIdentity
+        return ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_source.assembly_hash
+    }
     <# Match installation-context snapshot content hashing over the whole payload.
        All non-root entries, including root snapshot-provenance.json, count
        toward the limits; only its digest record is excluded. #>
@@ -1703,6 +1790,7 @@ public static class CePayloadDirectoryState {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntimeIdentity
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -1715,11 +1803,12 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
-
+    Assert-SourceRuntimeIdentity
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntimeIdentity
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -1904,6 +1993,7 @@ function Enter-StampLock {
 # so redesigning the on-disk format is real, valuable future work but out of
 # this short-PR-cycle round's scope -- logged in the effort's Round Ledger.
 function Invoke-StampBinstubOnly {
+    Assert-SourceRuntimeIdentity
     # Review finding (round 10): Deploy-SelfProvisioningBinstub generates a
     # launcher whose self-provisioning path hardcodes
     # `%USERPROFILE%\.agent-machines` (and `$HOME/.agent-machines` for its
@@ -1977,10 +2067,15 @@ function Invoke-StampBinstubOnly {
             $existingPayloadDir = (Get-Content -LiteralPath $payloadDirMarker -Raw -ErrorAction Stop).Trim()
             if ($existingPayloadDir -and (Test-Path -LiteralPath (Join-Path $existingPayloadDir 'scripts\init.ps1') -PathType Leaf)) {
                 $payloadDirAlreadyValid = $true
+                if ($SourceRuntimeIdentity) {
+                    $existingIdentity = Get-SourceRuntimeIdentity -Payload $existingPayloadDir -ExpectedVersion $SrcVersion
+                    $payloadDirAlreadyValid = $existingIdentity -ceq $SourceRuntimeIdentity
+                }
             }
-        } catch {}
+        } catch { $payloadDirAlreadyValid = $false }
     }
     if (-not $payloadDirAlreadyValid) {
+        Assert-SourceRuntimeIdentity -Payload $probePayload
         Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
     }
     Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
@@ -1988,6 +2083,7 @@ function Invoke-StampBinstubOnly {
 }
 
 function Invoke-Stamp {
+    Assert-SourceRuntimeIdentity
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE
     # into ~/.agent-machines/snapshots/<ver>/, record markers, and deploy the
     # self-provisioning binstub -- deferring the heavy venv build to first use.
@@ -2004,6 +2100,7 @@ function Invoke-Stamp {
     }
     $stampMutex = Enter-StampLock
     try {
+    Assert-SourceRuntimeIdentity
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
@@ -2033,14 +2130,25 @@ function Invoke-Stamp {
     # this exact version already looks valid -- the fast, safe, idempotent
     # path -- and only build a fresh one when it's genuinely missing/broken.
     $snapAlreadyValid = Test-Path (Join-Path (Join-Path $snapDir 'scripts') 'init.ps1')
+    if ($SourceRuntimeIdentity -and (Get-Item -LiteralPath $snapDir -Force -ErrorAction SilentlyContinue)) {
+        if ((Get-Item -LiteralPath $snapDir -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Source snapshot must be an ordinary directory'
+        }
+        Assert-SourceRuntimeIdentity -Payload $snapDir
+        $snapAlreadyValid = $true
+    }
     if (-not $snapAlreadyValid) {
         $snapTmp = "$snapDir.tmp-$PID"
-        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($SourceRuntimeIdentity) { $snapTmp += "-$([Guid]::NewGuid().ToString('N'))" }
+        elseif (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
         $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        if ($SourceRuntimeIdentity) { $exclude = @() }
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
         }
+        Assert-SourceRuntimeIdentity -Payload $snapTmp
+        Assert-SourceRuntimeIdentity
         # A concurrent re-stamp of the SAME version (two first-install hooks
         # racing, neither serialized against the other's Test-Path check
         # above) could have already built $snapDir by now. Rename the
@@ -2048,6 +2156,9 @@ function Invoke-Stamp {
         # far faster than the delete this replaces) rather than deleting the
         # live, currently-advertised snapshot outright, then move the fresh
         # copy into place and reap the aside-renamed old one.
+        if ($SourceRuntimeIdentity) {
+            [IO.Directory]::Move($snapTmp, $snapDir)
+        } else {
         if (Test-Path $snapDir) {
             $snapStale = "$snapDir.stale-$PID"
             Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale) -ErrorAction SilentlyContinue
@@ -2055,7 +2166,10 @@ function Invoke-Stamp {
         Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
         Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
             ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+        }
     }
+    Assert-SourceRuntimeIdentity -Payload $snapDir
+    Assert-SourceRuntimeIdentity
     # Same atomic-publish rationale as Invoke-StampBinstubOnly above: a
     # generated binstub reads payload-dir outside this stamp mutex.
     Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
@@ -2224,6 +2338,7 @@ foreach ($lib in @(
 )) {
     $libDir = Join-Path $PluginDir "libs\$($lib.Dir)"
     if (-not (Test-Path (Join-Path $libDir 'pyproject.toml'))) {
+        if ($SourceRuntimeIdentity) { throw "Source-qualified payload is missing its materialized library: $($lib.Dir)" }
         $libDir = Join-Path $PluginDir "..\..\libs\$($lib.Dir)"
     }
     if (Test-Path (Join-Path $libDir 'pyproject.toml')) {
@@ -2289,6 +2404,7 @@ if ($VersionedRuntime) {
         exit 1
     }
     if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
+    Assert-SourceRuntimeIdentity
     if ($CellMode) {
         & $probeHost -NoProfile -ExecutionPolicy Bypass -File $slotRunner `
             slot-complete `
@@ -2296,7 +2412,7 @@ if ($VersionedRuntime) {
             -ExpectedMarketplaceId $ExpectedMarketplaceId `
             -ExpectedPluginId agent-machines `
             -ExpectedPayloadRoot $OriginPayloadRoot `
-            -ExpectedPayloadVersion $SrcVersion `
+            -ExpectedPayloadVersion $PackageVersion `
             -SnapshotId $SrcVersion `
             -RuntimeVersion $SrcVersion `
             -DurableHome $DurableHome | Out-Null
@@ -2312,7 +2428,7 @@ if ($VersionedRuntime) {
             '-ExpectedMarketplaceId', $ExpectedMarketplaceId,
             '-ExpectedPluginId', 'agent-machines',
             '-ExpectedPayloadRoot', $OriginPayloadRoot,
-            '-ExpectedPayloadVersion', $SrcVersion,
+            '-ExpectedPayloadVersion', $PackageVersion,
             '-SnapshotId', $SrcVersion,
             '-RuntimeVersion', $SrcVersion,
             '-ExpectedNamespaceGeneration', $cellNamespaceGeneration,
@@ -2362,6 +2478,7 @@ if ($VersionedRuntime) {
 # -- 4. Deploy binstub -------------------------------------------------
 
 if (-not $CellMode) {
+    Assert-SourceRuntimeIdentity
     Deploy-SelfProvisioningBinstub
 }
 
@@ -2414,6 +2531,12 @@ if ($CellMode) {
         runtime        = 'python'
     }
     $tmp = "$manifestPath.tmp"
+    Assert-SourceRuntimeIdentity
+    if ($SourceRuntimeIdentity) {
+        ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object {
+            $manifest[$_.Name] = $_.Value
+        }
+    }
     $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
     Move-Item -Force -Path $tmp -Destination $manifestPath
     Write-Ok "Deploy manifest written (source: $kind)"

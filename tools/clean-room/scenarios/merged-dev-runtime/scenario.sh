@@ -19,13 +19,19 @@ CHECKOUT="$HOME/merged-source"
 RUNTIME="$HOME/.$PLUGIN"
 
 case "$PLUGIN" in
-    agent-bridge) ;;
+    agent-bridge|agent-codespaces|agent-containers|agent-mcp|agent-ssh|agent-machines|agent-pull-requests|budget-guidance) ;;
     *)
-        jam "repo-config" "This scenario currently proves agent-bridge only" \
-            "Use the declared source-install reference plugin."
+        jam "repo-config" "Selected plugin is not a declared source-install adopter" \
+            "Use one of this scenario's explicitly supported runtime plugins."
         cr_finalize
         ;;
 esac
+case "$PLUGIN" in
+    agent-containers|agent-machines|agent-mcp) INSTALLER="init.sh" ;;
+    *) INSTALLER="install.sh" ;;
+esac
+INSTALL_ACTION=provision
+if [ "$PLUGIN" = agent-bridge ] || [ "$PLUGIN" = agent-codespaces ]; then INSTALL_ACTION=install; fi
 
 phase 0 "fresh machine without installed runtime"
 envdump
@@ -84,7 +90,7 @@ if ! PAYLOAD="$(python3 -c \
     cr_finalize
 fi
 if ! capture "source-install" -- timeout 600 \
-    bash "$PAYLOAD/scripts/install.sh" install; then
+    bash "$PAYLOAD/scripts/$INSTALLER" "$INSTALL_ACTION"; then
     jam "runtime-install" "Non-editable source installer failed; see source-install.log" \
         "Fix source assembly in the owning installer; do not hand-install missing libraries."
     cr_finalize
@@ -125,9 +131,22 @@ then
     jam "path-binstub" "Runtime selection does not identify the selected source commit"
     cr_finalize
 fi
-if ! capture "installed-version" -- bash -lc 'agent-bridge --version'; then
+if ! capture "installed-version" -- bash -lc "$PLUGIN --help"; then
     jam "path-binstub" "Installed command is not usable on a fresh login-shell PATH"
     cr_finalize
+fi
+if [ "$PLUGIN" = agent-codespaces ]; then
+    _verify_codespaces_source_version() {
+        local reported command version remainder
+        reported="$(bash -lc 'agent-codespaces version')" || return 1
+        printf '%s\n' "$reported"
+        read -r command version remainder <<< "$reported"
+        [[ "$command" = agent-codespaces && "$version" = "$GENERATION" ]]
+    }
+    if ! capture "installed-source-version" -- _verify_codespaces_source_version; then
+        jam "path-binstub" "Codespaces command does not report the selected source generation"
+        cr_finalize
+    fi
 fi
 pass "Installed command resolves a completed source-qualified generation"
 
@@ -141,32 +160,66 @@ if ! mv "$CHECKOUT" "$HOME/merged-source-unavailable"; then
     jam "repo-config" "Cannot make the source fixture unavailable"
     cr_finalize
 fi
-if ! capture "independent-imports" -- "$RUNTIME/versions/$GENERATION/bin/python" -I - <<'PY'
+if ! capture "independent-imports" -- "$RUNTIME/versions/$GENERATION/bin/python" -I - "$PLUGIN" "$PAYLOAD" <<'PY'
 from __future__ import annotations
 
 from pathlib import Path
 import sys
-import agent_bridge
-import credential_relay
-import ssh_manager
-import zdd
+import importlib
+import importlib.metadata
 
 runtime = Path(sys.prefix).resolve()
-for module in (agent_bridge, credential_relay, ssh_manager, zdd):
+payload = Path(sys.argv[2])
+modules = {sys.argv[1].replace("-", "_")}
+for source in (payload / "libs").glob("*/src"):
+    for path in source.iterdir():
+        if path.is_dir() and (path / "__init__.py").is_file():
+            modules.add(path.name)
+        elif path.is_file() and path.suffix == ".py" and path.stem.isidentifier():
+            modules.add(path.stem)
+for name in sorted(modules):
+    module = importlib.import_module(name)
     location = Path(module.__file__).resolve()
-    assert runtime in location.parents, f"{module.__name__} depends on source outside its runtime"
+    assert runtime in location.parents, f"{name} depends on source outside its runtime"
+for distribution in importlib.metadata.distributions():
+    direct_url = distribution.read_text("direct_url.json")
+    if direct_url:
+        import json
+        assert not json.loads(direct_url).get("dir_info", {}).get("editable", False), (
+            f"{distribution.metadata['Name']} is editable"
+        )
+print(f"{len(modules)} installed module roots remain inside {runtime.name}")
 PY
 then
     jam "pythonpath" "Installed dependency closure still depends on the source checkout"
     cr_finalize
 fi
-if ! capture "independent-command" -- bash -lc 'agent-bridge --version'; then
+if ! capture "independent-command" -- bash -lc "$PLUGIN --help"; then
     jam "path-binstub" "Installed command failed after the source checkout became unavailable"
     cr_finalize
 fi
 pass "Non-editable installed code and vendor imports work without the source checkout"
 
-phase 5 "verify the source-qualified build is actually serving"
+phase 5 "verify immutable reuse and actual runtime use"
+if [ "$PLUGIN" != agent-bridge ]; then
+    COMPLETION="$RUNTIME/versions/$GENERATION/.install-complete.json"
+    BEFORE="$(sha256sum "$COMPLETION")"
+    if ! capture "source-reuse" -- timeout 600 bash "$PAYLOAD/scripts/$INSTALLER" provision; then
+        jam "runtime-install" "Identical source reuse failed; see source-reuse.log"
+        cr_finalize
+    fi
+    if [ "$(cat "$RUNTIME/current-version")" != "$GENERATION" ] ||
+        [ "$(sha256sum "$COMPLETION")" != "$BEFORE" ]; then
+        jam "runtime-install" "Identical source reuse changed the selected generation or completion bytes"
+        cr_finalize
+    fi
+    if ! capture "reused-command" -- bash -lc "$PLUGIN --help"; then
+        jam "path-binstub" "Installed command failed after identical source reuse"
+        cr_finalize
+    fi
+    pass "Actual installed commands and immutable completion survive identical reuse"
+    cr_finalize
+fi
 if ! capture "service-first-use" -- bash -lc 'agent-bridge agents'; then
     jam "bridge-service" "Installed first-use command could not reach its service"
     cr_finalize

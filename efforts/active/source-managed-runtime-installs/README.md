@@ -84,13 +84,13 @@ with private host identifiers redacted. Implementation choices below marked
 - [x] Confirm issue/slice ownership and preserve the existing dependency campaigns.
 
 ### Phase 1 - Reproduce direct-dev installation in the clean room
-- [ ] Extend the existing Tier-P rig with a credential-free, source-install scenario using a recorded clean merged dev commit.
-- [ ] Reproduce #3905 through an actual non-editable installer path and record the first classified failure.
-- [ ] Establish observable source identity, runtime generation, installed command and source-checkout isolation assertions.
+- [x] Extend the existing Tier-P rig with a credential-free, source-install scenario using a recorded clean merged dev commit.
+- [x] Reproduce #3905 through an actual non-editable installer path and record the first classified failure.
+- [x] Establish observable source identity, runtime generation, installed command and source-checkout isolation assertions.
 
 ### Phase 2 - Assemble immutable merged-source generations
-- [ ] Reuse canonical source materialization for the complete declared vendor closure without modifying the input checkout.
-- [ ] Add source-qualified non-editable generation identity while preserving package versions, profiles, dependency policy and completion evidence.
+- [x] Reuse canonical source materialization for the complete declared vendor closure without modifying the input checkout.
+- [x] Add source-qualified non-editable generation identity while preserving package versions, profiles, dependency policy and completion evidence.
 - [ ] Make installer, runtime resolver and installed command redirects agree on the exact selected generation on Linux and Windows.
 - [ ] Prove identical reuse, distinct same-package-version commits, source removal, interrupted build and failed-candidate preservation.
 
@@ -125,7 +125,7 @@ with private host identifiers redacted. Implementation choices below marked
 - [ ] **Policy:** real hook and first-use paths do not publish runtime copies or redirects in managed mode; their non-deployment behavior still runs.
 - [ ] **Skew:** newer-plugin/older-service and older-plugin/newer-service interactions work within declared capabilities or return precise readiness outcomes.
 - [ ] **Source modes:** main tracking, stable/exact pins and dev tracking converge through one source-assembly path without moving midway through a run.
-- [ ] **Clean-room:** a structured Tier-P report proves fresh Linux installation and real service use; report the exact source and serving identities.
+- [x] **Clean-room:** a structured Tier-P report proves fresh Linux installation and real service use; report the exact source and serving identities.
 - [ ] **Windows:** native installer/resolver fixtures pass; any installed pilot has explicit change consent and attributable running-state evidence.
 - [ ] **Agent-recommended - robustness:** test concurrent preparation/publication, unavailable-source retry and state-aware rollback through existing lifecycle primitives.
 - [ ] **Agent-recommended - rollout evidence:** retain a concise qualification/soak record before marking a development snapshot stable; do not infer stability from a clean install alone.
@@ -163,3 +163,40 @@ onto one branch.
 - Inspection found shared-library imports resolving into the checkout and generated metadata/cache files written there. Moving the source checkout made the installed import fail with `ModuleNotFoundError: credential_relay`.
 - This narrows the current manifestation of #3905: editable canonical references can hide the dependency until the checkout is unavailable. The fix must materialize a non-editable closure outside the source, not merely make the initial installer exit successfully.
 - Began canonical source preparation and a source-qualified runtime identity that preserves the original package version; native Windows unit/initializer coverage currently passes, while full source-install acceptance remains open.
+
+### 2026-10-17 - First implementation wave merged
+- PR #7080 merged as `9fe128630122a5fbddfcbba3b2a7e7b4a1186ac3` after the owner-authored Copilot verdict gate and successful CI. The worktree remains active for the complete effort.
+- Landed canonical merged-source preparation and integrity-qualified payload reuse, synchronized source helpers, and Agent Bridge installation/operational identity on both native installer paths.
+- Regression coverage includes source changes during lock/build/completion boundaries, preservation of the previous selection, stopped-predecessor rollback, Windows snapshot-to-first-use integrity, normalized development versions, generated-cache stability and explicit refusal diagnostics.
+- The first post-merge scenario execution reported six passing phases, including source removal and serving identity. It is not the formal qualification witness: its mounted scenario source briefly changed during concurrent post-merge branch reconciliation. The branch was restored without dropping local work.
+- Next slice: repeat the exact merged commit in a fresh named container with stationary scenario inputs, record its structured evidence, then continue deployment-policy separation and independent runtime-source selection. No native host rollout or marketplace change has occurred.
+
+### 2026-10-17 - Stationary-input source qualification
+- A new credential-free container ran `merged-dev-runtime` against exact merged commit `9fe128630122a5fbddfcbba3b2a7e7b4a1186ac3`: six phases passed, zero failed, with no classified jams.
+- Before/after hashes of every mounted scenario and shared-library input were identical. This fresh run, not the earlier overlapping reconciliation attempt, is the qualification witness.
+- The selected and actually serving generation both identify `0.4.1-dev3+source.9fe128630122a5fbddfcbba3b2a7e7b4a1186ac3.70d68874330d355a`. Package version remains `0.4.1-dev3`.
+- The real non-editable installer left its source checkout unchanged. Installed commands and vendor imports remained usable after that checkout was made unavailable; authenticated service health, routed PID/start-time identity and the running marker agreed on the selected generation.
+- Agent Bridge is the first complete installer adopter. Other consumers currently carry the canonical source helper only; their native installer/resolver adoption, managed publication policy, skew qualification and Manager-owned source selection remain open. The native Windows pilot has not begun.
+
+### 2026-10-17 - Remaining native adopter partitions
+- Partitioned the next implementation slice into disjoint native CLI installer groups, keeping shared source identity and integration coordinator-owned. The bounded workers may edit only their assigned plugin trees; git publication and combined verification remain single-owner.
+- Containers retains its durable `base` and `provider-exec` profiles as an independent generation dimension rather than replacing them with the source identity. Native stamp fixtures cover complete source snapshots and deferred-source independence; source/profile tests cover exact reuse, distinct commits and refusal after lease/build/activation-boundary changes.
+- Cell snapshot provenance is installation evidence, not assembled runtime content. The canonical hash excludes only its exact root sidecar after ordinary-file validation; preparation refuses preexisting source-owned deployment metadata. Temporary publication ownership markers remain covered by source validation rather than becoming a broad hash exclusion.
+- This is ongoing Phase 2 work, not a deployment-policy or Manager integration claim. Other adopter and full assembled-use gates remain open.
+
+### 2026-10-17 - CLI adopter wave and complete resolver bundles
+- Implemented native source identity, receipt-preserving snapshots and immutable construction/publication boundaries for Codespaces, Containers, MCP, SSH, Machines, Pull Requests and Budget Guidance. Existing package-only and claimed editable-development behavior remains distinct.
+- Exact-selector recovery now refuses unordered source hashes and implicit fallback to an older plain slot. Every independently deployed resolver bundle, standalone wheel/sdist and retained Fleet helper loader includes the new source companion; regression cases cover actual copied layouts and RECORD-bound companion replacement.
+- Focused native Windows and Linux validation covers source/profile identities, interrupted/refused candidates, identical reuse, snapshot independence, real writer contention, standalone artifact reconstruction and installed resolver execution. The clean-room scenario now selects these CLI adopters; their fresh merged-source qualification remains the next gate, not a claim made by this implementation.
+- Fixed tightly coupled fixture assumptions instead of changing production timeout or dependency-policy semantics: extracted functions load their real source helper, Windows editable retention may use its source-volume sibling, and the POSIX lock fixture avoids inherited Windows command-search paths.
+- Worktrees, Dispatch, Index, Logger and Vault still need native source-install adoption. Deployment-only hook separation, version-skew compatibility, independent Manager source selection and the specifically consented Windows pilot remain open.
+
+### 2026-10-17 - Native source-bootstrap review corrections
+- Reused the existing windowless native capture implementation as a canonical vendored companion instead of adding independent capture variants to each source reader. Source validation preserves JSON stdout, concrete stderr and exit status; launcher discovery is available before source initialization.
+- Real native tests cover launcher-only source selection and full Containers deferred stamping, including snapshot receipts and generated commands. Separate two-cycle GUI-parent observations cover source validation under both Windows PowerShell 5.1 and PowerShell 7 without attributable visible consoles or foreground changes.
+- A real launcher probe exposed PowerShell 5.1's unnecessary quoting of `-3`; the canonical encoder now quotes only arguments that need it while retaining empty, embedded-quote and trailing-backslash behavior. Large simultaneous stdout/stderr and failed-exit cases retain their exact evidence.
+- Corrected the fresh Codespaces clean-room action to `install`, which publishes its command; the later immutable-reuse invocation remains `provision`. The new adopter qualification remains gated on the exact merged source rather than these fixtures.
+- Pinned the complete Containers source receipt across the outer install lock and the shell-to-profile/stamp handoff, not only its generation string. Actual native lock-entry mutations retain a valid source-tree-only receipt and unchanged generation, yet fail before snapshots or redirects; profile and stamp handoffs also refuse before any runtime writes.
+- Replaced MCP/Codespaces source-stamp directory moves with one canonical snapshot publisher on both native paths. Its per-generation snapshot lease serializes the absent-target check, complete candidate copy, winner verification and rename; concurrent callers cannot nest a losing stage inside an already-published snapshot.
+- Real competing-process cases retain the actual kernel lease and compare the winning receipt, full file inventory, immutable reuse evidence and redirects. Shared API/CLI cases cover conflicting winners, changed source after lease acquisition, incomplete copies and preservation of the initial full identity. Native Windows and Linux suites pass; fresh merged-source qualification remains open.
+- Native stamp-marker failures propagate even when Bash callers disable `errexit` through a conditional; a failed payload redirect cannot advance the stamped generation. Codespaces' real version command also retains the selected source identity when build metadata exists, while ordinary package-version/commit output is unchanged; the clean-room witness now checks that command field explicitly.

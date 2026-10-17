@@ -45,6 +45,7 @@ def _copy_helper(tmp_path: Path, shell: str = "bash", *, missing_core: bool = Fa
         "versioned_runtime.py",
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
     ):
         if missing_core and name == "versioned_runtime.py":
             continue

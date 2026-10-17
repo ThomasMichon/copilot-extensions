@@ -33,7 +33,9 @@ def _extract_loop() -> str:
     return start + text.split(start, 1)[1].split(end, 1)[0] + "\ndone"
 
 
-def _run(bash: str, plugin_dir: Path, have_uv: bool) -> subprocess.CompletedProcess[str]:
+def _run(
+    bash: str, plugin_dir: Path, have_uv: bool, *, source_qualified: bool = False,
+) -> subprocess.CompletedProcess[str]:
     loop = _extract_loop()
     scripts = plugin_dir / "scripts"
     scripts.mkdir(parents=True)
@@ -68,6 +70,7 @@ venv_python_stub() {{
     printf 'POLICY_INSTALL:%s\\n' "$_installed_path"
 }}
 PLUGIN_DIR={shlex.quote(str(plugin_dir))}
+SOURCE_RUNTIME_IDENTITY={'source-fixture' if source_qualified else "''"}
 HAVE_UV={1 if have_uv else 0}
 {loop}
 """
@@ -152,3 +155,17 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
     assert [Path(p).name for p in installs] == LIB_ORDER
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))
+
+
+@pytest.mark.parametrize("have_uv", [True, False])
+def test_source_preinstall_refuses_canonical_fallback(have_uv: bool, tmp_path: Path):
+    bash = shutil.which("bash")
+    if os.name == "nt" or not bash:
+        pytest.skip("native POSIX bash is unavailable")
+    plugin_dir = tmp_path / "plugins" / "agent-machines"
+    plugin_dir.mkdir(parents=True)
+    _make_libs(tmp_path / "libs")
+    proc = _run(bash, plugin_dir, have_uv, source_qualified=True)
+    assert proc.returncode != 0
+    assert "Source-qualified payload is missing its materialized library" in proc.stderr
+    assert "POLICY_INSTALL:" not in proc.stdout

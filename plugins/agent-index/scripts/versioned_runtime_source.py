@@ -9,8 +9,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import sys
+import tempfile
 from types import ModuleType
 
 SOURCE_FILE = "runtime-source.json"
@@ -51,6 +53,18 @@ def runtime_version(package_version: str, commit: str, assembly_hash: str) -> st
     return f"{package_version}{separator}source.{commit}.{assembly_hash[:16]}"
 
 
+def requires_exact_selection(versions: list[str]) -> bool:
+    """Refuse unordered source recovery, including implicit plain-slot downgrade."""
+    if not any(re.search(r"[+.]source\.", version) for version in versions):
+        return False
+    print(
+        "Source-qualified runtime recovery requires an exact current-version or "
+        "last-known-good selector; refusing unordered source fallback",
+        file=sys.stderr,
+    )
+    return True
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -86,6 +100,7 @@ def assembly_hash(payload: Path) -> str:
         ):
             raise SourceIdentityError("Materialized runtime inputs must not be linked")
 
+    require_plain(payload)
     for directory, directories, names in os.walk(payload, onerror=scan_error, followlinks=False):
         project_root = (Path(directory) / "pyproject.toml").is_file()
         directories[:] = [
@@ -100,6 +115,10 @@ def assembly_hash(payload: Path) -> str:
             if path == payload / SOURCE_FILE or name.endswith((".pyc", ".pyo")):
                 continue
             require_plain(path)
+            # Installation-cell provenance is published after source assembly;
+            # its separate receipt validator owns this non-runtime root sidecar.
+            if path == payload / "snapshot-provenance.json":
+                continue
             files.append(path)
     if not files:
         raise SourceIdentityError("Materialized runtime payload is empty")
@@ -168,12 +187,50 @@ def manifest_fields(identity: SourceIdentity | None) -> dict[str, object]:
     }
 
 
+def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity) -> Path:
+    """Serialize complete source publication without directory-nesting moves."""
+    payload = Path(os.path.abspath(payload))
+    root = Path(os.path.abspath(root.expanduser()))
+    if root.resolve().is_relative_to(payload.resolve()):
+        raise SourceIdentityError("Source snapshot root must be outside the source payload")
+
+    def verify(path: Path) -> None:
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or (
+            getattr(info, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        ):
+            raise SourceIdentityError("Source snapshot inputs must be ordinary directories")
+        if read_source_identity(path, identity.package_version, plugin=identity.plugin) != identity:
+            raise SourceIdentityError("Source snapshot identity changed after runtime selection")
+
+    verify(payload)
+    snapshots = root / "snapshots"
+    snapshot = snapshots / identity.runtime_version
+    snapshots.mkdir(parents=True, exist_ok=True)
+    with _runtime().construction_lease(snapshots, identity.runtime_version):
+        verify(payload)
+        if snapshot.exists() or snapshot.is_symlink():
+            verify(snapshot)
+            verify(payload)
+            return snapshot
+        with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
+            candidate = Path(temporary) / "payload"
+            shutil.copytree(payload, candidate, symlinks=True)
+            verify(candidate)
+            verify(payload)
+            candidate.rename(snapshot)
+        return snapshot
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--payload", type=Path, required=True)
     parser.add_argument("--package-version", required=True)
     parser.add_argument("--plugin")
     parser.add_argument("--expected-runtime-version")
+    parser.add_argument("--expected-source-identity")
+    parser.add_argument("--snapshot-root", type=Path)
     parser.add_argument("--format", choices=("version", "json", "shell-fields"), default="version")
     args = parser.parse_args(argv)
     try:
@@ -183,6 +240,16 @@ def main(argv: list[str] | None = None) -> int:
         selected_version = identity.runtime_version if identity else args.package_version
         if args.expected_runtime_version is not None and args.expected_runtime_version != selected_version:
             raise SourceIdentityError("Source identity changed after runtime selection")
+        if (
+            args.expected_source_identity is not None
+            and json.dumps(manifest_fields(identity), sort_keys=True) != args.expected_source_identity
+        ):
+            raise SourceIdentityError("Source identity changed after runtime selection")
+        if args.snapshot_root is not None:
+            if identity is None or args.format != "version":
+                raise SourceIdentityError("Source snapshot publication requires a source receipt and path output")
+            print(publish_source_snapshot(args.payload, args.snapshot_root, identity))
+            return 0
         if args.format == "version":
             print(selected_version)
         else:

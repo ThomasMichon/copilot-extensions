@@ -267,6 +267,7 @@ _codespaces_runtime_healthy() {
 }
 
 _versioned_activate() {
+    _assert_source_runtime || return 1
     # CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
     # symlink onto it (first migration moves a legacy real `.venv` aside), then gc
     # old slots keeping current + previous-good. Returns non-zero on failure. No-op
@@ -285,6 +286,7 @@ _versioned_activate() {
     _versioned_mark_complete || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    _assert_source_runtime || return 1
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
@@ -423,6 +425,7 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
@@ -434,10 +437,12 @@ _versioned_slot_clean() {
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
@@ -496,6 +501,11 @@ _assert_uv() {
 # version.
 _install_package_into() {
     local py="$1" mode="${2:-}"
+    _assert_source_runtime || return 1
+    if [[ "$mode" == --editable && -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _fail "A source-qualified runtime cannot use editable dependencies"
+        return 1
+    fi
     if [[ ! -f "$SSH_MGR_DIR/pyproject.toml" ]]; then
         _fail "ssh-manager source not found at $SSH_MGR_DIR"
         return 1
@@ -600,6 +610,7 @@ _ensure_uv_index() {
 }
 
 deploy_venv() {
+    _assert_source_runtime || return 1
     if [[ -e "$VENV_DIR/.install-complete.json" ]] && ! _codespaces_runtime_healthy "$VENV_PYTHON"; then
         _fail "Completed runtime slot failed its module launch health gate (versions/$SRC_VERSION). Refusing an in-place rebuild; use distinct-generation repair or a new released version."
         return 1
@@ -625,6 +636,7 @@ deploy_venv() {
 }
 
 deploy_package() {
+    _assert_source_runtime || return 1
     [[ "${_RUNTIME_CONSTRUCTION_REUSE:-0}" == 1 ]] && return 0
     _install_package_into "$VENV_PYTHON" || return 1
     _stamp_build_info "$VENV_PYTHON"
@@ -645,7 +657,7 @@ deploy_package() {
 # (docs/patterns/mutable-dev-slot.md Runtime accessibility, option 1).
 _deploy_versioned_runtime_helper() {
     local temporary name
-    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime.py; do
+    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime.py; do
         temporary="$(mktemp "$INSTALL_DIR/$name.tmp.XXXXXX")" || return 1
         if ! cp "$SCRIPT_DIR/$name" "$temporary" \
             || ! mv -f "$temporary" "$INSTALL_DIR/$name"; then
@@ -752,6 +764,11 @@ do_dev() (
 # === end mutable-dev-slot ===
 
 deploy_binstub() {
+    mkdir -p "$INSTALL_DIR/bin"
+    local resolver
+    for resolver in resolve-runtime.sh resolve-runtime.ps1; do
+        cp -f "$SCRIPT_DIR/$resolver" "$INSTALL_DIR/bin/$resolver"
+    done
     mkdir -p "$LOCAL_BIN"
     local stub_path="$LOCAL_BIN/agent-codespaces"
     # Self-provisioning binstub (install-on-first-use). When the runtime venv is
@@ -805,6 +822,13 @@ _version_key() {
     '
 }
 _resolve_python() {
+    if [[ -f "$_root/bin/resolve-runtime.sh" ]]; then
+        AGENT_RT_ROOT="$_root"
+        AGENT_RT_PY=""
+        source "$_root/bin/resolve-runtime.sh"
+        [[ -n "$AGENT_RT_PY" ]] && printf '%s\n' "$AGENT_RT_PY"
+        return
+    fi
     for _marker in current-version last-known-good; do
         _ver=""
         [ -f "$_root/$_marker" ] && _ver="$(tr -d ' \t\r\n' < "$_root/$_marker")"
@@ -872,8 +896,16 @@ STUB
 }
 
 _write_codespaces_deploy_manifest() {
+    _assert_source_runtime || return 1
+    local fields="" py
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        py="$(_bootstrap_python)" || return 1
+        fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" \
+            --plugin agent-codespaces --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || return 1
+    fi
     write_deploy_manifest "agent-codespaces" "agent-codespaces" \
-        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
+        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
 }
 
 # -- Actions ---------------------------------------------------------------
@@ -1210,11 +1242,16 @@ do_update() {
 do_stamp() {
     _header "$SERVICE_NAME Stamp (defer runtime to first use)"
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    _assert_source_runtime || return 1
     # Record the REAL payload dir so the binstub can find this installer on first
     # use. Under the install-contract:v4 self-stage, $PLUGIN_DIR is an ephemeral
     # per-invocation staging copy that gets reaped -- COPILOT_PLUGIN_STAGED_FROM
     # holds the true (installed-plugins) payload path; prefer it.
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _stamp_source_snapshot || return 1
+    else
+        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    fi
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
@@ -1244,6 +1281,19 @@ do_provision() {
 
 # -- Dispatch --------------------------------------------------------------
 
+source "$SCRIPT_DIR/source-runtime.sh"
+PACKAGE_VERSION="$SRC_VERSION"
+SOURCE_RUNTIME_IDENTITY=""
+case "$ACTION" in
+    install|update|provision|stamp|dev)
+        _initialize_source_runtime || exit 1
+        if [[ "$ACTION" == dev && -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+            _fail "A source-qualified payload cannot select a mutable development slot"
+            exit 1
+        fi
+        _assert_source_runtime || exit 1
+        ;;
+esac
 case "$ACTION" in
     install)   do_install ;;
     stamp)     do_stamp ;;

@@ -52,7 +52,7 @@ def fake_uv(tmp_path: Path, body: str) -> Path:
 def construction_bundle(scripts: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
     for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
-                 "versioned_runtime_construction.py"):
+                 "versioned_runtime_construction.py", "versioned_runtime_source.py"):
         shutil.copy2(REPO / "libs/versioned-runtime" / name, scripts / name)
 
 
@@ -313,7 +313,10 @@ def test_engine_upgrade_resolves_unpublished_base_offline(tmp_path):
 
 @pytest.mark.parametrize("failure_stage", ["zdd", "agent-procutil", "server", "torch"])
 def test_native_engine_failed_upgrade_preserves_selection_and_retries(tmp_path, failure_stage):
-    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime.py"):
+    for name in (
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py", "versioned_runtime.py",
+    ):
         shutil.copyfile(REPO / "libs/versioned-runtime" / name, tmp_path / name)
     base = str(Path(sys._base_executable)).replace("'", "''")
     script = f"""

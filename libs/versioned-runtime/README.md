@@ -25,9 +25,17 @@ stays out of runtime dependency resolution and ships as plain stdlib files:
 `versioned_runtime.py` owns slot identity/admission and selectors;
 `versioned_runtime_leases.py` owns kernel construction/retention/publication
 ownership; `versioned_runtime_construction.py` owns the finite attached protocol
-and shell adapters. The protocol receives explicit typed runtime operations,
+and shell adapters; `versioned_runtime_source.py` owns source receipts and exact
+source-qualified recovery. The protocol receives explicit typed runtime operations,
 never reverse-imports a compatibility root. Each marketplace payload carries the
 complete adjacent family and is independently usable before any venv exists.
+
+Windows installers load `versioned_runtime_native.ps1` before source discovery.
+Its shared `Invoke-Hidden` captures both native streams concurrently without
+allocating a console, preserves exit status, and can return stderr separately
+for precise refusal diagnostics. Its PowerShell 5.1 argument encoding preserves
+empty/quoted arguments without unnecessarily quoting Python launcher selectors.
+Source selection and deferred stamping support a host exposing only `py.exe`.
 
 Because plugins are pulled **independently** from the marketplace, the file
 cannot be a shared runtime import — it must physically exist in each plugin. So
@@ -38,7 +46,7 @@ verify each companion as well as the entry file.
 The standalone `agent-index-service` and thin `fleet-manager` distributions also
 consume this exact primitive, without introducing a plugin or a second
 maintained source mirror. The shared `standalone_build.py` setuptools hooks
-copy the canonical family into wheel build output; each sdist carries the same
+copy the canonical Python family into wheel build output; each sdist carries the same
 primitive and helper bytes so a subsequent wheel build needs no repository
 checkout. The source bootstrap supports root-level and nested service project
 directories, rejects ambiguous/linked helper selection, and refuses conflicting
@@ -48,7 +56,7 @@ entry, companion and build-helper files, even when included copies exist. Those
 copies are optional byte-equality comparisons in a checkout; outside it, the
 complete sdist family is required.
 Wheel/sdist byte-equality tests and wheel RECORD bind the generated resource to the package
-artifact. Existing plugin bootstrap scripts remain self-contained and unchanged.
+artifact. Plugin bootstrap scripts remain self-contained.
 The index staging adapter uses only its own installed resource, never a
 repository/plugin/PATH fallback; editable/source-only installation is not an
 installer runtime. Fleet's artifact delivery and client resource diagnostics
@@ -66,9 +74,10 @@ health-repair guidance, even when its recorded owner has exited. Legacy `dev`
 cleanup retains its process-evidence safeguards for compatibility, but new
 explicit development refreshes build distinct `dev-<generation>` slots and
 never rewrite the working environment. Tier-3
-fallback uses the same numeric-token ordering in Python, POSIX shell, and
+package-only fallback uses the same numeric-token ordering in Python, POSIX shell, and
 PowerShell, so development versions such as `dev10` sort after `dev9` without
-`packaging` or GNU `sort -V`.
+`packaging` or GNU `sort -V`. Source-qualified slots instead require an exact
+current or last-known-good selection; hashes are not ordered recovery candidates.
 
 ## Construction ownership (Python API)
 
@@ -224,7 +233,7 @@ release-before-settlement checks:
 
 ## Merged-source runtime identities
 
-`versioned_runtime_source.py` is the optional plugin-side identity adapter for
+`versioned_runtime_source.py` is the source identity adapter for
 non-editable, merged-source payloads. It distinguishes original package
 version, full Git commit/tree, materialized first-party assembly hash and
 runtime generation. It is separate from editable development claims and does
@@ -233,10 +242,20 @@ not grant installation ownership or release attestation.
 The adapter verifies the plugin/package identity, canonical assembly bytes
 and any caller-pinned runtime selection. Malformed or changed metadata
 refuses installation rather than falling back to the ordinary package slot.
-Agent Bridge is the initial native installer consumer; the synchronizer
-ships the same helper to every runtime plugin without changing their default
-installation behavior. Standalone distributions retain their existing core
-runtime-resource family because they do not consume plugin source metadata.
+The synchronizer ships the same helper to every runtime plugin without changing
+ordinary package-only installation behavior; the source-preparation guide names
+the native installer adopters. Independently deployed Python resolver bundles,
+including standalone distributions, carry it for exact-selection recovery.
+That does not introduce a managed installer into standalone consumers.
+
+`publish_source_snapshot(payload, root, identity)` serializes source copying,
+winner verification and publication with the existing construction lease scoped
+to `root/snapshots`, separately from runtime-slot construction. A complete
+candidate is renamed into place, never moved inside an existing winner. Identical
+writers reuse the verified winner without rewriting it; conflicting receipts or
+copies refuse publication. The adapter's `--snapshot-root` mode returns that
+snapshot path, with `--expected-source-identity` retaining the caller's complete
+initial identity across the process boundary.
 
 Source preparation and the metadata contract are documented at
 [`prepare_runtime_source`](../../tools/prepare_runtime_source.md). The

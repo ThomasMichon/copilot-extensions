@@ -23,10 +23,35 @@ source admission, completion and activation primitives. Explicit optional-profil
 failure leaves the active selector intact, never a successful base-only downgrade.
 See the plugin README's **Optional restricted SSH runtime** for provisioning.
 
-The canonical Python and native shell recovery resolvers order qualified slots
-by the package-version portion before the profile qualifier. A completed final
-release therefore outranks its development versions even when selectors are
-missing and legacy unqualified slots coexist with profiled slots.
+Prepared source deployments retain this independent profile dimension:
+`<package-version>+<profile>.source.<commit>.<assembly>`. The coordinator validates
+the full source receipt before admission, after acquiring construction ownership,
+before completion and before activation. Its deploy manifest retains the original
+package version in `source.version`, the profiled slot in `runtime_version`, and
+the original source receipt in `runtime_source`. Source-qualified deferred stamps
+copy and verify the complete prepared assembly, so first use does not depend on
+the original source location.
+The native installer pins the complete receipt before waiting for its transaction
+lock and passes that same receipt into profile construction or deferred stamping.
+A valid receipt-only change is refused even when its runtime generation is unchanged.
+
+Source-qualified generations require an exact `current-version` or
+`last-known-good` selector. If neither resolves and source-qualified slots exist,
+Python and native shell resolvers refuse recovery rather than ordering opaque
+hashes or silently selecting an older plain package slot. Ordinary package-only
+recovery retains its existing version ordering.
+
+The root `snapshot-provenance.json` installation-cell receipt is published after
+assembly and is validated independently by the cell contract; it is not a runtime
+source-hash input. It must still be an ordinary file. Nested files with that name
+remain hashed runtime inputs, and source preparation rejects a checkout that
+already supplies this reserved deployment sidecar.
+
+When no source-qualified slots exist, the canonical Python and native shell
+recovery resolvers order profiled slots by the package-version portion before
+the profile qualifier. A completed final release therefore outranks its
+development versions even when selectors are missing and legacy unqualified
+slots coexist with profiled slots.
 
 ## Core agent service installation-cell contract
 

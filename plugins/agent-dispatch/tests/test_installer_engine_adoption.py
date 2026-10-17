@@ -782,6 +782,7 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
         "versioned_runtime.py",
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
     ):
         source = ENGINE if name in (
             "installer_dependency_policy.py", "installer_dependency_config.py",

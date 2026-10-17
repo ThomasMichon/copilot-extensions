@@ -73,6 +73,7 @@ VERSIONED_MARKER = "install-contract:v3 versioned-venv"
 VERSIONED_RUNTIME_FILE = "versioned_runtime.py"
 VERSIONED_RUNTIME_COMPONENTS = (
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    "versioned_runtime_native.ps1",
     "versioned_runtime_source.py",
 )
 # The one canonical source of the primitive. Every Python runtime plugin's

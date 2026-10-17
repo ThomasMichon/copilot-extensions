@@ -121,6 +121,90 @@ def test_source_identity_refuses_changed_payload_bytes(payload: Path) -> None:
         identity.read_source_identity(payload, VERSION)
 
 
+def test_cell_provenance_is_separate_from_assembled_source_bytes(payload: Path) -> None:
+    source = identity.read_source_identity(payload, VERSION)
+    (payload / "snapshot-provenance.json").write_text(
+        '{"schema":"copilot-extensions.snapshot-provenance","version":1}', encoding="utf-8",
+    )
+    assert identity.read_source_identity(payload, VERSION) == source
+    (payload / "nested").mkdir()
+    (payload / "nested" / "snapshot-provenance.json").write_text("runtime input", encoding="utf-8")
+    with pytest.raises(identity.SourceIdentityError, match="payload bytes"):
+        identity.read_source_identity(payload, VERSION)
+
+
+def _source_slots(root: Path):
+    runtime = identity._runtime()
+    first = identity.runtime_version(VERSION, "f" * 40, "a" * 64)
+    second = identity.runtime_version(VERSION + "+base", "a" * 40, "b" * 64)
+    for version in ("0.1.0", first, second):
+        python = root / "versions" / version / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"fixture interpreter")
+        python.chmod(0o700)
+        runtime.mark_complete(root, version)
+    return runtime, first, second
+
+
+@pytest.mark.parametrize("selector", [None, "current-version", "last-known-good"])
+def test_source_recovery_uses_explicit_identity_never_hash_order(
+    tmp_path: Path, selector: str | None, capsys,
+) -> None:
+    runtime, first, _ = _source_slots(tmp_path)
+    if selector:
+        (tmp_path / selector).write_text(first, encoding="utf-8")
+    python = runtime.resolve_python(tmp_path)
+    if selector:
+        assert python is not None and python.parent.parent == tmp_path / "versions" / first
+    else:
+        assert python is None
+        assert "refusing unordered source fallback" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("selector", [None, "current-version", "last-known-good"])
+@pytest.mark.parametrize("owner", ["canonical", "agent-worktrees"])
+def test_native_source_recovery_matches_explicit_python_selection(
+    tmp_path: Path, host: str, selector: str | None, owner: str,
+) -> None:
+    executable = _bash() if host == "bash" else (
+        shutil.which(host) if host != "powershell" or os.name == "nt" else None
+    )
+    if not executable:
+        pytest.skip(f"{host} unavailable")
+    _, first, _ = _source_slots(tmp_path)
+    if selector:
+        (tmp_path / selector).write_text(first, encoding="utf-8")
+    scripts = LIBRARY if owner == "canonical" else (
+        LIBRARY.parents[1] / "plugins" / owner / "scripts"
+    )
+    if host == "bash":
+        command = (
+            f"AGENT_RT_ROOT='{_posix(tmp_path)}'; "
+            f". '{_posix(scripts / 'resolve-runtime.sh')}'; printf '%s' \"$AGENT_RT_PY\""
+        )
+        argv = [executable, "-c", command]
+    else:
+        root = str(tmp_path).replace("'", "''")
+        resolver = str(scripts / "resolve-runtime.ps1").replace("'", "''")
+        command = f"$env:AGENT_RT_ROOT='{root}'; . '{resolver}'; [Console]::Out.Write($AgentRtPy)"
+        argv = [executable, "-NoProfile", "-Command", command]
+    result = subprocess.run(
+        argv, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    if selector:
+        selected = result.stdout.replace("\\", "/")
+        suffix = "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        assert f"/versions/{first}/{suffix}" in selected
+    else:
+        assert result.stdout == ""
+        assert "refusing unordered source fallback" in result.stderr
+
+
 def test_source_identity_cannot_select_another_installer_owner(payload: Path) -> None:
     manifest = payload / "plugin.json"
     manifest.write_text(
@@ -215,6 +299,7 @@ def test_powershell_source_initializer_uses_the_production_function(
         "param([string]$Python, [string]$Payload, [string]$Root, [string]$Scripts)",
         "$ErrorActionPreference = 'Stop'",
         "$PluginDir = $Payload; $InstallDir = $Root; $ScriptDir = $Scripts",
+        ". (Join-Path $ScriptDir 'versioned_runtime_native.ps1')",
         f"$PackageVersion = '{VERSION}'; $SrcVersion = $PackageVersion",
         "function Get-BootstrapPython { return $Python }",
         _function(owner, "Get-SourceRuntimeIdentity", powershell=True),
@@ -249,6 +334,7 @@ def test_powershell_source_refusal_keeps_helper_diagnostic(
         "param([string]$Python, [string]$Payload, [string]$Scripts)",
         "$ErrorActionPreference = 'Stop'",
         f"$PackageVersion = '{VERSION}'; $PluginDir = $Payload; $ScriptDir = $Scripts",
+        ". (Join-Path $ScriptDir 'versioned_runtime_native.ps1')",
         "function Get-BootstrapPython { return $Python }",
         _function(owner, "Get-SourceRuntimeIdentity", powershell=True),
         _function(owner, "Initialize-SourceRuntime", powershell=True),
@@ -324,6 +410,7 @@ def test_powershell_manifest_keeps_package_version_and_binds_source_generation(
         "param([string]$Python, [string]$Payload, [string]$Root, [string]$Scripts)",
         "$ErrorActionPreference = 'Stop'",
         "$PluginDir = $Payload; $InstallDir = $Root; $ScriptDir = $Scripts",
+        ". (Join-Path $ScriptDir 'versioned_runtime_native.ps1')",
         f"$PackageVersion = '{VERSION}'; $SrcVersion = $PackageVersion",
         "function Get-BootstrapPython { return $Python }",
         "function Get-SourceKind { return 'local' }",

@@ -208,11 +208,12 @@ def test_prepared_generation_refuses_changed_content(
         source_runtime.prepare(root, commit, PLUGIN, tmp_path / "prepared")
 
 
+@pytest.mark.parametrize("metadata", ["runtime-source.json", "snapshot-provenance.json"])
 def test_prepare_does_not_overwrite_source_owned_deployment_metadata(
-    repository: tuple[Path, str], tmp_path: Path,
+    repository: tuple[Path, str], tmp_path: Path, metadata: str,
 ) -> None:
     root, _ = repository
-    (root / "plugins" / PLUGIN / "runtime-source.json").write_text("{}", encoding="utf-8")
+    (root / "plugins" / PLUGIN / metadata).write_text("{}", encoding="utf-8")
     commit = _merged_commit(root)
     with pytest.raises(source_runtime.SourcePreparationError, match="reserved deployment metadata"):
         source_runtime.prepare(root, commit, PLUGIN, tmp_path / "prepared")

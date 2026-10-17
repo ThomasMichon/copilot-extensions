@@ -158,18 +158,26 @@ report shape (`cr-report.json`) keeps its historical top-level keys and adds an
 
 ### Merged-development source installation
 
-`merged-dev-runtime` is a credential-free Tier-P reference scenario for Agent
-Bridge. It pins a clean merged dev commit, prepares its canonical vendor
+`merged-dev-runtime` is a credential-free Tier-P source scenario. It defaults to
+Agent Bridge and also accepts `CR_SOURCE_PLUGIN` selecting Agent Codespaces,
+Containers, MCP, SSH, Machines, Pull Requests or Budget Guidance. It pins a
+clean merged dev commit, prepares its canonical vendor
 closure outside the checkout, invokes the real installer, and checks the
 source-qualified completed generation and installed command. It then makes
 the checkout unavailable and verifies installed imports and command use.
-The final stage confirms the qualified build is actually serving through
-authenticated health, routed PID/start-time identity and its running marker.
+For Bridge, the final stage confirms the qualified build is actually serving
+through authenticated health, routed PID/start-time identity and its running
+marker. For CLI adopters it reruns the real installer, checks exact selection
+and unchanged completion bytes, and invokes the installed command again.
 The selected commit must contain the source preparation/installer support.
 
 ```bash
 CR_SOURCE_COMMIT=<full-merged-commit> ./run.sh --scenario merged-dev-runtime \
   --name-suffix source-proof --pass-env CR_SOURCE_COMMIT run
+
+CR_SOURCE_COMMIT=<full-merged-commit> CR_SOURCE_PLUGIN=agent-containers \
+  ./run.sh --scenario merged-dev-runtime --name-suffix source-containers \
+  --pass-env CR_SOURCE_COMMIT --pass-env CR_SOURCE_PLUGIN run
 ```
 
 Use a fresh name suffix for an independent fresh-machine witness. The
