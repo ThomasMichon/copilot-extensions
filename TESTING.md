@@ -1307,8 +1307,11 @@ the earned baseline to that fork point rather than invalidating it against the
 replacement being tested. Added lines, unrecognized/binary diff shapes, and
 changes outside the attributed source scope remain explicit fallback triggers.
 That fallback adds the measured smoke set without removing known implicated
-tests. No usable baseline (including an unavailable Release asset) visibly
-runs the full/default portfolio; it never means “guards only” or zero tests.
+tests, including when age or commit-volume debt exceeds its threshold:
+remappable implicated tests remain additive to smoke. Legacy shadow consumers
+retain their existing debt fallback. No usable baseline (including an unavailable
+Release asset) visibly runs the full/default portfolio; it never means “guards
+only” or zero tests.
 An empty curated smoke floor is an error even when attributed tests remain.
 The pilot CLI also refuses an absent plugin test suite, so full fallback cannot
 become a successful no-suite skip.

@@ -138,3 +138,11 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
   but block execution when every candidate costs 121 seconds against the
   120-second budget, or all timing data is invalid. Fresh native and hosted
   deadline evidence remains required.
+- 2026-10-17: review found the legacy debt-exceeded early return could drop
+  an implicated test from the new required execution mode. Keep that legacy
+  path for unchanged shadow callers, but make additive-floor execution remap
+  and retain implicated tests even when age/commit-volume debt is exceeded.
+  Regressions cover the 121-second detector against the 120-second smoke
+  budget, and the real coverage-earned runtime proof runs both fresh and
+  eight-day-old baseline variants. Debt remains audited; no known detector
+  is removed to fit the smoke budget.

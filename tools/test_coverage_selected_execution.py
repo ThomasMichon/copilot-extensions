@@ -8,7 +8,7 @@ import ast
 import os
 import shlex
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -163,6 +163,32 @@ def test_debt_saturation_is_audited_and_curates_real_smoke(history, debt: str):
     assert payload["mode"] == "fallback"
     assert payload["debt"]["exceeded"]
     assert payload["selection"]["nodes"] == ["tests/test_app.py::test_smoke"]
+
+
+@pytest.mark.parametrize("debt", ["age", "commits"])
+def test_exceeded_debt_cannot_drop_an_implicated_test_over_the_smoke_budget(history, debt):
+    root, base, baseline = history
+    options = {}
+    baseline["tests"]["tests/test_app.py::test_implicated"]["duration_s"] = 121
+    if debt == "age":
+        baseline["generated_at"] = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    else:
+        for index in range(2):
+            _git(root, "commit", "--allow-empty", "-qm", f"intervening commit {index}")
+        base = _git(root, "rev-parse", "HEAD")
+        options["commit_volume_threshold"] = 1
+    (root / "plugins/fixture/src/app.py").write_text("value = 999\nother = 3\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "runtime regression after coverage debt")
+    payload = _plan(root, base, smoke_budget_s=120, **options)
+    assert payload["mode"] == "fallback"
+    assert payload["debt"]["exceeded"]
+    assert payload["reason"].startswith("coverage_debt:")
+    assert payload["fallback_set"]["selected_tests"] == ["tests/test_app.py::test_smoke"]
+    assert set(payload["selection"]["nodes"]) == {
+        "tests/test_app.py::test_implicated", "tests/test_app.py::test_smoke",
+    }
+    assert payload["fallback_set"]["total_runtime_s"] <= 120
 
 
 def test_empty_curated_evidence_is_a_hard_error_not_only_guards(history):
@@ -417,7 +443,8 @@ def test_discovery_runs_dispatch_for_its_selection_inputs(history, changed, even
     os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1",
     reason="opt-in real coverage collection and contained runtime regression",
 )
-def test_runtime_covered_regression_is_selected_and_fails(tmp_path, monkeypatch):
+@pytest.mark.parametrize("stale", [False, True])
+def test_runtime_covered_regression_is_selected_and_fails(tmp_path, monkeypatch, stale):
     from tools.coverage_guided_selection.baseline import collect_baseline
     from tools.test_plugin_test_selection import runner
 
@@ -450,6 +477,8 @@ def test_runtime_covered_regression_is_selected_and_fails(tmp_path, monkeypatch)
         cwd=tmp_path, test_path="plugins/fixture/tests", cov_source="plugins/fixture/src",
         plugin="fixture", measured_commit=base,
     )
+    if stale:
+        baseline["generated_at"] = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
     hot = "tests/test_app.py::test_implicated"
     cold = "tests/test_app.py::test_smoke"
     assert hot in baseline["coverage"]["plugins/fixture/src/app.py"]["2"]
@@ -468,6 +497,7 @@ def test_runtime_covered_regression_is_selected_and_fails(tmp_path, monkeypatch)
     monkeypatch.setattr(runner, "_has_pyproject", lambda _name: False)
     manifest = tmp_path / "selection.json"
     clean = _plan(tmp_path, base, smoke_budget_s=budget)
+    assert bool(clean["debt"]["exceeded"]) is stale
     assert hot not in clean["selection"]["nodes"]  # the smoke budget cannot buy it
     manifest.write_text(json.dumps(clean["selection"]), encoding="utf-8")
     kwargs = dict(
@@ -480,6 +510,7 @@ def test_runtime_covered_regression_is_selected_and_fails(tmp_path, monkeypatch)
     _git(tmp_path, "add", "plugins/fixture/src/app.py")
     _git(tmp_path, "commit", "-qm", "introduce runtime regression")
     broken = _plan(tmp_path, base, smoke_budget_s=budget)
+    assert bool(broken["debt"]["exceeded"]) is stale
     assert hot in broken["selection"]["nodes"]
     manifest.write_text(json.dumps(broken["selection"]), encoding="utf-8")
     assert runner.run_plugin("fixture", "uv", **kwargs) == 1
