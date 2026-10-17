@@ -1661,6 +1661,59 @@ class TestReciprocalDisposal:
         assert not sibling_path.exists() and not receipt.exists()
 
 
+    @pytest.mark.parametrize("extra", [
+        {1: "non-string"}, {None: "null-key"},
+        {"metadata": {1: "integer", "1": "string"}},
+        {"metadata": [{True: "boolean-key"}]},
+    ], ids=["integer", "null", "nested-collision", "nested-list"])
+    def test_pair_receipt_non_string_keys_fail_closed(self, tmp_path, extra):
+        from agent_worktrees import reap_cli
+        from agent_worktrees import terminal_pair_progress as progress
+
+        primary = tracking.create_new_record(
+            "primary", "worktree/primary", str(tmp_path / "primary"), "demo", "host",
+            "windows", tmp_path / "demo" / "worktrees",
+        )
+        sibling = tracking.create_new_record(
+            "sibling", "worktree/sibling", str(tmp_path / "sibling"), "knowledge", "host",
+            "windows", tmp_path / "knowledge" / "worktrees",
+        )
+        for record, role, project, target in (
+            (primary, "harness", "knowledge", "sibling"),
+            (sibling, "knowledge", "demo", "primary"),
+        ):
+            record.owner, record.kind, record.status, record.origin = "dispatcher", "bridge", "complete", "delegate"
+            record.pair_id, record.pair_role, record.pair_kind = "pair", role, "worktree"
+            record.pair_ref = tracking.format_claim_ref("host", project, target)
+            tracking.save_record(record, record.yaml_path)
+        paired = sibling.yaml_path.read_bytes()
+        document = yaml.safe_load(paired)
+        sibling.yaml_path.write_text(yaml.safe_dump({**document, **extra}), encoding="utf-8")
+        before = primary.yaml_path.read_bytes(), sibling.yaml_path.read_bytes()
+        with pytest.raises(ValueError, match="string keys"):
+            progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
+        assert (primary.yaml_path.read_bytes(), sibling.yaml_path.read_bytes()) == before
+        assert not progress.receipt_path(sibling.yaml_path).exists()
+        assert not progress.receipt_path(primary.yaml_path).exists()
+        sibling.yaml_path.write_bytes(paired)
+        progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
+        for record in (primary, sibling):
+            for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+                setattr(record, field, None)
+            tracking.save_record(record, record.yaml_path)
+        document = yaml.safe_load(sibling.yaml_path.read_text(encoding="utf-8"))
+        sibling.yaml_path.write_text(yaml.safe_dump({**document, **extra}), encoding="utf-8")
+        paths = (primary.yaml_path, sibling.yaml_path, progress.receipt_path(primary.yaml_path),
+                 progress.receipt_path(sibling.yaml_path))
+        before = [path.read_bytes() for path in paths]
+        assert progress.gc_preservation_reason(sibling.yaml_path) == "terminal-pair-receipt-unverified"
+        removed, reasons = reap_cli._remove_managed_worktree(
+            sibling, types.SimpleNamespace(), sibling.yaml_path.parent,
+        )
+        assert not removed and reasons == ["terminal-pair-receipt-unverified"]
+        assert progress.reciprocal_snapshot(primary, sibling, sibling.yaml_path) is None
+        assert [path.read_bytes() for path in paths] == before
+
     def test_pair_progress_interrupted_receipt_publication_keeps_reciprocity(self, tmp_path, monkeypatch):
         sibling, sibling_path, _ = _pair_sibling(
             tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",

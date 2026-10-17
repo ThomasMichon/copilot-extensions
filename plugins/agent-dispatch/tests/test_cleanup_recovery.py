@@ -670,6 +670,105 @@ def test_recovery_rpc_requires_control_authority_and_strict_fences(held):
         assert control.cleanup_recovery_history(key) == []
 
 
+@pytest.mark.parametrize("identity", ["{", "null", "[]", "true", "1", '"host"'])
+@pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
+def test_recovery_rpc_corrupt_history_is_typed_and_preserved(held, identity, boundary):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.coordinator import create_app
+
+    queue, task_id, key = held
+    apply(held, preview(held))
+    token = None
+    if boundary != "claim":
+        _, claimed, token = queue.claim_spawn_conclusion_retry(key, claimant_machine="host")
+        assert claimed
+    with queue._connect() as conn:
+        conn.execute("UPDATE cleanup_recoveries SET identity=?", (identity,))
+    before = asdict(queue.get_reservation(key)), asdict(queue.get(task_id)), queue.events(task_id)
+    body = {"claimant_machine": "host"}
+    suffix = "/claim" if boundary == "claim" else "/validate" if boundary == "validate" else ""
+    if boundary != "claim":
+        body["claim_token"] = token
+    if boundary == "outcome":
+        body.update(conclusion_state="complete", conclusion_detail='{"action":"primed"}')
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(f"/spawn-reservations/{key}/conclusion{suffix}", json=body)
+    assert response.status_code == 409
+    assert "recovery identity" in response.json()["detail"]
+    assert (asdict(queue.get_reservation(key)), asdict(queue.get(task_id)), queue.events(task_id)) == before
+    with queue._connect() as conn:
+        assert conn.execute("SELECT identity FROM cleanup_recoveries").fetchone()["identity"] == identity
+
+
+@pytest.mark.parametrize("field,value", [
+    ("claimant_machine", 1), ("claimant_machine", True),
+    ("claimant_machine", []), ("claimant_machine", {}),
+    ("unexpected_fence", "host"),
+])
+@pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
+def test_cleanup_claim_rpc_rejects_invalid_bodies_before_queue(held, monkeypatch, field, value, boundary):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.coordinator import create_app
+
+    queue, _, key = held
+    before = asdict(queue.get_reservation(key))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid request reached cleanup queue")
+
+    for method in ("claim_spawn_conclusion_retry", "validate_spawn_conclusion_claim",
+                   "record_spawn_conclusion"):
+        monkeypatch.setattr(queue, method, forbidden)
+    body = {"claimant_machine": "host"}
+    suffix = "/claim" if boundary == "claim" else "/validate" if boundary == "validate" else ""
+    if boundary != "claim":
+        body["claim_token"] = "exact-token"
+    if boundary == "outcome":
+        body.update(conclusion_state="complete", conclusion_detail='{"action":"primed"}')
+    body[field] = value
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(f"/spawn-reservations/{key}/conclusion{suffix}", json=body)
+    assert response.status_code == 422
+    assert asdict(queue.get_reservation(key)) == before
+
+
+@pytest.mark.parametrize("value", [1, True, [], {}])
+@pytest.mark.parametrize("boundary", ["validate", "outcome"])
+def test_cleanup_claim_rpc_rejects_invalid_token(held, value, boundary):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.coordinator import create_app
+
+    queue, _, key = held
+    before = asdict(queue.get_reservation(key))
+    body = {"claim_token": value, "claimant_machine": "host"}
+    suffix = "/validate" if boundary == "validate" else ""
+    if boundary == "outcome":
+        body.update(conclusion_state="complete", conclusion_detail='{"action":"primed"}')
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(f"/spawn-reservations/{key}/conclusion{suffix}", json=body)
+    assert response.status_code == 422
+    assert asdict(queue.get_reservation(key)) == before
+
+
+def test_legacy_cleanup_claim_rpc_preserves_omitted_body(held):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.coordinator import create_app
+
+    queue, _, key = held
+    queue.record_spawn_conclusion(
+        key, conclusion_state="pending", conclusion_detail='{"action":"pending"}',
+    )
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    with TestClient(app) as client:
+        response = client.post(f"/spawn-reservations/{key}/conclusion/claim")
+    assert response.status_code == 200
+    assert response.json()["claimed"] is True
+    assert response.json()["claim_token"]
+
+
 @pytest.mark.parametrize("claimant", ["other-host", None, ""])
 @pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
 def test_recovery_rpc_fences_claimant_host_at_every_boundary(held, claimant, boundary):

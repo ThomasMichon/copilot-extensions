@@ -111,15 +111,21 @@ class RetireSpawnBody(ReservationDetailBody):
 
 
 class ValidateConclusionClaimBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     claim_token: str
     claimant_machine: str | None = None
 
 
 class ClaimConclusionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     claimant_machine: str | None = None
 
 
 class RecordConclusionBody(ReservationDetailBody):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     claimant_machine: str | None = None
 
 

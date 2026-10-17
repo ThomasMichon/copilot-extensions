@@ -89,6 +89,8 @@ The pre-existing release obligation is retained in that immutable fence too.
 Recovery lease claim, validation and conclusion publication carry the
 supervisor's resolved `claimant_machine`. Each must match the retained creating
 host before granting or using a lease, including session-ending side effects.
+Malformed retained recovery JSON or a non-mapping identity returns a typed
+conflict without changing the reservation, task, audit events or history.
 The foreground supervise construction uses the same explicit/configured local
 alias resolution as registration scope; it does not omit that identity.
 Direct supervisor construction resolves its default local alias before binding
@@ -140,6 +142,9 @@ reconstruction, regardless of how record loading normalizes false, empty, null,
 numeric or unsupported values. This absence check and the non-pair digest use
 the same parsed document; malformed or reintroduced pair keys preserve both
 records and the receipt with the ordinary pair-preservation reason.
+Receipt hashing requires string keys throughout that document, including nested
+mappings and lists. Unsupported YAML keys are rejected rather than coerced into
+colliding JSON names; GC treats that evidence as unverified and preserves it.
 For a confirmed dispatch-attempt allocation, malformed reciprocal evidence is
 rejected by read-only shape validation before process/liveness or Git work,
 with the same check repeated under the primary record lock. Eligible paths
@@ -194,3 +199,6 @@ fail rather than silently performing another kind of recovery.
 The existing conclusion claim/validate/record endpoints accept optional
 `claimant_machine` for legacy compatibility, but require a known retained-host
 match for every recovery allocation.
+These three request bodies reject unknown fields and incorrect value types with
+HTTP 422 before queue access. Omitting the legacy claim body remains supported
+for ordinary conclusions without recovery history.

@@ -53,7 +53,13 @@ def validate_recovery(queue, conn, row, *, check_allocation=True, claimant_machi
     ).fetchone()
     if history is None:
         return
-    expected_host = json.loads(history["identity"]).get("creating_host")
+    try:
+        identity = json.loads(history["identity"])
+    except (ValueError, TypeError) as exc:
+        raise TaskError("cleanup recovery identity is not valid JSON") from exc
+    if not isinstance(identity, dict):
+        raise TaskError("cleanup recovery identity is not a mapping")
+    expected_host = identity.get("creating_host")
     if (not isinstance(claimant_machine, str) or not claimant_machine.strip()
             or not isinstance(expected_host, str) or not expected_host
             or claimant_machine.casefold() != expected_host.casefold()):

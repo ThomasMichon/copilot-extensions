@@ -31,6 +31,18 @@ def _document(path: Path) -> dict:
 
 def _document_digest(document: dict) -> str:
     document = {name: value for name, value in document.items() if name not in _PAIR_FIELDS}
+    pending, visited = [document], set()
+    while pending:
+        value = pending.pop()
+        if not isinstance(value, (dict, list, tuple)) or id(value) in visited:
+            continue
+        visited.add(id(value))
+        if isinstance(value, dict):
+            if any(not isinstance(key, str) for key in value):
+                raise ValueError("terminal pair record requires string keys")
+            pending.extend(value.values())
+        else:
+            pending.extend(value)
     return hashlib.sha256(json.dumps(document, sort_keys=True, default=str).encode()).hexdigest()
 
 
