@@ -124,9 +124,9 @@ async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
             if has_proxy:
                 assert broker_environments == [expected]
         elif environment == "ambient":
-            assert "env" not in spawn.await_args.kwargs
+            assert spawn.await_args.kwargs.get("env") is None
         else:
-            assert spawn.await_args.kwargs["env"] is explicit
+            assert spawn.await_args.kwargs["env"] == before
         assert dict(os.environ if environment == "ambient" else explicit) == before
     finally:
         await run_process_cleanup(process)
