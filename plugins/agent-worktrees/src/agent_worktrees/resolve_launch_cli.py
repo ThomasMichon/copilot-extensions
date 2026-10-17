@@ -16,6 +16,7 @@ from . import config as cfg
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
+from .worktree_naming import session_worktree_id
 
 if TYPE_CHECKING:
     from .__main__ import LaunchPreflight
@@ -686,11 +687,9 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
         return 3
     repo = config.default_repo
     platform_name = cfg.detect_platform()
-    plat_short = "win" if platform_name == "windows" else platform_name
-
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
-    worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
+    worktree_id = session_worktree_id(config.machine, platform_name, timestamp, suffix)
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 

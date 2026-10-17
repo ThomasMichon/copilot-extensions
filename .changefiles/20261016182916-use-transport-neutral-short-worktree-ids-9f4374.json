@@ -1,0 +1,9 @@
+{
+  "comment": "Use transport-neutral short worktree IDs and include logical-machine environment suffixes only once while preserving admitted allocations.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

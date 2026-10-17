@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 import json
+import re
 
 import pytest
 
@@ -119,6 +121,32 @@ def test_create_worktree_core_stages_seed_in_worktree_state_folder(
     saved = launch_seed_state.peek(rec.yaml_path)
     assert saved.kind == "new" and saved.text == "do the thing"
     assert result["launch"]["seed_id"] == saved.seed_id
+
+
+@pytest.mark.parametrize("machine,platform,prefix", [
+    ("test", "windows", "test-win"),
+    ("test-win", "windows", "test-win"),
+    ("test-windows", "windows", "test-windows"),
+    ("test-wsl", "wsl", "test-wsl"),
+    ("test-linux", "linux", "test-linux"),
+    ("test-wsl", "linux", "test-wsl-linux"),
+])
+@pytest.mark.parametrize("seed", [None, "new task"])
+def test_creation_uses_one_environment_suffix_and_short_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    machine: str, platform: str, prefix: str, seed: str | None,
+) -> None:
+    config = replace(_create_config(tmp_path), machine=machine, platform=platform)
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+
+    result = m._create_worktree_core(config, pending_seed=seed)
+
+    identity = result["worktree"]["id"]
+    assert re.fullmatch(rf"{re.escape(prefix)}-\d{{8}}-\d{{6}}-[0-9a-f]{{4}}", identity)
+    assert result["worktree"]["machine"] == machine
+    assert result["worktree"]["platform"] == platform
 
 
 @pytest.mark.parametrize("committed", [False, True])
