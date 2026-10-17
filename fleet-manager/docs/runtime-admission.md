@@ -31,6 +31,9 @@ propagate. There is no cached-allow fallback. Unknown, revoked, stale, conflicti
 and unavailable are distinct value-free refusal categories.
 
 Revisions cannot go backwards or name conflicting snapshots in one owner.
+Enrollment, read-branch and operation-grant order is canonicalized, so a
+permutation alone is not a same-revision policy conflict. Changed grant content
+still conflicts; normalization never joins or widens branches.
 Freshness renewal changes the revision even if grants are unchanged. The source
 owner still owns durable monotonic revisions and enrollment generations across
 deletion, restart and failover; this library is not their durable store.
@@ -79,6 +82,9 @@ owner/restart cannot accept it. No signing/encryption credential is hidden here.
 
 Call `revalidate(permit, original_request)` immediately before the bound lookup,
 effect admission or emission and retain its returned handle. Revalidation
+accepts a reconstructed supported request with the same canonical action/digest;
+it does not depend on retaining the request's Python object instance.
+The Permit itself must still be the exact owner-retained object. Revalidation
 consumes the old handle, including on failure. It rereads current policy and
 identity freshness; changed enrollment, revocation, request content, scope or
 expiry refuses. Unrelated policy updates can revalidate without expanding an
